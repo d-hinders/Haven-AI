@@ -178,6 +178,42 @@ describe('underlagFromData', () => {
     }).pdf.toString('latin1')
     expect(purchase).not.toBe(fee)
   })
+
+  /**
+   * #4533: a direct payment is a TRANSFER, not the purchase of a resource.
+   * The receipt must still render (the Accounted connector skips a payment
+   * with no underlag, so a null here means no document at all), name the
+   * recipient as the counterparty, and omit the Resource line rather than
+   * print "n/a" on a document an accountant files.
+   */
+  it('renders a transfer: recipient as counterparty, no Resource line when there is no resource URL', () => {
+    const pdf = underlagFromData({
+      ...DATA,
+      merchantName: null,
+      merchantAddress: DATA.merchantAddress,
+      resourceUrl: null,
+    }).pdf.toString('latin1')
+    expect(pdf).toContain(`Counterparty   ${DATA.merchantAddress}`)
+    // The PDF's own object dictionary carries `/Resources`; the assertion is
+    // about the RENDERED line, which starts with `(Resource`.
+    expect(pdf).not.toContain('(Resource')
+    expect(pdf).toContain('ON-CHAIN SETTLEMENT')
+  })
+
+  /**
+   * #4533: the label is scoped to the direct payment. A protocol payment
+   * (x402/mpp/spt) always has a resource URL, so its document keeps the
+   * `Merchant` / `Merchant addr` lines and stays byte-identical to before
+   * this change — the review card's "must not change existing output".
+   */
+  it('CONTROL: a protocol payment keeps the Merchant labels and its Resource line', () => {
+    const pdf = underlagFromData(DATA).pdf.toString('latin1')
+    expect(pdf).toContain(`Merchant       ${DATA.merchantName}`)
+    expect(pdf).toContain(`Merchant addr  ${DATA.merchantAddress}`)
+    expect(pdf).toContain(`Resource       ${DATA.resourceUrl}`)
+    expect(pdf).not.toContain('Counterparty')
+    expect(pdf).not.toContain('(Address')
+  })
 })
 
 describe('loadReceiptUnderlag', () => {

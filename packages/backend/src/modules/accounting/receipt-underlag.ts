@@ -169,8 +169,20 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     ...(data.ledgerCurrency !== 'SEK' && data.amountSek != null
       ? [`Haven SEK ref  ${data.amountSek} SEK (rate ${data.fxRate ?? 'n/a'}, same capture)`]
       : []),
-    `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
-    ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
+    // #4533: a direct payment is a transfer to an address, which may be a
+    // contact rather than a merchant — so it renders `Counterparty` /
+    // `Address`. A protocol payment (x402/mpp/spt) always carries a resource
+    // URL (the evidence row requires one) and keeps `Merchant` /
+    // `Merchant addr`, so its document stays byte-identical to before #4533.
+    ...(data.resourceUrl == null
+      ? [
+          `Counterparty   ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
+          ...(data.merchantName && data.merchantAddress ? [`Address        ${data.merchantAddress}`] : []),
+        ]
+      : [
+          `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
+          ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
+        ]),
     // #3918: the seller block, from the merchant's own invoice and the
     // catalog country — the reverse-VAT fields (Emil, our Accounted contact:
     // country + VAT reg no decide the omvand coding). Lines appear only when
@@ -178,7 +190,10 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     ...(data.merchantCountry ? [`Country        ${data.merchantCountry}`] : []),
     ...(data.merchantVatNo ? [`VAT reg no     ${data.merchantVatNo}`] : []),
     ...(data.merchantOrgNo ? [`Org no         ${data.merchantOrgNo}`] : []),
-    `Resource       ${data.resourceUrl ?? 'n/a'}`,
+    // #4533: a direct payment has no resource URL — it is a transfer, not the
+    // purchase of a resource. Omit the line rather than print "n/a" on a
+    // document an accountant files.
+    ...(data.resourceUrl != null ? [`Resource       ${data.resourceUrl}`] : []),
     // #4532: what kind of transaction this is. Before this line the three
     // receipts of one Bitrefill purchase (invoice/create, invoice/pay,
     // invoice/status) were byte-for-byte the same shape and an accountant

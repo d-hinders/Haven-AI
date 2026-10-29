@@ -28,6 +28,7 @@
 
 import pool from '../../db.js'
 import { type Executor, type QueryRow, withTransaction } from '../transaction.js'
+import { DIRECT_PAYMENT_RAIL_SQL } from './direct-payment-accounting.js'
 import { OWNER_COMPANY_DETAILS_JOIN_COLUMNS } from './owner-company-details.js'
 
 export type { Executor }
@@ -1221,11 +1222,24 @@ export async function getMerchantReceiptRow(
 
 // ── Receipt underlag source (moved from modules/accounting/receipt-underlag.ts, #999)
 
+// #4533: TWO sources, one shape. The evidence row is the protocol-payment
+// source (its id is the entry's `receiptRef`). A direct payment has no
+// evidence row, so its `receiptRef` is the intent id and the intent itself
+// supplies the settlement facts — without this branch the Accounted connector
+// would skip the payment with "receipt evidence not found" and no document
+// would ever be uploaded.
 export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
             pi.sign_hash, pi.signature, pi.delegate_address
      FROM machine_payment_evidence mpe
      LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
-     WHERE mpe.id = $1 AND mpe.user_id = $2`
+     WHERE mpe.id = $1 AND mpe.user_id = $2
+     UNION ALL
+     SELECT pi.tx_hash, pi.chain_id, pi.to_address AS merchant_address,
+            pi.sign_hash, pi.signature, pi.delegate_address
+     FROM payment_intents pi
+     WHERE pi.id = $1 AND pi.user_id = $2
+       AND ${DIRECT_PAYMENT_RAIL_SQL}
+     LIMIT 1`
 export interface UnderlagSourceRow {
   tx_hash: string | null
   chain_id: number | null

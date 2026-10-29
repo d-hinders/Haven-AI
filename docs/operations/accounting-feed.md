@@ -10,6 +10,7 @@ covers:
   - packages/backend/src/middleware/accountingFeed.ts
   - packages/backend/src/infra/secrets.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
+  - packages/backend/src/infra/repositories/direct-payment-accounting.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/backend/src/infra/repositories/accounting-webhook-deliveries.ts
   - packages/backend/src/db/migrations/080_accounting_connections.ts
@@ -36,7 +37,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-10-26"
+last-verified: "2026-10-29"
 ---
 
 # Accounting feed — operations runbook
@@ -68,12 +69,16 @@ carries two addresses, and they are not symmetric:
 
 - `counterparty.address` is the **merchant** (`payTo`) — this is what every
   exporter (SIE, Fortnox voucher/supplier) books as the supplier, and it is
-  the only address that reached a downstream ledger before #2960.
+  the only address that reached a downstream ledger before #2960. On a
+  **direct payment** (#4533) it is the recipient the user sent to, which may
+  be a saved contact rather than a merchant.
 - `treasuryAccount` is **our own side** — `machine_payment_evidence.payer_address`,
   which is written from `intent.account_address` at settlement
   (`modules/mpp/evidence.ts`) and is `parties.treasury_account` on every
   other #2960 surface (receipts, payment status, the payment-receipt
-  bundle). Before #2960 this feed selected `merchant_address` only and
+  bundle). A direct payment has no evidence row, so its entry reads
+  `payment_intents.account_address` instead — the same value, from the same
+  intent. Before #2960 this feed selected `merchant_address` only and
   never read or exposed which address was "our side" anywhere in code —
   the field existed nowhere on `AccountingEntry`, `AccountingEntrySourceRow`
   or `ENTRY_SOURCE_SQL`. It is additive: no exporter (SIE, Fortnox) reads it
@@ -147,6 +152,25 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
           connection's status and emits accounting.connection.needs_attention
 ```
 
+**A direct payment takes the same path from `feedSettledPaymentBestEffort()`
+down, from a different source (#4533).** `haven_send` — the
+delegation-redemption rail behind `POST /payments` — settles on-chain but
+never gets a `machine_payment_evidence` row: the evidence writer refuses it on
+the rail gate (`PROTOCOL_RAILS` excludes `direct`) and, past that, on
+`resource_url NOT NULL`. So the entry is built from `payment_intents` itself
+(a second branch in `ENTRY_SOURCE_SQL`), the backfill enumerates it from the
+same table (`listUnpushedPaymentIds`), and the settlement route fires the feed
+right after `confirmSubmittedIntent`. The receipt underlag reads the intent
+too, so the connector still has a document to attach.
+
+Only a payment to an address **outside the user's own Haven footprint** is
+fed (owner decision, 2026-10-29): a transfer to another of the user's smart
+accounts, or to one of their agents' delegate addresses, is an internal move
+and produces no sync row and no document. Contacts and every other
+third-party address count as outside. The filter lives in the SQL
+(`infra/repositories/direct-payment-accounting.ts`), so the entry build and
+the backfill selection cannot disagree about it.
+
 Three things feed a payment: the settlement hook above, **Sync now**
 (`POST /accounting/feed/sync`, manual, bounded to 200 payments per press,
 resumable through the ledger) and the background retry sweep. All three go
@@ -154,11 +178,14 @@ through the same `feedSettledPayment`, so the ledger, the floor, the FX gate
 and the degraded-destination rules apply identically.
 
 **A settled payment that never reached the feed at all** is a settlement-side
-question, not an accounting one — the feed needs a `machine_payment_evidence`
-row, and that row is written when an intent reaches `confirmed`. The erc7710
-paths that can leave a settled payment without one, the leader-gated sweep
-that completes them and its 24-hour recovery horizon are documented where
-that code is:
+question, not an accounting one — the feed needs a source row, and for a
+protocol payment that row is `machine_payment_evidence`, written when an
+intent reaches `confirmed`. (A direct payment needs no evidence row: the feed
+reads `payment_intents` directly, so a confirmed direct send to an outside
+address is always feedable — see *A direct payment takes the same path* above.)
+The erc7710 paths that can leave a settled payment without an evidence row, the
+leader-gated sweep that completes them and its 24-hour recovery horizon are
+documented where that code is:
 [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
 § *Completing an erc7710 settlement* and § *Completing a settlement nobody
 reported*. If `/accounting` has **no row** for a payment the user can see on
@@ -412,12 +439,24 @@ figure on the record it backs: `Book value` in the invoiced currency, with the
 SEK capture kept below it as `Haven SEK ref` when they differ. One document,
 two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
 kronor. When the merchant's own invoice is captured (#956), the underlag also
-carries the SELLER BLOCK (#3918): the seller's legal name on the `Merchant`
+carries the SELLER BLOCK (#3918): the seller's legal name on the counterparty
 line, the catalog's supplier `Country`, and the invoice's `VAT reg no` /
 `Org no` — the fields a Swedish consultant needs to code omvänd (reverse) VAT.
-The `Merchant` line is on every underlag (falling back to the merchant address,
-then `unknown`); `Country`, `VAT reg no` and `Org no` render only when their
-value is known, so the document never states an empty-looking fact.
+The counterparty line is on every underlag (falling back to the address, then
+`unknown`); `Country`, `VAT reg no` and `Org no` render only when their value
+is known, so the document never states an empty-looking fact.
+
+The counterparty line's LABEL follows the payment (#4533). A protocol payment
+(x402/mpp/spt) renders `Merchant <seller>` — the address on a second
+`Merchant addr <address>` line when both are known — and its `Resource` line
+names the paid resource. A **direct payment** (`POST /payments`, `haven_send`)
+is a transfer to an address that may be a contact rather than a merchant, so
+the same line renders `Counterparty <recipient>` (the recipient's name when
+known, else the address, else `unknown`), with the address on a second
+`Address <address>` line when both are known; and it has **no `Resource`
+line** — there is no resource, and the document does not print `n/a` for one.
+The label is chosen by whether the payment carries a resource URL, so an x402
+underlag is byte-identical to before #4533.
 
 **What kind of transaction it is (#4532).** Every underlag also carries
 `Transaction` — a closed enum, `purchase` | `api_fee` | `transfer` | `refund` |

@@ -9,6 +9,10 @@ import {
   transactionDescription,
   type TransactionKind,
 } from './transaction-kind.js'
+import {
+  DIRECT_PAYMENT_OUTSIDE_ADDRESS_SQL,
+  DIRECT_PAYMENT_RAIL_SQL,
+} from '../../infra/repositories/direct-payment-accounting.js'
 
 /**
  * Canonical accounting record for bookkeeping-ready export (epic #462, P0 #463).
@@ -200,6 +204,49 @@ export interface AccountingEntrySourceRow {
   /** The #3767 booked-hash pin, via the same join. */
   pinned_booked_tx_hash?: string | null
   pinned_booked_tx_kind?: string | null
+  /**
+   * #4533: the DIRECT-payment branch's book-time fiat capture, written by
+   * `confirmSubmittedIntent` (`payment_intents.usd_value`/`eur_value`/
+   * `sek_value`). Absent on the evidence branch, which carries `fx_rates`
+   * instead — see `ledgerRatesFromFiatValues`.
+   */
+  usd_value?: string | null
+  eur_value?: string | null
+  sek_value?: string | null
+}
+
+/**
+ * #4533: recover a token→currency rate map from the three fiat values a direct
+ * payment froze at settlement.
+ *
+ * A direct payment has no `machine_payment_evidence` row, so it has no
+ * `fx_rates` map — but `confirmSubmittedIntent` wrote the same book-time
+ * capture to the intent (`usd_value`/`eur_value`/`sek_value`, migrations 005
+ * and 090). Dividing each by the token amount recovers the rate it was
+ * computed from, so a non-SEK ledger can book a direct payment exactly as it
+ * books an x402 one. Currencies the intent never priced (DKK/NOK/GBP) stay
+ * absent, which the feed reads as not-ready — never as a recomputed spot rate.
+ *
+ * Returns null when there is no usable capture, so the caller falls back to
+ * `normalizeLedgerRates(row.fx_rates)`'s own null.
+ */
+export function ledgerRatesFromFiatValues(
+  row: Pick<AccountingEntrySourceRow, 'amount_human' | 'usd_value' | 'eur_value' | 'sek_value'>,
+): LedgerRates | null {
+  const amount = Number(row.amount_human)
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const out: LedgerRates = {}
+  const pairs: Array<[LedgerCurrency, string | null | undefined]> = [
+    ['SEK', row.sek_value],
+    ['USD', row.usd_value],
+    ['EUR', row.eur_value],
+  ]
+  for (const [currency, value] of pairs) {
+    const numeric = value == null ? Number.NaN : Number(value)
+    if (!Number.isFinite(numeric) || numeric <= 0) continue
+    out[currency] = numeric / amount
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /** A 0x-prefixed 32-byte transaction hash — the same recognizer evidence.ts applies. */
@@ -262,6 +309,9 @@ export function bookedHashForEntry(row: AccountingEntrySourceRow): {
  */
 export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntry {
   const booked = bookedHashForEntry(row)
+  // #4533: the evidence branch carries `fx_rates`; the direct branch carries
+  // the three fiat values instead. One entry shape either way.
+  const fxRates = normalizeLedgerRates(row.fx_rates) ?? ledgerRatesFromFiatValues(row)
   // #4532: the transaction kind, derived from the stored payment record — the
   // direction, the x402 route, the intent's MCP tool, the merchant's own
   // document and the delivery reference. Nothing here is agent-asserted: the
@@ -307,7 +357,7 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     fxRate: row.fx_rate_sek,
     fxSource: row.fx_source,
     fxAt: row.fx_at,
-    fxRates: normalizeLedgerRates(row.fx_rates),
+    fxRates,
     feeSek: row.fee_sek ?? null,
     category: row.category ?? null,
     account: row.override_account ?? null,
@@ -329,25 +379,53 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
   }
 }
 
-/** Shared column + join body for the canonical entry source. */
+/**
+ * Shared column + join body for the canonical entry source.
+ *
+ * TWO sources, one shape (#4533). The first is `machine_payment_evidence` —
+ * protocol payments (x402/mpp/spt), the only source before #4533. The second
+ * is `payment_intents` itself, for a settled DIRECT payment, which never gets
+ * an evidence row (the rail gate refuses it, and `resource_url` is NOT NULL
+ * there). Both branches emit the same columns so every caller — the
+ * single-payment build, the period build, and the feed — reads one shape.
+ *
+ * `payment_id` and `settled_at` are computed per branch because the outer
+ * statements filter and order on them; `user_id` is carried for the tenant
+ * scope. The three fiat values are the direct branch's book-time capture
+ * (`confirmSubmittedIntent` writes them); the evidence branch has none.
+ *
+ * The branches are disjoint by rail — an evidence row exists only for a
+ * protocol rail, and the direct branch requires `direct` — so `UNION ALL`
+ * cannot duplicate a payment.
+ */
 const ENTRY_SOURCE_SQL = `
-  mpe.id, mpe.payment_intent_id, mpe.approval_request_id, mpe.tx_hash, mpe.chain_id,
-  mpe.merchant_address, mpe.payer_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
-  mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
-  mpe.resource_url, mpe.confirmed_at, mpe.created_at,
-  mpe.delivery_reference,
-  mpe.purchase_group_id, mpe.parent_payment_id,
-  pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
-  pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
-  pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,
-  pi.machine_metadata->>'accounting_booked_tx_kind' AS pinned_booked_tx_kind,
-  pi.machine_metadata->'mcp_call_context'->>'toolName' AS mcp_tool_name,
-  mc.category AS category,
-  mc.country AS country,
-  mao.bas_account AS override_account,
-  pf.fee_sek AS fee_sek,
-  mr.url AS merchant_receipt_url,
-  mr.inline_json AS merchant_receipt_json
+  SELECT
+    mpe.id::TEXT AS id,
+    mpe.payment_intent_id::TEXT AS payment_intent_id,
+    mpe.approval_request_id::TEXT AS approval_request_id,
+    mpe.tx_hash, mpe.chain_id,
+    mpe.merchant_address, mpe.payer_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
+    mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
+    mpe.resource_url, mpe.confirmed_at, mpe.created_at,
+    mpe.delivery_reference,
+    mpe.purchase_group_id, mpe.parent_payment_id,
+    pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+    pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
+    pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,
+    pi.machine_metadata->>'accounting_booked_tx_kind' AS pinned_booked_tx_kind,
+    pi.machine_metadata->'mcp_call_context'->>'toolName' AS mcp_tool_name,
+    mc.category AS category,
+    mc.country AS country,
+    mao.bas_account AS override_account,
+    pf.fee_sek AS fee_sek,
+    mr.url AS merchant_receipt_url,
+    mr.inline_json AS merchant_receipt_json,
+    mpe.user_id,
+    COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) AS payment_id,
+    COALESCE(mpe.confirmed_at, mpe.created_at) AS settled_at,
+    NULL::NUMERIC AS usd_value,
+    NULL::NUMERIC AS eur_value,
+    NULL::NUMERIC AS sek_value
   FROM machine_payment_evidence mpe
   LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
   LEFT JOIN LATERAL (
@@ -360,7 +438,57 @@ const ENTRY_SOURCE_SQL = `
   LEFT JOIN payment_fees pf
     ON pf.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
   LEFT JOIN merchant_receipts mr
-    ON mr.evidence_id = mpe.id`
+    ON mr.evidence_id = mpe.id
+  UNION ALL
+  SELECT
+    pi.id::TEXT AS id,
+    pi.id::TEXT AS payment_intent_id,
+    NULL::TEXT AS approval_request_id,
+    pi.tx_hash, pi.chain_id,
+    pi.to_address AS merchant_address,
+    pi.account_address AS payer_address,
+    pi.token_symbol, pi.amount_raw, pi.amount_human,
+    -- The feed's SEK figure has always been NUMERIC(38,4) (migration 026);
+    -- payment_intents.sek_value is NUMERIC(20,6). Cast so a direct payment
+    -- is fed at the same scale as every other SEK figure, not with two extra
+    -- decimals no other row carries.
+    pi.sek_value::NUMERIC(38,4) AS amount_sek,
+    NULL::NUMERIC AS fx_rate_sek,
+    NULL::TEXT AS fx_source,
+    NULL::TIMESTAMPTZ AS fx_at,
+    NULL::JSONB AS fx_rates,
+    NULL::TEXT AS resource_url,
+    pi.confirmed_at, pi.created_at,
+    -- No evidence row, so no delivery reference (#4532's signal).
+    NULL::TEXT AS delivery_reference,
+    -- #4534: the purchase correlation key lives on machine_payment_evidence
+    -- only (migration 123), so a direct payment is ungrouped by construction.
+    -- Typed NULLs, not bare ones: the UNION resolves against the evidence
+    -- branch, where parent_payment_id is UUID.
+    NULL::TEXT AS purchase_group_id,
+    NULL::UUID AS parent_payment_id,
+    pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
+    pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
+    pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,
+    pi.machine_metadata->>'accounting_booked_tx_kind' AS pinned_booked_tx_kind,
+    pi.machine_metadata->'mcp_call_context'->>'toolName' AS mcp_tool_name,
+    NULL::TEXT AS category,
+    NULL::TEXT AS country,
+    NULL::TEXT AS override_account,
+    pf.fee_sek AS fee_sek,
+    NULL::TEXT AS merchant_receipt_url,
+    NULL::JSONB AS merchant_receipt_json,
+    pi.user_id,
+    pi.id::TEXT AS payment_id,
+    -- Same fallback the evidence branch uses: a confirmed intent always has
+    -- confirmed_at, but ordering and the feed-from floor must never see a
+    -- NULL settlement time.
+    COALESCE(pi.confirmed_at, pi.created_at) AS settled_at,
+    pi.usd_value, pi.eur_value, pi.sek_value
+  FROM payment_intents pi
+  LEFT JOIN payment_fees pf ON pf.payment_id = pi.id::TEXT
+  WHERE ${DIRECT_PAYMENT_RAIL_SQL}
+    AND ${DIRECT_PAYMENT_OUTSIDE_ADDRESS_SQL}`
 
 export interface BuildAccountingEntriesOptions {
   userId: string
@@ -376,9 +504,9 @@ export async function buildAccountingEntryForPayment(
   paymentId: string,
 ): Promise<AccountingEntry | null> {
   const result = await pool.query<AccountingEntrySourceRow>(
-    `SELECT ${ENTRY_SOURCE_SQL}
-     WHERE mpe.user_id = $1
-       AND COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) = $2
+    `SELECT * FROM (${ENTRY_SOURCE_SQL}) src
+     WHERE src.user_id = $1
+       AND src.payment_id = $2
      LIMIT 1`,
     [userId, paymentId],
   )
@@ -391,22 +519,22 @@ export async function buildAccountingEntries(
   opts: BuildAccountingEntriesOptions,
 ): Promise<AccountingEntry[]> {
   const params: unknown[] = [opts.userId]
-  let where = 'mpe.user_id = $1'
+  let where = 'src.user_id = $1'
   if (opts.from) {
     params.push(opts.from)
-    where += ` AND COALESCE(mpe.confirmed_at, mpe.created_at) >= $${params.length}`
+    where += ` AND src.settled_at >= $${params.length}`
   }
   if (opts.to) {
     params.push(opts.to)
-    where += ` AND COALESCE(mpe.confirmed_at, mpe.created_at) < $${params.length}`
+    where += ` AND src.settled_at < $${params.length}`
   }
   params.push(opts.limit ?? 1000)
   const limitParam = `$${params.length}`
 
   const result = await pool.query<AccountingEntrySourceRow>(
-    `SELECT ${ENTRY_SOURCE_SQL}
+    `SELECT * FROM (${ENTRY_SOURCE_SQL}) src
      WHERE ${where}
-     ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
+     ORDER BY src.settled_at DESC
      LIMIT ${limitParam}`,
     params,
   )

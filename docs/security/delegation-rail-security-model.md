@@ -4206,7 +4206,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > matching row-shape field. The column is `SMALLINT NOT NULL CHECK
 > (avatar_tint BETWEEN 1 AND 6)`, filled by a `BEFORE INSERT` trigger from the
 > lowest tint no held agent of that user holds, handed to a replacement by an
-> `AFTER UPDATE OF superseded_by_agent_id` trigger, and backfilled once. It is
+> `AFTER UPDATE OF superseded_by_agent_id` trigger (dropped by 122, #4448 — see
+> the note below), and backfilled once. It is
 > display data on the same boundary as `labels` (#3167) and `organization_id`
 > (#3164): no delegation, caveat, enforcer term, budget pre-check, allowance,
 > settlement window or refusal reads it, and the inherit trigger's `UPDATE` is
@@ -4214,6 +4215,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > cannot recolour a released agent or cross a tenant. No route, signing,
 > revocation or grant path changes. Scope of this note: those two reads and the
 > migration. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4448, 2026-10-29 — a superseded agent keeps its
+> tint, migration 122).** The covered files this diff touches are
+> `infra/repositories/agents.ts` (the unarchive statement) and the migration
+> directory. 122 drops the `agents_inherit_avatar_tint` trigger and its
+> function, redefines `agent_holds_avatar_tint` to `archived_at IS NULL` alone,
+> and backfills the collisions 121 left behind; `UNARCHIVE_AGENT_SQL` may
+> reassign a tint on unarchive when another non-archived agent of the same user
+> holds it. All of it is display data on the same boundary as `labels` (#3167)
+> and `organization_id` (#3164): no delegation, caveat, enforcer term, budget
+> pre-check, allowance, settlement window or refusal reads `avatar_tint` or
+> `superseded_by_agent_id`, and the unarchive statement's tint `CASE` is scoped
+> to the row's own `id` and `user_id`. No route, signing, revocation or grant
+> path changes. Scope of this note: that statement and the migration. Nothing
+> else in this document was re-verified for it.
 
 > **Re-verified unchanged (#4449, 2026-10-26 — the signer's success next-step
 > family).** The covered files this diff touches are

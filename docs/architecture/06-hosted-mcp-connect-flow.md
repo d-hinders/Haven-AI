@@ -139,7 +139,10 @@ restart-and-remove warning (null again once that replacement is revoked or
 archived, and each report is logged). It is a warning and nothing else: the superseded
 agent keeps its key, status and on-chain budget until the owner removes it, so
 the worst a misused report can do is warn any of its own owner's other
-agents — never another user's.
+agents — never another user's. A superseded agent also keeps its **colour**: it
+is still listed on every agent surface, so it holds its tint until it is
+archived, and the replacement keeps the tint it got at creation — there is no
+inheritance ([#4448](https://github.com/d-hinders/Haven-AI/issues/4448)).
 
 Manual credential generation is a supported integration path for servers and
 hosted backends (#2482), surfaced as its own top-level disclosure in the

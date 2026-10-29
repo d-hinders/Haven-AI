@@ -31,6 +31,7 @@
 import Link from 'next/link'
 import type { MouseEvent } from 'react'
 import type { ApiSchema } from '@haven_ai/core'
+import type { AccountingProvider } from '@/hooks/useAccounting'
 import { useT } from '@/context/LocaleContext'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -44,6 +45,7 @@ export const ACCOUNTING_PAGE_HREF = '/accounting'
 const PROVIDER_NAMES: Record<string, string> = {
   fortnox: 'Fortnox',
   accounted: 'Accounted',
+  igdrasil: 'Igdrasil',
 }
 
 export function providerDisplayName(provider: string): string {
@@ -58,8 +60,33 @@ export function providerDisplayName(provider: string): string {
  * Haven's own record, and user-facing copy must not read as a provider
  * read-back. The badge's pushed label and the feed page's verify sentences
  * both branch on this — one decision, one home.
+ *
+ * This set is the FALLBACK for callers that have no descriptor list to hand:
+ * the ledger row and the detail drawer read only the row's `accounting`
+ * object, so they cannot ask `GET /accounting/providers`. A caller that DOES
+ * have the list (the `/accounting` page) passes it to
+ * `isRecordOnlyProvider`, which prefers the descriptor — a connector that
+ * flips `verify` then needs no edit here. Igdrasil is listed explicitly so
+ * the badge is right before its descriptor lands (#4520).
  */
-export const RECORD_ONLY_PROVIDERS = new Set(['accounted'])
+export const RECORD_ONLY_PROVIDERS = new Set(['accounted', 'igdrasil'])
+
+/**
+ * Is this provider record-only? The descriptor's `capabilities.verify` is the
+ * source of truth when the caller has the provider list; otherwise the
+ * explicit set above answers. A provider absent from a list that IS to hand
+ * falls back to the set too — a partial list must not silently flip a
+ * record-only connector back to "In <Provider>".
+ */
+export function isRecordOnlyProvider(
+  provider: string,
+  providers?: ReadonlyArray<Pick<AccountingProvider, 'id' | 'capabilities'>> | null,
+): boolean {
+  const id = provider.toLowerCase()
+  const descriptor = providers?.find((p) => p.id.toLowerCase() === id)
+  if (descriptor) return descriptor.capabilities.verify === false
+  return RECORD_ONLY_PROVIDERS.has(id)
+}
 
 const TONE: Record<TransactionAccounting['status'], StatusTone> = {
   pushed: 'success',
@@ -116,7 +143,7 @@ function PresentAccountingBadge({
 
   const label =
     accounting.status === 'pushed'
-      ? RECORD_ONLY_PROVIDERS.has(accounting.provider.toLowerCase())
+      ? isRecordOnlyProvider(accounting.provider)
         ? t.accountingBadge.evidenceArchived
         : t.accountingBadge.inProvider(providerDisplayName(accounting.provider))
       : accounting.status === 'pending'

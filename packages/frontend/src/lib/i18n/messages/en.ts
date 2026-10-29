@@ -84,12 +84,14 @@ export const en = {
     },
     /**
      * The row's identity line (#3018): the delivered record, named per
-     * provider. Fortnox rows carry an invoice number; Accounted rows carry
-     * a document id from the namespaced ref.
+     * provider. Fortnox rows carry an invoice number; a record-only provider
+     * (Accounted, Igdrasil) carries a document id from the namespaced ref —
+     * the provider name is passed in, so the line never says "Accounted" for
+     * an Igdrasil row (#4520).
      */
     rowIdentity: {
       invoice: (number: string) => `Fortnox invoice ${number}`,
-      document: (id: string) => `Accounted document ${id}`,
+      document: (provider: string, id: string) => `${provider} document ${id}`,
     },
     /**
      * The verify result sentences (#1362), provider-conditional since #3018:
@@ -109,12 +111,16 @@ export const en = {
         registered: (number: string) => `Registered in Fortnox as invoice ${number} — awaiting booking by your accountant.`,
       },
       /**
-       * Accounted — answered from Haven's own record (the descriptor says
-       * `verify: false`): the sentence says what Haven knows, not what the
-       * provider answered. `document` is the short document id.
+       * A record-only provider — answered from Haven's own record (the
+       * descriptor says `verify: false`): the sentence says what Haven knows,
+       * not what the provider answered. `provider` is the display name
+       * (Accounted, Igdrasil); `document` is the short document id. One
+       * sentence for every record-only connector, so a new one needs no copy
+       * (#4520).
        */
-      accounted: {
-        registered: (document: string) => `Evidence archived in Accounted — document ${document}. Your accountant books from it.`,
+      recordOnly: {
+        registered: (provider: string, document: string) =>
+          `Evidence archived in ${provider} — document ${document}. Your accountant books from it.`,
       },
       /** The two verdicts the record-only connector can still surface — generic. */
       foreign: 'Not found under this payment — the record belongs to another one.',
@@ -307,9 +313,9 @@ export const en = {
       } as Record<string, string>,
       /**
        * Human labels for the provider scope identifiers `missingScopes`
-       * carries (Fortnox's, today). An identifier without a label is shown
-       * raw rather than hidden — the sentence must still name what a
-       * reconnect adds.
+       * carries. Fortnox's are bare names; Igdrasil's are `resource:action`
+       * pairs (#4518). An identifier without a label is shown raw rather than
+       * hidden — the sentence must still name what a reconnect adds.
        */
       scopeLabels: {
         companyinformation: 'company information',
@@ -319,6 +325,8 @@ export const en = {
         supplier: 'suppliers',
         archive: 'archive',
         bookkeeping: 'bookkeeping',
+        'companies:read': 'company information',
+        'vouchers:write': 'voucher uploads',
       } as Record<string, string>,
       notConfigured: 'Not available on this deployment yet.',
       status: {
@@ -466,6 +474,14 @@ export const en = {
           'Haven feeds ledgers that book in SEK, EUR, USD, DKK, NOK or GBP. Choose a company that books in one of those and try again.',
         featureOff: (provider: string) =>
           `Accounting connections are switched off on this deployment, so the ${provider} sign-in was not kept. Nothing was connected.`,
+        /**
+         * #4520: the consent let the person pick several companies, and the
+         * feed has no per-push company choice — so the grant is refused at
+         * connect (#4518's callback emits `reason=multi_company`). The advice
+         * is the user's own action: reconnect and pick one.
+         */
+        multiCompany: (provider: string) =>
+          `${provider} was given access to more than one company. Haven feeds one company per connection, so reconnect and choose a single company.`,
         error: (provider: string) => `We could not connect ${provider}. Try again in a moment.`,
       },
     },

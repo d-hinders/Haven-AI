@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.12.0-alpha.0 — 2026-10-29
+
 ### Added
 
 - **The local `haven_list_receipts` rows carry the delivery verdict, the

@@ -3201,6 +3201,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.12.0-alpha.0 release, 2026-10-29):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.12.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> Two commits in the range change signer source (`git log origin/main..origin/dev
+> -- packages/signer/src` at `b9c1d64b`), and both were read again for this
+> release:
+> - #4449 (#4462): success results name their next step, and the settlement-child
+>   guidance names the MCP route. Recorded above where it merged ("Re-verified
+>   unchanged (#4449 …)"); the change is guidance text and next-step fields only.
+> - #4415 (#4417): stale comments only.
+>
+> Neither adds a signing path or widens a check. Nothing else in this document
+> was re-verified.
+
 > **Re-verified (0.11.0-alpha.0 release, 2026-10-23):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.11.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.

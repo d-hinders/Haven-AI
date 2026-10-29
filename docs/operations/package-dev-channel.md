@@ -369,6 +369,22 @@ and the `release` skill.
 >
 > `last-verified` is not bumped.
 
+> **Re-verification (0.12.0-alpha.0 release, 2026-10-29):** coupled because the
+> bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
+> `0.11.0-alpha.0` → `0.12.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`
+> stays `alpha`.
+> - **Publish path.** Re-measured at `origin/dev` `b9c1d64b`: `git log
+>   origin/main..origin/dev` over `publish.yml`, `release-channel.mjs`,
+>   `release-snapshot-version.mjs` and `release-version-order.mjs` returns **1**
+>   commit, #4371 (#4374), which corrects a header comment in `publish.yml`
+>   ("four" places to "five") and changes no step. The bump's own diff touches
+>   none of these files.
+> - **Live dist-tags read during this release** (registry over HTTP). `dev` =
+>   `0.0.0-dev.202610271239.8cdcf88`, below `alpha`/`latest` = `0.11.0-alpha.0`
+>   for all five packages.
+>
+> `last-verified` is not bumped.
+
 > **Re-verification (0.11.0-alpha.0 release, 2026-10-23):** coupled because the
 > bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`), now
 > `0.10.0-alpha.0` → `0.11.0-alpha.0`, a MINOR step. `HAVEN_CONNECTOR_CHANNEL`

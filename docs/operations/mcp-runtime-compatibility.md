@@ -2916,6 +2916,50 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.12.0-alpha.0 release, 2026-10-29):** the manifest table
+> above is re-pinned by the bump to `0.12.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.11.0-alpha.0` is **MINOR**: the range adds surfaces and removes none, and
+> no CHANGELOG entry is marked **Update required**.
+>
+> Type-level changes for SDK consumers that build objects by hand:
+> - `nextRefillAt` is now required on `HavenAllowance` and
+>   `HavenAgentAllowanceSummary`;
+> - `budgetEndedAt` is now required on `HavenAllowanceSummary` and
+>   `HavenAgentSummary`;
+> - `budgetRefillsAt` is now required on `HavenAgentSummary`;
+> - `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`.
+>
+> Code that only reads these types is unaffected. The `.d.ts` comparison against
+> the published `0.11.0-alpha.0` (`sdk`, `signer`, `mcp`) removes and adds no
+> declaration name.
+>
+> **Surfaces this release moves:**
+> - **SDK.** An ended budget is named apart from a spent one:
+>   `delegation_expired` with the end date (#4352, #4458), the quote warning
+>   `QUOTE_BUDGET_ENDED`, and spent-for-the-period told apart from no budget
+>   (#4355). `haven_list_receipts` rows carry the six delivery fields the mapper
+>   dropped (#4469). Runbook and skill wording: budget end dates (#4350),
+>   which quote checks the budget (#4345), and the agent folder named by its
+>   wiring slug (#4396).
+> - **Signer.** Success results name their next step, and the settlement-child
+>   guidance names the MCP route (#4449). Guidance only; no new signing path.
+> - **Local MCP.** Embedded-SDK changes only (#4469); `README` wording (#4396).
+> - **Connect.** The installed skill names the ended budget (#4352), tells a
+>   spent budget from no budget (#4355), says which quote checks the budget
+>   (#4345), and names the agent folder by its slug (#4396). Existing installs
+>   keep their `SKILL.md` until reinstalled.
+> - **CLI.** `budget grant --expires` refuses a date more than 365 days out
+>   (#4351), and `haven guide`'s runbook gains the end-date and
+>   `needs_approval` wording (#4350, #4352, #4355).
+> - **Not moved.** `CLIENT_COMPAT` is unchanged (`git diff origin/main
+>   origin/dev -- packages/core/src/client-compat.ts` is empty), so no installed
+>   client is forced to update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-27 from an earlier
+> change and is not bumped.
+
 > **Re-verification (0.11.0-alpha.0 release, 2026-10-23):** the manifest table
 > above is re-pinned by the bump to `0.11.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
@@ -3299,10 +3343,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.11.0-alpha.0` |
-| `@haven_ai/mcp` | `0.11.0-alpha.0` |
-| `@haven_ai/sdk` | `0.11.0-alpha.0` |
-| `@haven_ai/signer` | `0.11.0-alpha.0` |
+| `@haven_ai/connect` | `0.12.0-alpha.0` |
+| `@haven_ai/mcp` | `0.12.0-alpha.0` |
+| `@haven_ai/sdk` | `0.12.0-alpha.0` |
+| `@haven_ai/signer` | `0.12.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

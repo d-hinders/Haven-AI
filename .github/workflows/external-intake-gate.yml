@@ -60,11 +60,27 @@ permissions:
   issues: read
   pull-requests: read
 
-# One run per PR at a time: label and body edits land on the same head sha, so
-# without this an earlier red could complete after a later green.
-concurrency:
-  group: external-intake-gate-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# ## No `concurrency` group, on purpose (#4524)
+#
+# Every run must finish with a verdict. A per-PR group cancels runs: GitHub
+# cancels a PENDING run whenever a newer one queues, whatever
+# `cancel-in-progress` says, and a run cancelled while pending leaves a check
+# suite with no check run at all. On PR #4516 (open plus four labels in one
+# second) two such empty suites were the newest on the head, and the merge box
+# showed this check as "Expected — Waiting for status to be reported" until a
+# label change started one uncontested run. Re-running the older runs did not
+# clear it: the merge box reads the newest suite, not the newest green run.
+#
+# Without the group, runs on one head overlap, and that is safe: each reads
+# standing live (never from the payload), and the run for the latest event is
+# in the newest suite, so it judges the latest state. An older run finishing
+# later does not change the merge box (#4516: a re-run success at 09:22:03Z in
+# an older suite left the PR blocked).
+#
+# Never filter label events with an `if:` (job or step) or soften the judging
+# step with `continue-on-error`: a skipped job or step reports Success, so any
+# label on an unaccepted external PR would mint a newer, passing suite — the
+# fail-open #4200 closed. The workflow test pins both.
 
 jobs:
   intake:

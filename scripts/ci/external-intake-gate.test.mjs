@@ -257,10 +257,26 @@ esac
 describe('the workflow shape', () => {
   const yml = readFileSync(new URL('../../.github/workflows/external-intake-gate.yml', import.meta.url), 'utf8')
 
-  test('pull_request_target with the seven trigger types, read-only token, one run per PR', () => {
+  test('pull_request_target with the seven trigger types, read-only token', () => {
     assert.match(yml, /^on:\n  pull_request_target:\n    types: \[opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled\]\n/m)
     assert.match(yml, /^permissions:\n  contents: read\n  issues: read\n  pull-requests: read\n\n/m)
-    assert.match(yml, /concurrency:\n  group: external-intake-gate-\$\{\{ github\.event\.pull_request\.number \}\}\n  cancel-in-progress: true/)
+  })
+
+  // #4524: a concurrency group cancels pending runs (whatever cancel-in-progress
+  // says), and a run cancelled while pending leaves an empty check suite that
+  // blocks the merge box. Checked over YAML lines, not comments.
+  test('no concurrency group: no run is ever cancelled (#4524)', () => {
+    const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    assert.doesNotMatch(code, /^\s*concurrency:/m)
+    assert.doesNotMatch(code, /cancel-in-progress/)
+  })
+
+  // #4524: a skipped job or step reports Success, so a label filter or an
+  // error-tolerated judge would let a label mint a passing suite (fail open).
+  test('the only if: is the repository guard; nothing tolerates a failed judge (#4524)', () => {
+    const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    assert.deepEqual(code.match(/^\s*if:.*$/gm), ["    if: github.repository == 'd-hinders/Haven-AI'"])
+    assert.doesNotMatch(code, /continue-on-error/)
   })
 
   test('the job is named "External intake gate" (the context the Dev merge ruleset requires)', () => {

@@ -43,6 +43,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 - The README names the agent folder by its wiring slug,
   `~/.haven/agents/<slug>/`, as the connector writes it (#4396). Docs only.
 
+- **A funding wait that fails now reports its cause (#4470, via `@haven_ai/sdk`).**
+  When the funding transaction's confirmation cannot be read in time, or the
+  transaction reverted, the local tools relay the SDK's new typed errors: status
+  504 or 502 (was 500) with a message that says which. The step the agent is
+  given is unchanged. No update needed.
+
 ## 0.11.0-alpha.0 — 2026-10-23
 
 ### Changed

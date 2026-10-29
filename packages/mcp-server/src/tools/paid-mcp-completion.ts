@@ -52,6 +52,8 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
+  FundingConfirmationUnknownError,
+  FundingRevertedError,
   HavenApiError,
   HavenClient,
   HavenInsecureRetryTargetError,
@@ -85,6 +87,7 @@ import {
 import {
   parseMcpTransport,
   serializeMcpTransport,
+  submitErc7710WithExpiryMapping,
   submitSignatureWithExpiryMapping,
   MERCHANT_OUT_OF_GAS_REASON,
 } from './support/mcp-context.js'
@@ -197,7 +200,7 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
   if (outcome.outcome === 'retryable') {
     return (
       'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
-      'verify it on-chain just yet (the chain was unreachable or the transaction is not mined). ' +
+      'verify it on-chain just yet (Haven did not answer, the chain was unreachable, or the transaction is not mined). ' +
       'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
       'payment_header: the exact payment_header you passed to this call.'
     )
@@ -573,7 +576,7 @@ export async function deliverMerchantPayment(
   // deterministically, on every hosted erc7710 call, with the merchant never
   // contacted.
   if (!options?.noFundingLeg) {
-    await haven.ensureFundingConfirmed(args.payment_id, fundingTxHash)
+    await ensureFundingConfirmedOrRefuse(haven, args.payment_id, fundingTxHash)
   }
 
   const envelope = {
@@ -1094,7 +1097,7 @@ export function classifySettlementEvidenceReport(
       nextArguments: { payment_id: paymentId },
       safeToContinue: true,
       reason: pending
-        ? 'Haven could not yet verify this transaction on-chain — the RPC was unreachable, or ' +
+        ? 'Haven could not yet verify this transaction on-chain — Haven did not answer, the RPC was unreachable, or ' +
           'the transaction is not mined yet. Report it again shortly with ' +
           'haven_report_settlement_evidence and the same hash — on an EIP-3009 payment adding ' +
           'payment_header: the exact payment_header you sent the merchant — or poll next_tool.'
@@ -1104,6 +1107,67 @@ export function classifySettlementEvidenceReport(
           'again will not change that; poll next_tool for the current status.',
       summary: { payment_id: paymentId, status: observedStatus ?? 'unknown' },
     }),
+  }
+}
+
+const FUNDING_REVERTED_OMITTED_REASON =
+  'the funding transaction reverted on-chain, so nothing reached the delegate and nothing was delivered; retrying this payment_id reads the same receipt, so tell the user'
+
+/**
+ * #4470: the funding wait's two outcomes, answered before the merchant is
+ * called. Before this, ethers' TIMEOUT rejection reached `normalizeError` as a
+ * plain `Error` and the agent was told "re-calling it the same way will fail
+ * the same way, so tell the user" after Haven's funding leg had been
+ * submitted.
+ *
+ * - Confirmation unknown (the wait timed out, or the RPC failed): funding may
+ *   be on-chain, the merchant was NOT called — check status, then complete
+ *   once; a sweep only if the funds are confirmed and delivery never happens.
+ * - Reverted: nothing reached the delegate and nothing was delivered; a retry
+ *   reads the same receipt.
+ */
+async function ensureFundingConfirmedOrRefuse(
+  haven: HavenClient,
+  paymentId: string,
+  fundingTxHash: string | undefined,
+): Promise<void> {
+  try {
+    await haven.ensureFundingConfirmed(paymentId, fundingTxHash)
+  } catch (err) {
+    if (err instanceof FundingConfirmationUnknownError) {
+      throw new HostedToolError({
+        code: 'FUNDING_CONFIRMATION_UNKNOWN',
+        message:
+          `The funding leg was submitted, but its on-chain confirmation could not be read in time, ` +
+          `so the merchant was NOT called. Funds may already be on the delegate. Check ` +
+          `haven_get_payment_status; once it shows the funding confirmed, retry ` +
+          `haven_complete_mcp_tool ONCE with the same payment_header. Sweep with ` +
+          `haven_sweep_delegate only if the funding is confirmed and delivery still fails. ` +
+          `Do not create a new payment for this. ${err.message}`,
+        statusCode: 504,
+        paymentId,
+        rail: 'x402',
+        nextStep: refusalNextStep({ nextAction: AgentPaymentNextAction.CheckStatusLater, nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }),
+        suggestedTool: 'haven_get_payment_status',
+      })
+    }
+    if (err instanceof FundingRevertedError) {
+      throw new HostedToolError({
+        code: 'FUNDING_REVERTED',
+        message:
+          `The funding transaction reverted on-chain: nothing reached the delegate, and the ` +
+          `merchant was not called. ${err.message}`,
+        statusCode: 502,
+        paymentId,
+        rail: 'x402',
+        nextStep: refusalNextStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason: FUNDING_REVERTED_OMITTED_REASON,
+        }),
+      })
+    }
+    throw err
   }
 }
 
@@ -1117,8 +1181,10 @@ export function classifySettlementEvidenceReport(
  *   read the backend REFUSED (a 4xx: a foreign or unknown payment — the
  *   report gets the same answer). The header would only reach the evidence
  *   attach path and overwrite a stored one, so it is not sent.
- * - `unavailable` — the status read failed transiently (5xx, transport,
- *   timeout). The handler posts NOTHING: posting without the header would
+ * - `unavailable` — the status read failed transiently (5xx), or got no
+ *   answer at all (a timeout, an unreachable backend or an unreadable body —
+ *   the SDK's `no_answer` cause, #4470; its 408 and 0 are not a refusal). The
+ *   handler posts NOTHING: posting without the header would
  *   earn a certain missing-header refusal whose guidance ("add
  *   payment_header") is false for an agent that passed one — a loop.
  */
@@ -1137,7 +1203,8 @@ async function settlementProofHeaderFor(
   try {
     status = await haven.getPaymentStatus(paymentId)
   } catch (err) {
-    const code = err instanceof HavenApiError ? err.statusCode : undefined
+    if (!(err instanceof HavenApiError) || err.failureCause?.kind === 'no_answer') return { kind: 'unavailable' }
+    const code = err.statusCode
     return code !== undefined && code >= 400 && code < 500 ? { kind: 'drop' } : { kind: 'unavailable' }
   }
   const funding = status.txHash
@@ -1349,8 +1416,10 @@ export function createPaidMcpCompletionHandlers(
         // `payment_header` is what tells the two schemes apart, because the
         // 3009 path always carries one built by the local signer.
         if (!args.payment_header) {
-          const submitted = await haven
-            .submitX402Erc7710(args.payment_id, args.signature)
+          // #4470 review S1: through the same wrapper as haven_submit, so a
+          // settle that got no answer reads the status for this payment id
+          // instead of a generic stop (and an expired child maps the same way).
+          const submitted = await submitErc7710WithExpiryMapping(haven, args.payment_id, args.signature)
             .catch(catchSettledResettle)
           // #3423: a second settle of a payment that already settled answers
           // with the original settlement as a done state (the #3417 helper),
@@ -1507,7 +1576,7 @@ export function createPaidMcpCompletionHandlers(
               safeToContinue: true,
               reason: pending
                 ? 'The merchant delivered the result and reported a settlement transaction, but ' +
-                  'Haven could not yet verify it on-chain (the RPC was unreachable, or the ' +
+                  'Haven could not yet verify it on-chain (Haven did not answer, the RPC was unreachable, or the ' +
                   'transaction is not mined yet). This is worth checking again — call next_tool ' +
                   'with next_arguments shortly (it hands the same settlement_tx_hash back to ' +
                   'Haven for verification); haven_get_payment_status shows the current status.'

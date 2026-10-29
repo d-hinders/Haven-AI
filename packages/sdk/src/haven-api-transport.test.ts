@@ -272,3 +272,39 @@ describe('HavenApiTransport HavenApiError compatibility', () => {
     })
   })
 })
+
+describe('HavenApiTransport no-answer cause (#4470)', () => {
+  const hang = (call: { init: RequestInit }) => new Promise<Response>((_resolve, reject) => {
+    call.init.signal?.addEventListener('abort', () => {
+      reject(new DOMException('The operation was aborted', 'AbortError'))
+    })
+  })
+
+  it.each([
+    { label: 'a hang (408)', fetchImpl: hang, status: 408 },
+    { label: 'a rejecting fetch (0)', fetchImpl: async () => { throw new TypeError('fetch failed') }, status: 0 },
+    { label: 'an HTML gateway 502 (0)', fetchImpl: () => new Response('<html>502</html>', { status: 502 }), status: 0 },
+    { label: 'a non-JSON 200 (0)', fetchImpl: () => new Response('ok', { status: 200 }), status: 0 },
+  ])('$label carries no_answer and the method, on GET and POST', async ({ fetchImpl, status }) => {
+    for (const method of ['GET', 'POST'] as const) {
+      installFetch(fetchImpl as Parameters<typeof installFetch>[0])
+      const transport = new HavenApiTransport({ apiKey: 'sk_agent_test', requestTimeout: 10 })
+      const call = method === 'GET' ? transport.get('/x') : transport.post('/x', {})
+      await expect(call).rejects.toMatchObject({
+        name: 'HavenApiError',
+        code: 'API_ERROR',
+        statusCode: status,
+        failureCause: { kind: 'no_answer', method },
+      })
+    }
+  })
+
+  it('a server that ANSWERS 408 with a JSON body is an answer: no cause, its own status', async () => {
+    installFetch(() => new Response(JSON.stringify({ error: 'Request timed out' }), { status: 408 }))
+    const transport = new HavenApiTransport({ apiKey: 'sk_agent_test' })
+    const err = await transport.get('/x').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenApiError)
+    expect((err as HavenApiError).statusCode).toBe(408)
+    expect((err as HavenApiError).failureCause).toBeUndefined()
+  })
+})

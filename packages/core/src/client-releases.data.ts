@@ -20,14 +20,14 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
-        "summary": "haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+7 more in the changelog)",
+        "summary": "haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+10 more in the changelog)",
         "summary_segments": [
           {
             "text": "haven_list_receipts",
             "code": true
           },
           {
-            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+7 more in the changelog)",
+            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+10 more in the changelog)",
             "code": false
           }
         ],
@@ -98,7 +98,7 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
-        "summary": "The local haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+2 more in the changelog)",
+        "summary": "The local haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+3 more in the changelog)",
         "summary_segments": [
           {
             "text": "The local ",
@@ -109,7 +109,7 @@ export const CLIENT_RELEASE_DATA = {
             "code": true
           },
           {
-            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+2 more in the changelog)",
+            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+3 more in the changelog)",
             "code": false
           }
         ],

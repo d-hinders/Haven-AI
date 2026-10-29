@@ -233,6 +233,9 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
     txHashIsFunding: false,
     fundingTxHash: null,
     suggestedAccount: '6540',
+    // #4534: ungrouped by default; the correlation-key cases override.
+    purchaseGroupId: null,
+    parentPaymentId: null,
     ...over,
   }
 }

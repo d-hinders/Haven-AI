@@ -279,7 +279,9 @@
       "budgetDelegationHash": "#4469: the budget delegation that METERED this payment (#3518), uniform across schemes. No transaction counterpart: the wallet feed reports the settled transfer, not which budget metered it. `string | null` here (the backend sends `?? null`), unlike the status read's `string`.",
       "deliveryQuality": "#4469: the paying agent's own delivery verdict (#3770) -- `ok` | `unusable` | `partial`, or null when not reported. No transaction counterpart: the wallet feed reports the transfer, not the agent's judgement about what it got. Evidence only; it gates nothing.",
       "deliveryNote": "#4469: the agent's optional note (max 2000 chars) on its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality.",
-      "deliveryReportedAt": "#4469: when the agent reported its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality."
+      "deliveryReportedAt": "#4469: when the agent reported its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality.",
+      "purchaseGroupId": "#4534: the purchase correlation key -- the merchant's own invoice/order id (or an agent-supplied group key) shared by every payment of one purchase. No transaction counterpart: the wallet feed reports the settled transfer, not which purchase it belongs to. Evidence only; it groups documents in the accounting tool and gates nothing.",
+      "parentPaymentId": "#4534: for a fee call, the purchase payment it paid for (null on the purchase itself and on every ungrouped payment). No transaction counterpart, same reason as purchaseGroupId -- a wallet-history row has no notion of a sibling payment."
     },
     "transaction": {
       "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",

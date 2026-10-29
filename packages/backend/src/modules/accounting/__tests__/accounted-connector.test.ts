@@ -108,6 +108,9 @@ function tx() {
     txHashIsFunding: false,
     fundingTxHash: null,
     suggestedAccount: '6540',
+    // #4534: ungrouped by default; the correlation-key cases override.
+    purchaseGroupId: null,
+    parentPaymentId: null,
   }
 }
 

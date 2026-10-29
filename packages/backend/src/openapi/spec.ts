@@ -13375,6 +13375,13 @@ export const openapiSpec = {
           delivery_quality: { type: ['string', 'null'], enum: ['ok', 'unusable', 'partial', null] },
           delivery_note: { type: ['string', 'null'] },
           delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
+          // #4534: the purchase correlation key. `purchase_group_id` is the
+          // merchant's own invoice/order id (or an agent-supplied group key)
+          // shared by every payment of one purchase; `parent_payment_id` is the
+          // purchase payment a fee call paid for. Both null on an ungrouped
+          // payment — which is fed exactly as before, never withheld.
+          purchase_group_id: { type: ['string', 'null'] },
+          parent_payment_id: { anyOf: [uuid, { type: 'null' }] },
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
@@ -13418,6 +13425,14 @@ export const openapiSpec = {
           // `@haven_ai/core`'s `deliveryReferenceError`) because "looks like
           // a credential" is not a JSON-Schema statement.
           deliveryReference: { type: 'string', maxLength: 512 },
+          // #4534: the merchant's PAID response body, read by the explicit
+          // per-merchant map in `modules/mpp/purchase-group.ts` to derive the
+          // purchase correlation key. Never stored — only the derived id is.
+          merchantResponse: { type: 'object', additionalProperties: true },
+          // #4534: an agent-supplied purchase group key — its own field, never
+          // overloaded onto `idempotencyKey`. Bounded at the evidence column's
+          // width; the semantic normalization (trim, non-empty) is the module's.
+          purchaseGroupId: { type: 'string', maxLength: 128 },
         },
         additionalProperties: false,
       },

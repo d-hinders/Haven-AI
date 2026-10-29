@@ -39,6 +39,9 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     vatTreatment: 'reverse_charge',
     resourceUrl: 'https://api.example/r',
     receiptRef: 'ev1',
+    // #4534: ungrouped by default; the correlation-key cases override.
+    purchaseGroupId: null,
+    parentPaymentId: null,
     ...over,
   }
 }

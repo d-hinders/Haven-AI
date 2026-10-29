@@ -205,6 +205,12 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
   if ('delivery_reference' in raw) {
     receipt.deliveryReference = raw.delivery_reference ?? null
   }
+  if ('purchase_group_id' in raw) {
+    receipt.purchaseGroupId = raw.purchase_group_id ?? null
+  }
+  if ('parent_payment_id' in raw) {
+    receipt.parentPaymentId = raw.parent_payment_id ?? null
+  }
 
   return receipt
 }

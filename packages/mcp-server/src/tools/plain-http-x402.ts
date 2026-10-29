@@ -1617,6 +1617,11 @@ export function createPlainHttpX402Handlers(
               ? { deliveryReference: args.delivery_reference }
               : {}),
             ...(args.merchant_body ? { merchantBody: args.merchant_body } : {}),
+            // #4534: the purchase correlation key — the agent-supplied group
+            // key and the merchant's paid response body (read by the explicit
+            // per-merchant map on the backend). Both optional.
+            ...(args.purchase_group_id ? { purchaseGroupId: args.purchase_group_id } : {}),
+            ...(args.merchant_response ? { merchantResponse: args.merchant_response } : {}),
           })
           .catch((err: unknown) => {
             throw erc7710OutcomeRefusal(err, args, evidence) ?? err

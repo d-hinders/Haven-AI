@@ -69,6 +69,9 @@ function tx() {
     txHashIsFunding: false,
     fundingTxHash: null,
     suggestedAccount: '6540',
+    // #4534: ungrouped.
+    purchaseGroupId: null,
+    parentPaymentId: null,
   }
 }
 

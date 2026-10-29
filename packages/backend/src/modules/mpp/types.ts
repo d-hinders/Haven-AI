@@ -70,6 +70,19 @@ export interface EvidenceBody {
    * `@haven_ai/core`'s `deliveryReferenceError`.
    */
   deliveryReference?: string
+  /**
+   * #4534: the merchant's PAID response body, when the agent reports one. Read
+   * by the explicit per-merchant map in `purchase-group.ts` to derive the
+   * purchase correlation key — never scraped generically, and never stored
+   * (only the derived id is). Absent is the normal case.
+   */
+  merchantResponse?: Record<string, unknown>
+  /**
+   * #4534: an agent-supplied purchase group key — its own field, never
+   * overloaded onto `idempotency_key`. Used only when the merchant's own
+   * response supplies no correlation.
+   */
+  purchaseGroupId?: string
 }
 
 export const SUPPORTED_ASSETS = ['ETH', 'USDC'] as const

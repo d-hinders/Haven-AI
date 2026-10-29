@@ -5902,6 +5902,8 @@ export type components = {
             delivery_note?: string | null;
             /** Format: date-time */
             delivery_reported_at?: string | null;
+            purchase_group_id?: string | null;
+            parent_payment_id?: string | null;
             confirmed_at?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -5933,6 +5935,10 @@ export type components = {
                 [key: string]: unknown;
             };
             deliveryReference?: string;
+            merchantResponse?: {
+                [key: string]: unknown;
+            };
+            purchaseGroupId?: string;
         };
         MachinePaymentDeliveryQualityRequest: {
             /** @enum {string} */

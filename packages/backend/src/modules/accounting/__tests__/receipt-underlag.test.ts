@@ -32,6 +32,10 @@ const DATA = {
   merchantVatNo: 'SE559412345601',
   merchantOrgNo: '559412-3456',
   resourceUrl: 'https://merchant.example/vpn',
+  // #4534: the purchase correlation key. Nulls are the ungrouped case; the
+  // correlation-key cases override.
+  purchaseGroupId: null,
+  parentPaymentId: null,
   chainId: 84532,
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
@@ -58,6 +62,9 @@ const TX = {
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
   receiptRef: 'evidence-1',
+  // #4534: ungrouped by default; the correlation-key cases override.
+  purchaseGroupId: null,
+  parentPaymentId: null,
   // #3918: the captured merchant receipt — the demo merchant's seller block
   // (empirical anchor: settle of b1e26fc2 returned exactly these values).
   merchantReceipt: {

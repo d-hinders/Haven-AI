@@ -218,6 +218,9 @@ describeDb('purchase correlation key (#4534)', () => {
       merchantVatNo: null,
       merchantOrgNo: null,
       resourceUrl: tx.resourceUrl,
+      // #4532 (dev): the kind and its line, carried by the same feed payload.
+      transactionKind: tx.transactionKind,
+      description: tx.description,
       purchaseGroupId: tx.purchaseGroupId,
       parentPaymentId: tx.parentPaymentId,
       chainId: createEntry!.chainId,
@@ -272,6 +275,9 @@ describeDb('purchase correlation key (#4534)', () => {
       merchantVatNo: null,
       merchantOrgNo: null,
       resourceUrl: tx.resourceUrl,
+      // #4532 (dev): the kind and its line, carried by the same feed payload.
+      transactionKind: tx.transactionKind,
+      description: tx.description,
       purchaseGroupId: tx.purchaseGroupId,
       parentPaymentId: tx.parentPaymentId,
       chainId: entry!.chainId,

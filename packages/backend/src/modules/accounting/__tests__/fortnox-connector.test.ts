@@ -61,6 +61,9 @@ const TX = {
   txHash: null as string | null,
   txHashIsFunding: false,
   fundingTxHash: null as string | null,
+  // #4532: the kind and its line. A fixture, not a derivation.
+  transactionKind: 'purchase' as const,
+  description: 'merchant.example - vpn (purchase)',
   suggestedAccount: null as string | null,
   // #4534: ungrouped by default; the correlation-key cases override.
   purchaseGroupId: null as string | null,
@@ -770,5 +773,53 @@ describe('feedDescription (#3767)', () => {
     expect(d).not.toContain('Tx ')
     expect(d).not.toContain('Funding tx')
     expect(d).toContain('Resource example.test.')
+  })
+})
+
+/** #4532: the comment carries the transaction kind, Fortnox-safe. */
+describe('feedDescription (#4532)', () => {
+  function tx(over: Record<string, unknown> = {}) {
+    return {
+      paymentId: 'pi1', settledAt: '2026-10-29T10:00:00.000Z', direction: 'out' as const,
+      counterparty: { address: '0xabc', name: null },
+      resourceUrl: 'https://api.bitrefill.com/x402/invoice/pay',
+      chainId: 84532,
+      txHash: null, txHashIsFunding: false, fundingTxHash: null,
+      token: 'USDC', amountAtomic: '10000', amount: '0.01',
+      receiptRef: 'receipt-1', merchantReceipt: null,
+      transactionKind: 'purchase' as const,
+      description: 'api.bitrefill.com - invoice/pay (purchase)',
+      suggestedAccount: null,
+      ...over,
+    } as never
+  }
+
+  it('carries the description, with the route separator folded to a hyphen', () => {
+    const d = feedDescription(tx())
+    expect(d).toContain('api.bitrefill.com - invoice-pay (purchase).')
+  })
+
+  it('distinguishes a fee call from the purchase in the same comment field', () => {
+    const fee = feedDescription(
+      tx({
+        resourceUrl: 'https://api.bitrefill.com/x402/invoice/create',
+        transactionKind: 'api_fee',
+        description: 'api.bitrefill.com - invoice/create (API fee)',
+      }),
+    )
+    expect(fee).toContain('(API fee)')
+    expect(fee).not.toContain('(purchase)')
+  })
+
+  it('omits the part entirely when the payload carries no description (older callers)', () => {
+    const d = feedDescription(tx({ description: undefined }))
+    expect(d).not.toContain('undefined')
+    expect(d).toContain('Resource api.bitrefill.com.')
+  })
+
+  it('keeps every character Fortnox-safe', () => {
+    const d = feedDescription(tx())
+    expect(d).toMatch(/^[A-Za-z0-9 ,.:+/@()#&=_-]*$/)
+    expect(d).not.toMatch(/:\/\//)
   })
 })

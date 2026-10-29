@@ -2529,7 +2529,13 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     )
 
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
-    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: SETTLEMENT })
+    // #4530: the header this call forwarded is prefilled beside the hash, so
+    // the agent does not have to re-supply a value it already sent.
+    expect(res.data.next_arguments).toEqual({
+      payment_id: 'pay_x402',
+      settlement_tx_hash: SETTLEMENT,
+      payment_header: 'eyJ4IjoxfQ==',
+    })
     expect(res.data.reason).toContain('not mined')
     // #4123: a retry without the header is refused before the hash is judged,
     // so the retry instruction names it — the instruction, not just the word.
@@ -2670,9 +2676,56 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
 
     expect(res.data.settled).toBe(true)
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
-    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
+    // #4530: the settle arm prefills the header it forwarded, exactly as the
+    // complete arm does.
+    expect(res.data.next_arguments).toEqual({
+      payment_id: 'pay_7710',
+      settlement_tx_hash: SETTLEMENT,
+      payment_header: VALID_PAYMENT_HEADER_REF.v1,
+    })
     expect(res.data.reason).toContain('not mined')
     // #4123: the same retry instruction as the complete arm.
+    expect(res.data.reason).toBe(RETRYABLE_REASON)
+  })
+
+  it("haven_settle_mcp_tool's retryable arm omits payment_header when it exceeds the report tool's cap (#4530)", async () => {
+    stubFetch({
+      'POST /payments/pay_7710/sign': { status: 200, body: { payment_id: 'pay_7710', status: 'confirmed', tx_hash: '0x' + 'ee'.repeat(32) } },
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'submitSignature').mockResolvedValue({
+      status: 'confirmed',
+      txHash: '0x' + 'ee'.repeat(32),
+    } as never)
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
+    mockDelivery(haven, { outcome: 'retryable', statusCode: 503 })
+
+    // A REAL v2 header padded past SETTLEMENT_PROOF_HEADER_MAX_LENGTH (16,384)
+    // through the spec's `extensions` echo — still under the SDK's own 65,536
+    // wire cap, so the settle preflight accepts it. The report tool would
+    // refuse it, so the handoff must omit the key rather than emit a
+    // next_arguments its own target rejects.
+    const decoded = JSON.parse(Buffer.from(VALID_PAYMENT_HEADER_REF.v2, 'base64').toString('utf8'))
+    decoded.extensions = { pad: 'x'.repeat(17_000) }
+    const oversized = Buffer.from(JSON.stringify(decoded), 'utf8').toString('base64')
+    expect(oversized.length).toBeGreaterThan(16_384)
+
+    const res = ok<Record<string, any>>(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_7710',
+        signature: SIG7710,
+        merchant_url: 'http://merchant.test/mcp',
+        tool_name: 'create_text',
+        arguments: { prompt: 'Hello' },
+        payment_header: oversized,
+      }),
+    )
+
+    expect(res.data.settled).toBe(true)
+    expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
+    expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
+    expect(res.data.next_arguments).not.toHaveProperty('payment_header')
+    // The prose still names the header — the instruction survives the omission.
     expect(res.data.reason).toBe(RETRYABLE_REASON)
   })
 

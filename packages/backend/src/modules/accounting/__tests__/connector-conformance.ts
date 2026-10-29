@@ -232,6 +232,10 @@ export function feedTransaction(paymentId: string, over: Partial<FeedTransaction
     txHash: null,
     txHashIsFunding: false,
     fundingTxHash: null,
+    // #4532: the kind and its line. A fixture, not a derivation — the
+    // conformance suite asserts the contract, not the classifier.
+    transactionKind: 'purchase' as const,
+    description: 'merchant.example - vpn (purchase)',
     suggestedAccount: '6540',
     // #4534: ungrouped by default; the correlation-key cases override.
     purchaseGroupId: null,
@@ -252,6 +256,7 @@ export function accountingEntry(paymentId: string) {
     amountAtomic: tx.amountAtomic, amountHuman: '0.001', amountSek: tx.amountSek, fxRate: tx.fxRate,
     fxSource: tx.fxSource, fxAt: tx.fxAt, fxRates: { SEK: 10.42, EUR: 0.92, DKK: 6.87 },
     receiptRef: tx.receiptRef, merchantReceipt: null, account: '6540', vatTreatment: 'reverse_charge',
+    transactionKind: tx.transactionKind, transactionDescription: tx.description,
   }
 }
 

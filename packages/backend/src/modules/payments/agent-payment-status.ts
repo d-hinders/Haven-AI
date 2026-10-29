@@ -129,6 +129,16 @@ export interface AgentPaymentStatus {
    */
   merchant_settlement_recorded?: boolean
   /**
+   * #4530: the merchant settlement transaction Haven recorded and verified
+   * on-chain — the `machine_metadata.merchant_settlement_tx_hash` string the
+   * flag above keys on, surfaced so a status read can name WHICH transaction
+   * was recorded (the #3888 sweep records one the agent never reported).
+   * Present only when `merchant_settlement_recorded` is, absent otherwise —
+   * never `null`, never the merchant's unverified echo. A public on-chain
+   * transaction id, not a secret.
+   */
+  merchant_settlement_tx_hash?: string
+  /**
    * #3494: a bounded, redacted cause for a `failed` payment — the same
    * `error_message` `failSubmittedIntent` books on the row (already scrubbed
    * of vendor secrets by `redactVendorSecrets` before it is stored), capped
@@ -536,6 +546,18 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
 }
 
 /**
+ * #4530: the recorded merchant settlement transaction, when one is recorded —
+ * the same `machine_metadata.merchant_settlement_tx_hash` string
+ * `hasVerifiedMerchantSettlement` keys on, surfaced so a status read can name
+ * WHICH transaction was recorded instead of only that one was. `null` when
+ * nothing is recorded (or the stored value is not a string).
+ */
+function recordedMerchantSettlementTxHash(machineMetadata: unknown): string | null {
+  const value = parsedMachineMetadata(machineMetadata)?.merchant_settlement_tx_hash
+  return typeof value === 'string' ? value : null
+}
+
+/**
  * #3475: an eip3009 merchant settlement the agent reported and Haven verified
  * on-chain (`modules/x402/eip3009-settlement-evidence.ts`), or the #3888
  * settlement sweep verified from the chain alone when no report ever came.
@@ -543,7 +565,7 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
  * the delegate.
  */
 function hasVerifiedMerchantSettlement(machineMetadata: unknown): boolean {
-  return typeof parsedMachineMetadata(machineMetadata)?.merchant_settlement_tx_hash === 'string'
+  return recordedMerchantSettlementTxHash(machineMetadata) !== null
 }
 
 /**
@@ -1099,7 +1121,16 @@ function statusFromRow(
         ? { submission_outcome_pending: true as const }
         : {}),
       ...(hasVerifiedMerchantSettlement(payment.machine_metadata)
-        ? { merchant_settlement_recorded: true as const }
+        ? {
+            merchant_settlement_recorded: true as const,
+            // #4530: the recorded transaction itself, beside the flag and
+            // under the same presence rule — present only when recorded,
+            // absent otherwise. Named after the metadata key and the flag
+            // (`merchant_settlement_tx_hash`), NOT `settlement_tx_hash`: on
+            // receipts and the transactions feed that name also carries the
+            // merchant's UNVERIFIED echo, and this field is the recorded one.
+            merchant_settlement_tx_hash: recordedMerchantSettlementTxHash(payment.machine_metadata) as string,
+          }
         : {}),
       // #3494: additive, failed rows only — see the field doc on
       // `AgentPaymentStatus.failure_reason`.

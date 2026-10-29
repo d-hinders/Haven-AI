@@ -111,6 +111,66 @@ describe('toAccountingEntry', () => {
 })
 
 /**
+ * #4532: the transaction kind is derived from the stored row, not asserted.
+ * These pin the wiring — the classifier itself is covered by
+ * `transaction-kind.test.ts`.
+ */
+describe('the transaction kind (#4532)', () => {
+  it('derives the kind from the resource route and renders the description', () => {
+    const e = toAccountingEntry(row({ resource_url: 'https://api.bitrefill.com/x402/invoice/pay' }))
+    expect(e.transactionKind).toBe('purchase')
+    expect(e.transactionDescription).toBe('api.bitrefill.com - invoice/pay (purchase)')
+  })
+
+  it('pins the three Bitrefill routes through the entry builder', () => {
+    const kinds = [
+      'https://api.bitrefill.com/x402/invoice/create',
+      'https://api.bitrefill.com/x402/invoice/pay',
+      'https://api.bitrefill.com/x402/invoice/status',
+    ].map((url) => toAccountingEntry(row({ resource_url: url })).transactionKind)
+    expect(kinds).toEqual(['api_fee', 'purchase', 'api_fee'])
+  })
+
+  it('reads the intent metadata MCP tool as the route for an MCP purchase', () => {
+    const e = toAccountingEntry(
+      row({ resource_url: 'https://mcp.soundside.ai/mcp', mcp_tool_name: 'create_text' }),
+    )
+    expect(e.transactionKind).toBe('purchase')
+    expect(e.transactionDescription).toBe('mcp.soundside.ai - create_text (purchase)')
+  })
+
+  it('reads the delivery reference as a purchase signal', () => {
+    const e = toAccountingEntry(
+      row({ resource_url: 'https://api.example/v1/thing', delivery_reference: 'Bik Bok 5 SEK, order 6ac7' }),
+    )
+    expect(e.transactionKind).toBe('purchase')
+  })
+
+  it('reads the captured merchant invoice as a purchase signal', () => {
+    const e = toAccountingEntry(
+      row({
+        resource_url: 'https://api.example/v1/thing',
+        merchant_receipt_json: { fakturanummer: 'FAK-1', saljare: { name: 'Haven Demo AB' } },
+      }),
+    )
+    expect(e.transactionKind).toBe('purchase')
+  })
+
+  it('a row with no derivable signal is `unknown` and does not throw', () => {
+    const e = toAccountingEntry(row({ resource_url: 'https://api.example/v1/thing' }))
+    expect(e.transactionKind).toBe('unknown')
+    expect(e.transactionDescription).toBe('api.example - v1/thing (unclassified)')
+  })
+
+  it('CONTROL: two different routes really do produce two different kinds', () => {
+    const pay = toAccountingEntry(row({ resource_url: 'https://api.bitrefill.com/x402/invoice/pay' }))
+    const create = toAccountingEntry(row({ resource_url: 'https://api.bitrefill.com/x402/invoice/create' }))
+    expect(pay.transactionKind).not.toBe(create.transactionKind)
+    expect(pay.transactionDescription).not.toBe(create.transactionDescription)
+  })
+})
+
+/**
  * `normalizeLedgerRates` is the only thing standing between `fx_rates` — JSONB
  * written by some build, not necessarily this one — and a figure on a supplier
  * invoice. Its defensive branches had no test: the review on #2877 found that

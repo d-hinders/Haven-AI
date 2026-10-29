@@ -4253,6 +4253,70 @@ During a rolling deploy the fingerprint may alternate once across replicas;
 reconnect once, and if it still alternates, continue and report. The
 published `haven-pay` skill carries the same rule.
 
+> **Re-verified (#4530, 2026-10-29, passage only).** The rule above gained two
+> sentences, and this block records the case that forced them. The change is
+> instructions text only: the instructions are excluded from the contract
+> fingerprint, no tool description and no input schema moved, so this is **not**
+> a reconnect event and the fingerprint is unchanged.
+>
+> **The case the fingerprint cannot see.** A 0.12.0-alpha.0 production EIP-3009
+> smoke test (Claude Code desktop, demo merchant) hit a client whose
+> `tools/list` was **pre-0.11** — `haven_report_settlement_evidence` declared
+> only `{payment_id, settlement_tx_hash}` with `additionalProperties: false`,
+> and its description lacked the "On EIP-3009 also pass payment_header"
+> sentence — while every result in the same session carried the **current**
+> `contract_fingerprint` (`9f6a89fa545a01c3`, `main`'s contract, in which the
+> tool does declare `payment_header`). The fingerprint check compares the
+> instructions the client loaded at `initialize` against the fingerprint on a
+> result; when both are current but the **tool list** is cached, it reports
+> nothing. The agent then sent the report without the header, was refused with
+> `SETTLEMENT_PROOF_HEADER_MISSING`, and was told to add a key its own schema
+> said it could not send.
+>
+> **Reproduction status.** Reproduced by the owner on their own machine
+> (2026-10-29, Claude Code in the desktop app), not in this build environment.
+> Two full app restarts did **not** refresh the cached `tools/list`:
+> `haven_report_settlement_evidence` stayed
+> `{payment_id, settlement_tx_hash}` with no EIP-3009 sentence. `claude mcp
+> remove haven-claude-cloud -s user`, then `claude mcp add` with the same URL
+> and header, then a restart **did** refresh it — the tool then listed
+> `payment_header` and its description carried "On EIP-3009 also pass
+> payment_header". The server was `0.12.0-alpha.0` with
+> `contract_fingerprint` `9f6a89fa545a01c3` before and after, so the
+> fingerprint was correct throughout: the case is exactly current
+> instructions and current results beside a cached pre-0.11 tool list, which
+> the fingerprint comparison cannot see. The cache therefore lives in the
+> client's tool-list layer, not in Haven — the client also accepted and sent
+> the undeclared key once the agent passed it — and remove/re-add is the
+> working remedy, which is what the owner decision below records.
+>
+> **The owner's ruling (2026-10-29, option 2), now in the server
+> instructions.** Two sentences were added to `HOSTED_INSTRUCTIONS`
+> (`packages/mcp-server/src/server.ts`):
+>
+> - Sending a `next_arguments` that Haven returned, **verbatim**, is always
+>   allowed, even when a key in it is missing from the schema the client
+>   loaded. Sending Haven's own arguments unchanged is not hand-building or
+>   reshaping — the prohibition is on reshaping a payload to fit, not on
+>   passing through what the server handed you.
+> - When a reconnect or restart does **not** change the tool list, the remedy
+>   is to **remove and re-add the hosted MCP server entry** in the client. The
+>   instructions previously named only reconnect or restart, which this case
+>   shows can be insufficient.
+>
+> **Does the prefill fix detection?** No — and it is not meant to. The
+> `payment_header` prefill (#4530 A) removes the *consequence* of a cached
+> list: the retryable settlement-evidence handoffs now carry the header the
+> call forwarded, so an agent holding a pre-0.11 schema no longer has to add a
+> key its schema lacks, and the amended rule says passing Haven's own
+> `next_arguments` through is allowed. Detection of a client whose
+> instructions are current but whose tool list is cached remains impossible
+> from the fingerprint alone. A further change would need the client to echo
+> the tool-list hash it loaded (a `tools/list`-derived value sent back on each
+> call) so the server can compare it — a new detection mechanism, out of scope
+> without an owner decision, and the tool-description budget is at its cap
+> (#4123 §3).
+
 ### Task budgets — a third sign-context, and the tool set moves (#3329)
 
 `haven_sign` accepts `task_budget_id` (mutually exclusive with `payment_id`

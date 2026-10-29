@@ -1553,6 +1553,17 @@ const agentPaymentStatus = {
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
     },
+    // #4530
+    merchant_settlement_tx_hash: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{64}$',
+      description:
+        'The merchant settlement transaction Haven recorded and verified on-chain (#4530) — the ' +
+        'transaction `merchant_settlement_recorded` reports, named so a status read can confirm WHICH ' +
+        'one was recorded (the settlement sweep records one the agent never reported). Present only ' +
+        'when `merchant_settlement_recorded` is; omitted otherwise, and never the merchant\'s ' +
+        'unverified echo. A public on-chain transaction id, not a secret.',
+    },
     // #3494
     failure_reason: {
       type: ['string', 'null'],

@@ -414,7 +414,7 @@ x402 tool-window failures:
    merchant timeout after funding → MERCHANT_UNRESPONSIVE_AFTER_FUNDING → check_status_later; eip3009: retry once, then haven_sweep_delegate; erc7710: no retry, check status after the window, re-quote only if unsettled
    funding confirmation unreadable (eip3009, hosted) → FUNDING_CONFIRMATION_UNKNOWN → check_status_later; merchant not called; once funding shows confirmed, complete ONCE (#4470)
    funding transaction reverted (eip3009, hosted) → FUNDING_REVERTED → stop_and_tell_user; nothing reached the delegate (#4470)
-   no answer to a submit (hosted haven_submit) → NO_ANSWER_OUTCOME_UNKNOWN → check_status_later; never re-submit, never a new payment (#4470)
+   no answer to a submit (hosted haven_submit, and haven_settle_mcp_tool's erc7710 settle) → NO_ANSWER_OUTCOME_UNKNOWN → check_status_later; never re-submit, never a new payment (#4470)
 ```
 
 ### `phase` reference

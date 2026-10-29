@@ -6906,3 +6906,31 @@ to call next in structured fields, and those fields are typed end to end
 >
 > Scope of this note: those fields and texts. Nothing else in this document
 > was re-verified.
+
+> **#4534 (2026-10-29, the purchase correlation key on the outcome report):**
+> `haven_report_x402_outcome` gains two OPTIONAL arguments —
+> `purchase_group_id` (1–128 chars) and `merchant_response` (an object). On an
+> accepted outcome they ride the same `POST /machine-payments/evidence` report
+> the tool already posts: the backend derives the group id from the merchant's
+> own invoice/order id through a small explicit per-merchant map (Bitrefill:
+> `invoice_id`), or takes the agent's key when the merchant supplies none, and
+> records it on the `machine_payment_evidence` row (migration 123) together
+> with `parent_payment_id` — the purchase payment a fee call paid for, resolved
+> from the group's own members. The receipt (`haven_list_receipts` and the
+> evidence echo) gains `purchase_group_id` and `parent_payment_id`; both are
+> null on an ungrouped payment, which is fed exactly as before.
+> - **Version skew is a refusal, not a silent drop.** Both arguments are
+>   opt-in: a caller that supplies neither sends a byte-identical body to
+>   before. A NEW MCP/SDK against a backend older than migration 123 gets the
+>   existing request-validation refusal (400) for the two new body fields,
+>   because `MachinePaymentEvidenceRequest` is `additionalProperties: false` —
+>   the feature is unavailable there rather than quietly ignored.
+> - **Hosted picks this up on deploy**; local MCP/connect users need an
+>   `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK exactly),
+>   as with #3764 and #3778.
+> - `tools-list.snapshot.json` moves: two new optional arguments on one tool.
+>   No tool is added or removed, no version floor or consent-hash input
+>   changes, and `lint:next-steps` stays at zero.
+>
+> Scope of this note: those arguments, the two receipt fields and the snapshot
+> row. Nothing else in this document was re-verified.

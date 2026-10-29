@@ -68,6 +68,16 @@ export interface ReceiptUnderlagData {
    */
   transactionKind: TransactionKind
   description: string
+  /**
+   * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
+   * own invoice/order id (or an agent-supplied group key) shared by every
+   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
+   * call paid for. Both null on an ungrouped payment. The document renders the
+   * group id so a human can match documents by eye — grouping is a rendering
+   * choice in the accounting tool, never a merge in Haven.
+   */
+  purchaseGroupId: string | null
+  parentPaymentId: string | null
   chainId: number | null
   /**
    * #3767: the hash the surface BOOKS — the verified merchant settlement when
@@ -175,6 +185,14 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     // could not tell the purchase from the merchant's per-call API fees.
     `Transaction    ${data.transactionKind}`,
     `Description    ${data.description}`,
+    // #4534: the purchase correlation key. Before these lines the three
+    // receipts of one Bitrefill purchase (invoice/create, invoice/pay,
+    // invoice/status) were byte-for-byte the same shape and an accountant had
+    // no way to see they were one purchase. The group id is the merchant's own
+    // invoice/order id, so it matches the merchant's documents too; an
+    // ungrouped payment says so rather than leaving the line out.
+    `Purchase group ${data.purchaseGroupId ?? 'ungrouped'}`,
+    `Parent payment ${data.parentPaymentId ?? 'n/a'}`,
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -393,6 +411,10 @@ export async function loadReceiptUnderlag(
     // same two values the feed payload carries.
     transactionKind: tx.transactionKind,
     description: tx.description,
+    // #4534: the purchase correlation key — the same two values the feed
+    // payload carries, so the document and the payload agree.
+    purchaseGroupId: tx.purchaseGroupId,
+    parentPaymentId: tx.parentPaymentId,
     chainId: row.chain_id,
     // #3767: the BOOKED hash — the settlement when available/pinned, the
     // funding hash labelled as funding after the window, null (raw

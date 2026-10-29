@@ -125,7 +125,7 @@ const boundary: ClientBoundary = {
     "async reportDeliveryQuality(input: { paymentId: string; quality: 'ok' | 'unusable' | 'partial'; note?: string; }): Promise<{ payment_id: string; quality: string; note: string | null; updated_at: string; }>",
     "async resumeAuthorizedX402(input: ResumeAuthorizedX402Input): Promise<X402Receipt>",
     "async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response>",
-    "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; deliveryReference?: string; }): Promise<X402MerchantOutcomeReport>",
+    "async reportX402MerchantOutcome(input: { paymentId: string; outcome: X402MerchantOutcome; merchantStatus: number; merchantBody?: string; deliveryReference?: string; purchaseGroupId?: string; merchantResponse?: Record<string, unknown>; }): Promise<X402MerchantOutcomeReport>",
     "async reportSettlementEvidence(paymentId: string, settlementTxHash: string, options: { paymentHeader?: string; } = {}): Promise<EvidenceReportOutcome>", // #4061 paymentHeader
     "async settleX402Erc7710(paymentRequired: X402PaymentRequired, options: { resourceUrl?: string; } = {}): Promise<X402Erc7710Settlement>",
     "async submitCatalogEntry(resourceUrl: string, options: { website?: string; } = {}): Promise<HavenCatalogSubmission>",

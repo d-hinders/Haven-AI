@@ -3070,3 +3070,22 @@ which the characterization tests enforce.
 > `no-funding-leg.ts` at `origin/dev` `b9f9f1e47`. Scope of this note: the
 > paragraph added above. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified 2026-10-29 (#4534, the purchase correlation key on the outcome
+> report):** this diff touched four files in this document's coverage list —
+> `packages/sdk/src/client.ts`, `packages/sdk/src/merchant-completion.ts`,
+> `packages/sdk/src/types.ts` and `packages/mcp-server/src/tools/**` — and none
+> of the sequence, signing or settlement claims above. `reportX402MerchantOutcome`
+> gains two OPTIONAL inputs, `purchaseGroupId` and `merchantResponse`, spread
+> into the same `POST /machine-payments/evidence` payload the accepted arm
+> already posts, so the accepted-outcome behaviour described above is
+> unchanged: `proof_status` still upgrades to `merchant_response_observed` and
+> the payment still leaves case 2's predicate permanently. The hosted
+> `haven_report_x402_outcome` gains the same two optional arguments and
+> forwards them to that same report. `HavenPaymentReceipt` gains two optional
+> read-only fields (`purchaseGroupId`, `parentPaymentId`), absent on an older
+> backend. Nothing here authorizes, signs, funds or settles anything: the
+> fields are descriptive metadata on a document the accounting feed already
+> produces, and a payment with no correlation is reported exactly as before.
+> Scope of this note: those four files. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.

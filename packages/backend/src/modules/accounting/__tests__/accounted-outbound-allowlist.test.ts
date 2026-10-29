@@ -72,6 +72,9 @@ function tx() {
     transactionKind: 'purchase' as const,
     description: 'merchant.example - vpn (purchase)',
     suggestedAccount: '6540',
+    // #4534: ungrouped.
+    purchaseGroupId: null,
+    parentPaymentId: null,
   }
 }
 

@@ -65,6 +65,9 @@ const TX = {
   transactionKind: 'purchase' as const,
   description: 'merchant.example - vpn (purchase)',
   suggestedAccount: null as string | null,
+  // #4534: ungrouped by default; the correlation-key cases override.
+  purchaseGroupId: null as string | null,
+  parentPaymentId: null as string | null,
 }
 
 function fetchStub(handlers: Record<string, (init?: RequestInit) => { status?: number; body: unknown }>) {

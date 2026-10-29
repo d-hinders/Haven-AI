@@ -42,6 +42,9 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     // #4532: the kind and its line. A fixture, not a derivation.
     transactionKind: 'purchase',
     transactionDescription: 'api.example - r (purchase)',
+    // #4534: ungrouped by default; the correlation-key cases override.
+    purchaseGroupId: null,
+    parentPaymentId: null,
     ...over,
   }
 }

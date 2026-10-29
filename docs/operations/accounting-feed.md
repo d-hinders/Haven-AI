@@ -92,13 +92,13 @@ does not carry the agent's delegate address (only `agent_id`).
 | Variable | Meaning | dev | prod |
 |---|---|---|---|
 | `HAVEN_HOSTED` | The feed is a hosted add-on; nothing below matters on a self-host | `true` | `true` |
-| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval, and (#2918) the connection routes 404 too — `GET /connections`, `connect-url`, `api-key`, disconnect, activate, backfill and settings all answer the same 404 body as the feed actions; only `GET /providers` stays reachable (the Coming soon page reads it) and the OAuth callback redirects instead of 404ing (see *Routes*). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so prod is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | unset — AND `HAVEN_REPORTING_FEED_ENABLED` unset or `false` (Coming soon) |
-| `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | unset |
-| `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | unset until #2876 (zero rows) |
+| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval, and (#2918) the connection routes 404 too — `GET /connections`, `connect-url`, `api-key`, disconnect, activate, backfill and settings all answer the same 404 body as the feed actions; only `GET /providers` stays reachable (the Coming soon page reads it) and the OAuth callback redirects instead of 404ing (see *Routes*). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so a deployment is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | `true` (since 2026-10-29, #4497); `HAVEN_REPORTING_FEED_ENABLED` stays absent |
+| `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | `all` (since 2026-10-29, #4497) |
+| `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | set (since 2026-10-29, #4497) — never change or unset it once a connection row exists |
 | `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` | Retry-sweep cadence (#2866). Default 300 000 (5 min); floor 10 000; unset, empty, 0 or NaN take the default | default | default |
 | `HAVEN_OPS_TOKEN` | Gates `GET /health/ops`, where the accounting counters live (#2872; the webhook counters joined in #3019) beside the request-validation snapshot (`request_validation`: `mode`, `wouldRefuse`, `wouldCoerce`, per-route-field maps, and since #3208 `since` + `seenByRoute` — in-process, see `dev-environment.md` § *How to take a shadow reading* for the reading that survives deploys). Unset → the route is 404 | set | set |
 | `HAVEN_API_URL` (fallback `PUBLIC_API_URL`) | The public origin Accounted calls back to (#3019): the webhook subscriptions are registered as `<origin>/accounting/webhooks/accounted/<token>`. No localhost fallback — unset, an Accounted connect stores the row, registers nothing and flags it `needs_attention` with reason `no public API origin configured`; the feed still works. Dev states it in `.env.dev.example` | set | set |
-| `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | unset |
+| `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | client id and secret set (the dev app's — there is no separate prod app), redirect URI unset, so Fortnox is not configured on prod until #2876 |
 
 Availability for one account is `hosted && enabled && entitled`;
 `GET /accounting/feed/status` reports `hosted`, `enabled` (and `flagEnabled`,
@@ -240,9 +240,14 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
 
 ### The two OFF states, and what each surface shows (#2869)
 
-Owner decision 2026-09-11: the feed is **visible in production while switched
-off**, and the two off states read differently — exposure (flipping
-`HAVEN_ACCOUNTING_ENABLED`) remains a separate manual decision.
+The two off states read differently, and they describe a deployment that has
+the feed switched off — a rollback, or a hosted box that never enabled it.
+**Neither of Haven's two deployments is in the flag-off state today:** dev and
+production both run with `HAVEN_ACCOUNTING_ENABLED=true` since 2026-10-29
+(#4497). The 2026-09-11 owner decision that the feed is *visible in production
+while switched off* is superseded for every provider except Fortnox, which is
+not configured on production until #2876. Exposure (flipping the flag) remains
+a separate manual decision, and unsetting it is the rollback.
 
 | `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
 |---|---|---|---|---|
@@ -360,8 +365,10 @@ passes and books in SEK, the default.
 > **No production connection is non-SEK today.** Two providers are `live`:
 > Fortnox, whose `getCompanyInfo` reports `SEK` by construction, and Accounted,
 > whose company read exposes no currency (`base_currency` null), so it books in
-> SEK by the default above. The machinery
-> below ships ahead of its first user — the `coming_soon` providers.
+> SEK by the default above. Production has Accounted connections since
+> 2026-10-29 (#4497), and they book in SEK for that reason — the currency is
+> the default, not an assertion. The non-SEK machinery below still has no user:
+> the `coming_soon` providers are its first.
 
 **What is pushed, and when the rate was taken.** The record carries the amount in
 the connection's `base_currency`, converted with the rate captured **at
@@ -707,7 +714,9 @@ Consequently:
   revoke with), so the user should also remove the old integration inside
   Fortnox, or let it expire after 45 idle days. History and settings survive
   (the row is kept). A real rotation path — a key-version table with a read
-  fallback — is the follow-on to file when prod gets its key (#2876).
+  fallback — is the follow-on to file now that production has its key
+  (#4497, 2026-10-29). It was previously deferred to #2876, which no longer
+  carries it.
 
 ## Schema for on-call
 
@@ -1040,6 +1049,13 @@ The handshake has two halves, and both are now in code:
    `accounting.webhook.verification_failed` `warn` line carrying the provider's
    error code only.
 
+   **A first-attempt rate limit is expected.** The three calls land
+   back-to-back, so Accounted rate-limits the second and third
+   (`RATE_LIMITED`) on a fresh connect. Measured on production 2026-10-29
+   (#4497): two of the three verified on the provider's own retry about two
+   minutes later, and all three ended `verified`. Nothing is left unverified —
+   do not reconnect over it.
+
 **The verify verb needs a LIVE key.** A test key (`gnubok_sk_test_`) cannot run
 it — the provider refuses the write, so a connect made with a test key logs
 `WEBHOOK_VERIFICATION_FAILED` (or `TEST_KEY_WRITE_BLOCKED`) and the
@@ -1169,3 +1185,21 @@ receiver is reachable and verifying, before the first real commit.
 > of sending the route into the ErrorBoundary. No endpoint, flow or
 > behaviour this document describes changes. Scope of this note: those
 > expressions. Nothing else in this document was re-verified.
+
+> **Re-verified #4497 (2026-10-29, production enabled).** Changed: the
+> Configuration table's prod column now reads `HAVEN_ACCOUNTING_ENABLED=true`,
+> mode `all`, `HAVEN_SECRETS_KEY` set, and `FORTNOX_*` with the client id and
+> secret set (the dev app's) but the redirect URI unset; the two-off-states
+> section now says the flag-off state describes a deployment that switched the
+> feed off, not either of Haven's two deployments; the ledger-currency
+> blockquote keeps "no production connection is non-SEK" and rewords its
+> "ahead of its first user" reasoning, because production has Accounted
+> connections that book in SEK by the default; the key-rotation follow-on is
+> due now rather than with #2876; and the verify-call paragraph records that a
+> first-attempt `RATE_LIMITED` on two of the three subscriptions is expected
+> and self-heals on the provider's retry. Re-checked against the measured prod
+> state of 2026-10-29 (feed status for two accounts, the providers list, the
+> 503 on the Fortnox connect-url, one connected Accounted destination with
+> `base_currency` null, three verified subscriptions) and against the code
+> claims the changed sentences rest on. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.

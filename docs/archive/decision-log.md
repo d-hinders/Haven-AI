@@ -35,6 +35,7 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-29 | Accounting enabled in production for every account; Accounted first, Fortnox later | #4497 (supersedes #2858's dev-only exposure, except Fortnox) |
 | 2026-10-26 | Agents carry a stored tint, unique among a user's first six; merchants and contacts keep the name hash | #4428 |
 | 2026-10-21 | The pending-promotion digest issue is retired; pending work is the `main...dev` compare | #666 |
 | 2026-10-17 | Phone navigation floats: the tab bar is a floating pill, and the More sheet a floating card that covers it with its own ✕; the bar labels `/transactions` "Activity" | #4058 (supersedes #4053's "stops at the bar's top edge") |
@@ -58,6 +59,74 @@ named where they belong below.
 | 2026-07-12 | Session rail retired outright; AllowanceModule import-only | #834 (AllowanceModule half superseded) |
 | — | Approval-queue history readability waived | #2021, #2055 |
 | — | Historical: POC scope and phased roadmap | — |
+
+---
+
+## 2026-10-29 — accounting enabled in production for every account; Accounted first, Fortnox later (#4497)
+
+Owner decisions, 2026-10-27, revised 2026-10-29 in session. The accounting
+feed is **on in production for every account**, with **Accounted as the only
+connectable provider**. Fortnox stays off in production and is enabled later
+under #2876. This is the production-exposure decision that #2876 item (6)
+reserved, taken for Accounted and the demo; **#2876 stays open for Fortnox in
+production** — the prod connect itself, a prod Fortnox app, service accounts,
+consent webhooks and sysadmin copy.
+
+**The decisions, as revised:**
+
+1. **Every production account gets accounting.**
+   `HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all`, the same as dev, with no
+   `account_entitlements` row written or read. This replaces an earlier
+   same-day choice of "demo account only", which would have let every user
+   *connect* anyway, because the connection routes check only
+   `hosted && enabled` (`middleware/accountingFeed.ts`, #2861). "No paid tiers
+   yet" (epic #2858) stands.
+2. **Accounted first; Fortnox in production later** (revised 2026-10-29: the
+   demo runs on Accounted). Fortnox is switched off on production by unsetting
+   `FORTNOX_REDIRECT_URI`; enabling it later is #2876's work. Superseded:
+   "both providers, Fortnox and Accounted" (2026-10-27).
+3. **Fortnox app: deferred with Fortnox.** The 2026-10-27 plan was to reuse the
+   dev Fortnox app for production rather than register a separate one. That
+   choice is now made when Fortnox is enabled, under #2876. Production keeps
+   the dev app's client id and secret as they are today, and they stay inert
+   while the redirect URI is unset.
+4. **The demo is this week.** Do not rotate `JWT_SECRET` (#4486 step 2) in the
+   hour before it. The rotation ends every dashboard session.
+5. **Paid tiers come later, once there are real users.** Until then accounting
+   is free for every account. Entitlement mode `granted` and the
+   `account_entitlements` table stay in the code for that later tier work;
+   nothing here removes them.
+6. **Promote `dev` → `main` first** (2026-10-29). Production deploys from
+   `main`, which did not yet carry the Accounted webhook verification fix
+   (#4440) or the Settings Business tab (#4382, #4367). The promotion ran in
+   its own session, and the flag was switched on only after it was verified on
+   production.
+
+**Supersession.** This supersedes the 2026-09-11 entry *accounting connections:
+self-serve, provider-generic, dev-only (#2858)* — both its "every dev user is
+entitled" scope and its "prod shows the feature as *Coming soon*; exposing it
+needs a new manual decision (#2876)" rule — for every provider except Fortnox,
+which is still off in production. That entry stays as written.
+
+**Measured on production, 2026-10-29.** `GET /accounting/feed/status` answers
+`enabled: true, entitled: true, entitlementMode: "all"` for two different
+accounts. `GET /accounting/providers` lists `accounted` `configured: true` and
+`fortnox` `configured: false`, and
+`POST /accounting/connections/fortnox/connect-url` answers 503
+`PROVIDER_NOT_CONFIGURED`. One Accounted connection is `connected` and the
+active destination, with `base_currency` null (it books in SEK by the default),
+and its three webhook subscriptions are `verified`. The Bitrefill rehearsal
+(step 8 of #4497) is recorded on the issue, not here.
+
+**Rollback.** Unset `HAVEN_ACCOUNTING_ENABLED` and redeploy: the feed, the
+connection routes and the retry sweep all switch off. Never unset or change
+`HAVEN_SECRETS_KEY` once a connection row exists — the stored secrets become
+undecryptable.
+
+The rules were restated in `docs/operations/accounting-feed.md` (the
+Configuration table, the two off states, ledger currency and key rotation),
+`docs/product/accounting-connections.md`, `docs/operations/dev-environment.md`
+and `.env.dev.example`.
 
 ---
 

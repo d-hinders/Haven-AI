@@ -4,6 +4,11 @@ import { isSupportedLedgerCurrency, type LedgerCurrency } from '../../domain/led
 import { vatTreatmentForCountry } from '../../domain/vat.js'
 // dep-lint-exempt: the transactions barrel re-exports transactions/accounting.ts, which imports the accounting barrel, so importing toCanonicalAddress through it closes an accounting ↔ transactions cycle; normalize.ts is a zero-import leaf (#4379)
 import { toCanonicalAddress } from '../transactions/normalize.js'
+import {
+  deriveTransactionKind,
+  transactionDescription,
+  type TransactionKind,
+} from './transaction-kind.js'
 
 /**
  * Canonical accounting record for bookkeeping-ready export (epic #462, P0 #463).
@@ -110,6 +115,18 @@ export interface AccountingEntry {
   resourceUrl: string | null
   /** Underlag: the settlement evidence backing this entry. */
   receiptRef: string
+  /**
+   * #4532: what KIND of transaction this is, derived server-side from the
+   * payment record (`transaction-kind.ts`) — never asserted by an agent, and
+   * never guessed: a payment with no derivable signal is `unknown`.
+   */
+  transactionKind: TransactionKind
+  /**
+   * #4532: the accountant-facing one-line description that carries the kind,
+   * e.g. `api.bitrefill.com - invoice/pay (purchase)`. Rendered on the receipt
+   * underlag and carried on the feed payload beside the kind.
+   */
+  transactionDescription: string
   /** The merchant's OWN receipt when the agent captured one (#956); absent/null = none. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
 }
@@ -147,6 +164,19 @@ export interface AccountingEntrySourceRow {
   /** Merchant-issued receipt (LEFT JOIN merchant_receipts, #956). */
   merchant_receipt_url?: string | null
   merchant_receipt_json?: unknown
+  /**
+   * #4532: the deliverable the agent named with the x402 outcome
+   * (`machine_payment_evidence.delivery_reference`, migration 107 / #3778) —
+   * one of the transaction-kind signals.
+   */
+  delivery_reference?: string | null
+  /**
+   * #4532: the MCP tool the payment called
+   * (`payment_intents.machine_metadata->'mcp_call_context'->>'toolName'`,
+   * #1307) — the route signal for an MCP purchase, whose resource URL is the
+   * merchant's single endpoint and names nothing.
+   */
+  mcp_tool_name?: string | null
   /**
    * The intent-side fields (#3767). Optional in the TYPE only because test
    * fixtures predate the join; the SQL always selects them (null without an
@@ -220,6 +250,18 @@ export function bookedHashForEntry(row: AccountingEntrySourceRow): {
  */
 export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntry {
   const booked = bookedHashForEntry(row)
+  // #4532: the transaction kind, derived from the stored payment record — the
+  // direction, the x402 route, the intent's MCP tool, the merchant's own
+  // document and the delivery reference. Nothing here is agent-asserted: the
+  // agent can report a document or a deliverable, never a kind.
+  const direction = 'out' as const
+  const kind = deriveTransactionKind({
+    direction,
+    resourceUrl: row.resource_url,
+    mcpToolName: row.mcp_tool_name ?? null,
+    merchantReceiptJson: row.merchant_receipt_json ?? null,
+    deliveryReference: row.delivery_reference ?? null,
+  })
   return {
     paymentId: row.payment_intent_id ?? row.approval_request_id ?? row.id,
     txHash: row.tx_hash,
@@ -235,7 +277,7 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
         : null,
     chainId: row.chain_id,
     settledAt: row.confirmed_at ?? row.created_at,
-    direction: 'out',
+    direction,
     // #3129: the same canonical form the transaction feed emits. Before that
     // change both were lowercase and agreed by accident; normalising only the
     // feed would have made ONE payment read `0xabcd…1234` on its bookkeeping
@@ -260,6 +302,11 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     vatTreatment: vatTreatmentForCountry(row.country),
     resourceUrl: row.resource_url,
     receiptRef: row.id,
+    // #4532: the kind and the line that carries it. The merchant label is the
+    // counterparty's name when the entry has one — it does not today, so the
+    // resource host renders, the same host on every receipt of one merchant.
+    transactionKind: kind.kind,
+    transactionDescription: transactionDescription(kind.kind, null, row.resource_url, kind.route),
     merchantReceipt:
       row.merchant_receipt_url != null || row.merchant_receipt_json != null
         ? { url: row.merchant_receipt_url ?? null, inlineJson: row.merchant_receipt_json ?? null }
@@ -273,10 +320,12 @@ const ENTRY_SOURCE_SQL = `
   mpe.merchant_address, mpe.payer_address, mpe.token_symbol, mpe.amount_raw, mpe.amount_human,
   mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
   mpe.resource_url, mpe.confirmed_at, mpe.created_at,
+  mpe.delivery_reference,
   pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
   pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
   pi.machine_metadata->>'accounting_booked_tx_hash' AS pinned_booked_tx_hash,
   pi.machine_metadata->>'accounting_booked_tx_kind' AS pinned_booked_tx_kind,
+  pi.machine_metadata->'mcp_call_context'->>'toolName' AS mcp_tool_name,
   mc.category AS category,
   mc.country AS country,
   mao.bas_account AS override_account,

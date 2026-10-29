@@ -1,5 +1,6 @@
 import { DEFAULT_LEDGER_CURRENCY, type LedgerCurrency } from '../../domain/ledger-currency.js'
 import type { AccountingEntry } from './entry.js'
+import type { TransactionKind } from './transaction-kind.js'
 
 /**
  * Non-asserting transaction shape for the reporting feed (epic #491, P1 #495).
@@ -76,6 +77,19 @@ export interface FeedTransaction {
   fundingTxHash: string | null
   /** The merchant's own receipt when captured (#956) — attached as a second file. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
+  /**
+   * #4532: what KIND of transaction this is — `purchase` | `api_fee` |
+   * `transfer` | `refund` | `unknown`, derived server-side from the payment
+   * record (`transaction-kind.ts`). An agent cannot set it, and a payment with
+   * no derivable signal is `unknown` rather than a guess.
+   */
+  transactionKind: TransactionKind
+  /**
+   * #4532: the accountant-facing one-line description that carries the kind,
+   * e.g. `api.bitrefill.com - invoice/pay (purchase)`. The same line renders on
+   * the receipt underlag, so the payload and the attached document agree.
+   */
+  description: string
   /** A *suggestion* only (the user's per-merchant override) — never an asserted account. */
   suggestedAccount?: string | null
 }
@@ -197,6 +211,10 @@ export function toFeedTransaction(
     txHashIsFunding: entry.bookedTxHashIsFunding,
     fundingTxHash: entry.fundingTxHash,
     merchantReceipt: entry.merchantReceipt ?? null,
+    // #4532: the kind and its line, decided once in `toAccountingEntry` — the
+    // payload and the receipt underlag read the same two values.
+    transactionKind: entry.transactionKind,
+    description: entry.transactionDescription,
     suggestedAccount: entry.account ?? opts.connectionSuggestedAccount ?? null,
   }
 }

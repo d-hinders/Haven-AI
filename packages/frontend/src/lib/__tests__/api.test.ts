@@ -30,6 +30,19 @@ describe('ApiClient', () => {
     })
   }
 
+  /**
+   * A real bodyless success: `json()` rejects exactly as the browser does on an
+   * empty body, so a client that still parses fails the test rather than
+   * silently passing (#4538).
+   */
+  function mockFetchNoContent(status: number) {
+    ;(fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      status,
+      json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
+    })
+  }
+
   describe('get()', () => {
     it('calls fetch with correct URL and auth header when token exists', async () => {
       localStorage.setItem('haven_token', 'test-token')
@@ -136,6 +149,45 @@ describe('ApiClient', () => {
         headers: {},
       })
       expect(result).toEqual({ success: true })
+    })
+
+    /**
+     * #4538: `DELETE /accounting/connections/:provider` answers `204 No
+     * Content`. Parsing that empty body threw `SyntaxError: Unexpected end of
+     * JSON input`, which reached the user as a raw engine string on Disconnect
+     * and skipped the refetch. A bodyless success must resolve.
+     */
+    it('resolves without parsing a body on 204 No Content', async () => {
+      mockFetchNoContent(204)
+
+      await expect(api.delete('/accounting/connections/fortnox')).resolves.toBeUndefined()
+
+      expect(fetch).toHaveBeenCalledWith('/api/accounting/connections/fortnox', {
+        method: 'DELETE',
+        headers: {},
+      })
+    })
+
+    it('resolves without parsing a body on 205 Reset Content', async () => {
+      mockFetchNoContent(205)
+
+      await expect(api.delete('/accounting/categories?resourceUrl=x')).resolves.toBeUndefined()
+    })
+
+    it('still parses a JSON body on a 200', async () => {
+      mockFetchOk({ success: true })
+
+      await expect(api.delete('/agents/1')).resolves.toEqual({ success: true })
+    })
+
+    it('still throws ApiRequestError with the parsed message on a non-ok delete', async () => {
+      mockFetchError(404, { error: 'connection_not_found' })
+
+      await expect(api.delete('/accounting/connections/fortnox')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        message: 'connection_not_found',
+        status: 404,
+      })
     })
   })
 

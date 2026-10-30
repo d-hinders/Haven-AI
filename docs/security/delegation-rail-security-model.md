@@ -4367,3 +4367,18 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > never touches `payment_intents`, settlement or custody. A caller that
 > supplies neither is byte-identical to before. Scope of this note: that one
 > file. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4563, 2026-10-30 — the Settings link label):** this
+> diff touched one file in this document's coverage list,
+> `packages/frontend/src/components/AccountSignersCard.tsx`, and the change is
+> a JSDoc comment only: the sentence that names the page's link to Settings now
+> says "Passkeys and wallets" instead of "All signers in Settings", per the
+> owner's 2026-10-30 copy decision (`docs/product/copy-guidelines.md` § *The
+> Settings section is "Passkeys and wallets"*). No rendered string, no prop, no
+> row, no control and no flow changes — the card's own markup is untouched, and
+> the link itself lives on the page above it (`AccountDetailClient.tsx`, not in
+> this document's coverage). Nothing about who can approve, what is signed,
+> which delegation is issued, which caveat or enforcer term applies, the budget
+> pre-check, the settlement window or custody reads the label. Scope of this
+> note: that one comment. Nothing else in this document was re-verified for it,
+> and `last-verified` already reads 2026-10-30.

@@ -344,9 +344,9 @@ export default function TransactionDetailPanel({
       <DetailRow key="by" label="By" value={tx.initiatedBy === 'human' ? 'You' : 'Your accounts'} />,
     )
   } else {
-    // A delegate sweep: the agent's unspent allowance funding, returned.
+    // A delegate sweep: the agent's unused budget, returned.
     details.push(
-      <DetailRow key="what" label="What happened" value="Unspent allowance returned" />,
+      <DetailRow key="what" label="What happened" value="Unused budget returned" />,
     )
   }
   // #2870: only when the list joined a sync row for this payment — the same

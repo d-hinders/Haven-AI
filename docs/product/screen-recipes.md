@@ -1432,9 +1432,11 @@ it):
      one line says how many are hidden and links to the Agents page's
      revoked facet.
    - **Security & details** — "Who can approve": the section carries ONE
-     heading, ABOVE its card, with "All signers in Settings" as a link at the
+     heading, ABOVE its card, with "Passkeys and wallets" as a link at the
      right of the heading row (#4474, mockup v9 — the intro sentence and the
-     in-card Settings row are gone); it is the ONLY place in the app that can
+     in-card Settings row are gone; the link text is the owner's 2026-10-30
+     decision, #4563, superseding the mockup's "All signers in Settings"); it
+     is the ONLY place in the app that can
      add or remove a signer or run recovery (`AccountSignersCard` renders
      here; Settings → Security's "Passkeys and wallets" section lists them
      without add or remove flows). Each signer is a two-line row — the kind

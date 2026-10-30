@@ -777,7 +777,7 @@ export default function AccountDetailClient() {
                   href="/settings?tab=security#signers"
                   className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
                 >
-                  All signers in Settings
+                  Passkeys and wallets
                 </Link>
               }
             />

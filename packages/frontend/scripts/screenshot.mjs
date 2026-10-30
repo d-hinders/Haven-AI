@@ -5004,7 +5004,7 @@ export const SCENARIOS = {
       const card = section.locator('div.rounded-\\[10px\\]').first()
 
       // #4474: the SHOT is the section, not the card. The slice added the
-      // "Who can approve" heading row and its "All signers in Settings" link
+      // "Who can approve" heading row and its "Passkeys and wallets" link
       // above the card, and a card-only capture evidences neither — the two
       // things the diff is judged on would be the two things the PNG omits.
       // All three states shoot the same wrapper so the framing cannot read as

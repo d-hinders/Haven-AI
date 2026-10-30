@@ -123,8 +123,9 @@ See [`dev-environment.md`](dev-environment.md) for the rest of the dev stack.
 > two phrases above: the add-a-wallet button reads **Add a wallet** (not *Or
 > add a wallet*), and **Remove is absent, not disabled, while one signer
 > remains** — with two or more, every row carries it. The *Who can approve*
-> heading now sits ABOVE the card with **All signers in Settings** as a link on
-> its heading row, each signer row is two lines (the kind over "Added {date}"),
+> heading now sits ABOVE the card with **Passkeys and wallets** as a link on
+> its heading row (the link text is the owner's 2026-10-30 decision, #4563,
+> superseding the mockup's *All signers in Settings*), each signer row is two lines (the kind over "Added {date}"),
 > and the card's ONE footer row holds *Add a backup passkey*, *Add a wallet*
 > and *Lost a device?*. Re-checked without change: the stable dev URL, the
 > opt-in PR previews (#3821), the "Browser wallet" / "Show address" (#3825)

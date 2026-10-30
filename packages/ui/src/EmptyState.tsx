@@ -17,6 +17,16 @@ interface EmptyStateProps {
    * the title only; icon/body/action belong to the larger sizes).
    */
   size?: Size
+  /**
+   * Drop the dashed, `--v2-surface`-filled shell (#4563). Use it when the
+   * state sits inside a `Card`: the shell would be a second filled surface
+   * inside the card, which `CLAUDE.md` § UI Surface Hierarchy forbids.
+   *
+   * A separate prop rather than a fourth `size` because the two axes are
+   * independent — `size` is density, `bare` is surface. `size="compact" bare`
+   * is the in-card preview; `bare` alone is the in-card page-level state.
+   */
+  bare?: boolean
   className?: string
 }
 
@@ -59,11 +69,16 @@ export function EmptyState({
   body,
   action,
   size = 'default',
+  bare = false,
   className = '',
 }: EmptyStateProps) {
   const palette = TONE_CLASSES[tone]
-  const shell =
-    'rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] text-center'
+  // #4563: `bare` drops the shell but keeps everything else. The shell is a
+  // filled surface (`--v2-surface`), so inside a `Card` it would be a second
+  // filled surface — CLAUDE.md § UI Surface Hierarchy forbids that.
+  const shell = bare
+    ? 'text-center'
+    : 'rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] text-center'
 
   if (size === 'inline') {
     return (

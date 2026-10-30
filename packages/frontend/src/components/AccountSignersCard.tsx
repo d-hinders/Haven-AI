@@ -14,7 +14,7 @@
  * longer renders on the agent page.
  *
  * #4474 (mockup v9): the card is the section's CONTENT only. Its heading
- * ("Who can approve") and the "All signers in Settings" link live on the page
+ * ("Who can approve") and the "Passkeys and wallets" link live on the page
  * above it (`SectionHeading`, #4475), so the card carries no heading, no intro
  * sentence and no in-card Settings row. Inside: the single-signer warning
  * (owner decision 2026-10-27 — a warning about one section's own content may

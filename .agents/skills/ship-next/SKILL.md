@@ -1047,10 +1047,10 @@ says so and exits 0, and the report names the absence.
 after the next `dev → main` promotion — a prod query after a migration applies, a
 check only prod can answer — it is filed as its own issue under the `Next release`
 convention, the box is rewritten to link that issue and ticked, and the epic may
-close before the promotion; the release process carries the step. The convention
-is defined once in
+close before the promotion; the release process carries the step. The
+convention's filing mechanics are defined once in
 [branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main)
-— read it there, do not restate it.
+— read them there, do not restate them.
 
 **An unticked box is not always outstanding work — it may be a mis-written box.**
 A box phrased so that no outcome can make it true (a waived operator step still

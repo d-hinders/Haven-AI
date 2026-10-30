@@ -217,9 +217,9 @@ encodes have to be applied by hand; that is what the rest of this section is for
   under the `Next release` convention (owner decision 2026-10-30, amending the
   2026-09-08 rule #2767), rewrite the box to link that issue and tick it, and let
   the epic close before the promotion. The release process carries the step. The
-  convention is defined once in
+  convention's filing mechanics are defined once in
   [branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main);
-  read it there rather than restating it.
+  read them there rather than restating them.
 
   **Every box must be able to reach a ticked state truthfully (#2906).** A box
   records a **disposition** — *done*, or *waived / no longer applicable* with the
@@ -241,9 +241,9 @@ encodes have to be applied by hand; that is what the rest of this section is for
     reach for, because an epic's scope can always be narrated so a step stopped
     applying. Without a named waiver-holder this rule is a tick-by-declaration
     route to closing any inconvenient epic, which is worse than the problem it
-    fixes. The surrounding rule already says a tick is a **human** act — the
-    owner for a waiver, and a filed `Next release` issue for a prod-only step,
-    which the release process then carries; this does not weaken it.
+    fixes. The surrounding rule already says a tick records a disposition someone
+    else can check — a named human's waiver, or a filed `Next release` issue the
+    release process carries; this does not weaken it.
   - **A box that is already true.** A box asking that a command "runs without a
     flag" when it already does is ticked on unchanged code and measures nothing.
     Write each box so it is **false today and true only when the work is done**.

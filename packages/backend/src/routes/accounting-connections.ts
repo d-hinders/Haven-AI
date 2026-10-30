@@ -123,12 +123,14 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
       if (!PROVIDER_ID_RE.test(provider)) return reply.code(404).send({ error: 'Unknown accounting provider.', error_code: 'UNKNOWN_PROVIDER' })
       // The payload type is fixed to { sub, email } by the jwt plugin; the
       // state carries different claims at runtime, hence the cast.
+      const claims = newOAuthStateClaims(sub, provider)
       const state = app.jwt.sign(
-        newOAuthStateClaims(sub, provider) as unknown as { sub: string; email: string },
+        claims as unknown as { sub: string; email: string },
         { expiresIn: `${OAUTH_STATE_TTL_SECONDS}s` },
       )
       try {
-        return { url: connectUrlFor(provider, state) }
+        // #4517: the `jti` also keys the PKCE verifier, for a provider that uses it.
+        return { url: connectUrlFor(provider, state, claims.jti) }
       } catch (err) {
         const refusal = providerRefusal(err)
         if (refusal) return reply.code(refusal.status).send(refusal.body)
@@ -183,7 +185,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
       }
 
       try {
-        await completeProviderOAuthCallback(provider, claims.sub, code)
+        await completeProviderOAuthCallback(provider, claims.sub, code, claims.jti)
       } catch (err) {
         // The redirect is the same for every failure class — the user sees
         // "error" either way — but an operator must be able to tell them

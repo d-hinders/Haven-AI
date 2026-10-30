@@ -86,8 +86,19 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-27"
+last-verified: "2026-10-29"
 ---
+
+> **Re-verified #4541 (2026-10-29, the release-records shipped-delta drafter):**
+> no covered runtime surface changes. The diff adds a new measurement script
+> under `scripts/ci` and its `node --test` suite, a `release:records` entry in
+> `package.json`, and a section in the covered `scripts/README.md` describing
+> them. The script reads `release:scope --json` and prints the CASP shard's
+> shipped-delta figures; it touches no package source, no tool name, input
+> schema, strict-input list, expected-context version, consent hash or
+> `tools-list.snapshot.json` entry, and no version literal the Supported
+> Runtime Manifest table pins. Nothing else in this document was re-verified,
+> and `last-verified` is re-stamped to 2026-10-29 for this note.
 
 > **Re-verified #4468 (2026-10-27, the ten typed task-/sub-budget
 > payment-scope refusals and three siblings):** covered surfaces change
@@ -2916,6 +2927,59 @@ and `@haven_ai/connect` its own `CONNECTOR_VERSION`).
 > **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
 > rows are unchanged. `last-verified` is not bumped.
 
+> **Re-verification (0.12.0-alpha.0 release, 2026-10-29):** the manifest table
+> above is re-pinned by the bump to `0.12.0-alpha.0` for `connect`, `mcp`, `sdk`
+> and `signer`, with `SDK_VERSION` rewritten beside it. The step from
+> `0.11.0-alpha.0` is **MINOR**: the range adds surfaces and removes none, and
+> no CHANGELOG entry is marked **Update required**.
+>
+> Type-level changes for SDK consumers that build objects by hand:
+> - `nextRefillAt` is now required on `HavenAllowance` and
+>   `HavenAgentAllowanceSummary`;
+> - `budgetEndedAt` is now required on `HavenAllowanceSummary` and
+>   `HavenAgentSummary`;
+> - `budgetRefillsAt` is now required on `HavenAgentSummary`;
+> - `AgentPaymentWarningCode` gains `QUOTE_BUDGET_ENDED`.
+>
+> Code that only reads these types is unaffected. The `.d.ts` comparison against
+> the published `0.11.0-alpha.0` (`sdk`, `signer`, `mcp`) removes no declaration
+> name and adds three, all in `sdk`: `FundingConfirmationUnknownError`,
+> `FundingRevertedError` and `HavenApiFailureCause` (#4470).
+>
+> **Surfaces this release moves:**
+> - **SDK.** An ended budget is named apart from a spent one:
+>   `delegation_expired` with the end date (#4352, #4458), the quote warning
+>   `QUOTE_BUDGET_ENDED`, and spent-for-the-period told apart from no budget
+>   (#4355). `haven_list_receipts` rows carry the six delivery fields the mapper
+>   dropped (#4469). Retry or stop follows the failure's cause:
+>   `HavenApiError.failureCause`, and a typed failed funding wait (504 for a timeout,
+>   which was an untyped error; 502 for a revert, which was 500) (#4470). Runbook and skill wording: budget end dates (#4350),
+>   which quote checks the budget (#4345), and the agent folder named by its
+>   wiring slug (#4396).
+> - **Signer.** Success results name their next step, and the settlement-child
+>   guidance names the MCP route (#4449). Guidance only; no new signing path.
+> - **Local MCP.** Embedded-SDK changes only: `haven_get_agent`'s description
+>   and result name an ended budget and tell a spent budget from no budget
+>   (#4352, #4355), receipt rows carry their delivery fields (#4469), and a
+>   failed funding wait reports its cause: 504 for a timeout, which was an
+>   untyped `UNKNOWN_ERROR`, and 502 for a revert, which was 500 (#4470). The
+>   tool list is unchanged, so there is no re-consent prompt. `README` wording
+>   (#4396).
+> - **Connect.** The installed skill names the ended budget (#4352), tells a
+>   spent budget from no budget (#4355), says which quote checks the budget
+>   (#4345), and names the agent folder by its slug (#4396). Existing installs
+>   keep their `SKILL.md` until reinstalled.
+> - **CLI.** `budget grant --expires` refuses a date more than 365 days out
+>   (#4351), and `haven guide`'s runbook gains the end-date and
+>   `needs_approval` wording (#4350, #4352, #4355).
+> - **Not moved.** `CLIENT_COMPAT` is unchanged (`git diff origin/main
+>   origin/dev -- packages/core/src/client-compat.ts` is empty), so no installed
+>   client is forced to update.
+>
+> **Re-read, not rubber-stamped:** the Node floor and the Codex and Claude Code
+> rows are unchanged. `last-verified` already reads 2026-10-27 from an earlier
+> change and is not bumped.
+
 > **Re-verification (0.11.0-alpha.0 release, 2026-10-23):** the manifest table
 > above is re-pinned by the bump to `0.11.0-alpha.0` for `connect`, `mcp`, `sdk`
 > and `signer`, with `SDK_VERSION` rewritten beside it. The step from
@@ -3299,10 +3363,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.11.0-alpha.0` |
-| `@haven_ai/mcp` | `0.11.0-alpha.0` |
-| `@haven_ai/sdk` | `0.11.0-alpha.0` |
-| `@haven_ai/signer` | `0.11.0-alpha.0` |
+| `@haven_ai/connect` | `0.12.0-alpha.0` |
+| `@haven_ai/mcp` | `0.12.0-alpha.0` |
+| `@haven_ai/sdk` | `0.12.0-alpha.0` |
+| `@haven_ai/signer` | `0.12.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -4199,6 +4263,70 @@ prepared or funded payment keeps its `payment_id` and resumes through
 During a rolling deploy the fingerprint may alternate once across replicas;
 reconnect once, and if it still alternates, continue and report. The
 published `haven-pay` skill carries the same rule.
+
+> **Re-verified (#4530, 2026-10-29, passage only).** The rule above gained two
+> sentences, and this block records the case that forced them. The change is
+> instructions text only: the instructions are excluded from the contract
+> fingerprint, no tool description and no input schema moved, so this is **not**
+> a reconnect event and the fingerprint is unchanged.
+>
+> **The case the fingerprint cannot see.** A 0.12.0-alpha.0 production EIP-3009
+> smoke test (Claude Code desktop, demo merchant) hit a client whose
+> `tools/list` was **pre-0.11** — `haven_report_settlement_evidence` declared
+> only `{payment_id, settlement_tx_hash}` with `additionalProperties: false`,
+> and its description lacked the "On EIP-3009 also pass payment_header"
+> sentence — while every result in the same session carried the **current**
+> `contract_fingerprint` (`9f6a89fa545a01c3`, `main`'s contract, in which the
+> tool does declare `payment_header`). The fingerprint check compares the
+> instructions the client loaded at `initialize` against the fingerprint on a
+> result; when both are current but the **tool list** is cached, it reports
+> nothing. The agent then sent the report without the header, was refused with
+> `SETTLEMENT_PROOF_HEADER_MISSING`, and was told to add a key its own schema
+> said it could not send.
+>
+> **Reproduction status.** Reproduced by the owner on their own machine
+> (2026-10-29, Claude Code in the desktop app), not in this build environment.
+> Two full app restarts did **not** refresh the cached `tools/list`:
+> `haven_report_settlement_evidence` stayed
+> `{payment_id, settlement_tx_hash}` with no EIP-3009 sentence. `claude mcp
+> remove haven-claude-cloud -s user`, then `claude mcp add` with the same URL
+> and header, then a restart **did** refresh it — the tool then listed
+> `payment_header` and its description carried "On EIP-3009 also pass
+> payment_header". The server was `0.12.0-alpha.0` with
+> `contract_fingerprint` `9f6a89fa545a01c3` before and after, so the
+> fingerprint was correct throughout: the case is exactly current
+> instructions and current results beside a cached pre-0.11 tool list, which
+> the fingerprint comparison cannot see. The cache therefore lives in the
+> client's tool-list layer, not in Haven — the client also accepted and sent
+> the undeclared key once the agent passed it — and remove/re-add is the
+> working remedy, which is what the owner decision below records.
+>
+> **The owner's ruling (2026-10-29, option 2), now in the server
+> instructions.** Two sentences were added to `HOSTED_INSTRUCTIONS`
+> (`packages/mcp-server/src/server.ts`):
+>
+> - Sending a `next_arguments` that Haven returned, **verbatim**, is always
+>   allowed, even when a key in it is missing from the schema the client
+>   loaded. Sending Haven's own arguments unchanged is not hand-building or
+>   reshaping — the prohibition is on reshaping a payload to fit, not on
+>   passing through what the server handed you.
+> - When a reconnect or restart does **not** change the tool list, the remedy
+>   is to **remove and re-add the hosted MCP server entry** in the client. The
+>   instructions previously named only reconnect or restart, which this case
+>   shows can be insufficient.
+>
+> **Does the prefill fix detection?** No — and it is not meant to. The
+> `payment_header` prefill (#4530 A) removes the *consequence* of a cached
+> list: the retryable settlement-evidence handoffs now carry the header the
+> call forwarded, so an agent holding a pre-0.11 schema no longer has to add a
+> key its schema lacks, and the amended rule says passing Haven's own
+> `next_arguments` through is allowed. Detection of a client whose
+> instructions are current but whose tool list is cached remains impossible
+> from the fingerprint alone. A further change would need the client to echo
+> the tool-list hash it loaded (a `tools/list`-derived value sent back on each
+> call) so the server can compare it — a new detection mechanism, out of scope
+> without an owner decision, and the tool-description budget is at its cap
+> (#4123 §3).
 
 ### Task budgets — a third sign-context, and the tool set moves (#3329)
 
@@ -6752,3 +6880,68 @@ to call next in structured fields, and those fields are typed end to end
 > version changed. Scope of this note: the receipt row shape and that one
 > description. Nothing else in this document was re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified (#4470, 2026-10-27 — retry or stop by cause, not status).**
+> Additive on the wire.
+> - **The SDK.** `HavenApiError` gains an optional `failureCause`: the
+>   transport's own 408 and status-0 errors carry `{ kind: 'no_answer',
+>   method }`, and nine deterministic SDK throws plus two payment-state throws
+>   carry `{ kind: 'deterministic' }`. Its `name`, `code` (`API_ERROR`) and
+>   `statusCode` are unchanged, so the local MCP (`packages/mcp/src/tools.ts`)
+>   relays it as before. The funding wait throws two new `HavenApiError`
+>   subclasses, `FundingConfirmationUnknownError` and `FundingRevertedError`.
+>   The local MCP reaches that wait through `haven.fetch` and `payX402Quote`
+>   and relays the two with their new status (504 / 502, was 500) and message;
+>   its step is unchanged.
+>   A settlement report that got no answer is `retryable`, not `refused`.
+> - **The hosted MCP.** `normalizeError`'s generic `HavenApiError` branch
+>   reads the cause first:
+>   - a non-answer on a read re-calls once;
+>   - a non-answer on a write stops without re-calling;
+>   - a deterministic failure stops;
+>   - only an unmarked status falls through to the 4xx and 5xx steps, and
+>     their reasons are byte-identical.
+>
+>   `haven_submit`, on both schemes, and `haven_settle_mcp_tool`'s erc7710
+>   settle answer a non-answer with the new code `NO_ANSWER_OUTCOME_UNKNOWN`
+>   and the status read for its `payment_id`.
+>   The eip3009 delivery step answers the funding wait with the new codes
+>   `FUNDING_CONFIRMATION_UNKNOWN` (check status) and `FUNDING_REVERTED`
+>   (stop), before any merchant call. The settlement-report pending texts now
+>   name "Haven did not answer" as a cause.
+> - **What does not change.** No `haven_*` tool name, input schema,
+>   strict-input list, tool description, expected-context version or signer
+>   contract changes, and `tools-list.snapshot.json` does not move. Every
+>   step names a tool through `refusalNextStep` or says why none follows, and
+>   `lint:next-steps` stays at zero.
+>
+> Scope of this note: those fields and texts. Nothing else in this document
+> was re-verified.
+
+> **#4534 (2026-10-29, the purchase correlation key on the outcome report):**
+> `haven_report_x402_outcome` gains two OPTIONAL arguments —
+> `purchase_group_id` (1–128 chars) and `merchant_response` (an object). On an
+> accepted outcome they ride the same `POST /machine-payments/evidence` report
+> the tool already posts: the backend derives the group id from the merchant's
+> own invoice/order id through a small explicit per-merchant map (Bitrefill:
+> `invoice_id`), or takes the agent's key when the merchant supplies none, and
+> records it on the `machine_payment_evidence` row (migration 123) together
+> with `parent_payment_id` — the purchase payment a fee call paid for, resolved
+> from the group's own members. The receipt (`haven_list_receipts` and the
+> evidence echo) gains `purchase_group_id` and `parent_payment_id`; both are
+> null on an ungrouped payment, which is fed exactly as before.
+> - **Version skew is a refusal, not a silent drop.** Both arguments are
+>   opt-in: a caller that supplies neither sends a byte-identical body to
+>   before. A NEW MCP/SDK against a backend older than migration 123 gets the
+>   existing request-validation refusal (400) for the two new body fields,
+>   because `MachinePaymentEvidenceRequest` is `additionalProperties: false` —
+>   the feature is unavailable there rather than quietly ignored.
+> - **Hosted picks this up on deploy**; local MCP/connect users need an
+>   `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK exactly),
+>   as with #3764 and #3778.
+> - `tools-list.snapshot.json` moves: two new optional arguments on one tool.
+>   No tool is added or removed, no version floor or consent-hash input
+>   changes, and `lint:next-steps` stays at zero.
+>
+> Scope of this note: those arguments, the two receipt fields and the snapshot
+> row. Nothing else in this document was re-verified.

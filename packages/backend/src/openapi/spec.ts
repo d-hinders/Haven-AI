@@ -1553,6 +1553,17 @@ const agentPaymentStatus = {
         'on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the ' +
         'confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown.',
     },
+    // #4530
+    merchant_settlement_tx_hash: {
+      type: 'string',
+      pattern: '^0x[0-9a-fA-F]{64}$',
+      description:
+        'The merchant settlement transaction Haven recorded and verified on-chain (#4530) — the ' +
+        'transaction `merchant_settlement_recorded` reports, named so a status read can confirm WHICH ' +
+        'one was recorded (the settlement sweep records one the agent never reported). Present only ' +
+        'when `merchant_settlement_recorded` is; omitted otherwise, and never the merchant\'s ' +
+        'unverified echo. A public on-chain transaction id, not a secret.',
+    },
     // #3494
     failure_reason: {
       type: ['string', 'null'],
@@ -13375,6 +13386,13 @@ export const openapiSpec = {
           delivery_quality: { type: ['string', 'null'], enum: ['ok', 'unusable', 'partial', null] },
           delivery_note: { type: ['string', 'null'] },
           delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
+          // #4534: the purchase correlation key. `purchase_group_id` is the
+          // merchant's own invoice/order id (or an agent-supplied group key)
+          // shared by every payment of one purchase; `parent_payment_id` is the
+          // purchase payment a fee call paid for. Both null on an ungrouped
+          // payment — which is fed exactly as before, never withheld.
+          purchase_group_id: { type: ['string', 'null'] },
+          parent_payment_id: { anyOf: [uuid, { type: 'null' }] },
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
@@ -13418,6 +13436,14 @@ export const openapiSpec = {
           // `@haven_ai/core`'s `deliveryReferenceError`) because "looks like
           // a credential" is not a JSON-Schema statement.
           deliveryReference: { type: 'string', maxLength: 512 },
+          // #4534: the merchant's PAID response body, read by the explicit
+          // per-merchant map in `modules/mpp/purchase-group.ts` to derive the
+          // purchase correlation key. Never stored — only the derived id is.
+          merchantResponse: { type: 'object', additionalProperties: true },
+          // #4534: an agent-supplied purchase group key — its own field, never
+          // overloaded onto `idempotencyKey`. Bounded at the evidence column's
+          // width; the semantic normalization (trim, non-empty) is the module's.
+          purchaseGroupId: { type: 'string', maxLength: 128 },
         },
         additionalProperties: false,
       },

@@ -10,6 +10,7 @@ covers:
   - packages/backend/src/middleware/accountingFeed.ts
   - packages/backend/src/infra/secrets.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
+  - packages/backend/src/infra/repositories/direct-payment-accounting.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/backend/src/infra/repositories/accounting-webhook-deliveries.ts
   - packages/backend/src/db/migrations/080_accounting_connections.ts
@@ -36,7 +37,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-10-26"
+last-verified: "2026-10-29"
 ---
 
 # Accounting feed — operations runbook
@@ -68,12 +69,16 @@ carries two addresses, and they are not symmetric:
 
 - `counterparty.address` is the **merchant** (`payTo`) — this is what every
   exporter (SIE, Fortnox voucher/supplier) books as the supplier, and it is
-  the only address that reached a downstream ledger before #2960.
+  the only address that reached a downstream ledger before #2960. On a
+  **direct payment** (#4533) it is the recipient the user sent to, which may
+  be a saved contact rather than a merchant.
 - `treasuryAccount` is **our own side** — `machine_payment_evidence.payer_address`,
   which is written from `intent.account_address` at settlement
   (`modules/mpp/evidence.ts`) and is `parties.treasury_account` on every
   other #2960 surface (receipts, payment status, the payment-receipt
-  bundle). Before #2960 this feed selected `merchant_address` only and
+  bundle). A direct payment has no evidence row, so its entry reads
+  `payment_intents.account_address` instead — the same value, from the same
+  intent. Before #2960 this feed selected `merchant_address` only and
   never read or exposed which address was "our side" anywhere in code —
   the field existed nowhere on `AccountingEntry`, `AccountingEntrySourceRow`
   or `ENTRY_SOURCE_SQL`. It is additive: no exporter (SIE, Fortnox) reads it
@@ -92,13 +97,13 @@ does not carry the agent's delegate address (only `agent_id`).
 | Variable | Meaning | dev | prod |
 |---|---|---|---|
 | `HAVEN_HOSTED` | The feed is a hosted add-on; nothing below matters on a self-host | `true` | `true` |
-| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval, and (#2918) the connection routes 404 too — `GET /connections`, `connect-url`, `api-key`, disconnect, activate, backfill and settings all answer the same 404 body as the feed actions; only `GET /providers` stays reachable (the Coming soon page reads it) and the OAuth callback redirects instead of 404ing (see *Routes*). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so prod is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | unset — AND `HAVEN_REPORTING_FEED_ENABLED` unset or `false` (Coming soon) |
-| `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | unset |
-| `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | unset until #2876 (zero rows) |
+| `HAVEN_ACCOUNTING_ENABLED` | Kill-switch. Off: `GET /accounting/feed/status` answers `available: false`, Sync now / verify / reopen 404, the settlement hook returns before any query, the retry sweep registers no interval, and (#2918) the connection routes 404 too — `GET /connections`, `connect-url`, `api-key`, disconnect, activate, backfill and settings all answer the same 404 body as the feed actions; only `GET /providers` stays reachable (the Coming soon page reads it) and the OAuth callback redirects instead of 404ing (see *Routes*). The pre-#2859 name `HAVEN_REPORTING_FEED_ENABLED` is still honoured with one boot warning; the new name wins whenever it is *set*, including `false` — so a deployment is off only while BOTH are unset, or the alias is `false` (the prod variable list still carried `HAVEN_REPORTING_FEED_ENABLED` at the 2026-09-04 owner-reported reading in `package-dev-channel.md`; a stale `=true` there turns the feed ON) | `true` | `true` (since 2026-10-29, #4497); `HAVEN_REPORTING_FEED_ENABLED` stays absent |
+| `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` | Who passes the entitlement gate once the feed is on (#2861): `granted` (default, also when unset) — accounts holding an `account_entitlements` row for `accounting_feed`; `all` — every account, no row read or written. **Any other value refuses the boot** naming both modes | `all` | `all` (since 2026-10-29, #4497) |
+| `HAVEN_SECRETS_KEY` | 32 bytes, base64 (`openssl rand -base64 32`). Encrypts provider secrets at rest (#2860). Without it a NEW connection and a token refresh are refused before the provider is called; rows are never written in plaintext. See *Secrets at rest* | set | set (since 2026-10-29, #4497) — never change or unset it once a connection row exists |
 | `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS` | Retry-sweep cadence (#2866). Default 300 000 (5 min); floor 10 000; unset, empty, 0 or NaN take the default | default | default |
 | `HAVEN_OPS_TOKEN` | Gates `GET /health/ops`, where the accounting counters live (#2872; the webhook counters joined in #3019) beside the request-validation snapshot (`request_validation`: `mode`, `wouldRefuse`, `wouldCoerce`, per-route-field maps, and since #3208 `since` + `seenByRoute` — in-process, see `dev-environment.md` § *How to take a shadow reading* for the reading that survives deploys). Unset → the route is 404 | set | set |
 | `HAVEN_API_URL` (fallback `PUBLIC_API_URL`) | The public origin Accounted calls back to (#3019): the webhook subscriptions are registered as `<origin>/accounting/webhooks/accounted/<token>`. No localhost fallback — unset, an Accounted connect stores the row, registers nothing and flags it `needs_attention` with reason `no public API origin configured`; the feed still works. Dev states it in `.env.dev.example` | set | set |
-| `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | unset |
+| `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | client id and secret set (the dev app's — there is no separate prod app), redirect URI unset, so Fortnox is not configured on prod until #2876 |
 
 Availability for one account is `hosted && enabled && entitled`;
 `GET /accounting/feed/status` reports `hosted`, `enabled` (and `flagEnabled`,
@@ -147,6 +152,25 @@ feedSettledPaymentBestEffort()          ← fire-and-forget: NEVER blocks settle
           connection's status and emits accounting.connection.needs_attention
 ```
 
+**A direct payment takes the same path from `feedSettledPaymentBestEffort()`
+down, from a different source (#4533).** `haven_send` — the
+delegation-redemption rail behind `POST /payments` — settles on-chain but
+never gets a `machine_payment_evidence` row: the evidence writer refuses it on
+the rail gate (`PROTOCOL_RAILS` excludes `direct`) and, past that, on
+`resource_url NOT NULL`. So the entry is built from `payment_intents` itself
+(a second branch in `ENTRY_SOURCE_SQL`), the backfill enumerates it from the
+same table (`listUnpushedPaymentIds`), and the settlement route fires the feed
+right after `confirmSubmittedIntent`. The receipt underlag reads the intent
+too, so the connector still has a document to attach.
+
+Only a payment to an address **outside the user's own Haven footprint** is
+fed (owner decision, 2026-10-29): a transfer to another of the user's smart
+accounts, or to one of their agents' delegate addresses, is an internal move
+and produces no sync row and no document. Contacts and every other
+third-party address count as outside. The filter lives in the SQL
+(`infra/repositories/direct-payment-accounting.ts`), so the entry build and
+the backfill selection cannot disagree about it.
+
 Three things feed a payment: the settlement hook above, **Sync now**
 (`POST /accounting/feed/sync`, manual, bounded to 200 payments per press,
 resumable through the ledger) and the background retry sweep. All three go
@@ -154,11 +178,14 @@ through the same `feedSettledPayment`, so the ledger, the floor, the FX gate
 and the degraded-destination rules apply identically.
 
 **A settled payment that never reached the feed at all** is a settlement-side
-question, not an accounting one — the feed needs a `machine_payment_evidence`
-row, and that row is written when an intent reaches `confirmed`. The erc7710
-paths that can leave a settled payment without one, the leader-gated sweep
-that completes them and its 24-hour recovery horizon are documented where
-that code is:
+question, not an accounting one — the feed needs a source row, and for a
+protocol payment that row is `machine_payment_evidence`, written when an
+intent reaches `confirmed`. (A direct payment needs no evidence row: the feed
+reads `payment_intents` directly, so a confirmed direct send to an outside
+address is always feedable — see *A direct payment takes the same path* above.)
+The erc7710 paths that can leave a settled payment without an evidence row, the
+leader-gated sweep that completes them and its 24-hour recovery horizon are
+documented where that code is:
 [`04-x402-payment-sequence.md`](../architecture/04-x402-payment-sequence.md)
 § *Completing an erc7710 settlement* and § *Completing a settlement nobody
 reported*. If `/accounting` has **no row** for a payment the user can see on
@@ -240,9 +267,14 @@ a `remedy` field, the other two carry a `reason`. A fourth, chain-level line
 
 ### The two OFF states, and what each surface shows (#2869)
 
-Owner decision 2026-09-11: the feed is **visible in production while switched
-off**, and the two off states read differently — exposure (flipping
-`HAVEN_ACCOUNTING_ENABLED`) remains a separate manual decision.
+The two off states read differently, and they describe a deployment that has
+the feed switched off — a rollback, or a hosted box that never enabled it.
+**Neither of Haven's two deployments is in the flag-off state today:** dev runs
+with `HAVEN_ACCOUNTING_ENABLED=true`, and production has since 2026-10-29
+(#4497). The 2026-09-11 owner decision that the feed is *visible in production
+while switched off* is superseded for every provider except Fortnox, which is
+not configured on production until #2876. Exposure (flipping the flag) remains
+a separate manual decision, and unsetting it is the rollback.
 
 | `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
 |---|---|---|---|---|
@@ -360,8 +392,10 @@ passes and books in SEK, the default.
 > **No production connection is non-SEK today.** Two providers are `live`:
 > Fortnox, whose `getCompanyInfo` reports `SEK` by construction, and Accounted,
 > whose company read exposes no currency (`base_currency` null), so it books in
-> SEK by the default above. The machinery
-> below ships ahead of its first user — the `coming_soon` providers.
+> SEK by the default above. Production has Accounted connections since
+> 2026-10-29 (#4497), and they book in SEK for that reason — the currency is
+> the default, not an assertion. The non-SEK machinery below still has no user:
+> the `coming_soon` providers are its first.
 
 **What is pushed, and when the rate was taken.** The record carries the amount in
 the connection's `base_currency`, converted with the rate captured **at
@@ -405,12 +439,70 @@ figure on the record it backs: `Book value` in the invoiced currency, with the
 SEK capture kept below it as `Haven SEK ref` when they differ. One document,
 two clearly-labelled figures — never a DKK invoice backed by a receipt quoting
 kronor. When the merchant's own invoice is captured (#956), the underlag also
-carries the SELLER BLOCK (#3918): the seller's legal name on the `Merchant`
+carries the SELLER BLOCK (#3918): the seller's legal name on the counterparty
 line, the catalog's supplier `Country`, and the invoice's `VAT reg no` /
 `Org no` — the fields a Swedish consultant needs to code omvänd (reverse) VAT.
-The `Merchant` line is on every underlag (falling back to the merchant address,
-then `unknown`); `Country`, `VAT reg no` and `Org no` render only when their
-value is known, so the document never states an empty-looking fact.
+The counterparty line is on every underlag (falling back to the address, then
+`unknown`); `Country`, `VAT reg no` and `Org no` render only when their value
+is known, so the document never states an empty-looking fact.
+
+The counterparty line's LABEL follows the payment (#4533). A protocol payment
+(x402/mpp/spt) renders `Merchant <seller>` — the address on a second
+`Merchant addr <address>` line when both are known — and its `Resource` line
+names the paid resource. A **direct payment** (`POST /payments`, `haven_send`)
+is a transfer to an address that may be a contact rather than a merchant, so
+the same line renders `Counterparty <recipient>` (the recipient's name when
+known, else the address, else `unknown`), with the address on a second
+`Address <address>` line when both are known; and it has **no `Resource`
+line** — there is no resource, and the document does not print `n/a` for one.
+The label is chosen by whether the payment carries a resource URL, so an x402
+underlag is byte-identical to before #4533.
+
+**What kind of transaction it is (#4532).** Every underlag also carries
+`Transaction` — a closed enum, `purchase` | `api_fee` | `transfer` | `refund` |
+`unknown` — and `Description`, one line for the accountant, e.g.
+`api.bitrefill.com - invoice/pay (purchase)` beside
+`api.bitrefill.com - invoice/create (API fee)`. The same two values ride the
+feed payload (`FeedTransaction.transactionKind` / `.description`), so the
+payload and the attached document cannot disagree.
+
+The kind is DERIVED server-side from the stored payment record
+(`modules/accounting/transaction-kind.ts`); no route accepts it and an agent
+cannot set it. The ladder, strongest signal first:
+
+1. `direction` — `in` is income/refund, so `refund`.
+2. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
+   invoice-shaped body (invoice/order number, line items, seller block) is a
+   `purchase`; a body with none of those markers is a bare acknowledgement, so
+   `api_fee`.
+3. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
+   deliverable, so `purchase`.
+4. `machine_metadata.mcp_call_context.toolName` (#1307) — an MCP tool call IS
+   the paid deliverable, so `purchase`.
+5. the x402 route — the last path segment of `resource_url` against three
+   closed vocabularies: purchase verbs (`pay`, `purchase`, `buy`, `order`, …),
+   fee verbs (`create`, `status`, `search`, `detail`, `quote`, …) and transfer
+   verbs (`send`, `transfer`, `withdraw`, …).
+
+A route verb outside those sets is `unknown`, never a guess — `price` is
+deliberately absent, because `https://api.anchor-x402.com/v1/price/token` is a
+paid data call whose OUTPUT is the price. A payment with no derivable signal
+renders `unknown` and does not fail the feed.
+
+**Why it exists.** One BikBok gift-card purchase through Bitrefill's
+plain-HTTP x402 route settled three payments on production 2026-10-29 —
+`POST /x402/invoice/create` (0.002 USDC), `POST /x402/invoice/pay` (0.010) and
+`GET /x402/invoice/status` (0.001) — and all three receipts rendered the same
+field set. Only the middle one is the purchase; the other two are the
+merchant's per-call API fees. The three routes are pinned by a test to
+`api_fee`, `purchase`, `api_fee`.
+
+**Where the connectors carry it.** Fortnox has a free-text `Comments` field, so
+the description rides there (with `/` folded to `-`, because the field refuses
+it — error 2000359). Accounted's document upload takes exactly `file` +
+`upload_source` (`additionalProperties: false`), so there is no metadata field
+to carry them: the PDF is the carrier. Existing stored receipts are untouched —
+the kind renders at push time and nothing re-renders a delivered document.
 
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
@@ -707,7 +799,9 @@ Consequently:
   revoke with), so the user should also remove the old integration inside
   Fortnox, or let it expire after 45 idle days. History and settings survive
   (the row is kept). A real rotation path — a key-version table with a read
-  fallback — is the follow-on to file when prod gets its key (#2876).
+  fallback — is the follow-on to file now that production has its key
+  (#4497, 2026-10-29). It was previously deferred to #2876, which no longer
+  carries it.
 
 ## Schema for on-call
 
@@ -808,7 +902,9 @@ needed (`fortnoxScopeForPath`, five entries: `/supplierinvoicefileconnections`
 Fortnox does not say which; a bare 403 counts as scope, a 403 with another code
 (a licence error such as `[2003295]`) is a plain `failed`. `[2000359]`
 non-ASCII in Comments/Name (middle dots, `://`, `…`) — the connector sanitises;
-a new occurrence is a new field that slipped through. Rate limit: 25 requests /
+a new occurrence is a new field that slipped through. Since #4532 the
+`Comments` field also carries the transaction description, whose route
+separator `/` is folded to `-` for exactly this reason. Rate limit: 25 requests /
 5 s per client-id + tenant, HTTP 429 with no `Retry-After`.
 
 **What the accountant sees.** *Meny → Leverantörsfakturor*: an unbooked
@@ -1040,6 +1136,13 @@ The handshake has two halves, and both are now in code:
    `accounting.webhook.verification_failed` `warn` line carrying the provider's
    error code only.
 
+   **A first-attempt rate limit is expected.** The three calls land
+   back-to-back, so Accounted rate-limits the second and third
+   (`RATE_LIMITED`) on a fresh connect. Measured on production 2026-10-29
+   (#4497): two of the three verified on the provider's own retry about two
+   minutes later, and all three ended `verified`. Nothing is left unverified —
+   do not reconnect over it.
+
 **The verify verb needs a LIVE key.** A test key (`gnubok_sk_test_`) cannot run
 it — the provider refuses the write, so a connect made with a test key logs
 `WEBHOOK_VERIFICATION_FAILED` (or `TEST_KEY_WRITE_BLOCKED`) and the
@@ -1169,3 +1272,32 @@ receiver is reachable and verifying, before the first real commit.
 > of sending the route into the ErrorBoundary. No endpoint, flow or
 > behaviour this document describes changes. Scope of this note: those
 > expressions. Nothing else in this document was re-verified.
+
+> **Re-verified #4497 (2026-10-29, production enabled).** Changed: the
+> Configuration table's prod column now reads `HAVEN_ACCOUNTING_ENABLED=true`,
+> mode `all`, `HAVEN_SECRETS_KEY` set, and `FORTNOX_*` with the client id and
+> secret set (the dev app's) but the redirect URI unset; the two-off-states
+> section now says the flag-off state describes a deployment that switched the
+> feed off, not either of Haven's two deployments; the ledger-currency
+> blockquote keeps "no production connection is non-SEK" and rewords its
+> "ahead of its first user" reasoning, because production has Accounted
+> connections that book in SEK by the default; the key-rotation follow-on is
+> due now rather than with #2876; and the verify-call paragraph records that a
+> first-attempt `RATE_LIMITED` on two of the three subscriptions is expected
+> and self-heals on the provider's retry. Re-checked against the measured prod
+> state of 2026-10-29 (feed status for two accounts, the providers list, the
+> 503 on the Fortnox connect-url, one connected Accounted destination with
+> `base_currency` null, three verified subscriptions) and against the code
+> claims the changed sentences rest on. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.
+
+> **Re-verified #4532 (2026-10-29, receipt transaction kind).** Added: the
+> "What kind of transaction it is" block under *What the accountant sees on the
+> attachment* — the closed enum, the derivation ladder, the three pinned
+> Bitrefill routes, and where each connector carries the fields. Changed: the
+> Fortnox provider note's description of the `Comments` field now names the
+> description part and its `/` → `-` fold. Re-checked against
+> `modules/accounting/transaction-kind.ts`, `entry.ts`, `feed-transaction.ts`,
+> `receipt-underlag.ts`, `fortnox-connector.ts` and `accounted-connector.ts`.
+> Nothing else in this document was re-verified, and `last-verified` is not
+> bumped.

@@ -149,7 +149,13 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
       txHash: null,
       txHashIsFunding: false,
       fundingTxHash: null,
+      // #4532: the kind and its line. A fixture, not a derivation.
+      transactionKind: 'purchase' as const,
+      description: 'merchant.example - vpn (purchase)',
       suggestedAccount: '6540',
+      // #4534: ungrouped.
+      purchaseGroupId: null,
+      parentPaymentId: null,
     })
     expect(replay).toEqual({ externalRef: DOC_REF, status: 'pushed' })
     expect(state.replayIdempotent).toBe(true)
@@ -200,7 +206,13 @@ describeDb('Accounted document feed on the real database (#3018)', () => {
       txHash: null,
       txHashIsFunding: false,
       fundingTxHash: null,
+      // #4532: the kind and its line. A fixture, not a derivation.
+      transactionKind: 'purchase' as const,
+      description: 'merchant.example - vpn (purchase)',
       suggestedAccount: '6540',
+      // #4534: ungrouped.
+      purchaseGroupId: null,
+      parentPaymentId: null,
     })
     expect(refused.status).toBe('skipped')
     expect(refused.reason).toContain('IDEMPOTENCY_KEY_REUSE')

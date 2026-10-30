@@ -1,0 +1,4 @@
+{"message":"Starting Container","timestamp":"2026-10-29T14:48:03.428082091Z","level":"info"}
+{"hostname":"da7999ece317","timestamp":"2026-10-29T14:48:04.660655386Z","level":"info","time":1793285283802,"message":"Database migrations complete","pid":1}
+{"level":"warn","time":1793285283803,"timestamp":"2026-10-29T14:48:04.660656000Z","message":"RPC_URL_BASE is not set — using the PUBLIC endpoint https://mainnet.base.org. Every mainnet settlement, account deploy and caveat-enforcer read goes through a shared unauthenticated node. Set RPC_URL_BASE to a dedicated provider endpoint to decouple this deployment from those outages."}
+{"message":"Haven backend running on port 8080","pid":1,"time":1793285283980,"hostname":"da7999ece317","timestamp":"2026-10-29T14:48:04.660662746Z","level":"info"}

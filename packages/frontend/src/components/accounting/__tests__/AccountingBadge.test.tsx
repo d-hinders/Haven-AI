@@ -12,7 +12,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '@/context/LocaleContext'
-import { AccountingBadge, providerDisplayName } from '@/components/accounting/AccountingBadge'
+import { AccountingBadge, isRecordOnlyProvider, providerDisplayName } from '@/components/accounting/AccountingBadge'
 import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
@@ -94,6 +94,34 @@ describe('AccountingBadge', () => {
     expect(link).toHaveAttribute('href', '/accounting')
     expect(link).toHaveTextContent('Evidence archived')
     expect(link).toHaveAttribute('data-status', 'pushed')
+  })
+
+  it('a pushed IGDRASIL row reads "Evidence archived", not "In Igdrasil" (#4520)', () => {
+    // Igdrasil is record-only too (`capabilities.verify: false`, #4518): the
+    // badge has no provider list to ask, so the explicit set must carry it.
+    renderWithLocale(
+      <AccountingBadge accounting={accounting({ provider: 'igdrasil', externalRef: 'igdrasil:document:doc_7f3a91' })} />,
+    )
+    const link = screen.getByRole('link', { name: 'Evidence archived. Open accounting.' })
+    expect(link).toHaveTextContent('Evidence archived')
+    expect(link).not.toHaveTextContent('In Igdrasil')
+    expect(link).toHaveAttribute('data-status', 'pushed')
+  })
+
+  it('isRecordOnlyProvider prefers the descriptor when the list is to hand (#4520)', () => {
+    const descriptor = (id: string, verify: boolean) => ({
+      id,
+      capabilities: { attachments: false, verify, revoke: false, companyInfo: true },
+    })
+    // The descriptor answers for a provider the explicit set does not know…
+    expect(isRecordOnlyProvider('bokio', [descriptor('bokio', false)])).toBe(true)
+    // …and can flip a listed one back to a read-back provider.
+    expect(isRecordOnlyProvider('accounted', [descriptor('accounted', true)])).toBe(false)
+    // No list (the ledger row's case) falls back to the explicit set.
+    expect(isRecordOnlyProvider('igdrasil')).toBe(true)
+    expect(isRecordOnlyProvider('fortnox')).toBe(false)
+    // A partial list must not silently flip a record-only connector.
+    expect(isRecordOnlyProvider('igdrasil', [descriptor('fortnox', true)])).toBe(true)
   })
 
   it('pending → "Feeding…"', () => {

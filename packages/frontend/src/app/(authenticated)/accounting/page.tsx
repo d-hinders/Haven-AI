@@ -17,7 +17,8 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { ConnectOutcomeForwarderInSuspense } from '@/components/accounting/ConnectOutcomeForwarder'
 import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
 import { FeedSummary } from '@/components/accounting/FeedSummary'
-import { providerDisplayName, RECORD_ONLY_PROVIDERS } from '@/components/accounting/AccountingBadge'
+import { providerDisplayName, isRecordOnlyProvider } from '@/components/accounting/AccountingBadge'
+import { useAccountingProviders, type AccountingProvider } from '@/hooks/useAccounting'
 import { truncate } from '@/lib/format'
 
 const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
@@ -94,7 +95,8 @@ function hasFeedActivity(status: Pick<AccountingFeedStatus, 'counts' | 'syncs'>)
 /**
  * The external_ref → the row's identity line + the key its verdict is bound
  * to (#1364), per provider (#3018). Fortnox carries an invoice number in its
- * ref; Accounted carries the document id. Null for any other namespace.
+ * ref; Accounted and Igdrasil carry a document id (#4520). Null for any other
+ * namespace.
  */
 function externalRecord(
   externalRef: string | null,
@@ -103,28 +105,41 @@ function externalRecord(
   if (invoice) return { kind: 'invoice', id: invoice[1] }
   const document = externalRef?.match(/^accounted:document:([0-9a-fA-F-]{8,64})$/)
   if (document) return { kind: 'document', id: document[1] }
+  // Igdrasil's document ids are the provider's own (`igdrasil:document:<id>`,
+  // #4518) — not Accounted's UUID shape, so the charset is wider.
+  const igdrasil = externalRef?.match(/^igdrasil:document:([A-Za-z0-9_-]{1,64})$/)
+  if (igdrasil) return { kind: 'document', id: igdrasil[1] }
   return null
 }
 
 /**
  * Plain-language verdict from a verification (#1362), provider-conditional
  * since #3018. A provider that reads back (Fortnox) gets sentences naming
- * it and its invoice; a record-only provider (#3018, Accounted) answers
- * from Haven's own record, so its sentence says what Haven KNOWS — the
- * archived evidence and who books from it — and never reads as the
+ * it and its invoice; a record-only provider (#3018, Accounted and Igdrasil)
+ * answers from Haven's own record, so its sentence says what Haven KNOWS —
+ * the archived evidence and who books from it — and never reads as the
  * provider having answered. `registered: false` on a record-only row
  * (`foreign_invoice`) and `no_invoice_ref` keep the generic sentences:
  * they are about our own record's identity, not a provider verdict.
+ *
+ * `providers` is the descriptor list when the caller has it (#4520): the
+ * record-only decision then comes from `capabilities.verify`, not a name list.
  */
 function verificationSummary(
   v: AccountingVerification,
   provider: string,
   t: ReturnType<typeof useT>,
+  providers?: ReadonlyArray<Pick<AccountingProvider, 'id' | 'capabilities'>> | null,
 ): { text: string; tone: 'success' | 'warning' | 'danger' } {
-  if (RECORD_ONLY_PROVIDERS.has(provider)) {
+  if (isRecordOnlyProvider(provider, providers)) {
     if (!v.registered) return { text: t.accountingPage.verify.foreign, tone: 'warning' }
     const document = v.document_ref ? v.document_ref.slice(0, 8) : null
-    if (document) return { text: t.accountingPage.verify.accounted.registered(document), tone: 'success' }
+    if (document) {
+      return {
+        text: t.accountingPage.verify.recordOnly.registered(providerDisplayName(provider), document),
+        tone: 'success',
+      }
+    }
     return { text: t.accountingPage.verify.missing, tone: 'warning' }
   }
   if (!v.registered) {
@@ -154,6 +169,11 @@ function verificationSummary(
 export default function AccountingPage() {
   const t = useT()
   const { status, loading, error, sync, verify, reopen } = useAccountingFeed()
+  // #4520: where the descriptor list is to hand, `capabilities.verify` is what
+  // decides "record-only" — a connector that flips it needs no frontend edit.
+  // The badge's explicit set stays the fallback for the ledger row, which has
+  // no list to ask.
+  const { providers } = useAccountingProviders()
   const [busy, setBusy] = useState<'sync' | null>(null)
   const [verifying, setVerifying] = useState<string | null>(null)
   const [verifications, setVerifications] = useState<Record<string, AccountingVerification | { error: string }>>({})
@@ -367,7 +387,7 @@ export default function AccountingPage() {
                               (record?.kind === 'invoice'
                                 ? t.accountingPage.rowIdentity.invoice(record.id)
                                 : record?.kind === 'document'
-                                  ? t.accountingPage.rowIdentity.document(record.id)
+                                  ? t.accountingPage.rowIdentity.document(providerDisplayName(s.provider), record.id)
                                   : s.attempts > 1
                                     ? `${s.attempts} attempts`
                                     : providerDisplayName(s.provider))}
@@ -391,12 +411,12 @@ export default function AccountingPage() {
                           <div className="flex items-center justify-between gap-3 px-5 pb-3">
                             <p
                               className={`text-xs ${
-                                'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v, s.provider, t).tone]
+                                'error' in v ? TONE_TEXT.danger : TONE_TEXT[verificationSummary(v, s.provider, t, providers).tone]
                               }`}
                             >
                               {'error' in v
                                 ? v.error
-                                : `${verificationSummary(v, s.provider, t).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
                             </p>
                             {!('error' in v) && !v.registered && (
                               <Button

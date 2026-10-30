@@ -126,6 +126,26 @@ last-verified: "2026-10-25"
 > Scope: the migration comment only; the document-wide `last-verified` date
 > is not re-stamped.
 
+> **Re-verified unchanged (#4534, 2026-10-29, the purchase correlation key):**
+> the diff touches four covered areas — `modules/mpp/**` (a new
+> `purchase-group.ts` derivation module plus two OPTIONAL inputs on the
+> evidence report), `infra/repositories/machine-payments.ts` (three new
+> evidence-row SQL helpers), `modules/accounting/**` (the entry, feed payload
+> and receipt underlag carry two more fields) and `db/migrations/**`
+> (migration 123 adds two NULLABLE columns to `machine_payment_evidence`).
+> None of them is a payment, signing, key, custody, advice, settlement or
+> merchant-acquiring surface. The two fields are DESCRIPTIVE metadata on a
+> document the accounting feed already produces: `purchase_group_id` is the
+> merchant's own invoice/order id (or an agent-supplied group key) and
+> `parent_payment_id` is the purchase payment a fee call paid for. They
+> authorize nothing, gate nothing, change no amount, and are written
+> first-write-wins on the evidence row only — `payment_intents`, settlement
+> and custody are untouched. An ungrouped payment is fed exactly as before
+> with both fields null, so nothing is withheld because its group could not
+> be resolved, and no historical row is backfilled. Haven still signs nothing
+> and holds no key material. Scope: those four areas; the document-wide
+> `last-verified` date is not re-stamped.
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose

@@ -620,6 +620,15 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 16384
+          },
+          "purchase_group_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "merchant_response": {
+            "type": "object",
+            "additionalProperties": {}
           }
         },
         "required": [

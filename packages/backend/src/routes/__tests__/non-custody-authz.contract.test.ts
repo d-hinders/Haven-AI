@@ -56,7 +56,7 @@ import { allowanceModuleRailRetired, serializeUserOp } from '../../rails/executi
  * deleted) — case 5 is what makes every refusal in this file meaningful.
  */
 
-const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
+const { mockQuery, fiatMocks, delegationMocks, feedMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   fiatMocks: {
     getFiatValuesForTokenAmount: vi.fn(),
@@ -67,10 +67,18 @@ const { mockQuery, fiatMocks, delegationMocks } = vi.hoisted(() => ({
     prepareDelegationPayment: vi.fn(),
     submitDelegationPayment: vi.fn(),
   },
+  feedMocks: { feedSettledPaymentBestEffort: vi.fn() },
 }))
 
 vi.mock('../../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery(...args) } }))
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
+// #4533: the settlement path fires the accounting feed itself (a direct
+// payment never gets an evidence row, so the evidence hook cannot feed it).
+// Only that one export is replaced — the rest of the module is real.
+vi.mock('../../modules/accounting/index.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../modules/accounting/index.js')>()),
+  feedSettledPaymentBestEffort: feedMocks.feedSettledPaymentBestEffort,
+}))
 // Only the network seam of the delegation rail (bundler/EntryPoint/account) is
 // mocked — everything else (the shape check, the claim/confirm writes) is
 // real production code from routes/payments.ts.
@@ -178,6 +186,7 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
     mockQuery.mockReset()
     for (const m of Object.values(fiatMocks)) m.mockReset()
     for (const m of Object.values(delegationMocks)) m.mockReset()
+    for (const m of Object.values(feedMocks)) m.mockReset()
     fiatMocks.getFiatValuesForTokenAmount.mockResolvedValue({ usd: '1.00', eur: '0.92' })
   })
 
@@ -268,6 +277,8 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
     expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
     // No confirmation write ever happened:
     expect(mockQuery.mock.calls.some((c) => /SET status = 'confirmed'/.test(String(c[0])))).toBe(false)
+    // #4533: and no accounting underlag was fed for a payment that never settled.
+    expect(feedMocks.feedSettledPaymentBestEffort).not.toHaveBeenCalled()
   })
 
   it('DELEGATION RAIL — positive control: only releases the transfer when the account accepts the signature on-chain', async () => {
@@ -287,5 +298,8 @@ describe('non-custody: authentication is not authority (Red Line #3)', () => {
     // which is what this assertion says. (#2307 removed a trailing
     // `executeAllowanceTransfer` spy that watched a non-export.)
     expect(delegationMocks.submitDelegationPayment).toHaveBeenCalledOnce()
+    // #4533: the settlement path fires the accounting feed for the payment it
+    // just confirmed — fire-and-forget, so the transfer never waits on it.
+    expect(feedMocks.feedSettledPaymentBestEffort).toHaveBeenCalledWith(AGENT.user_id, PAYMENT_ID)
   })
 })

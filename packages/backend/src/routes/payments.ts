@@ -44,6 +44,11 @@ import { formatTokenAmount, parseTokenAmount } from '@haven_ai/core'
 // needs it after a delegation-rail send confirms, so it imports the module's
 // public entry point (same pattern as routes/x402.ts -> modules/x402/).
 import { tryRecordMachinePaymentEvidenceBaseById, mppDemoRetired } from '../modules/mpp/index.js'
+// #4533: a direct payment never gets a `machine_payment_evidence` row (the
+// rail gate refuses it), so the evidence hook above cannot feed it. The
+// settlement path fires the accounting feed itself — fire-and-forget, exactly
+// like the evidence hook: it can never block, delay or fail the transfer.
+import { feedSettledPaymentBestEffort } from '../modules/accounting/index.js'
 import {
   deserializeUserOp,
   isSettlementChainState,
@@ -1087,6 +1092,12 @@ export default async function paymentRoutes(app: FastifyInstance): Promise<void>
         }
 
         await tryRecordMachinePaymentEvidenceBaseById(id, agent.id, request.log)
+        // #4533: the evidence hook above is a no-op for a direct payment (the
+        // rail gate refuses it), so the underlag is fed from here instead. The
+        // entry is built from `payment_intents` itself; the outside-address
+        // filter lives in that SQL, so an internal transfer is simply not fed.
+        // Fire-and-forget: settlement never waits on an accounting push.
+        feedSettledPaymentBestEffort(agent.user_id, id)
         emitFirstPaymentSettled(id)
 
         return reply.send({

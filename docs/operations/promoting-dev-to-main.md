@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - scripts/ci/rpc-conformance.mjs
+  - scripts/ci/release-closeout-log.mjs
   - .github/workflows/dev-gate.yml
   - .github/workflows/publish.yml
   - .github/workflows/qa-dev.yml
@@ -10,7 +11,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-10-25"
+last-verified: "2026-10-29"
 ---
 
 # Promoting `dev → main` (production release)
@@ -233,19 +234,48 @@ so this is a rule to point at rather than a question to ask the release runner.
 - [ ] Watch the **prod deploys** finish (Railway backend / MCP, Vercel frontend)
       — a promotion that changes nothing the frontend is built from shows the
       Vercel frontend as "Canceled by Ignored Build Step", which is expected
-      ([`dev-environment.md` § Which pushes rebuild the frontend](dev-environment.md#which-pushes-rebuild-the-frontend))
-      — and confirm the **migrations applied cleanly** to the prod DB. A backend
-      that refuses to boot with *"Migration … was left INCOMPLETE by an earlier
-      run"* means a **non-transactional** migration (#2150) died part-way: its
-      statements were not rolled back, and the error itself carries the two
-      recovery statements. Do not restart hoping it clears — it will not, by
-      design. Decide from the schema whether to finish it by hand or undo it,
-      then run the matching statement.
-- [ ] **Read the boot log for RPC warnings (#2615).** The backend now warns once
-      per unset public-RPC default, and the evidence standard is the ABSENCE of
-      that line in the deploy log — not the presence of the variable in the
+      ([`dev-environment.md` § Which pushes rebuild the frontend](dev-environment.md#which-pushes-rebuild-the-frontend)).
+- [ ] **Run the closeout log check** — one command, bound to the promotion's
+      merge SHA:
+
+      ```sh
+      node scripts/ci/release-closeout-log.mjs --pr <promotion PR number>
+      # or: --sha <the merge commit>
+      ```
+
+      It reads GitHub's `deployment_status` stream for `Haven AI / production`
+      to anchor the SHA, finds the Railway deployment of that commit, reads
+      **that deployment's** boot log, and prints the block to paste onto this
+      PR. Exit 0 is a pass, 1 is a failed check (it says what failed), and 2
+      means it could not run at all — it then prints a one-line pointer to the
+      manual check below.
+
+      One-time setup: install the Railway CLI and `railway login`. No
+      `railway link` is needed — the script passes the project and environment
+      ids it reads from the GitHub deployment record, so it never depends on
+      what your checkout is linked to. No token enters the repo: `gh` uses your
+      GitHub login and `railway` uses your Railway login.
+
+      **Why the binding is the point.** `runMigrations()` runs before
+      `listen()`, so a migration that fails means the new process never serves
+      — and Railway keeps the previous deployment live. A log read that is not
+      bound to the deployment can therefore read the OLD process and pass. The
+      script fails unless the deployment's identity equals the promotion merge
+      SHA and both boot markers are present in that deployment's window; only
+      then does it count the RPC warnings.
+
+      A backend that refuses to boot with *"Migration … was left INCOMPLETE by
+      an earlier run"* means a **non-transactional** migration (#2150) died
+      part-way: its statements were not rolled back, and the error itself
+      carries the two recovery statements. Do not restart hoping it clears — it
+      will not, by design. Decide from the schema whether to finish it by hand
+      or undo it, then run the matching statement.
+- [ ] **The RPC standard is an ABSENCE (#2615).** The backend warns once per
+      unset public-RPC default, and the evidence is the absence of that line in
+      the deployment's boot log — not the presence of the variable in the
       Railway dashboard. A dashboard read is a name-level observation; the boot
-      log is the process saying what it resolved.
+      log is the process saying what it resolved. The check above counts it;
+      the manual check below searches for it.
 
       The production variable set, and the trap in it:
 
@@ -319,6 +349,44 @@ so this is a rule to point at rather than a question to ask the release runner.
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
       the September 2026 qa-dev waves were a provider that refused batches over
       three and the `pending` tag (epic #3335).
+
+### Manual check in the Railway web UI
+
+The fallback when the script cannot run for you — no CLI, no production log
+access, or a script error. It reaches the same verdict, and it is the only path
+that needs no terminal. The strings below are the ones the script matches; a
+test pins them together, so the two paths cannot disagree.
+
+1. Open the Haven project's **production** environment in Railway, then the
+   `@haven/backend` service. Open the deployment whose commit is the promotion
+   merge SHA — the commit the promotion PR merged at. If no deployment carries
+   that commit, the promotion did not deploy: stop here and say so.
+2. Confirm that deployment is the **active** one for the service. A deployment
+   that is not active is not serving, and its log proves nothing about what
+   users are hitting.
+3. In that deployment's **deploy log**, find `Database migrations complete` and
+   `Haven backend running on port`. Both must be present: the first is
+   `runMigrations()` returning, the second is `listen()` succeeding. A log with
+   neither is the previous deployment's, or a process that never booted.
+4. Note the last `[migrate] applied <version>` line in that log. No such line
+   is a valid answer — it means the schema was already current — but say which
+   it was rather than leaving the field blank.
+5. Search the same log for `is not set — using the PUBLIC endpoint`. The
+   standard is its **absence**: zero matches. A match names the variable that
+   is unset (`RPC_URL_BASE` or `RPC_URL_BASE_SEPOLIA`) and the public node the
+   process fell back to.
+6. Record the result on the promotion PR in the shape the script prints:
+
+   ```
+   promotion merge SHA: <the merge commit>
+   GitHub deployment: <deployment id> (Haven AI / production) — success at <time>
+   Railway deployment: <deployment id> — <state>, created <time>
+   log window: <deployment start> → <deployment start + 30 min> (<n> lines)
+   boot markers: "Database migrations complete" at <time>; "Haven backend running on port" at <time>
+   last applied migration: <version | none — no pending migrations at this boot>
+   unset public-RPC warnings: <n>
+   verdict: PASS | FAIL
+   ```
 
 - [ ] **Request validation is ENFORCING in prod since the #3032 flip** (epic
       #3028 slice 4): with `HAVEN_REQUEST_VALIDATION` unset the backend boots

@@ -327,6 +327,17 @@ describe('ConnectionsCard', () => {
       expect(alert).not.toHaveTextContent('Try again')
     })
 
+    it('connect=error&reason=multi_company names the one-company rule and the fix (#4520)', async () => {
+      searchParamsRef.current = new URLSearchParams('provider=igdrasil&connect=error&reason=multi_company')
+      serve([])
+      renderCard()
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('Igdrasil was given access to more than one company')
+      expect(alert).toHaveTextContent('reconnect and choose a single company')
+      // Not the generic "try again" sentence: retrying the same grant fails again.
+      expect(alert).not.toHaveTextContent('We could not connect Igdrasil')
+    })
+
     it('connect=error without a reason is the generic sentence', async () => {
       searchParamsRef.current = new URLSearchParams('provider=fortnox&connect=error')
       serve([])

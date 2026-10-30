@@ -451,7 +451,14 @@ describe('#4061 review: payment_header is forwarded only on the report it proves
     expect(result.data).toMatchObject({ settled: false, code: 'SETTLEMENT_PENDING', retryable: true })
     expect(result.data.next_action).toBe('retry_with_explicit_context')
     expect(result.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
-    expect(result.data.next_arguments).toEqual({ payment_id: 'pay_x402', settlement_tx_hash: MERCHANT_TX })
+    // #4530: the header the agent passed is prefilled beside the hash — this
+    // arm is reachable only when the call carried one, so there is nothing to
+    // make the agent re-supply.
+    expect(result.data.next_arguments).toEqual({
+      payment_id: 'pay_x402',
+      settlement_tx_hash: MERCHANT_TX,
+      payment_header: PAYMENT_HEADER,
+    })
     expect(result.data.reason).toContain('the same payment_header you passed')
     expect(result.data.reason).not.toMatch(/carried no payment_header/)
   })

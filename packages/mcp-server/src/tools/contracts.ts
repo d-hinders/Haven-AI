@@ -613,6 +613,22 @@ export const toolSchemas = {
     // #3925 nonce proof. Read only with settlement evidence on an accepted
     // outcome; see `settlementProofHeaderArg`.
     payment_header: settlementProofHeaderArg.optional(),
+    // #4534: the purchase correlation key. `purchase_group_id` is the group a
+    // payment belongs to — the merchant's own invoice/order id when you have
+    // it, or a key you choose for a purchase that spans several paid calls.
+    // It is its OWN field, never the idempotency key: a retry key answers "is
+    // this the same attempt?", a purchase group answers "is this the same
+    // purchase?". Optional; an ungrouped payment is fed exactly as before.
+    purchase_group_id: z
+      .string()
+      .min(1)
+      .max(128, 'purchase_group_id must be at most 128 characters')
+      .optional(),
+    // #4534: the merchant's PAID response body, when it carries the merchant's
+    // own invoice/order id. Haven reads it through a small explicit
+    // per-merchant map (Bitrefill: `invoice_id`) — never a generic scrape —
+    // and stores only the derived id, never the body. Optional.
+    merchant_response: z.record(z.string(), z.unknown()).optional(),
   },
   haven_report_delivery_quality: {
     // #3770: the delivery-quality report — the agent's evidence-only verdict

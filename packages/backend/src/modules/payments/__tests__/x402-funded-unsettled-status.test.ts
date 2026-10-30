@@ -355,9 +355,11 @@ describeDb('#3475 follow-up — settlement_scheme / merchant_settlement_recorded
     const status = await getAgentPaymentStatus(agent, paymentId)
     expect(status?.settlement_scheme).toBe('eip3009')
     expect(status).not.toHaveProperty('merchant_settlement_recorded')
+    // #4530: the hash rides the same presence rule — absent, never null.
+    expect(status).not.toHaveProperty('merchant_settlement_tx_hash')
   })
 
-  it('eip3009, settlement recorded: merchant_settlement_recorded is true', async () => {
+  it('eip3009, settlement recorded: merchant_settlement_recorded is true and the recorded hash is named (#4530)', async () => {
     const { agent, paymentId } = await seedConfirmedX402({
       settlementScheme: 'eip3009',
       confirmedMinutesAgo: 60,
@@ -366,6 +368,10 @@ describeDb('#3475 follow-up — settlement_scheme / merchant_settlement_recorded
     const status = await getAgentPaymentStatus(agent, paymentId)
     expect(status?.settlement_scheme).toBe('eip3009')
     expect(status?.merchant_settlement_recorded).toBe(true)
+    // The seed writes `0x5e5e…` into machine_metadata.merchant_settlement_tx_hash;
+    // the status read now names it, so an agent can confirm WHICH transaction
+    // was recorded (the #3888 sweep records one it never reported).
+    expect(status?.merchant_settlement_tx_hash).toBe(`0x${'5e'.repeat(32)}`)
   })
 
   it('erc7710: settlement_scheme is erc7710, merchant_settlement_recorded is absent (never the right signal there)', async () => {

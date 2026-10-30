@@ -33,6 +33,16 @@ import { refusalNextStep } from './guidance.js'
 import type { PaymentScopeRefusalCode } from '@haven_ai/core'
 import type { ToolFailure, ToolPayload } from '../contracts.js'
 
+/** #4470: Haven gave no answer to a read (`GET`); a read changes nothing, so one re-call is safe. */
+const NO_ANSWER_READ_OMITTED_REASON =
+  'Haven did not answer this read (it timed out, was unreachable, or sent an unreadable body); a read changes nothing, so re-call the same tool with the same arguments once before telling the user'
+/** #4470: Haven gave no answer to a write (`POST`); it may have taken effect. */
+const NO_ANSWER_WRITE_OMITTED_REASON =
+  'Haven did not answer this write (it timed out, was unreachable, or sent an unreadable body), so whether it took effect is unknown; do not re-call it or create a new payment — if it concerned a payment_id, read haven_get_payment_status for it, otherwise tell the user'
+/** #4470: the SDK refused an answer it cannot use; the same call gets the same answer. */
+const DETERMINISTIC_API_OMITTED_REASON =
+  'Haven answered, but with something this client cannot use (the message says what); re-calling it the same way gets the same answer, so tell the user what failed'
+
 export class HostedToolError extends Error {
   readonly code: string
   readonly statusCode?: number
@@ -876,28 +886,55 @@ export function normalizeError(err: unknown): ToolFailure {
   }
   if (err instanceof HavenApiError) {
     // #3214: the #3102 rule — no hosted refusal carries a bare next_action —
-    // now covers the generic branches too. A 5xx (or status-less) upstream
-    // answer is usually transient — the live 500 that filed this re-ran the
-    // same quote with the same arguments and succeeded — so the step says
-    // retry the same call once; no tool is named because normalizeError sees
-    // every tool's errors (the message and the agent's own last call say
-    // which), and the idempotency key, where the tool has one, must not
-    // change. A 4xx is the call refused as made: retrying it the same way
-    // cannot succeed.
+    // also covers the generic branches. No tool is named because
+    // normalizeError sees every tool's errors (the message and the agent's own
+    // last call say which), and the idempotency key, where the tool has one,
+    // must not change.
+    //
+    // #4470: the step is decided by the cause first and the status second.
+    // - `no_answer` (the SDK transport's own 408 timeout and status 0 — a
+    //   `fetch` that threw or a body that was not JSON) is no refusal: a read
+    //   is re-called once, a write's outcome is unknown, so it is never
+    //   re-called. A handler that knows the payment id answers the write with
+    //   the status read first (`noAnswerOnSubmitErrorFor`).
+    // - `deterministic` (an SDK refusal of an answer it cannot use) is the
+    //   same answer on every retry, whatever its status.
+    // - Otherwise the status: a 5xx is usually transient — the live 500 that
+    //   filed #3214 re-ran the same quote with the same arguments and
+    //   succeeded — and a 4xx is the call refused as made.
+    const cause = err.failureCause
     const step =
-      err.statusCode !== undefined && err.statusCode < 500
-        ? refusalNextStep({
-            nextAction: AgentPaymentNextAction.StopAndTellUser,
-            nextTool: null,
-            nextToolOmittedReason:
-              'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
-          })
-        : refusalNextStep({
-            nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-            nextTool: null,
-            nextToolOmittedReason:
-              'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
-          })
+      cause?.kind === 'no_answer'
+        ? cause.method === 'GET'
+          ? refusalNextStep({
+              nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+              nextTool: null,
+              nextToolOmittedReason: NO_ANSWER_READ_OMITTED_REASON,
+            })
+          : refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason: NO_ANSWER_WRITE_OMITTED_REASON,
+            })
+        : cause?.kind === 'deterministic'
+          ? refusalNextStep({
+              nextAction: AgentPaymentNextAction.StopAndTellUser,
+              nextTool: null,
+              nextToolOmittedReason: DETERMINISTIC_API_OMITTED_REASON,
+            })
+          : err.statusCode !== undefined && err.statusCode < 500
+            ? refusalNextStep({
+                nextAction: AgentPaymentNextAction.StopAndTellUser,
+                nextTool: null,
+                nextToolOmittedReason:
+                  'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+              })
+            : refusalNextStep({
+                nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                nextTool: null,
+                nextToolOmittedReason:
+                  'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
+              })
     return {
       success: false,
       code: err.code,

@@ -3201,6 +3201,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > text, copy-only) and #3524 (compact `haven_send`/`haven_pay` results), were
 > re-verified where they merged. Nothing else in this document was re-verified.
 
+> **Re-verified (0.12.0-alpha.0 release, 2026-10-29):** the release bump's only
+> covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
+> (`0.12.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
+> Two commits in the range change signer source (`git log origin/main..origin/dev
+> -- packages/signer/src` at `feda1617`), and both were read again for this
+> release:
+> - #4449 (#4462): success results name their next step, and the settlement-child
+>   guidance names the MCP route. Recorded below where it merged ("Re-verified
+>   unchanged (#4449 …)"); the change is guidance text and next-step fields only.
+> - #4415 (#4417): a test title and assertion floor in `cli-args.test.ts`;
+>   test-only, not shipped.
+>
+> Neither adds a signing path or widens a check. Nothing else in this document
+> was re-verified.
+
 > **Re-verified (0.11.0-alpha.0 release, 2026-10-23):** the release bump's only
 > covered-file edit is the `SIGNER_VERSION` literal in `packages/signer/src/tools.ts`
 > (`0.11.0-alpha.0`). No signing check, refusal or allowlist moves in that edit.
@@ -4191,7 +4206,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > matching row-shape field. The column is `SMALLINT NOT NULL CHECK
 > (avatar_tint BETWEEN 1 AND 6)`, filled by a `BEFORE INSERT` trigger from the
 > lowest tint no held agent of that user holds, handed to a replacement by an
-> `AFTER UPDATE OF superseded_by_agent_id` trigger, and backfilled once. It is
+> `AFTER UPDATE OF superseded_by_agent_id` trigger (dropped by 122, #4448 — see
+> the note below), and backfilled once. It is
 > display data on the same boundary as `labels` (#3167) and `organization_id`
 > (#3164): no delegation, caveat, enforcer term, budget pre-check, allowance,
 > settlement window or refusal reads it, and the inherit trigger's `UPDATE` is
@@ -4199,6 +4215,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > cannot recolour a released agent or cross a tenant. No route, signing,
 > revocation or grant path changes. Scope of this note: those two reads and the
 > migration. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4448, 2026-10-29 — a superseded agent keeps its
+> tint, migration 122).** The covered files this diff touches are
+> `infra/repositories/agents.ts` (the unarchive statement) and the migration
+> directory. 122 drops the `agents_inherit_avatar_tint` trigger and its
+> function, redefines `agent_holds_avatar_tint` to `archived_at IS NULL` alone,
+> and backfills the collisions 121 left behind; `UNARCHIVE_AGENT_SQL` may
+> reassign a tint on unarchive when another non-archived agent of the same user
+> holds it. All of it is display data on the same boundary as `labels` (#3167)
+> and `organization_id` (#3164): no delegation, caveat, enforcer term, budget
+> pre-check, allowance, settlement window or refusal reads `avatar_tint` or
+> `superseded_by_agent_id`, and the unarchive statement's tint `CASE` is scoped
+> to the row's own `id` and `user_id`. No route, signing, revocation or grant
+> path changes. Scope of this note: that statement and the migration. Nothing
+> else in this document was re-verified for it.
 
 > **Re-verified unchanged (#4449, 2026-10-26 — the signer's success next-step
 > family).** The covered files this diff touches are
@@ -4267,3 +4298,37 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > spend authority). Scope of this note: the card diff above and the page's
 > Security-tab section headings. Nothing else in this document was re-verified
 > for it, and `last-verified` already reads 2026-10-27.
+
+> **Re-verified unchanged (#4470, 2026-10-27 — failure causes and the funding
+> wait's outcomes).** The covered files this diff touches are
+> `packages/sdk/src/client.ts`, `x402-erc7710.ts` and `x402-funding-leg.ts`.
+> In the first two, the change is the error each refusal throws: the same
+> guards fire on the same answers, and nothing is signed after them, but the
+> errors now carry `{ kind: 'deterministic' }` through
+> `HavenApiError.deterministic(...)`, so the hosted step stops instead of
+> saying "re-call once". In `x402-funding-leg.ts`, the funding wait still runs
+> before any merchant retry and still throws when the funding leg is not
+> confirmed. A wait that times out or cannot read the chain now throws
+> `FundingConfirmationUnknownError`, and a reverted receipt throws
+> `FundingRevertedError`; the merchant is still never called after either.
+> No signing decision, typed-data check, recipient pin, allowlist, binding,
+> delegation, caveat, enforcer term, budget pre-check, settlement window,
+> funding leg or sweep changes. Scope of this note: those three files.
+> Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4534, 2026-10-29 — the purchase correlation key):**
+> this diff touched one file in this document's coverage list,
+> `packages/sdk/src/client.ts`, and none of its authority, custody or signing
+> surfaces. The change rides the same seam #3778's note scopes — the ACCEPTED
+> arm's `/machine-payments/evidence` report — plus the
+> `reportX402MerchantOutcome` pass-through: two new OPTIONAL inputs,
+> `purchaseGroupId` (≤ 128 chars, the merchant's own invoice/order id or a
+> caller-chosen group key) and `merchantResponse` (the merchant's paid
+> response body, read by a small explicit per-merchant map on the backend and
+> never stored — only the derived id is). Both are spread into the evidence
+> payload only when present, and only on an accepted outcome. They authorize
+> nothing, produce or consume no signature, and no spend decision reads their
+> value; the backend writes them first-write-wins onto the evidence row and
+> never touches `payment_intents`, settlement or custody. A caller that
+> supplies neither is byte-identical to before. Scope of this note: that one
+> file. Nothing else in this document was re-verified for it.

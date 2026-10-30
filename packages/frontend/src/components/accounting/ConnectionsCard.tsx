@@ -16,7 +16,8 @@
  * forwards that query to `/settings` untouched, so this card is the one
  * place that reads it: `connected` opens the backfill choice, `denied` and
  * `error` become a sentence beside the card, and `reason=unsupported_currency`
- * gets its own (the supported ledger currencies, named — #2877). The query is then
+ * gets its own (the supported ledger currencies, named — #2877), as does
+ * `reason=multi_company` (#4520). The query is then
  * stripped with `router.replace` so a reload does not replay the outcome.
  *
  * "First successful connect" is inferred, not signalled: the callback does
@@ -195,6 +196,10 @@ export function ConnectionsCard() {
     if (outcome.connect === 'connected') return { tone: 'ok' as const, text: copy.outcome.connected(name) }
     if (outcome.connect === 'denied') return { tone: 'error' as const, text: copy.outcome.denied(name) }
     if (outcome.reason === 'unsupported_currency') return { tone: 'error' as const, text: copy.outcome.unsupportedCurrency }
+    // #4520: the grant covered several companies and the feed has no per-push
+    // company choice, so the callback refuses it (#4518) — the user's own fix
+    // is to reconnect and pick one.
+    if (outcome.reason === 'multi_company') return { tone: 'error' as const, text: copy.outcome.multiCompany(name) }
     // #2918: the backend consumed the state and kept nothing — "try again" would be the wrong advice.
     if (outcome.reason === 'feature_off') return { tone: 'error' as const, text: copy.outcome.featureOff(name) }
     return { tone: 'error' as const, text: copy.outcome.error(name) }

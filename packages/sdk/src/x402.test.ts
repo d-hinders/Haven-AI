@@ -1343,6 +1343,10 @@ describe('x402 helpers', () => {
         },
       }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-123' } }), { status: 202 }))
+      // #4470: the settlement report's own answer. Unmocked, this 6th call went
+      // to the real network and its failure was classed `refused`; a
+      // non-answer now classes `retryable` (still one post).
+      .mockResolvedValueOnce(new Response(JSON.stringify({ evidence: { id: 'evidence-124' } }), { status: 202 }))
 
     const haven = new HavenClient({
       apiKey: 'sk_agent_test',
@@ -2544,7 +2548,9 @@ describe('#3764 — the local retry reports the merchant settlement beside the f
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_AGENT_RESPONSE), { status: 200 }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(X402_TAX_UNAVAILABLE), { status: 200 }))
     fetchMock.mockResolvedValueOnce(new Response('paid content', { status: 200, headers: retryHeaders }))
-    fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))
+    // A fresh Response per call: one shared instance answers its first read
+    // and then throws "Body already used", a non-answer #4470 classes `retryable`.
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 200 }))
     return { fetchMock }
   }
 
@@ -2803,9 +2809,6 @@ describe('#4215 — the local retry retries the settlement report on a retryable
       }),
       { status: 409 },
     )],
-    ['a transport failure with no HTTP status', () => Promise.reject(new TypeError('fetch failed'))],
-    ['a 408 (a timeout, classed refused)', new Response(JSON.stringify({ error: 'Request timed out' }), { status: 408 })],
-    ['a non-JSON 503 (classed refused, status 0)', new Response('gateway timed out', { status: 503 })],
   ]
 
   it.each(refusalCases)('%s — exactly ONE settlement post, never retried', async (_label: string, answer: SettlementAnswer) => {
@@ -2816,5 +2819,50 @@ describe('#4215 — the local retry retries the settlement report on a retryable
     // The refusal is swallowed (D1): the purchase still returns the
     // merchant's response unchanged.
     expect(res.status).toBe(200)
+  })
+
+  // #4470: these were classed `refused` before — a verdict on the hash that
+  // nothing had reached. A non-answer (the transport's status 0: `fetch`
+  // threw, or the body was not JSON) and any 408 are no verdict: they class
+  // `retryable` (see the reportSettlementEvidence cases below), and the loop
+  // hands them back at once instead of re-attempting, because each attempt
+  // can cost a whole request timeout. So: still exactly one post.
+  const noVerdictCases: Array<[string, SettlementAnswer]> = [
+    ['a transport failure with no HTTP status', () => Promise.reject(new TypeError('fetch failed'))],
+    ['a non-JSON 503 (status 0)', new Response('gateway timed out', { status: 503 })],
+    ['a 408 with a JSON body', new Response(JSON.stringify({ error: 'Request timed out' }), { status: 408 })],
+  ]
+
+  it.each(noVerdictCases)('%s — exactly ONE settlement post, not re-attempted', async (_label: string, answer: SettlementAnswer) => {
+    // Fake timers, and enough answers for every scheduled attempt, so a loop
+    // that re-attempted a non-answer fails on the post count below rather
+    // than on vitest's timeout (#4470 review N2).
+    vi.useFakeTimers()
+    const again = () => (typeof answer === 'function' ? answer : answer.clone())
+    const { fetchMock } = flowWithSettlementAnswers([again(), again(), again(), again()])
+    const flow = runFlow()
+    await vi.advanceTimersByTimeAsync(10_000)
+    const res = await flow
+
+    expect(settlementPosts(fetchMock)).toHaveLength(1)
+    expect(res.status).toBe(200)
+  })
+
+  it.each([
+    ['a transport failure with no HTTP status', () => Promise.reject(new TypeError('fetch failed')), 0],
+    ['a non-JSON 200 (status 0)', () => Promise.resolve(new Response('ok', { status: 200 })), 0],
+    ['a 408 with a JSON body', () => Promise.resolve(new Response(JSON.stringify({ error: 'Request timed out' }), { status: 408 })), 408],
+  ] as const)('reportSettlementEvidence: %s classes retryable, never refused', async (_label, answer, statusCode) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(answer)
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'https://haven.example' })
+    const outcome = await haven.reportSettlementEvidence('pay_4470', `0x${'be'.repeat(32)}`)
+    expect(outcome).toEqual({ outcome: 'retryable', statusCode })
+  })
+
+  it('reportSettlementEvidence: a genuine 409 still classes refused (the control)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'tx_hash_mismatch' }), { status: 409 }))
+    const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'https://haven.example' })
+    const outcome = await haven.reportSettlementEvidence('pay_4470', `0x${'be'.repeat(32)}`)
+    expect(outcome).toMatchObject({ outcome: 'refused', statusCode: 409 })
   })
 })

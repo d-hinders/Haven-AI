@@ -1147,8 +1147,20 @@ The dev backend also runs the **Fortnox bookkeeping integration**: `FORTNOX_*`
 vars (client id/secret + redirect to the dev backend's
 `/accounting/connections/fortnox/callback` — the provider-generic path since
 #2862; the Fortnox app's registered redirect URI must match it) are set on the
-dev Railway backend, using a **separate dev Fortnox app** — never the prod
-credentials. The feed was live-proven against dev on 2026-07-16.
+dev Railway backend. There is **no separate prod Fortnox app**: production
+holds the same client id and secret as dev (compared by hash, 2026-10-29,
+#4497), and they are inert there because `FORTNOX_REDIRECT_URI` is unset, so
+Fortnox is not configured on prod. Whether prod keeps sharing the dev app or
+registers its own is decided when Fortnox is enabled, under #2876. The feed
+was live-proven against dev on 2026-07-16.
+
+  > **Re-verified #4497 (2026-10-29):** the paragraph above said dev uses a
+  > **separate dev Fortnox app** and never the prod credentials. That is false:
+  > production's `FORTNOX_CLIENT_ID` hashes identically to dev's, so prod holds
+  > the dev app's credentials, inert while `FORTNOX_REDIRECT_URI` is unset. The
+  > redirect path in the paragraph was already the post-#2862
+  > `/accounting/connections/fortnox/callback` and is unchanged. Nothing else in
+  > this document was re-read for it, and `last-verified` is not bumped.
 
   > **Re-verified #3126 (2026-09-18):** round 3 of PR #3148 regenerated
   > `packages/backend/src/openapi/route-modules.generated.ts` — the branch

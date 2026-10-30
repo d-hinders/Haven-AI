@@ -59,7 +59,10 @@ const ADDITIVE_SINCE_BASE = new Set([
   // #3770: the delivery-quality verdict on the receipts the paying agent reads.
   'delivery_quality', 'delivery_note', 'delivery_reported_at',
   // #3778: additive non-secret delivery pointer on the receipts read.
-  'delivery_reference'])
+  'delivery_reference',
+  // #4534: additive purchase correlation key on the receipts read — null on
+  // every ungrouped payment, which is the shape the fixture recorded.
+  'purchase_group_id', 'parent_payment_id'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)

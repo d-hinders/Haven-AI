@@ -16,10 +16,12 @@
  */
 import {
   attachEvidenceProof,
+  backfillPurchaseGroupParent,
   findEvidenceForIntent,
   findEvidenceProofsForIntent,
   findIntentEvidenceSource,
   findIntentForEvidenceScoped,
+  findPurchaseGroupMembers,
   getIntentSettlementFields,
   insertResidueEvent,
   listEvidenceReceiptsForAgent,
@@ -27,6 +29,7 @@ import {
   receiptCursorResolvesForAgent,
   resolveReconciliationForPayment,
   setEvidenceDeliveryReference,
+  setEvidencePurchaseGroup,
   upsertEvidenceBase,
   type IntentSettlementFields,
 } from '../../infra/repositories/machine-payments.js'
@@ -56,6 +59,7 @@ import {
 import { withParties } from '../../openapi/party-model.js'
 import { toCanonicalAddress } from '../transactions/index.js'
 import type { EvidenceBody, MppHandlerResult } from './types.js'
+import { purchaseGroupRoleForResourceUrl, resolvePurchaseGroup } from './purchase-group.js'
 import { isZeroSettlementTxHash } from '@haven_ai/sdk'
 import { deliveryReferenceError } from '@haven_ai/core'
 
@@ -153,6 +157,19 @@ export interface AttachMachinePaymentEvidenceInput {
    * this is the defense in depth for direct SDK/API callers.
    */
   deliveryReference?: string
+  /**
+   * #4534: the merchant's PAID response body, when the agent reports one.
+   * Read by the explicit per-merchant map in `purchase-group.ts` to derive the
+   * purchase correlation key — never scraped generically, and never stored
+   * (only the derived id is). Absent is the normal case.
+   */
+  merchantResponse?: Record<string, unknown>
+  /**
+   * #4534: an agent-supplied purchase group key — its own field, never
+   * overloaded onto `idempotency_key`. Used only when the merchant's own
+   * response supplies no correlation (derivation #2 in the issue).
+   */
+  purchaseGroupId?: string
 }
 
 export interface MachinePaymentEvidenceRow {
@@ -184,6 +201,15 @@ export interface MachinePaymentEvidenceRow {
   protocol_receipt_payload: Record<string, unknown> | null
   merchant_status: number | null
   delivery_reference: string | null
+  /**
+   * #4534: the purchase correlation key. `purchase_group_id` is the merchant's
+   * own invoice/order id (or an agent-supplied group key) shared by every
+   * payment of one purchase; `parent_payment_id` is the purchase payment a fee
+   * call paid for. Both null on an ungrouped payment — which is fed exactly as
+   * before, never withheld.
+   */
+  purchase_group_id: string | null
+  parent_payment_id: string | null
   confirmed_at: string | null
   amount_sek: string | null
   fx_rate_sek: string | null
@@ -538,6 +564,77 @@ async function findProtocolPaymentForEvidence(
   return (payment as PaymentIntentEvidenceRow | null) ?? null
 }
 
+/**
+ * #4534: persist the purchase correlation key on the evidence row.
+ *
+ * Exported as the seam the DB suite drives directly: the derivation and the
+ * parent resolution are the behaviour under test, and they need real rows to
+ * resolve against.
+ *
+ * Resolution order is the issue's: the merchant's own invoice/order id from
+ * the reported response body, then an agent-supplied group key, then nothing.
+ * Nothing is ever guessed from a time window — two purchases from the same
+ * merchant minutes apart would mix, and there is no way to tell afterwards.
+ *
+ * The parent link is resolved from the group's own members: the purchase leg
+ * is the member whose merchant route names the purchase (`invoice/pay`), and
+ * every other member points at it. Because `invoice/create` settles before
+ * `invoice/pay`, a fee row written first has no parent yet — when the purchase
+ * row lands it backfills the group. A member whose route the merchant map does
+ * not recognise stays unlinked rather than guessed.
+ *
+ * Best-effort by contract: the correlation key is descriptive metadata on a
+ * document the feed already produces, so a failure here must never fail the
+ * evidence report (which is the payment's own record). The feed then carries
+ * both fields null, exactly as for an ungrouped payment — never withheld.
+ */
+export async function recordPurchaseGroup(
+  payment: MachinePaymentEvidenceSource,
+  input: Pick<AttachMachinePaymentEvidenceInput, 'agentId' | 'merchantResponse' | 'purchaseGroupId'>,
+): Promise<void> {
+  const verdict = resolvePurchaseGroup({
+    merchantUrl: resourceUrlForPayment(payment),
+    merchantResponse: input.merchantResponse,
+    agentGroupId: input.purchaseGroupId,
+  })
+  if (!verdict) return
+
+  let parentPaymentId: string | null = null
+  if (verdict.role === 'fee') {
+    const members = await findPurchaseGroupMembers(verdict.purchaseGroupId, payment.user_id)
+    const purchase = members.find(
+      (member) => purchaseGroupRoleForResourceUrl(member.resource_url) === 'purchase',
+    )
+    parentPaymentId = purchase?.id ?? null
+  }
+
+  const row = await setEvidencePurchaseGroup({
+    paymentIntentId: payment.id,
+    agentId: input.agentId,
+    purchaseGroupId: verdict.purchaseGroupId,
+    parentPaymentId,
+  })
+
+  // The purchase leg landed: point the group's FEE legs that have no parent
+  // yet at it. This is what makes the link independent of settlement order.
+  // Only fee legs are linked — a member whose route the map does not recognise
+  // stays unlinked rather than guessed, and a second purchase leg (a retried
+  // `invoice/pay`) never becomes a child of the first.
+  if (verdict.role === 'purchase' && row) {
+    const members = await findPurchaseGroupMembers(verdict.purchaseGroupId, payment.user_id)
+    const feeMemberIds = members
+      .filter((member) => member.id !== row.id && member.parent_payment_id === null)
+      .filter((member) => purchaseGroupRoleForResourceUrl(member.resource_url) === 'fee')
+      .map((member) => member.id)
+    await backfillPurchaseGroupParent(
+      verdict.purchaseGroupId,
+      payment.user_id,
+      row.id,
+      feeMemberIds,
+    )
+  }
+}
+
 export async function attachMachinePaymentEvidence(
   input: AttachMachinePaymentEvidenceInput,
 ): Promise<MachinePaymentEvidenceRow | null> {
@@ -660,6 +757,13 @@ export async function attachMachinePaymentEvidence(
       await setEvidenceDeliveryReference(payment.id, input.agentId, normalizedDeliveryReference)
     }
     if (settled.outcome === 'recorded') {
+      // #4534: the correlation key rides the same report — persisted before
+      // the row is echoed, so the caller sees what was stored.
+      try {
+        await recordPurchaseGroup(payment, input)
+      } catch {
+        // Descriptive metadata only — never fail the settlement report.
+      }
       return findEvidenceForIntent<MachinePaymentEvidenceRow>(payment.id, input.agentId)
     }
   }
@@ -691,6 +795,17 @@ export async function attachMachinePaymentEvidence(
   // ladder, for every rail. (Previously the feed fired here, BEFORE the
   // attach — the other rails' only behaviour change is that later timing.)
   await recordMachinePaymentEvidenceBase(payment, { suppressFeed: true })
+
+  // #4534: the purchase correlation key, persisted BEFORE the attach and the
+  // feed fire so the row the attach returns (and the document the feed pushes)
+  // already carries it. Best-effort: descriptive metadata must never fail the
+  // evidence report.
+  try {
+    await recordPurchaseGroup(payment, input)
+  } catch {
+    // The feed then carries both fields null — an ungrouped payment, which is
+    // fed exactly as before and never withheld.
+  }
 
   const proofStatus = proofStatusForAttach(input)
   const evidence = await attachEvidenceProof<MachinePaymentEvidenceRow>({
@@ -985,6 +1100,11 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // Written only from validated input (see `attachMachinePaymentEvidence`),
       // never the merchant body.
       delivery_reference: row.delivery_reference ?? null,
+      // #4534: the purchase correlation key — the merchant's own invoice/order
+      // id (or an agent-supplied group key) and, for a fee call, the purchase
+      // payment it paid for. Both null on an ungrouped payment.
+      purchase_group_id: row.purchase_group_id ?? null,
+      parent_payment_id: row.parent_payment_id ?? null,
       confirmed_at: row.confirmed_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -1071,6 +1191,11 @@ export async function attachEvidenceHandler(
       protocolReceiptPayload: body.protocolReceiptPayload,
       // #3778: the optional non-secret delivery pointer.
       deliveryReference: body.deliveryReference,
+      // #4534: the purchase correlation key — the merchant's paid response
+      // body (read by the explicit per-merchant map) and the agent-supplied
+      // group key. Both optional; absent is the normal case.
+      merchantResponse: body.merchantResponse,
+      purchaseGroupId: body.purchaseGroupId,
     })
 
     if (!evidence) {

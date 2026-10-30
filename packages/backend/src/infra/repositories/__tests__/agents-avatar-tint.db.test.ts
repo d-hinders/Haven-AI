@@ -10,10 +10,10 @@
  *     least-used/lowest number, per user);
  *   - the BEFORE INSERT trigger (a plain insert that does not name the column
  *     still gets a tint — 127 insert sites and old replicas depend on it);
- *   - held / released / inherited (archived and superseded agents free their
- *     tint, pending_approval and revoked agents keep it, and setting
- *     `superseded_by_agent_id` hands the predecessor's tint to the
- *     replacement unless another held agent holds it).
+ *   - held / released (archived agents free their tint, superseded,
+ *     pending_approval and revoked agents keep it — #4448: a superseded agent
+ *     is still visible, so it holds its tint and the replacement is never
+ *     recoloured).
  *
  * The backfill cases run with the column ABSENT (`down()`), insert their
  * fixture, then let `up()` do the backfill — the only way to reproduce rows
@@ -23,6 +23,10 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import db from '../../../db.js'
 import { down, up } from '../../../db/migrations/121_agents_avatar_tint.js'
+import {
+  down as down122,
+  up as up122,
+} from '../../../db/migrations/122_agents_avatar_tint_superseded_holds.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
 
 async function run(step: typeof up): Promise<void> {
@@ -38,13 +42,20 @@ async function run(step: typeof up): Promise<void> {
  * Run `body` with migration 121 reverted, then restore it. `up()` is what
  * performs the backfill, so the fixture inserted inside `body` is exactly the
  * "rows that predate the migration" case.
+ *
+ * 122 sits on top of 121 at head and drops the inheritance trigger, so it is
+ * reverted first and restored last: 121's `up()` re-creates the trigger, and
+ * leaving it there would put the worker schema back at 121 for every test that
+ * follows (#4448).
  */
 async function withColumnAbsent<T>(body: () => Promise<T>): Promise<T> {
+  await run(down122)
   await run(down)
   try {
     return await body()
   } finally {
     await run(up)
+    await run(up122)
   }
 }
 
@@ -243,24 +254,57 @@ describeDb('agents.avatar_tint assignment rules (#4429)', () => {
     expect(await tintOf(other)).toBe(2)
   })
 
-  it('a superseded agent\'s tint is free for the next new agent, and its own stored tint does not change', async () => {
+  it('a superseded agent keeps holding its tint, and the replacement keeps its own', async () => {
     const userId = await insertUser()
     const predecessor = await insertAgent(userId)
     const replacement = await insertAgent(userId)
     expect(await tintsOf([predecessor, replacement])).toEqual([1, 2])
 
-    // The replacement inherits the predecessor's tint (1), releasing its own
-    // (2) for the next new agent. The predecessor's stored tint is untouched.
+    // #4448: supersession is warning-only — the predecessor is still visible
+    // on every agent surface, so it holds its tint and the replacement is
+    // never recoloured.
     await db.query(`UPDATE agents SET superseded_by_agent_id = $1 WHERE id = $2`, [
       replacement,
       predecessor,
     ])
 
-    expect(await tintOf(predecessor)).toBe(1)
-    expect(await tintOf(replacement)).toBe(1)
+    expect(await tintsOf([predecessor, replacement])).toEqual([1, 2])
+
+    // The next new agent takes the first free tint, not the predecessor's.
+    const next = await insertAgent(userId)
+    expect(await tintOf(next)).toBe(3)
+  })
+
+  it('archiving the predecessor releases its tint and leaves the replacement unchanged', async () => {
+    const userId = await insertUser()
+    const predecessor = await insertAgent(userId)
+    const replacement = await insertAgent(userId)
+    await db.query(`UPDATE agents SET superseded_by_agent_id = $1 WHERE id = $2`, [
+      replacement,
+      predecessor,
+    ])
+
+    await db.query(`UPDATE agents SET archived_at = NOW() WHERE id = $1`, [predecessor])
 
     const next = await insertAgent(userId)
-    expect(await tintOf(next)).toBe(2)
+    expect(await tintOf(next)).toBe(1)
+    expect(await tintOf(predecessor)).toBe(1)
+    expect(await tintOf(replacement)).toBe(2)
+  })
+
+  it('superseding several predecessors in one UPDATE leaves the replacement and each predecessor unchanged', async () => {
+    const userId = await insertUser()
+    const first = await insertAgent(userId)
+    const second = await insertAgent(userId)
+    const replacement = await insertAgent(userId)
+    expect(await tintsOf([first, second, replacement])).toEqual([1, 2, 3])
+
+    await db.query(`UPDATE agents SET superseded_by_agent_id = $1 WHERE id = ANY($2)`, [
+      replacement,
+      [first, second],
+    ])
+
+    expect(await tintsOf([first, second, replacement])).toEqual([1, 2, 3])
   })
 
   it('a pending_approval agent and a revoked agent block their tint', async () => {
@@ -273,25 +317,10 @@ describeDb('agents.avatar_tint assignment rules (#4429)', () => {
     expect(await tintsOf([pending, revoked, active])).toEqual([1, 2, 3])
   })
 
-  it('setting superseded_by_agent_id gives the replacement the predecessor\'s tint', async () => {
+  it('setting superseded_by_agent_id does not recolour the replacement', async () => {
     const userId = await insertUser()
     const predecessor = await insertAgent(userId)
     const replacement = await insertAgent(userId)
-
-    await db.query(`UPDATE agents SET superseded_by_agent_id = $1 WHERE id = $2`, [
-      replacement,
-      predecessor,
-    ])
-
-    expect(await tintOf(replacement)).toBe(1)
-  })
-
-  it('does not inherit when another held agent already holds the predecessor\'s tint', async () => {
-    const userId = await insertUser()
-    const predecessor = await insertAgent(userId, { tint: 1 })
-    const replacement = await insertAgent(userId, { tint: 2 })
-    // A third held agent holds tint 1 too, so the replacement must keep 2.
-    const blocker = await insertAgent(userId, { tint: 1 })
 
     await db.query(`UPDATE agents SET superseded_by_agent_id = $1 WHERE id = $2`, [
       replacement,
@@ -300,10 +329,23 @@ describeDb('agents.avatar_tint assignment rules (#4429)', () => {
 
     expect(await tintOf(replacement)).toBe(2)
     expect(await tintOf(predecessor)).toBe(1)
-    expect(await tintOf(blocker)).toBe(1)
   })
 
-  it('inherits only once — a later unrelated update does not recolour the replacement', async () => {
+  it('does not inherit even when no other held agent holds the predecessor\'s tint', async () => {
+    const userId = await insertUser()
+    const predecessor = await insertAgent(userId, { tint: 1 })
+    const replacement = await insertAgent(userId, { tint: 2 })
+
+    await db.query(`UPDATE agents SET superseded_by_agent_id = $1 WHERE id = $2`, [
+      replacement,
+      predecessor,
+    ])
+
+    expect(await tintOf(replacement)).toBe(2)
+    expect(await tintOf(predecessor)).toBe(1)
+  })
+
+  it('a later unrelated update does not recolour the replacement', async () => {
     const userId = await insertUser()
     const predecessor = await insertAgent(userId)
     const replacement = await insertAgent(userId)
@@ -312,11 +354,11 @@ describeDb('agents.avatar_tint assignment rules (#4429)', () => {
       replacement,
       predecessor,
     ])
-    expect(await tintOf(replacement)).toBe(1)
+    expect(await tintOf(replacement)).toBe(2)
 
-    // A rename is not a supersession: the trigger is scoped to
-    // `UPDATE OF superseded_by_agent_id`, so the tint stays put.
+    // A rename is not a supersession, and there is no inheritance trigger to
+    // fire either way (#4448).
     await db.query(`UPDATE agents SET name = 'renamed' WHERE id = $1`, [replacement])
-    expect(await tintOf(replacement)).toBe(1)
+    expect(await tintOf(replacement)).toBe(2)
   })
 })

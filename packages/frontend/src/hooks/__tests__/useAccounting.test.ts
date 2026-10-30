@@ -119,6 +119,24 @@ describe('accounting hooks on the generic routes (#2862)', () => {
     expect(result.current.connections).toEqual([])
   })
 
+  it('disconnect re-lists even when the DELETE rejects, and still rejects (#4538)', async () => {
+    mockApiGet.mockImplementation(routeGet)
+    mockApiDelete.mockRejectedValue(new ApiRequestError('connection_not_found', 404))
+    const { result } = renderHook(() => useAccountingConnections())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const listCalls = () => mockApiGet.mock.calls.filter((c) => c[0] === '/accounting/connections').length
+    const before = listCalls()
+
+    await act(async () => {
+      await expect(result.current.disconnect('fortnox')).rejects.toThrow('connection_not_found')
+    })
+
+    // The row is re-read from the server rather than left rendered as Connected…
+    expect(listCalls()).toBe(before + 1)
+    // …and the failure still reaches the caller, so the error band shows it.
+    expect(result.current.connections).toHaveLength(1)
+  })
+
   it('updateSettings PATCHes …/settings with the snake_case body and swaps the returned row in place', async () => {
     mockApiGet.mockImplementation(routeGet)
     const merged = { ...CONNECTED.connections[0], settings: { suggestedAccount: '6540', autoFeed: false } }

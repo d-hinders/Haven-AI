@@ -91,6 +91,12 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // carried through even when `null` (a real, known answer).
     ...(raw.settlement_scheme !== undefined ? { settlementScheme: raw.settlement_scheme } : {}),
     ...(raw.merchant_settlement_recorded === true ? { merchantSettlementRecorded: true as const } : {}),
+    // #4530: the recorded transaction itself — absent from the raw payload
+    // (older backend, or nothing recorded) stays absent here, so the field
+    // never claims a hash the backend did not record.
+    ...(typeof raw.merchant_settlement_tx_hash === 'string'
+      ? { merchantSettlementTxHash: raw.merchant_settlement_tx_hash }
+      : {}),
     // #3494: additive, mirrors the backend's own `status === 'failed'` gate —
     // absent from the raw payload (older backend, or any non-failed status)
     // stays absent here.
@@ -204,6 +210,12 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
   }
   if ('delivery_reference' in raw) {
     receipt.deliveryReference = raw.delivery_reference ?? null
+  }
+  if ('purchase_group_id' in raw) {
+    receipt.purchaseGroupId = raw.purchase_group_id ?? null
+  }
+  if ('parent_payment_id' in raw) {
+    receipt.parentPaymentId = raw.parent_payment_id ?? null
   }
 
   return receipt

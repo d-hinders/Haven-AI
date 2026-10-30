@@ -220,7 +220,8 @@ export function withDiscoveryGuidance(err: unknown, merchantUrl: string, discove
     ? `Same-origin discovery resolved the same URL (${discovered}), which still did not answer 402.`
     : `No same-origin discovery document was found at /.well-known/haven-demo-merchant or /. ` +
       `If ${merchantUrl} is a base merchant URL, pass the exact MCP endpoint instead (often <origin>/mcp).`
-  return new HavenApiError(`${err.message} ${guidance}`, err.statusCode ?? 400)
+  // #4470: the cause rides the rebuild, or a marked error reads by status again.
+  return new HavenApiError(`${err.message} ${guidance}`, err.statusCode ?? 400, undefined, undefined, err.failureCause)
 }
 
 /**
@@ -317,6 +318,9 @@ export async function quoteMcpToolCall(
           `${retryErr.message} (at the DISCOVERED endpoint ${discovered}, ` +
             `resolved from ${inputUrl} via the merchant discovery document)`,
           retryErr.statusCode ?? 400,
+          undefined,
+          undefined,
+          retryErr.failureCause,
         )
       }
       throw retryErr
@@ -513,6 +517,33 @@ export function coerceJsonField(input: unknown, field: string): unknown {
   }
 }
 
+/**
+ * #4470: Haven got the write but its answer never arrived (a timeout, an
+ * unreachable backend, an unreadable body). The submission may have taken
+ * effect — a re-sent erc7710 settle 409s and its payment_header cannot be
+ * recovered (`modules/x402/settle.ts`) — so the step is the status read for
+ * this payment id, never a retry and never a new payment. The id comes from
+ * the caller: transport errors carry none.
+ */
+function noAnswerOnSubmitErrorFor(err: unknown, paymentId: string): HostedToolError | null {
+  if (!(err instanceof HavenApiError) || err.failureCause?.kind !== 'no_answer') return null
+  return new HostedToolError({
+    code: 'NO_ANSWER_OUTCOME_UNKNOWN',
+    message:
+      `Haven did not answer this submission, so whether it took effect is unknown. Do not ` +
+      `submit it again and do not create a new payment: read haven_get_payment_status for ` +
+      `this payment_id first. ${err.message}`,
+    statusCode: err.statusCode,
+    paymentId,
+    nextStep: refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_get_payment_status',
+      nextArguments: { payment_id: paymentId },
+    }),
+    suggestedTool: 'haven_get_payment_status',
+  })
+}
+
 export async function submitSignatureWithExpiryMapping(
   haven: HavenClient,
   paymentId: string,
@@ -521,7 +552,7 @@ export async function submitSignatureWithExpiryMapping(
   try {
     return await haven.submitSignature(paymentId, signature)
   } catch (err) {
-    const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
+    const mapped = (await paymentWindowExpiredErrorFor(haven, paymentId, err)) ?? noAnswerOnSubmitErrorFor(err, paymentId)
     if (mapped) throw mapped
     throw err
   }
@@ -546,7 +577,7 @@ export async function submitErc7710WithExpiryMapping(
   try {
     return await haven.submitX402Erc7710(paymentId, signature)
   } catch (err) {
-    const mapped = await paymentWindowExpiredErrorFor(haven, paymentId, err)
+    const mapped = (await paymentWindowExpiredErrorFor(haven, paymentId, err)) ?? noAnswerOnSubmitErrorFor(err, paymentId)
     if (mapped) throw mapped
     throw err
   }

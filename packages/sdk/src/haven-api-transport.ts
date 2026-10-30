@@ -140,12 +140,20 @@ export class HavenApiTransport {
       return data as T
     } catch (err) {
       if (err instanceof HavenApiError) throw err
+      // #4470: neither of these is an answer — the request may or may not
+      // have taken effect — so they carry `no_answer` and the method, and a
+      // consumer decides retry-or-check from that, not from 408/0. A server
+      // that ANSWERS 408 with a JSON body is thrown above, with no cause.
+      const failureCause = { kind: 'no_answer', method } as const
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new HavenApiError(`Request to ${path} timed out`, 408)
+        throw new HavenApiError(`Request to ${path} timed out`, 408, undefined, undefined, failureCause)
       }
       throw new HavenApiError(
         `Request to ${path} failed: ${err instanceof Error ? err.message : String(err)}`,
         0,
+        undefined,
+        undefined,
+        failureCause,
       )
     } finally {
       clearTimeout(timeout)

@@ -1004,6 +1004,10 @@ describe('machine payment routes', () => {
         delivery_reported_at: null,
         // #3778: no reference reported for this seed — null, not absent.
         delivery_reference: null,
+        // #4534: no purchase correlation reported for this seed — null, not
+        // absent. An ungrouped payment is fed exactly as before.
+        purchase_group_id: null,
+        parent_payment_id: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
         updated_at: '2026-05-15T12:00:01.000Z',

@@ -5409,6 +5409,8 @@ export type components = {
             settlement_scheme?: ("eip3009" | "erc7710") | null;
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
             merchant_settlement_recorded?: boolean;
+            /** @description The merchant settlement transaction Haven recorded and verified on-chain (#4530) — the transaction `merchant_settlement_recorded` reports, named so a status read can confirm WHICH one was recorded (the settlement sweep records one the agent never reported). Present only when `merchant_settlement_recorded` is; omitted otherwise, and never the merchant's unverified echo. A public on-chain transaction id, not a secret. */
+            merchant_settlement_tx_hash?: string;
             /** @description A bounded, redacted cause for a `failed` payment — the stored error message (already scrubbed of vendor secrets before it was written), capped so a viem/bundler dump never rides this response. Present (possibly `null`, when no message was recorded) only when `status` is `failed`; omitted on every other status. */
             failure_reason?: string | null;
             /** @description The budget delegation that metered this payment (#1059), recorded at authorize. The settle summary keys its allowance rows on this — the budget that PAID, never a re-derived (token, payee) first match. Omitted on the legacy rail and on intents predating migration 053. */
@@ -5902,6 +5904,8 @@ export type components = {
             delivery_note?: string | null;
             /** Format: date-time */
             delivery_reported_at?: string | null;
+            purchase_group_id?: string | null;
+            parent_payment_id?: string | null;
             confirmed_at?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -5933,6 +5937,10 @@ export type components = {
                 [key: string]: unknown;
             };
             deliveryReference?: string;
+            merchantResponse?: {
+                [key: string]: unknown;
+            };
+            purchaseGroupId?: string;
         };
         MachinePaymentDeliveryQualityRequest: {
             /** @enum {string} */

@@ -208,8 +208,12 @@ export function throwPaymentStateError(
     throw new HavenPaymentStateError(state.message, statusCode, state, raw)
   }
 
+  // #4470: the pending_approval throw and the 5xx fallback are marked
+  // deterministic, so the hosted step does not read their status: a 202 here
+  // is not "refused as made (4xx)", and `failed` (or a status this SDK does
+  // not know) is not "transient, retry once" for being mapped to 502.
   if (raw.status === 'pending_approval') {
-    throw new HavenApiError(
+    throw HavenApiError.deterministic(
       `${label} exceeds the agent's on-chain budget and was declined; no approval is pending and none will arrive (payment_id: ${raw.payment_id}).`,
       statusCode,
       raw,
@@ -226,5 +230,6 @@ export function throwPaymentStateError(
 
   const paymentId = raw.payment_id ? ` (payment_id: ${raw.payment_id})` : ''
   const message = raw.error ?? `${label} ${raw.status}${paymentId}`
+  if (statusCode >= 500) throw HavenApiError.deterministic(message, statusCode, raw)
   throw new HavenApiError(message, statusCode, raw)
 }

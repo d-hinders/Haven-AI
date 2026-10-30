@@ -843,13 +843,13 @@ describe('agent archive routes (#1401)', () => {
   it('unarchive succeeds, and is an idempotent no-op on a non-archived agent', async () => {
     const app = await buildApp()
     primeDb([
-      [/UPDATE agents\s+SET archived_at = NULL/, { rows: [{ id: 'agent-1' }] }],
+      [/UPDATE agents a\s+SET archived_at = NULL/, { rows: [{ id: 'agent-1' }] }],
     ])
     const first = await app.inject({ method: 'POST', url: '/agents/agent-1/unarchive' })
     expect(first.statusCode).toBe(200)
 
     primeDb([
-      [/UPDATE agents\s+SET archived_at = NULL/, { rows: [] }],
+      [/UPDATE agents a\s+SET archived_at = NULL/, { rows: [] }],
       [/SELECT id FROM agents WHERE id = \$1 AND user_id = \$2/, { rows: [{ id: 'agent-1' }] }],
     ])
     const second = await app.inject({ method: 'POST', url: '/agents/agent-1/unarchive' })

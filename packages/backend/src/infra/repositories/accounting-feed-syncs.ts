@@ -25,6 +25,10 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import {
+  DIRECT_PAYMENT_OUTSIDE_ADDRESS_SQL,
+  DIRECT_PAYMENT_RAIL_SQL,
+} from './direct-payment-accounting.js'
 
 export type { Executor }
 
@@ -271,16 +275,47 @@ export async function listSyncsForPaymentIds(
 
 // ── Backfill selection (moved from modules/accounting/feed-orchestrator.ts, #999)
 
-export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) AS payment_id
-     FROM machine_payment_evidence mpe
-     LEFT JOIN accounting_feed_syncs s
-       ON s.user_id = mpe.user_id AND s.provider = $2
-      AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
-      AND s.status = 'pushed'
-      AND s.document_kind = 'underlag'
-     WHERE mpe.user_id = $1 AND (mpe.amount_sek IS NOT NULL OR mpe.fx_rates IS NOT NULL) AND s.id IS NULL
-       AND ($4::timestamptz IS NULL OR COALESCE(mpe.confirmed_at, mpe.created_at) >= $4::timestamptz)
-     ORDER BY COALESCE(mpe.confirmed_at, mpe.created_at) DESC
+// #4533: TWO sources, one selection. The evidence branch is the pre-#4533
+// source (protocol payments). The direct branch reads `payment_intents`
+// itself, because a direct payment never gets an evidence row — that is what
+// makes a pre-fix direct payment reachable by the backfill at all. The
+// branches are disjoint by rail (see `direct-payment-accounting.ts`), so
+// `UNION ALL` cannot enumerate one payment twice.
+//
+// "FX-ready" for a direct payment is a book-time capture in ANY of the three
+// fiat values `confirmSubmittedIntent` writes — the same either-form test the
+// evidence branch applies to `amount_sek`/`fx_rates` (#2877).
+//
+// `document_kind = 'underlag'` (#4532) is part of the pushed-row test in BOTH
+// branches: a payment whose only pushed row is a different document kind is
+// still waiting for its underlag.
+export const LIST_UNPUSHED_PAYMENT_IDS_SQL = `SELECT u.payment_id
+     FROM (
+       SELECT COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT) AS payment_id,
+              COALESCE(mpe.confirmed_at, mpe.created_at) AS settled_at
+       FROM machine_payment_evidence mpe
+       LEFT JOIN accounting_feed_syncs s
+         ON s.user_id = mpe.user_id AND s.provider = $2
+        AND s.payment_id = COALESCE(mpe.payment_intent_id::TEXT, mpe.approval_request_id::TEXT)
+        AND s.status = 'pushed'
+        AND s.document_kind = 'underlag'
+       WHERE mpe.user_id = $1 AND (mpe.amount_sek IS NOT NULL OR mpe.fx_rates IS NOT NULL) AND s.id IS NULL
+       UNION ALL
+       SELECT pi.id::TEXT AS payment_id, COALESCE(pi.confirmed_at, pi.created_at) AS settled_at
+       FROM payment_intents pi
+       LEFT JOIN accounting_feed_syncs s
+         ON s.user_id = pi.user_id AND s.provider = $2
+        AND s.payment_id = pi.id::TEXT
+        AND s.status = 'pushed'
+        AND s.document_kind = 'underlag'
+       WHERE pi.user_id = $1
+         AND (pi.sek_value IS NOT NULL OR pi.usd_value IS NOT NULL OR pi.eur_value IS NOT NULL)
+         AND s.id IS NULL
+         AND ${DIRECT_PAYMENT_RAIL_SQL}
+         AND ${DIRECT_PAYMENT_OUTSIDE_ADDRESS_SQL}
+     ) u
+     WHERE ($4::timestamptz IS NULL OR u.settled_at >= $4::timestamptz)
+     ORDER BY u.settled_at DESC
      LIMIT $3`
 
 /**

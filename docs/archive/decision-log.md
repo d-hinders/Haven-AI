@@ -35,6 +35,8 @@ named where they belong below.
 
 | Date | Decision | Refs |
 |---|---|---|
+| 2026-10-29 | Accounting enabled in production for every account; Accounted first, Fortnox later | #4497 (supersedes #2858's dev-only exposure, except Fortnox) |
+| 2026-10-29 | A superseded agent keeps its tint until it is archived, and a replacement is never recoloured — reverses the inheritance half of #4428 (a) | #4448 (supersedes #4428's inheritance half) |
 | 2026-10-26 | Agents carry a stored tint, unique among a user's first six; merchants and contacts keep the name hash | #4428 |
 | 2026-10-21 | The pending-promotion digest issue is retired; pending work is the `main...dev` compare | #666 |
 | 2026-10-17 | Phone navigation floats: the tab bar is a floating pill, and the More sheet a floating card that covers it with its own ✕; the bar labels `/transactions` "Activity" | #4058 (supersedes #4053's "stops at the bar's top edge") |
@@ -61,6 +63,126 @@ named where they belong below.
 
 ---
 
+## 2026-10-29 — accounting enabled in production for every account; Accounted first, Fortnox later (#4497)
+
+Owner decisions, 2026-10-27, revised 2026-10-29 in session. The accounting
+feed is **on in production for every account**, with **Accounted as the only
+connectable provider**. Fortnox stays off in production and is enabled later
+under #2876. This is the production-exposure decision that #2876 item (6)
+reserved, taken for Accounted and the demo; **#2876 stays open for Fortnox in
+production** — the prod connect itself, a prod Fortnox app, service accounts,
+consent webhooks and sysadmin copy.
+
+**The decisions, as revised:**
+
+1. **Every production account gets accounting.**
+   `HAVEN_ACCOUNTING_ENTITLEMENT_MODE=all`, the same as dev, with no
+   `account_entitlements` row written or read. This replaces an earlier
+   same-day choice of "demo account only", which would have let every user
+   *connect* anyway, because the connection routes check only
+   `hosted && enabled` (`middleware/accountingFeed.ts`, #2861). "No paid tiers
+   yet" (epic #2858) stands.
+2. **Accounted first; Fortnox in production later** (revised 2026-10-29: the
+   demo runs on Accounted). Fortnox is switched off on production by unsetting
+   `FORTNOX_REDIRECT_URI`; enabling it later is #2876's work. Superseded:
+   "both providers, Fortnox and Accounted" (2026-10-27).
+3. **Fortnox app: deferred with Fortnox.** The 2026-10-27 plan was to reuse the
+   dev Fortnox app for production rather than register a separate one. That
+   choice is now made when Fortnox is enabled, under #2876. Production keeps
+   the dev app's client id and secret as they are today, and they stay inert
+   while the redirect URI is unset.
+4. **The demo is this week.** Do not rotate `JWT_SECRET` (#4486 step 2) in the
+   hour before it. The rotation ends every dashboard session.
+5. **Paid tiers come later, once there are real users.** Until then accounting
+   is free for every account. Entitlement mode `granted` and the
+   `account_entitlements` table stay in the code for that later tier work;
+   nothing here removes them.
+6. **Promote `dev` → `main` first** (2026-10-29). Production deploys from
+   `main`, which did not yet carry the Accounted webhook verification fix
+   (#4440) or the Settings Business tab (#4382, #4367). The promotion ran in
+   its own session, and the flag was switched on only after it was verified on
+   production.
+
+**Supersession.** This supersedes the 2026-09-11 entry *accounting connections:
+self-serve, provider-generic, dev-only (#2858)* — both its "every dev user is
+entitled" scope and its "prod shows the feature as *Coming soon*; exposing it
+needs a new manual decision (#2876)" rule — for every provider except Fortnox,
+which is still off in production. That entry stays as written.
+
+**Measured on production, 2026-10-29.** `GET /accounting/feed/status` answers
+`enabled: true, entitled: true, entitlementMode: "all"` for two different
+accounts. `GET /accounting/providers` lists `accounted` `configured: true` and
+`fortnox` `configured: false`, and
+`POST /accounting/connections/fortnox/connect-url` answers 503
+`PROVIDER_NOT_CONFIGURED`. One Accounted connection is `connected` and the
+active destination, with `base_currency` null (it books in SEK by the default),
+and its three webhook subscriptions are `verified`. The Bitrefill rehearsal
+(step 8 of #4497) is still pending; its record lives on the issue, not here.
+
+**Rollback.** Unset `HAVEN_ACCOUNTING_ENABLED` and redeploy: the feed, the
+connection routes and the retry sweep all switch off. Never unset or change
+`HAVEN_SECRETS_KEY` once a connection row exists — the stored secrets become
+undecryptable.
+
+The rules were restated in `docs/operations/accounting-feed.md` (the
+Configuration table, the two off states, ledger currency and key rotation),
+`docs/product/accounting-connections.md`, `docs/operations/dev-environment.md`
+and `.env.dev.example`.
+
+---
+
+## 2026-10-29 — a superseded agent keeps its tint until it is archived (#4448)
+
+Owner decision, 2026-10-29, on finding B1 of the second spec review on #4428.
+It **reverses the inheritance half** of the 2026-10-26 decision above; the rest
+of that decision stands.
+
+The 2026-10-26 rule treated a superseded agent (`superseded_by_agent_id IS NOT
+NULL`) as having released its tint, and handed that tint to the replacement.
+Both halves rested on a premise that does not hold: **a superseded agent is not
+hidden anywhere.** Outside migrations and tests the column is read in two
+places only — the writer (`MARK_AGENTS_SUPERSEDED_SQL`) and
+`FIND_AGENT_SUPERSESSION_SQL`, which serves the `superseded_by` warning to the
+stale agent on its own agent-authenticated reads. No agent list read filters on
+it: the dashboard preview filters by status only, `GET /agents` has no filter,
+and the analytics overview filters by `user_id` only. The frontend never reads
+it. Supersession is warning-only: `--replace` revokes nothing, and the
+superseded agent keeps its key, status and on-chain budget until the owner
+removes it.
+
+So after `POST /agent-connection-setups/{setupId}/retired-agents` the
+replacement and its still-visible predecessor wore the same colour side by
+side — on the dashboard, on `/agents`, in the account Agents tab and in
+analytics. That is exactly the collision epic #4428 exists to remove.
+
+The rule now:
+
+- **A superseded agent holds its tint.** Held means `archived_at IS NULL`;
+  there is no supersession term. Only archiving releases a tint. Nothing is
+  hidden, so the old agent stays easy to find and revoke.
+- **No inheritance.** The replacement keeps the tint it got at creation and is
+  never recoloured. Inheritance would recolour an agent while it is visible,
+  which is the rule the whole decision rests on.
+- **History exception, accepted.** An archived agent that still appears in a
+  historical view (Analytics with activity in the range, `/agents` with
+  Archived shown, the agent panel's removed list) may repeat a released tint
+  next to the agent that took it. Documented in
+  `docs/product/design-system.md`; no code changes for it.
+- **Backfill.** Migration 122 removes the collisions 121 left behind — an
+  inherited pair, and a predecessor whose released tint a later agent took —
+  among the non-archived agents of every user with six or fewer such agents,
+  recolouring the newer agent of each pair.
+- **Unarchive.** If the agent's stored tint is now held by another
+  non-archived agent of the same user, it gets a free tint on unarchive;
+  otherwise it keeps its tint. Only an agent that was hidden is recoloured.
+
+Direction (i) — hiding superseded agents — was not taken. One reason is the
+installed CLI: `@haven_ai/cli` reads `GET /agents` for `haven agents list` and
+for `secret-check`'s key-backed addresses, and hiding a superseded agent there
+would be a silent false negative in a shipped security check.
+
+---
+
 ## 2026-10-26 — agents carry a stored tint, unique among a user's first six (#4428)
 
 Owner decision, 2026-10-26: an agent's colour is **assigned when the agent is
@@ -84,7 +206,9 @@ The rule now:
   needs-setup and revoked agents hold theirs; archived (`archived_at`) and
   superseded (`superseded_by_agent_id`) agents release theirs, so a new agent
   can take it. A replacement takes over its predecessor's tint when the
-  supersession is recorded.
+  supersession is recorded. *(Superseded 2026-10-29 by #4448 — see the entry
+  above: a superseded agent holds its tint until it is archived, and there is
+  no inheritance.)*
 - **More than six agents.** The tint held by the fewest of the user's agents,
   lowest number on ties. Repeats are unavoidable past six, and the name stays
   in the legend and tooltip.

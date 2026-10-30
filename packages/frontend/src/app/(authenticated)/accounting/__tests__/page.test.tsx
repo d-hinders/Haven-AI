@@ -27,11 +27,31 @@ vi.mock('@/hooks/useAccountingFeed', async () => {
 })
 // `ComingSoon` lists the registry's providers; the page tests only care that
 // the state renders, so the provider listing is stubbed to a fixed answer.
+// #4520: the page also reads the descriptor list (`useAccountingProviders`) —
+// `capabilities.verify` is what decides "record-only" where the list is to
+// hand, so the stub carries the real capability shapes.
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
+  const providers = [
+    {
+      id: 'fortnox', displayName: 'Fortnox', authKind: 'oauth2', availability: 'live', configured: true,
+      requiredScopes: ['bookkeeping', 'companyinformation', 'archive'],
+      capabilities: { attachments: true, verify: true, revoke: true, companyInfo: true },
+    },
+    {
+      id: 'accounted', displayName: 'Accounted', authKind: 'api_key', availability: 'live', configured: true,
+      requiredScopes: [],
+      capabilities: { attachments: false, verify: false, revoke: false, companyInfo: true },
+    },
+    {
+      id: 'igdrasil', displayName: 'Igdrasil', authKind: 'oauth2', availability: 'live', configured: true,
+      requiredScopes: ['companies:read', 'vouchers:write'],
+      capabilities: { attachments: false, verify: false, revoke: true, companyInfo: true },
+    },
+  ]
   return {
     ...actual,
-    api: { ...actual.api, get: vi.fn().mockResolvedValue({ providers: [{ id: 'fortnox', displayName: 'Fortnox' }] }) },
+    api: { ...actual.api, get: vi.fn().mockResolvedValue({ providers }) },
   }
 })
 
@@ -332,6 +352,57 @@ describe('/accounting: an Accounted row (#3018)', () => {
     expect(await screen.findByText(/Evidence archived in Accounted — document 3f1c7a52/)).toBeInTheDocument()
     // The sentence never reads as a provider read-back: no "registered in",
     // no invoice wording.
+    expect(screen.queryByText(/Registered in/)).toBeNull()
+    expect(screen.queryByText(/invoice/i)).toBeNull()
+  })
+})
+
+/**
+ * The Igdrasil row on the feed page (#4520): the second record-only connector
+ * writes `igdrasil:document:<id>` (#4518). Its identity line names Igdrasil
+ * (not Accounted), the check button names Igdrasil, and a verify answer reads
+ * from Haven's own record — provider-named, never a read-back.
+ */
+describe('/accounting: an Igdrasil row (#4520)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+  })
+
+  const igdrasilRow = {
+    id: 's3', user_id: 'u1', provider: 'igdrasil', payment_id: 'pay_3',
+    external_ref: 'igdrasil:document:doc_7f3a91',
+    status: 'pushed' as const, error: null, attempts: 1,
+    created_at: '2026-10-29T09:00:00.000Z', updated_at: '2026-10-29T09:00:00.000Z',
+  }
+
+  function withIgdrasilRow(overrides: Partial<AccountingFeedStatus> = {}) {
+    withStatus({ syncs: [igdrasilRow], ...overrides })
+  }
+
+  it('the identity line names the Igdrasil document and the check button says Check in Igdrasil', () => {
+    withIgdrasilRow()
+    renderPage()
+    expect(screen.getByText('Igdrasil document doc_7f3a91')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check in Igdrasil' })).toBeInTheDocument()
+    // The Accounted-named copy must not leak onto another record-only provider.
+    expect(screen.queryByText(/Accounted document/)).toBeNull()
+  })
+
+  it('the verify verdict reads from the record, provider-named, never a read-back (#4520)', async () => {
+    withIgdrasilRow()
+    mockFeed.mockReturnValue(feed({
+      status: feedStatus({ syncs: [igdrasilRow] }),
+      verify: vi.fn().mockResolvedValue({
+        registered: true, missing: null, booked: null, cancelled: null,
+        document_ref: 'doc_7f3a91', invoice_number: null,
+        voucher: null, invoice_date: null, total: 10.42,
+        checked_at: '2026-10-29T09:05:00.000Z',
+      }),
+    }))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Check in Igdrasil' }))
+    expect(await screen.findByText(/Evidence archived in Igdrasil — document doc_7f3a/)).toBeInTheDocument()
     expect(screen.queryByText(/Registered in/)).toBeNull()
     expect(screen.queryByText(/invoice/i)).toBeNull()
   })

@@ -217,8 +217,14 @@ export function useAccountingConnections() {
   }, [load])
 
   const disconnect = useCallback(async (provider: string) => {
-    await api.delete(`/accounting/connections/${encodeURIComponent(provider)}`)
-    await load()
+    try {
+      await api.delete(`/accounting/connections/${encodeURIComponent(provider)}`)
+    } finally {
+      // Re-list even when the DELETE rejects: the row must not stay rendered as
+      // Connected after a failed request (#4538). The rejection still propagates
+      // to the caller, so the card's error band shows the real failure.
+      await load()
+    }
   }, [load])
 
   const activate = useCallback(async (provider: string) => {

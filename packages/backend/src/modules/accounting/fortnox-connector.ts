@@ -141,6 +141,20 @@ export function supplierNameFor(tx: FeedTransaction): string {
 }
 
 /**
+ * Fortnox's Comments field rejects characters outside this set (error 2000359,
+ * found live in the sandbox). The #4532 description carries a route with `/`
+ * separators, which the field refuses — folded to `-` rather than dropped, so
+ * `invoice/pay` still reads as a route instead of two words.
+ */
+function fortnoxSafeText(value: string): string {
+  return value
+    .replace(/\//g, '-')
+    .replace(/[^A-Za-z0-9 .,()-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * Human description carried on the invoice (token amount + source).
  * Fortnox's Comments field rejects several non-alphanumeric characters
  * ("Värdet innehåller ej tillåtna tecken", error 2000359 — found live in the
@@ -172,6 +186,11 @@ export function feedDescription(tx: FeedTransaction): string {
     tx.amount != null
       ? `Amount ${tx.amount} ${tx.token} (${tx.amountAtomic} atomic).`
       : `Amount ${tx.amountAtomic} ${tx.token} atomic.`,
+    // #4532: what KIND of transaction this is — the same line the receipt
+    // underlag carries, so the comment and the attached document agree. Placed
+    // before the booked hash for the same reason the hash is placed before
+    // `Resource`: the 512-character slice cuts from the end.
+    tx.description ? `${fortnoxSafeText(tx.description)}.` : null,
     bookedTx,
     resourceHost ? `Resource ${resourceHost}.` : null,
     `Haven payment ${tx.paymentId}.`,

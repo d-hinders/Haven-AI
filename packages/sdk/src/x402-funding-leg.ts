@@ -2,6 +2,8 @@ import { exact } from 'x402/schemes'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
   AgentPaymentNextAction,
+  FundingConfirmationUnknownError,
+  FundingRevertedError,
   HavenApiError,
   HavenSigningError,
   X402AlreadySettledError,
@@ -301,7 +303,7 @@ export class X402FundingLeg {
 
     // 3. Sign the hash
     if (!raw.sign_data?.hash) {
-      throw new HavenApiError('No sign_hash returned from x402/authorize', 500, raw)
+      throw HavenApiError.deterministic('No sign_hash returned from x402/authorize', 500, raw)
     }
     // #3375: the recipient pin's asset and amount come from the option this
     // call is paying, the same values sent in the `/x402` body above — never
@@ -468,6 +470,11 @@ export class X402FundingLeg {
    * Skipped when `chainRpcs` does not include the chain; in that case Haven's
    * backend has already confirmed on-chain submission and callers accept the
    * small propagation window as a trade-off for not configuring an RPC URL.
+   *
+   * #4470: the two outcomes are typed apart. ethers 6 `waitForTransaction`
+   * REJECTS on its timeout (and on an RPC failure) rather than resolving
+   * null, so that path is `FundingConfirmationUnknownError` — funding may
+   * have moved. A mined receipt with `status !== 1` is `FundingRevertedError`.
    */
   async waitForFundingTx(
     txHash: string | undefined,
@@ -478,14 +485,18 @@ export class X402FundingLeg {
     const rpcUrl = this.chainRpcs[chainId]
     if (!rpcUrl) return
     const provider = createJsonRpcProvider(rpcUrl)
-    const onChainReceipt = await provider.waitForTransaction(txHash, 1, timeoutMs)
-    if (!onChainReceipt || onChainReceipt.status !== 1) {
-      throw new HavenApiError(
-        'Funding tx did not confirm on-chain within the timeout window.',
-        500,
-        { txHash, chainId },
-      )
+    let onChainReceipt: Awaited<ReturnType<typeof provider.waitForTransaction>>
+    try {
+      onChainReceipt = await provider.waitForTransaction(txHash, 1, timeoutMs)
+    } catch (err) {
+      throw new FundingConfirmationUnknownError(txHash, chainId, err instanceof Error ? err.message : String(err))
     }
+    // Typed as nullable; ethers 6.16 resolves only with a receipt, so this
+    // arm is defensive and answers the same as the rejection above.
+    if (!onChainReceipt) {
+      throw new FundingConfirmationUnknownError(txHash, chainId, 'no receipt within the timeout window')
+    }
+    if (onChainReceipt.status !== 1) throw new FundingRevertedError(txHash, chainId)
   }
 
   /**

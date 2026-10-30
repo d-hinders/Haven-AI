@@ -194,6 +194,9 @@ describe('payX402Quote forwards taskBudgetId to /x402 (#3378)', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ available: false, reason: 'disabled' }), { status: 200 }))
     // 4. The merchant's paid answer.
     fetchMock.mockResolvedValueOnce(new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    // 5. The evidence posts that follow. Unmocked they reached the real
+    // network, whose non-answer #4470 classes `retryable` instead of `refused`.
+    fetchMock.mockImplementation(async () => new Response('{}', { status: 202 }))
 
     const client = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: DELEGATE_KEY, baseUrl: 'https://haven.example' })
     const quote = await client.quoteX402(paymentRequired.resource.url)

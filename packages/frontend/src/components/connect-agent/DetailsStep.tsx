@@ -55,7 +55,7 @@ export function DetailsStep({
   return (
     <>
       <div>
-        <label htmlFor="connect-agent-name" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+        <label htmlFor="connect-agent-name" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
           Agent name
         </label>
         <Input
@@ -67,8 +67,8 @@ export function DetailsStep({
         />
       </div>
       <div>
-        <label htmlFor="connect-agent-description" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
-          Description <span className="normal-case">(optional)</span>
+        <label htmlFor="connect-agent-description" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+          Description (optional)
         </label>
         <Textarea
           id="connect-agent-description"

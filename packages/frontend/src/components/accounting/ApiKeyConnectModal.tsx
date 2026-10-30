@@ -115,6 +115,7 @@ export function ApiKeyConnectModal({ open, providerName, onClose, onConnect }: A
       subtitle={copy.intro(providerName)}
       closeOnBackdrop={!busy}
       closeOnEscape={!busy}
+      closeButtonDisabled={busy}
       panelTestId={API_KEY_MODAL_TEST_ID}
       footer={
         <>

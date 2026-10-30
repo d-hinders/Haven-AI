@@ -550,6 +550,7 @@ export function CompanyDetailsCard() {
           title={copy.remove.confirmTitle}
           closeOnBackdrop={!deleting}
           closeOnEscape={!deleting}
+          closeButtonDisabled={deleting}
           footer={
             <>
               <Button

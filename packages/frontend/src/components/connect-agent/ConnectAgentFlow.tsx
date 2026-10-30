@@ -37,6 +37,13 @@ export interface ConnectAgentFlowParts {
   steps: ReactNode
   /** The *Agent name* input; the modal hands it to `Modal` as its open-time focus. */
   nameInputRef: RefObject<HTMLInputElement | null>
+  /**
+   * The current step's `tabIndex={-1}` region — the flow's own "focus here,
+   * not in a text field" target. The modal hands it to `Modal` as its
+   * open-time focus on a coarse pointer (#4562), so a phone does not open its
+   * keyboard on a dialog the user has not asked to type into.
+   */
+  stepRegionRef: RefObject<HTMLDivElement | null>
   /** Read once at mount (#3687): a touch-first pointer never auto-focuses the name input. */
   coarsePointer: boolean
 }
@@ -193,5 +200,5 @@ export function ConnectAgentFlow({
       </div>
     )
 
-  return <>{children({ flow, progress, steps, nameInputRef, coarsePointer })}</>
+  return <>{children({ flow, progress, steps, nameInputRef, stepRegionRef, coarsePointer })}</>
 }

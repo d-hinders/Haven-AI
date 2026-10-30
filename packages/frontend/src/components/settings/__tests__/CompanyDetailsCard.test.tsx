@@ -731,6 +731,15 @@ describe('CompanyDetailsCard — delete', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
 
+    // #4562: the header ✕ is on by default now, and this dialog's `onClose` is
+    // unguarded — only the backdrop and Escape check `!deleting`. Without
+    // `closeButtonDisabled={deleting}` the ✕ would be the one way to close it
+    // mid-delete.
+    const closeButton = within(dialog).getByRole('button', { name: 'Close' })
+    expect(closeButton).toBeDisabled()
+    fireEvent.click(closeButton)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
     resolveDelete({ ok: true })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })

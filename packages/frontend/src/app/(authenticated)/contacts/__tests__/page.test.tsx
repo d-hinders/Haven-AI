@@ -110,6 +110,36 @@ describe('ContactsPage', () => {
     })
   })
 
+  it('disables the header close button while a contact is saving (#4562)', async () => {
+    let resolveAdd!: (value: unknown) => void
+    setupContacts({
+      addContact: vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAdd = resolve
+          }),
+      ),
+    })
+
+    render(<ContactsPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add your first contact' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add contact' })
+    fireEvent.change(screen.getByLabelText('Contact name'), { target: { value: 'Acme Services' } })
+    fireEvent.change(screen.getByLabelText('Recipient address'), { target: { value: CONTACT.address } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add contact' }))
+
+    // The ✕ is on by default now; this dialog guards Escape and the backdrop
+    // with `!saving`, so the ✕ has to be guarded too.
+    const closeButton = within(dialog).getByRole('button', { name: 'Close' })
+    await waitFor(() => expect(closeButton).toBeDisabled())
+    fireEvent.click(closeButton)
+    expect(screen.getByRole('dialog', { name: 'Add contact' })).toBeInTheDocument()
+
+    resolveAdd(CONTACT)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add contact' })).not.toBeInTheDocument())
+  })
+
   it('renders saved recipients with visible row actions', () => {
     setupContacts({ contacts: [CONTACT] })
 

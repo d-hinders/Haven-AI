@@ -782,6 +782,9 @@ describe('x402 helpers', () => {
         retry_body: JSON.stringify({ error: 'Missing session ID' }),
         merchant_to: accepted.payTo,
         delegate_to: delegateAddress,
+        // #4552: the merchant's `error` here is a sentence, not a code, so the
+        // field is present and null — never absent.
+        merchant_reported_error: null,
       },
     })
   })

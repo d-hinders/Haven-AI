@@ -591,11 +591,15 @@ const response = await fetch('https://paid-api.example.com/data', {
     'X-PAYMENT': receipt.paymentHeader!,
   },
 })
+const merchantBody = await response.text()
 
 await haven.reportX402MerchantOutcome({
   paymentId: status.paymentId,
   outcome: response.ok ? 'accepted' : 'rejected',
   merchantStatus: response.status,
+  // On a rejection, pass the merchant's body: its `error` reason is recorded
+  // as `merchant_reported_error` (merchant-claimed, never verified by Haven).
+  ...(response.ok ? {} : { merchantBody }),
 })
 ```
 

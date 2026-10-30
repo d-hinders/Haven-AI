@@ -334,9 +334,10 @@ on the **EIP-3009** scheme (the pay result names
 building the header, so the call can only refuse. Then tell Haven what the
 merchant answered: \`mcp__haven__haven_report_x402_outcome\` with the
 \`payment_id\`, \`outcome\` (\`"accepted"\` for a 2xx, else \`"rejected"\`)
-and the \`merchant_status\` you got. Because Haven never sent that paid
-request, this is the only way it can learn the purchase failed — without it a
-failed purchase reads as complete for fifteen minutes. If the merchant's
+and the \`merchant_status\` you got. On a rejection, also pass the merchant's
+body as \`merchant_body\` so its reason is recorded. Because Haven never sent
+that paid request, this is the only way it can learn the purchase failed —
+without it a failed purchase reads as complete for fifteen minutes. If the merchant's
 \`PAYMENT-RESPONSE\` header names a \`transaction\`, pass that raw header as
 \`payment_response\` on the SAME \`mcp__haven__haven_report_x402_outcome\`
 call, together with \`payment_header\`: the exact header you retried the

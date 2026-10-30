@@ -99,6 +99,7 @@ export const HOSTED_INSTRUCTIONS = [
   'then haven_submit, then retry the merchant yourself with the returned',
   'payment_header (both header names, below), then haven_report_x402_outcome',
   'with that same payment_header (a reported settlement is recorded only with it).',
+  "On a rejection, pass the merchant's body as merchant_body so its reason is recorded.",
   'erc7710: haven_sign, then haven_submit with settlement_scheme "erc7710", then',
   'retry the merchant yourself with the payment_header haven_submit returns',
   '(PAYMENT-SIGNATURE only), then record the merchant\'s settlement with',

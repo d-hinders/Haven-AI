@@ -19,6 +19,25 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **The merchant's own reason for refusing a paid retry is recorded and
+  echoed (#4552).** x402 merchants have started saying WHY they refused: a
+  verify-stage refusal returns `{"error": "<reason>"}` in the 402 body, a
+  stock settlement failure carries it only in the `PAYMENT-RESPONSE` header
+  (`errorReason`), and merchants from before x402-foundation/x402#3795 carry
+  it only in `PAYMENT-REQUIRED` (`error`). A new total parser
+  (`merchantReportedError`) accepts only a code-shaped value
+  (`^[a-z0-9_]{1,64}$`) from the untruncated body, then falls back to those
+  two headers, and never throws — it runs inside `recordRetryRejected`'s
+  swallowing `try`, where a throw would silently drop the stranded-funds
+  event. Both writers now record `details.merchant_reported_error` (the code,
+  or `null`, never absent), and `reportMerchantOutcome` returns it as the
+  optional `merchantReportedError` on `X402MerchantOutcomeReport`, which
+  `haven_report_x402_outcome` echoes as `merchant_reported_error`. The value
+  is merchant-claimed, never something Haven verified, and the handoff stays
+  `haven_sweep_delegate` for every reason. `retry_body` is unchanged.
+  Additive and optional on a type that is only returned, so existing
+  consumers keep compiling. No update needed.
+
 - **`PaymentStatusResult.merchantSettlementTxHash` names the recorded
   settlement transaction (#4530).** `haven_get_payment_status` already
   reported `merchantSettlementRecorded: true` when an EIP-3009 payment's

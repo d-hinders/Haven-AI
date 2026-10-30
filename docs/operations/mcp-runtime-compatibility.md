@@ -7012,3 +7012,50 @@ to call next in structured fields, and those fields are typed end to end
 >
 > Scope of this note: the dependency pins and those test files. Nothing else in
 > this document was re-verified.
+> **#4552 (2026-10-30, the merchant's rejection reason on a rejected retry):**
+> `haven_report_x402_outcome` gains one OPTIONAL response field,
+> `merchant_reported_error`, on a REJECTED outcome only: the merchant's own
+> reason for refusing, as a code, or `null` when the reported body carried
+> none. It is the SDK's parse result, not a read-back — the MCP server never
+> parses the body itself — and it is merchant-claimed data, never something
+> Haven verified. The response's `reason` says so.
+> - **Where the reason comes from.** x402 merchants have started saying WHY
+>   they refused: a verify-stage refusal returns `{"error": "<reason>"}` in the
+>   402 body (x402-foundation/x402#3795, and #3882 for Go), where the reason is
+>   the facilitator's `invalidReason` — a snake_case code such as
+>   `invalid_exact_evm_non_canonical_signature`. A stock settlement failure
+>   returns an EMPTY body and carries the reason only in the `PAYMENT-RESPONSE`
+>   header (`errorReason`); merchants from before #3795 carry it only in
+>   `PAYMENT-REQUIRED` (`error`). The same `error` field sometimes holds a
+>   sentence, so only a value matching `^[a-z0-9_]{1,64}$` is accepted.
+> - **Both writers record it.** `details.merchant_reported_error` is written by
+>   `recordRetryRejected` (the SDK's local paid retry and the hosted
+>   `haven_complete_mcp_tool` path, which also falls back to the merchant
+>   headers it holds) and by `reportMerchantOutcome` (the agent-reported
+>   plain-HTTP path, body-only). It is set after the `...input.details` spread,
+>   so a caller cannot override it, and it is always present — the code or
+>   `null`. `retry_body` is unchanged. `details` is open JSONB, so an older SDK
+>   that does not write the key is read as optional: no backend change and no
+>   migration.
+> - **The parser is total.** It runs inside `recordRetryRejected`'s swallowing
+>   `try`, where a throw would silently drop the stranded-funds event, so every
+>   failure path returns `null` rather than raising.
+> - **The handoff does not branch on the reason.** `next_tool` stays
+>   `haven_sweep_delegate` for every rejection, and every `next_arguments` value
+>   is unchanged.
+> - **Instructions ask for the body.** The report instructions in
+>   `REPORT_X402_OUTCOME_DESCRIPTION`, `state-direct-recovery.ts`, `server.ts`,
+>   `skill-content.ts` (and its byte-pinned frontend mirror) and the SDK README
+>   now ask the agent to pass the merchant's body on a rejection — the only
+>   route by which the reason reaches Haven on the plain-HTTP path.
+> - **Hosted picks this up on deploy**; local MCP/connect users need an
+>   `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK exactly),
+>   as with #3764, #3778 and #4534.
+> - `tools-list.snapshot.json` moves: one description changed, no tool added or
+>   removed, no input schema change, no version floor or consent-hash input
+>   change. The description payload stays under its shrink-only cap (31,803 /
+>   31,812 UTF-8 bytes), and `lint:next-steps` stays at zero.
+>
+> Scope of this note: that response field, the two writers' `details` key, the
+> parser and the instruction copies. Nothing else in this document was
+> re-verified.

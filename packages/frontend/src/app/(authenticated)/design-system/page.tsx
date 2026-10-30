@@ -4016,7 +4016,7 @@ export default function DesignSystemPage() {
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">In-card form — `bare`</h3>
             <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
               The same state inside a Card, with no shell of its own. This is the dashboard
-              Activity card&apos;s shape.
+              Transactions card&apos;s shape.
             </p>
             <div className="mt-4">
               <EmptyState

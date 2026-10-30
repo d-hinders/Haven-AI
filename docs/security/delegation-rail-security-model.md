@@ -110,10 +110,8 @@ last-verified: "2026-10-30"
 >   reads its value.
 >
 > The release's other change, **#4530**'s
-> `PaymentStatusResult.merchantSettlementTxHash`, lands in
-> `packages/sdk/src/types.ts` and `payment-mappers.ts`, neither of which is on
-> this document's cover list; it is a read-only status field and touches no
-> signing path.
+> `PaymentStatusResult.merchantSettlementTxHash`, is a read-only status field
+> on a type this document does not cover; it touches no signing path.
 >
 > The shipped delta is four files in `@haven_ai/sdk` (+64/−0), so
 > `@haven_ai/signer` publishes a version literal over byte-identical contents.

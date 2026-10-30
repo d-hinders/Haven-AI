@@ -2289,3 +2289,104 @@ share the prose-only shape stay as they are (expired bodies only). The scan PR
   decided in that entry's disposition.
 
 Drive: `ship-next epic=#4349` (C1 is its only open slice), `ship-next 4459`.
+
+---
+
+## 2026-10-30 — whole repo, weighted to the landings since 2026-10-26
+
+Full report: `docs/bug-reports/quality-scan-2026-10-30-whole-repo.md`.
+Measured on frozen `origin/dev` @ `99ef8d063`; window
+`b9f9f1e47..99ef8d063` → **51** first-parent landings / 438 changed files /
++22,263 −2,230 lines. Two isolated read-only worktrees took the repository and
+GitHub/history samples. No live call, mutation, database suite or browser run.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None materially worsened in the re-measured dimensions.
+
+**Structural findings:** none in the examined sample.
+
+**Improvement candidates (one PR each), pending owner decision:**
+
+- **C1 — block 2's contract-doc selector reads a body example as front
+  matter.** Exact selector: 8 documents / 19 raw misses; actual front-matter
+  sample: 7 documents / 15 literal misses across 5, equal at the prior scan
+  SHA. The 2026-10-26 entries' "17 across 6 of 8" (18 across 6 of 8 in the
+  2026-09-25 to 10-21 entries) is these 15 plus the false document's two
+  real-path misses. One shared selector plus a
+  body-example counter-control. Routing `(none)`, off money-path.
+- **C2 — accounting purchase parents and public payment ids use different UUID
+  domains.** `parent_payment_id` stores the purchase evidence/receipt id while
+  the feed's `paymentId` is the intent id. PR #4544 records that joining the
+  two misses. Decide intent id versus an explicit receipt-domain name.
+  Routing `code backend`; `mpp/evidence.ts`, `mpp/purchase-group.ts` and
+  `infra/repositories/machine-payments.ts` are **money-path**, `entry.ts` off.
+- **C3 — a direct payment is classified as an unknown merchant.** The new
+  direct-feed branch supplies none of the classifier's route/document signals
+  (its MCP tool name is selected but null in practice), so execution returns
+  `unknown / none` and “Unknown merchant (unclassified)” although the closed
+  enum includes `transfer`. PR #4546 records the residual.
+- **C4 — the served receipt schema omits a live field the SDK consumes.**
+  `delivery_reference` is emitted by the backend and mapped by the SDK but
+  absent from the OpenAPI `MachinePaymentReceipt` and generated core type;
+  `additionalProperties: true` hides the gap. PR #4479 records the follow-up.
+- **C5 — two sibling PR gates retain the concurrency group proven to create
+  empty suites.** PR ownership and Baseline change still use a per-PR group
+  (with `cancel-in-progress: true`) on `pull_request_target`, bursting through
+  `opened` + `edited` rather than labels. The group alone cancels pending runs
+  (#4524 *Verified* 3), so the remedy is removing it or `queue: max`. PR #4526
+  names both as planned follow-up; #4524's operator verify (probe PR #4528)
+  recorded the 5/5 burst after the fix. PR ownership gate is the pending 17th
+  required context on `dev`.
+
+**Probed clean** (block → coverage → command → result, at `99ef8d063`;
+parentheses are the 2026-10-26 entry at `b9f9f1e47`):
+
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`
+  → backend 120,895 / 160,644 (119,096 / 158,650); frontend 77,394 / 84,225
+  (75,800 / 81,996); sdk 19,621 / 22,603; core 25,730 / 985 (24,096
+  generated); qa-agent 15,133 / 13,283; mcp-server 14,114 / 25,456; signer
+  5,564 / 9,363; connect 12,436 / 15,676; cli 3,207 / 3,609; ops 3,143 /
+  2,222; ui 2,603 / 2,057; mcp 2,817 / 5,038; demo-merchant-mcp 3,788 /
+  4,210. Fat controllers: census only → 50 route files, 4 ≥ 1,000 lines,
+  `grep -oE '\b(app|ownerApp)\.(get|post|put|patch|delete|route)\b'` → 212
+  registrations; largest route file payments 1,572 lines (1,561). No
+  material structural delta.
+- block 1 → not examined → no dependencies/mutation run under this bounded
+  four-day scan.
+- block 2 → examined → 8 / 19 raw, corrected 7 documents / 15 literal gaps
+  across 5 (C1); coupling baseline green, 124 pairs / 33 docs.
+- block 3 → partial → positive control 3/3; the reference's two `rg` lines
+  over the 25 newest shards (`2026-10-25-4372` … `2026-10-30-4552`) → **16
+  figure lines, 2 with a command** (7 / 0); 12 of the 16 are measured
+  figures, 7 of those on or directly under the two commanded release-shard
+  lines. *First reading corrected in review:* 7/0 was the `b9f9f1e47`
+  sample. `any` 39 (39); DB mocks 54 / 270 / 57 (unchanged).
+- block 4 → examined → positive control 36; 196 files, 47 historical / 149
+  live; prose ratchet green 32 / 30; unchanged.
+- block 5 → examined → since 2026-08-10: 282 merge / 1,396 squash / 1,681
+  total; merge count unchanged, current window squash-only.
+- block 6 → examined, all four halves → copy lint **66 unscanned / 4 with
+  hits** (64 / 4; script unchanged, +2 new files `frontend/src/lib/agent-facet.ts`
+  and `sdk/src/test-support/low-s.ts`); money perimeter 32 / 20, visual gate
+  15 of 27, docs boundary 43 (all unchanged).
+- block 8 → not examined → requires builds, Postgres and backend recording.
+- block 9 → not examined → shares block 8's recording prerequisite.
+- incident clustering → examined → 81 issues created since 2026-10-26, 25
+  open / 56 closed; large clusters already tracked.
+- workflow archaeology → examined → newest 100 CI runs 82 success / 11
+  cancelled / 7 failed, no sampled `dev` failure; five sampled QA money-flow
+  jobs passed every leg on attempt 1/2.
+- comment archaeology → examined → 0 TODO/FIXME/HACK/XXX package-source hits;
+  positive control `import` 2,204 files.
+- cross-package duplication / validation / data-layer coverage → partial;
+  live exercise → not examined.
+- novelty → the full ledger, `docs/bug-reports/`, open GitHub issues and the
+  source PRs (#4544, #4546, #4479, #4526) and issue #4524; none of C1–C5 is
+  a prior ledger item or has an open issue.
+
+**Review:** `haven-reviewer` at `7141367` re-derived every local figure; no
+blocking, four should-fix (block 3 reading, the 257-registration figure, the
+missing *Verified at scan* field, block 6 "all unchanged"), six nits. All
+applied in place; corrected figures are marked above and in the report's §5.
+
+**Disposition: pending owner decision** (C1–C5).

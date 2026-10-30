@@ -966,8 +966,8 @@ in `EmptyState.tsx`).
 Inside a `Card` that shell is a **second filled surface**, which `CLAUDE.md`
 § UI Surface Hierarchy forbids: tinted surfaces are for callouts, table headers,
 day bands, the `anchor` elevation, chips, code blocks and overlays — never for a
-wrapper that groups a card's own content. The dashboard's Activity card is the
-live case.
+wrapper that groups a card's own content. The dashboard's Transactions card is
+the live case.
 
 **The in-card form is `bare`.** Pass `bare` to drop the shell and keep
 everything else — icon halo, title, body, action. It is a separate prop rather

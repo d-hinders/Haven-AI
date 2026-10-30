@@ -62,7 +62,9 @@ const ADDITIVE_SINCE_BASE = new Set([
   'delivery_reference',
   // #4534: additive purchase correlation key on the receipts read — null on
   // every ungrouped payment, which is the shape the fixture recorded.
-  'purchase_group_id', 'parent_payment_id'])
+  // #4577: `parent_receipt_id` is the same value under the name that says what
+  // it holds; `parent_payment_id` stays as the deprecated alias.
+  'purchase_group_id', 'parent_payment_id', 'parent_receipt_id'])
 
 function stripParties(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripParties)

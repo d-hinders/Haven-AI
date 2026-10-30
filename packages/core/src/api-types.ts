@@ -5905,6 +5905,12 @@ export type components = {
             /** Format: date-time */
             delivery_reported_at?: string | null;
             purchase_group_id?: string | null;
+            /** @description The parent purchase receipt's `id` — the `machine_payment_evidence` row id of the purchase leg a fee call paid for. Null on the purchase itself and on every ungrouped payment. Joins to `id`, not to `payment_id`. */
+            parent_receipt_id?: string | null;
+            /**
+             * @deprecated
+             * @description Deprecated: same value as `parent_receipt_id`. The name is wrong — it holds a receipt (evidence) id, not a payment id. Prefer `parent_receipt_id`.
+             */
             parent_payment_id?: string | null;
             confirmed_at?: string | null;
             /** Format: date-time */

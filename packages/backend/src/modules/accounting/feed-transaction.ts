@@ -93,13 +93,17 @@ export interface FeedTransaction {
   /**
    * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
    * own invoice/order id (or an agent-supplied group key) shared by every
-   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
-   * call paid for. Both null on an ungrouped payment — which is fed exactly as
-   * before, never withheld. Grouping is a rendering choice in the accounting
+   * payment of one purchase; `parentReceiptRef` is the purchase's receipt
+   * (evidence) id — the `receiptRef` of the purchase leg a fee call paid for,
+   * NOT a payment id. Both null on an ungrouped payment — which is fed exactly
+   * as before, never withheld. Grouping is a rendering choice in the accounting
    * tool; Haven never merges documents.
+   *
+   * #4577: named `parentReceiptRef` to match `receiptRef`, which is what it
+   * joins to.
    */
   purchaseGroupId: string | null
-  parentPaymentId: string | null
+  parentReceiptRef: string | null
   /** A *suggestion* only (the user's per-merchant override) — never an asserted account. */
   suggestedAccount?: string | null
 }
@@ -227,8 +231,9 @@ export function toFeedTransaction(
     description: entry.transactionDescription,
     // #4534: the purchase correlation key — the payload and the receipt
     // underlag read the same two values, so the document and the feed agree.
+    // #4577: `parentReceiptRef` is the parent purchase's `receiptRef`.
     purchaseGroupId: entry.purchaseGroupId,
-    parentPaymentId: entry.parentPaymentId,
+    parentReceiptRef: entry.parentReceiptRef,
     suggestedAccount: entry.account ?? opts.connectionSuggestedAccount ?? null,
   }
 }

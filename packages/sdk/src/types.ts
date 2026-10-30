@@ -1670,11 +1670,19 @@ export interface HavenPaymentReceipt {
   /**
    * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
    * own invoice/order id (or an agent-supplied group key) shared by every
-   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
-   * call paid for. Both null on an ungrouped payment. Absent on an older
-   * backend.
+   * payment of one purchase; `parentReceiptId` is the purchase's receipt
+   * (evidence) id — the `id` of the parent purchase receipt, NOT a payment id.
+   * Both null on an ungrouped payment. Absent on an older backend.
+   *
+   * #4577: joins to `id`, not to `paymentId`.
    */
   purchaseGroupId?: string | null
+  parentReceiptId?: string | null
+  /**
+   * @deprecated #4577: same value as `parentReceiptId`, under a name that says
+   * the wrong thing — it holds a receipt (evidence) id, not a payment id. Kept
+   * because 0.13.0-alpha.0 shipped it. Use `parentReceiptId`.
+   */
   parentPaymentId?: string | null
   confirmedAt: string | null
   createdAt: string
@@ -2780,8 +2788,13 @@ export interface RawHavenPaymentReceipt {
   delivery_reported_at?: string | null
   /** #4469: the NON-SECRET delivery pointer (#3778); absent on an older backend. */
   delivery_reference?: string | null
-  /** #4534: the purchase correlation key; absent on an older backend. */
+  /**
+   * #4534: the purchase correlation key; absent on an older backend.
+   * #4577: `parent_receipt_id` is the parent purchase receipt's `id`;
+   * `parent_payment_id` carries the same value as a deprecated alias.
+   */
   purchase_group_id?: string | null
+  parent_receipt_id?: string | null
   parent_payment_id?: string | null
   confirmed_at: string | null
   created_at: string

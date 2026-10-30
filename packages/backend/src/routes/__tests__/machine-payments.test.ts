@@ -1006,7 +1006,10 @@ describe('machine payment routes', () => {
         delivery_reference: null,
         // #4534: no purchase correlation reported for this seed — null, not
         // absent. An ungrouped payment is fed exactly as before.
+        // #4577: `parent_receipt_id` is the same value under the name that says
+        // what it holds; `parent_payment_id` stays as the deprecated alias.
         purchase_group_id: null,
+        parent_receipt_id: null,
         parent_payment_id: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',

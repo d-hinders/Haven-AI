@@ -37,7 +37,7 @@ function entry(over: Partial<AccountingEntry> = {}): AccountingEntry {
     transactionDescription: 'api.example - r (purchase)',
     // #4534: ungrouped by default.
     purchaseGroupId: null,
-    parentPaymentId: null,
+    parentReceiptRef: null,
     ...over,
   }
 }

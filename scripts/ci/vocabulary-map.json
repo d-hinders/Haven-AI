@@ -281,7 +281,8 @@
       "deliveryNote": "#4469: the agent's optional note (max 2000 chars) on its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality.",
       "deliveryReportedAt": "#4469: when the agent reported its delivery verdict (#3770). No transaction counterpart, same reason as deliveryQuality.",
       "purchaseGroupId": "#4534: the purchase correlation key -- the merchant's own invoice/order id (or an agent-supplied group key) shared by every payment of one purchase. No transaction counterpart: the wallet feed reports the settled transfer, not which purchase it belongs to. Evidence only; it groups documents in the accounting tool and gates nothing.",
-      "parentPaymentId": "#4534: for a fee call, the purchase payment it paid for (null on the purchase itself and on every ungrouped payment). No transaction counterpart, same reason as purchaseGroupId -- a wallet-history row has no notion of a sibling payment."
+      "parentReceiptId": "#4577: the parent purchase receipt's `id` -- the `machine_payment_evidence` row id of the purchase leg a fee call paid for (null on the purchase itself and on every ungrouped payment). No transaction counterpart, same reason as purchaseGroupId -- a wallet-history row has no notion of a sibling payment. Joins to the receipt's `id`, not to `paymentId`.",
+      "parentPaymentId": "#4534/#4577: DEPRECATED alias of `parentReceiptId` -- the same value under a name that says the wrong thing (it holds a receipt id, not a payment id). Kept because 0.13.0-alpha.0 shipped it. No transaction counterpart, same reason as purchaseGroupId -- a wallet-history row has no notion of a sibling payment."
     },
     "transaction": {
       "type": "native / erc20 / internal -- a transfer classification. Receipts are always payments.",

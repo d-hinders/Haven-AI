@@ -113,8 +113,11 @@ last-verified: "2026-10-30"
 > `PaymentStatusResult.merchantSettlementTxHash`, is a read-only status field
 > on a type this document does not cover; it touches no signing path.
 >
-> The shipped delta is four files in `@haven_ai/sdk` (+64/−0), so
-> `@haven_ai/signer` publishes a version literal over byte-identical contents.
+> The shipped delta is seven files: six in `@haven_ai/sdk` (+145/−3 across the
+> range) and one in `@haven_ai/signer` (`package.json`, whose devDependencies
+> move `@x402/core` 2.17.0→2.29.0 and `@x402/extensions` ^2.17.0→^2.29.0). The
+> signer's two changed test files do not ship, and no signer source that ships
+> changes, so the signer tarball's only difference is that `package.json`.
 > `last-verified` is re-stamped to 2026-10-30 for this note.
 
 > **Re-verified #4492 (2026-10-27, the shared select primitive draws its own chevron).**

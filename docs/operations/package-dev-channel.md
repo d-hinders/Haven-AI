@@ -31,13 +31,13 @@ covers:
 last-verified: "2026-10-30"
 ---
 
-> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through
-> `CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`, which this bump
-> rewrote from `0.12.0-alpha.0` to `0.13.0-alpha.0`. That literal is the ONLY
-> edit the bump makes to any file this document covers — verified by reading
-> the diff, not by trusting the bump's own report: `runtime.ts` changes one
-> line, and `runtime-manifest.ts` re-pins `sdkVersion` and `signerVersion` to
-> the same string.
+> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through two
+> covered files, both rewritten by the bump from `0.12.0-alpha.0` to
+> `0.13.0-alpha.0`: `CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`
+> and `MCP_VERSION` in `packages/mcp/src/server.ts`. Verified by reading the
+> diff, not by trusting the bump's own report: each file changes one line, and
+> `runtime-manifest.ts` (not in this document's `covers:`) re-pins
+> `sdkVersion` and `signerVersion` to the same string.
 >
 > Re-read against the release, and unchanged: the snapshot version format
 > (`0.0.0-dev.<ts>.<sha>`, `scripts/release-snapshot-version.mjs`), the
@@ -48,11 +48,12 @@ last-verified: "2026-10-30"
 > credential-file shape and consent inputs, and the `dev` dist-tag publish in
 > `.github/workflows/publish.yml`. None of those files is in this bump's diff.
 >
-> The release itself carries no connector change: the shipped delta is four
-> files in `@haven_ai/sdk` (#4534's purchase correlation key and #4530's
-> `merchantSettlementTxHash`), so `@haven_ai/connect` publishes a version
-> literal over byte-identical contents. `last-verified` is re-stamped to
-> 2026-10-30 for this note.
+> The release itself carries no connector change: the shipped delta is seven
+> files across `@haven_ai/sdk` (six: #4534's purchase correlation key, #4530's
+> `merchantSettlementTxHash`, and #4554's `test-support/low-s.ts`) and
+> `@haven_ai/signer` (one: its `package.json` devDependency bump), so
+> `@haven_ai/connect` publishes a version literal over byte-identical
+> contents. `last-verified` is re-stamped to 2026-10-30 for this note.
 
 > **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
 > file this diff touches is `packages/backend/src/config.ts` — one COMMENT

@@ -211,6 +211,16 @@ encodes have to be applied by hand; that is what the rest of this section is for
   reports the epic ready to close only when every box is ticked, so an epic filed
   without it can never be reported ready in the way the template expects.
 
+  **A box only a promotion can satisfy is filed, not carried.** When a box can
+  only be done at or after the next `dev → main` promotion — a prod query after a
+  migration applies, a check only prod can answer — file it as its own issue
+  under the `Next release` convention (owner decision 2026-10-30, amending the
+  2026-09-08 rule #2767), rewrite the box to link that issue and tick it, and let
+  the epic close before the promotion. The release process carries the step. The
+  convention's filing mechanics are defined once in
+  [branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main);
+  read them there rather than restating them.
+
   **Every box must be able to reach a ticked state truthfully (#2906).** A box
   records a **disposition** — *done*, or *waived / no longer applicable* with the
   reason and a link — not only a success. Two ways to write a box whose tick
@@ -231,8 +241,9 @@ encodes have to be applied by hand; that is what the rest of this section is for
     reach for, because an epic's scope can always be narrated so a step stopped
     applying. Without a named waiver-holder this rule is a tick-by-declaration
     route to closing any inconvenient epic, which is worse than the problem it
-    fixes. The surrounding rule already says the epic stays open until a **human**
-    ticks the last box; this does not weaken it.
+    fixes. The surrounding rule already says a tick records a disposition someone
+    else can check — a named human's waiver, or a filed `Next release` issue the
+    release process carries; this does not weaken it.
   - **A box that is already true.** A box asking that a command "runs without a
     flag" when it already does is ticked on unchanged code and measures nothing.
     Write each box so it is **false today and true only when the work is done**.

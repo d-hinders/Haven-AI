@@ -27,7 +27,10 @@ unclear; this page is the order, not the reasoning.
    the merge, it looks stalled — a Railway redeploy is the remedy.
 3. **Hold `dev` while the promotion PR is open.** No merges to `dev` until the
    promotion lands: its head is the `dev` branch, and every merge moves it,
-   dismisses approvals and re-runs checks.
+   dismisses approvals and re-runs checks. The PR also carries an **Owed at this
+   release** section — the issues filed under the
+   [`Next release` convention](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main)
+   that this promotion carries, each linked as `Refs #<n>`.
 4. **When migrations are in range — code-owner approval** from someone other
    than the PR's author (`packages/backend/src/db/migrations/*.ts` is the one
    hard-gated path). Request it when opening, not when it blocks.
@@ -76,6 +79,13 @@ unclear; this page is the order, not the reasoning.
 9. **Real-payment canary.** The prod smoke's canary is a real payment through
    the funded prod wallet — an operator step, never reported done while
    outstanding.
+10. **Work the owed issues.** Every issue the promotion PR lists under *Owed at
+    this release* is worked now: record the result on the issue, remove
+    `operator-verify` and close it. An issue whose prerequisite did not reach
+    prod is carried to the next promotion, with the reason recorded on the
+    issue. The promotion is not closed out while one is open and not carried.
+    The convention and its selector are
+    [`branch-and-release-flow.md` § *Promotion to production*](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main).
 
 The full prod smoke (the closeout log check and its manual fallback, the
 error-log watch, the rollback path) is `promoting-dev-to-main.md` § *Merge,

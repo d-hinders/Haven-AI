@@ -582,6 +582,14 @@ three maintainers — is
 **Promotion preflight** — run before opening the promotion PR; each line cost
 0.5.0-alpha.1 (#3325) a round-trip with the owner.
 
+- [ ] **Run the owed-issues selector.** Every issue filed under the `Next release`
+      convention that this promotion carries belongs in the PR body. The selector
+      is defined once in
+      [`branch-and-release-flow.md` § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main)
+      — run it there, do not restate it. For each issue it returns, check that the
+      issue's prerequisite is in `origin/main..origin/dev` and link it from the
+      promotion PR as `Refs #<n>`. An issue whose prerequisite is not in range is
+      carried to the next promotion, with the reason recorded on the issue.
 - [ ] **BEHIND is expected, not noise.** `git rev-list --count origin/dev..origin/main`
       non-zero plus `strict_required_status_checks_policy: true` on `Dev gate`
       (`curl -sS https://api.github.com/repos/d-hinders/Haven-AI/rules/branches/main`)
@@ -623,6 +631,13 @@ UI. This PR showing as BEHIND `main` is expected — merge it anyway (no sync-ba
 <one paragraph: the packages/version bumps in range, or "no version bump —
 publishes nothing"; paste `npm run release:scope` output>
 
+## Owed at this release
+
+<one line per issue the selector returned that this promotion carries:
+`Refs #<n>` — <what is owed, and the prerequisite that puts it in range>.
+"None" when the selector returns nothing. An issue carried to the next
+promotion is not listed here; its reason is recorded on the issue.>
+
 ## Preflight
 
 - [ ] `dev` held while this PR is open (no merges to `dev`)
@@ -636,6 +651,7 @@ publishes nothing"; paste `npm run release:scope` output>
 - [ ] `npm view @haven_ai/<pkg> dist-tags` — all five on `alpha` and `latest`
 - [ ] Closeout log check passed — deployment identity = the merge SHA, both boot markers present, no unset-public-RPC warning (or the manual check recorded)
 - [ ] Real-payment canary
+- [ ] Owed issue #<n>: <the step> — result recorded on the issue, `operator-verify` removed, issue closed (one box per owed issue)
 ```
 
 What it leaves to you:
@@ -685,6 +701,14 @@ checklist; work them there rather than from here. They cover watching the
 Railway and Vercel deploys land, the closeout log check, the prod smoke itself,
 which Vercel hostnames are production and which is the trap, and the rollback
 path.
+
+**The promotion is not closed out while an owed issue is open and not carried.**
+Every issue the promotion PR lists under *Owed at this release* is worked here:
+record the result on the issue, remove `operator-verify` and close it. An issue
+whose prerequisite did not reach prod is carried to the next promotion with the
+reason recorded on the issue — never silently dropped. The convention and its
+selector are defined once in
+[`branch-and-release-flow.md` § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main).
 
 **The two log checks are machine-read, and bound to the merge SHA.** Run
 

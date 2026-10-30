@@ -1040,8 +1040,17 @@ gh issue view <epic> --json body -q .body | node scripts/ci/epic-promotion-check
 
 Exit 0 is "ready to close"; exit 1 prints the unticked boxes, and the report lists
 them instead. An epic with no such section predates the template change — the tool
-says so and exits 0, and the report names the absence. The epic stays open across
-the promotion until a human ticks the last box.
+says so and exits 0, and the report names the absence.
+
+**A box only a promotion can satisfy is filed, not carried** (owner decision
+2026-10-30, amending the 2026-09-08 rule #2767). When a box can only be done at or
+after the next `dev → main` promotion — a prod query after a migration applies, a
+check only prod can answer — it is filed as its own issue under the `Next release`
+convention, the box is rewritten to link that issue and ticked, and the epic may
+close before the promotion; the release process carries the step. The
+convention's filing mechanics are defined once in
+[branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main)
+— read them there, do not restate them.
 
 **An unticked box is not always outstanding work — it may be a mis-written box.**
 A box phrased so that no outcome can make it true (a waived operator step still
@@ -1089,9 +1098,14 @@ operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
    secret values — and the expected output of each step). The label is what makes
    step 1 enforceable rather than remembered: the close guard reads it off the issue,
    so it holds however the pull-request body is later rewritten.
-3. Leave the issue OPEN in this state and say so in the report; do not close on
+3. **If the live step needs prod, file a separate `Next release` issue** under the
+   convention in
+   [branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main),
+   and link it from the original issue. The original keeps its own history and is
+   never re-titled; the release session works the new issue at closeout.
+4. Leave the issue OPEN in this state and say so in the report; do not close on
    "code merged".
-4. When the operator confirms (or pastes the output), verify it matches the expected
+5. When the operator confirms (or pastes the output), verify it matches the expected
    evidence, tick the checklist, remove the `operator-verify` label, and close with
    the evidence links. To find landed issues still waiting for that evidence,
    `gh issue list --label landed-partial --state open` lists the open issues the

@@ -73,6 +73,15 @@ for how the environments are wired, see
       rebuilding reflexively. Do not hand-count the diff
       ([#2724](https://github.com/d-hinders/Haven-AI/issues/2724)).
 
+- [ ] **Run the owed-issues selector, and link what this promotion carries.** A
+      step that can only be done at or after a promotion is filed as its own
+      issue under the `Next release` convention — defined once in
+      [`branch-and-release-flow.md` § *Promotion to production*](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main),
+      which also owns the selector. Run it, check each issue's prerequisite is in
+      `origin/main..origin/dev`, and link it from the promotion PR as `Refs #<n>`
+      under *Owed at this release*. An issue whose prerequisite is not in range is
+      carried to the next promotion, with the reason recorded on the issue.
+
 ## The promotion window — `dev` is held while the PR is open
 
 **From opening the promotion PR until it merges, do not merge anything into
@@ -349,6 +358,13 @@ so this is a rule to point at rather than a question to ask the release runner.
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
       the September 2026 qa-dev waves were a provider that refused batches over
       three and the `pending` tag (epic #3335).
+- [ ] **Work the owed issues.** The promotion is not closed out while an issue
+      listed under *Owed at this release* is open and not carried. For each one,
+      record the result on the issue, remove `operator-verify` and close it; an
+      issue whose prerequisite did not reach prod is carried to the next
+      promotion with the reason recorded on the issue. The convention is defined
+      once in
+      [`branch-and-release-flow.md` § *Promotion to production*](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main).
 
 ### Manual check in the Railway web UI
 

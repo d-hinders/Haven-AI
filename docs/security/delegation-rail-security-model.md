@@ -84,8 +84,43 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-27"
+last-verified: "2026-10-30"
 ---
+
+> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through
+> `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this bump rewrote
+> from `0.12.0-alpha.0` to `0.13.0-alpha.0`. **The edit to that file is the
+> version literal only** — one line, read in the diff rather than taken from
+> the bump's report. No tool schema, signing input, typed-data check,
+> recipient pin, allowlist, binding, delegation, caveat, enforcer term, budget
+> pre-check, settlement window, funding leg or sweep moves, and
+> `packages/signer/src/core.ts` is not in this bump's diff at all.
+>
+> **Signing-surface changes in the promoted range, already re-verified where
+> they merged.** The range `origin/main..origin/dev` carries **three** changes
+> to files on this document's cover list:
+>
+> - **#4448** (`#4529`), `packages/backend/src/infra/repositories/agents.ts` —
+>   `UNARCHIVE_AGENT_SQL` clears only `archived_at` and recolours an agent only
+>   when its stored tint is now held by another non-archived agent. Presentation
+>   data; its own note is at line 4243.
+> - **#4534** (`#4544`), `packages/sdk/src/client.ts` — the purchase correlation
+>   key, whose own note is at the end of this document (2026-10-29). It
+>   authorizes nothing, produces or consumes no signature, and no spend decision
+>   reads its value.
+> - **the release bump**, `packages/signer/src/tools.ts` — the `SIGNER_VERSION`
+>   literal, one line, no signing surface.
+>
+> The release's other change, **#4530**'s
+> `PaymentStatusResult.merchantSettlementTxHash`, is a read-only status field
+> on a type this document does not cover; it touches no signing path.
+>
+> The shipped delta, re-measured at the door (`origin/dev` `745d4ebf`), is 16
+> files, +162/−20, over 14 commits — ten of them the bump's own version
+> literals. `@haven_ai/signer` publishes a version literal over otherwise
+> byte-identical contents; its two test files in range are #4550's low-s
+> wire-byte assertions, which pin a property the bridge already had.
+> `last-verified` is re-stamped to 2026-10-30 for this note.
 
 > **Re-verified #4492 (2026-10-27, the shared select primitive draws its own chevron).**
 > The covered file this diff touches is one, `components/DelegationSendModal.tsx`,
@@ -4206,7 +4241,8 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > matching row-shape field. The column is `SMALLINT NOT NULL CHECK
 > (avatar_tint BETWEEN 1 AND 6)`, filled by a `BEFORE INSERT` trigger from the
 > lowest tint no held agent of that user holds, handed to a replacement by an
-> `AFTER UPDATE OF superseded_by_agent_id` trigger, and backfilled once. It is
+> `AFTER UPDATE OF superseded_by_agent_id` trigger (dropped by 122, #4448 — see
+> the note below), and backfilled once. It is
 > display data on the same boundary as `labels` (#3167) and `organization_id`
 > (#3164): no delegation, caveat, enforcer term, budget pre-check, allowance,
 > settlement window or refusal reads it, and the inherit trigger's `UPDATE` is
@@ -4214,6 +4250,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > cannot recolour a released agent or cross a tenant. No route, signing,
 > revocation or grant path changes. Scope of this note: those two reads and the
 > migration. Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4448, 2026-10-29 — a superseded agent keeps its
+> tint, migration 122).** The covered files this diff touches are
+> `infra/repositories/agents.ts` (the unarchive statement) and the migration
+> directory. 122 drops the `agents_inherit_avatar_tint` trigger and its
+> function, redefines `agent_holds_avatar_tint` to `archived_at IS NULL` alone,
+> and backfills the collisions 121 left behind; `UNARCHIVE_AGENT_SQL` may
+> reassign a tint on unarchive when another non-archived agent of the same user
+> holds it. All of it is display data on the same boundary as `labels` (#3167)
+> and `organization_id` (#3164): no delegation, caveat, enforcer term, budget
+> pre-check, allowance, settlement window or refusal reads `avatar_tint` or
+> `superseded_by_agent_id`, and the unarchive statement's tint `CASE` is scoped
+> to the row's own `id` and `user_id`. No route, signing, revocation or grant
+> path changes. Scope of this note: that statement and the migration. Nothing
+> else in this document was re-verified for it.
 
 > **Re-verified unchanged (#4449, 2026-10-26 — the signer's success next-step
 > family).** The covered files this diff touches are
@@ -4299,3 +4350,20 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > delegation, caveat, enforcer term, budget pre-check, settlement window,
 > funding leg or sweep changes. Scope of this note: those three files.
 > Nothing else in this document was re-verified for it.
+
+> **Re-verified unchanged (#4534, 2026-10-29 — the purchase correlation key):**
+> this diff touched one file in this document's coverage list,
+> `packages/sdk/src/client.ts`, and none of its authority, custody or signing
+> surfaces. The change rides the same seam #3778's note scopes — the ACCEPTED
+> arm's `/machine-payments/evidence` report — plus the
+> `reportX402MerchantOutcome` pass-through: two new OPTIONAL inputs,
+> `purchaseGroupId` (≤ 128 chars, the merchant's own invoice/order id or a
+> caller-chosen group key) and `merchantResponse` (the merchant's paid
+> response body, read by a small explicit per-merchant map on the backend and
+> never stored — only the derived id is). Both are spread into the evidence
+> payload only when present, and only on an accepted outcome. They authorize
+> nothing, produce or consume no signature, and no spend decision reads their
+> value; the backend writes them first-write-wins onto the evidence row and
+> never touches `payment_intents`, settlement or custody. A caller that
+> supplies neither is byte-identical to before. Scope of this note: that one
+> file. Nothing else in this document was re-verified for it.

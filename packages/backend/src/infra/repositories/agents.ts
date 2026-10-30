@@ -834,11 +834,38 @@ export async function archiveAgent(
  * Clears archived_at and nothing else — the agent returns to the primary
  * list with the same status it had before archiving. Un-archiving restores no
  * authority of any kind.
+ *
+ * #4448: archiving released the agent's tint, so another agent may have taken
+ * it while this one was hidden. If the stored tint is now held by another
+ * non-archived agent of the same user and the user has six or fewer
+ * non-archived agents after this unarchive, the agent gets a free tint;
+ * otherwise it keeps its tint. Only an agent that was hidden is recoloured, so
+ * the "never recoloured while visible" rule holds. Past six agents a repeat is
+ * unavoidable and the tint is left alone.
  */
-export const UNARCHIVE_AGENT_SQL = `UPDATE agents
-       SET archived_at = NULL, updated_at = NOW()
-       WHERE id = $1 AND user_id = $2 AND archived_at IS NOT NULL
-       RETURNING id`
+export const UNARCHIVE_AGENT_SQL = `UPDATE agents a
+       SET archived_at = NULL,
+           updated_at = NOW(),
+           avatar_tint = CASE
+             WHEN EXISTS (
+                    SELECT 1
+                      FROM agents b
+                     WHERE b.user_id = a.user_id
+                       AND b.id <> a.id
+                       AND b.archived_at IS NULL
+                       AND b.avatar_tint = a.avatar_tint
+                  )
+              AND (
+                    SELECT count(*)
+                      FROM agents c
+                     WHERE c.user_id = a.user_id
+                       AND c.archived_at IS NULL
+                  ) <= 5
+             THEN agent_next_avatar_tint(a.user_id, a.id)
+             ELSE a.avatar_tint
+           END
+       WHERE a.id = $1 AND a.user_id = $2 AND a.archived_at IS NOT NULL
+       RETURNING a.id`
 
 export async function unarchiveAgent(
   agentId: string,

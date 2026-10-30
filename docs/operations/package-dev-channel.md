@@ -28,8 +28,32 @@ covers:
   - packages/mcp/src/server.ts
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/core/src/client-compat.ts
-last-verified: "2026-10-23"
+last-verified: "2026-10-30"
 ---
+
+> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through
+> `CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`, which this bump
+> rewrote from `0.12.0-alpha.0` to `0.13.0-alpha.0`. That literal is the ONLY
+> edit the bump makes to any file this document covers — verified by reading
+> the diff, not by trusting the bump's own report: `runtime.ts` changes one
+> line, and `runtime-manifest.ts` re-pins `sdkVersion` and `signerVersion` to
+> the same string.
+>
+> Re-read against the release, and unchanged: the snapshot version format
+> (`0.0.0-dev.<ts>.<sha>`, `scripts/release-snapshot-version.mjs`), the
+> channel resolution and its guards (`scripts/release-channel.mjs`,
+> `packages/sdk/src/connector-channel.ts`,
+> `packages/mcp-server/src/connector-channel.ts`), `HAVEN_CONNECTOR_CHANNEL`
+> and `parseConnectorChannel` in `packages/backend/src/config.ts`, the
+> credential-file shape and consent inputs, and the `dev` dist-tag publish in
+> `.github/workflows/publish.yml`. None of those files is in this bump's diff.
+>
+> The release itself carries no connector change: the shipped delta at the door
+> (`origin/dev` `745d4ebf`) is 16 files, +162/−20, and `@haven_ai/connect`'s
+> three of them are the bump's own version literals (`package.json`,
+> `runtime.ts`, `runtime-manifest.ts`), so it publishes a version literal over
+> otherwise byte-identical contents. `last-verified` is re-stamped to
+> 2026-10-30 for this note.
 
 > **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered
 > file this diff touches is `packages/backend/src/config.ts` — one COMMENT

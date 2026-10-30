@@ -86,8 +86,73 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-27"
+last-verified: "2026-10-30"
 ---
+
+> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** the Supported Runtime
+> Manifest table's four rows move to `0.13.0-alpha.0`, and that is the whole of
+> this release's effect on the table. Re-read against the source constants
+> rather than the bump's own rewrite: `MCP_VERSION`
+> (`packages/mcp/src/server.ts:113`), `CONNECTOR_VERSION`
+> (`packages/connect/src/runtime.ts:56`), `SIGNER_VERSION`
+> (`packages/signer/src/tools.ts:70`) and `SDK_VERSION`
+> (`packages/sdk/src/client-identity.ts:20`) all read `0.13.0-alpha.0`. Only
+> `mcpVersion` is derived from a constant (`runtime-manifest.ts:13` reads
+> `MCP_VERSION`); `sdkVersion` and `signerVersion` are literals the bump
+> re-pins (`:15`, `:17`). The Node floor is unchanged at `>= 22.0.0`.
+>
+> **What the release carries.** Re-measured at the door (`origin/dev`
+> `745d4ebf`), the shipped delta is 16 files, +162/−20, over 14 commits:
+> `sdk` 7, `connect` 3, `cli` 2, `mcp` 2, `signer` 2. Ten of those are the
+> bump's own version literals, which is why every package appears at the door
+> and only `sdk` appeared at the cut. The substantive changes, all already
+> recorded above and none re-litigated here:
+>
+> - **#4534, the purchase correlation key** — two OPTIONAL inputs on
+>   `reportX402MerchantOutcome` (`purchaseGroupId`, `merchantResponse`) and two
+>   additive receipt fields (`purchaseGroupId`, `parentPaymentId`). Its own note
+>   is at the end of this document.
+> - **#4530, `PaymentStatusResult.merchantSettlementTxHash`** — additive and
+>   optional on a type that is only returned, so existing consumers keep
+>   compiling. It names the settlement transaction Haven recorded, under the
+>   same presence rule as `merchantSettlementRecorded`: present only when
+>   recorded, absent otherwise, never `null` and never the merchant's
+>   unverified echo.
+>
+> - **#4550, canonical low-s EIP-3009 bridge signatures** — a new
+>   `test-support/low-s.ts` entry asserting the wire bytes of a 65-byte EOA
+>   signature, plus `@x402/core` moving from `2.17.0` to `2.29.0` in the
+>   **devDependencies** of `sdk`, `signer` and `backend`. Test fixtures and a
+>   build-time pin; no signing path changes.
+>
+> **What did NOT move.** No tool is added, renamed or removed. No input schema
+> changes beyond #4534's two optional arguments, which are already in
+> `tools-list.snapshot.json` from that PR. No strict-input list, no
+> expected-context version, no consent hash, no version floor. The
+> `next-arguments-corpus.json` DOES move in the range — #4530's prefill adds
+> `payment_header` to three settlement-evidence rows and adds two rows, which
+> the note at the end of this document already records; the bump itself does
+> not touch it. `@haven_ai/mcp`, `@haven_ai/signer`,
+> `@haven_ai/connect` and `@haven_ai/cli` ship version literals over otherwise
+> byte-identical contents, which is why the bump moves all five and only `sdk`
+> carries a substantive change.
+>
+> **Version skew.** A local `@haven_ai/mcp` or `@haven_ai/connect` older than
+> this release pins the previous SDK exactly, so it keeps the old receipt and
+> status shapes until it is updated; the hosted server picks the SDK change up
+> on deploy. Nothing is refused in either direction — both changes are
+> additive. `last-verified` is re-stamped to 2026-10-30 for this note.
+
+> **Re-verified #4541 (2026-10-29, the release-records shipped-delta drafter):**
+> no covered runtime surface changes. The diff adds a new measurement script
+> under `scripts/ci` and its `node --test` suite, a `release:records` entry in
+> `package.json`, and a section in the covered `scripts/README.md` describing
+> them. The script reads `release:scope --json` and prints the CASP shard's
+> shipped-delta figures; it touches no package source, no tool name, input
+> schema, strict-input list, expected-context version, consent hash or
+> `tools-list.snapshot.json` entry, and no version literal the Supported
+> Runtime Manifest table pins. Nothing else in this document was re-verified,
+> and `last-verified` is re-stamped to 2026-10-29 for this note.
 
 > **Re-verified #4468 (2026-10-27, the ten typed task-/sub-budget
 > payment-scope refusals and three siblings):** covered surfaces change
@@ -3352,10 +3417,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.12.0-alpha.0` |
-| `@haven_ai/mcp` | `0.12.0-alpha.0` |
-| `@haven_ai/sdk` | `0.12.0-alpha.0` |
-| `@haven_ai/signer` | `0.12.0-alpha.0` |
+| `@haven_ai/connect` | `0.13.0-alpha.0` |
+| `@haven_ai/mcp` | `0.13.0-alpha.0` |
+| `@haven_ai/sdk` | `0.13.0-alpha.0` |
+| `@haven_ai/signer` | `0.13.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -4252,6 +4317,70 @@ prepared or funded payment keeps its `payment_id` and resumes through
 During a rolling deploy the fingerprint may alternate once across replicas;
 reconnect once, and if it still alternates, continue and report. The
 published `haven-pay` skill carries the same rule.
+
+> **Re-verified (#4530, 2026-10-29, passage only).** The rule above gained two
+> sentences, and this block records the case that forced them. The change is
+> instructions text only: the instructions are excluded from the contract
+> fingerprint, no tool description and no input schema moved, so this is **not**
+> a reconnect event and the fingerprint is unchanged.
+>
+> **The case the fingerprint cannot see.** A 0.12.0-alpha.0 production EIP-3009
+> smoke test (Claude Code desktop, demo merchant) hit a client whose
+> `tools/list` was **pre-0.11** — `haven_report_settlement_evidence` declared
+> only `{payment_id, settlement_tx_hash}` with `additionalProperties: false`,
+> and its description lacked the "On EIP-3009 also pass payment_header"
+> sentence — while every result in the same session carried the **current**
+> `contract_fingerprint` (`9f6a89fa545a01c3`, `main`'s contract, in which the
+> tool does declare `payment_header`). The fingerprint check compares the
+> instructions the client loaded at `initialize` against the fingerprint on a
+> result; when both are current but the **tool list** is cached, it reports
+> nothing. The agent then sent the report without the header, was refused with
+> `SETTLEMENT_PROOF_HEADER_MISSING`, and was told to add a key its own schema
+> said it could not send.
+>
+> **Reproduction status.** Reproduced by the owner on their own machine
+> (2026-10-29, Claude Code in the desktop app), not in this build environment.
+> Two full app restarts did **not** refresh the cached `tools/list`:
+> `haven_report_settlement_evidence` stayed
+> `{payment_id, settlement_tx_hash}` with no EIP-3009 sentence. `claude mcp
+> remove haven-claude-cloud -s user`, then `claude mcp add` with the same URL
+> and header, then a restart **did** refresh it — the tool then listed
+> `payment_header` and its description carried "On EIP-3009 also pass
+> payment_header". The server was `0.12.0-alpha.0` with
+> `contract_fingerprint` `9f6a89fa545a01c3` before and after, so the
+> fingerprint was correct throughout: the case is exactly current
+> instructions and current results beside a cached pre-0.11 tool list, which
+> the fingerprint comparison cannot see. The cache therefore lives in the
+> client's tool-list layer, not in Haven — the client also accepted and sent
+> the undeclared key once the agent passed it — and remove/re-add is the
+> working remedy, which is what the owner decision below records.
+>
+> **The owner's ruling (2026-10-29, option 2), now in the server
+> instructions.** Two sentences were added to `HOSTED_INSTRUCTIONS`
+> (`packages/mcp-server/src/server.ts`):
+>
+> - Sending a `next_arguments` that Haven returned, **verbatim**, is always
+>   allowed, even when a key in it is missing from the schema the client
+>   loaded. Sending Haven's own arguments unchanged is not hand-building or
+>   reshaping — the prohibition is on reshaping a payload to fit, not on
+>   passing through what the server handed you.
+> - When a reconnect or restart does **not** change the tool list, the remedy
+>   is to **remove and re-add the hosted MCP server entry** in the client. The
+>   instructions previously named only reconnect or restart, which this case
+>   shows can be insufficient.
+>
+> **Does the prefill fix detection?** No — and it is not meant to. The
+> `payment_header` prefill (#4530 A) removes the *consequence* of a cached
+> list: the retryable settlement-evidence handoffs now carry the header the
+> call forwarded, so an agent holding a pre-0.11 schema no longer has to add a
+> key its schema lacks, and the amended rule says passing Haven's own
+> `next_arguments` through is allowed. Detection of a client whose
+> instructions are current but whose tool list is cached remains impossible
+> from the fingerprint alone. A further change would need the client to echo
+> the tool-list hash it loaded (a `tools/list`-derived value sent back on each
+> call) so the server can compare it — a new detection mechanism, out of scope
+> without an owner decision, and the tool-description budget is at its cap
+> (#4123 §3).
 
 ### Task budgets — a third sign-context, and the tool set moves (#3329)
 
@@ -6842,3 +6971,52 @@ to call next in structured fields, and those fields are typed end to end
 >
 > Scope of this note: those fields and texts. Nothing else in this document
 > was re-verified.
+
+> **#4534 (2026-10-29, the purchase correlation key on the outcome report):**
+> `haven_report_x402_outcome` gains two OPTIONAL arguments —
+> `purchase_group_id` (1–128 chars) and `merchant_response` (an object). On an
+> accepted outcome they ride the same `POST /machine-payments/evidence` report
+> the tool already posts: the backend derives the group id from the merchant's
+> own invoice/order id through a small explicit per-merchant map (Bitrefill:
+> `invoice_id`), or takes the agent's key when the merchant supplies none, and
+> records it on the `machine_payment_evidence` row (migration 123) together
+> with `parent_payment_id` — the purchase payment a fee call paid for, resolved
+> from the group's own members. The receipt (`haven_list_receipts` and the
+> evidence echo) gains `purchase_group_id` and `parent_payment_id`; both are
+> null on an ungrouped payment, which is fed exactly as before.
+> - **Version skew is a refusal, not a silent drop.** Both arguments are
+>   opt-in: a caller that supplies neither sends a byte-identical body to
+>   before. A NEW MCP/SDK against a backend older than migration 123 gets the
+>   existing request-validation refusal (400) for the two new body fields,
+>   because `MachinePaymentEvidenceRequest` is `additionalProperties: false` —
+>   the feature is unavailable there rather than quietly ignored.
+> - **Hosted picks this up on deploy**; local MCP/connect users need an
+>   `@haven_ai/mcp` / `@haven_ai/connect` release (both pin the SDK exactly),
+>   as with #3764 and #3778.
+> - `tools-list.snapshot.json` moves: two new optional arguments on one tool.
+>   No tool is added or removed, no version floor or consent-hash input
+>   changes, and `lint:next-steps` stays at zero.
+>
+> Scope of this note: those arguments, the two receipt fields and the snapshot
+> row. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4550, 2026-10-30 — `@x402/*` devDependency bump and
+> low-s pinning tests).** The diff touches this document's covered
+> `packages/signer/**` and `packages/sdk/package.json` only in ways that reach
+> no runtime surface. `@x402/*` moves 2.17.0 → 2.29.0 as a **devDependency** in
+> every published package, so no installed `@haven_ai/mcp`, `@haven_ai/connect`
+> or `@haven_ai/sdk` user resolves it; the runtime dependency `x402@^1.2.0` in
+> `packages/sdk` and `packages/signer` is unchanged. The signer's new tests
+> assert the EIP-3009 bridge header's wire signature is canonical low-s on all
+> three signing branches — they pin bytes the bridge already emits and change
+> no signing path. `packages/signer/src/siwx.test.ts` adapts to two
+> `@x402/extensions` 2.29 API changes in the REFERENCE implementation the test
+> compares against (`verifySIWxSignature` result fields renamed `valid` →
+> `isValid` / `address` → `payer`; `createSIWxPayload` now takes the response
+> URL and asserts the challenge is bound to its origin) — test-only, and the
+> signer's own SIWX header construction is untouched. No tool is added or
+> removed, no argument, version floor, consent-hash input or
+> `tools-list.snapshot.json` row changes, and `lint:next-steps` stays at zero.
+>
+> Scope of this note: the dependency pins and those test files. Nothing else in
+> this document was re-verified.

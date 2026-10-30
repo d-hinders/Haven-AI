@@ -397,6 +397,21 @@ haven_pay_x402_quote → haven_sign
 > when the fact warrants it (eip3009, accepted, unsettled) — not a new call
 > an agent must always make. `last-verified` unchanged.
 
+> **Re-verified (#4530, 2026-10-29, passage only).** "The agent adds
+> `payment_header`" is no longer the whole story. Where the handoff already
+> holds the agent's header — the retryable settlement-evidence arms of
+> `haven_complete_mcp_tool` / `haven_settle_mcp_tool`, the report tool's own
+> status-unreadable arm, and the plain-HTTP outcome report's folded-evidence
+> retryable and offer arms — `next_arguments` now carries `payment_header`
+> beside the hash, so the agent re-supplies nothing; the plain-HTTP retryable
+> arm prefills what the call FORWARDED as `proofHeader`, never the raw
+> argument. The prefill is omitted when the header exceeds the report tools'
+> 16,384-character cap, and the prose still names the header for a client
+> holding a stale tool list. The missing-header arms stay prose-only: there
+> the call carried no header. The status read also names the recorded
+> transaction (`merchant_settlement_tx_hash`), so an agent can confirm on that
+> read which settlement Haven recorded. `last-verified` unchanged.
+
 > **Hosted egress (#3747).** Only the HOSTED side of this comparison is
 > constrained: `createHostedHavenClient` installs the strict merchant-egress
 > policy (https-only public hosts, no IP literals or internal names, ≤3

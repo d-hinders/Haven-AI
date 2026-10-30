@@ -51,6 +51,8 @@ import { Implementation, toMetaMaskSmartAccount } from '@metamask/smart-accounts
 import { createx402DelegationProvider } from '@metamask/smart-accounts-kit/experimental'
 import { x402Erc7710Client } from '@metamask/x402'
 import { wrapFetchWithPayment, x402Client, decodePaymentResponseHeader } from '@x402/fetch'
+import type { Network, SchemeNetworkClient } from '@x402/core/types'
+import { pathToFileURL } from 'node:url'
 
 /**
  * Chain selection (#1458): everything chain-specific lives in one row so a
@@ -110,6 +112,61 @@ async function mcpRequest(
     body: JSON.stringify(body),
   })
   return { response, sessionId: response.headers.get('mcp-session-id') ?? sessionId }
+}
+
+/**
+ * The merchant advertises BOTH eip3009 (default) and erc7710; the default
+ * selector takes the first option, so pick the erc7710 one explicitly.
+ */
+export const selectErc7710 = (
+  _version: number,
+  requirements: Array<{ extra?: Record<string, unknown> | null }>,
+) => {
+  const erc7710 = requirements.find((r) => r.extra?.assetTransferMethod === 'erc7710')
+  if (!erc7710) throw new Error('merchant did not advertise assetTransferMethod erc7710')
+  return erc7710
+}
+
+export interface PilotPaymentClientConfig {
+  /** CAIP-2 network the scheme client is registered for, e.g. `eip155:84532`. */
+  network: Network
+  /** The USDC the pilot pays in — the only asset spend controls allow. */
+  asset: Address
+  /** Atomic per-payment cap for that asset (USDC has 6 decimals). */
+  maxAmountPerPayment: string
+  /** The ERC-7710 scheme client (the real one in `main`, a stub in tests). */
+  schemeClient: SchemeNetworkClient
+}
+
+/**
+ * Build the pilot's x402 buyer client with spend controls configured
+ * EXPLICITLY (#4550).
+ *
+ * `@x402/*` 2.29 always applies spend controls when it selects a requirement.
+ * With none configured, only assets the scheme client's `findDefaultAsset`
+ * recognises are allowed — and `@metamask/x402`'s erc7710 client has no
+ * `findDefaultAsset`, so EVERY 402 was rejected with "All payment
+ * requirements were rejected by spendControls…" whatever the price. The
+ * `as never` cast on the selector hid the drift.
+ *
+ * The opt-in is the USDC this pilot pays in, capped at the pilot's own price:
+ * a merchant quoting more than the pilot expects must fail loudly rather than
+ * silently overpay.
+ */
+export function createPilotClient(config: PilotPaymentClientConfig): x402Client {
+  return x402Client.fromConfig({
+    schemes: [{ network: config.network, client: config.schemeClient }],
+    paymentRequirementsSelector: selectErc7710 as never,
+    spendControls: {
+      allowedAssets: [
+        {
+          network: config.network,
+          asset: config.asset,
+          maxAmountPerPayment: config.maxAmountPerPayment,
+        },
+      ],
+    },
+  })
 }
 
 async function main(): Promise<void> {
@@ -190,20 +247,15 @@ async function main(): Promise<void> {
     account: smartAccount,
     expirySeconds: DELEGATION_EXPIRY_SECONDS,
   })
-  // The merchant advertises BOTH eip3009 (default) and erc7710; the default
-  // selector takes the first option, so pick the erc7710 one explicitly.
-  const selectErc7710 = (
-    _version: number,
-    requirements: Array<{ extra?: Record<string, unknown> | null }>,
-  ) => {
-    const erc7710 = requirements.find((r) => r.extra?.assetTransferMethod === 'erc7710')
-    if (!erc7710) throw new Error('merchant did not advertise assetTransferMethod erc7710')
-    return erc7710
-  }
-  const client = new x402Client(selectErc7710 as never).register(
-    `eip155:${CHAIN.id}`,
-    new x402Erc7710Client({ delegationProvider: provider }),
-  )
+  // #4550: spend controls are configured explicitly inside `createPilotClient`
+  // — 2.29 rejects every requirement without them, because the erc7710 scheme
+  // client has no `findDefaultAsset`.
+  const client = createPilotClient({
+    network: `eip155:${CHAIN.id}` as Network,
+    asset: USDC,
+    maxAmountPerPayment: VPN_BASIC_PRICE.toString(),
+    schemeClient: new x402Erc7710Client({ delegationProvider: provider }),
+  })
   const fetchWithPay = wrapFetchWithPayment(fetch, client)
 
   // 5. MCP handshake against the demo merchant, then the paid tool call —
@@ -277,7 +329,15 @@ async function main(): Promise<void> {
   console.log('   paste the tx link on #452.')
 }
 
-main().catch((e) => {
-  console.error('x402-7710-buyer failed:', e instanceof Error ? `${e.name}: ${e.message.slice(0, 400)}` : e)
-  process.exit(1)
-})
+// Import-safe: the unit test imports `createPilotClient` from this module, and
+// a module-scope `main()` would run the whole pilot (env reads, RPC, bundler)
+// on import.
+const isEntrypoint =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isEntrypoint) {
+  main().catch((e) => {
+    console.error('x402-7710-buyer failed:', e instanceof Error ? `${e.name}: ${e.message.slice(0, 400)}` : e)
+    process.exit(1)
+  })
+}

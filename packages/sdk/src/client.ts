@@ -2078,6 +2078,10 @@ export class HavenClient {
     merchantBody?: string
     /** #3778: the optional NON-SECRET delivery pointer — see `reportMerchantOutcome`. */
     deliveryReference?: string
+    /** #4534: an agent-supplied purchase group key — see `reportMerchantOutcome`. */
+    purchaseGroupId?: string
+    /** #4534: the merchant's paid response body — see `reportMerchantOutcome`. */
+    merchantResponse?: Record<string, unknown>
   }): Promise<X402MerchantOutcomeReport> {
     return await this.merchantCompletion.reportMerchantOutcome(input)
   }

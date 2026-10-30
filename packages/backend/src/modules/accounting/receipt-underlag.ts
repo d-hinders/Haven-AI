@@ -1,6 +1,7 @@
 import { loadReceiptUnderlagSource } from '../../infra/repositories/machine-payments.js'
 import { safeGetBinary, type SafeFetchOptions, type SsrfRefusal } from '../../infra/http/ssrf-guard.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import type { TransactionKind } from './transaction-kind.js'
 
 /**
  * Receipt underlag for the reporting feed (epic #491, P2 #498).
@@ -59,6 +60,24 @@ export interface ReceiptUnderlagData {
   merchantVatNo: string | null
   merchantOrgNo: string | null
   resourceUrl: string | null
+  /**
+   * #4532: what KIND of transaction this document is, and the one-line
+   * description that carries it. Derived server-side from the payment record
+   * (`transaction-kind.ts`) — the document never states a kind an agent chose,
+   * and a payment with no derivable signal says `unknown` rather than guessing.
+   */
+  transactionKind: TransactionKind
+  description: string
+  /**
+   * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
+   * own invoice/order id (or an agent-supplied group key) shared by every
+   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
+   * call paid for. Both null on an ungrouped payment. The document renders the
+   * group id so a human can match documents by eye — grouping is a rendering
+   * choice in the accounting tool, never a merge in Haven.
+   */
+  purchaseGroupId: string | null
+  parentPaymentId: string | null
   chainId: number | null
   /**
    * #3767: the hash the surface BOOKS — the verified merchant settlement when
@@ -150,8 +169,20 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     ...(data.ledgerCurrency !== 'SEK' && data.amountSek != null
       ? [`Haven SEK ref  ${data.amountSek} SEK (rate ${data.fxRate ?? 'n/a'}, same capture)`]
       : []),
-    `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
-    ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
+    // #4533: a direct payment is a transfer to an address, which may be a
+    // contact rather than a merchant — so it renders `Counterparty` /
+    // `Address`. A protocol payment (x402/mpp/spt) always carries a resource
+    // URL (the evidence row requires one) and keeps `Merchant` /
+    // `Merchant addr`, so its document stays byte-identical to before #4533.
+    ...(data.resourceUrl == null
+      ? [
+          `Counterparty   ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
+          ...(data.merchantName && data.merchantAddress ? [`Address        ${data.merchantAddress}`] : []),
+        ]
+      : [
+          `Merchant       ${data.merchantName ?? data.merchantAddress ?? 'unknown'}`,
+          ...(data.merchantName && data.merchantAddress ? [`Merchant addr  ${data.merchantAddress}`] : []),
+        ]),
     // #3918: the seller block, from the merchant's own invoice and the
     // catalog country — the reverse-VAT fields (Emil, our Accounted contact:
     // country + VAT reg no decide the omvand coding). Lines appear only when
@@ -159,7 +190,24 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     ...(data.merchantCountry ? [`Country        ${data.merchantCountry}`] : []),
     ...(data.merchantVatNo ? [`VAT reg no     ${data.merchantVatNo}`] : []),
     ...(data.merchantOrgNo ? [`Org no         ${data.merchantOrgNo}`] : []),
-    `Resource       ${data.resourceUrl ?? 'n/a'}`,
+    // #4533: a direct payment has no resource URL — it is a transfer, not the
+    // purchase of a resource. Omit the line rather than print "n/a" on a
+    // document an accountant files.
+    ...(data.resourceUrl != null ? [`Resource       ${data.resourceUrl}`] : []),
+    // #4532: what kind of transaction this is. Before this line the three
+    // receipts of one Bitrefill purchase (invoice/create, invoice/pay,
+    // invoice/status) were byte-for-byte the same shape and an accountant
+    // could not tell the purchase from the merchant's per-call API fees.
+    `Transaction    ${data.transactionKind}`,
+    `Description    ${data.description}`,
+    // #4534: the purchase correlation key. Before these lines the three
+    // receipts of one Bitrefill purchase (invoice/create, invoice/pay,
+    // invoice/status) were byte-for-byte the same shape and an accountant had
+    // no way to see they were one purchase. The group id is the merchant's own
+    // invoice/order id, so it matches the merchant's documents too; an
+    // ungrouped payment says so rather than leaving the line out.
+    `Purchase group ${data.purchaseGroupId ?? 'ungrouped'}`,
+    `Parent payment ${data.parentPaymentId ?? 'n/a'}`,
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -374,6 +422,14 @@ export async function loadReceiptUnderlag(
     merchantVatNo: seller.vatNo,
     merchantOrgNo: seller.orgNo,
     resourceUrl: tx.resourceUrl,
+    // #4532: the kind and its line, decided once in `toAccountingEntry` — the
+    // same two values the feed payload carries.
+    transactionKind: tx.transactionKind,
+    description: tx.description,
+    // #4534: the purchase correlation key — the same two values the feed
+    // payload carries, so the document and the payload agree.
+    purchaseGroupId: tx.purchaseGroupId,
+    parentPaymentId: tx.parentPaymentId,
     chainId: row.chain_id,
     // #3767: the BOOKED hash — the settlement when available/pinned, the
     // funding hash labelled as funding after the window, null (raw

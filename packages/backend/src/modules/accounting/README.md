@@ -233,6 +233,24 @@ hash already is the settlement: they are never deferred and `txHashIsFunding`
 is always false. Retired rails carry `txHash: null` and render exactly as they
 did before this contract existed.
 
+## What kind of transaction it is (#4532)
+
+`FeedTransaction.transactionKind` is a closed enum — `purchase` | `api_fee` |
+`transfer` | `refund` | `unknown` — and `FeedTransaction.description` is the
+one line that carries it (`api.bitrefill.com - invoice/pay (purchase)`). Both
+render on the receipt underlag (`Transaction` / `Description`) and both are
+DERIVED in `transaction-kind.ts` from the stored payment record: the payment
+direction, the x402 resource route, the intent's `mcp_call_context.toolName`,
+the captured merchant document and the delivery reference. No route accepts a
+kind, so an agent cannot set it, and a payment with no derivable signal is
+`unknown` rather than a guess.
+
+A connector carries the two values where its API allows it — Fortnox's
+free-text `Comments` field does, with `/` folded to `-` for its character
+restriction (error 2000359); Accounted's upload takes exactly `file` +
+`upload_source`, so the PDF is the carrier there. A new connector should carry
+them if it has a free-text field and otherwise rely on the document.
+
 ## OAuth `state`, and why the callback consumes it
 
 `POST /accounting/connections/:provider/connect-url` signs a JWT: `sub`,

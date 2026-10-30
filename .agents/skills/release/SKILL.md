@@ -104,6 +104,39 @@ So, before any merge and before reporting any state:
   allowlist, which looks identical to a service being down. Check
   `$HTTPS_PROXY/__agentproxy/status` before reading anything into it.
 
+## Report Each Milestone
+
+**Post one line at each milestone, naming the next one.** A release runs for
+hours and the owner cannot see inside it. During the 0.12.0-alpha.0 run the
+owner had to ask "where is QA now?", "Why does this take so long?" and "Is QA
+running?" — three questions the run should have answered unprompted. Silence
+reads as a stall, and the owner's only recourse is to interrupt you.
+
+The milestones, in order:
+
+1. **release PR opened** — number, head SHA, and what it carries.
+2. **merged** — the merge SHA.
+3. **dev deploy live** — the live time read as *The Release PR* says, or
+   "check Railway" when it cannot be told.
+4. **QA green** — the `money-flow` run finished, and the `qa-freshness`
+   **check** re-run green. The check, not the run: a green run does not turn
+   the check green (*Preflight* step 4). The check is re-run on the promotion
+   PR, so say which of the two you are reporting — "run green, check owed"
+   before that PR exists, "check green" after.
+5. **promotion opened** — number and head.
+6. **merged** — the merge SHA.
+7. **prod deploy live** — Railway and Vercel.
+8. **closeout done** — what published, what did not, and the canary's state.
+
+Each line names the next milestone, so the owner knows what to expect and when
+to worry. A milestone that is late is itself worth a line: say it is late and
+what you are doing about it, rather than going quiet.
+
+**Record the phase timings in the promotion PR body after closeout** — the
+merge-to-live time for `dev` and for prod, and the QA wait. That is the input
+to the epic's promotion-checklist box (#4539), and the only place the next
+release can learn where its own hours went.
+
 ## Preflight
 
 Establish facts before touching anything. Each of these has cost a real release.
@@ -159,7 +192,10 @@ because `release-scope.mjs` counts `package.json` as a tarball member, so once a
 bump exists the shipped delta can never read zero again.
 
 **3. Write down what it carries.** That commit list becomes the PR body and the
-CASP shard. Name the issues.
+CASP shard. Name the issues. **Decide the open PRs into `dev` in the same
+pass** — the scope freeze under *The Release PR* — because a published-package
+PR that merges after the bump is cut costs a re-measure, a re-review and CI
+again.
 
 **4. Start the money-flow QA run NOW if the freshness signal is stale.** The
 gate's semantics, the #2164 version-bump exemption and the `qa-override` escape
@@ -346,6 +382,15 @@ clears them); the other two are cleared by the shard you write anyway:
    declare `satisfied-by: docs/regulatory/casp-changelog/**`. That is why
    neither needs an edit of its own.
 
+**The shard's Shipped delta figures come from `npm run release:records`, not
+from you.** It prints the file count, the `+/−` line counts, the per-package
+split and the excluded breakdown from `release:scope --json`, labelled with the
+range it measured (`--label=cut` here, `--label=door` at the promotion). The
+prose around the numbers — what the release carries and why — stays hand-written
+and reviewed; the script owns only the numbers, so a scope change is a re-run
+rather than a re-type. `scripts/README.md` § *`ci/release-records.mjs`* has its
+exit codes and what it does with the payload's edge buckets.
+
 **Do not take this list on faith either.** Run the command above at the top of
 the release: it is the gate's own reckoning against the current front matter,
 and it is what a sixth doc joining the set would show first.
@@ -440,6 +485,89 @@ Non-empty means a promotion is already open. Say so before merging, and if you
 merge anyway: re-run `qa-freshness` at the new head, re-measure the scope, and
 tell that PR's author what changed underneath them.
 
+**Freeze the scope at the cut, and decide the open PRs once.** The listing
+above asks what is already open into `main`; this asks what should still be
+allowed to join the release you are about to cut. Nothing else in this skill
+decides it, and deciding late is measured rather than argued: #4516, a
+published-package PR open since 07:45Z — before the 08:05 start — was not
+decided at the cut, and after the release PR opened at 08:46:50Z it cost four
+commits (one merge `0cd702cf4`, one figure re-measure `f8adbf63a`, two wording
+corrections `3e09df875` and `af4fd8f36`) plus their review and CI, through
+09:43:57. #4523, frontend only, was allowed under this rule and touched no
+release-branch file.
+
+List the open PRs into `dev` that touch a published package directory:
+
+```sh
+gh pr list --base dev --state open --json number,title,files \
+  --jq '.[] | select(.files[]?.path | test("^packages/(sdk|signer|mcp|connect|cli)/")) | "\(.number) \(.title)"'
+# or the GitHub MCP: list_pull_requests
+```
+
+- **The owner decides in or out, once.** "In" PRs merge **before** the bump is
+  cut. Anything decided "out" waits for the next release — unless the owner
+  explicitly re-opens scope and accepts the re-cut cost: re-measure the scope,
+  re-review, and CI again.
+- **Announce the freeze where other sessions and people look.** Put it in the
+  release PR body and on #3193, the shared surface `AGENTS.md` § *Cross-session
+  agent coordination* names for release trains. Lift it on the same two
+  surfaces. A freeze nobody announced binds only the session running the
+  release — the same gap `promoting-dev-to-main.md` § *The promotion window*
+  names for the hold.
+- **PRs that touch no published package may still land on `dev`** until the
+  promotion PR opens. Backend, frontend and ops changes reach no tarball, so
+  they are outside the freeze. The shard's hand-written *Deploys with this
+  promotion* section must still name them, and the door re-measure under
+  *Promotion To Production* catches only their count.
+
+**After the merge, bound the dev deploy wait.** The release PR merging to `dev`
+starts a Railway deployment, and the promotion's `qa-freshness` check reads
+that deployment — so a deploy that never lands stalls the release silently.
+Give it **8 minutes** from the merge, then act.
+
+Read the deployment for the merge SHA. `gh` is unavailable in the remote
+environment (the note in *Preflight* step 4), so use the unauthenticated `curl`
+this skill already uses for the rules check under *Promotion To Production* —
+same access path, different endpoint:
+
+```sh
+curl -sS "https://api.github.com/repos/d-hinders/Haven-AI/deployments?environment=Haven%20AI%20%2F%20dev&per_page=10"
+# then, for the deployment whose "sha" is the merge SHA:
+curl -sS "https://api.github.com/repos/d-hinders/Haven-AI/deployments/<id>/statuses"
+```
+
+`Haven AI / dev` is `RAILWAY_DEV_ENVIRONMENT` in `scripts/ci/qa-freshness.mjs` —
+read the constant there rather than retyping the literal, and note the
+environment name is URL-encoded in the query.
+
+**Which reading counts as live.** The statuses list is newest-first and one
+deployment carries several unlabelled `success` entries, so the reading is not
+obvious:
+
+- The **earliest `success`** on the deployment whose `sha` is the merge SHA —
+  the last `success` in that newest-first list — is when it went live. That is
+  the reading that counts.
+- Later `success` entries on the same deployment are **not** the live time.
+  Railway re-states "N is still the live one" when the next deployment starts
+  building and again when it goes live (`docs/operations/agent-qa.md` §
+  *Automation & gating*, the de-duplication rule), and a redeploy of the same
+  deployment emits its own `in_progress` → `success` pair. Reading the newest
+  `success` instead reads a re-statement: on 2026-10-29 deployment 7421777793
+  went live at 19:16:10Z and its newest `success` reads 19:25:11Z, and
+  7412333353's newest reads 2 h 10 min after it went live.
+- **When it cannot be told, say "check Railway".** No deployment for the merge
+  SHA, no `success` in its statuses, or more than one deployment carrying that
+  SHA with no way to tell which is serving — report that and point at the
+  Railway project rather than guessing a live time.
+
+**The bound.** The last 15 `Haven AI / dev` deployments reached their first
+`success` in **2 min 20 s to 5 min 37 s** after creation. The release commit
+`3243d58f4` took **19 min 27 s**. So at 8 minutes past the merge, a deployment
+that has not reported `success` is outside the measured normal range: tell the
+user it looks stalled and that a **Railway redeploy** is the remedy. Do not
+wait indefinitely, and never report the deploy as live off an `in_progress`
+status.
+
 ## Promotion To Production
 
 Publishing happens on the `dev → main` promotion. **Follow
@@ -506,7 +634,7 @@ publishes nothing"; paste `npm run release:scope` output>
 ## After merge
 
 - [ ] `npm view @haven_ai/<pkg> dist-tags` — all five on `alpha` and `latest`
-- [ ] Migrations confirmed applied in the Railway log
+- [ ] Closeout log check passed — deployment identity = the merge SHA, both boot markers present, no unset-public-RPC warning (or the manual check recorded)
 - [ ] Real-payment canary
 ```
 
@@ -528,16 +656,17 @@ What it leaves to you:
 
   ```sh
   npm run build                # the shipped set is read out of dist/
-  npm run release:scope        # origin/main..origin/dev
+  npm run release:records -- --label=door   # the shard's figures, from release:scope --json
   ```
 
   Build first — it refuses outright on an unbuilt package rather than guessing.
-  Compare its shipped delta against what the shard claims and amend the shard
+  Compare the block it prints against what the shard claims and amend the shard
   when they disagree. **Never hand-count the diff** — that is the judgement this
   step exists to enforce, and on 0.1.36-alpha.0 hand-counting got the scope wrong
   four separate ways. The script's semantics, its exit codes and what it refuses
-  are `scripts/README.md` § *`release-scope.mjs`*; the operator checklist is
-  `promoting-dev-to-main.md`. Read them there rather than from here (#2724).
+  are `scripts/README.md` § *`release-scope.mjs`* and § *`ci/release-records.mjs`*;
+  the operator checklist is `promoting-dev-to-main.md`. Read them there rather
+  than from here (#2724).
 
 - It calls the promotion a human step; it does not say whose. **Confirm the user
   wants it** before opening one — cutting the release and shipping it to
@@ -553,12 +682,32 @@ not disappear.
 The merge is not the finish. `promoting-dev-to-main.md` § *Merge, deploy, and
 verify prod* and § *Run the prod smoke on the right hostname* own the post-merge
 checklist; work them there rather than from here. They cover watching the
-Railway and Vercel deploys land, confirming migrations applied cleanly and how
-to recover a non-transactional one that died part-way, reading the boot log for
-the unset-public-RPC warnings (the evidence is the **absence** of that line in
-the deploy log, not the presence of a variable in a dashboard), the prod smoke
-itself, which Vercel hostnames are production and which is the trap, and the
-rollback path.
+Railway and Vercel deploys land, the closeout log check, the prod smoke itself,
+which Vercel hostnames are production and which is the trap, and the rollback
+path.
+
+**The two log checks are machine-read, and bound to the merge SHA.** Run
+
+```sh
+node scripts/ci/release-closeout-log.mjs --pr <promotion PR number>
+```
+
+and paste its block onto the promotion PR. It anchors the promotion's merge SHA
+in GitHub's `deployment_status` stream for `Haven AI / production`, finds the
+Railway deployment of that commit, reads **that deployment's** boot log, and
+fails unless the deployment's identity equals the SHA and both boot markers
+(`Database migrations complete`, `Haven backend running on port`) are present.
+Only then does it count the unset-public-RPC warnings — the evidence is the
+**absence** of that line in the deploy log, not the presence of a variable in a
+dashboard. The binding is the point: `runMigrations()` runs before `listen()`,
+so a failed migration means the new process never serves while Railway keeps the
+previous deployment live, and an unbound log read can pass on the OLD process.
+
+Exit 0 is a pass, 1 a failed check (it says what failed), 2 means it could not
+run — it then prints a one-line pointer to the **manual check in the Railway web
+UI** in `promoting-dev-to-main.md`, which reaches the same verdict with the same
+strings. A non-transactional migration that died part-way names its own recovery
+statements; do not restart hoping it clears.
 
 **A green deploy status is not the prod smoke.** The deploy platform reporting
 success says a process started; it says nothing about whether a user can log in,

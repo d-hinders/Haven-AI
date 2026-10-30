@@ -32,6 +32,13 @@ const DATA = {
   merchantVatNo: 'SE559412345601',
   merchantOrgNo: '559412-3456',
   resourceUrl: 'https://merchant.example/vpn',
+  // #4532: the kind and the line that carries it.
+  transactionKind: 'purchase' as const,
+  description: 'merchant.example - vpn (purchase)',
+  // #4534: the purchase correlation key. Nulls are the ungrouped case; the
+  // correlation-key cases override.
+  purchaseGroupId: null,
+  parentPaymentId: null,
   chainId: 84532,
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
@@ -58,6 +65,9 @@ const TX = {
   fxSource: 'riksbank',
   fxAt: '2026-07-15T09:30:00.000Z',
   receiptRef: 'evidence-1',
+  // #4534: ungrouped by default; the correlation-key cases override.
+  purchaseGroupId: null,
+  parentPaymentId: null,
   // #3918: the captured merchant receipt — the demo merchant's seller block
   // (empirical anchor: settle of b1e26fc2 returned exactly these values).
   merchantReceipt: {
@@ -75,6 +85,9 @@ const TX = {
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
   fundingTxHash: null,
+  // #4532: the kind and the line that carries it.
+  transactionKind: 'purchase' as const,
+  description: 'merchant.example - vpn (purchase)',
   suggestedAccount: null,
 }
 
@@ -134,6 +147,73 @@ describe('underlagFromData', () => {
     const { filename } = underlagFromData({ ...DATA, paymentId: 'a/b:c d' })
     expect(filename).toBe('haven-receipt-a_b_c_d.pdf')
   })
+
+  // #4532: the document says WHAT it is. Before this the three receipts of one
+  // Bitrefill purchase (invoice/create, invoice/pay, invoice/status) rendered
+  // the same field set and an accountant could not tell the purchase from the
+  // merchant's per-call API fees.
+  it('renders the transaction kind and its description (#4532)', () => {
+    const s = underlagFromData(DATA).pdf.toString('latin1')
+    expect(s).toContain('Transaction    purchase')
+    // Parens are PDF-escaped in the content stream (see pdfEscape).
+    expect(s).toContain('Description    merchant.example - vpn \\(purchase\\)')
+  })
+
+  it('renders `unknown` rather than guessing when no signal was derivable (#4532)', () => {
+    const s = underlagFromData({
+      ...DATA,
+      transactionKind: 'unknown',
+      description: 'Unknown merchant (unclassified)',
+    }).pdf.toString('latin1')
+    expect(s).toContain('Transaction    unknown')
+    expect(s).toContain('Description    Unknown merchant \\(unclassified\\)')
+  })
+
+  it('CONTROL: the two kinds render different bytes, so the assertion above can fail', () => {
+    const purchase = underlagFromData(DATA).pdf.toString('latin1')
+    const fee = underlagFromData({
+      ...DATA,
+      transactionKind: 'api_fee',
+      description: 'merchant.example - vpn (API fee)',
+    }).pdf.toString('latin1')
+    expect(purchase).not.toBe(fee)
+  })
+
+  /**
+   * #4533: a direct payment is a TRANSFER, not the purchase of a resource.
+   * The receipt must still render (the Accounted connector skips a payment
+   * with no underlag, so a null here means no document at all), name the
+   * recipient as the counterparty, and omit the Resource line rather than
+   * print "n/a" on a document an accountant files.
+   */
+  it('renders a transfer: recipient as counterparty, no Resource line when there is no resource URL', () => {
+    const pdf = underlagFromData({
+      ...DATA,
+      merchantName: null,
+      merchantAddress: DATA.merchantAddress,
+      resourceUrl: null,
+    }).pdf.toString('latin1')
+    expect(pdf).toContain(`Counterparty   ${DATA.merchantAddress}`)
+    // The PDF's own object dictionary carries `/Resources`; the assertion is
+    // about the RENDERED line, which starts with `(Resource`.
+    expect(pdf).not.toContain('(Resource')
+    expect(pdf).toContain('ON-CHAIN SETTLEMENT')
+  })
+
+  /**
+   * #4533: the label is scoped to the direct payment. A protocol payment
+   * (x402/mpp/spt) always has a resource URL, so its document keeps the
+   * `Merchant` / `Merchant addr` lines and stays byte-identical to before
+   * this change — the review card's "must not change existing output".
+   */
+  it('CONTROL: a protocol payment keeps the Merchant labels and its Resource line', () => {
+    const pdf = underlagFromData(DATA).pdf.toString('latin1')
+    expect(pdf).toContain(`Merchant       ${DATA.merchantName}`)
+    expect(pdf).toContain(`Merchant addr  ${DATA.merchantAddress}`)
+    expect(pdf).toContain(`Resource       ${DATA.resourceUrl}`)
+    expect(pdf).not.toContain('Counterparty')
+    expect(pdf).not.toContain('(Address')
+  })
 })
 
 describe('loadReceiptUnderlag', () => {
@@ -158,6 +238,10 @@ describe('loadReceiptUnderlag', () => {
     expect(text).toContain('VAT reg no     SE559412345601')
     expect(text).toContain('Org no         559412-3456')
     expect(text).toContain('Country        SE')
+    // #4532: the kind and its line come from the feed transaction, so the
+    // payload and the attached document cannot disagree.
+    expect(text).toContain('Transaction    purchase')
+    expect(text).toContain('Description    merchant.example - vpn \\(purchase\\)')
     const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
     expect(sql).toContain('mpe.user_id = $2')
     expect(params).toEqual(['evidence-1', 'u1'])

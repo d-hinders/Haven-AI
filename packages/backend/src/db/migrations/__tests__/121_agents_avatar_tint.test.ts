@@ -27,6 +27,10 @@ import {
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../121_agents_avatar_tint.js'
+import {
+  down as down122,
+  up as up122,
+} from '../122_agents_avatar_tint_superseded_holds.js'
 
 async function run(step: typeof up): Promise<void> {
   const client = await db.connect()
@@ -34,6 +38,24 @@ async function run(step: typeof up): Promise<void> {
     await step(client)
   } finally {
     client.release()
+  }
+}
+
+/**
+ * Run `body` with 122 reverted, so 121's own shape is what the assertions see.
+ * 122 drops the inheritance trigger and redefines `agent_holds_avatar_tint`
+ * with one argument, so 121's down/up cycle cannot run on top of it: 121's
+ * `down()` would drop the column out from under 122's predicate, and 121's
+ * `up()` would re-create the inheritance pair 122 removed. The restore puts
+ * 122 back on top, which is what leaves the worker schema at head for the
+ * tests that follow (#4448).
+ */
+async function with122Reverted<T>(body: () => Promise<T>): Promise<T> {
+  await run(down122)
+  try {
+    return await body()
+  } finally {
+    await run(up122)
   }
 }
 
@@ -95,11 +117,15 @@ describeDb('migration 121 — agents.avatar_tint (#4429)', () => {
     await initDbHarness()
     // Re-apply THIS source over the worker schema, so every case below tests
     // the migration as written now — not a schema an earlier run left behind.
+    // 122 sits on top of 121 at head, so it is reverted first and restored
+    // last (#4448).
     await resetDb()
     try {
+      await run(down122)
       await run(down)
     } finally {
       await run(up)
+      await run(up122)
     }
   })
 
@@ -123,44 +149,62 @@ describeDb('migration 121 — agents.avatar_tint (#4429)', () => {
     expect(check.rows[0].definition).toContain('6')
   })
 
-  it('the two triggers and the five functions exist at head', async () => {
-    expect((await triggers()).rows.map((r) => r.tgname)).toEqual([
-      'agents_assign_avatar_tint',
-      'agents_inherit_avatar_tint',
-    ])
+  it('121 adds two triggers and five functions; 122 removes the inheritance pair at head', async () => {
+    await with122Reverted(async () => {
+      expect((await triggers()).rows.map((r) => r.tgname)).toEqual([
+        'agents_assign_avatar_tint',
+        'agents_inherit_avatar_tint',
+      ])
+      expect((await functions()).rows.map((r) => r.proname)).toEqual([
+        'agent_holds_avatar_tint',
+        'agent_least_used_avatar_tint',
+        'agent_next_avatar_tint',
+        'agents_assign_avatar_tint_on_insert',
+        'agents_inherit_avatar_tint_on_supersede',
+      ])
+    })
+
+    // At head, 122 has dropped the inheritance trigger and its function.
+    expect((await triggers()).rows.map((r) => r.tgname)).toEqual(['agents_assign_avatar_tint'])
     expect((await functions()).rows.map((r) => r.proname)).toEqual([
       'agent_holds_avatar_tint',
       'agent_least_used_avatar_tint',
       'agent_next_avatar_tint',
       'agents_assign_avatar_tint_on_insert',
-      'agents_inherit_avatar_tint_on_supersede',
     ])
   })
 
   it('down() removes the column, the CHECK, both triggers and every function; up() restores them', async () => {
-    await withMigrationReverted(
-      () => run(down),
-      async () => {
-        expect((await columns()).rows).toEqual([])
-        expect((await checkConstraint()).rows).toEqual([])
-        expect((await triggers()).rows).toEqual([])
-        expect((await functions()).rows).toEqual([])
-      },
-      () => run(up),
-    )
-    expect((await columns()).rows).toHaveLength(1)
-    expect((await triggers()).rows).toHaveLength(2)
-    expect((await functions()).rows).toHaveLength(5)
+    await with122Reverted(async () => {
+      await withMigrationReverted(
+        () => run(down),
+        async () => {
+          expect((await columns()).rows).toEqual([])
+          expect((await checkConstraint()).rows).toEqual([])
+          expect((await triggers()).rows).toEqual([])
+          expect((await functions()).rows).toEqual([])
+        },
+        () => run(up),
+      )
+      expect((await columns()).rows).toHaveLength(1)
+      expect((await triggers()).rows).toHaveLength(2)
+      expect((await functions()).rows).toHaveLength(5)
+    })
+    // 122 is back on top: the worker schema is at head again.
+    expect((await triggers()).rows).toHaveLength(1)
+    expect((await functions()).rows).toHaveLength(4)
   })
 
   it('after a down/up cycle a plain INSERT that does not name avatar_tint still gets one', async () => {
-    await withMigrationReverted(
-      () => run(down),
-      async () => {
-        expect((await columns()).rows).toEqual([])
-      },
-      () => run(up),
-    )
+    await with122Reverted(async () => {
+      await withMigrationReverted(
+        () => run(down),
+        async () => {
+          expect((await columns()).rows).toEqual([])
+        },
+        () => run(up),
+      )
+    })
     const userId = await insertUser()
     const { rows } = await db.query<{ avatar_tint: number }>(
       `INSERT INTO agents (user_id, name) VALUES ($1, '121 agent') RETURNING avatar_tint`,

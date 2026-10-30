@@ -1381,6 +1381,22 @@ predicate permanently rather than until the window elapses.
 > `haven_report_settlement_evidence` again with the hash prefilled. The
 > agent adds `payment_header`; the hash was not judged. Every other refusal
 > keeps its terminal answer. `last-verified` unchanged.
+>
+> **The header is prefilled where the arm holds it (#4530, passage only).**
+> "The agent adds `payment_header`" is no longer the whole story. On the arms
+> that already hold the agent's header — the retryable settlement-evidence
+> handoff of `haven_complete_mcp_tool` / `haven_settle_mcp_tool`, the report
+> tool's own status-unreadable arm, and the plain-HTTP outcome report's
+> folded-evidence retryable and offer arms — `next_arguments` now carries
+> `payment_header` beside the hash, so the agent re-supplies nothing. The
+> plain-HTTP retryable arm prefills what the call FORWARDED as `proofHeader`,
+> never the raw argument. The prefill is omitted when the header exceeds the
+> report tools' 16,384-character cap, and the prose still names the header for
+> a client holding a stale tool list. The missing-header arms stay prose-only:
+> there the call carried no header, so there is nothing to prefill. The status
+> read also names the recorded transaction now
+> (`merchant_settlement_tx_hash`), so an agent can confirm on that read which
+> settlement Haven recorded. `last-verified` unchanged.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:
@@ -3054,3 +3070,22 @@ which the characterization tests enforce.
 > `no-funding-leg.ts` at `origin/dev` `b9f9f1e47`. Scope of this note: the
 > paragraph added above. The rest of this document was not re-read for it, and
 > `last-verified` is not bumped.
+
+> **Re-verified 2026-10-29 (#4534, the purchase correlation key on the outcome
+> report):** this diff touched four files in this document's coverage list —
+> `packages/sdk/src/client.ts`, `packages/sdk/src/merchant-completion.ts`,
+> `packages/sdk/src/types.ts` and `packages/mcp-server/src/tools/**` — and none
+> of the sequence, signing or settlement claims above. `reportX402MerchantOutcome`
+> gains two OPTIONAL inputs, `purchaseGroupId` and `merchantResponse`, spread
+> into the same `POST /machine-payments/evidence` payload the accepted arm
+> already posts, so the accepted-outcome behaviour described above is
+> unchanged: `proof_status` still upgrades to `merchant_response_observed` and
+> the payment still leaves case 2's predicate permanently. The hosted
+> `haven_report_x402_outcome` gains the same two optional arguments and
+> forwards them to that same report. `HavenPaymentReceipt` gains two optional
+> read-only fields (`purchaseGroupId`, `parentPaymentId`), absent on an older
+> backend. Nothing here authorizes, signs, funds or settles anything: the
+> fields are descriptive metadata on a document the accounting feed already
+> produces, and a payment with no correlation is reported exactly as before.
+> Scope of this note: those four files. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.

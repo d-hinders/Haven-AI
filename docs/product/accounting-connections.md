@@ -63,18 +63,12 @@ the retry sweep, what on-call reads when something is stuck — is in
 - **Transactions** shows a small badge on each fed payment — *In Fortnox*,
   *Feeding…*, *Not fed* — and links to `/accounting` (#2870).
 
-The feature is **dev-only for now**. Every account on the dev deployment is
-entitled; production shows the feature as *Coming soon* (#2869): the
-`/accounting` page says what the feed will do and which platforms are lined
-up, ending with "Nothing can be connected yet."; the sidebar entry carries a
-muted *Soon* pill; the Settings card renders NOTHING — the platforms it
-cannot offer are hidden, not listed (2026-10-23, #4359; until then the card
-listed every platform as *Coming soon* with no action). A self-hosted Haven
-shows *Not available on self-hosted* in the Settings card — the explanation
-is information, so it renders whenever the Business tab is visible — and no
-sidebar entry. Exposing the feed in production is a separate, explicit
-decision (#2876). Agents and MCP get nothing new from any of this: the feed
-reads settled payments, it does not take part in making them.
+The feature is **on for every account in dev and production**. Production
+connects Accounted; Fortnox comes to production later (#2876). A self-hosted
+Haven shows *Not available on self-hosted* in the Settings card — the
+explanation is information, so it renders whenever the Business tab is visible
+— and no sidebar entry. Agents and MCP get nothing new from any of this: the
+feed reads settled payments, it does not take part in making them.
 
 ## Connecting Fortnox
 
@@ -168,7 +162,8 @@ Two Accounted specifics worth knowing:
 
 A settled payment is delivered as **one document**: Haven renders the verifiable
 receipt underlag (payment id, settled time, book value, merchant, resource,
-chain, transaction hash) and uploads it to your Accounted company. The upload
+chain, transaction hash, and since #4532 the transaction kind and its
+description) and uploads it to your Accounted company. The upload
 is append-only — Accounted stores a document once and it cannot be edited
 afterwards — so a retry of the same payment never creates a second document.
 Haven only marks the payment delivered when Accounted confirms it stored

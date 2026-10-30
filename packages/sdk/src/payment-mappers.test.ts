@@ -301,6 +301,22 @@ describe('payment result mappers', () => {
     ).toBe(true)
   })
 
+  it('mapPaymentStatusResult carries merchantSettlementTxHash only when the backend sends one (#4530)', () => {
+    // Absent from the raw payload (older backend, or nothing recorded) stays
+    // absent here — the field never claims a hash the backend did not record.
+    expect(mapPaymentStatusResult(paymentStatusResponse()).merchantSettlementTxHash).toBeUndefined()
+    expect(
+      'merchantSettlementTxHash' in mapPaymentStatusResult(paymentStatusResponse()),
+    ).toBe(false)
+
+    const hash = `0x${'5e'.repeat(32)}`
+    expect(
+      mapPaymentStatusResult(
+        paymentStatusResponse({ merchant_settlement_recorded: true, merchant_settlement_tx_hash: hash }),
+      ).merchantSettlementTxHash,
+    ).toBe(hash)
+  })
+
   it('mapPaymentStatusResult carries submissionOutcomePending only while the submit is outcome-pending (#3564)', () => {
     expect(mapPaymentStatusResult(paymentStatusResponse()).submissionOutcomePending).toBeUndefined()
     expect(

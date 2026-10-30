@@ -31,8 +31,10 @@
 //
 // Accepting an ISSUE does not re-trigger `pull_request_target` on the PRs that
 // close it (the ownership gate's precedent), so the failure text says to re-run
-// the check or edit the PR. Accepting the PR itself does: `unlabeled` is one of
-// the workflow's trigger types.
+// the NEWEST gate run or edit the PR: the merge box reads the newest check
+// suite on the head, so re-running an older run changes nothing (#4524).
+// Accepting the PR itself does re-trigger: `unlabeled` is one of the
+// workflow's trigger types.
 //
 // ## Fail closed
 //
@@ -44,7 +46,7 @@ import { EXTERNAL_LABEL, maintainerActorResolver, readStanding } from './externa
 
 export const GATED_BASE = 'dev'
 
-const WAY_OUT = (n) => `a maintainer removes \`${EXTERNAL_LABEL}\` from #${n}, then re-runs this check or edits the PR`
+const WAY_OUT = (n) => `a maintainer removes \`${EXTERNAL_LABEL}\` from #${n}, then re-runs the newest External intake gate run or edits the PR`
 
 /**
  * Pure verdict.
@@ -73,7 +75,7 @@ export function evaluate({ pr, prStanding, issues }) {
     if (i.isPullRequest || String(i.state).toLowerCase() !== 'open') continue
     if (i.blocked) lines.push(`- It closes #${i.number}, opened by @${i.author} (${i.association}), not a maintainer, and not accepted — ${WAY_OUT(i.number)}.`)
   }
-  for (const u of unreadable) lines.push(`- Could not read #${u.number}${u.error ? ` (${u.error})` : ''} — the gate fails closed; re-run this check.`)
+  for (const u of unreadable) lines.push(`- Could not read #${u.number}${u.error ? ` (${u.error})` : ''} — the gate fails closed; re-run the newest External intake gate run.`)
 
   if (lines.length === 0) return { verdict: 'pass', reason: 'neither this pull request nor any open issue it closes is unaccepted external intake', report: '' }
   return {
@@ -165,7 +167,7 @@ if (isMain) await (async () => {
       process.exitCode = 1
     }
   } catch (e) {
-    console.log(`❌ External intake gate: could not read this pull request or its closing references — the gate fails closed. Re-run this job. (${e?.message ?? e})`)
+    console.log(`❌ External intake gate: could not read this pull request or its closing references — the gate fails closed. Re-run the newest External intake gate run. (${e?.message ?? e})`)
     process.exitCode = 1
   }
 })()

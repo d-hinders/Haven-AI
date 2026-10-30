@@ -521,6 +521,26 @@ describe('contract fingerprint delivery (#3816)', () => {
     expect(HOSTED_INSTRUCTIONS).toContain('reconnect once, and if it still')
   })
 
+  it('the stale-list rule allows Haven\'s own next_arguments verbatim and names the remove-and-re-add remedy (#4530)', () => {
+    // Owner decision, 2026-10-29 (option 2): a next_arguments Haven returned
+    // is always sendable verbatim, even when a key in it is missing from the
+    // schema the client loaded — that is not hand-building or reshaping. And
+    // when a reconnect or restart does not change the tool list, the remedy
+    // is to remove and re-add the hosted MCP server entry.
+    //
+    // The instructions are a line-wrapped array joined with '\n', so the
+    // sentences are asserted on the whitespace-normalized text: a re-wrap is
+    // not a wording change, a reworded sentence is.
+    const flat = HOSTED_INSTRUCTIONS.replace(/\s+/g, ' ')
+    expect(flat).toContain(
+      'Sending a next_arguments Haven returned, verbatim, is always allowed, even when a key in it is missing from the schema your client loaded',
+    )
+    expect(flat).toContain("sending Haven's own arguments unchanged is not hand-building or reshaping")
+    expect(flat).toContain(
+      'When a reconnect or restart does not change the tool list, remove and re-add the hosted MCP server entry in your client',
+    )
+  })
+
   it('the fingerprint in the instructions equals the one on a tool result (transport-level)', async () => {
     const { client, server } = await connectHosted()
 

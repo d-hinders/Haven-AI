@@ -82,6 +82,7 @@ import {
   buildPurchaseSummary,
   catchSettledResettle,
   type HostedHandoff,
+  prefillablePaymentHeader,
   refusalNextStep,
 } from './support/guidance.js'
 import {
@@ -128,15 +129,25 @@ function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string
  * `completeX402MerchantCall`'s `settlementEvidenceOutcome` — the same three
  * arms #3727's `evidenceHandoff` gives the plain-HTTP outcome report:
  * recorded (or nothing posted) → no tool; retryable →
- * `haven_report_settlement_evidence` with `payment_id` and the hash
- * prefilled; refused → no tool, because re-reporting the same hash
- * re-refuses. Spread at an emission's top level so `lint:next-steps` reads it
- * as named.
+ * `haven_report_settlement_evidence` with `payment_id`, the hash and the
+ * agent's own `payment_header` prefilled; refused → no tool, because
+ * re-reporting the same hash re-refuses. Spread at an emission's top level so
+ * `lint:next-steps` reads it as named.
+ *
+ * #4530: the retryable arm prefills `payment_header` — the header this call
+ * forwarded to the merchant, which is exactly the #3925 nonce proof the report
+ * needs. `main` declares the field on the report tool, so the stale-client
+ * gate no longer forbids it; the cap check lives in
+ * `prefillablePaymentHeader`. The missing-header arm below stays prose-only:
+ * if it is reached, Haven already forwarded the header it sent (or withheld
+ * it deliberately) and the report was refused, so prefilling the same value
+ * invites the loop `settlementProofHeaderFor` exists to avoid.
  */
 function settlementEvidenceHandoff(
   outcome: EvidenceReportOutcome | undefined,
   paymentId: string,
   settlementTxHash: string | null,
+  paymentHeader: string | undefined,
 ): HostedHandoff {
   if (!outcome || outcome.outcome === 'confirmed') {
     return { nextTool: null, nextToolOmittedReason: 'the purchase is settled; no Haven tool follows' }
@@ -153,6 +164,9 @@ function settlementEvidenceHandoff(
         // the report call is a defined no-op (#3475 follow-up), never a
         // validation refusal in front of an agent.
         ...(settlementTxHash ? { settlement_tx_hash: settlementTxHash } : {}),
+        // #4530: the header this call sent the merchant, when the report tool
+        // can accept it (see `prefillablePaymentHeader`).
+        ...prefillablePaymentHeader(paymentHeader),
       },
     }
   }
@@ -184,8 +198,10 @@ function settlementEvidenceHandoff(
  *
  * #4123: the retryable arm names payment_header — an EIP-3009 settlement
  * report without it is refused before its hash is judged, so "the same hash"
- * alone costs a wasted round trip. Prose only: next_arguments stay as they
- * are (the stale-client gate checks them against main's report schema).
+ * alone costs a wasted round trip. #4530: the header is now ALSO prefilled in
+ * `next_arguments` where the arm holds it (`settlementEvidenceHandoff`); the
+ * prose stays because it is still the instruction a client holding a stale
+ * tool list needs.
  */
 function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): string {
   if (!outcome || outcome.outcome === 'confirmed') {
@@ -1030,10 +1046,11 @@ export function classifySettlementEvidenceReport(
   // `error_code`, never the sentence. Since #3925 an EIP-3009 merchant
   // settlement is recorded only with the payment header the agent sent the
   // merchant; this report carried none, so the hash was never judged and
-  // the remedy is THIS tool again, the hash prefilled, plus payment_header
-  // (the agent's own value, so it cannot be prefilled). Ahead of the
-  // reason-bearing arm below, which would tell the agent re-reporting cannot
-  // help — false for exactly this refusal.
+  // the remedy is THIS tool again, the hash prefilled, plus payment_header.
+  // #4530: this arm cannot prefill the header — the call carried none — which
+  // is why the prose names it; the arms that DO hold the header prefill it.
+  // Ahead of the reason-bearing arm below, which would tell the agent
+  // re-reporting cannot help — false for exactly this refusal.
   if (isMissingProofHeaderRefusal(outcome)) {
     return {
       payment_id: paymentId,
@@ -1084,6 +1101,13 @@ export function classifySettlementEvidenceReport(
       }),
     }
   }
+  // #4530 (decided per arm): this SETTLEMENT_PENDING arm keeps naming
+  // `haven_get_payment_status`, not the report tool. The status read is the
+  // cheaper, non-mutating step and — since #4530's B — it now carries
+  // `merchant_settlement_tx_hash` when the #3888 sweep already recorded the
+  // settlement, so the agent can confirm on that read whether re-reporting is
+  // needed at all. The reason below still names the report tool and the
+  // header, so an agent that does need to re-report has the instruction.
   const pending = outcome.outcome === 'retryable'
   return {
     payment_id: paymentId,
@@ -1334,6 +1358,9 @@ export function createPaidMcpCompletionHandlers(
                 delivered.settlement_evidence_outcome,
                 args.payment_id,
                 delivered.settlement_tx_hash,
+                // #4530: the header this call forwarded to the merchant — the
+                // #3925 nonce proof the report needs, prefilled for the agent.
+                args.payment_header,
               ),
               safeToContinue: true,
               reason: settlementEvidenceReason(delivered.settlement_evidence_outcome),
@@ -1680,6 +1707,9 @@ export function createPaidMcpCompletionHandlers(
               merchant.settlement_evidence_outcome,
               args.payment_id,
               merchant.settlement_tx_hash,
+              // #4530: same prefill as the complete arm — the header this
+              // settle forwarded to the merchant.
+              args.payment_header,
             ),
             safeToContinue: true,
             reason: settlementEvidenceReason(merchant.settlement_evidence_outcome),
@@ -1768,7 +1798,16 @@ export function createPaidMcpCompletionHandlers(
             ...buildAgentGuidance({
               nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
               nextTool: 'haven_report_settlement_evidence',
-              nextArguments: { payment_id: args.payment_id, settlement_tx_hash: args.settlement_tx_hash },
+              nextArguments: {
+                payment_id: args.payment_id,
+                settlement_tx_hash: args.settlement_tx_hash,
+                // #4530: this arm is reachable only when the call carried a
+                // payment_header (`settlementProofHeaderFor` runs only then),
+                // so the header the agent passed is exactly what the retry
+                // needs — prefill it rather than making the agent re-supply
+                // a value it already sent.
+                ...prefillablePaymentHeader(args.payment_header),
+              },
               safeToContinue: true,
               reason:
                 'Nothing was reported yet: Haven could not read this payment just now, and it reads the ' +

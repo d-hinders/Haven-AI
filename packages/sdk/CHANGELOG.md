@@ -15,6 +15,37 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.13.0-alpha.0 — 2026-10-30
+
+### Added
+
+- **`PaymentStatusResult.merchantSettlementTxHash` names the recorded
+  settlement transaction (#4530).** `haven_get_payment_status` already
+  reported `merchantSettlementRecorded: true` when an EIP-3009 payment's
+  merchant settlement was recorded and verified on-chain, but not WHICH
+  transaction it recorded — so an agent could not confirm on that read that
+  the hash it held was the one Haven had (the settlement sweep records one the
+  agent never reported). The status read now carries
+  `merchant_settlement_tx_hash`, mapped to `merchantSettlementTxHash`, under
+  the same presence rule as the flag: present only when recorded, absent
+  otherwise, never `null` and never the merchant's unverified echo. Additive
+  and optional on a type that is only returned, so existing consumers keep
+  compiling. No update needed.
+
+- **The purchase correlation key reaches the SDK (#4534).** `reportX402MerchantOutcome`
+  gains two OPTIONAL inputs: `purchaseGroupId` (1–128 chars — the merchant's own
+  invoice/order id, or a caller-chosen group key when the merchant supplies
+  none) and `merchantResponse` (the merchant's paid response body, from which
+  the backend derives the group id through a small explicit per-merchant map
+  and never stores the body). `HavenPaymentReceipt` gains `purchaseGroupId` and
+  `parentPaymentId` — the merchant's invoice/order id every payment of one
+  purchase shares, and, for a fee call, the purchase payment it paid for. Both
+  are descriptive metadata on a document the accounting feed already produces:
+  they authorize nothing, produce or consume no signature, and no spend
+  decision reads them. A caller that supplies neither sends a byte-identical
+  body to before, and an ungrouped payment is fed exactly as before with both
+  receipt fields null. Additive and optional throughout. No update needed.
+
 ## 0.12.0-alpha.0 — 2026-10-29
 
 ### Added

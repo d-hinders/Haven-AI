@@ -85,8 +85,21 @@ export const EMISSION_SITE_COUNT = 33
  * #4061 adds two (the missing-proof-header arms: the evidence tool's own new
  * site, and the outcome report's folded-evidence branch), one each, and
  * review round 2 one more (the status-unavailable answer).
+ * #4530 adds two more, one per arm that had no row: the settle retryable arm
+ * (the complete arm's row gains the prefilled header) and the plain-HTTP
+ * folded-evidence retryable arm. The offer arm's row gains the header too.
  */
-export const EMISSION_FIXTURE_COUNT = 43
+export const EMISSION_FIXTURE_COUNT = 45
+
+/**
+ * #4530: a sample EIP-3009 payment header for the prefill fixtures — a real
+ * header is about 4.5 KB, and this one is well under
+ * `SETTLEMENT_PROOF_HEADER_MAX_LENGTH` (16,384), so the arms that prefill it
+ * do. The cap-omission case is proven in `tools.test.ts`, not here: a fixture
+ * row is a shape, and the corpus only needs the key present.
+ */
+const SAMPLE_PAYMENT_HEADER =
+  'eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiYmFzZSIsInBheWxvYWQiOnsic2lnbmF0dXJlIjoiMHg1YTU5In19'
 
 export const EMISSION_SITES = [
   { site: 'catalog-purchase.ts prepare erc7710', action: AgentPaymentNextAction.SignAndSubmitPayment, tool: 'haven_sign', args: { payment_id: 'pay_1' }, expect: { ...SIGNER('haven_sign'), next_arguments: { payment_id: 'pay_1' } } },
@@ -110,7 +123,7 @@ export const EMISSION_SITES = [
   // next_arguments / reason only, so AgentPaymentNextAction.AwaitingSettlementEvidence's
   // published meaning (an erc7710 payment past its settlement window) is
   // never reused for a different fact.
-  { site: 'plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1' } } },
+  { site: 'plain-http-x402.ts report outcome accepted, eip3009 unsettled (offer settlement evidence)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', payment_header: SAMPLE_PAYMENT_HEADER }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', payment_header: SAMPLE_PAYMENT_HEADER } } },
   { site: 'paid-mcp-completion.ts pending', action: AgentPaymentNextAction.CheckStatusLater, tool: 'haven_get_payment_status', args: { payment_id: 'pay_1' }, expect: { ...HOSTED('haven_get_payment_status'), next_arguments: { payment_id: 'pay_1' } } },
   // #3529: the reason-bearing evidence refusal is its own arm — keyed on the
   // relayed reason's PRESENCE (only the eip3009 settlement seam emits one),
@@ -155,14 +168,20 @@ export const EMISSION_SITES = [
   // the pre-#3764 shape with no guidance at all), and the settle arm's
   // existing site now reads the same helper. The retryable arm names the
   // report tool with the hash prefilled; the refused one names no tool.
-  { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash prefilled)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}` } } },
+  { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence retryable (hash + header prefilled)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}`, payment_header: SAMPLE_PAYMENT_HEADER }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}`, payment_header: SAMPLE_PAYMENT_HEADER } } },
+  // #4530: the settle arm shares `settlementEvidenceHandoff` with the complete
+  // arm but is its own emission site — the same prefill, its own row.
+  { site: 'paid-mcp-completion.ts settle eip3009: settlement evidence retryable (hash + header prefilled)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}`, payment_header: SAMPLE_PAYMENT_HEADER }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'a'.repeat(64)}`, payment_header: SAMPLE_PAYMENT_HEADER } } },
   { site: 'paid-mcp-completion.ts complete eip3009: settlement evidence refused (no tool, reason)', action: AgentPaymentNextAction.None, tool: null, reason: 'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash', expect: { next_tool_omitted_reason: 'the merchant settlement hash was refused: it does not match this payment on-chain — do not re-report the same hash' } },
   // #4061: a settlement report refused for want of the proof header (backend
   // error_code settlement_proof_header_missing) names the evidence tool again,
   // payment_id + hash prefilled; the agent adds its own payment_header.
   { site: 'paid-mcp-completion.ts report settlement evidence: proof header missing (re-call adding payment_header)', action: AgentPaymentNextAction.RetryWithExplicitContext, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
-  { site: 'paid-mcp-completion.ts report settlement evidence: status unreadable with payment_header (nothing posted, call again)', action: AgentPaymentNextAction.RetryWithExplicitContext, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
+  { site: 'paid-mcp-completion.ts report settlement evidence: status unreadable with payment_header (nothing posted, call again)', action: AgentPaymentNextAction.RetryWithExplicitContext, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}`, payment_header: SAMPLE_PAYMENT_HEADER }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}`, payment_header: SAMPLE_PAYMENT_HEADER } } },
   { site: 'plain-http-x402.ts report outcome accepted: folded evidence missing the proof header (re-report adding payment_header)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}` } } },
+  // #4530: the plain-HTTP folded-evidence RETRYABLE arm — the header this call
+  // forwarded is prefilled beside the hash. It had no row before.
+  { site: 'plain-http-x402.ts report outcome accepted: folded evidence retryable (hash + forwarded header prefilled)', action: AgentPaymentNextAction.None, tool: 'haven_report_settlement_evidence', args: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}`, payment_header: SAMPLE_PAYMENT_HEADER }, expect: { ...HOSTED('haven_report_settlement_evidence'), next_arguments: { payment_id: 'pay_1', settlement_tx_hash: `0x${'be'.repeat(32)}`, payment_header: SAMPLE_PAYMENT_HEADER } } },
 ] as const
 
 

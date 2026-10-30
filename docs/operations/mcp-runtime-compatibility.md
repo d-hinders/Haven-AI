@@ -89,6 +89,33 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **Re-verified #4577 (2026-10-30, the parent-receipt field on the receipts
+> wire and the SDK):** covered surfaces change ADDITIVELY, and no tool, input
+> schema, strict-input list, expected-context version, consent hash, version
+> floor or `tools-list.snapshot.json` entry moves.
+>
+> - `packages/sdk/src/types.ts` — `HavenPaymentReceipt.parentReceiptId` and
+>   `RawHavenPaymentReceipt.parent_receipt_id` are added, both optional. The
+>   value is the parent purchase receipt's `id` (the
+>   `machine_payment_evidence` row id of the purchase leg a fee call paid for),
+>   which is what `parentPaymentId` already carried under a name that said
+>   "payment". `parentPaymentId` keeps mapping the same value and is now
+>   `@deprecated`; it is NOT removed, because 0.13.0-alpha.0 shipped it and
+>   removal is a breaking change needing its own release decision.
+> - `packages/sdk/src/payment-mappers.ts` — one new block-form mapping
+>   (`receipt.parentReceiptId = raw.parent_receipt_id`), per-row: a backend that
+>   does not send the key leaves it ABSENT, never a fabricated `null`. The
+>   existing `parent_payment_id` block is unchanged.
+>
+> **Version skew.** A local `@haven_ai/mcp` or `@haven_ai/connect` older than
+> this change pins the previous SDK exactly, so it keeps the old receipt shape
+> (no `parentReceiptId`) until it is updated; the hosted server picks the SDK
+> change up on deploy. Nothing is refused in either direction — the change is
+> additive and optional on a type that is only returned, so existing consumers
+> keep compiling. `last-verified` already reads 2026-10-30 from the release note
+> below, so it is not re-stamped for this note. Nothing else in this document
+> was re-verified.
+
 > **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** the Supported Runtime
 > Manifest table's four rows move to `0.13.0-alpha.0`, and that is the whole of
 > this release's effect on the table. Re-read against the source constants

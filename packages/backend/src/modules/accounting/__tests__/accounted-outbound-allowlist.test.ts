@@ -74,7 +74,7 @@ function tx() {
     suggestedAccount: '6540',
     // #4534: ungrouped.
     purchaseGroupId: null,
-    parentPaymentId: null,
+    parentReceiptRef: null,
   }
 }
 

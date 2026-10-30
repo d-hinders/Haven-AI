@@ -71,13 +71,25 @@ export interface ReceiptUnderlagData {
   /**
    * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
    * own invoice/order id (or an agent-supplied group key) shared by every
-   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
-   * call paid for. Both null on an ungrouped payment. The document renders the
-   * group id so a human can match documents by eye — grouping is a rendering
-   * choice in the accounting tool, never a merge in Haven.
+   * payment of one purchase; `parentReceiptRef` is the purchase's receipt
+   * (evidence) id — the `receiptRef` of the purchase leg a fee call paid for,
+   * NOT a payment id. Both null on an ungrouped payment. The document renders
+   * the group id so a human can match documents by eye — grouping is a
+   * rendering choice in the accounting tool, never a merge in Haven.
+   *
+   * #4577: named `parentReceiptRef` to match `receiptRef`, which is what it
+   * joins to, and rendered as `Parent receipt`.
    */
   purchaseGroupId: string | null
-  parentPaymentId: string | null
+  parentReceiptRef: string | null
+  /**
+   * #4577: this document's OWN evidence id — the `machine_payment_evidence`
+   * row id, the same value `AccountingEntry.receiptRef` carries. Rendered as
+   * `Receipt ref` on a protocol underlag so a fee's document and its
+   * purchase's document match by eye. On a direct payment it is the intent id,
+   * which `Payment id` already prints, so the line is omitted there.
+   */
+  receiptRef: string
   chainId: number | null
   /**
    * #3767: the hash the surface BOOKS — the verified merchant settlement when
@@ -206,8 +218,14 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     // no way to see they were one purchase. The group id is the merchant's own
     // invoice/order id, so it matches the merchant's documents too; an
     // ungrouped payment says so rather than leaving the line out.
+    // #4577: `Parent receipt` names what the value is — the parent purchase
+    // receipt's id, not a payment id. `Receipt ref` prints THIS document's own
+    // evidence id, so a fee and its purchase match by eye. It is omitted on a
+    // direct payment, where `receiptRef` is the intent id `Payment id` already
+    // prints.
     `Purchase group ${data.purchaseGroupId ?? 'ungrouped'}`,
-    `Parent payment ${data.parentPaymentId ?? 'n/a'}`,
+    `Parent receipt ${data.parentReceiptRef ?? 'n/a'}`,
+    ...(data.resourceUrl != null ? [`Receipt ref    ${data.receiptRef}`] : []),
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -428,8 +446,11 @@ export async function loadReceiptUnderlag(
     description: tx.description,
     // #4534: the purchase correlation key — the same two values the feed
     // payload carries, so the document and the payload agree.
+    // #4577: `parentReceiptRef` is the parent purchase's `receiptRef`;
+    // `receiptRef` is this document's own evidence id.
     purchaseGroupId: tx.purchaseGroupId,
-    parentPaymentId: tx.parentPaymentId,
+    parentReceiptRef: tx.parentReceiptRef,
+    receiptRef: tx.receiptRef,
     chainId: row.chain_id,
     // #3767: the BOOKED hash — the settlement when available/pinned, the
     // funding hash labelled as funding after the window, null (raw

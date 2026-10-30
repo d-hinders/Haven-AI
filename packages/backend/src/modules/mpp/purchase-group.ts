@@ -14,8 +14,10 @@
  *
  * - `purchase_group_id` — a stable identifier for the purchase a payment
  *   belongs to.
- * - `parent_payment_id` — for a fee call, the purchase payment it paid for.
- *   Null for the purchase itself and for ungrouped payments.
+ * - `parent_payment_id` — for a fee call, the purchase's receipt (evidence)
+ *   id: the `machine_payment_evidence.id` of the purchase leg it paid for, NOT
+ *   a payment-intent id. Null for the purchase itself and for ungrouped
+ *   payments. (#4577: the wire names the same value `parent_receipt_id`.)
  *
  * ## Derivation, in the issue's order of preference
  *

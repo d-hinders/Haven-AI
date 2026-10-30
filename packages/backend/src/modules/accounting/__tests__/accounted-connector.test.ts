@@ -113,7 +113,7 @@ function tx() {
     suggestedAccount: '6540',
     // #4534: ungrouped by default; the correlation-key cases override.
     purchaseGroupId: null,
-    parentPaymentId: null,
+    parentReceiptRef: null,
   }
 }
 

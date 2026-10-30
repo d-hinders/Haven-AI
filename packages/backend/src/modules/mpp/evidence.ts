@@ -204,9 +204,14 @@ export interface MachinePaymentEvidenceRow {
   /**
    * #4534: the purchase correlation key. `purchase_group_id` is the merchant's
    * own invoice/order id (or an agent-supplied group key) shared by every
-   * payment of one purchase; `parent_payment_id` is the purchase payment a fee
-   * call paid for. Both null on an ungrouped payment — which is fed exactly as
-   * before, never withheld.
+   * payment of one purchase; `parent_payment_id` holds the purchase's receipt
+   * (evidence) id — the `machine_payment_evidence.id` of the purchase leg a fee
+   * call paid for, NOT a payment-intent id. Both null on an ungrouped payment —
+   * which is fed exactly as before, never withheld.
+   *
+   * #4577: the column name is kept (no migration); the wire carries the same
+   * value as `parent_receipt_id`, and `parent_payment_id` stays beside it as a
+   * deprecated alias.
    */
   purchase_group_id: string | null
   parent_payment_id: string | null
@@ -1101,9 +1106,14 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // never the merchant body.
       delivery_reference: row.delivery_reference ?? null,
       // #4534: the purchase correlation key — the merchant's own invoice/order
-      // id (or an agent-supplied group key) and, for a fee call, the purchase
-      // payment it paid for. Both null on an ungrouped payment.
+      // id (or an agent-supplied group key) and, for a fee call, the purchase's
+      // receipt (evidence) id. Both null on an ungrouped payment.
+      // #4577: `parent_receipt_id` names what the value IS (a receipt id, the
+      // parent purchase receipt's `id`); `parent_payment_id` carries the same
+      // value as a deprecated alias, because the SDK shipped it in
+      // 0.13.0-alpha.0. Additive on the wire; nothing stored changes.
       purchase_group_id: row.purchase_group_id ?? null,
+      parent_receipt_id: row.parent_payment_id ?? null,
       parent_payment_id: row.parent_payment_id ?? null,
       confirmed_at: row.confirmed_at,
       created_at: row.created_at,

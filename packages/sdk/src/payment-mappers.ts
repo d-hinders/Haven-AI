@@ -214,6 +214,14 @@ export function mapPaymentReceipt(raw: RawHavenPaymentReceipt): HavenPaymentRece
   if ('purchase_group_id' in raw) {
     receipt.purchaseGroupId = raw.purchase_group_id ?? null
   }
+  // #4577: the parent purchase receipt's `id`, under the name that says what it
+  // holds. Block form, not a spread — the vocabulary guard reads `receipt.x = …`
+  // lines and cannot see a spread.
+  if ('parent_receipt_id' in raw) {
+    receipt.parentReceiptId = raw.parent_receipt_id ?? null
+  }
+  // #4577: the same value under the name 0.13.0-alpha.0 shipped. Deprecated on
+  // the type; kept mapping so an existing consumer keeps working.
   if ('parent_payment_id' in raw) {
     receipt.parentPaymentId = raw.parent_payment_id ?? null
   }

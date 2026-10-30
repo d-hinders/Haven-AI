@@ -134,12 +134,16 @@ export interface AccountingEntry {
   /**
    * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
    * own invoice/order id (or an agent-supplied group key) shared by every
-   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
-   * call paid for. Both null on an ungrouped payment — which is fed exactly as
-   * before, never withheld.
+   * payment of one purchase; `parentReceiptRef` is the purchase's receipt
+   * (evidence) id — the `receiptRef` of the purchase leg a fee call paid for,
+   * NOT a payment id. Both null on an ungrouped payment — which is fed exactly
+   * as before, never withheld.
+   *
+   * #4577: named `parentReceiptRef` to match `receiptRef`, which is what it
+   * joins to. The stored column stays `parent_payment_id` (no migration).
    */
   purchaseGroupId: string | null
-  parentPaymentId: string | null
+  parentReceiptRef: string | null
   /** The merchant's OWN receipt when the agent captured one (#956); absent/null = none. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
 }
@@ -370,8 +374,10 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     transactionKind: kind.kind,
     transactionDescription: transactionDescription(kind.kind, null, row.resource_url, kind.route),
     // #4534: the purchase correlation key, read straight off the evidence row.
+    // #4577: the column is `parent_payment_id`; the entry names it for what it
+    // holds — the parent purchase's `receiptRef`.
     purchaseGroupId: row.purchase_group_id ?? null,
-    parentPaymentId: row.parent_payment_id ?? null,
+    parentReceiptRef: row.parent_payment_id ?? null,
     merchantReceipt:
       row.merchant_receipt_url != null || row.merchant_receipt_json != null
         ? { url: row.merchant_receipt_url ?? null, inlineJson: row.merchant_receipt_json ?? null }

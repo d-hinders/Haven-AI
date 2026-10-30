@@ -45,12 +45,19 @@
 // merge on a stale green tick — the PR author was there first, which is the
 // protocol's own answer; stated so nobody reads the tick as a live lock.
 //
+// ## Re-running
+//
+// A RELEASE on another issue fires no PR event, so re-running is the only way
+// out of that red. Re-run the NEWEST gate run (or edit the PR): the merge box
+// reads the newest check suite on the head, so re-running an older run changes
+// nothing (#4524).
+//
 // ## Fail closed
 //
 // A required check that cannot read the issues it must judge FAILS, with the
 // read error in the log, rather than passing — the operator-verify close guard
 // sets that precedent, and a green check that judged nothing is the worse
-// outcome. Re-run the job after a transient error.
+// outcome. Re-run the newest PR ownership gate run after a transient error.
 //
 // ## Interaction with the merge-time release (#3177)
 //
@@ -109,9 +116,9 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
     // Fail closed: a candidate that could not be read cannot be judged.
     return {
       verdict: 'fail',
-      reason: `could not read issue(s) ${unreadable.map((n) => `#${n}`).join(', ')} — the gate fails closed; re-run after a transient error`,
+      reason: `could not read issue(s) ${unreadable.map((n) => `#${n}`).join(', ')} — the gate fails closed; re-run the newest PR ownership gate run after a transient error`,
       findings: [],
-      report: `❌ PR ownership gate: could not read ${unreadable.map((n) => `#${n}`).join(', ')}. A required check that judged nothing must not pass. Re-run this job.`,
+      report: `❌ PR ownership gate: could not read ${unreadable.map((n) => `#${n}`).join(', ')}. A required check that judged nothing must not pass. Re-run the newest PR ownership gate run.`,
     }
   }
   if (findings.length === 0) return { verdict: 'pass', reason: 'every issue this PR closes is unheld or held by its author', findings: [], report: '' }
@@ -130,7 +137,7 @@ export function evaluate({ pr, issues, nowMs = Date.now(), channelIssue = CHANNE
     if (onlyAssigned.length) parts.push(`assigned to ${onlyAssigned.map((a) => `@${a}`).join(', ')} (no live claim comment found — a tracking assignment still counts here; if their claim went stale, post your own \`🔒 CLAIM #${f.issue}\` and the projection takes it over)`)
     lines.push(`- #${f.issue}: ${parts.join('; ')}.`)
   }
-  lines.push('', 'Two ways out (AGENTS.md § Cross-session agent coordination):', `1. Coordinate in #${channelIssue} for a handover — the holder posts \`🔓 RELEASE #<issue>\` (and unassigns), then re-run this check.`, '2. Keep the PR but stop closing the issue: change `Closes #<issue>` to `Refs #<issue>` in the body, title and commit messages (the check re-runs on edit and on push).', '', `A draft PR is not gated; mark ready when the ownership is settled. Posted by the PR ownership gate (#3179).`)
+  lines.push('', 'Two ways out (AGENTS.md § Cross-session agent coordination):', `1. Coordinate in #${channelIssue} for a handover — the holder posts \`🔓 RELEASE #<issue>\` (and unassigns), then re-run the newest PR ownership gate run.`, '2. Keep the PR but stop closing the issue: change `Closes #<issue>` to `Refs #<issue>` in the body, title and commit messages (the check re-runs on edit and on push).', '', `A draft PR is not gated; mark ready when the ownership is settled. Posted by the PR ownership gate (#3179).`)
   return { verdict: 'fail', reason: `held by someone else: ${findings.map((f) => `#${f.issue}`).join(', ')}`, findings, report: lines.join('\n') }
 }
 
@@ -225,7 +232,7 @@ if (isMain) await (async () => {
       process.exitCode = 1
     }
   } catch (e) {
-    console.log(`❌ PR ownership gate: could not read this pull request's closing references or their issues — the gate fails closed. Re-run this job. (${e?.message ?? e})`)
+    console.log(`❌ PR ownership gate: could not read this pull request's closing references or their issues — the gate fails closed. Re-run the newest PR ownership gate run. (${e?.message ?? e})`)
     process.exitCode = 1
   }
 })()

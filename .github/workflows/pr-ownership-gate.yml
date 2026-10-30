@@ -45,8 +45,10 @@ name: PR ownership gate
 # ## Fail closed, and the exit code is the verdict
 #
 # A required check that cannot read the issues it must judge FAILS, with the
-# error in the log (the operator-verify close guard's precedent). Re-run the job
-# after a transient error. `shell: bash` + `set -o pipefail` keep the script's
+# error in the log (the operator-verify close guard's precedent). Re-run the
+# NEWEST gate run (or edit the PR) after a transient error: the merge box reads
+# the newest check suite on the head, so re-running an older run changes
+# nothing (#4524). `shell: bash` + `set -o pipefail` keep the script's
 # exit 1 through the `tee` into the step summary — Actions' default `bash -e`
 # has no pipefail and would have turned every failure green (measured).
 #
@@ -70,12 +72,40 @@ permissions:
   issues: read
   pull-requests: read
 
-# One run per PR at a time: `edited` fires on every body/title edit and the
-# runs land on the same head sha, so without this an earlier red could
-# complete after a later green (labeler.yml's shape).
-concurrency:
-  group: pr-ownership-gate-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# ## No `concurrency` group, on purpose (#4524, #4580)
+#
+# Every run must finish with a verdict. A per-PR group cancels runs: GitHub
+# cancels a PENDING run whenever a newer one queues, whatever
+# `cancel-in-progress` says, and a run cancelled while pending leaves a check
+# suite with no check run at all. On PR #4575 (2026-10-30) one push, a body edit
+# and ready-for-review left cancelled runs of this gate and the Baseline change
+# gate on head `3ce58c3a`, beside newer passing runs. The same shape blocked
+# PR #4516 on the External intake gate, which dropped its group in #4526.
+#
+# Without the group, runs on one head overlap. That is safe because the merge
+# box judges a required Actions check by the workflow's NEWEST check suite on
+# the head. GitHub does not document that rule; #4516 is the evidence: a
+# re-run success at 09:22:03Z — the newest check run by start and completion —
+# sat in an older suite and left the PR blocked, and it cleared only when the
+# highest-id suite went green. The run for the latest event owns the newest
+# suite, so the latest state decides. If GitHub ever judges by the newest
+# COMPLETED run instead, an older green finishing after a newer red would fail
+# open: the fallback is `cancel-in-progress: false` + `queue: max` (#4524
+# owner Q1).
+#
+# This gate's inputs are safe under that rule even though it does not read
+# everything live. It reads its closing references live, but takes `author`,
+# `draft`, `base` and `defaultBranch` from the payload (`prFromPayload`). That
+# is enough because `author` never changes; a base change fires `edited` and
+# draft→ready fires `ready_for_review`, each owning a newer suite with the
+# then-current payload; ready→draft triggers nothing, but leaves the stricter
+# verdict in place and a draft cannot merge; only a default-branch rename is
+# untriggered. The argument depends on `edited` and `ready_for_review` staying
+# in `types:` — the workflow test pins the exact list.
+#
+# Never filter events with an `if:` (job or step) or soften the judging step
+# with `continue-on-error`: a skipped job or step reports Success, so any event
+# would mint a newer, passing suite — fail open. The workflow test pins both.
 
 jobs:
   ownership:

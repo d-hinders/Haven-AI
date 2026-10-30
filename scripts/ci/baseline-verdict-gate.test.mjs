@@ -1279,15 +1279,28 @@ describe('the workflow cannot mask the verdict', () => {
   })
 
   test('permissions are read-only — the PR-derived input is text, never code', () => {
-    const perms = yml.slice(yml.indexOf('permissions:'), yml.indexOf('concurrency:'))
+    const perms = yml.slice(yml.indexOf('permissions:'), yml.indexOf('\n\njobs:'))
     assert.match(perms, /contents: read/)
     assert.match(perms, /pull-requests: read/)
     assert.doesNotMatch(perms, /contents: write/)
     assert.doesNotMatch(perms, /actions: write/)
   })
 
-  test('one run per PR at a time (edited fires per keystroke-saved edit)', () => {
-    assert.match(yml, /concurrency:\n  group: baseline-change-gate-\$\{\{ github\.event\.pull_request\.number \}\}\n  cancel-in-progress: true/)
+  // #4524/#4580: a concurrency group cancels pending runs (whatever
+  // cancel-in-progress says), and a run cancelled while pending leaves an empty
+  // check suite that blocks the merge box. Checked over YAML lines, not comments.
+  test('no concurrency group: no run is ever cancelled (#4524, #4580)', () => {
+    const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    assert.doesNotMatch(code, /^[ \t]*(?:-[ \t]+)?['"]?concurrency['"]?[ \t]*:/m)
+    assert.doesNotMatch(code, /cancel-in-progress/)
+  })
+
+  // #4524/#4580: a skipped job or step reports Success, so an event filter or
+  // an error-tolerated judge would mint a newer passing suite (fail open).
+  test('the only if: is the repository guard; nothing tolerates a failed judge (#4524, #4580)', () => {
+    const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    assert.deepEqual(code.match(/^[ \t]*(?:-[ \t]+)?['"]?if['"]?[ \t]*:.*$/gm), ["    if: github.repository == 'd-hinders/Haven-AI'"])
+    assert.doesNotMatch(code, /continue-on-error/)
   })
 
   test('the gate runs on the default-branch base only — promotions are skipped by the script, not by a missing check', () => {

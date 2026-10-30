@@ -142,7 +142,7 @@
 // A check that cannot read the PR it must judge FAILS, with the read error in
 // the log — the operator-verify close guard's and pr-ownership-gate's shared
 // precedent. A green check that judged nothing is the worse outcome. Re-run
-// the job after a transient error.
+// the newest Baseline change gate run after a transient error.
 //
 // ## Advisory until a ruleset change says otherwise
 //
@@ -762,7 +762,7 @@ if (isMain) await (async () => {
       process.exitCode = 1
     }
   } catch (e) {
-    console.log(`❌ Baseline change gate: could not read this pull request's changed baselines, body, comments or commits — the gate fails closed. Re-run this job. (${e?.message ?? e})`)
+    console.log(`❌ Baseline change gate: could not read this pull request's changed baselines, body, comments or commits — the gate fails closed. Re-run the newest Baseline change gate run. (${e?.message ?? e})`)
     process.exitCode = 1
   }
 })()

@@ -319,13 +319,37 @@ describe('the workflow cannot mask the verdict', () => {
     assert.match(step, /\n\s+shell: bash\n\s+run: \|\n\s+set -o pipefail\n\s+node scripts\/ci\/pr-ownership-gate\.mjs --event "\$GITHUB_EVENT_PATH" \| tee -a "\$GITHUB_STEP_SUMMARY"\n/)
   })
 
-  test('the judge is the default branch\'s copy: pull_request_target, read-only token, no ref on the checkout, one run per PR', () => {
+  test('the judge is the default branch\'s copy: pull_request_target, read-only token, no ref on the checkout', () => {
     assert.match(yml, /^on:\n  pull_request_target:/m)
-    assert.match(yml, /concurrency:\n  group: pr-ownership-gate-\$\{\{ github\.event\.pull_request\.number \}\}\n  cancel-in-progress: true/)
     assert.doesNotMatch(yml, /^on:\n  pull_request:/m)
     assert.match(yml, /permissions:\n  contents: read\n  issues: read\n  pull-requests: read/)
     // No `ref:` under the checkout step — the default on pull_request_target is the DEFAULT branch.
     const checkout = yml.slice(yml.indexOf('actions/checkout@v4'), yml.indexOf('actions/setup-node@v4'))
     assert.doesNotMatch(checkout, /ref:/)
+  })
+
+  // #4580: this gate takes `author`, `draft`, `base` and `defaultBranch` from
+  // the payload, which is safe only because a base change fires `edited` and
+  // draft→ready fires `ready_for_review` — each owning a newer suite with the
+  // then-current payload. Drop either type and the argument collapses.
+  test('the trigger types are exactly the five the payload argument depends on (#4580)', () => {
+    assert.match(yml, /^on:\n  pull_request_target:\n    types: \[opened, edited, synchronize, reopened, ready_for_review\]\n/m)
+  })
+
+  // #4524/#4580: a concurrency group cancels pending runs (whatever
+  // cancel-in-progress says), and a run cancelled while pending leaves an empty
+  // check suite that blocks the merge box. Checked over YAML lines, not comments.
+  test('no concurrency group: no run is ever cancelled (#4524, #4580)', () => {
+    const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    assert.doesNotMatch(code, /^[ \t]*(?:-[ \t]+)?['"]?concurrency['"]?[ \t]*:/m)
+    assert.doesNotMatch(code, /cancel-in-progress/)
+  })
+
+  // #4524/#4580: a skipped job or step reports Success, so an event filter or
+  // an error-tolerated judge would mint a newer passing suite (fail open).
+  test('the only if: is the repository guard; nothing tolerates a failed judge (#4524, #4580)', () => {
+    const code = yml.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+    assert.deepEqual(code.match(/^[ \t]*(?:-[ \t]+)?['"]?if['"]?[ \t]*:.*$/gm), ["    if: github.repository == 'd-hinders/Haven-AI'"])
+    assert.doesNotMatch(code, /continue-on-error/)
   })
 })

@@ -818,6 +818,219 @@ an agent is beyond those three fields.
   caller's fallback label as `name` and `avatarTint: null` (the name hash); the
   stack never invents a name.
 
+### StatusBadge
+
+`packages/ui/src/StatusBadge.tsx` is the app's one status pill: a
+`rounded-full` stadium, `px-2 py-0.5 text-xs font-medium`, `whitespace-nowrap`
+(#2147 — a wrapped label turns the stadium into an over-rounded blob that stops
+reading as a status chip), filled from one of five tones. It has 32 JSX sites
+and, until #4563, no entry here.
+
+| tone | fill / ink | means |
+|---|---|---|
+| `success` | `--v2-success-soft` / `--v2-success` | the thing is done, or is working as intended |
+| `warning` | `--v2-warning-soft` / `--v2-warning` | something needs the owner's eye, or a posture changed |
+| `danger` | `--v2-danger-soft` / `--v2-danger` | authority is gone, or the thing failed |
+| `neutral` | `--v2-surface-2` / `--v2-ink-2` | a fact with no judgement — archived, expired, in flight |
+| `brand` | `--v2-brand-soft` / `--v2-brand` | a next step for the owner, not a problem |
+
+**One label and one tone per state.** The tables below are the source of truth
+for the status families the app renders. Slice 7 (#4567) moves the code onto
+them; where the code disagrees today, the table wins and the disagreement is
+named in the row rather than left for the next reader to rediscover.
+
+#### Agents
+
+| state | label | tone | source |
+|---|---|---|---|
+| `active` | Connected | `success` | `lib/payment-status.ts` `AGENT_STATUS` |
+| `paused` | Paused | `warning` | `AGENT_STATUS`, `AgentRow`'s `agentBadge` |
+| `pending_approval` | **Needs setup** | **`brand`** | `AGENT_STATUS` renders `warning` today — #4567 moves it; `agentBadge` already renders `brand` |
+| `revoked` | Revoked | `danger` | `AGENT_STATUS`, `AgentCard`'s `agentCardBadge` |
+| `archived_at` set | Archived | `neutral` | `agent-panel/AgentCard.tsx` `agentCardBadge` |
+| budget ended | Budget ended | `neutral` | `AgentRow.tsx` `agentBadge` |
+| ≥ 90% of budget used | N% used | `neutral` | `AgentRow.tsx` `agentBadge` |
+
+**"Needs setup" is `brand`, not `warning`** (owner decision 2026-10-30). The
+agent exists and is reachable; it has no budget yet, so the owner has one step
+to take. `brand` is the tone for a next step. `warning` is earned by a change
+in posture — `Paused`, `Suspended`, `Revoking…` — not by a setup that has not
+finished. `AGENT_STATUS`'s `warning` is the drift #4567 removes.
+
+#### Payments
+
+| state | label | tone | source |
+|---|---|---|---|
+| `pending_signature` | Awaiting signature | `brand` | `PAYMENT_STATUS` |
+| `submitted` | Submitted | `brand` | `PAYMENT_STATUS` |
+| `confirmed` | **Sent** | `success` | `PAYMENT_STATUS` — a confirmed payment is **Sent** everywhere |
+| `failed` | Failed | `danger` | `PAYMENT_STATUS`, `transactionRowBadge`'s fallback |
+| `expired` | Expired | `neutral` | `PAYMENT_STATUS` |
+| delegate sweep | Recovered | `success` | `lib/transaction-presentation.tsx` `transactionStatus` |
+| `confirming_merchant` | Confirming | `warning` | `lib/machine-payment-lifecycle.ts` |
+| `needs_attention` | Needs attention | `warning` | `lib/machine-payment-lifecycle.ts` |
+| `paid` | no badge | — | `machine-payment-lifecycle.ts` — a settled machine payment renders as a normal row |
+
+`transactionRowBadge` is the ONE precedence every ledger surface uses
+(#4288): sweep `Recovered`, then the machine-payment lifecycle, then the wire's
+`statusBadge`, then `Failed` for an `isError` row. A screen that builds its own
+chain drifts from this the moment a rule changes.
+
+#### Accounting sync
+
+| state | label | tone | source |
+|---|---|---|---|
+| `pushed` | **In <Provider>** | `success` | `components/accounting/AccountingBadge.tsx` |
+| `pushed`, record-only connector | Evidence archived | `success` | same — Accounted archives the document Haven pushed, so "In …" would read as a booking the provider made (#3018) |
+| `pending` | **Sending…** | `neutral` | code renders "Feeding…" today — #4567 moves it |
+| `failed` / `skipped` | **Not sent** | `warning` | code renders "Not fed" today — #4567 moves it; the reason rides on hover/focus where the badge is interactive |
+
+The provider name comes from the row (`accounting.provider`) through
+`providerDisplayName`, so a second provider does not read as "In Fortnox".
+
+#### Merchant budgets
+
+| state | label | tone | source |
+|---|---|---|---|
+| `current` | Current | `success` | `marketplace/MerchantBudgetsList.tsx` `PIN_STATUS_COPY` |
+| `stale` | Old address | `warning` | same |
+| `unverified` | Address unconfirmed | `warning` | same |
+| `not_erc7710` | Not every offer | `warning` | same |
+
+#### Agent passport — issuance and standing
+
+`components/AgentPassportCard.tsx` carries two badges, one per axis.
+
+| issuance | label | tone |
+|---|---|---|
+| not issued | Not issued | `neutral` |
+| `failed` | Issuance failed | `danger` |
+| `pending` | Issuing… | `neutral` |
+| anchored, `revoked_onchain` | Revoked on-chain | `danger` |
+| `re_anchoring` | Updating on-chain | `neutral` |
+| `revocation_pending` | Revoking… | `warning` |
+| anchored | Issued | `success` |
+
+| standing | label | tone |
+|---|---|---|
+| `active` | Active | `success` |
+| `suspended` | Suspended | `warning` |
+| `revoked` | Revoked | `danger` |
+| `unknown` | Unknown | `neutral` |
+
+`Issuing…` and `Updating on-chain` are `neutral`, not `warning`: the system is
+doing something in the background and the owner has nothing to do. `warning` is
+earned by `Revoking…` and `Suspended`, which are changes in posture.
+
+#### Network
+
+| state | label | tone | source |
+|---|---|---|---|
+| testnet chain | Test network | `neutral` | `accounts/[accountId]/AccountDetailClient.tsx`, `AccountsOverviewClient.tsx` |
+
+#### What the table does not cover
+
+Some `StatusBadge` sites are **contextual tags**, not statuses of the thing the
+row is about. They are listed here by name so #4567 neither invents labels for
+them nor leaves them unclassified:
+
+- **tool-call results** — `agents/[agentId]/AgentToolCallsTab.tsx` renders the
+  backend's own `result_status` word through `resultTone`;
+- **connect-setup steps** — `connect-agent/SetupStates.tsx`'s
+  `SetupStatusState` / `SetupErrorState` badges, which label a step in a flow
+  rather than a durable state;
+- **the credential handoff** — `haven/CredentialHandoffCard.tsx`'s
+  `Saved` / `Action required`;
+- **VIES** — `settings/CompanyDetailsCard.tsx`'s "checked against VIES" badge;
+- **"This device"** — `NewAccountDialog.tsx`'s marker on the credential the
+  current device holds.
+
+A contextual tag may reuse a tone, but it does not join the vocabulary table:
+its label is about the context, and the table's job is one label per state of
+one thing.
+
+### EmptyState
+
+`packages/ui/src/EmptyState.tsx` is the app's one empty/absent state (39 JSX
+sites). Three sizes, one shell:
+
+| size | padding | type | use |
+|---|---|---|---|
+| `default` | `px-6 py-10` | title `text-sm font-semibold`, body `text-sm` | page- or section-level absence |
+| `compact` | `p-6` | title `text-sm font-medium`, body `text-xs` | in-card previews and side columns |
+| `inline` | `px-3 py-2.5` | `text-xs`, title only | a one-line placeholder inside dense content |
+
+All three render the same shell — `rounded-[10px] border border-dashed
+border-[var(--v2-border-strong)] bg-[var(--v2-surface)]` (the `shell` constant
+in `EmptyState.tsx`).
+Inside a `Card` that shell is a **second filled surface**, which `CLAUDE.md`
+§ UI Surface Hierarchy forbids: tinted surfaces are for callouts, table headers,
+day bands, the `anchor` elevation, chips, code blocks and overlays — never for a
+wrapper that groups a card's own content. The dashboard's Transactions card is
+the live case.
+
+**The in-card form is `bare`.** Pass `bare` to drop the shell and keep
+everything else — icon halo, title, body, action. It is a separate prop rather
+than a fourth size because the two axes are independent: `size` is density,
+`bare` is surface. `size="compact" bare` is the in-card preview; `bare` alone is
+the in-card page-level state; `size="inline" bare` keeps the one-line shape
+without the shell. `EmptyState.test.tsx` holds all three.
+
+**When to add a call to action.** Add one when the user can act from where they
+are and the action is the obvious next step — "Create agent budget" on an empty
+budget list, "Try again" on a load error. Do not add one when the absence is
+informational (there is nothing to do), when the action lives on another surface
+the copy already names, or when the state is a preview. One action, never two.
+
+**The copy shape is "No … yet".** "No agents yet", "No payments yet", "No
+budgets yet" — the `yet` says the absence is a starting point, not a verdict.
+The body says what the thing is for and what happens next, in one sentence.
+Never "You have no …", never "Nothing here", never an exclamation mark.
+
+**The load-error shape.** A failed load is not an empty state, but it is built
+on the same primitive: title **"<Thing> could not load"**, a body that says what
+is still true ("Existing agent budgets are unchanged."), and a **Try again**
+button — the retry label is `Try again` everywhere (§ copy-guidelines, busy and
+retry copy). `tone="danger"` on the icon, `bare` inside a card. Never "Something
+went wrong", never an error code, never a bare "Retry". `screen-recipes.md`
+SR:676 is the shipped precedent ("Agents could not load", whose "Try again"
+shows the skeleton again).
+
+### Spinner
+
+`packages/ui/src/Spinner.tsx` is the one busy indicator. Two sizes, both on the
+closed icon scale (§ 5 → Size): `sm` is 16px (`h-4 w-4`), for a glyph beside
+text or inside a button; `md` is 20px (`h-5 w-5`), for a standalone indicator in
+a panel. It renders lucide `Loader2` through `Icon` (stroke 1.5) and gates the
+rotation with `motion-safe:animate-spin`, so a user who has asked their system
+to reduce motion gets a still glyph rather than a spinning one.
+
+Decorative by default (`aria-hidden`). Pass `label` when the spinner is the only
+thing saying the surface is busy: it then renders `role="status"` with the label
+in an `sr-only` span. A spinner never replaces the words that say what is
+happening — a button in flight still swaps its label to `Verbing…` with
+`aria-busy` (§ Buttons), and a loading container still carries
+`aria-busy`/`aria-live` around its skeletons (§ Skeletons).
+
+**Why it lives here and not in #4568.** #4564 (`DialogResult`) and #4568
+consume it, so the owner approves the primitive once, on this PR, before two
+slices build on it.
+
+**The hand-rolled sites it replaces.** Re-derive the census rather than trusting
+this sentence:
+
+```sh
+git grep -n "animate-spin" -- packages ':!**/__tests__/**'
+```
+
+At `31c07cd49` that returns six sites, and **five** have no motion gate:
+`EditAgentModal.tsx`, `EditBudgetModal.tsx` and `FundMerchantModal.tsx` (a 40px
+CSS ring each), and `AgentPanel.tsx` and `PaymentCredentialsModal.tsx` (a lucide
+glyph). `connect-agent/ConnectSteps.tsx` is the one that already gates. (The
+#4563 audit said four; the census is five — the count is the command's, not this
+paragraph's.) #4567/#4568 move them onto the primitive; this slice adds it and
+the `/design-system` demo.
+
 ### Detail-page section rule (#3692)
 
 On an **entity detail page** — an agent or an account — the page is a stack of
@@ -1142,6 +1355,27 @@ Unknown — `null` or a non-finite value — renders `—` in `--v2-ink-3`, neve
 A currency figure is a **valuation of a token amount**, not a fiat balance
 Haven holds — the budget's own token where a budget is set, the user's
 currency everywhere else (owner decision 2026-10-09).
+
+**The full rule, and the surfaces it names (owner decision D1, 2026-10-30).**
+The 2026-10-09 sentence settled the budget case and left the rest to be
+re-derived per screen, which is how the app ended up following it two ways at
+once. The split is not a preference; it follows what is **enforced**:
+
+- **Token surfaces — budgets, prices, and anything the user types.** A budget
+  is enforced in its own token on-chain, so the figure the user sets and the
+  figure the app shows back must be that token: an agent card's budget line, a
+  budget form's amount field, a marketplace price, and the Send amount. A
+  converted figure here would be a number the user cannot act on and the
+  contract does not enforce.
+- **Currency surfaces — balances, totals and spending figures.** These are
+  valuations of what happened, not instructions: the account balance, the
+  dashboard's summary and 30-day spend, and Analytics. They read in the user's
+  preferred currency, through `formatFiatDisplay` and `Amount`'s currency mode
+  above.
+
+A surface that shows both — the Agents tab's mixed-token budget summary line —
+keeps each figure in its own unit and converts only the one total that has to
+add tokens together, carrying `≈` per the rule above.
 
 ### AttentionList (#3805)
 

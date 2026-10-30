@@ -68,6 +68,7 @@ import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { StatTile } from '@/components/ui/StatTile'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -3990,6 +3991,168 @@ export default function DesignSystemPage() {
             action={<Button size="sm" variant="ghost">Try again</Button>}
           />
         </div>
+      </Section>
+
+      <Section
+        title="EmptyState — sizes, the in-card form, and the load-error shape"
+        description="One primitive for every absence. The dashed shell is a filled surface, so inside a Card it must be dropped with `bare` — otherwise the card holds a second filled surface, which the surface-hierarchy rule forbids."
+        testId="ds-empty-state"
+      >
+        <div className="grid gap-5 lg:grid-cols-3">
+          <EmptyState
+            title="No agents yet"
+            body="Connect an agent to let it make payments within rules you control."
+            action={<Button size="sm">Connect an agent</Button>}
+          />
+          <EmptyState
+            size="compact"
+            title="No payments yet"
+            body="Payments your agents make appear here."
+          />
+          <EmptyState size="inline" title="No budget set yet" />
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5" data-testid="ds-empty-state-in-card">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">In-card form — `bare`</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              The same state inside a Card, with no shell of its own. This is the dashboard
+              Transactions card&apos;s shape.
+            </p>
+            <div className="mt-4">
+              <EmptyState
+                bare
+                size="compact"
+                title="No payments yet"
+                body="Payments your agents make appear here."
+              />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5" data-testid="ds-empty-state-load-error">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Load-error shape</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              &quot;&lt;Thing&gt; could not load&quot;, what is still true, and a <strong>Try again</strong> button
+              (screen-recipes SR:676).
+            </p>
+            <div className="mt-4">
+              <EmptyState
+                bare
+                tone="danger"
+                icon={<Icon icon={OctagonAlert} className="h-full w-full" />}
+                title="Agent budgets could not load"
+                body="Existing agent budgets are unchanged."
+                action={<Button size="sm" variant="ghost">Try again</Button>}
+              />
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="StatusBadge — one label and one tone per state"
+        description="Five tones, and a vocabulary table in design-system.md § StatusBadge that names one label and one tone per state for agents, payments, accounting sync, merchant budgets, the agent passport and the network chip."
+        testId="ds-status-badge"
+      >
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Every tone</h3>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <StatusBadge tone="success">Sent</StatusBadge>
+            <StatusBadge tone="warning">Needs attention</StatusBadge>
+            <StatusBadge tone="danger">Failed</StatusBadge>
+            <StatusBadge tone="neutral">Archived</StatusBadge>
+            <StatusBadge tone="brand">Needs setup</StatusBadge>
+          </div>
+          <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+            <code className="rounded bg-[var(--v2-surface)] px-1">brand</code> is a next step for the
+            owner, not a problem — which is why <strong>Needs setup</strong> is brand and not warning.
+            <code className="rounded bg-[var(--v2-surface)] px-1">warning</code> is earned by a change
+            in posture: Paused, Suspended, Revoking….
+          </p>
+        </Card>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Agents and payments</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">Connected</StatusBadge>
+              <StatusBadge tone="warning">Paused</StatusBadge>
+              <StatusBadge tone="brand">Needs setup</StatusBadge>
+              <StatusBadge tone="danger">Revoked</StatusBadge>
+              <StatusBadge tone="neutral">Archived</StatusBadge>
+              <StatusBadge tone="neutral">Budget ended</StatusBadge>
+              <StatusBadge tone="neutral">92% used</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="brand">Awaiting signature</StatusBadge>
+              <StatusBadge tone="brand">Submitted</StatusBadge>
+              <StatusBadge tone="success">Sent</StatusBadge>
+              <StatusBadge tone="danger">Failed</StatusBadge>
+              <StatusBadge tone="neutral">Expired</StatusBadge>
+              <StatusBadge tone="success">Recovered</StatusBadge>
+              <StatusBadge tone="warning">Confirming</StatusBadge>
+              <StatusBadge tone="warning">Needs attention</StatusBadge>
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Accounting, merchants, passport, network</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">In Fortnox</StatusBadge>
+              <StatusBadge tone="neutral">Sending…</StatusBadge>
+              <StatusBadge tone="warning">Not sent</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">Current</StatusBadge>
+              <StatusBadge tone="warning">Old address</StatusBadge>
+              <StatusBadge tone="warning">Address unconfirmed</StatusBadge>
+              <StatusBadge tone="warning">Not every offer</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">Issued</StatusBadge>
+              <StatusBadge tone="neutral">Issuing…</StatusBadge>
+              <StatusBadge tone="danger">Issuance failed</StatusBadge>
+              <StatusBadge tone="warning">Revoking…</StatusBadge>
+              <StatusBadge tone="danger">Revoked on-chain</StatusBadge>
+              <StatusBadge tone="success">Active</StatusBadge>
+              <StatusBadge tone="warning">Suspended</StatusBadge>
+              <StatusBadge tone="neutral">Unknown</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge>Test network</StatusBadge>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              Contextual tags — tool-call results, connect-setup steps, the credential handoff,
+              VIES and &quot;This device&quot; — are outside the vocabulary table by name.
+            </p>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="Spinner — the one busy indicator"
+        description="Two sizes on the icon scale, and the rotation is gated with motion-safe so a reduced-motion user gets a still glyph. Decorative by default; pass a label when the spinner is the only thing saying the surface is busy."
+        testId="ds-spinner"
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Spinner />
+              <span className="text-sm text-[var(--v2-ink-2)]">sm — 16px, beside text</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Spinner size="md" />
+              <span className="text-sm text-[var(--v2-ink-2)]">md — 20px, standalone</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Spinner label="Loading payments" />
+              <span className="text-sm text-[var(--v2-ink-2)]">labelled — role=&quot;status&quot;</span>
+            </div>
+          </div>
+          <p className="mt-4 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+            A spinner never replaces the words that say what is happening: a button in flight still
+            swaps its label to <code className="rounded bg-[var(--v2-surface)] px-1">Verbing…</code> with{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">aria-busy</code>, and a loading
+            container still carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-busy</code> and{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">aria-live</code> around its skeletons.
+          </p>
+        </Card>
       </Section>
 
       <Section

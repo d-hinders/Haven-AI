@@ -22,6 +22,7 @@
     "./SegmentedControl": "./src/SegmentedControl.tsx",
     "./Tabs": "./src/Tabs.tsx",
     "./Skeleton": "./src/Skeleton.tsx",
+    "./Spinner": "./src/Spinner.tsx",
     "./StatTile": "./src/StatTile.tsx",
     "./StatusBadge": "./src/StatusBadge.tsx",
     "./Table": "./src/Table.tsx",

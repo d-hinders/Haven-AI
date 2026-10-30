@@ -248,7 +248,7 @@ test.describe('detail panel polish — sweep copy on one line (E)', () => {
       const dialog = await openPanel(page, width, 'Returned from Atlas')
       const lineCount = await dialog.evaluate((root) => {
         const dd = Array.from(root.querySelectorAll('dd')).find(
-          (el) => el.textContent === 'Unspent allowance returned',
+          (el) => el.textContent === 'Unused budget returned',
         )
         if (!dd) return -1
         const value = dd.querySelector<HTMLDivElement>(':scope > div')

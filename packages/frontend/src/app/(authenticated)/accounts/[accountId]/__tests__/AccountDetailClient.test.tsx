@@ -788,7 +788,7 @@ describe('AccountDetailClient', () => {
       tabParam = 'security'
       render(<AccountDetailClient />)
 
-      const link = screen.getByRole('link', { name: 'All signers in Settings' })
+      const link = screen.getByRole('link', { name: 'Passkeys and wallets' })
       expect(link).toHaveAttribute('href', '/settings?tab=security#signers')
       expect(screen.queryByText(/The ways this account can be approved/)).not.toBeInTheDocument()
       expect(screen.queryByText(/All your passkeys and wallets in Settings/)).not.toBeInTheDocument()

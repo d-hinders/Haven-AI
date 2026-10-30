@@ -153,7 +153,7 @@ function exportButton(): HTMLElement {
 }
 
 /**
- * #4561 — one page name. The heading said "Transaction history" while the
+ * #4561 — one page name. The heading carried a name of its own while the
  * sidebar, the route and the dashboard card said something else. It is
  * "Transactions" now, on BOTH branches: the feed and the no-accounts empty
  * state each render their own `PageHeader`.

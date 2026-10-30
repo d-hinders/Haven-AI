@@ -390,6 +390,12 @@ explicitly open schema stays open. That is the spec's decision; tightening it
 is a separate contract change, not something a test helper should do behind the
 spec's back.
 
+One open schema no longer relies on that trust alone: `MachinePaymentReceipt`
+keeps `additionalProperties: true`, but a backend test now pins its emitted
+keys — it reads the declared set from the component schema and the emitted set
+from the live `GET /machine-payments/receipts` response, and fails naming any
+key the schema omits, with an empty allowlist (#4579).
+
 A schema composed with `allOf` is also left open, on purpose. `additionalProperties`
 only sees the properties declared at its own level, so closing one `allOf` member
 makes it reject the properties its siblings contribute — a valid payload would be
@@ -445,7 +451,10 @@ about routes that had shipped long ago:
 The first two went unnoticed because `Agent` sets `additionalProperties: true` —
 the same limit recorded above. An open schema is a deliberate choice, but it
 means undeclared fields accumulate silently, and consumers generating clients
-from the spec never learn the fields exist.
+from the spec never learn the fields exist. `MachinePaymentReceipt` is the first
+open schema to close that gap from the test side: its emitted keys are pinned
+against the declared set by a guard with an empty allowlist (#4579), so a new
+field on the receipts wire cannot ship undeclared again.
 
 `DelegateBalance` was also lifted out of the inline
 `/agents/{id}/delegate-balance` response into a named component. The frontend

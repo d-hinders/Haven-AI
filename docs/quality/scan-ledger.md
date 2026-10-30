@@ -2389,3 +2389,48 @@ missing *Verified at scan* field, block 6 "all unchanged"), six nits. All
 applied in place; corrected figures are marked above and in the report's §5.
 
 **Disposition: pending owner decision** (C1–C5).
+
+**Disposition (owner, 2026-10-30): file all five; C2 option (b), C5 option
+(a).** The owner answered in the captain's session. C2: name the parent field
+for what it holds (a receipt id) additively, and keep storing the evidence id.
+C5: remove the two gates' concurrency group, as #4526 did. Every issue went
+through new-task with an independent spec review; none has an open owner
+question, and `pending-review` is lifted on all five. The scan PR is #4575.
+
+- C1 → [#4576](https://github.com/d-hinders/Haven-AI/issues/4576)
+  (`area:docs`). Spec review re-ran 11 claims: 9 reproduced, 2 wrong and
+  fixed; 9 corrections. One wrong claim was also in this entry and the report:
+  the ledger's block-2 series is 18 across 6 of 8 from 2026-10-03 to 10-21,
+  and 17 only in the 2026-10-26 entries. It was corrected in place on #4575
+  (`48914a20`) before merge. Among the other corrections: a fixture-based
+  counter-control, the `set -f` constraint on the selector, and a stated
+  17 → 15 series conversion.
+- C2 → [#4577](https://github.com/d-hinders/Haven-AI/issues/4577)
+  (`money-path`, `area:backend`, `area:sdk`, `area:docs`). Spec review re-ran
+  15 claims: 14 reproduced, 1 wrong and fixed (`FeedTransaction` is internal,
+  so only the receipts API/SDK and the PDF are public; the internal types are
+  renamed in place, no alias); 12 corrections. Among them: `Receipt ref` only
+  on protocol underlags, a line-array (not byte) identity probe, SDK mapper
+  tests, ten live comment copies, and the Accounted re-file risk stated and
+  accepted.
+- C3 → [#4578](https://github.com/d-hinders/Haven-AI/issues/4578)
+  (`area:backend`, `area:docs`). Spec review re-ran 12 claims: 11 reproduced,
+  1 wrong and fixed; 10 corrections. Among them: a CASP shard joins the scope;
+  the label is the canonical address only (contact names are out, since they
+  would change Fortnox's supplier); exact-string pins; prose copies of the
+  rung list.
+- C4 → [#4579](https://github.com/d-hinders/Haven-AI/issues/4579)
+  (`area:backend`, `area:sdk`, `area:docs`). Spec review found one blocking
+  issue: **six** emitted receipt keys are undeclared, not one (39 emitted /
+  33 declared). The scope now declares all six behind an empty-allowlist
+  guard, and the title is updated. 11 claims re-run, 10 reproduced, 1 wrong
+  and fixed; 8 corrections.
+- C5 → [#4580](https://github.com/d-hinders/Haven-AI/issues/4580)
+  (`area:ci`). Spec review re-ran 12 claims: 9 reproduced, 3 wrong or
+  incomplete and fixed; 9 corrections. Among them: re-run-the-newest wording,
+  the no-`if:` pin, the payload-safety argument with a `types:` pin, a
+  re-anchored permissions slice, and an operator-verify instrument.
+
+Drive: `ship-next 4576`, `ship-next 4577`, `ship-next 4578`, `ship-next 4579`,
+`ship-next 4580`. C2 and C4 both edit `MachinePaymentReceipt`; whichever lands
+second regenerates `api-types.ts`.

@@ -2310,8 +2310,8 @@ disposition. None materially worsened in the re-measured dimensions.
 - **C1 — block 2's contract-doc selector reads a body example as front
   matter.** Exact selector: 8 documents / 19 raw misses; actual front-matter
   sample: 7 documents / 15 literal misses across 5, equal at the prior scan
-  SHA. The ledger's "17 across 6 of 8" since 2026-10-03 is these 15 plus the
-  false document's two real-path misses. One shared selector plus a
+  SHA. The 2026-10-26 entries' "17 across 6 of 8" (18 in the 10-03 to 10-21
+  entries) is these 15 plus the false document's two real-path misses. One shared selector plus a
   body-example counter-control. Routing `(none)`, off money-path.
 - **C2 — accounting purchase parents and public payment ids use different UUID
   domains.** `parent_payment_id` stores the purchase evidence/receipt id while

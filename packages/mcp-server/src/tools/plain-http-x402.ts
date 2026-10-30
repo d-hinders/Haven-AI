@@ -1749,6 +1749,14 @@ export function createPlainHttpX402Handlers(
           // was anchored to — and see that the agent did not choose it.
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
+          // #4552: the merchant's own reason for refusing, echoed from the
+          // SDK's parse — the MCP server never parses the body itself. It is
+          // merchant-claimed data, never something Haven verified, and it is
+          // present on a rejection only, so an accepted report's shape is
+          // byte-identical to before.
+          ...(report.outcome === 'rejected'
+            ? { merchant_reported_error: report.merchantReportedError ?? null }
+            : {}),
           // #3727: present only when the caller supplied evidence — calls
           // without evidence answer the pre-existing shape, byte for byte.
           ...(settlementEvidence ? { settlement_evidence: settlementEvidence } : {}),
@@ -1791,10 +1799,12 @@ export function createPlainHttpX402Handlers(
                   ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
                     'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
                     'the same purchase. The settlement evidence you attached was not used: it is only ' +
-                    'recorded with an accepted outcome.'
+                    'recorded with an accepted outcome. merchant_reported_error, when set, is the ' +
+                    "merchant's own claim, not something Haven verified."
                   : 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
                     'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
-                    'the same purchase.'
+                    'the same purchase. merchant_reported_error, when set, is the ' +
+                    "merchant's own claim, not something Haven verified."
                 : settlementEvidence
                   ? evidenceReason(settlementEvidence)
                   : offerSettlementEvidence

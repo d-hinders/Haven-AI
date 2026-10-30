@@ -141,9 +141,42 @@ describe('the signal ladder', () => {
   })
 })
 
+describe('a direct payment is a transfer (#4578)', () => {
+  // The signal is the literal the entry source's direct branch emits
+  // (`TRUE::BOOLEAN`), never an intent column — so no agent-written metadata
+  // can set it. These three cases are the acceptance criteria: (a) proves the
+  // change, (b) and (c) guard the rungs around it.
+  it('(a) the direct-payment signal → transfer, basis rail', () => {
+    const verdict = deriveTransactionKind(signals({ directPayment: true }))
+    expect(verdict.kind).toBe('transfer')
+    expect(verdict.basis).toBe('rail')
+    // A direct payment has no route to name, so the description is the label
+    // and the kind alone.
+    expect(verdict.route).toBeNull()
+  })
+
+  it('(b) all signals null without it → still unknown / none', () => {
+    const verdict = deriveTransactionKind(signals())
+    expect(verdict.kind).toBe('unknown')
+    expect(verdict.basis).toBe('none')
+  })
+
+  it('(c) direction `in` with it → still refund — direction is rung 1', () => {
+    const verdict = deriveTransactionKind(signals({ direction: 'in', directPayment: true }))
+    expect(verdict.kind).toBe('refund')
+    expect(verdict.basis).toBe('direction')
+  })
+
+  it('the description is exactly the canonical address and the kind', () => {
+    expect(
+      transactionDescription('transfer', '0x15179876c595922999C2d5DC7c23Cc7711fE799a', null, null),
+    ).toBe('0x15179876c595922999C2d5DC7c23Cc7711fE799a (transfer)')
+  })
+})
+
 describe('an agent cannot set the kind', () => {
   it('a transactionKind smuggled onto the signals object is ignored', () => {
-    // The derivation reads five named facts and nothing else. A caller that
+    // The derivation reads six named facts and nothing else. A caller that
     // passes a kind of its own changes nothing — this is the executable form
     // of "derived server-side; an agent cannot set it".
     const smuggled = {

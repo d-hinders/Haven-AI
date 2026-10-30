@@ -471,15 +471,20 @@ The kind is DERIVED server-side from the stored payment record
 cannot set it. The ladder, strongest signal first:
 
 1. `direction` — `in` is income/refund, so `refund`.
-2. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
+2. the direct-payment rail (#4578) — the entry source's direct branch emits
+   this signal as a literal, so a settled direct payment (`haven_send`,
+   `POST /payments`) is a movement of funds to an address, so `transfer`. The
+   literal is written by the SQL branch, never read from an intent column, so
+   no agent-written metadata can set it.
+3. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
    invoice-shaped body (invoice/order number, line items, seller block) is a
    `purchase`; a body with none of those markers is a bare acknowledgement, so
    `api_fee`.
-3. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
+4. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
    deliverable, so `purchase`.
-4. `machine_metadata.mcp_call_context.toolName` (#1307) — an MCP tool call IS
+5. `machine_metadata.mcp_call_context.toolName` (#1307) — an MCP tool call IS
    the paid deliverable, so `purchase`.
-5. the x402 route — the last path segment of `resource_url` against three
+6. the x402 route — the last path segment of `resource_url` against three
    closed vocabularies: purchase verbs (`pay`, `purchase`, `buy`, `order`, …),
    fee verbs (`create`, `status`, `search`, `detail`, `quote`, …) and transfer
    verbs (`send`, `transfer`, `withdraw`, …).
@@ -487,7 +492,10 @@ cannot set it. The ladder, strongest signal first:
 A route verb outside those sets is `unknown`, never a guess — `price` is
 deliberately absent, because `https://api.anchor-x402.com/v1/price/token` is a
 paid data call whose OUTPUT is the price. A payment with no derivable signal
-renders `unknown` and does not fail the feed.
+renders `unknown` and does not fail the feed. A direct payment is no longer one
+of those: since #4578 it renders `transfer`, and its `Description` names the
+counterparty's canonical address — `0x1517…799a (transfer)` — because a direct
+payment has no merchant name and no resource host to name.
 
 **Why it exists.** One BikBok gift-card purchase through Bitrefill's
 plain-HTTP x402 route settled three payments on production 2026-10-29 —
@@ -1343,3 +1351,15 @@ receiver is reachable and verifying, before the first real commit.
 > `receipt-underlag.ts`, `fortnox-connector.ts` and `accounted-connector.ts`.
 > Nothing else in this document was re-verified, and `last-verified` is not
 > bumped.
+
+> **Re-verified #4578 (2026-10-30, direct payments classify as transfers).**
+> Changed: the "What kind of transaction it is" block under *What the
+> accountant sees on the attachment* — the derivation ladder gains a rung 2
+> (the direct-payment rail, emitted as a literal by the entry source's direct
+> branch) and the later rungs renumber to 3-6; the `unknown` sentence now says
+> a direct payment renders `transfer` with its counterparty's canonical
+> address as the `Description` label. Re-checked against
+> `modules/accounting/transaction-kind.ts`, `entry.ts` and
+> `receipt-underlag.ts`, and against the real-DB suite
+> `direct-payment-feed.db.test.ts`. Nothing else in this document was
+> re-verified, and `last-verified` is not bumped.

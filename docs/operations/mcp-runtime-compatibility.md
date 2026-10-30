@@ -101,10 +101,12 @@ last-verified: "2026-10-30"
 > `MCP_VERSION`); `sdkVersion` and `signerVersion` are literals the bump
 > re-pins (`:15`, `:17`). The Node floor is unchanged at `>= 22.0.0`.
 >
-> **What the release carries.** The shipped delta is four files, all in
-> `@haven_ai/sdk` (+64/−0): `client.ts`, `merchant-completion.ts`,
-> `payment-mappers.ts`, `types.ts`. Two changes, both already recorded above
-> and neither re-litigated here:
+> **What the release carries.** Re-measured at the door (`origin/dev`
+> `745d4ebf`), the shipped delta is 16 files, +162/−20, over 14 commits:
+> `sdk` 7, `connect` 3, `cli` 2, `mcp` 2, `signer` 2. Ten of those are the
+> bump's own version literals, which is why every package appears at the door
+> and only `sdk` appeared at the cut. The substantive changes, all already
+> recorded above and none re-litigated here:
 >
 > - **#4534, the purchase correlation key** — two OPTIONAL inputs on
 >   `reportX402MerchantOutcome` (`purchaseGroupId`, `merchantResponse`) and two
@@ -117,6 +119,12 @@ last-verified: "2026-10-30"
 >   recorded, absent otherwise, never `null` and never the merchant's
 >   unverified echo.
 >
+> - **#4550, canonical low-s EIP-3009 bridge signatures** — a new
+>   `test-support/low-s.ts` entry asserting the wire bytes of a 65-byte EOA
+>   signature, plus `@x402/core` moving from `2.17.0` to `2.29.0` in the
+>   **devDependencies** of `sdk`, `signer` and `backend`. Test fixtures and a
+>   build-time pin; no signing path changes.
+>
 > **What did NOT move.** No tool is added, renamed or removed. No input schema
 > changes beyond #4534's two optional arguments, which are already in
 > `tools-list.snapshot.json` from that PR. No strict-input list, no
@@ -125,9 +133,9 @@ last-verified: "2026-10-30"
 > `payment_header` to three settlement-evidence rows and adds two rows, which
 > the note at the end of this document already records; the bump itself does
 > not touch it. `@haven_ai/mcp`, `@haven_ai/signer`,
-> `@haven_ai/connect` and `@haven_ai/cli` ship version literals only — their
-> tarball contents are byte-identical to `0.12.0-alpha.0`, which is why the
-> bump moves all five and only `sdk` carries a change.
+> `@haven_ai/connect` and `@haven_ai/cli` ship version literals over otherwise
+> byte-identical contents, which is why the bump moves all five and only `sdk`
+> carries a substantive change.
 >
 > **Version skew.** A local `@haven_ai/mcp` or `@haven_ai/connect` older than
 > this release pins the previous SDK exactly, so it keeps the old receipt and

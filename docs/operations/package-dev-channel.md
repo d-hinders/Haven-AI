@@ -48,10 +48,11 @@ last-verified: "2026-10-30"
 > credential-file shape and consent inputs, and the `dev` dist-tag publish in
 > `.github/workflows/publish.yml`. None of those files is in this bump's diff.
 >
-> The release itself carries no connector change: the shipped delta is four
-> files in `@haven_ai/sdk` (#4534's purchase correlation key and #4530's
-> `merchantSettlementTxHash`), so `@haven_ai/connect` publishes a version
-> literal over byte-identical contents. `last-verified` is re-stamped to
+> The release itself carries no connector change: the shipped delta at the door
+> (`origin/dev` `745d4ebf`) is 16 files, +162/−20, and `@haven_ai/connect`'s
+> three of them are the bump's own version literals (`package.json`,
+> `runtime.ts`, `runtime-manifest.ts`), so it publishes a version literal over
+> otherwise byte-identical contents. `last-verified` is re-stamped to
 > 2026-10-30 for this note.
 
 > **Re-verified #4415 (2026-10-25, stale comment sweep):** the only covered

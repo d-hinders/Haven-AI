@@ -97,8 +97,8 @@ last-verified: "2026-10-30"
 > `packages/signer/src/core.ts` is not in this bump's diff at all.
 >
 > **Signing-surface changes in the promoted range, already re-verified where
-> they merged.** The range `origin/main..origin/dev` carries **two** changes to
-> files on this document's cover list:
+> they merged.** The range `origin/main..origin/dev` carries **three** changes
+> to files on this document's cover list:
 >
 > - **#4448** (`#4529`), `packages/backend/src/infra/repositories/agents.ts` —
 >   `UNARCHIVE_AGENT_SQL` clears only `archived_at` and recolours an agent only
@@ -108,13 +108,18 @@ last-verified: "2026-10-30"
 >   key, whose own note is at the end of this document (2026-10-29). It
 >   authorizes nothing, produces or consumes no signature, and no spend decision
 >   reads its value.
+> - **the release bump**, `packages/signer/src/tools.ts` — the `SIGNER_VERSION`
+>   literal, one line, no signing surface.
 >
 > The release's other change, **#4530**'s
 > `PaymentStatusResult.merchantSettlementTxHash`, is a read-only status field
 > on a type this document does not cover; it touches no signing path.
 >
-> The shipped delta is four files in `@haven_ai/sdk` (+64/−0), so
-> `@haven_ai/signer` publishes a version literal over byte-identical contents.
+> The shipped delta, re-measured at the door (`origin/dev` `745d4ebf`), is 16
+> files, +162/−20, over 14 commits — ten of them the bump's own version
+> literals. `@haven_ai/signer` publishes a version literal over otherwise
+> byte-identical contents; its two test files in range are #4550's low-s
+> wire-byte assertions, which pin a property the bridge already had.
 > `last-verified` is re-stamped to 2026-10-30 for this note.
 
 > **Re-verified #4492 (2026-10-27, the shared select primitive draws its own chevron).**

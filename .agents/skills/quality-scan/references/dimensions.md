@@ -121,17 +121,62 @@ about (its own `last-verified` note records the widening); a change to the
 other 7 would never have re-implicated it.
 
 ```bash
-# Sample: every doc whose FRONT-MATTER declares `contract: true` — the
-# anchored `^contract: true` (8 docs). An unanchored grep returns 18: the
-# same 8 plus 7 casp-changelog shards and 3 contributing docs that mention
-# the phrase in prose. Shards are dated records and never carry the key, so
-# they are excluded by construction, not by list.
+# Sample: every doc whose FRONT-MATTER declares `contract: true` — the key
+# read from the FIRST front-matter block only. A whole-file grep cannot do
+# that: `rg -l "^contract: true" docs --glob '*.md'` returns 8 at `99ef8d063`
+# and 8 at `f11274ada`, and one of the 8 is
+# `docs/contributing/docs-quality-system.md`, which carries the key only
+# inside its body's front-matter schema example (`:49`) and has no `contract`
+# key of its own (`:1-29`; its `last-verified` chain records the same at
+# `docs/archive/last-verified-chains-2026-09.md:467`). The front-matter read
+# returns 7 at both SHAs. An unanchored grep returns 25 at `99ef8d063` and 26
+# at `f11274ada`: the 8 plus 10 casp-changelog shards and 7 docs that mention
+# the phrase in prose (8 at `f11274ada`, the 2026-10-30 scan report being the
+# extra one). Shards are dated records and never carry the key, so they are
+# excluded by construction, not by list.
+# The match is `^contract: true` followed by whitespace or end of line — the
+# trailing-comment form, because the repo's own parser strips a trailing
+# ` # comment` from a scalar (`scripts/docs/validate-frontmatter.mjs:216-218`)
+# and `coupling-gate.mjs:548` reads `parsed.data.contract === 'true'`.
 # Derivation, as a command: every backticked path in the BODY that exists
 # as a tracked file, diffed against the declared `covers:` (globs matched by
 # prefix). A heuristic — the reader judges each miss; the coupling gate's
 # reverse walk (`coupling-gate.mjs`, #2457) names the declared side.
+FM='FNR==1{c=0} /^---$/{c++; next} c==1 && /^contract: true([[:space:]]|$)/{print FILENAME; nextfile}'
+# Counter-control, before the loop: the selector must read the front-matter
+# block and nothing else. A fixture whose BODY carries the key must NOT be
+# selected; one whose front matter carries it MUST be. A fixture tests the
+# selector's logic, not today's repository, so it does not depend on
+# `docs-quality-system.md:49` staying unindented.
+CTL=$(mktemp -d)
+cat > "$CTL/body-only.md" <<'EOF'
+---
+owner: "@x"
+status: current
+covers:
+  - scripts/docs/**
+last-verified: "2026-10-30"
+---
+
+contract: true
+EOF
+cat > "$CTL/front-matter.md" <<'EOF'
+---
+owner: "@x"
+status: current
+contract: true
+covers:
+  - scripts/docs/**
+last-verified: "2026-10-30"
+---
+
+no key in the body
+EOF
+awk "$FM" "$CTL/body-only.md" | grep -q . && echo "CONTROL FAILED body-only fixture selected"
+awk "$FM" "$CTL/front-matter.md" | grep -q . || echo "CONTROL FAILED front-matter fixture not selected"
+rm -rf "$CTL"
 set -f  # no pathname expansion: `packages/signer/**` must stay a glob STRING, not become the directory listing
-for d in $(rg -l "^contract: true" docs --glob '*.md' | sort); do
+for d in $(git ls-files 'docs/*.md' | xargs awk "$FM" | sort); do
   declared=$(awk '/^---$/{c++; next} c==1' "$d" | awk '/^covers:/{f=1;next} f&&/^  - /{sub(/^  - /,"");print;next} f{f=0}' | sort -u)
   claimed=$(awk '/^---$/{c++; next} c>=2' "$d" | grep -o '`[^` ]*`' | tr -d '`' | grep -E '^(packages|scripts|\.github)/[^ ]+\.[a-z]+$' | sort -u | while read p; do git ls-files --error-unmatch "$p" >/dev/null 2>&1 && echo "$p"; done)
   missing=0; for p in $claimed; do hit=0; for g in $declared; do case "$g" in *'**'*) [[ "$p" == "${g%%\*\**}"* ]] && hit=1;; *) [ "$p" = "$g" ] && hit=1;; esac; done; [ $hit = 0 ] && missing=$((missing+1)); done
@@ -139,6 +184,11 @@ for d in $(rg -l "^contract: true" docs --glob '*.md' | sort); do
 done
 set +f
 ```
+
+The series converts: the old selector's 17 (2026-10-26) is the new 15 plus
+the body-example doc's 2, and its 18 (2026-09-25 to 10-21) was taken on the
+same false 8-doc sample, so the next run's drop from 17 to 15 is that doc
+leaving the sample, not two misses fixed.
 
 Run it under `bash` — zsh does not word-split `$claimed`, and the loop then
 reports one miss per doc whatever the truth is (measured: that is exactly the
@@ -158,13 +208,17 @@ the doc for a path the loop reports as uncovered. The loop is a heuristic over
 glob strings; the gate is the authority, and `--strict` is how CI invokes it
 (without the flag the gate drops test and generated paths swept up by a
 wildcard, which strict mode keeps for contract docs — see *Run each
-instrument the way CI runs it* above). Measured
+instrument the way CI runs it* above). On `99ef8d063` and `f11274ada` the
+loop reports 15 misses across 5 of 7 documents with the front-matter selector,
+against 19 across 6 of 8 with the whole-file grep. Measured
 on `e42ed68f` with `--strict`: of the first reading's 21 misses, the gate names
 the runtime doc for all 14 false ones and for none of the 7 true ones, so the
 confirmation alone would have settled that reading. On `893d74f6`:
 8 contract docs; `docs-quality-system.md` cites 17 existing paths and covers
 3 of them (10 with `set -f`), `mcp-runtime-compatibility.md` 18 and 5 (11
 with `set -f`), `dev-environment.md` 5 and 1 (unchanged); `delegation-rail-security-model.md` declares 23 and cites 0.
+The 8 there included the body-example doc (C1, 2026-10-30); at `893d74f6` it
+also had no front-matter key.
 
 **3. Stale numbers in prose — re-derive from the instrument.** Two figures
 that reached CASP shards and had to be corrected in place: #2421's shard

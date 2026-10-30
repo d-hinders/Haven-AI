@@ -74,7 +74,7 @@ the money-path globs file and core's generated API types);
 19 − 4 leaves **15 literal gaps across 5 actual contract documents**, each
 confirmed with `coupling-gate.mjs --strict --changed=<path>` (none names its
 document). The ledger's 2026-10-26 entries record "17 across 6 of 8" (the
-2026-10-03 to 10-21 entries record 18): that 17 is these 15 plus the false
+2026-09-25 to 10-21 entries record 18 across 6 of 8): that 17 is these 15 plus the false
 document's two real-path misses. Re-running the
 corrected sample at `b9f9f1e47` gives the same 15/5, so the contracts did not
 worsen; the instrument was counting the wrong sample.
@@ -403,7 +403,7 @@ corrections are applied in place above and marked where a figure changed:
   C2's remedy touches money-path files;
 - C1's arithmetic (19 − 4) and its link to the ledger's 17/6 (first written
   as "since 2026-10-03"; corrected by #4576's spec review: 17 dates from the
-  2026-10-26 entries, 18 before);
+  2026-10-26 entries, 18 across 6 of 8 from 2026-09-25);
 - C3's MCP-tool signal is selected but null in practice;
 - C5: the 5/5 burst is recorded on issue #4524 (probe PR #4528), not PR
   #4526; pending runs are cancelled by the group itself, so

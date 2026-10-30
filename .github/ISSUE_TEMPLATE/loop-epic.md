@@ -66,8 +66,17 @@ verification — which runbook or QA scenario is run on `dev`, by whom, before
 promotion. `new-task` writes this section from the slices' operator-step notes.
 ship-next's closeout reports the epic "ready to close" only when every box here
 is ticked (`node scripts/ci/epic-promotion-checklist.mjs`), and otherwise lists
-the unticked ones; the epic stays open across the promotion until a human ticks
-the last box.
+the unticked ones.
+
+A box that ONLY a promotion can satisfy — a prod query after a migration applies,
+a check only prod can answer — is filed as its own issue under the `Next release`
+convention (owner decision 2026-10-30, amending the 2026-09-08 rule #2767): the
+box is rewritten to link that issue and ticked, and the epic may then close
+before the promotion. The release process carries the step. The convention — its
+prefix, its `operator-verify` label, its #3193 announcement and its selector — is
+defined once in
+[branch-and-release-flow.md § *Promotion to production*](../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main);
+read it there, do not restate it.
 
 EVERY BOX MUST BE ABLE TO REACH A TICKED STATE TRUTHFULLY (#2906). A box records
 a DISPOSITION — done, or waived / no longer applicable with the reason and a

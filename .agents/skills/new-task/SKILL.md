@@ -211,6 +211,16 @@ encodes have to be applied by hand; that is what the rest of this section is for
   reports the epic ready to close only when every box is ticked, so an epic filed
   without it can never be reported ready in the way the template expects.
 
+  **A box only a promotion can satisfy is filed, not carried.** When a box can
+  only be done at or after the next `dev → main` promotion — a prod query after a
+  migration applies, a check only prod can answer — file it as its own issue
+  under the `Next release` convention (owner decision 2026-10-30, amending the
+  2026-09-08 rule #2767), rewrite the box to link that issue and tick it, and let
+  the epic close before the promotion. The release process carries the step. The
+  convention is defined once in
+  [branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main);
+  read it there rather than restating it.
+
   **Every box must be able to reach a ticked state truthfully (#2906).** A box
   records a **disposition** — *done*, or *waived / no longer applicable* with the
   reason and a link — not only a success. Two ways to write a box whose tick

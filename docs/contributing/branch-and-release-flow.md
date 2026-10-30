@@ -8,6 +8,7 @@ covers:
   - scripts/release-bump.mjs
   - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
+  - scripts/ci/operator-verify-close-guard.mjs
   - .github/workflows/publish.yml
 last-verified: "2026-10-21"
 ---
@@ -320,6 +321,58 @@ the epic when its last sub-issue lands on `dev`.
 3. `git rev-list --count --first-parent origin/main..origin/dev` reads `0`:
    `dev` and `main` are back in sync.
 
+**Owed at this release — the `Next release (dev → main):` convention.** A step
+that can only be done at, or after, the next `dev → main` promotion — a prod
+query after a migration applies, a check only prod can answer — is filed as its
+own issue, never left as a box on an epic or a sentence in a PR body. This
+section is the convention's only definition; every other place links here rather
+than restating it.
+
+- **File it through `new-task`** as a standalone issue. Its title starts with the
+  prefix `Next release (dev → main):` (`->` is accepted in place of `→`), and it
+  carries the **`operator-verify`** label, so no PR closes it by accident — the
+  close guard in `scripts/ci/operator-verify-close-guard.mjs` enforces that.
+- **Announce it on the agent coordination channel #3193** (`📣 FYI`), so a
+  release session sees it without having to run the selector.
+- **Lifecycle.** The release session that carries it works it at closeout,
+  records the result on the issue, removes `operator-verify` and closes it. An
+  issue whose prerequisite is not in `origin/main..origin/dev` is carried to the
+  next promotion, with the reason recorded on the issue.
+- **Two carve-outs.** A data precondition a migration states stays where it is:
+  it is run against prod before the merge, as
+  [`../operations/release-checklist.md`](../operations/release-checklist.md)
+  step 5 says, and is not filed under this convention. A `hotfix/*` promotion
+  does not run this step at all — it branches from `main` and carries none of
+  `dev`'s owed work.
+
+**The selector.** GitHub search drops the arrow and punctuation and matches the
+phrase anywhere in a title, so the search alone also matches an issue that merely
+mentions it. The prefix is therefore checked client-side:
+
+```sh
+gh issue list --state open --label operator-verify --limit 200 --search 'in:title "Next release"' \
+  --json number,title --jq '.[] | select(.title | test("^Next release \\(dev (→|->) main\\):"))'
+```
+
+Measured on 2026-10-30, this returns #4555 alone. A second line lists phrase
+matches that fail either check — no `operator-verify` label, or the prefix not at
+the start — so a mis-filed issue shows up instead of being dropped silently:
+
+```sh
+gh issue list --state open --limit 200 --search 'in:title "Next release"' \
+  --json number,title,labels \
+  --jq '.[] | select( ((.title | test("^Next release \\(dev (→|->) main\\):")) | not) or (([.labels[].name] | index("operator-verify")) | not) ) | "\(.number)\t\(.title)"'
+```
+
+On 2026-10-30 that second line returns #4556 — the issue that defined this
+convention — which is correct: it carries no `operator-verify` label and its
+title does not start with the prefix.
+
+**A harmless side effect.** `claim-release-on-merge.yml` runs on any merged PR,
+so a promotion PR writing `Refs #4555` makes `release-on-merge.mjs` add
+`landed-partial` to #4555 and post a claim-release line. Nothing reads that
+label, and it does not close the issue.
+
 > **Never revert a published release bump — cut forward instead
 > ([#2580](https://github.com/d-hinders/Haven-AI/issues/2580)).** Once a version
 > is on npm it cannot be unpublished after 72 hours, and the dist-tags keep
@@ -487,6 +540,10 @@ close on dev-merge). Full ruleset/auto-merge setup is in
   the body**, since all three reach `dev` (#2320). A required check fails the PR if
   a closing keyword targets such an issue, wherever on the PR it is written — the
   rule is enforced rather than remembered (#2276).
+- **A step that only a promotion can satisfy is its own issue**, filed under the
+  [`Next release` convention](#promotion-to-production-dev--main) — not a box on
+  an epic and not a line in a PR body. That section owns the prefix, the label,
+  the announcement and the selector; read it there.
 - Promotion to prod is a separate human step; prod state lives in the `prod-*`
   Releases; what is pending is the `main...dev` compare.
 

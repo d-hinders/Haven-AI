@@ -86,7 +86,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-29"
+last-verified: "2026-10-30"
 ---
 
 > **Re-verified #4541 (2026-10-29, the release-records shipped-delta drafter):**
@@ -6945,3 +6945,24 @@ to call next in structured fields, and those fields are typed end to end
 >
 > Scope of this note: those arguments, the two receipt fields and the snapshot
 > row. Nothing else in this document was re-verified.
+
+> **Re-verified unchanged (#4550, 2026-10-30 — `@x402/*` devDependency bump and
+> low-s pinning tests).** The diff touches this document's covered
+> `packages/signer/**` and `packages/sdk/package.json` only in ways that reach
+> no runtime surface. `@x402/*` moves 2.17.0 → 2.29.0 as a **devDependency** in
+> every published package, so no installed `@haven_ai/mcp`, `@haven_ai/connect`
+> or `@haven_ai/sdk` user resolves it; the runtime dependency `x402@^1.2.0` in
+> `packages/sdk` and `packages/signer` is unchanged. The signer's new tests
+> assert the EIP-3009 bridge header's wire signature is canonical low-s on all
+> three signing branches — they pin bytes the bridge already emits and change
+> no signing path. `packages/signer/src/siwx.test.ts` adapts to two
+> `@x402/extensions` 2.29 API changes in the REFERENCE implementation the test
+> compares against (`verifySIWxSignature` result fields renamed `valid` →
+> `isValid` / `address` → `payer`; `createSIWxPayload` now takes the response
+> URL and asserts the challenge is bound to its origin) — test-only, and the
+> signer's own SIWX header construction is untouched. No tool is added or
+> removed, no argument, version floor, consent-hash input or
+> `tools-list.snapshot.json` row changes, and `lint:next-steps` stays at zero.
+>
+> Scope of this note: the dependency pins and those test files. Nothing else in
+> this document was re-verified.

@@ -194,6 +194,15 @@ export interface AccountingEntrySourceRow {
    */
   mcp_tool_name?: string | null
   /**
+   * #4578: which branch of `ENTRY_SOURCE_SQL` produced this row — `TRUE` on
+   * the `payment_intents` (direct-payment) branch, `FALSE` on the
+   * `machine_payment_evidence` branch. A literal the SQL writes, never an
+   * intent column, so no agent-written metadata can set it. Optional in the
+   * TYPE only because test fixtures predate the column; the SQL always
+   * selects it.
+   */
+  is_direct_payment?: boolean | null
+  /**
    * The intent-side fields (#3767). Optional in the TYPE only because test
    * fixtures predate the join; the SQL always selects them (null without an
    * intent row).
@@ -313,17 +322,29 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
   // the three fiat values instead. One entry shape either way.
   const fxRates = normalizeLedgerRates(row.fx_rates) ?? ledgerRatesFromFiatValues(row)
   // #4532: the transaction kind, derived from the stored payment record — the
-  // direction, the x402 route, the intent's MCP tool, the merchant's own
-  // document and the delivery reference. Nothing here is agent-asserted: the
-  // agent can report a document or a deliverable, never a kind.
+  // direction, the direct-payment rail, the x402 route, the intent's MCP tool,
+  // the merchant's own document and the delivery reference. Nothing here is
+  // agent-asserted: the agent can report a document or a deliverable, never a
+  // kind.
   const direction = 'out' as const
+  // #4578: which branch produced this row. A literal the SQL writes, so no
+  // agent-written metadata can set it.
+  const directPayment = row.is_direct_payment === true
   const kind = deriveTransactionKind({
     direction,
+    directPayment,
     resourceUrl: row.resource_url,
     mcpToolName: row.mcp_tool_name ?? null,
     merchantReceiptJson: row.merchant_receipt_json ?? null,
     deliveryReference: row.delivery_reference ?? null,
   })
+  // #3129: the same canonical form the transaction feed emits. Before that
+  // change both were lowercase and agreed by accident; normalising only the
+  // feed would have made ONE payment read `0xabcd…1234` on its bookkeeping
+  // underlag and `0xAbCd…1234` in the transaction it documents. Both sides of
+  // the entry go through it, and #4578's description label reuses the
+  // counterparty's canonical form so the two lines cannot disagree.
+  const counterpartyAddress = toCanonicalAddress(row.merchant_address)
   return {
     paymentId: row.payment_intent_id ?? row.approval_request_id ?? row.id,
     txHash: row.tx_hash,
@@ -340,13 +361,10 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     chainId: row.chain_id,
     settledAt: row.confirmed_at ?? row.created_at,
     direction,
-    // #3129: the same canonical form the transaction feed emits. Before that
-    // change both were lowercase and agreed by accident; normalising only the
-    // feed would have made ONE payment read `0xabcd…1234` on its bookkeeping
-    // underlag and `0xAbCd…1234` in the transaction it documents.
+    // #2960: our own side — `parties.treasury_account` on every other surface.
     treasuryAccount: toCanonicalAddress(row.payer_address ?? null),
     counterparty: {
-      address: toCanonicalAddress(row.merchant_address),
+      address: counterpartyAddress,
       name: null,
       country: row.country ?? null,
     },
@@ -367,8 +385,16 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
     // #4532: the kind and the line that carries it. The merchant label is the
     // counterparty's name when the entry has one — it does not today, so the
     // resource host renders, the same host on every receipt of one merchant.
+    // #4578: a direct payment has no resource host, so its label is the
+    // counterparty's canonical address — the same form the underlag's
+    // `Counterparty` line prints — and the line reads `<address> (transfer)`.
     transactionKind: kind.kind,
-    transactionDescription: transactionDescription(kind.kind, null, row.resource_url, kind.route),
+    transactionDescription: transactionDescription(
+      kind.kind,
+      directPayment ? counterpartyAddress : null,
+      row.resource_url,
+      kind.route,
+    ),
     // #4534: the purchase correlation key, read straight off the evidence row.
     purchaseGroupId: row.purchase_group_id ?? null,
     parentPaymentId: row.parent_payment_id ?? null,
@@ -408,6 +434,10 @@ const ENTRY_SOURCE_SQL = `
     mpe.amount_sek, mpe.fx_rate_sek, mpe.fx_source, mpe.fx_at, mpe.fx_rates,
     mpe.resource_url, mpe.confirmed_at, mpe.created_at,
     mpe.delivery_reference,
+    -- #4578: the direct-payment signal. FALSE here by construction — this
+    -- branch selects only a machine_payment_evidence row, and the rail gate
+    -- refuses a direct payment. Typed so the UNION ALL unifies.
+    FALSE::BOOLEAN AS is_direct_payment,
     mpe.purchase_group_id, mpe.parent_payment_id,
     pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
     pi.machine_metadata->>'merchant_settlement_tx_hash' AS verified_settlement_tx_hash,
@@ -461,6 +491,9 @@ const ENTRY_SOURCE_SQL = `
     pi.confirmed_at, pi.created_at,
     -- No evidence row, so no delivery reference (#4532's signal).
     NULL::TEXT AS delivery_reference,
+    -- #4578: this branch IS the direct payment, so the signal is a literal
+    -- TRUE — never an intent column, so no agent-written metadata can set it.
+    TRUE::BOOLEAN AS is_direct_payment,
     -- #4534: the purchase correlation key lives on machine_payment_evidence
     -- only (migration 123), so a direct payment is ungrouped by construction.
     -- Typed NULLs, not bare ones: the UNION resolves against the evidence

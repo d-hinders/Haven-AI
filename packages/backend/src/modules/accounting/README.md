@@ -240,10 +240,14 @@ did before this contract existed.
 one line that carries it (`api.bitrefill.com - invoice/pay (purchase)`). Both
 render on the receipt underlag (`Transaction` / `Description`) and both are
 DERIVED in `transaction-kind.ts` from the stored payment record: the payment
-direction, the x402 resource route, the intent's `mcp_call_context.toolName`,
+direction, the direct-payment rail (a literal the entry source's direct branch
+emits, #4578), the x402 resource route, the intent's `mcp_call_context.toolName`,
 the captured merchant document and the delivery reference. No route accepts a
 kind, so an agent cannot set it, and a payment with no derivable signal is
-`unknown` rather than a guess.
+`unknown` rather than a guess. A direct payment is a `transfer` and its
+description names the counterparty's canonical address
+(`0x1517…799a (transfer)`), because it has no merchant name and no resource
+host to name.
 
 A connector carries the two values where its API allows it — Fortnox's
 free-text `Comments` field does, with `/` folded to `-` for its character

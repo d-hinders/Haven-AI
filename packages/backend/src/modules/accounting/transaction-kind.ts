@@ -25,23 +25,28 @@
  *  1. `direction` — the feed's own contract (`AccountingEntry.direction`):
  *     `in` is income/refund. The closed enum has no `income` member and an
  *     inbound payment on this rail is a merchant refund, so `in` → `refund`.
- *  2. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
+ *  2. `directPayment` (#4578) — the direct-payment branch of the entry source
+ *     emits this as a literal, so a settled direct payment (`haven_send`,
+ *     `POST /payments`) is a movement of funds to an address → `transfer`.
+ *     The literal is written by the SQL branch, never read from an intent
+ *     column, so no agent-written metadata can set it.
+ *  3. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
  *     invoice-shaped body (invoice/order number, line items, seller block) is
  *     the document a merchant issues for a PURCHASE; a body carrying none of
  *     those markers is a bare acknowledgement, i.e. a paid call that delivered
  *     no product → `api_fee`.
- *  3. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
+ *  4. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
  *     deliverable ("Bik Bok 5 SEK, order 6ac7…"), so something was bought →
  *     `purchase`.
- *  4. the intent's own metadata (`machine_metadata.mcp_call_context.toolName`,
+ *  5. the intent's own metadata (`machine_metadata.mcp_call_context.toolName`,
  *     #1307) — an MCP tool call IS the paid deliverable (one call, one
  *     output), so → `purchase`.
- *  5. the x402 resource route — the last path segment of `resource_url` is the
+ *  6. the x402 resource route — the last path segment of `resource_url` is the
  *     call verb. A closed PURCHASE vocabulary → `purchase`, a closed FEE
  *     vocabulary → `api_fee`, a closed TRANSFER vocabulary → `transfer`.
  *     Anything else → `unknown`.
  *
- * Rung 5 is the one the issue's three Bitrefill routes pin: `create` and
+ * Rung 6 is the one the issue's three Bitrefill routes pin: `create` and
  * `status` are fee verbs, `pay` is a purchase verb.
  *
  * ## Why the vocabularies are closed
@@ -81,6 +86,7 @@ export const TRANSACTION_KINDS: readonly TransactionKind[] = [
  */
 export type TransactionKindBasis =
   | 'direction'
+  | 'rail'
   | 'merchant_document'
   | 'delivery_reference'
   | 'mcp_tool'
@@ -91,6 +97,14 @@ export type TransactionKindBasis =
 export interface TransactionKindSignals {
   /** `AccountingEntry.direction` — `in` is income/refund. */
   direction: 'out' | 'in'
+  /**
+   * #4578: the entry source's direct-payment branch emits this as a literal
+   * (`TRUE::BOOLEAN` on the `payment_intents` branch, `FALSE::BOOLEAN` on the
+   * evidence branch). It is a fact about which branch produced the row, never
+   * an intent column, so no agent-written metadata can set it. Optional so
+   * every pre-#4578 fixture stays valid; absent reads as `false`.
+   */
+  directPayment?: boolean
   /** `machine_payment_evidence.resource_url` — the x402 resource the payment paid for. */
   resourceUrl: string | null
   /** `machine_metadata.mcp_call_context.toolName` — the MCP tool the payment called. */
@@ -303,7 +317,17 @@ export function deriveTransactionKind(signals: TransactionKindSignals): Transact
     return { kind: 'refund', basis: 'direction', route: routeLabel }
   }
 
-  // Rung 2 — the merchant's own document: an invoice means a product was sold,
+  // Rung 2 — the direct-payment rail (#4578). A settled direct payment
+  // (`haven_send`, `POST /payments`) moves funds to an address; it buys no
+  // resource, so it is a transfer. The signal is the literal the entry
+  // source's direct branch emits, so no agent-written metadata can set it.
+  // `route` is null: a direct payment has no route to name, and the
+  // description must read exactly `<address> (transfer)`.
+  if (signals.directPayment === true) {
+    return { kind: 'transfer', basis: 'rail', route: null }
+  }
+
+  // Rung 3 — the merchant's own document: an invoice means a product was sold,
   // a bare acknowledgement means the paid call delivered nothing.
   const documentShape = merchantDocumentShape(signals.merchantReceiptJson)
   if (documentShape === 'invoice') {
@@ -313,17 +337,17 @@ export function deriveTransactionKind(signals: TransactionKindSignals): Transact
     return { kind: 'api_fee', basis: 'merchant_document', route: routeLabel }
   }
 
-  // Rung 3 — the agent named a deliverable, so something was bought.
+  // Rung 4 — the agent named a deliverable, so something was bought.
   if (signals.deliveryReference != null && signals.deliveryReference.trim().length > 0) {
     return { kind: 'purchase', basis: 'delivery_reference', route: routeLabel }
   }
 
-  // Rung 4 — an MCP tool call is itself the paid deliverable.
+  // Rung 5 — an MCP tool call is itself the paid deliverable.
   if (signals.mcpToolName != null && signals.mcpToolName.trim().length > 0) {
     return { kind: 'purchase', basis: 'mcp_tool', route: routeLabel }
   }
 
-  // Rung 5 — the x402 route's call verb, against the three closed vocabularies.
+  // Rung 6 — the x402 route's call verb, against the three closed vocabularies.
   if (route) {
     if (PURCHASE_VERBS.has(route.tail)) return { kind: 'purchase', basis: 'route', route: route.label }
     if (FEE_VERBS.has(route.tail)) return { kind: 'api_fee', basis: 'route', route: route.label }
@@ -369,6 +393,13 @@ function hostOf(resourceUrl: string | null): string | null {
  * (the seller block fills it at underlag time from the merchant's own invoice),
  * so in practice the host is what renders — the same host on all three
  * Bitrefill receipts, which is what makes them comparable.
+ *
+ * A direct payment (#4578) has neither a name nor a resource host: it is a
+ * movement of funds to an address, so `toAccountingEntry` passes the
+ * counterparty's canonical address as the label and the line reads exactly
+ * `0x1517…799a (transfer)`. `counterparty.name` stays null — filling it would
+ * also change Fortnox's booked supplier and the underlag's `Counterparty`
+ * line.
  */
 export function transactionDescription(
   kind: TransactionKind,

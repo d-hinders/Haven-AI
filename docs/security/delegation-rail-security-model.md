@@ -84,8 +84,32 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-27"
+last-verified: "2026-10-30"
 ---
+
+> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through
+> `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this bump rewrote
+> from `0.12.0-alpha.0` to `0.13.0-alpha.0`. **The edit to that file is the
+> version literal only** — one line, read in the diff rather than taken from
+> the bump's report. No tool schema, signing input, typed-data check,
+> recipient pin, allowlist, binding, delegation, caveat, enforcer term, budget
+> pre-check, settlement window, funding leg or sweep moves, and
+> `packages/signer/src/core.ts` is not in this bump's diff at all.
+>
+> **Signing-surface changes in the promoted range, already re-verified where
+> they merged.** The range `origin/main..origin/dev` carries one change to a
+> file on this document's cover list: **#4534**, `packages/sdk/src/client.ts`
+> — the purchase correlation key, whose own note is at the end of this
+> document (2026-10-29). It authorizes nothing, produces or consumes no
+> signature, and no spend decision reads its value. The release's other
+> change, **#4530**'s `PaymentStatusResult.merchantSettlementTxHash`, lands in
+> `packages/sdk/src/types.ts` and `payment-mappers.ts`, neither of which is on
+> this document's cover list; it is a read-only status field and touches no
+> signing path.
+>
+> The shipped delta is four files in `@haven_ai/sdk` (+64/−0), so
+> `@haven_ai/signer` publishes a version literal over byte-identical contents.
+> `last-verified` is re-stamped to 2026-10-30 for this note.
 
 > **Re-verified #4492 (2026-10-27, the shared select primitive draws its own chevron).**
 > The covered file this diff touches is one, `components/DelegationSendModal.tsx`,

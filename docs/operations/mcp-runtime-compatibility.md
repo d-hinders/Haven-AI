@@ -86,8 +86,50 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-29"
+last-verified: "2026-10-30"
 ---
+
+> **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** the Supported Runtime
+> Manifest table's four rows move to `0.13.0-alpha.0`, and that is the whole of
+> this release's effect on the table. Re-read against the source constants
+> rather than the bump's own rewrite: `MCP_VERSION`
+> (`packages/mcp/src/server.ts:113`), `CONNECTOR_VERSION`
+> (`packages/connect/src/runtime.ts:56`), `SIGNER_VERSION`
+> (`packages/signer/src/tools.ts:70`) and `SDK_VERSION`
+> (`packages/sdk/src/client-identity.ts:20`) all read `0.13.0-alpha.0`, and
+> `runtime-manifest.ts` derives its rows from them. The Node floor is unchanged
+> at `>= 22.0.0`.
+>
+> **What the release carries.** The shipped delta is four files, all in
+> `@haven_ai/sdk` (+64/−0): `client.ts`, `merchant-completion.ts`,
+> `payment-mappers.ts`, `types.ts`. Two changes, both already recorded above
+> and neither re-litigated here:
+>
+> - **#4534, the purchase correlation key** — two OPTIONAL inputs on
+>   `reportX402MerchantOutcome` (`purchaseGroupId`, `merchantResponse`) and two
+>   additive receipt fields (`purchaseGroupId`, `parentPaymentId`). Its own note
+>   is at the end of this document.
+> - **#4530, `PaymentStatusResult.merchantSettlementTxHash`** — additive and
+>   optional on a type that is only returned, so existing consumers keep
+>   compiling. It names the settlement transaction Haven recorded, under the
+>   same presence rule as `merchantSettlementRecorded`: present only when
+>   recorded, absent otherwise, never `null` and never the merchant's
+>   unverified echo.
+>
+> **What did NOT move.** No tool is added, renamed or removed. No input schema
+> changes beyond #4534's two optional arguments, which are already in
+> `tools-list.snapshot.json` from that PR. No strict-input list, no
+> expected-context version, no consent hash, no version floor, no
+> `next-arguments-corpus.json` row. `@haven_ai/mcp`, `@haven_ai/signer`,
+> `@haven_ai/connect` and `@haven_ai/cli` ship version literals only — their
+> tarball contents are byte-identical to `0.12.0-alpha.0`, which is why the
+> bump moves all five and only `sdk` carries a change.
+>
+> **Version skew.** A local `@haven_ai/mcp` or `@haven_ai/connect` older than
+> this release pins the previous SDK exactly, so it keeps the old receipt and
+> status shapes until it is updated; the hosted server picks the SDK change up
+> on deploy. Nothing is refused in either direction — both changes are
+> additive. `last-verified` is re-stamped to 2026-10-30 for this note.
 
 > **Re-verified #4541 (2026-10-29, the release-records shipped-delta drafter):**
 > no covered runtime surface changes. The diff adds a new measurement script
@@ -3363,10 +3405,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.12.0-alpha.0` |
-| `@haven_ai/mcp` | `0.12.0-alpha.0` |
-| `@haven_ai/sdk` | `0.12.0-alpha.0` |
-| `@haven_ai/signer` | `0.12.0-alpha.0` |
+| `@haven_ai/connect` | `0.13.0-alpha.0` |
+| `@haven_ai/mcp` | `0.13.0-alpha.0` |
+| `@haven_ai/sdk` | `0.13.0-alpha.0` |
+| `@haven_ai/signer` | `0.13.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.13.0-alpha.0 — 2026-10-30
+
 ## 0.12.0-alpha.0 — 2026-10-29
 
 - **The installed skill names the ended budget (#4352).** `needs_approval`

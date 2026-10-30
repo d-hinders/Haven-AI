@@ -325,9 +325,9 @@ the epic when its last sub-issue lands on `dev`.
 that can only be done at, or after, the next `dev → main` promotion — a prod
 query after a migration applies, a check only prod can answer — is filed as its
 own issue, never left as a box on an epic or a sentence in a PR body. This
-section is the convention's only definition — the prefix, the label, the
-announcement, the lifecycle and the selector; every other place links here
-rather than restating those.
+section is the convention's only definition — the prefix and the selector are
+written here and nowhere else, and the places that file or run a release link
+here rather than restating them.
 
 - **File it through `new-task`** as a standalone issue. Its title starts with the
   prefix `Next release (dev → main):` (`->` is accepted in place of `→`), and it

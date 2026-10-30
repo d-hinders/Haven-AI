@@ -325,8 +325,9 @@ the epic when its last sub-issue lands on `dev`.
 that can only be done at, or after, the next `dev → main` promotion — a prod
 query after a migration applies, a check only prod can answer — is filed as its
 own issue, never left as a box on an epic or a sentence in a PR body. This
-section is the convention's only definition; every other place links here rather
-than restating it.
+section is the convention's only definition — the prefix, the label, the
+announcement, the lifecycle and the selector; every other place links here
+rather than restating those.
 
 - **File it through `new-task`** as a standalone issue. Its title starts with the
   prefix `Next release (dev → main):` (`->` is accepted in place of `→`), and it
@@ -368,10 +369,18 @@ On 2026-10-30 that second line returns #4556 — the issue that defined this
 convention — which is correct: it carries no `operator-verify` label and its
 title does not start with the prefix.
 
-**A harmless side effect.** `claim-release-on-merge.yml` runs on any merged PR,
-so a promotion PR writing `Refs #4555` makes `release-on-merge.mjs` add
-`landed-partial` to #4555 and post a claim-release line. Nothing reads that
-label, and it does not close the issue.
+**A promotion PR's `Refs` lines release nothing.** `claim-release-on-merge.yml`
+runs on any merged PR, but `release-on-merge.mjs` returns before reading
+anything when the merge's base is not the default branch: `decide()` and
+`decideRefs()` both early-return on `pr.base !== pr.defaultBranch`, and the CLI
+short-circuits before any read. The default branch is `dev` and a promotion's
+base is `main`, so a promotion PR writing `Refs #4555` adds no `landed-partial`
+label and posts no claim-release line — the issue stays open and the release
+session closes it at closeout. `release-on-merge.test.mjs` pins both halves
+(*unmerged and a promotion → no label*; *unmerged, a promotion, and a bot author
+release nothing*). `landed-partial` is not inert, though: it is a skip reason for
+`ship-next` § *Select The Work* and for AGENTS.md § *Cross-session agent
+coordination* — it is only a promotion merge that never sets it.
 
 > **Never revert a published release bump — cut forward instead
 > ([#2580](https://github.com/d-hinders/Haven-AI/issues/2580)).** Once a version

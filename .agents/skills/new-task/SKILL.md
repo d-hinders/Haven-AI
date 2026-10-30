@@ -241,8 +241,9 @@ encodes have to be applied by hand; that is what the rest of this section is for
     reach for, because an epic's scope can always be narrated so a step stopped
     applying. Without a named waiver-holder this rule is a tick-by-declaration
     route to closing any inconvenient epic, which is worse than the problem it
-    fixes. The surrounding rule already says the epic stays open until a **human**
-    ticks the last box; this does not weaken it.
+    fixes. The surrounding rule already says a tick is a **human** act — the
+    owner for a waiver, and a filed `Next release` issue for a prod-only step,
+    which the release process then carries; this does not weaken it.
   - **A box that is already true.** A box asking that a command "runs without a
     flag" when it already does is ticked on unchanged code and measures nothing.
     Write each box so it is **false today and true only when the work is done**.

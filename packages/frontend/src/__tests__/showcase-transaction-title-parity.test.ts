@@ -76,7 +76,7 @@ describe('/design-system machine-payment sample titles (#2448)', () => {
   })
 
   // The agent-attributed row title ("Agent payment by <agent>") was pinned
-  // here against the "Transaction history" table showcase. #4266 retired that
+  // here against the "Transactions" table showcase. #4266 retired that
   // showcase with `TransactionsTable`, and #4267 retired `transactionTitle`
   // itself: the list rows and the detail panel lead with the counterparty.
 

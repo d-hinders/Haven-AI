@@ -10,14 +10,23 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError } from '@/lib/api'
 
-const { mockGetText, mockGet, mockDownloadCsv, urlState } = vi.hoisted(() => ({
+const { mockGetText, mockGet, mockDownloadCsv, urlState, authState } = vi.hoisted(() => ({
   mockGetText: vi.fn(),
   mockGet: vi.fn(),
   mockDownloadCsv: vi.fn(),
   // Reached through the account deep link by default, which seeds the
   // account filter; the export request must carry the same key (#2913).
   urlState: { query: 'accountId=safe-1' },
+  // The signed-in user's accounts. Mutable so the no-accounts branch — the
+  // other place the page heading renders (#4561) — is reachable; `beforeEach`
+  // seeds it.
+  authState: { accounts: [] as Array<{ id: string; account_address: string; chain_id: number; name: string }> },
 }))
+
+/** The one account every test starts with, unless it clears `authState`. */
+const SIGNED_IN_ACCOUNTS = [
+  { id: 'safe-1', account_address: '0x' + 'aa'.repeat(20), chain_id: 8453, name: 'Main' },
+]
 
 vi.mock('@/lib/api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api')
@@ -42,13 +51,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(urlState.query),
 }))
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({
-    user: {
-      accounts: [
-        { id: 'safe-1', account_address: '0x' + 'aa'.repeat(20), chain_id: 8453, name: 'Main' },
-      ],
-    },
-  }),
+  useAuth: () => ({ user: { accounts: authState.accounts } }),
 }))
 vi.mock('@/hooks/useContacts', () => ({ useContacts: () => ({ resolveAddress: () => null }) }))
 // `useChainScope` is deliberately NOT mocked: the network default is part of
@@ -115,6 +118,7 @@ const TransactionsClient = (await import('../TransactionsClient')).default
 beforeEach(() => {
   mockGetText.mockReset()
   mockGet.mockReset()
+  authState.accounts = SIGNED_IN_ACCOUNTS
   // Two reads go through `api.get`: the unfiltered total behind
   // "{shown} of {total}" (`limit=1`), and the In/Out totals walk (#4266),
   // which pages the same folded feed the list shows.
@@ -147,6 +151,34 @@ async function exportNoticeRegion(): Promise<HTMLElement> {
 function exportButton(): HTMLElement {
   return screen.getByRole('button', { name: /export csv/i })
 }
+
+/**
+ * #4561 — one page name. The heading carried a name of its own while the
+ * sidebar, the route and the dashboard card said something else. It is
+ * "Transactions" now, on BOTH branches: the feed and the no-accounts empty
+ * state each render their own `PageHeader`.
+ *
+ * Asserted as "exactly one h1, and it reads Transactions" rather than as a
+ * negative match on the old string: the page must not grow a second heading
+ * either, and the old name is not worth keeping in the source to grep for.
+ */
+describe('TransactionsClient — one page name (#4561)', () => {
+  it('heads the page "Transactions", matching the sidebar and the route', () => {
+    render(<TransactionsClient />)
+    const headings = screen.getAllByRole('heading', { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent(/^Transactions$/)
+  })
+
+  it('heads the no-accounts branch "Transactions" too', () => {
+    authState.accounts = []
+    render(<TransactionsClient />)
+    expect(screen.getByText('No accounts yet')).toBeInTheDocument()
+    const headings = screen.getAllByRole('heading', { level: 1 })
+    expect(headings).toHaveLength(1)
+    expect(headings[0]).toHaveTextContent(/^Transactions$/)
+  })
+})
 
 describe('TransactionsClient — CSV export (#2871)', () => {
   it('asks the backend for the file and downloads what comes back', async () => {

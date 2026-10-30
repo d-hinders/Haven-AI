@@ -29,6 +29,12 @@
  * marketplace names the agent the prompt is pasted to ("Copied — paste it
  * to Atlas"). The longer label is allowed to wrap (the default stays on one
  * line); the confirmation is still the 1.5s state.
+ *
+ * The wrap is `Button`'s `wrap` prop (#4561), not a `whitespace-normal`
+ * className: both utilities set `white-space`, so which one wins is decided
+ * by Tailwind's stylesheet order rather than by the class attribute. It is
+ * passed whenever `copiedText` exists — in BOTH states, so the button does
+ * not change height when the confirmation appears.
  */
 
 import { Check, Clipboard } from 'lucide-react'
@@ -100,6 +106,7 @@ export function CopyButton({
         onClick={() => void handleCopy()}
         aria-label={accessibleName}
         className={className}
+        wrap={copiedText !== undefined}
       >
         {copied ? (
           <Icon icon={Check} className="h-3.5 w-3.5 text-[var(--v2-success)]" />

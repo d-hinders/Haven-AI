@@ -1103,7 +1103,8 @@ export function mapEvidence(row: MachinePaymentEvidenceRow) {
       // #3778: the non-secret delivery pointer, echoed on the receipt — the
       // owner's "a deliverable exists and here is the pointer to it" field.
       // Written only from validated input (see `attachMachinePaymentEvidence`),
-      // never the merchant body.
+      // never the merchant body. Declared on the served schema
+      // (`MachinePaymentReceipt`) as nullable (#4579).
       delivery_reference: row.delivery_reference ?? null,
       // #4534: the purchase correlation key — the merchant's own invoice/order
       // id (or an agent-supplied group key) and, for a fee call, the purchase's

@@ -5898,12 +5898,30 @@ export type components = {
             amount_human: string;
             challenge_id?: string | null;
             idempotency_key?: string | null;
+            /** @description #4579: the challenge the payment answered, stored as JSONB. The database enforces no shape on this column, so the schema states none. */
+            challenge_payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description #4579: the payment option the agent selected from the challenge, stored as JSONB. The database enforces no shape on this column, so the schema states none. */
+            selected_payment?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description #4579: the header name the merchant expects the payment proof in; null when the challenge named none. The header VALUE is never returned. */
+            payment_proof_header_name?: string | null;
+            /** @description #4579: the header name the merchant returns its protocol receipt in; null when the challenge named none. The header VALUE is never returned. */
+            protocol_receipt_header_name?: string | null;
+            /** @description #4579: the merchant's PAYMENT-RESPONSE object, relayed verbatim (#3125) and merchant-controlled — nothing inside it is Haven's record. Stored as JSONB with no database-enforced shape, so the schema states none. */
+            protocol_receipt_payload?: {
+                [key: string]: unknown;
+            } | null;
             merchant_status?: number | null;
             /** @enum {string|null} */
             delivery_quality?: "ok" | "unusable" | "partial" | null;
             delivery_note?: string | null;
             /** Format: date-time */
             delivery_reported_at?: string | null;
+            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+            delivery_reference?: string | null;
             purchase_group_id?: string | null;
             /** @description The parent purchase receipt's `id` — the `machine_payment_evidence` row id of the purchase leg a fee call paid for. Null on the purchase itself and on every ungrouped payment. Joins to `id`, not to `payment_id`. */
             parent_receipt_id?: string | null;

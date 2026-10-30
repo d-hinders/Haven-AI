@@ -406,7 +406,7 @@ const ROUTES: ProductRoute[] = [
      * against 320/246).
      */
     minCharsMobile: 240,
-    anchor: (page: Page) => page.getByRole('heading', { name: 'Transaction history' }),
+    anchor: (page: Page) => page.getByRole('heading', { name: 'Transactions' }),
     /**
      * `dashboardTransaction.timestamp` is 1779000000 (2026-05-17T06:40Z), which
      * is 3 months and change before `FROZEN_NOW` — `timeAgo`'s `${months}mo ago`

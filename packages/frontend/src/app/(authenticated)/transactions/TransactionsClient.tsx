@@ -328,7 +328,7 @@ export default function TransactionsClient() {
     return (
       <div className="max-w-5xl">
         <PageHeader
-          title="Transaction history"
+          title="Transactions"
           subtitle="All activity across your accounts."
         />
 
@@ -360,7 +360,7 @@ export default function TransactionsClient() {
 
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Transaction history" subtitle={subtitle} />
+      <PageHeader title="Transactions" subtitle={subtitle} />
 
       <ListExportNotice notice={listExport.notice} className="mb-4" />
 

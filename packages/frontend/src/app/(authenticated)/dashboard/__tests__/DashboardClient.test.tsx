@@ -777,7 +777,7 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     // The full layout keeps the activity section.
-    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
   })
 
   it('before the first agent payment the spending block says what will appear there, not three zeros (#3818)', () => {
@@ -924,7 +924,7 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     // The agents and activity sections wait until the account is funded.
     expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Transactions' })).not.toBeInTheDocument()
     // #3897 (changed on purpose, the mockup's new-user card): the spending
     // half stays, explaining what it will show — never zero tiles.
     const spending = screen.getByRole('region', { name: 'Spending' })

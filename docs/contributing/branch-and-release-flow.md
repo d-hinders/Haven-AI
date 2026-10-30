@@ -9,6 +9,7 @@ covers:
   - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
   - scripts/ci/operator-verify-close-guard.mjs
+  - scripts/ci/release-on-merge.mjs
   - .github/workflows/publish.yml
 last-verified: "2026-10-21"
 ---
@@ -369,18 +370,19 @@ On 2026-10-30 that second line returns #4556 — the issue that defined this
 convention — which is correct: it carries no `operator-verify` label and its
 title does not start with the prefix.
 
-**A promotion PR's `Refs` lines release nothing.** `claim-release-on-merge.yml`
-runs on any merged PR, but `release-on-merge.mjs` returns before reading
-anything when the merge's base is not the default branch: `decide()` and
-`decideRefs()` both early-return on `pr.base !== pr.defaultBranch`, and the CLI
-short-circuits before any read. The default branch is `dev` and a promotion's
-base is `main`, so a promotion PR writing `Refs #4555` adds no `landed-partial`
-label and posts no claim-release line — the issue stays open and the release
-session closes it at closeout. `release-on-merge.test.mjs` pins both halves
-(*unmerged and a promotion → no label*; *unmerged, a promotion, and a bot author
-release nothing*). `landed-partial` is not inert, though: it is a skip reason for
-`ship-next` § *Select The Work* and for AGENTS.md § *Cross-session agent
-coordination* — it is only a promotion merge that never sets it.
+**A promotion PR's `Refs` lines release nothing.** A merge into a non-default
+branch releases nothing (AGENTS.md § *Cross-session agent coordination*):
+`release-on-merge.mjs` returns before reading anything when the merge's base is
+not the default branch — `decide()` and `decideRefs()` both early-return on
+`pr.base !== pr.defaultBranch`, and the CLI short-circuits before any read. The
+default branch is `dev` and a promotion's base is `main`, so a promotion PR
+writing `Refs #4555` adds no `landed-partial` label and posts no claim-release
+line — the issue stays open and the release session closes it at closeout.
+`release-on-merge.test.mjs` pins both halves (*unmerged and a promotion → no
+label*; *unmerged, a promotion, and a bot author release nothing*).
+`landed-partial` is not inert, though: it is a skip reason for `ship-next` §
+*Select The Work* and for AGENTS.md § *Cross-session agent coordination* — it is
+only a promotion merge that never sets it.
 
 > **Never revert a published release bump — cut forward instead
 > ([#2580](https://github.com/d-hinders/Haven-AI/issues/2580)).** Once a version

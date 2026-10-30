@@ -6,6 +6,8 @@ covers:
   - scripts/frontend-copy-lint.mjs
   - docs/contributing/docs-quality-system.md
   - packages/backend/src/modules/mpp/evidence.ts
+  - packages/backend/src/modules/mpp/purchase-group.ts
+  - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/modules/accounting/entry.ts
   - packages/backend/src/modules/accounting/transaction-kind.ts
   - packages/backend/src/openapi/spec.ts
@@ -65,11 +67,18 @@ Parsing only the first front-matter block gives **7**. The false eighth is the
 documentation-quality system, whose body contains `contract: true` inside the
 front-matter schema example but whose own front matter has no contract key.
 Consequently the exact block reports **19** raw cited-but-not-covered paths
-across 8 selected documents. Four come from the false document; after excluding
-that document and the two raw glob-string false classes, the measurement is
-**15 literal gaps across 5 actual contract documents**. Re-running the corrected
-sample at `b9f9f1e47` gives the same 15/5, so the contracts did not worsen;
-the instrument was counting the wrong sample.
+across 8 selected documents. Four come from the false document (two of them
+the glob strings `packages/**/*.md` and
+`packages/backend/src/docs-drift/*.test.ts`, two real paths:
+the money-path globs file and core's generated API types);
+19 − 4 leaves **15 literal gaps across 5 actual contract documents**, each
+confirmed with `coupling-gate.mjs --strict --changed=<path>` (none names its
+document). The ledger has recorded "17 across 6 of 8" since 2026-10-03: that
+is these 15 plus the false document's two real-path misses. Re-running the
+corrected sample at `b9f9f1e47` gives the same 15/5, so the contracts did not
+worsen; the instrument was counting the wrong sample.
+`dimensions.md:124-125,165` still describes 8 documents and treats
+`docs-quality-system.md` as a contract document.
 
 **Expected benefit.** Future scans stop publishing false coverage deltas and
 stop asking reviewers to investigate a document outside the declared sample.
@@ -79,6 +88,14 @@ and become the next run's baseline.
 **Approximate scope.** One PR: select contract documents through an existing
 front-matter parser or a shared exported selector, update the measurement
 reference, and add a body-only `contract: true` counter-control.
+
+**Verified at scan.**
+
+```text
+rg -l '^contract: true' docs --glob '*.md' | wc -l          → 8 (front-matter parse → 7)
+classifyChangedFiles(.agents/skills/quality-scan/references/dimensions.md) → (none)
+money-path: dimensions.md → off   (control rails/sweep.ts → money-path)
+```
 
 **Verification still needed.** The fixed selector must return 7 contract
 documents and preserve the 15/5 literal-gap result at this SHA. A fixture with
@@ -109,6 +126,24 @@ public field to make the receipt/evidence domain explicit. A semantic change
 must decide whether existing rows need a backfill; a rename can stay additive
 for compatibility.
 
+**Verified at scan.** `evidence.ts:602-616` sets the parent to the purchase's
+`machine_payment_evidence` row id; `entry.ts:328` sets `paymentId` from
+`payment_intent_id` and `receiptRef` from the evidence row id;
+`purchase-correlation.db.test.ts:188-200,235` asserts the parent equals the
+seeded `evidenceId`, distinct from its `intentId`. Routing and money-path:
+
+```text
+classifyChangedFiles(evidence.ts, purchase-group.ts, machine-payments.ts, entry.ts) → code backend
+modules/mpp/evidence.ts                      → money-path
+modules/mpp/purchase-group.ts                → money-path
+infra/repositories/machine-payments.ts       → money-path
+modules/accounting/entry.ts                  → off
+(control rails/sweep.ts                      → money-path)
+```
+
+A remedy that changes what the parent column stores touches money-path files
+and takes that playbook; a rename confined to `entry.ts` does not.
+
 **Verification still needed.** A real-database test should join a fee's parent
 to the purchase feed entry using the documented public fields. Preserve
 settlement-order independence, first-write-wins, orphan fees and retried
@@ -116,9 +151,14 @@ purchase legs.
 
 ### C3 — direct payments now enter the accounting feed but are classified as an unknown merchant instead of a transfer
 
-**Opportunity and evidence.** The direct-payment branch supplies no resource
-URL, MCP tool, merchant receipt or delivery reference. The classifier therefore
-cannot reach its route-based `transfer` vocabulary:
+**Opportunity and evidence.** The direct-payment branch supplies `NULL` for the
+resource URL, merchant receipt and delivery reference (`entry.ts:459-480`).
+It does select an MCP tool name
+(`pi.machine_metadata->'mcp_call_context'->>'toolName'`, `entry.ts:474`), but
+that is null in practice: only `x402/delegation-authorize.ts` writes
+`mcp_call_context`. The classifier therefore cannot reach `transfer`
+(`transaction-kind.ts:66`), which it reaches only through a route verb
+(`:330`):
 
 ```text
 deriveTransactionKind({
@@ -143,6 +183,14 @@ manual bookkeeping interpretation.
 **Approximate scope.** One PR across the transaction-kind signals/classifier,
 the accounting entry mapper, focused unit and real-database tests, receipt
 rendering assertions, and the accounting contract documentation.
+
+**Verified at scan.** The classifier reproduction above (Node type stripping).
+Routing and money-path:
+
+```text
+classifyChangedFiles(transaction-kind.ts, entry.ts, receipt-underlag.ts) → code backend
+modules/accounting/{transaction-kind,entry,receipt-underlag}.ts → off
+```
 
 **Verification still needed.** Add a pure classifier case plus a real direct
 payment feed/receipt case that says `transfer`. Protocol purchases, API fees,
@@ -171,6 +219,19 @@ closure cannot silently drop it.
 core types, and update response-shape/mapper contract tests and the relevant
 contract note.
 
+**Verified at scan.** `MachinePaymentReceipt` (`spec.ts:13314-13405`) carries
+`delivery_quality`, no `delivery_reference`, and `additionalProperties: true`
+at `:13405`; the `delivery_reference` at `spec.ts:961` belongs to another
+schema. The backend emits it (`evidence.ts:1102`); the SDK declares it
+(`types.ts:2782`) and reads it (`payment-mappers.ts:211-212`). Routing and
+money-path:
+
+```text
+classifyChangedFiles(spec.ts, core/src/api-types.ts, sdk/src/payment-mappers.ts)
+  → code frontend ops backend sdk connect mcp mcp_server signer core qa_agent
+openapi/spec.ts, core/src/api-types.ts, sdk/src/payment-mappers.ts → off
+```
+
 **Verification still needed.** Run generated-type drift, backend response-shape
 tests, SDK mapper tests and a recorded receipt response through the existing
 round-trip instrument.
@@ -178,10 +239,13 @@ round-trip instrument.
 ### C5 — two sibling `pull_request_target` gates retain the same cancellation shape proven to create empty check suites
 
 **Opportunity and evidence.** #4524 demonstrated that a per-PR concurrency
-group with `cancel-in-progress: true` can cancel a pending run before it
-creates a check run, leaving the newest suite on a head at “Expected — Waiting
-for status to be reported.” PR #4526 removed that group from External intake
-gate and recorded a 5/5 post-merge burst with complete suites.
+group can cancel a pending run before it creates a check run, leaving the
+newest suite on a head at “Expected — Waiting for status to be reported.” The
+pending-run cancellation is the group's default behaviour whatever
+`cancel-in-progress` says (#4524, *Verified* 3); `cancel-in-progress: true`
+additionally cancels the running one. PR #4526 removed the group from External
+intake gate, and #4524's operator-verify comment (probe PR #4528, 2026-10-29)
+recorded a 5/5 post-merge burst, every gate suite with one check run.
 
 The PR ownership gate and Baseline change gate still use the same trigger and
 concurrency shape:
@@ -195,10 +259,13 @@ concurrency:
   cancel-in-progress: true
 ```
 
-PR #4526 explicitly lists both as planned follow-up. GitHub search found no
-separate tracking issue. The ownership/baseline contexts may be advisory today;
-the proven hazard still creates ambiguous empty suites and becomes
-merge-blocking whenever either context is required.
+Neither listens for `labeled`, so the burst is `opened` plus a quick body edit
+(`edited`) on the same head. PR #4526 lists both as planned follow-up, and
+#4524 settled that a follow-up issue would be filed through `new-task`; GitHub
+search found none. Neither context is required on `dev` today, but PR
+ownership gate is the pending 17th required context
+(`docs/contributing/autonomous-pr-loop.md:584`): once applied, it inherits
+this failure mode. Until then the hazard creates ambiguous empty suites.
 
 **Expected benefit.** Every event produces a terminal verdict, avoiding empty
 same-SHA suites and eliminating a known future required-check deadlock.
@@ -207,25 +274,43 @@ same-SHA suites and eliminating a known future required-check deadlock.
 workflow tests. `docs.yml` remains outside this candidate because #4524 asked
 for an observed incident before changing that separate workflow.
 
+The remedy is removing the group (as #4526 did) or `queue: max`; flipping
+`cancel-in-progress` to `false` alone does not stop pending-run cancellation.
+
+**Verified at scan.**
+
+```text
+grep -n cancel-in-progress pr-ownership-gate.yml baseline-verdict-gate.yml → :78 true, :77 true
+external-intake-gate.yml → no concurrency: block (comment only, :68, :83)
+classifyChangedFiles(both workflows + their scripts/ci/*.test.mjs)
+  → code frontend ui ops backend sdk connect mcp mcp_server signer cli demo_merchant core qa_agent full
+money-path: both workflows → off
+```
+
 **Verification still needed.** Mutation/static tests must reject reintroduced
 concurrency. Because `pull_request_target` runs the default-branch copy, a
-post-merge label/body-edit burst must show every suite containing a terminal
-check run.
+post-merge burst of `opened` plus body edits (or pushes) must show every suite
+containing a terminal check run; these two gates do not trigger on labels.
 
 ## 3. Coverage record
 
 All measurements below are at `99ef8d063` unless stated otherwise.
 
-- **Sizing → examined.** Tracked TS/TSX/MJS under each package's `src`, split
-  on tests: backend 120,895 source / 160,644 test lines; frontend 77,394 /
+- **Sizing → examined.** The 09-22 command pinned with `git ls-tree`/`git show`:
+  tracked `.ts`/`.tsx`/`.mjs` under each `packages/<p>/src`, split on
+  `\.test\.|__tests__`: backend 120,895 source / 160,644 test lines; frontend 77,394 /
   84,225; SDK 19,621 / 22,603; MCP server 14,114 / 25,456; QA agent 15,133 /
   13,283; connect 12,436 / 15,676; signer 5,564 / 9,363; core 25,730 / 985
   (24,096 generated API-type lines; adjusted non-generated 1,634 / 985);
   remaining packages were within a few percent of the 2026-10-26 baseline.
-- **Fat controllers → examined as a census.** 50 production backend route
-  files / 257 registrations; 4 files at or above 1,000 lines. Largest:
-  payments 1,572 lines / 7 registrations, up 11 lines from the ledger's last
-  largest-route reading. No material structural delta.
+- **Fat controllers → examined as a census.** Non-test `.ts` under
+  `packages/backend/src/routes` at the scan SHA → 50 files; 4 at or above
+  1,000 lines. Registrations,
+  `grep -oE '\b(app|ownerApp)\.(get|post|put|patch|delete|route)\b'` over
+  those 50 → **212** (*corrected in review*: the first reading said 257 with no
+  command, and no candidate command reproduces it). Largest: payments 1,572
+  lines / 7 registrations, up 11 lines from the 2026-10-26 reading of 1,561.
+  No material structural delta.
 - **Block 1, guard falsifiability → not examined.** The four-day delta and
   usage budget did not justify dependency installation plus mutations. No
   mutation result is claimed.
@@ -234,10 +319,18 @@ All measurements below are at `99ef8d063` unless stated otherwise.
   literal misses across 5, unchanged at the previous scan SHA. The coupling
   baseline remains green at 124 pairs / 33 docs. C1 is the instrument defect.
 - **Block 3, stale numbers → partial.** Positive control 3/3. Newest 25
-  regulatory shards: 7 regex matches on 5 lines, 0 with an inline command;
-  only 3 are measured figures, the rest protocol/status/migration notation.
-  This matches the 2026-10-26 7/0 reading. `any` density 39 and DB-mock
-  gauge 54 mocks / 270 positional calls / 57 files, both unchanged.
+  regulatory shards by dated name (`2026-10-25-4372` … `2026-10-30-4552`),
+  the reference's two `rg` lines → **16 figure-bearing lines, 2 with a
+  command** (*corrected in review*: the first reading, 7/0, was the
+  `b9f9f1e47` sample, not this SHA's). 12 of the 16 are measured figures; 4
+  are notation (a `500/502` status pair, migration numbers `093/094/…`, an
+  issue number before "tests", a `1/2/3-link` count). The two commanded lines
+  are the 0.12.0/0.13.0 release shards' "re-measured" lines, and 5 more
+  measured lines are the bullets directly under them.
+  The remaining 5 uncommanded measured lines are test-run counts in PR
+  verification shards (`4449:99-100`, `4394:56`, `4458:81`, `4415:46`),
+  against 3 at `b9f9f1e47`; not raised as a candidate. `any` density 39 and
+  DB-mock gauge 54 mocks / 270 positional calls / 57 files, both unchanged.
 - **Block 4, retired vocabulary → examined.** Positive control 36 shards;
   196 files, 47 historical / 149 live; prose ratchet green at 32 hits / 30
   files; code-half references unchanged. Exact match to the prior baseline.
@@ -245,10 +338,13 @@ All measurements below are at `99ef8d063` unless stated otherwise.
   commits / 1,396 squash landings / 1,681 total. Merge count is unchanged;
   every new landing is squash. The latest wrong-method landing remains
   2026-09-07. Squash-only enforcement holds in the examined window.
-- **Block 6, nets with holes → examined.** Copy-lint perimeter 66 unscanned /
-  4 with hits; money perimeter 32 verb files / 20 outside, unchanged; visual
-  gate 15 exact routes of 27, unchanged; pinned Markdown outside both docs
-  boundaries 43, unchanged; freshness-gate exit branches unchanged.
+- **Block 6, nets with holes → examined.** Copy-lint perimeter **66**
+  unscanned / 4 with hits (64 / 4 on 2026-10-26; the script is unchanged, and
+  the +2 are two new files, the frontend's `agent-facet.ts` and the SDK's
+  test-support `low-s.ts`); money perimeter 32 verb files /
+  20 outside, unchanged; visual gate 15 exact routes of 27, unchanged; pinned
+  Markdown outside both docs boundaries 43, unchanged; freshness-gate exit
+  branches unchanged.
 - **Block 8, refusal census → not examined.** It needs core/MCP builds,
   Postgres and the backend response-recording suite. No short fixture result
   is treated as evidence.
@@ -289,4 +385,32 @@ All measurements below are at `99ef8d063` unless stated otherwise.
   current GitHub issues and the source PRs that disclosed the residuals.
 - This report makes no claim about unexecuted mutations, database behaviour,
   blocks 8/9, browser behaviour, or a live runtime.
+
+## 5. Independent review
+
+`haven-reviewer` at head `7141367` (base `99ef8d063`), briefed to re-derive
+every locally reproducible figure at the scan SHA; the captain re-checked
+the GitHub-side claims (PR #4544, #4546, #4479, #4526 and issue #4524 bodies
+and comments, and open-issue searches for C1–C5). Verdict: no blocking, four
+should-fix, six nits. All five candidates verified against the code. The
+corrections are applied in place above and marked where a figure changed:
+
+- block 3 shard reading 7/0 → **16/2** at the scan SHA;
+- route registrations 257 (no command) → **212** with its command;
+- block 6 copy-lint figure stated as 64 → 66, not "unchanged";
+- the *Verified at scan* field (routing and money-path) added to C1–C5;
+  C2's remedy touches money-path files;
+- C1's arithmetic (19 − 4) and its link to the ledger's 17/6;
+- C3's MCP-tool signal is selected but null in practice;
+- C5: the 5/5 burst is recorded on issue #4524 (probe PR #4528), not PR
+  #4526; pending runs are cancelled by the group itself, so
+  `cancel-in-progress: false` alone is not a remedy; the two gates do not
+  trigger on labels; PR ownership gate is the pending 17th required context;
+- `covers:` adds the two files where C2's parent id is written.
+
+Everything else re-derived as recorded: the 51-landing window and shortstat,
+all sizing figures, 50 route files / 4 ≥ 1,000 lines / payments 1,572, block 2
+8/19 → 7/15/5 at both SHAs, 124 pairs / 33 docs, `any` 39, DB-mock gauge, block 4,
+block 5, the other three block-6 halves, and the comment-archaeology counts.
+Not re-derived locally: issue, CI-run and QA-log counts (GitHub only).
 

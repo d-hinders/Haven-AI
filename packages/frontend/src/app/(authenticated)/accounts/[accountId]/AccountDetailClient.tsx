@@ -38,9 +38,11 @@
  *   With one signer the tab carries the warning dot and the card its
  *   warning; Account details (address, network, created date) sit below.
  *   #4474 (mockup v9): both sections are headed ABOVE their card by the
- *   shared `SectionHeading` — "Who can approve" carries the "All signers in
- *   Settings" link on its heading line, and "Account details" is a divided
- *   label/value list (`DetailList`) rather than a two-column grid.
+ *   shared `SectionHeading` — "Who can approve" carries the "Passkeys and
+ *   wallets" link on its heading line (the link text is the owner's
+ *   2026-10-30 decision, #4563, superseding the mockup's "All signers in
+ *   Settings"), and "Account details" is a divided label/value list
+ *   (`DetailList`) rather than a two-column grid.
  *
  * ## Removed with this slice (#4097)
  *

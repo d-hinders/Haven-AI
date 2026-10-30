@@ -961,7 +961,8 @@ sites). Three sizes, one shell:
 | `inline` | `px-3 py-2.5` | `text-xs`, title only | a one-line placeholder inside dense content |
 
 All three render the same shell — `rounded-[10px] border border-dashed
-border-[var(--v2-border-strong)] bg-[var(--v2-surface)]` (`EmptyState.tsx:65–66`).
+border-[var(--v2-border-strong)] bg-[var(--v2-surface)]` (the `shell` constant
+in `EmptyState.tsx`).
 Inside a `Card` that shell is a **second filled surface**, which `CLAUDE.md`
 § UI Surface Hierarchy forbids: tinted surfaces are for callouts, table headers,
 day bands, the `anchor` elevation, chips, code blocks and overlays — never for a

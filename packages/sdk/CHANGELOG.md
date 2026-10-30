@@ -15,8 +15,6 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
-## 0.13.0-alpha.0 — 2026-10-30
-
 ### Added
 
 - **The merchant's own reason for refusing a paid retry is recorded and
@@ -37,6 +35,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   `haven_sweep_delegate` for every reason. `retry_body` is unchanged.
   Additive and optional on a type that is only returned, so existing
   consumers keep compiling. No update needed.
+
+## 0.13.0-alpha.0 — 2026-10-30
+
+### Added
 
 - **`PaymentStatusResult.merchantSettlementTxHash` names the recorded
   settlement transaction (#4530).** `haven_get_payment_status` already

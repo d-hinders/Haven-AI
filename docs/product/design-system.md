@@ -1354,7 +1354,7 @@ snapshot … regardless of the caller's `tz`". Re-keying the writer by local
 date would mix history, let the zone vary per device, and change that
 contract, so the figures keep their UTC keys and the label names what is
 measured: the change line reads "since yesterday (UTC)" and the sparkline's
-aria-label reads "over the last 30 UTC days". The Activity card beside it
+aria-label reads "over the last 30 UTC days". The Transactions card beside it
 buckets the USER's local days — the two windows deliberately do not read
 alike.
 
@@ -1393,6 +1393,17 @@ rather than repeated per entry:
   treatment the field micro-actions use; see *Button-shaped controls that are not `Button`*.)
 - **Transition:** `transition-colors duration-150`. Colour only — nothing about a `Button`
   animates its size, position or spacing.
+- **Labels never wrap (#4561).** The base string carries `whitespace-nowrap`, so a label
+  that does not fit the space it is given overflows the button's edge instead of breaking
+  mid-phrase. The measured case was "Set budget" splitting onto two lines inside a 98px
+  button at 1288px. The one opt-out is the `wrap` prop, which swaps in `whitespace-normal`
+  **and** replaces the fixed `h-*` with the same number as a `min-h-*` plus vertical
+  padding (`WRAP_SIZE_CLASS`) — a fixed height cannot hold a second line, so a wrapping
+  label would otherwise paint outside its own box. `CopyButton`'s `copiedText` is the only
+  caller: "Copied — paste it to <agent>" carries a dynamic agent name, and that component's
+  contract is that wrapping beats truncating. Do not reach for `className="whitespace-normal"`
+  instead — both utilities set `white-space`, and which one wins is decided by declaration
+  order in Tailwind's generated stylesheet, not by position in the class attribute.
 - **`href` turns it into a link.** With `href`, `Button` renders a `next/link` `<a>` (and
   accepts `target` / `rel`) with an identical class string; without it, a `<button>` (with
   `type`, defaulting to `"button"`). Same paint, different element — which matters for focus,
@@ -1985,7 +1996,7 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   second sanctioned band after `Card.Header`, on the table-header tokens
   (`--v2-table-header-bg` / `--v2-table-header-ink`) with a full-width hairline below
   and the label uppercased by CSS (#4225). A `band={false}` prop keeps the plain
-  label for the dashboard's first day, where the Activity card's own tinted
+  label for the dashboard's first day, where the Transactions card's own tinted
   `Card.Header` sits directly above. A `partial`
   flag marks a bucket whose day is cut by a window boundary ([#3975](https://github.com/d-hinders/Haven-AI/issues/3975)).
 - **Row dividers ([#4165](https://github.com/d-hinders/Haven-AI/issues/4165), owner
@@ -1996,7 +2007,7 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   separation (`divide-y` on the list) — and since #4225 the day band itself ends in
   the same hairline — so a day still reads stronger than a row. Every day-grouped list draws it: the
   account and agent Activity tabs, the agent Tool calls tab, `/transactions` and the
-  dashboard's Activity card.
+  dashboard's Transactions card.
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 

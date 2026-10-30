@@ -26,7 +26,7 @@ test.describe('transaction history — x402 display + detail panel', () => {
     await dismissMobileSidebar(page)
 
     // History renders the row and the export affordance.
-    await expect(page.getByRole('heading', { name: 'Transaction history' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Transactions' })).toBeVisible()
     // #4266: the page is the shared ledger now, not a table. The row title is
     // WHO WAS PAID — the x402 resource host, never "Agent payment" or an
     // address — and the drawer calls it a "Paid request" (#4267), asserted

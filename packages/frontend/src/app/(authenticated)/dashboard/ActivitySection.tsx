@@ -105,7 +105,7 @@ export function ActivitySection({
     <div data-testid="dashboard-activity" className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
         as="h2"
-        title="Activity"
+        title="Transactions"
         actions={
           <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
             View all

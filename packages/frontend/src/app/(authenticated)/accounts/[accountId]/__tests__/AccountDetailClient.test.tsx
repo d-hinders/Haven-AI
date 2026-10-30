@@ -348,7 +348,7 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText('Agent access')).not.toBeInTheDocument()
     expect(screen.queryByText('Token balances')).not.toBeInTheDocument()
     expect(screen.queryByText('Advanced account details')).not.toBeInTheDocument()
-    expect(screen.queryByText('Transaction history')).not.toBeInTheDocument()
+    expect(screen.queryByText('Transactions')).not.toBeInTheDocument()
     expect(screen.queryByText('Receiving USDC')).not.toBeInTheDocument()
   })
 

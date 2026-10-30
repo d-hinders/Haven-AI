@@ -4095,6 +4095,8 @@ export default function DesignSystemPage() {
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Accounting, merchants, passport, network</h3>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">In Fortnox</StatusBadge>
+              <StatusBadge tone="success">Evidence archived</StatusBadge>
+              <StatusBadge tone="neutral">Tracked</StatusBadge>
               <StatusBadge tone="neutral">Sending…</StatusBadge>
               <StatusBadge tone="warning">Not sent</StatusBadge>
             </div>

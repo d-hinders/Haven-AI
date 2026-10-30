@@ -279,8 +279,11 @@ export default function TransactionDetailPanel({
 
   const kind = rowKind(tx)
   // The rows' one precedence (`transactionRowBadge`, #4266); the panel
-  // alone names a plain settled payment "Executed".
-  const status = transactionRowBadge(tx) ?? { label: 'Executed', tone: 'success' as const }
+  // alone names a plain settled payment "Sent" — the same word
+  // `PAYMENT_STATUS.confirmed` uses (#4567). The #3810 no-badge rule ("a
+  // confirmed row carries no badge") is for LIST rows; the panel's anatomy
+  // carries a status badge.
+  const status = transactionRowBadge(tx) ?? { label: 'Sent', tone: 'success' as const }
   // The title matches the list row: who was paid (or who paid), never a raw
   // address; a folded move reads as the ledger row does.
   const title =

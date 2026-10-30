@@ -366,12 +366,20 @@ describe('TransactionDetailPanel — structure per kind', () => {
     expect(rows(details())).toEqual({ 'What happened': 'Unused budget returned' })
   })
 
+  it('a confirmed payment reads "Sent" in the panel — the same word PAYMENT_STATUS uses (#4567)', () => {
+    renderPanel(KINDS.contactSend)
+    // The panel's anatomy carries a status badge even though the ledger row
+    // for the same payment carries none (#3810 is a list-row rule).
+    expect(within(header()).getByText('Sent')).toBeInTheDocument()
+    expect(within(header()).queryByText('Executed')).toBeNull()
+  })
+
   it('accounting present: the badge, linked to /accounting, and the failure reason in words', () => {
     renderPanel(KINDS.accounting)
     const accountingRow = rows(details())
-    expect(accountingRow.Accounting).toBe('Not fed')
+    expect(accountingRow.Accounting).toBe('Not sent')
     expect(accountingRow.Reason).toBe('Supplier missing')
-    expect(within(details()).getByRole('link', { name: /Not fed/ })).toHaveAttribute(
+    expect(within(details()).getByRole('link', { name: /Not sent/ })).toHaveAttribute(
       'href',
       expect.stringContaining('/accounting'),
     )

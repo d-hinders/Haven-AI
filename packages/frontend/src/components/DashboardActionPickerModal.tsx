@@ -2,6 +2,7 @@
 
 import { ChevronRight, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useRef } from 'react'
 import { resolveChainOrNull } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
@@ -74,9 +75,7 @@ export default function DashboardActionPickerModal({
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{account.name}</span>
                     {account.is_default && (
-                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
-                        Default
-                      </span>
+                      <StatusBadge tone="brand">Default</StatusBadge>
                     )}
                   </div>
                   <p className="text-xs text-[var(--v2-ink-3)] mt-1">

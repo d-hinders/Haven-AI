@@ -2289,3 +2289,73 @@ share the prose-only shape stay as they are (expired bodies only). The scan PR
   decided in that entry's disposition.
 
 Drive: `ship-next epic=#4349` (C1 is its only open slice), `ship-next 4459`.
+
+---
+
+## 2026-10-30 — whole repo, weighted to the landings since 2026-10-26
+
+Full report: `docs/bug-reports/quality-scan-2026-10-30-whole-repo.md`.
+Measured on frozen `origin/dev` @ `99ef8d063`; window
+`b9f9f1e47..99ef8d063` → **51** first-parent landings / 438 changed files /
++22,263 −2,230 lines. Two isolated read-only worktrees took the repository and
+GitHub/history samples. No live call, mutation, database suite or browser run.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None materially worsened in the re-measured dimensions.
+
+**Structural findings:** none in the examined sample.
+
+**Improvement candidates (one PR each), pending owner decision:**
+
+- **C1 — block 2's contract-doc selector reads a body example as front
+  matter.** Exact selector: 8 documents / 19 raw misses; actual front-matter
+  sample: 7 documents / 15 literal misses across 5, equal at the prior scan
+  SHA. One shared selector plus a body-example counter-control.
+- **C2 — accounting purchase parents and public payment ids use different UUID
+  domains.** `parent_payment_id` stores the purchase evidence/receipt id while
+  the feed's `paymentId` is the intent id. PR #4544 records that joining the
+  two misses. Decide intent id versus an explicit receipt-domain name.
+- **C3 — a direct payment is classified as an unknown merchant.** The new
+  direct-feed branch supplies none of the classifier's route/document/tool
+  signals, so execution returns `unknown / none` and “Unknown merchant
+  (unclassified)” although the closed enum includes `transfer`. PR #4546
+  records the residual.
+- **C4 — the served receipt schema omits a live field the SDK consumes.**
+  `delivery_reference` is emitted by the backend and mapped by the SDK but
+  absent from the OpenAPI `MachinePaymentReceipt` and generated core type;
+  `additionalProperties: true` hides the gap. PR #4479 records the follow-up.
+- **C5 — two sibling PR gates retain the cancellation shape proven to create
+  empty suites.** PR ownership and Baseline change still use per-PR
+  `cancel-in-progress: true` on the same `pull_request_target` event family
+  that froze External intake gate; PR #4526 names both as planned follow-up.
+
+**Probed clean** (block → coverage → result):
+
+- sizing → examined → backend 120,895 / 160,644 source/test lines; frontend
+  77,394 / 84,225; SDK 19,621 / 22,603; MCP server 14,114 / 25,456; no
+  material prior structural delta.
+- block 1 → not examined → no dependencies/mutation run under this bounded
+  four-day scan.
+- block 2 → examined → 8 / 19 raw, corrected 7 documents / 15 literal gaps
+  across 5 (C1); coupling baseline green, 124 pairs / 33 docs.
+- block 3 → partial → positive control 3/3; newest shards 7 matches on 5 lines,
+  0 with inline command, prior 7/0; `any` 39; DB mocks 54 / 270 / 57.
+- block 4 → examined → positive control 36; 196 files, 47 historical / 149
+  live; prose ratchet green 32 / 30; unchanged.
+- block 5 → examined → since 2026-08-10: 282 merge / 1,396 squash / 1,681
+  total; merge count unchanged, current window squash-only.
+- block 6 → examined → copy perimeter 66 / 4; money perimeter 32 / 20; visual
+  exact-route coverage 15 / 27; docs boundary 43; all unchanged.
+- block 8 → not examined → requires builds, Postgres and backend recording.
+- block 9 → not examined → shares block 8's recording prerequisite.
+- incident clustering → examined → 81 issues created since 2026-10-26, 25
+  open / 56 closed; large clusters already tracked.
+- workflow archaeology → examined → newest 100 CI runs 82 success / 11
+  cancelled / 7 failed, no sampled `dev` failure; five sampled QA money-flow
+  jobs passed every leg on attempt 1/2.
+- comment archaeology → examined → 0 TODO/FIXME/HACK/XXX package-source hits;
+  positive control `import` 2,204 files.
+- cross-package duplication / validation / data-layer coverage → partial;
+  live exercise → not examined.
+
+**Disposition: pending owner decision** (C1–C5).

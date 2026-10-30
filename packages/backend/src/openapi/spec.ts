@@ -13388,11 +13388,25 @@ export const openapiSpec = {
           delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
           // #4534: the purchase correlation key. `purchase_group_id` is the
           // merchant's own invoice/order id (or an agent-supplied group key)
-          // shared by every payment of one purchase; `parent_payment_id` is the
-          // purchase payment a fee call paid for. Both null on an ungrouped
-          // payment — which is fed exactly as before, never withheld.
+          // shared by every payment of one purchase; `parent_receipt_id` is the
+          // purchase's receipt (evidence) id — the `id` of the parent purchase
+          // receipt, NOT a payment id. Both null on an ungrouped payment — which
+          // is fed exactly as before, never withheld.
           purchase_group_id: { type: ['string', 'null'] },
-          parent_payment_id: { anyOf: [uuid, { type: 'null' }] },
+          parent_receipt_id: {
+            anyOf: [uuid, { type: 'null' }],
+            description:
+              "The parent purchase receipt's `id` — the `machine_payment_evidence` row id of the purchase leg a fee call paid for. Null on the purchase itself and on every ungrouped payment. Joins to `id`, not to `payment_id`.",
+          },
+          // #4577: the same value under its old name, kept because the SDK
+          // shipped `parentPaymentId` in 0.13.0-alpha.0. It holds a RECEIPT id,
+          // not a payment id — prefer `parent_receipt_id`.
+          parent_payment_id: {
+            anyOf: [uuid, { type: 'null' }],
+            deprecated: true,
+            description:
+              'Deprecated: same value as `parent_receipt_id`. The name is wrong — it holds a receipt (evidence) id, not a payment id. Prefer `parent_receipt_id`.',
+          },
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,

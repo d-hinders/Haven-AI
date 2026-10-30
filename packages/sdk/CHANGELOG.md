@@ -17,6 +17,19 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **The parent purchase receipt is named for what it holds (#4577).**
+  `HavenPaymentReceipt.parentReceiptId` (raw `parent_receipt_id`) carries the
+  parent purchase receipt's `id` — the `machine_payment_evidence` row id of the
+  purchase leg a fee call paid for. It joins to the receipt's `id`, not to
+  `paymentId`, which is why the old name was wrong: `parentPaymentId` sat beside
+  a `paymentId` that is a payment-intent id, so a join on the two names found
+  nothing. `parentPaymentId` still maps the same value and is now
+  `@deprecated`; it is kept because 0.13.0-alpha.0 shipped it, and removing it
+  is a breaking change that needs its own release decision. Both keys are
+  per-row: a backend that does not send one leaves it absent, never a
+  fabricated null. Additive and optional on a type that is only returned, so
+  existing consumers keep compiling. No update needed.
+
 - **The merchant's own reason for refusing a paid retry is recorded and
   echoed (#4552).** x402 merchants have started saying WHY they refused: a
   verify-stage refusal returns `{"error": "<reason>"}` in the 402 body, a

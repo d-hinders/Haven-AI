@@ -37,7 +37,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-10-29"
+last-verified: "2026-10-30"
 ---
 
 # Accounting feed — operations runbook
@@ -503,6 +503,48 @@ it — error 2000359). Accounted's document upload takes exactly `file` +
 `upload_source` (`additionalProperties: false`), so there is no metadata field
 to carry them: the PDF is the carrier. Existing stored receipts are untouched —
 the kind renders at push time and nothing re-renders a delivered document.
+
+**The purchase correlation key (#4534, renamed #4577).** One purchase can settle
+as several payments — the Bitrefill shape above is three — and the feed files
+one document per payment, because a pushed document is immutable. What links
+them is the correlation key, and it is a **receipt** id, not a payment id:
+
+- `purchase_group_id` — the merchant's own invoice/order id (or an
+  agent-supplied group key) shared by every payment of one purchase.
+- `parent_receipt_id` — for a fee call, the parent purchase receipt's `id`: the
+  `machine_payment_evidence` row id of the purchase leg it paid for. Null on the
+  purchase itself and on every ungrouped payment.
+
+The underlag renders both, plus its own evidence id, so a fee's document and its
+purchase's document match by eye:
+
+```
+Purchase group inv_bikbok_4497
+Parent receipt 3f2a…-the-invoice-pay-evidence-id
+Receipt ref    9c41…-this-document's-own-evidence-id
+```
+
+`Receipt ref` appears on a **protocol** underlag only. On a direct payment
+(`POST /payments`, `haven_send`) `receiptRef` is the payment-intent id, which
+`Payment id` already prints, so the line is omitted rather than printing the
+same value twice. An ungrouped payment renders `Purchase group ungrouped` and
+`Parent receipt n/a`.
+
+The feed payload carries the same two values as `FeedTransaction.purchaseGroupId`
+/ `.parentReceiptRef` — named `parentReceiptRef` to match `receiptRef`, which is
+what it joins to. The stored column is still `machine_payment_evidence.parent_payment_id`
+(no migration); the receipts wire carries the value as `parent_receipt_id` and
+keeps `parent_payment_id` beside it as a **deprecated alias**, because the SDK
+shipped `parentPaymentId` in 0.13.0-alpha.0. The old name was wrong: it sat
+beside a `payment_id` that is a payment-intent id, so a join on the two names
+found nothing.
+
+**Accepted risk — Accounted write-once bytes.** Accounted's idempotency key comes
+from `paymentId`, and re-filing a document with different bytes ends in a
+terminal `IDEMPOTENCY_KEY_REUSE` skip (see *Sync statuses* below). A grouped row
+whose first upload reached Accounted but which is retried after this deploy
+re-renders with the two new lines and takes that skip. Rows already `pushed` are
+final and are never re-rendered.
 
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its

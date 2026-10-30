@@ -381,8 +381,9 @@ line — the issue stays open and the release session closes it at closeout.
 `release-on-merge.test.mjs` pins both halves (*unmerged and a promotion → no
 label*; *unmerged, a promotion, and a bot author release nothing*).
 `landed-partial` is not inert, though: it is a skip reason for `ship-next` §
-*Select The Work* and for AGENTS.md § *Cross-session agent coordination* — it is
-only a promotion merge that never sets it.
+*Select The Work* and for AGENTS.md § *Cross-session agent coordination*. A
+promotion merge is one of the cases that never sets it — a bot-authored PR, an
+epic, and an issue not authored by a maintainer never do either.
 
 > **Never revert a published release bump — cut forward instead
 > ([#2580](https://github.com/d-hinders/Haven-AI/issues/2580)).** Once a version

@@ -4,8 +4,10 @@
  * The list of providers Haven knows about, as descriptors (`provider.ts`).
  * Owner decision 2026-09-11: a provider can be LISTED as *Coming soon*
  * before any code for it exists — listing is a product decision, and the
- * dashboard shows it. Light and Igdrasil are the two listed that way today
- * (Accounted joined them the same way and has been `live` since #3017).
+ * dashboard shows it. Light is the one listed that way with no code today;
+ * Accounted joined the same way and has been `live` since #3017, and
+ * Igdrasil's connector exists since #4518 but stays `coming_soon` until it is
+ * live-verified (#4519).
  * Only a `live` provider accepts a connect; the generic routes enforce
  * that through `assertConnectable`.
  *
@@ -20,6 +22,7 @@
 import { getConnector, type AccountingConnector } from './connector.js'
 import type { AccountingProvider, ProviderAvailability } from './provider.js'
 import { FORTNOX_SCOPE } from './fortnox.js'
+import { IGDRASIL_SCOPE } from './igdrasil.js'
 
 export const FORTNOX: AccountingProvider = {
   id: 'fortnox',
@@ -84,10 +87,18 @@ export const LIGHT: AccountingProvider = {
 export const IGDRASIL: AccountingProvider = {
   id: 'igdrasil',
   displayName: 'Igdrasil',
+  // #4518 (epic #2875): OAuth2 + PKCE — Igdrasil's personal keys only read,
+  // so writes go through Haven's registered OAuth app.
   authKind: 'oauth2',
-  capabilities: COMING_SOON_CAPABILITIES,
+  // Document-only like Accounted: the uploaded underlag IS the object (no
+  // attachment step); verify answers from Haven's own record. Revoke posts
+  // the refresh token to Igdrasil's `/oauth/revoke`. The company read is the
+  // connect-time check that the grant reaches exactly one company.
+  capabilities: { attachments: false, verify: false, revoke: true, companyInfo: true },
+  // Stays `coming_soon` — and so off the Settings card (#4359) — until the
+  // live run on dev (#4519) flips it.
   availability: 'coming_soon',
-  requiredScopes: [],
+  requiredScopes: IGDRASIL_SCOPE.split(' '),
 }
 
 /** Display order: live first, then coming soon in product order. */

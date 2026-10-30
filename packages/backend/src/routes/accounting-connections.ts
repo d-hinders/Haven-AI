@@ -7,6 +7,7 @@ import {
   ConnectionNotActivatableError,
   ConnectionSettingsError,
   InvalidApiKeyError,
+  MultiCompanyGrantError,
   MultiCompanyKeyError,
   OAUTH_STATE_PURPOSE,
   OAUTH_STATE_TTL_SECONDS,
@@ -77,10 +78,12 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // #2864: a connect refused because the company books in another currency
   // is the one failure the user can act on differently (pick another
   // company), so the redirect names it: `&reason=unsupported_currency`.
+  // #4518: so is a grant that reaches several companies (approve one):
+  // `&reason=multi_company`.
   const redirect = (
     provider: string,
     outcome: 'connected' | 'denied' | 'error',
-    reason?: 'unsupported_currency' | 'feature_off',
+    reason?: 'unsupported_currency' | 'feature_off' | 'multi_company',
   ) =>
     `${accountingUrl}?provider=${encodeURIComponent(provider)}&connect=${outcome}${reason ? `&reason=${reason}` : ''}`
 
@@ -196,6 +199,8 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
           'accounting oauth callback failed after state verification',
         )
         if (err instanceof UnsupportedBaseCurrencyError) return reply.redirect(redirect(provider, 'error', 'unsupported_currency'))
+        // #4518: the grant reaches several companies — the frontend names it (#4520).
+        if (err instanceof MultiCompanyGrantError) return reply.redirect(redirect(provider, 'error', 'multi_company'))
         return reply.redirect(redirect(provider, 'error'))
       }
       return reply.redirect(redirect(provider, 'connected'))

@@ -58,6 +58,7 @@ import { syncUser } from './feed-orchestrator.js'
 import { getSyncState, reopenMissingPushed } from './feed-sync.js'
 import { fortnoxConfigured, fortnoxCredentials } from './fortnox-connection.js'
 import { fortnoxOAuth2Config } from './fortnox.js'
+import { igdrasilConfigured, igdrasilCredentials, igdrasilOAuth2Config } from './igdrasil.js'
 import { buildAuthorizeUrl, completeOAuth2Connect, type OAuth2ProviderConfig } from './oauth-flow.js'
 import { pkceVerifierFor } from './oauth-pkce.js'
 import { missingScopesFor, type AccountingProvider } from './provider.js'
@@ -161,11 +162,12 @@ export async function getDestinationSummary(userId: string): Promise<ConnectionS
 
 /**
  * The per-deployment OAuth2 parameters for a provider, or null when it is not
- * configured here. Fortnox is the one live OAuth2 provider; a second one adds
- * a case, and the routes stay untouched.
+ * configured here. One case per OAuth2 provider (Fortnox; Igdrasil since
+ * #4518); the routes stay untouched.
  */
 export function oauth2ConfigFor(providerId: string): OAuth2ProviderConfig | null {
   if (providerId === 'fortnox') return fortnoxConfigured() ? fortnoxOAuth2Config(fortnoxCredentials()) : null
+  if (providerId === 'igdrasil') return igdrasilConfigured() ? igdrasilOAuth2Config(igdrasilCredentials()) : null
   return null
 }
 

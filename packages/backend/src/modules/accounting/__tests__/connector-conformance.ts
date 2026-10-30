@@ -5,6 +5,8 @@
  *
  *   in-memory-connector.conformance.test.ts   InMemoryConnector
  *   fortnox-connector.conformance.test.ts     FortnoxConnector, recorded HTTP fixtures
+ *   accounted-connector.conformance.test.ts   AccountedConnector, recorded HTTP fixtures
+ *   igdrasil-connector.conformance.test.ts    IgdrasilConnector, fixtures from Igdrasil's OpenAPI (#4518)
  *
  * The suite drives the REAL orchestrator (`feedSettledPayment`), the real
  * ledger and connection repositories on the REAL database (the #1220

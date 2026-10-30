@@ -97,6 +97,28 @@ export class ProviderError extends Error {
  */
 export const UNSUPPORTED_BASE_CURRENCY_MESSAGE = `Haven feeds ${ledgerCurrencyList()} ledgers`
 
+/**
+ * The grant reaches more than one company (#4518). Haven's feed has no
+ * per-push company choice, so a grant that names several companies is
+ * refused at connect rather than booking into the wrong one silently.
+ * Provider-neutral: Igdrasil's consent screen lets a person pick several
+ * companies. (Accounted's pasted key has its own `MultiCompanyKeyError` —
+ * different advice, a key scoped to one company.) The OAuth callback answers
+ * it with `reason=multi_company`.
+ */
+export class MultiCompanyGrantError extends Error {
+  readonly code = 'MULTI_COMPANY_GRANT' as const
+  constructor(
+    public readonly provider: string,
+    public readonly count: number | 'several',
+  ) {
+    super(
+      `The ${provider} grant reaches ${count} companies — Haven feeds exactly one. Connect again and approve one company.`,
+    )
+    this.name = 'MultiCompanyGrantError'
+  }
+}
+
 export class UnsupportedBaseCurrencyError extends Error {
   readonly code = 'UNSUPPORTED_BASE_CURRENCY' as const
   constructor(public readonly baseCurrency: string) {

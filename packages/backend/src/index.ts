@@ -112,7 +112,7 @@ import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
 import accountingWebhookRoutes from './routes/accounting-webhooks.js'
 import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
-import { AccountedConnector } from './modules/accounting/index.js'
+import { AccountedConnector, igdrasilConnectorIfConfigured } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
 import {
@@ -618,6 +618,12 @@ if (fortnoxConfigured()) {
 // whole exposure decision. #3018 is the push half: the receipt underlag is
 // uploaded as one WORM document, delivery proven by sha256 echo.
 registerConnector(new AccountedConnector())
+// #4518 (epic #2875): the Igdrasil adapter, credential-gated like Fortnox —
+// Haven's OAuth app is per deployment (IGDRASIL_CLIENT_ID / _SECRET /
+// _REDIRECT_URI). Registered, it makes `configured: true`; the descriptor
+// stays `coming_soon` until the live run (#4519), so nothing can connect yet.
+const igdrasilConnector = igdrasilConnectorIfConfigured()
+if (igdrasilConnector) registerConnector(igdrasilConnector)
 // #1328: the legacy /demo/mpp/* MPP demo route is retired (see
 // modules/mpp/challenge.ts's mppDemoRetired() for the authorize-side refusal).
 

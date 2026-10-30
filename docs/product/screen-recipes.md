@@ -1054,10 +1054,10 @@ Money and risk clarity:
 are ROLLING — the owner decision (epic #3801, 2026-10-09): `[now − 7×24h,
 now)` on the payment instant, the same definition `/analytics/overview` uses;
 no calendar months. The header sentence, the Needs-attention items that say
-"in the last 7 days" and the Activity card all cover that one interval (the
+"in the last 7 days" and the Transactions card all cover that one interval (the
 wire's `activityWindowStart` is its boundary). They differ in what they put
 in it, not when it ends: the header counts confirmed agent payments, the
-Activity card also carries deposits, sweeps, failed and pending rows.
+Transactions card also carries deposits, sweeps, failed and pending rows.
 
 **The dashboard's activity list is grouped and merchant-first (#3810).** The
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per
@@ -1151,7 +1151,7 @@ Structure:
    amount sits right with the time under it. An own-account transfer (the
    backend's `foldOwnTransfers=1`, #4265) reads "Moved between your accounts"
    with `DirectionMark direction="move"`, the subline "You · <from> → <to>" (or
-   "Your accounts · …"), and an unsigned amount. The dashboard's Activity card
+   "Your accounts · …"), and an unsigned amount. The dashboard's Transactions card
    shows the same move as one row too (#4268), without the actor. The summary line carries
    "In <total> · Out <total>" beside the count. No Initiator, From/To or link
    columns. A row opens `TransactionDetailPanel`, where the full address and

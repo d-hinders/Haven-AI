@@ -167,3 +167,54 @@ describe('Button disclosure pair (#2903)', () => {
     expect(button.hasAttribute('aria-controls')).toBe(false)
   })
 })
+
+/**
+ * #4561. A label that breaks mid-phrase is a layout bug, not a wrap: "Set
+ * budget" split onto two lines inside a 98px button at 1288px, measured in
+ * the browser (`white-space: normal`). The default is `whitespace-nowrap`;
+ * `wrap` is the one opt-out, and it has to carry the matching size class
+ * because a fixed height cannot hold a second line.
+ *
+ * jsdom does not lay out, so these read the utility classes — the same
+ * instrument the tap-target guard above uses, and the same reason: the
+ * invariant is expressible in the class names and breaks under mutation.
+ */
+describe('Button label wrapping (#4561)', () => {
+  const classesOfLabel = (name: string) => screen.getByRole('button', { name }).className.split(/\s+/)
+
+  it('never wraps by default', () => {
+    render(<Button>Set budget</Button>)
+    const classes = classesOfLabel('Set budget')
+    expect(classes).toContain('whitespace-nowrap')
+    expect(classes).not.toContain('whitespace-normal')
+  })
+
+  it('keeps the fixed painted height on the default form', () => {
+    render(<Button size="sm">Set budget</Button>)
+    expect(classesOfLabel('Set budget')).toContain('h-9')
+  })
+
+  it('wrap opts out of nowrap', () => {
+    render(<Button wrap>Copied — paste it to Atlas</Button>)
+    const classes = classesOfLabel('Copied — paste it to Atlas')
+    expect(classes).toContain('whitespace-normal')
+    expect(classes).not.toContain('whitespace-nowrap')
+  })
+
+  it.each([
+    ['sm', 'min-h-9'],
+    ['md', 'min-h-10'],
+    ['lg', 'min-h-11'],
+  ] as const)('wrap at size=%s keeps the declared height as a floor (%s)', (size, floor) => {
+    // A fixed `h-*` would paint the second line outside the button's box, so
+    // the wrapping form swaps it for the same number as a `min-h-*`.
+    render(
+      <Button size={size} wrap>
+        Copied — paste it to Atlas
+      </Button>,
+    )
+    const classes = classesOfLabel('Copied — paste it to Atlas')
+    expect(classes).toContain(floor)
+    expect(classes.some((c) => /^h-\d+$/.test(c))).toBe(false)
+  })
+})

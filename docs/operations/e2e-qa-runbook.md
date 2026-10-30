@@ -139,7 +139,7 @@ merchants** found.
    top-up from the delegate's own balance, and on the delegation rail there is no
    such leg to queue against. Confirm either the expected on-chain settlement or the
    refusal — the edge-case note below says which refusal each path gives.
-2. **Displays correctly in the UI** — the payment appears in Transaction history
+2. **Displays correctly in the UI** — the payment appears in Transactions
    and its detail panel shows the x402 fields (the resource host as the title
    and the For row, the Settlement row, and the merchant address and
    settlement transaction under Technical details, #4267). *Happy path here is automated

@@ -62,9 +62,32 @@ describe('CopyButton', () => {
     )
     const button = screen.getByRole('button', { name: 'Copy prompt for Fact' })
     expect(button.textContent).toBe('Copy prompt')
+    // #4561: the wrap-capable form is used in BOTH states, so the button does
+    // not change height when the confirmation appears.
+    expect(button.className.split(/\s+/)).toContain('whitespace-normal')
     await click(button)
+    expect(write).toHaveBeenCalledWith('Pay https://x.example/a and return the result')
     const copied = screen.getByRole('button', { name: 'Prompt for Fact copied' })
     expect(copied.textContent).toBe('Copied — paste it to Atlas')
+    // The copied state is the one that has to wrap: a long agent name must
+    // break inside the button rather than run past its edge, and the height
+    // must be a floor rather than a fixed `h-9` so the second line fits.
+    const copiedClasses = copied.className.split(/\s+/)
+    expect(copiedClasses).toContain('whitespace-normal')
+    expect(copiedClasses).not.toContain('whitespace-nowrap')
+    expect(copiedClasses).toContain('min-h-9')
+    expect(copiedClasses.some((c) => /^h-\d+$/.test(c))).toBe(false)
+  })
+
+  it('labelled without copiedText keeps the nowrap default — nothing to wrap', async () => {
+    mockClipboard(() => Promise.resolve())
+    render(<CopyButton value="v" label="prompt for Fact" text="Copy prompt" />)
+    const button = screen.getByRole('button', { name: 'Copy prompt for Fact' })
+    expect(button.className.split(/\s+/)).toContain('whitespace-nowrap')
+    await click(button)
+    expect(screen.getByRole('button', { name: 'Prompt for Fact copied' }).className.split(/\s+/)).toContain(
+      'whitespace-nowrap',
+    )
   })
 
   it('labelled without copiedText keeps the plain "Copied" confirmation', async () => {

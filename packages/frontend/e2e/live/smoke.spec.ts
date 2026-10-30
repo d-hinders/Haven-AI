@@ -43,7 +43,7 @@ test.describe('live smoke — deployed dev stack', () => {
 
   test('transaction history loads from the real backend', async ({ page }) => {
     await page.goto('/transactions')
-    await expect(page.getByRole('heading', h1('Transaction history'))).toBeVisible()
+    await expect(page.getByRole('heading', h1('Transactions'))).toBeVisible()
     // Either real rows or the honest empty state — never the load-failure state.
     await expect(page.getByText(/could not load|failed to load/i)).toHaveCount(0)
   })

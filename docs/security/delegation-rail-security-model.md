@@ -97,12 +97,20 @@ last-verified: "2026-10-30"
 > `packages/signer/src/core.ts` is not in this bump's diff at all.
 >
 > **Signing-surface changes in the promoted range, already re-verified where
-> they merged.** The range `origin/main..origin/dev` carries one change to a
-> file on this document's cover list: **#4534**, `packages/sdk/src/client.ts`
-> — the purchase correlation key, whose own note is at the end of this
-> document (2026-10-29). It authorizes nothing, produces or consumes no
-> signature, and no spend decision reads its value. The release's other
-> change, **#4530**'s `PaymentStatusResult.merchantSettlementTxHash`, lands in
+> they merged.** The range `origin/main..origin/dev` carries **two** changes to
+> files on this document's cover list:
+>
+> - **#4448** (`#4529`), `packages/backend/src/infra/repositories/agents.ts` —
+>   `UNARCHIVE_AGENT_SQL` clears only `archived_at` and recolours an agent only
+>   when its stored tint is now held by another non-archived agent. Presentation
+>   data; its own note is at line 4243.
+> - **#4534** (`#4544`), `packages/sdk/src/client.ts` — the purchase correlation
+>   key, whose own note is at the end of this document (2026-10-29). It
+>   authorizes nothing, produces or consumes no signature, and no spend decision
+>   reads its value.
+>
+> The release's other change, **#4530**'s
+> `PaymentStatusResult.merchantSettlementTxHash`, lands in
 > `packages/sdk/src/types.ts` and `payment-mappers.ts`, neither of which is on
 > this document's cover list; it is a read-only status field and touches no
 > signing path.

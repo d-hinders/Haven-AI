@@ -96,9 +96,10 @@ last-verified: "2026-10-30"
 > (`packages/mcp/src/server.ts:113`), `CONNECTOR_VERSION`
 > (`packages/connect/src/runtime.ts:56`), `SIGNER_VERSION`
 > (`packages/signer/src/tools.ts:70`) and `SDK_VERSION`
-> (`packages/sdk/src/client-identity.ts:20`) all read `0.13.0-alpha.0`, and
-> `runtime-manifest.ts` derives its rows from them. The Node floor is unchanged
-> at `>= 22.0.0`.
+> (`packages/sdk/src/client-identity.ts:20`) all read `0.13.0-alpha.0`. Only
+> `mcpVersion` is derived from a constant (`runtime-manifest.ts:13` reads
+> `MCP_VERSION`); `sdkVersion` and `signerVersion` are literals the bump
+> re-pins (`:15`, `:17`). The Node floor is unchanged at `>= 22.0.0`.
 >
 > **What the release carries.** The shipped delta is four files, all in
 > `@haven_ai/sdk` (+64/−0): `client.ts`, `merchant-completion.ts`,
@@ -119,8 +120,11 @@ last-verified: "2026-10-30"
 > **What did NOT move.** No tool is added, renamed or removed. No input schema
 > changes beyond #4534's two optional arguments, which are already in
 > `tools-list.snapshot.json` from that PR. No strict-input list, no
-> expected-context version, no consent hash, no version floor, no
-> `next-arguments-corpus.json` row. `@haven_ai/mcp`, `@haven_ai/signer`,
+> expected-context version, no consent hash, no version floor. The
+> `next-arguments-corpus.json` DOES move in the range — #4530's prefill adds
+> `payment_header` to three settlement-evidence rows and adds two rows, which
+> the note at the end of this document already records; the bump itself does
+> not touch it. `@haven_ai/mcp`, `@haven_ai/signer`,
 > `@haven_ai/connect` and `@haven_ai/cli` ship version literals only — their
 > tarball contents are byte-identical to `0.12.0-alpha.0`, which is why the
 > bump moves all five and only `sdk` carries a change.

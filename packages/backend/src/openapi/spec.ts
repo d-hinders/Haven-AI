@@ -13379,6 +13379,41 @@ export const openapiSpec = {
           amount_human: { type: 'string' },
           challenge_id: { type: ['string', 'null'] },
           idempotency_key: { type: ['string', 'null'] },
+          // #4579: the challenge the payment answered, stored as JSONB. The
+          // database enforces no shape on the column, so the schema asserts
+          // none — an open object or null.
+          challenge_payload: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#4579: the challenge the payment answered, stored as JSONB. The database enforces no shape on this column, so the schema states none.',
+          },
+          // #4579: the payment option the agent selected out of the challenge,
+          // also JSONB with no database-enforced shape.
+          selected_payment: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#4579: the payment option the agent selected from the challenge, stored as JSONB. The database enforces no shape on this column, so the schema states none.',
+          },
+          // #4579: the header NAMES only. The header VALUES are the payment
+          // proof and the merchant receipt — never returned on any read.
+          payment_proof_header_name: {
+            type: ['string', 'null'],
+            description:
+              '#4579: the header name the merchant expects the payment proof in; null when the challenge named none. The header VALUE is never returned.',
+          },
+          protocol_receipt_header_name: {
+            type: ['string', 'null'],
+            description:
+              '#4579: the header name the merchant returns its protocol receipt in; null when the challenge named none. The header VALUE is never returned.',
+          },
+          // #4579: merchant-controlled and relayed VERBATIM (#3125) — the
+          // merchant's PAYMENT-RESPONSE object. Nothing inside it is Haven's
+          // record, and the schema must not assert a shape the merchant owns.
+          protocol_receipt_payload: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              "#4579: the merchant's PAYMENT-RESPONSE object, relayed verbatim (#3125) and merchant-controlled — nothing inside it is Haven's record. Stored as JSONB with no database-enforced shape, so the schema states none.",
+          },
           merchant_status: { type: ['integer', 'null'] },
           // #3770: the paying agent's evidence-only delivery verdict, when
           // reported. Nullable = not reported; never gates anything and the
@@ -13386,6 +13421,16 @@ export const openapiSpec = {
           delivery_quality: { type: ['string', 'null'], enum: ['ok', 'unusable', 'partial', null] },
           delivery_note: { type: ['string', 'null'] },
           delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
+          // #4579: the non-secret delivery pointer, echoed on the receipt
+          // (#3778). Same semantics as the activity feed's field at the top of
+          // this file; the 512-character cap is the evidence request's write
+          // bound (`MachinePaymentEvidenceRequest.deliveryReference`).
+          delivery_reference: {
+            type: ['string', 'null'],
+            maxLength: 512,
+            description:
+              '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+          },
           // #4534: the purchase correlation key. `purchase_group_id` is the
           // merchant's own invoice/order id (or an agent-supplied group key)
           // shared by every payment of one purchase; `parent_receipt_id` is the

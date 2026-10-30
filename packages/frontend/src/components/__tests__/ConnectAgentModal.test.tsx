@@ -167,8 +167,14 @@ describe('ConnectAgentModal focus (#3687)', () => {
     render(<ConnectAgentModal open onClose={vi.fn()} />)
 
     expect(screen.getByLabelText('Agent name')).not.toHaveFocus()
-    // Today's behaviour there: the first focusable, the header Close button.
-    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+    // #4562: `Modal` now focuses the BODY's first focusable, which on this
+    // step is the *Agent name* input — the exact thing a coarse pointer must
+    // not do. The flow hands `Modal` its own step region instead, so focus
+    // lands inside the dialog without opening a keyboard.
+    const focused = document.activeElement as HTMLElement
+    expect(focused).not.toBe(screen.getByRole('button', { name: 'Close' }))
+    expect(focused).toHaveAttribute('tabindex', '-1')
+    expect(screen.getByRole('dialog')).toContainElement(focused)
   })
 
   it('keeps focus inside the dialog across a step change, and Back lands in the name input', () => {

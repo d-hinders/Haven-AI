@@ -1354,6 +1354,12 @@ export default function DesignSystemPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [topModalOpen, setTopModalOpen] = useState(false)
   const [topModalTall, setTopModalTall] = useState(false)
+  // #4562: the two footer shapes, side by side so the owner can pick one on the
+  // PR. `singleScreenFooterOpen` is the shipped rule (right-aligned,
+  // content-width); `multiScreenFooterOpen` is the alternative (DialogActions
+  // everywhere).
+  const [singleScreenFooterOpen, setSingleScreenFooterOpen] = useState(false)
+  const [multiScreenFooterOpen, setMultiScreenFooterOpen] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
@@ -3902,19 +3908,46 @@ export default function DesignSystemPage() {
         <Card hover={false} className="p-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Widths</h3>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Anatomy</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Choose <code className="rounded bg-[var(--v2-surface)] px-1">sm</code>,{' '}
-                <code className="rounded bg-[var(--v2-surface)] px-1">md</code>,{' '}
-                <code className="rounded bg-[var(--v2-surface)] px-1">lg</code>, or{' '}
-                <code className="rounded bg-[var(--v2-surface)] px-1">xl</code> for the content, not the page.
+                Title, an optional subtitle, a close button, the body, and an optional footer. Every
+                dialog reads the same, top to bottom.
+              </p>
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setSingleScreenFooterOpen(true)}>
+                Open a single-screen dialog
+              </Button>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close button</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                On by default. Opt out only when another control is the dismiss — a confirmation&apos;s
+                Cancel. A dialog that guards closing while busy passes{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">closeButtonDisabled</code> so the ✕
+                is guarded too.
               </p>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Header</h3>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Field labels</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Dialog panels are white with a compact <code className="rounded bg-[var(--v2-surface)] px-1">text-sm</code>{' '}
-                title. Add a subtitle, close button, or header accessory when the flow needs them.
+                Sentence case, <code className="rounded bg-[var(--v2-surface)] px-1">text-sm font-medium</code>{' '}
+                in ink. Uppercase, letter-spaced labels are retired.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Open-time focus</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The body&apos;s first focusable element, never the ✕. The ✕ is the fallback only when the
+                body has nothing focusable in it.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Widths</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                <code className="rounded bg-[var(--v2-surface)] px-1">sm</code> for one question,{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">md</code> (default) for a one- or
+                two-field form, <code className="rounded bg-[var(--v2-surface)] px-1">lg</code> for a list
+                manager, <code className="rounded bg-[var(--v2-surface)] px-1">xl</code> for a multi-screen
+                flow. Width follows the content, not the page.
               </p>
             </div>
             <div>
@@ -3937,9 +3970,28 @@ export default function DesignSystemPage() {
             <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close behavior</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Backdrop, Escape, and the optional close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
+                Backdrop, Escape, and the close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
               </p>
             </div>
+          </div>
+        </Card>
+
+        <Card hover={false} className="mt-4 p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Footer — the owner&apos;s choice</h3>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Two dialog kinds, two footer rules. A <em>multi-screen</em> dialog uses{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">DialogActions</code>: equal halves, stacking
+            below <code className="rounded bg-[var(--v2-surface)] px-1">sm</code>. A <em>single-screen</em>{' '}
+            dialog uses right-aligned, content-width buttons. The alternative — one footer shape everywhere —
+            is shown beside it; the owner picks on the PR that introduced this section.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSingleScreenFooterOpen(true)}>
+              Single-screen footer (shipped rule)
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setMultiScreenFooterOpen(true)}>
+              Single-screen with DialogActions (alternative)
+            </Button>
           </div>
         </Card>
       </Section>
@@ -4831,6 +4883,58 @@ export default function DesignSystemPage() {
               {topModalTall ? 'Show short screen' : 'Show tall screen'}
             </Button>
           </DialogActions>
+        </div>
+      </Modal>
+
+      {/* #4562: the two footer shapes for a SINGLE-SCREEN dialog, side by side
+          so the owner can pick one on the PR. Both carry the same body — a
+          title, a subtitle, one labelled field — so the only difference on
+          screen is the footer. */}
+      <Modal
+        open={singleScreenFooterOpen}
+        onClose={() => setSingleScreenFooterOpen(false)}
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
+        width="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSingleScreenFooterOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => setSingleScreenFooterOpen(false)}>Save budget</Button>
+          </>
+        }
+      >
+        <div>
+          <label htmlFor="ds-single-screen-budget" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+            Budget per day
+          </label>
+          <Input id="ds-single-screen-budget" placeholder="5.00" inputMode="decimal" />
+        </div>
+      </Modal>
+
+      <Modal
+        open={multiScreenFooterOpen}
+        onClose={() => setMultiScreenFooterOpen(false)}
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
+        width="md"
+        footer={
+          <DialogActions>
+            <Button variant="ghost" className="flex-1" onClick={() => setMultiScreenFooterOpen(false)}>
+              Cancel
+            </Button>
+            <Button className="flex-1" onClick={() => setMultiScreenFooterOpen(false)}>
+              Save budget
+            </Button>
+          </DialogActions>
+        }
+      >
+        <div>
+          <label htmlFor="ds-multi-screen-budget" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+            Budget per day
+          </label>
+          <Input id="ds-multi-screen-budget" placeholder="5.00" inputMode="decimal" />
         </div>
       </Modal>
 

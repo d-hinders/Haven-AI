@@ -100,6 +100,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
       open
       onClose={saving ? () => {} : onClose}
       closeOnBackdrop={!saving}
+      closeButtonDisabled={saving}
       title={mode === 'add' ? 'Add contact' : 'Edit contact'}
       /*
         #1946: the actions live in the footer, which `ui/Modal` renders OUTSIDE
@@ -308,6 +309,7 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
       open
       onClose={deleting ? () => {} : onClose}
       closeOnBackdrop={!deleting}
+      closeButtonDisabled={deleting}
       title="Delete contact"
     >
       <div className="space-y-4">

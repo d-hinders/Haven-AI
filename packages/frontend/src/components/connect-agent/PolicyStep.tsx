@@ -30,7 +30,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
     <>
       {flow.hasMultipleAccounts && (
         <div>
-          <label htmlFor="connect-agent-safe" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+          <label htmlFor="connect-agent-safe" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
             Spend from
           </label>
           <Select
@@ -49,7 +49,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       )}
 
       <div>
-        <p className="mb-1.5 text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Agent budget</p>
+        <p className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">Agent budget</p>
         <div className="grid grid-cols-3 gap-2">
           <div
             aria-label="Budget token"

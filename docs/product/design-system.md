@@ -35,6 +35,9 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/AccountingBadge.tsx
   - packages/frontend/src/components/accounting/ConnectionsCard.tsx
+  - packages/frontend/src/components/accounting/ApiKeyConnectModal.tsx
+  - packages/frontend/src/components/accounting/BackfillDialog.tsx
+  - packages/frontend/src/components/NewAccountDialog.tsx
   - packages/frontend/src/components/haven/AgentRow.tsx
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentDetailClient.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/AgentsSection.tsx
@@ -108,11 +111,16 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-10-27
+last-verified: 2026-10-30
 ---
 
 # Haven Design System
 
+> Re-verified 2026-10-30 for #4562: § Modal (the dialog anatomy — close button
+> by default, open-time focus in the body, the field-label style, the width
+> mapping) and § Dialog actions (the single-screen footer rule beside the
+> multi-screen one). This note covers those passages only.
+>
 > Re-verified 2026-10-22 for #4237: the navigation bullets (floating tab bar —
 > the concentric-capsule indicator, the pill's `p-1` inset, the bar-only
 > "Home" label and the relaxed one-active-idiom rule for the bar). This note
@@ -2482,6 +2490,62 @@ them (below), are still bespoke `role="dialog"` shells. A new dialog uses
 `Modal`. Anything changed here is changed everywhere, so the
 structure is worth stating rather than re-deriving from the file.
 
+**Anatomy.** Every dialog built on `Modal` reads the same, top to bottom:
+
+| Part | Rule |
+|---|---|
+| Title | Required. `text-sm font-semibold` in `--v2-ink`, sentence case. |
+| Subtitle | Optional. `text-xs` in `--v2-ink-3`, one or two lines — the sentence that says what the dialog is for. |
+| Close button | **On by default.** `showCloseButton` defaults to `true`; the ✕ is a 40px hit target in the header, `aria-label="Close"`, `data-modal-close`. |
+| Body | The only scroller. Its first focusable element takes focus on open (below). |
+| Footer | Optional, outside the scroll box. The rule per dialog kind is § Dialog actions. |
+
+**The close button is the default, and opting out needs a reason.** A dialog
+whose only way out is the backdrop or Escape strands a keyboard user, and it
+made two dialogs of the same kind read differently: Send had no ✕ while New
+account did. `showCloseButton={false}` is therefore reserved for the case where
+another control *is* the dismiss — `ConfirmDialog`, whose Cancel sits in the
+footer — and the caller states that reason in a comment beside the prop. That is
+the rule for every confirmation: a confirmation's Cancel is its dismiss, so it
+does not also carry a ✕.
+
+**A dialog that guards closing while busy must guard the ✕ too.** Escape and the
+backdrop are guarded per caller (`closeOnEscape={!busy}`, `closeOnBackdrop={!busy}`),
+so a default ✕ would otherwise be the one unguarded way out of a request in
+flight. Every busy-guarded caller passes `closeButtonDisabled={busy}` — the
+pattern `NewAccountDialog` already used. The five sites: `ApiKeyConnectModal`
+(`busy`), `BackfillDialog` (`busy`), the contact delete dialog (`deleting`), the
+contact add/edit dialog (`saving`) and the company-details delete
+(`deleting`).
+
+**Open-time focus goes to the body, not to the ✕.** `Modal` focuses
+`initialFocusRef` when a caller passes one; otherwise the **body's** first
+focusable element, and only when the body has nothing focusable does it fall
+back to the ✕. The ✕ sits in the header, ahead of the body in DOM order, so a
+panel-wide query would put focus on Close in every dialog that does not pass
+`initialFocusRef` — Send, the contacts editor, ApiKeyConnect — and the user's
+first keystroke would dismiss the dialog instead of filling its first field.
+`tabindex="-1"` is excluded from the query: it is the programmatic-focus handle
+a step region uses, not something Tab reaches. A caller that must not focus a
+text field on open (the Connect agent flow on a coarse pointer, where focusing
+*Agent name* would open the phone keyboard) passes its own `tabIndex={-1}`
+region as `initialFocusRef` instead.
+
+**Field labels are sentence case, `text-sm font-medium` in ink.** That is the
+majority shape already shipped by New account and IssueSubBudget, and it is the
+one style: `mb-1.5 block text-sm font-medium text-[var(--v2-ink)]`. Uppercase,
+letter-spaced labels (`text-xs uppercase tracking-wide` in ink-3) are retired —
+they read as a different product from the sentence-case titles and buttons
+around them. The Connect agent flow's three uppercase labels moved onto it in
+#4562; Edit agent's labels move in #4565.
+
+**Widths say what the content is, not how big the page is.** `sm` (384px) for a
+single question or a short confirmation; `md` (448px, the default) for a form of
+one or two fields; `lg` (512px) for a list manager or a form with a table-like
+row; `xl` (576px) for a multi-screen flow, where the header must hold still
+across screens of different heights. Width is a property of the content, so two
+dialogs of the same kind take the same width.
+
 **Three boxes, and only one of them scrolls.** This is the fact that makes most
 guesses about `Modal` wrong:
 
@@ -2611,7 +2675,28 @@ equal and still submits nothing.
 
 ### Dialog actions (`ui/DialogActions`)
 
-The one footer rule for a multi-screen dialog: **the screen's main action pair
+**Two dialog kinds, two footer rules.** A *multi-screen* dialog — one dialog
+walking through several screens — uses `DialogActions`. A *single-screen* dialog
+— one screen, one decision — uses **right-aligned, content-width buttons** in
+`Modal`'s `footer`: secondary then primary, each sized to its label, the pair
+flush with the footer's right edge. Send and New account already ship that
+shape, and it is the rule here.
+
+The reason the two differ is what the footer is doing. On a multi-screen dialog
+the pair is the screen's whole forward motion, so it earns the full body width
+and the equal halves that make the primary unmissable. On a single-screen dialog
+the pair is a confirmation of a form the user has just read, and full-width
+halves would give a two-word "Cancel" the same weight as the action — the
+footer would compete with the body instead of closing it.
+
+**Owner decision, recorded on #4562.** The alternative — single-screen dialogs
+use `DialogActions` too, so there is exactly one footer shape in the app — is
+shown beside this rule on `/design-system` → *Modal* → *Footer*. The owner picks
+on the PR that introduced this section; if they pick the alternative, this
+paragraph and the `/design-system` entry change together and the single-screen
+callers move in a follow-up slice, not in the design-system slice.
+
+The multi-screen rule: **the screen's main action pair
 sits full width at the bottom, at `Button`'s default `md` (40px), on the body's
 edges — secondary left, primary right, equal halves.** A screen with a single
 action gets one full-width primary. Below `sm` the pair **stacks**, primary on

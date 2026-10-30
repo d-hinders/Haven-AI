@@ -73,6 +73,9 @@ export default function ConfirmDialog({
       title={title}
       initialFocusRef={initialFocusRef}
       closeOnBackdrop={!loading}
+      // A confirmation's Cancel IS the dismiss, so the header ✕ would be a
+      // second control doing the same thing one row above it (#4562).
+      showCloseButton={false}
       footer={(
         <>
           <Button

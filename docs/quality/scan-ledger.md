@@ -2391,19 +2391,21 @@ applied in place; corrected figures are marked above and in the report's §5.
 
 **Disposition: pending owner decision** (C1–C5).
 
-**Disposition (owner, 2026-10-30): file all five; C2 option (b), C5 option
-(a).** The owner answered in the captain's session. C2: name the parent field
-for what it holds (a receipt id) additively, and keep storing the evidence id.
-C5: remove the two gates' concurrency group, as #4526 did. Every issue went
-through new-task with an independent spec review; none has an open owner
-question, and `pending-review` is lifted on all five. The scan PR is #4575.
+**Disposition (owner, 2026-10-30): file all five; C2 as the rename, C5 as
+removing the group.** The owner answered in the captain's session. C2: name the
+parent field for what it holds (a receipt id) additively, and keep storing the
+evidence id. C5: remove the two gates' concurrency group, as #4526 did. Every
+issue went through new-task with an independent spec review; none has an open
+owner question, and `pending-review` is lifted on all five. The scan PR is
+#4575, merged before this disposition (stacked PR #4581).
 
 - C1 → [#4576](https://github.com/d-hinders/Haven-AI/issues/4576)
   (`area:docs`). Spec review re-ran 11 claims: 9 reproduced, 2 wrong and
   fixed; 9 corrections. One wrong claim was also in this entry and the report:
-  the ledger's block-2 series is 18 across 6 of 8 from 2026-10-03 to 10-21,
-  and 17 only in the 2026-10-26 entries. It was corrected in place on #4575
-  (`48914a20`) before merge. Among the other corrections: a fixture-based
+  the ledger's block-2 series is 18 across 6 of 8 from 2026-09-25 to 10-21
+  (09-22: 17 across 5), and 17 across 6 of 8 only in the 2026-10-26 entries.
+  It was corrected in place on #4575 before merge (its first correction also
+  misdated the start as 10-03; the review of #4581 caught that). Among the other corrections: a fixture-based
   counter-control, the `set -f` constraint on the selector, and a stated
   17 → 15 series conversion.
 - C2 → [#4577](https://github.com/d-hinders/Haven-AI/issues/4577)

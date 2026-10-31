@@ -105,8 +105,8 @@ export function AgentOrganizationTree({
         <EmptyState
           bare
           tone="danger"
-          title="Organizations could not load"
-          body="Your organizations are unchanged."
+          title="Organisations could not load"
+          body="Your organisations are unchanged."
           action={
             <Button size="sm" variant="tertiary" onClick={onRetry}>
               Try again

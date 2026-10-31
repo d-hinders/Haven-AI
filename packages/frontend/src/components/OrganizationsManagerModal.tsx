@@ -18,7 +18,7 @@ import ConfirmDialog from './ConfirmDialog'
  * Manage the organization tree (#3164): create, rename, move, delete.
  *
  * Reached from the agents panel's organization tree ("Manage") and
- * "Add organization". Deleting is the destructive path and goes through
+ * "Add organisation". Deleting is the destructive path and goes through
  * `ConfirmDialog`, whose body states the guarantee the API gives: the
  * contents move up one level, no agent is deleted, spending is untouched.
  *

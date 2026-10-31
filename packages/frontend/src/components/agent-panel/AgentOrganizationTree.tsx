@@ -118,7 +118,7 @@ export function AgentOrganizationTree({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon icon={Network} className="h-3.5 w-3.5 text-[var(--v2-ink-3)]" />
-          <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organizations</span>
+          <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organisations</span>
           {/* #3236: a refetch with rows present says so in place — the rows
               stay, so nothing below the tree moves. Deliberately NOT a live
               region: it fires after every agent move, and `aria-busy` on the
@@ -130,9 +130,9 @@ export function AgentOrganizationTree({
             Manage
           </Button>
           {/* The label hides below `sm` so the header stays one line at 390. */}
-          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organization">
+          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organisation">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Add organization</span>
+            <span className="hidden sm:inline">Add organisation</span>
           </Button>
         </div>
       </div>

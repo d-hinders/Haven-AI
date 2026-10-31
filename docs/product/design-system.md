@@ -2740,12 +2740,12 @@ dialog. Three placements in that flow are decided rather than incidental:
 ### Dialog result states (`ui/DialogResult`)
 
 A dialog that performs a request ends on one of three screens: busy, success,
-failure. `ui/DialogResult` is that screen, so the three dialogs that hand-built
-it — `EditBudgetModal`, `EditAgentModal`, `FundMerchantModal` — read the same
-(#4564). It owns the **centred block only**: the icon, the title, the
-description, and any extra notices the caller needs. The action row stays the
-caller's, in `Modal`'s footer, because it is the screen's own decision (Close,
-Try again, Stop old budget).
+failure. `ui/DialogResult` is that screen. `EditBudgetModal` reads through it
+today (#4564); `EditAgentModal` and `FundMerchantModal` still hand-build their
+busy screens and move onto it in #4565 and #4566. It owns the **centred block
+only**: the icon, the title, the description, and any extra notices the caller
+needs. The action row stays the caller's, in `Modal`'s footer, because it is
+the screen's own decision (Close, Try again, Stop old budget).
 
 | State | Mark | Tone |
 |---|---|---|

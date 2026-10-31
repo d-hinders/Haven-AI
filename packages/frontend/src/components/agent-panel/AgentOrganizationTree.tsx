@@ -92,7 +92,7 @@ export function AgentOrganizationTree({
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-3)]" role="status" aria-busy="true" aria-live="polite">
-          Loading organizations…
+          Loading organisations…
         </p>
       </div>
     )
@@ -173,7 +173,7 @@ export function AgentOrganizationTree({
 
       {organizations.length === 0 ? (
         <p className="mt-2 text-sm text-[var(--v2-ink-3)]">
-          No organizations yet. Add one to start grouping your agents.
+          No organisations yet. Add one to start grouping your agents.
         </p>
       ) : (
         <div

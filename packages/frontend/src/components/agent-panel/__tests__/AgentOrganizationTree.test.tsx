@@ -102,7 +102,7 @@ describe('AgentOrganizationTree (#3236 refetch states)', () => {
 
   it('first load with no rows yet is still the status panel', () => {
     renderTree({ organizations: [], loading: true })
-    expect(screen.getByRole('status')).toHaveTextContent('Loading organizations…')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading organisations…')
     expect(screen.queryByTestId('organization-tree')).toBeNull()
   })
 

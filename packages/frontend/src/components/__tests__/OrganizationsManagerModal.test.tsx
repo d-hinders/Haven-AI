@@ -105,7 +105,7 @@ describe('OrganizationsManagerModal', () => {
       expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument(),
     )
 
-    fireEvent.change(screen.getByLabelText('New organization name'), {
+    fireEvent.change(screen.getByLabelText('New organisation name'), {
       target: { value: 'Company A' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
@@ -141,7 +141,7 @@ describe('OrganizationsManagerModal', () => {
       )
 
       fireEvent.click(within(screen.getByTestId('organization-manager-list')).getByRole('button', { name: 'Delete Company A very long organization name' }))
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete organisation' }))
 
       const dialog = await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })
       // Our words, naming the organization, not the server's raw message
@@ -154,7 +154,7 @@ describe('OrganizationsManagerModal', () => {
       expect(within(dialog).getByRole('alert')).not.toHaveTextContent('An unexpected error occurred')
       // The dialog stays open (the organization was not deleted) with the
       // destructive action re-enabled for a retry.
-      expect(screen.getByRole('button', { name: 'Delete organization' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Delete organisation' })).toBeEnabled()
       // Let a stray rejection surface before the process handler is removed.
       await new Promise((resolve) => setTimeout(resolve, 25))
       expect(unhandled).toEqual([])
@@ -171,7 +171,7 @@ describe('OrganizationsManagerModal', () => {
     )
 
     fireEvent.click(within(screen.getByTestId('organization-manager-list')).getByRole('button', { name: 'Delete Company A very long organization name' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete organisation' }))
     await waitFor(async () =>
       expect(
         within(await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })).getByRole('alert'),
@@ -185,7 +185,7 @@ describe('OrganizationsManagerModal', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })
     expect(within(dialog).queryByRole('alert')).toBeNull()
     await act(async () => {
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete organization' }))
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete organisation' }))
     })
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Delete Company A very long organization name?' })).toBeNull(),
@@ -240,7 +240,7 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
     const list = within(screen.getByTestId('organization-manager-list'))
     fireEvent.click(list.getByRole('button', { name: 'Rename Company A very long organization name' }))
-    const input = list.getByLabelText('Organization name')
+    const input = list.getByLabelText('Organisation name')
     fireEvent.change(input, { target: { value: 'Clash' } })
     fireEvent.click(list.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(list.getByRole('alert')).toHaveTextContent('RENAME-409'))
@@ -252,7 +252,7 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
     mockPost.mockRejectedValueOnce(new Error('CREATE-409'))
     renderModal()
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText('New organization name'), { target: { value: 'Dup' } })
+    fireEvent.change(screen.getByLabelText('New organisation name'), { target: { value: 'Dup' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     const form = within(screen.getByTestId('organization-create-form'))
     await waitFor(() => expect(form.getByRole('alert')).toHaveTextContent('CREATE-409'))
@@ -270,8 +270,8 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
         name: 'Delete Company A very long organization name',
       }),
     )
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete organization' })).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete organisation' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete organisation' })).toBeNull())
     expect(mockGet.mock.calls.length).toBeGreaterThan(fetchesBefore)
     // The page's tree refreshes too — not only the manager's own list.
     expect(onOrganizationsChanged).toHaveBeenCalled()

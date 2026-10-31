@@ -893,10 +893,10 @@ now exists, not the choice the form asks for. It is not repeated on
 `/accounts/<id>`, whose own empty states ("No funds yet.", "No agents
 connected") carry the next step.
 
-The "Signers, in Settings" clause stays in the backups sentence because
-[#4570](https://github.com/d-hinders/Haven-AI/issues/4570) owns renaming it to
-the Settings section's own name; that slice edits the clause, not the
-paragraph.
+The backups sentence now names the Settings section itself — "Passkeys and
+wallets, in Settings, shows which accounts each one approves." — per the
+2026-10-30 decision that "signers" never appears in user copy (#4570). The
+clause is the only part of the paragraph that changed.
 
 The waiting labels are onboarding's (`Waiting for your passkey…`,
 `Setting up your account…`). A dismissed passkey prompt returns to the form

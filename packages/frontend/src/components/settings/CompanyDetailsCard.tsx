@@ -51,8 +51,8 @@
  * gets focus on submit (design review 3).
  *
  * ── Delete ───────────────────────────────────────────────────────────────
- * "Remove company details" asks for confirmation (the same `Modal` +
- * danger-button shape `ConnectionsCard`'s Disconnect dialog uses) before
+ * "Remove company details" asks for confirmation through the shared
+ * `ConfirmDialog` (#4570 — every confirmation goes through it), before
  * calling `DELETE /user/company-details`. A failed delete shows its error
  * INSIDE the dialog (design review 5) and blocks Escape/backdrop-close while
  * the request is in flight; success closes the dialog and announces
@@ -64,9 +64,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Input } from '@/components/ui/Input'
-import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { SettingsSection } from '@/components/ui/SettingsSection'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
@@ -541,53 +541,31 @@ export function CompanyDetailsCard() {
       </div>
 
       {confirmingDelete ? (
-        <Modal
+        <ConfirmDialog
           open
-          onClose={() => {
+          onCancel={() => {
             setConfirmingDelete(false)
             resetDeleteError()
           }}
-          title={copy.remove.confirmTitle}
-          closeOnBackdrop={!deleting}
-          closeOnEscape={!deleting}
-          closeButtonDisabled={deleting}
-          footer={
-            <>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setConfirmingDelete(false)
-                  resetDeleteError()
-                }}
-                disabled={deleting}
-              >
-                {copy.remove.cancel}
-              </Button>
-              <Button
-                variant="danger"
-                disabled={deleting}
-                aria-busy={deleting}
-                onClick={() => {
-                  void remove().then((result) => {
-                    if (result.ok) {
-                      setConfirmingDelete(false)
-                      setSaved(false)
-                      setAdding(false)
-                      setJustRemoved(true)
-                    }
-                  })
-                }}
-              >
-                {copy.remove.confirm}
-              </Button>
-            </>
+          onConfirm={() =>
+            remove().then((result) => {
+              if (result.ok) {
+                setConfirmingDelete(false)
+                setSaved(false)
+                setAdding(false)
+                setJustRemoved(true)
+              }
+            })
           }
-        >
-          <div className="space-y-3">
-            <p>{copy.remove.confirmBody}</p>
-            {deleteError ? <InlineAlert>{copy.remove.error}</InlineAlert> : null}
-          </div>
-        </Modal>
+          title={copy.remove.confirmTitle}
+          body={copy.remove.confirmBody}
+          confirmLabel={copy.remove.confirm}
+          cancelLabel={copy.remove.cancel}
+          tone="danger"
+          loading={deleting}
+          busyLabel={copy.remove.deleting}
+          error={deleteError ? <InlineAlert>{copy.remove.error}</InlineAlert> : null}
+        />
       ) : null}
     </SettingsSection>
   )

@@ -60,7 +60,7 @@ describe('device approval screen', () => {
     // reassurance; only listing what it cannot reads as a warning.
     render(<DeviceApprovalClient />)
     expect(screen.getByText(/create and manage agents/i)).toBeInTheDocument()
-    for (const excluded of [/sign anything/i, /approve a budget/i, /change your signers/i]) {
+    for (const excluded of [/sign anything/i, /approve a budget/i, /change who can approve/i]) {
       expect(screen.getByText(excluded)).toBeInTheDocument()
     }
   })

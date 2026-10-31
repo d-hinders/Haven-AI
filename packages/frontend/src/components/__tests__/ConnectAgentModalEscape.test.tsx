@@ -89,7 +89,7 @@ describe('ConnectAgentModal Escape, rendered with the real flow hook', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create setup prompt' }))
     })
-    expect(screen.getByRole('button', { name: 'Creating setup...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Creating setup…' })).toBeDisabled()
 
     pressEscape()
 

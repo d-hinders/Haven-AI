@@ -196,7 +196,7 @@ export const en = {
       edit: 'Edit',
       cancel: 'Cancel',
       save: 'Save',
-      saving: 'Saving...',
+      saving: 'Saving…',
       saved: 'Name updated.',
       helperText: 'Use the name you want shown in Haven.',
       errorEmpty: 'Enter a name for your Haven account.',
@@ -594,6 +594,9 @@ export const en = {
           'This deletes your legal name, country, organisation number and VAT number from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
         confirm: 'Remove',
         cancel: 'Keep details',
+        // #4570: the confirm button's own verb while the delete is in flight,
+        // instead of ConfirmDialog's generic "Working…".
+        deleting: 'Removing…',
         error: 'We could not remove your company details. Try again in a moment.',
         // Design review 6: announced (role=status) after a successful delete.
         removed: 'Company details removed.',

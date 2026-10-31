@@ -174,7 +174,7 @@ function LoginForm() {
           disabled={submitting}
           className="w-full"
         >
-          {submitting ? 'Signing in...' : 'Sign in'}
+          {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
 

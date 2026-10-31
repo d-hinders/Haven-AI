@@ -164,7 +164,7 @@ export function organizationFacet(organizations: Organization[]): AgentFacet {
   }
   return {
     id: 'organization',
-    label: 'Organization',
+    label: 'Organisation',
     match: 'any',
     options,
     predicate: (agent: Agent, value: string) => {

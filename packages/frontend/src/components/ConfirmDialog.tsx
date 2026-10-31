@@ -19,6 +19,19 @@ export interface ConfirmDialogProps {
   tone?: 'danger' | 'primary'
   /** Disable the confirm button (e.g. while the confirm action is running). */
   loading?: boolean
+  /**
+   * Label the confirm button carries while `loading`. Defaults to "Working…".
+   * A caller whose action has its own verb passes it ("Deleting…"), so the
+   * button keeps saying what is happening instead of falling back to a
+   * generic word (#4570).
+   */
+  busyLabel?: string
+  /**
+   * The confirm action's failure, rendered under the body. A confirmation
+   * that can fail has to say so where the user is looking — the dialog stays
+   * open, so the error belongs inside it (#4570).
+   */
+  error?: ReactNode
   /** Disable the confirm button without changing the button label. */
   confirmDisabled?: boolean
   /** Wrap the confirm button when the caller needs an extra guard, such as network switching. */
@@ -39,6 +52,8 @@ export default function ConfirmDialog({
   cancelLabel = 'Cancel',
   tone = 'danger',
   loading = false,
+  busyLabel = 'Working…',
+  error,
   confirmDisabled = false,
   confirmButtonWrapper,
 }: ConfirmDialogProps) {
@@ -62,7 +77,7 @@ export default function ConfirmDialog({
       disabled={loading || confirmDisabled}
       className="min-w-24"
     >
-      {loading ? 'Working...' : confirmLabel}
+      {loading ? busyLabel : confirmLabel}
     </Button>
   )
 
@@ -92,6 +107,7 @@ export default function ConfirmDialog({
       )}
     >
       {typeof body === 'string' ? <p>{body}</p> : body}
+      {error ? <div className="mt-3">{error}</div> : null}
     </Modal>
   )
 }

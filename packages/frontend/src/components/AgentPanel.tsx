@@ -313,7 +313,7 @@ export default function AgentPanel() {
                 {/* #3164: the organization manager — create/rename/move/delete.
                     The tree above the list appears once one exists. */}
                 <DropdownMenuItem onSelect={() => panel.setOrganizationsManagerOpen(true)}>
-                  Organizations
+                  Organisations
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

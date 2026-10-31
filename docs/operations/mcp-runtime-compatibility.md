@@ -89,6 +89,21 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **Re-verified #4570 (2026-10-31, copy only in the connect flow's waiting
+> screen):** the one covered file this slice touches is
+> `packages/frontend/src/components/connect-agent/WaitingForConnector.tsx`, and
+> the change is the manual-credential button's busy label — `Creating
+> credentials...` becomes `Creating credentials…` (U+2026, copy-guidelines
+> § Busy and retry copy). No tool, input schema, strict-input list,
+> expected-context version, consent hash, version floor or
+> `tools-list.snapshot.json` entry moves; the connector command, the setup
+> prompt and the runtime manifest are untouched. The same slice's other edits
+> (the shared confirmation dialog's busy label and error slot, the contact and
+> company-details confirmations, the connect flow's inline close guard, the
+> "signers" wording and the British spellings) are outside this document's
+> covered surfaces. `last-verified` is not re-stamped for a copy-only note.
+> Nothing else in this document was re-verified.
+
 > **Re-verified #4577 (2026-10-30, the parent-receipt field on the receipts
 > wire and the SDK):** covered surfaces change ADDITIVELY, and no tool, input
 > schema, strict-input list, expected-context version, consent hash, version

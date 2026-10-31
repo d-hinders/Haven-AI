@@ -4060,6 +4060,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > note: the send-flow recipient selection and the unchanged hook it feeds;
 > `last-verified` is bumped to 2026-10-16 for exactly this coverage.
 
+> **Re-verified unchanged (#4570, 2026-10-31 — the "signers" clause is gone):**
+> this diff is copy only, in one covered file. `components/NewAccountDialog.tsx`
+> now reads "Passkeys and wallets, in Settings, shows which accounts each one
+> approves." — the Settings section's own name, per the 2026-10-30 decision that
+> "signers" never appears in user copy (CG:129). The same slice rewords the
+> device-login disclosure's "change your signers" to "change who can approve"
+> (`app/(authenticated)/device/DeviceApprovalClient.tsx`), which keeps its
+> meaning: a device login still cannot change the account's approval set. No
+> signing step, signer-set gate, `pickSigningPath` branch or passkey ceremony is
+> added, removed or reordered; the dialog still asks for ONE assertion and no
+> new passkey, and the new account's only signer is still the passkey that
+> assertion picks. No new spender, no authority grant, no custody change. Scope
+> of this re-read: those two files' copy and §5 (copy rules); nothing else in
+> this document was re-read for it, and `last-verified` is not bumped.
+
 > **Re-verified unchanged (#4571, 2026-10-31 — the New account dialog's copy
 > is two sentences):** this diff is copy only, in one covered file.
 > `components/NewAccountDialog.tsx` compresses the three #4024 facts into two

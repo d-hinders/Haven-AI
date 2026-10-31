@@ -16,13 +16,13 @@ export function SigningStatus({ signer, stage, error }: SigningStatusProps) {
   if (stage === 'signing') {
     text =
       signer?.type === 'passkey'
-        ? 'Waiting for your passkey...'
-        : 'Confirm the transaction in your wallet...'
+        ? 'Waiting for your passkey…'
+        : 'Confirm the transaction in your wallet…'
   } else if (stage === 'executing') {
     text =
       signer?.type === 'passkey'
-        ? 'Submitting via Haven...'
-        : 'Submitting transaction...'
+        ? 'Submitting via Haven…'
+        : 'Submitting transaction…'
   } else if (stage === 'confirmed') {
     text = 'Confirmed.'
   } else if (stage === 'error') {

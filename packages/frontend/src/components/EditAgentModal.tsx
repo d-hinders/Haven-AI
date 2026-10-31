@@ -192,7 +192,7 @@ export default function EditAgentModal({
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>
             <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Edit agent</h2>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name, description, labels and organization shown in Haven.</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name, description, labels and organisation shown in Haven.</p>
           </div>
           <button
             type="button"
@@ -402,7 +402,7 @@ export default function EditAgentModal({
                   <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
                 </div>
                 <p className="text-sm font-medium text-[var(--v2-ink)]">Agent updated</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Details, labels and organization saved</p>
+                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Details, labels and organisation saved</p>
               </div>
               <Button variant="ghost" onClick={handleClose} className="w-full">Done</Button>
             </div>

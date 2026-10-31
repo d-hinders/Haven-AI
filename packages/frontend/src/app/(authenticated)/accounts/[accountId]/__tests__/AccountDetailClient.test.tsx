@@ -941,7 +941,7 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     openAccountMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
@@ -977,7 +977,7 @@ describe('AccountDetailClient', () => {
 
     const openDialog = () => {
       openAccountMenu()
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     }
 
     openDialog()
@@ -999,7 +999,7 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     openAccountMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     const refusal = await screen.findByRole('alert')
@@ -1020,11 +1020,25 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     openAccountMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/accounts'))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  // #4570: a menu item that opens a confirmation ends in "…" (copy-guidelines
+  // § Destructive verbs). The account menu's one confirmation is Remove.
+  it('the menu item that opens the remove confirmation ends in "…"', () => {
+    render(<AccountDetailClient />)
+
+    openAccountMenu()
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
+    const remove = items.find((label) => label.startsWith('Remove'))
+    expect(remove).toBe('Remove account…')
+    // The ellipsis is the promise of a dialog, and the dialog is what follows.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
+    expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
   })
 
   it('renders backup & recovery for a delegation account with zero agents', () => {

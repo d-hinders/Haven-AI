@@ -521,10 +521,10 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     render(<AgentPanel />)
     expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Organization:/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Organisation:/ })).toBeNull()
   })
 
-  it('appends the Organization facet alongside Status and Budget', () => {
+  it('appends the Organisation facet alongside Status and Budget', () => {
     mockUseOrganizations.mockReturnValue({
       organizations: [
         { id: 'org-1', parent_organization_id: null, name: 'Company A', created_at: '2026-09-22T00:00:00Z', updated_at: '2026-09-22T00:00:00Z', agent_count: 0 },
@@ -540,7 +540,7 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     render(<AgentPanel />)
     expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Organization:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Organisation:/ })).toBeInTheDocument()
   })
 })
 
@@ -601,7 +601,7 @@ describe('AgentPanel across accounts (#3719)', () => {
 })
 
 describe('AgentPanel page header (#4209)', () => {
-  it('renders the page header with Connect agent and a ⋯ menu holding Labels and Organizations', () => {
+  it('renders the page header with Connect agent and a ⋯ menu holding Labels and Organisations', () => {
     setAgents([agent()])
     render(<AgentPanel />)
 
@@ -615,13 +615,13 @@ describe('AgentPanel page header (#4209)', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
-    // The Labels and Organizations BUTTONS are gone; they are menu items now.
+    // The Labels and Organisations BUTTONS are gone; they are menu items now.
     expect(screen.queryByRole('button', { name: 'Labels' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Organizations' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Organisations' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
     // #4491: the page header hosts this menu — nothing above it may clip.
     expectMenuNotClipped(screen.getByRole('menu'))
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organizations'])
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organisations'])
   })
 
   it("passes Connect agent and the ⋯ trigger straight to PageHeader's wrapping actions row (#4401)", () => {
@@ -649,7 +649,7 @@ describe('AgentPanel page header (#4209)', () => {
     ).toBeNull()
   })
 
-  it('opens the Labels and Organizations managers from the ⋯ menu', () => {
+  it('opens the Labels and Organisations managers from the ⋯ menu', () => {
     setAgents([agent()])
     render(<AgentPanel />)
 

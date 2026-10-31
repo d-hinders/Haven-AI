@@ -173,7 +173,7 @@ describe('EditAgentModal', () => {
     await vi.waitFor(() =>
       expect(screen.getByRole('option', { name: 'Acme / Tech Agents' })).toBeInTheDocument(),
     )
-    const picker = screen.getByLabelText('Organization')
+    const picker = screen.getByLabelText('Organisation')
     expect(picker).toHaveValue('')
 
     fireEvent.change(picker, { target: { value: 'org-2' } })
@@ -194,7 +194,7 @@ describe('EditAgentModal', () => {
     await vi.waitFor(() =>
       expect(screen.getByRole('option', { name: 'Acme' })).toBeInTheDocument(),
     )
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-1' } })
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org-1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
     expect(screen.getByTestId('review-organization')).toHaveTextContent('Acme')
     fireEvent.click(screen.getByRole('button', { name: 'Save details' }))
@@ -237,14 +237,14 @@ describe('EditAgentModal', () => {
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
     fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Dinner plans' } })
     fireEvent.click(screen.getByRole('checkbox', { name: 'prod' }))
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-1' } })
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org-1' } })
 
     rerenderWith({ agent: polled() })
 
     expect(screen.getByLabelText('Agent name')).toHaveValue('Meals')
     expect(screen.getByLabelText(/Description/)).toHaveValue('Dinner plans')
     expect(screen.getByRole('checkbox', { name: 'prod' })).toBeChecked()
-    expect(screen.getByLabelText('Organization')).toHaveValue('org-1')
+    expect(screen.getByLabelText('Organisation')).toHaveValue('org-1')
   })
 
   it('stays on the review step across a poll', () => {

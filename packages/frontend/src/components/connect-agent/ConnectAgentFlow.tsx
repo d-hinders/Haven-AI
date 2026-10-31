@@ -7,6 +7,7 @@ import {
   type UseAgentConnectionSetupOptions,
 } from '@/hooks/useAgentConnectionSetup'
 import { StepProgress } from '../ui/StepProgress'
+import { CloseGuardPanel } from './CloseGuardPanel'
 import { ConnectStep } from './ConnectStep'
 import { DetailsStep } from './DetailsStep'
 import { PolicyStep } from './PolicyStep'
@@ -182,7 +183,11 @@ export function ConnectAgentFlow({
    * `outline-none` keeps a programmatic focus from drawing a ring.
    */
   const steps =
-    flow.step === 'connect' ? (
+    flow.closeGuardOpen ? (
+      // #4570: the close guard REPLACES the step body while it asks. It is an
+      // inline panel, not a dialog — see `CloseGuardPanel`.
+      <CloseGuardPanel onCancel={flow.cancelClose} onConfirm={flow.confirmClose} />
+    ) : flow.step === 'connect' ? (
       <div ref={stepRegionRef} tabIndex={-1} className="outline-none">
         <ConnectStep flow={flow} nestedCopyBlocks={inline} />
       </div>

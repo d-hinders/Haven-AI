@@ -139,7 +139,7 @@ export default function OrganizationsManagerModal({
       setNewName('')
       setNewParentId('')
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : 'The organization could not be created.')
+      setCreateError(err instanceof Error ? err.message : 'The organisation could not be created.')
     } finally {
       setSaving(false)
     }
@@ -195,14 +195,14 @@ export default function OrganizationsManagerModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Manage organizations"
+        aria-label="Manage organisations"
         className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
       >
         <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Manage organizations</h2>
+            <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Manage organisations</h2>
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-              Create, rename, move and remove the organizations your agents file under.
+              Create, rename, move and remove the organisations your agents file under.
             </p>
           </div>
           <button
@@ -218,7 +218,7 @@ export default function OrganizationsManagerModal({
         <div className="p-6">
           {/* Create */}
           <div className="mb-4" data-testid="organization-create-form">
-            <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Add an organization</p>
+            <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Add an organisation</p>
             <div className="flex gap-2">
               <Input
                 value={newName}
@@ -229,8 +229,8 @@ export default function OrganizationsManagerModal({
                     void submitNew()
                   }
                 }}
-                placeholder="Organization name"
-                aria-label="New organization name"
+                placeholder="Organisation name"
+                aria-label="New organisation name"
                 className="flex-1"
               />
               <Button
@@ -244,7 +244,7 @@ export default function OrganizationsManagerModal({
             </div>
             {organizations.length > 0 && (
               <Select
-                aria-label="Place the new organization inside"
+                aria-label="Place the new organisation inside"
                 value={newParentId}
                 onChange={(event) => setNewParentId(event.target.value)}
                 className="mt-2"
@@ -271,7 +271,7 @@ export default function OrganizationsManagerModal({
             <div role="status" aria-busy="true" className="space-y-2">
               <Skeleton className="h-9" />
               <Skeleton className="h-9" />
-              <span className="sr-only">Loading organizations</span>
+              <span className="sr-only">Loading organisations</span>
             </div>
           ) : error ? (
             <div className="space-y-3 text-center">
@@ -282,7 +282,7 @@ export default function OrganizationsManagerModal({
             </div>
           ) : organizations.length === 0 ? (
             <p className="py-4 text-center text-sm text-[var(--v2-ink-2)]">
-              No organizations yet. Add the first one above.
+              No organisations yet. Add the first one above.
             </p>
           ) : (
             <ul className="space-y-2" data-testid="organization-manager-list">
@@ -300,7 +300,7 @@ export default function OrganizationsManagerModal({
                               void saveRename(org)
                             }
                           }}
-                          aria-label="Organization name"
+                          aria-label="Organisation name"
                           className="flex-1"
                         />
                         <Button size="sm" onClick={() => void saveRename(org)} disabled={saving}>
@@ -430,7 +430,7 @@ export default function OrganizationsManagerModal({
         open={deleteTarget !== null}
         onCancel={() => (deleting ? undefined : setDeleteTarget(null))}
         onConfirm={() => void confirmDelete()}
-        title={deleteTarget ? `Delete ${deleteTarget.name}?` : 'Delete organization?'}
+        title={deleteTarget ? `Delete ${deleteTarget.name}?` : 'Delete organisation?'}
         body={
           <>
             <p>
@@ -448,7 +448,7 @@ export default function OrganizationsManagerModal({
             ) : null}
           </>
         }
-        confirmLabel="Delete organization"
+        confirmLabel="Delete organisation"
         tone="danger"
         loading={deleting}
       />

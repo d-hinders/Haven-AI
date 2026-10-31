@@ -298,7 +298,7 @@ describe('AgentPanel inline first-agent flow (#4065)', () => {
     expect(headerMenu()).toBeInTheDocument()
     fireEvent.click(headerMenu()!)
     expect(screen.getByRole('menuitem', { name: 'Labels' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Organizations' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Organisations' })).toBeInTheDocument()
   })
 
   it('has no Cancel on step 1 — the one action is Set agent budget', () => {
@@ -412,7 +412,7 @@ describe('the latch: inline stays mounted until the user leaves (#4065)', () => 
     setAgentsList([{ ...PENDING_AGENT, status: 'active' }])
     rerender(<AgentPanel />)
 
-    expect(within(inlineFlow()!).getByRole('button', { name: 'Creating setup...' })).toBeDisabled()
+    expect(within(inlineFlow()!).getByRole('button', { name: 'Creating setup…' })).toBeDisabled()
     expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
   })
 
@@ -576,7 +576,7 @@ describe('Escape never resets the inline flow (#4065)', () => {
 
   it.each([
     ['Labels', 'Manage labels'],
-    ['Organizations', 'Manage organizations'],
+    ['Organisations', 'Manage organisations'],
   ])('Escape that closes the %s manager leaves the flow as it was', (button, dialogName) => {
     render(<AgentPanel />)
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })

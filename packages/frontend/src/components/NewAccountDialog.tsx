@@ -483,7 +483,7 @@ function NewAccountDialogBody({
           </li>
           <li>
             <span className="font-medium text-[var(--v2-ink)]">Backups don&rsquo;t carry over:</span> add one on the
-            new account&rsquo;s page; Signers, in Settings, shows which accounts each passkey and wallet approves.
+            new account&rsquo;s page; Passkeys and wallets, in Settings, shows which accounts each one approves.
           </li>
         </ul>
 

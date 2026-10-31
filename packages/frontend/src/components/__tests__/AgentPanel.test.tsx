@@ -521,10 +521,10 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     render(<AgentPanel />)
     expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Organization:/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Organisation:/ })).toBeNull()
   })
 
-  it('appends the Organization facet alongside Status and Budget', () => {
+  it('appends the Organisation facet alongside Status and Budget', () => {
     mockUseOrganizations.mockReturnValue({
       organizations: [
         { id: 'org-1', parent_organization_id: null, name: 'Company A', created_at: '2026-09-22T00:00:00Z', updated_at: '2026-09-22T00:00:00Z', agent_count: 0 },
@@ -540,7 +540,7 @@ describe('AgentPanel list toolbar (#3165, on ListToolbar since #4113)', () => {
     render(<AgentPanel />)
     expect(screen.getByRole('button', { name: /Status:/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Budget:/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Organization:/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Organisation:/ })).toBeInTheDocument()
   })
 })
 

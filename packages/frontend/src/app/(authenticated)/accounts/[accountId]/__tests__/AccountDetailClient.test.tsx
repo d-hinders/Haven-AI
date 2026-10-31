@@ -1178,7 +1178,7 @@ describe('AccountDetailClient — rename dialog (#4566)', () => {
 
     expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled()
 
     const backdrop = container.querySelector('.v2-modal-backdrop')
     expect(backdrop).not.toBeNull()

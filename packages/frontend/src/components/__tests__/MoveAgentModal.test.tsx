@@ -96,7 +96,7 @@ describe('MoveAgentModal', () => {
     renderModal()
     expect(screen.getByRole('dialog', { name: 'Move Food' })).toBeInTheDocument()
     expect(screen.getByText('Choose where the agent is filed.')).toBeInTheDocument()
-    const picker = screen.getByLabelText('Organization')
+    const picker = screen.getByLabelText('Organisation')
     expect(picker).toHaveValue('')
     expect(screen.getByRole('option', { name: 'Acme / Tech Agents' })).toBeInTheDocument()
     // Nothing to save until the placement changes.
@@ -105,7 +105,7 @@ describe('MoveAgentModal', () => {
 
   it('moves the agent with one PUT and hands the updated agent back', async () => {
     const { onClose, onMoved } = renderModal()
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-2' } })
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org-2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Move agent' }))
 
     await vi.waitFor(() =>
@@ -117,7 +117,7 @@ describe('MoveAgentModal', () => {
 
   it('sends null for Top level', async () => {
     renderModal({ ...AGENT, organization_id: 'org-2' })
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: 'Move agent' }))
 
     await vi.waitFor(() =>
@@ -128,7 +128,7 @@ describe('MoveAgentModal', () => {
   it('shows a failed move inline and keeps the dialog open', async () => {
     mockPut.mockRejectedValueOnce(new Error('The agent could not be moved.'))
     const { onClose } = renderModal()
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-2' } })
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org-2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Move agent' }))
 
     await vi.waitFor(() =>
@@ -161,7 +161,7 @@ describe('MoveAgentModal', () => {
       }),
     )
     renderModal()
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'org-2' } })
+    fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'org-2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Move agent' }))
     await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Moving…' })).toBeInTheDocument())
 

@@ -417,7 +417,7 @@ describe('the latch: inline stays mounted until the user leaves (#4065)', () => 
     setAgentsList([{ ...PENDING_AGENT, status: 'active' }])
     rerender(<AgentPanel />)
 
-    expect(within(inlineFlow()!).getByRole('button', { name: 'Creating setup...' })).toBeDisabled()
+    expect(within(inlineFlow()!).getByRole('button', { name: 'Creating setup…' })).toBeDisabled()
     expect(screen.queryByTestId('agent-card')).not.toBeInTheDocument()
   })
 

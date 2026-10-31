@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TransactionActivityDayHeader, TransactionActivityRow, TransactionActivityRowSkeleton, TransactionMovement, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
-import { cutsItsDay, dayKeyInZone, timeAgo } from '@/lib/format'
+import { cutsItsDay, dayKeyInZone, formatClockTime } from '@/lib/format'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
 
 /** One grouped-activity row from `GET /dashboard/overview` (#3824). */
@@ -338,7 +338,9 @@ function ActivityRow({
       failed={group.status === 'failed'}
       status={statusLabel(group)}
       statusTone={statusTone(group)}
-      timestamp={timeAgo(group.latestAt)}
+      // #4572: the group sits under a day band, so it shows its latest
+      // payment's clock time rather than repeating the day as "3h ago".
+      timestamp={formatClockTime(group.latestAt)}
       direction={ownTransfer ? 'move' : group.direction}
       density="compact"
       insetDivider={insetDivider}

@@ -768,7 +768,9 @@ test.describe('transaction detail panel visual regression (#4267)', () => {
       axis: 'desktop' as const,
       row: 'research.example',
       // `dashboardTransaction.timestamp` 1779000000 = 2026-05-17T06:40:00Z.
-      when: /^Paid by Research agent from Operations · May 17, 2026, 6:40\sAM$/,
+      // #4573: the panel's "when" is `lib/format.ts`'s en-GB rule, not the
+      // device locale — the spec's `locale: 'en-US'` no longer reaches it.
+      when: /^Paid by Research agent from Operations · 17 May 2026, 06:40$/,
       needsAttention: false,
     },
     {
@@ -776,7 +778,7 @@ test.describe('transaction detail panel visual regression (#4267)', () => {
       axis: 'mobile' as const,
       row: 'api.example.dev',
       // `x402UnrecordedSettlementTransaction.timestamp` 1778900000 = 2026-05-16T02:53:20Z.
-      when: /^Paid by Research agent from Operations · May 16, 2026, 2:53\sAM$/,
+      when: /^Paid by Research agent from Operations · 16 May 2026, 02:53$/,
       needsAttention: true,
     },
   ]

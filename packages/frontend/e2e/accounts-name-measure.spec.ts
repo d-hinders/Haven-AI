@@ -53,7 +53,7 @@
  * reserve for). What survives of #2236 is its dead-reservation half, now
  * asserted for EVERY card: no card reserves width for actions it does not
  * render. The `Active` badge stays in `readCard`'s scan, so a reintroduced one
- * fails the `['default']` badge assertions below rather than going unseen.
+ * fails the `['Default account']` badge assertions below rather than going unseen.
  *
  * WHY THESE THREE ARE ONE SPEC AND NOT THREE. They are one row's width, spent
  * three ways: the name's measure, where the badges sit, and what the actions
@@ -138,6 +138,12 @@ const WIDTHS = [1280, 390] as const
  * only to absorb sub-pixel rounding: when the name is the only item on its
  * flex line its measure IS the line, so the healthy reading is ~100%. The
  * #2223 defect reads ~45% at both widths, so nothing sits near this threshold.
+ *
+ * RE-DERIVED under #4571, when the badge became the wider `Default account`
+ * stadium (109.0px, up from 52.1px): measured 264.7px of a 265px row at 1280
+ * (99.89%) and 300px of 300px at 390 (100.00%). The wider pill still wraps
+ * clear of the name rather than shrinking it, so the constant is unchanged —
+ * it sits ~5pp under the healthy reading and ~50pp over the defect.
  */
 const MIN_TRUNCATED_SHARE_OF_ROW = 0.95
 
@@ -212,18 +218,11 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
     // conditions below are needed, and each rules out one half of that
     // mutation: `getClientRects()` for display:none, `position: static` for
     // anything pulled out of flow, and a real pill width for the 1px box. 24px
-    // is measured, not guessed: the rendered pills are 58.2px (`Active`) and
-    // 52.1px (`default`) at BOTH widths, and `sr-only` is 1px — so the
-    // threshold sits with ~2x headroom on one side and 24x on the other.
-    //
-    // Badges, laid out AS CHROME rather than merely present in the DOM.
-    // `haven-reviewer` defeated a text-only version of this check with its own
-    // mutation on #2223: drop `flex-wrap` AND give both badges `sr-only`, and
-    // every test passed — `position: absolute` takes them out of flex flow, so
-    // the `h3` gets the whole row exactly as a real wrap would, while their
-    // text nodes stay queryable. A layout no sighted user gets, invisible to
-    // the very check that exists to say "this was not bought by deleting the
-    // chrome".
+    // is measured, not guessed: since #4571 the one rendered pill is the
+    // `Default account` stadium, 109.0px at BOTH widths (it was 52.1px for the
+    // retired lowercase `default` chip, and 58.2px for the `Active` badge
+    // #3719 removed), and `sr-only` is 1px — so the threshold sits with ~4.5x
+    // headroom on one side and 24x on the other.
     //
     // SCANNED ACROSS THE TITLE ROW — the #2235 two-row scan exists to catch
     // the era when `default` lived on the caption line; #4021 removed that
@@ -238,7 +237,7 @@ async function readCard(page: Page, accountName: string): Promise<CardReading> {
           el.getBoundingClientRect().width >= 24,
       )
       .map((el) => [(el.textContent ?? '').trim(), el] as const)
-      .filter(([t]) => t === 'Active' || t === 'default')
+      .filter(([t]) => t === 'Active' || t === 'Default account')
     for (const [t, el] of badges) badgeRects[t] = rect(el)
 
     // The hover actions — identified by the buttons they hold rather than by
@@ -329,7 +328,7 @@ test('/accounts: two accounts — the name survives its chrome at both widths', 
     // on `accounts.length > 1` — the whole reason the #2223 defect was
     // invisible on a one-account fixture. No `Active` badge since #3719.
     expect(reading.badges, `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['default'])
+      .toEqual(['Default account'])
     expect(reading.rowInner, `@${width}px: the title row measured ${reading.rowInner}px`).toBeGreaterThan(0)
 
     // The #2223 defect, stated as the user sees it: the name reads in full.
@@ -355,7 +354,7 @@ test('/accounts: an unbounded name truncates against the card, not against its c
     const reading = await readCardSettled(page, UNBOUNDED_NAME)
 
     expect(reading.badges, `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['default'])
+      .toEqual(['Default account'])
 
     // A name this long MUST still truncate — names are user-supplied and
     // unbounded, and a card that grew to fit one would be a different defect.
@@ -396,10 +395,10 @@ test('/accounts: an ordinary name keeps its badges on the title line', async ({ 
     const reading = await readCardSettled(page, ORDINARY_NAME)
 
     expect(reading.badges, `@${width}px: the card renders ${JSON.stringify(reading.badges)}`)
-      .toEqual(['default'])
+      .toEqual(['Default account'])
 
     // The badge on the name's own line.
-    for (const label of ['default'] as const) {
+    for (const label of ['Default account'] as const) {
       const badge = reading.badgeRects[label]
       expect(
         overlapOf(badge, reading.nameRect).y,

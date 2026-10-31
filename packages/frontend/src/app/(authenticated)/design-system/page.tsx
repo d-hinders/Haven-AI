@@ -917,7 +917,7 @@ function ListControlsExample({
         filtering="browser"
         facets={facets}
         sort={DS_LIST_SORT}
-        searchDescription="By name or delegate address"
+        searchDescription="by name or address"
         searchEpoch={searchEpoch}
         actions={actions}
         count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}

@@ -62,7 +62,7 @@
  * so the mapping and the URL write live here.
  */
 
-import { EllipsisVertical, X } from 'lucide-react'
+import { EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -125,8 +125,7 @@ import { isTestnetChain } from '@/lib/marketplace'
 import { holdingDisplayAmount, holdingRows, holdingRateLine } from '@/lib/account-holdings'
 import { agentSpendSummaryLine } from '@/lib/agent-spend-summary'
 import { computeAttentionItems } from '@/lib/dashboard-attention'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { Modal } from '@/components/ui/Modal'
 
 /** The page's tabs; `activity` is the default and the unknown-value fallback. */
 type AccountTab = 'activity' | 'agents' | 'security'
@@ -893,11 +892,9 @@ function RenameModal({
   onRename: (name: string) => Promise<void>
   loading: boolean
 }) {
-  const panelRef = useRef<HTMLDivElement>(null)
   const [name, setName] = useState(account.name)
   const [error, setError] = useState('')
-  useFocusTrap(panelRef, true)
-  useEscapeToClose(true, onClose, { enabled: !loading })
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -915,71 +912,54 @@ function RenameModal({
     }
   }
 
+  // #4566: the shell is `ui/Modal`. A rename in flight disables every way out
+  // together — the ✕, the backdrop and Escape — or the ✕ becomes the one
+  // unguarded exit. The form stays in the body and its submit button sits in
+  // the footer, associated by `form` so Enter in the field still submits
+  // (`docs/product/design-system.md` § Modal).
   return (
-    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
-    // never had one, so every side is exactly its safe-area inset — 0 in any
-    // browser without a notch, and the clearance the home indicator needs in
-    // the installed shell.
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
-      <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rename-account-title"
-        className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
-          <div>
-            <h2 id="rename-account-title" className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Give this Haven account a name only you see.</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            aria-label="Close"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Icon icon={X} className="h-5 w-5" />
-          </button>
+    <Modal
+      open
+      onClose={onClose}
+      title="Rename account"
+      subtitle="Give this Haven account a name only you see."
+      width="sm"
+      closeButtonDisabled={loading}
+      closeOnBackdrop={!loading}
+      closeOnEscape={!loading}
+      initialFocusRef={inputRef}
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="submit" form="rename-account-form" disabled={loading}>
+            {loading ? 'Saving...' : 'Save changes'}
+          </Button>
+        </>
+      }
+    >
+      <form id="rename-account-form" onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="rename-account-name" className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
+          <input
+            id="rename-account-name"
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setError('')
+            }}
+            className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2.5 text-sm text-[var(--v2-ink)] transition-colors focus-visible:border-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+          />
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
-          <div>
-            <label htmlFor="rename-account-name" className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
-            <input
-              id="rename-account-name"
-              type="text"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setError('')
-              }}
-              autoFocus
-              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2.5 text-sm text-[var(--v2-ink)] transition-colors focus-visible:border-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-            />
+        {error && (
+          <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
+            {error}
           </div>
-          {error && (
-            <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
-              {error}
-            </div>
-          )}
-          <div className="flex gap-3 pt-1">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onClose}
-              disabled={loading}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading} className="flex-1">
-              {loading ? 'Saving...' : 'Save changes'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+        )}
+      </form>
+    </Modal>
   )
 }

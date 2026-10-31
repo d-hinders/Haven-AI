@@ -22,7 +22,6 @@
  * "recipient pin" and "ERC-7710" never appear.
  */
 
-import { Check, X } from 'lucide-react'
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseUnits, formatUnits } from 'viem'
@@ -39,16 +38,15 @@ import {
   isPermanentMerchantBudgetRefusal,
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow } from '@/components/haven'
-import { Icon } from '@/components/ui/Icon'
 import { InlineAlert } from '@/components/ui/InlineAlert'
-import { Spinner } from '@haven_ai/ui/Spinner'
 import { Button } from '@/components/ui/Button'
+import { DialogActions } from '@/components/ui/DialogActions'
+import { DialogResult } from '@/components/ui/DialogResult'
+import { Modal } from '@/components/ui/Modal'
 import WalletConnectAction from '@/components/WalletConnectAction'
 import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
 import EditBudgetModal from '@/components/EditBudgetModal'
 import { Select } from '@/components/ui/Select'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
 interface TokenOption {
   address: string
@@ -192,12 +190,10 @@ interface Props {
 }
 
 export default function FundMerchantModal({ open, onClose, merchant, funding, offers, agents, onGranted }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
   // #3933: the live budget being edited instead of granting a second one into
   // its slot. While set, the edit flow replaces this modal on screen, and
   // brings its own focus trap and Escape handling.
   const [editTarget, setEditTarget] = useState<DelegationBudget | null>(null)
-  useFocusTrap(panelRef, open && !editTarget)
 
   const eligibleAgents = useMemo(() => eligibleFundingAgents(agents, funding), [agents, funding])
 
@@ -340,8 +336,6 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     onClose()
   }, [busy, onClose])
 
-  useEscapeToClose(open, handleClose, { enabled: !busy && !editTarget })
-
   const run = useCallback(async () => {
     if (!input) return
     // #3933: the slot already holds a live budget — the backend refuses a
@@ -410,38 +404,104 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
     )
   }
 
-  return (
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem] v2-modal-backdrop">
-      <div className="absolute inset-0" onClick={busy ? undefined : handleClose} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="fund-merchant-title"
-        data-testid="fund-merchant-modal"
-        className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
-          <div>
-            <h2 id="fund-merchant-title" className="text-lg font-semibold text-[var(--v2-ink)]">
-              Set a budget for {merchant.name}
-            </h2>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-              Give an agent a budget that pays only {merchant.name}. Nothing changes until you approve.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={busy}
-            aria-label="Close"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:opacity-50"
-          >
-            <Icon icon={X} className="h-4 w-4" />
-          </button>
-        </div>
+  // #4566: the screen's action pair lives in `Modal`'s footer — outside the
+  // scroll box, so a short viewport can never push the forward action off
+  // screen (#1946). A multi-screen dialog uses `DialogActions`; a screen with
+  // a single action renders one full-width primary.
+  const footer =
+    step === 'select' ? (
+      eligibleAgents.length === 0 ? (
+        <Button variant="ghost" onClick={handleClose} className="w-full">
+          Close
+        </Button>
+      ) : (
+        <DialogActions className="w-full">
+          <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
+            Cancel
+          </Button>
+          <Button onClick={() => setStep('review')} disabled={!input} className="flex-1">
+            Review
+          </Button>
+        </DialogActions>
+      )
+    ) : step === 'review' ? (
+      <DialogActions className="w-full">
+        <Button variant="ghost" onClick={() => setStep('select')} className="flex-1" disabled={busy}>
+          Back
+        </Button>
+        <Button onClick={() => void run()} disabled={busy || !ready} className="flex-1">
+          {replacedBudget ? 'Edit current budget' : 'Approve budget'}
+        </Button>
+      </DialogActions>
+    ) : step === 'done' ? (
+      <Button variant="ghost" onClick={handleClose} className="w-full">
+        Done
+      </Button>
+    ) : step === 'error' && outcome && !outcome.ok ? (
+      outcome.reason === 'slot_occupied' ? (
+        // #3933: the server refused a plain grant into an occupied slot. Never
+        // "Try again" — the same grant would be refused again. The way forward
+        // is the edit flow.
+        <DialogActions className="w-full">
+          <Button variant="ghost" onClick={handleClose} className="flex-1">
+            Close
+          </Button>
+          {slotTarget ? (
+            <Button onClick={() => setEditTarget(slotTarget)} className="flex-1">
+              Edit current budget
+            </Button>
+          ) : (
+            <Button onClick={() => void reload()} className="flex-1">
+              Reload budgets
+            </Button>
+          )}
+        </DialogActions>
+      ) : permanentRefusal ? (
+        // Design review round 3, finding A (code F2): a refusal that a reload
+        // CAN resolve — the payTo moved, it isn't confirmed yet, or the
+        // merchant vanished — offers "Reload page" as its primary action, not
+        // just "Close". "Close" alone stays for the refusals a reload cannot
+        // fix (this agent IS the payTo, the offer stopped taking this kind of
+        // budget, the agent was revoked, or the account is off the delegation
+        // rail).
+        refusalKind === 'pay_to_changed' ||
+        refusalKind === 'no_verified_pay_to' ||
+        refusalKind === 'merchant_not_found' ? (
+          <Button onClick={() => window.location.reload()} className="w-full">
+            Reload page
+          </Button>
+        ) : (
+          <Button onClick={handleClose} className="w-full">
+            Close
+          </Button>
+        )
+      ) : (
+        <DialogActions className="w-full">
+          <Button variant="ghost" onClick={handleClose} className="flex-1">
+            Close
+          </Button>
+          <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
+            Try again
+          </Button>
+        </DialogActions>
+      )
+    ) : undefined
 
-        <div className="p-6">
+  return (
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={`Set a budget for ${merchant.name}`}
+      subtitle={`Give an agent a budget that pays only ${merchant.name}. Nothing changes until you approve.`}
+      width="lg"
+      // A signature in flight disables every way out together — the ✕, the
+      // backdrop and Escape — or the ✕ becomes the one unguarded exit.
+      closeButtonDisabled={busy}
+      closeOnBackdrop={!busy}
+      closeOnEscape={!busy}
+      footer={footer}
+      panelTestId="fund-merchant-modal"
+    >
           {step === 'select' &&
             (eligibleAgents.length === 0 ? (
               <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
@@ -452,9 +512,6 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                   </Link>{' '}
                   on a network {merchant.name} accepts, then come back here.
                 </p>
-                <Button variant="ghost" onClick={handleClose} className="w-full">
-                  Close
-                </Button>
               </div>
             ) : (
               <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
@@ -538,14 +595,6 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                     ) : null}
                   </>
                 )}
-                <div className="flex gap-3">
-                  <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
-                    Cancel
-                  </Button>
-                  <Button onClick={() => setStep('review')} disabled={!input} className="flex-1">
-                    Review
-                  </Button>
-                </div>
               </div>
             ))}
 
@@ -621,14 +670,6 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                 </div>
               )}
 
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep('select')} className="flex-1" disabled={busy}>
-                  Back
-                </Button>
-                <Button onClick={() => void run()} disabled={busy || !ready} className="flex-1">
-                  {replacedBudget ? 'Edit current budget' : 'Approve budget'}
-                </Button>
-              </div>
               {ready && passkeyElsewhere ? <PasskeyElsewhereHint /> : null}
               {!ready && (
                 <div className="space-y-2">
@@ -647,114 +688,56 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
           )}
 
           {step === 'working' && (
-            <div ref={stepRegionRef} tabIndex={-1} role="status" aria-live="polite" className="space-y-4 py-8 text-center outline-none">
-              <Spinner size="md" />
-              <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your approval…</p>
-              <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">
-                {/* #3331 review finding design-9: never assume a passkey — the
-                    same copy `EditBudgetModal.tsx` uses for its own waiting step. */}
-                Approve in your wallet or with your passkey. The budget is set only after you approve.
-              </p>
+            <div ref={stepRegionRef} tabIndex={-1} className="outline-none">
+              <DialogResult
+                state="busy"
+                title="Waiting for your approval…"
+                // #3331 review finding design-9: never assume a passkey — the
+                // same copy `EditBudgetModal.tsx` uses for its own waiting step.
+                description="Approve in your wallet or with your passkey. The budget is set only after you approve."
+              />
             </div>
           )}
 
           {step === 'done' && (
-            <div ref={stepRegionRef} tabIndex={-1} className="space-y-5 outline-none">
-              <div className="py-4 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
-                  <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
-                </div>
-                <p className="text-sm font-medium text-[var(--v2-ink)]">Budget set</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                  {selectedAgent?.name} can now pay {merchant.name}, within this budget.
-                </p>
-              </div>
-              <Button variant="ghost" onClick={handleClose} className="w-full">
-                Done
-              </Button>
+            <div ref={stepRegionRef} tabIndex={-1} className="outline-none">
+              <DialogResult
+                state="success"
+                title="Budget set"
+                description={`${selectedAgent?.name} can now pay ${merchant.name}, within this budget.`}
+              />
             </div>
           )}
 
           {step === 'error' && outcome && !outcome.ok && (
-            <div ref={stepRegionRef} tabIndex={-1} role="alert" className="space-y-5 outline-none">
-              <div className="space-y-3 py-2 text-center">
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
-                  <Icon icon={X} className="h-5 w-5 text-[var(--v2-danger)]" />
-                </div>
-                {/* #3331 review finding F9: ONE heading for every failure shape
-                    — "the budget could not be set" — followed by named copy
-                    for a recognised refusal or a generic sentence otherwise.
-                    The generic failure closes with "Nothing changed."
-                    (#3930: `unconfirmed` does NOT — the grant may already be
-                    in place, so it gets its own sentence instead). */}
-                <p className="text-sm font-medium text-[var(--v2-ink)]">
-                  {outcome.reason === 'slot_occupied' ? 'This agent already has a budget here' : 'The budget could not be set'}
-                </p>
-                <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                  {outcome.reason === 'slot_occupied'
+            <div ref={stepRegionRef} tabIndex={-1} role="alert" className="outline-none">
+              {/* #3331 review finding F9: ONE heading for every failure shape
+                  — "the budget could not be set" — followed by named copy
+                  for a recognised refusal or a generic sentence otherwise.
+                  The generic failure closes with "Nothing changed."
+                  (#3930: `unconfirmed` does NOT — the grant may already be
+                  in place, so it gets its own sentence instead). */}
+              <DialogResult
+                state="error"
+                title={
+                  outcome.reason === 'slot_occupied'
+                    ? 'This agent already has a budget here'
+                    : 'The budget could not be set'
+                }
+                description={
+                  outcome.reason === 'slot_occupied'
                     ? `${selectedAgent?.name ?? 'This agent'} already has a live budget that pays ${merchant.name}'s address. Nothing was approved. Edit that budget to change its limits.`
                     : outcome.reason === 'unconfirmed'
-                    ? "The budget could not be confirmed — it may already be in place. Check the agent's budgets before trying again; a retry never adds a second budget for the same token and recipient."
-                    : `${
-                        outcome.reason === 'refused'
-                          ? refusalCopy(outcome.detail, merchant.name)
-                          : 'Haven could not set up this budget.'
-                      } Nothing changed.`}
-                </p>
-              </div>
-              <div className="flex gap-3">
-                {outcome.reason === 'slot_occupied' ? (
-                  // #3933: the server refused a plain grant into an occupied
-                  // slot. Never "Try again" — the same grant would be refused
-                  // again. The way forward is the edit flow.
-                  <>
-                    <Button variant="ghost" onClick={handleClose} className="flex-1">
-                      Close
-                    </Button>
-                    {slotTarget ? (
-                      <Button onClick={() => setEditTarget(slotTarget)} className="flex-1">
-                        Edit current budget
-                      </Button>
-                    ) : (
-                      <Button onClick={() => void reload()} className="flex-1">
-                        Reload budgets
-                      </Button>
-                    )}
-                  </>
-                ) : permanentRefusal ? (
-                  // Design review round 3, finding A (code F2): a refusal that
-                  // a reload CAN resolve — the payTo moved, it isn't confirmed
-                  // yet, or the merchant vanished — offers "Reload page" as its
-                  // primary action, not just "Close". "Close" alone stays for
-                  // the refusals a reload cannot fix (this agent IS the payTo,
-                  // the offer stopped taking this kind of budget, the agent was
-                  // revoked, or the account is off the delegation rail).
-                  refusalKind === 'pay_to_changed' ||
-                  refusalKind === 'no_verified_pay_to' ||
-                  refusalKind === 'merchant_not_found' ? (
-                    <Button onClick={() => window.location.reload()} className="flex-1">
-                      Reload page
-                    </Button>
-                  ) : (
-                    <Button onClick={handleClose} className="flex-1">
-                      Close
-                    </Button>
-                  )
-                ) : (
-                  <>
-                    <Button variant="ghost" onClick={handleClose} className="flex-1">
-                      Close
-                    </Button>
-                    <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
-                      Try again
-                    </Button>
-                  </>
-                )}
-              </div>
+                      ? "The budget could not be confirmed — it may already be in place. Check the agent's budgets before trying again; a retry never adds a second budget for the same token and recipient."
+                      : `${
+                          outcome.reason === 'refused'
+                            ? refusalCopy(outcome.detail, merchant.name)
+                            : 'Haven could not set up this budget.'
+                        } Nothing changed.`
+                }
+              />
             </div>
           )}
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

@@ -14,7 +14,7 @@
  * distinguishing copy BEFORE the capture — the stale indicator's literal
  * `as of …` line, frozen with the page clock — so a locator that drifts is
  * a red test rather than a baseline of the wrong thing. The as-of literal
- * is frozen exactly like the SEK suite's `3mo ago`: an unfrozen `timeAgo`
+ * is frozen exactly like the SEK suite's `06:40`: an unfrozen `timeAgo`
  * here would drift on a calendar boundary like the ones #2318 rejected.
  *
  * The scenario is PURE STALE (both tokens have a last-known value; the ETH

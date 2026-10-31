@@ -87,7 +87,7 @@ import {
 } from '@/lib/transaction-presentation'
 import { transactionTokenLabel } from '@/lib/transaction-filters'
 import { parseX402Hostname } from '@/lib/transaction-labels'
-import { timeAgo } from '@/lib/format'
+import { formatClockTime } from '@/lib/format'
 import type { AggregatedTransaction, TransactionFilterTokenOption } from '@/types/transactions'
 
 interface AgentActivityTabProps {
@@ -765,7 +765,9 @@ function AgentRefusalRow({ view, insetDivider }: { view: RefusalRowView; insetDi
       asset={view.item.token_symbol}
       status="Refused"
       statusTone="neutral"
-      timestamp={timeAgo(view.timestamp * 1000)}
+      // #4572: both agent ledger rows sit under a day band, so they show the
+      // clock time — the band already states the day.
+      timestamp={formatClockTime(view.timestamp * 1000)}
       direction="neutral"
       density="compact"
       insetDivider={insetDivider}
@@ -805,7 +807,7 @@ function AgentLedgerRow({
       failed={tx.isError}
       status={badge?.label}
       statusTone={badge?.tone}
-      timestamp={timeAgo(tx.timestamp * 1000)}
+      timestamp={formatClockTime(tx.timestamp * 1000)}
       direction={tx.direction}
       fiat={fiat}
       density="compact"

@@ -112,13 +112,11 @@ export function TransactionActivityRow({
   // nuances inside the title row (badge + text mixed heights).
   //
   // The pin is `sm:` ONLY, and the breakpoint is the whole point (#1833). The
-  // height was measured against the two-column arrangement below
-  // (`sm:grid-cols-[minmax(0,1fr)_auto]`), which does not exist under 640px:
-  // there the two children STACK, so title+description and amount+timestamp
-  // occupy two bands inside a box still clamped to 72px, and the overflow
-  // spilled onto the following row. Rows visibly overlapped on /dashboard at
-  // 390px — found independently by two rendered review passes, neither
-  // looking for it.
+  // height was measured against the desktop arrangement, which does not exist
+  // under 640px: there the row stacks into bands, so a box still clamped to
+  // 72px spilled its content onto the following row. Rows visibly overlapped
+  // on /dashboard at 390px — found independently by two rendered review
+  // passes, neither looking for it.
   //
   // Below `sm` the row therefore sizes to its content, with `py-3` supplying
   // the vertical breathing room the fixed height used to provide. At `sm` and
@@ -129,6 +127,30 @@ export function TransactionActivityRow({
   // is variable-height (a wrapping <TransactionMovement>, an optional status
   // badge), so any fixed value is a new overlap waiting for the first string
   // long enough to exceed it.
+  //
+  // ── The phone layout (#4572) ───────────────────────────────────────────────
+  //
+  // Below `sm` the row is TWO bands, not three: the title line carries the
+  // title (truncating) and the amount, right-aligned; the description line
+  // carries the description and the timestamp. Before #4572 the amount and
+  // timestamp were a third band under the text block, so a payment took three
+  // lines (name, amount, time) and a 375px screen showed about five rows.
+  //
+  // The mechanism is one grid, three columns (`mark | text | amount`), with
+  // the text and amount blocks `display: contents` below `sm` so their
+  // children become grid items of the row itself and can be placed on the
+  // title and description rows. At `sm` and up both blocks are boxes again and
+  // the row is the same two-column arrangement as before. Badges ride a
+  // subordinate line below `sm` (`w-full` inside the wrapping title line) so
+  // they can never squeeze the amount; at `sm` and up their wrapper is
+  // `display: contents` and they are the title line's own flex items.
+  //
+  // The second band is indented by the grid's own geometry — the mark column
+  // plus the 12px gap — which is `pl-11` at compact density (32 + 12 = 44px)
+  // and 48px at comfortable (36 + 12). The old `pl-11` was a fixed 44px at
+  // both densities, so comfortable rows gain 4px of indent; compact, the
+  // density every ledger uses, is unchanged.
+  //
   // The inset is the row's own geometry — padding, the mark (32px compact,
   // 36px comfortable) and the 12px gap — so the hairline starts exactly where
   // the title does at every breakpoint.
@@ -138,8 +160,14 @@ export function TransactionActivityRow({
       }`
     : ''
   const containerPadding = isCompact
-    ? 'gap-3 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
-    : 'gap-3 px-4 py-4 sm:px-5'
+    ? 'gap-x-3 gap-y-0 px-4 py-3 sm:px-5 sm:py-0 sm:h-[72px]'
+    : 'gap-x-3 gap-y-0 px-4 py-4 sm:px-5'
+  // Badges are a subordinate line below `sm` (#4572): the title truncates and
+  // the amount keeps its place on the title line, so a status badge and an
+  // accounting badge can never squeeze the figure. At `sm` and up the wrapper
+  // is `display: contents`, so the badges are the title line's own flex items
+  // again — byte-identical to before.
+  const hasBadges = Boolean(countLabel || status || extraBadges)
   // Ledger mode (#4096): the row itself is the control — a div carrying
   // button semantics. A ledger row must contain no controls (design-system
   // § Transaction ledger, #4266): a control nested in a button is invalid
@@ -166,77 +194,84 @@ export function TransactionActivityRow({
     <div
       {...interactiveProps}
       data-inset-divider={insetDivider ? '' : undefined}
-      className={`relative grid transition-colors hover:bg-[var(--v2-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${containerPadding}${dividerClass}${onOpen ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80' : ''}`}
+      className={`relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start transition-colors hover:bg-[var(--v2-surface-hover)] sm:items-center ${containerPadding}${dividerClass}${onOpen ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/80' : ''}`}
     >
-      {/* `items-start` below `sm`, centred at `sm` and up (#1833 review).
-          Centring the mark against the WHOLE text block reads correctly while
-          that block is one or two lines, and wrongly once it wraps to three or
-          four: the mark drifts down beside the status badge or the "From …"
-          line, away from the title it marks. Below `sm` that wrap is now the
-          common case rather than the exception, because the row sizes to its
-          content instead of clipping at 72px — so this fix and the height fix
-          are the same change seen from two sides.
-
-          Same shape as the height pin above: an alignment chosen for the
-          arrangement at one breakpoint, applied where that arrangement does
-          not exist. `sm:items-center` keeps `sm`+ byte-identical. */}
-      <div className="flex min-w-0 items-start gap-3 sm:items-center">
+      {/* The mark. Below `sm` it spans both bands so its 32/36px height does
+          not inflate the title row; at `sm` and up it is the first column of
+          the single row, centred like the text block beside it. */}
+      <div className="col-start-1 row-start-1 row-span-2 sm:row-span-1">
         <DirectionMark direction={direction} density={density} />
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="min-w-0 truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
-            {countLabel ? (
-              <span className="text-xs font-medium text-[var(--v2-ink-3)]">{countLabel}</span>
-            ) : null}
-            {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
-            {extraBadges}
-          </div>
-          {description ? (
-            // Compact density tightens the title→description gap to match Row's mt-0.5.
-            <div className={`${isCompact ? 'mt-0.5 truncate' : 'mt-1'} text-xs text-[var(--v2-ink-2)]`}>{description}</div>
-          ) : null}
-          {details.length > 0 && !isCompact ? (
-            <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--v2-ink-3)]">
-              {details.map((detail) => (
-                <div key={detail.label} className="flex min-w-0 items-center gap-1">
-                  <dt className="flex-shrink-0">{detail.label}:</dt>
-                  <dd className="min-w-0 truncate text-[var(--v2-ink-2)]">{detail.value}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : null}
-        </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 pl-11 sm:block sm:pl-0 sm:text-right">
-        <div>
-          <p>
-            {fiat ? (
-              <Amount
-                amount={fiat.amount}
-                currency={fiat.currency}
-                approx={fiat.approx}
-                direction={direction === 'neutral' || direction === 'move' ? undefined : direction}
-                failed={failed}
-              />
-            ) : (
-              <Amount
-                value={value}
-                symbol={asset}
-                direction={direction === 'neutral' || direction === 'move' ? undefined : direction}
-                failed={failed}
-              />
-            )}
-          </p>
-          {(timestamp || action) && !isCompact ? (
-            <div className="mt-1 flex items-center justify-end gap-2 text-xs text-[var(--v2-ink-3)]">
-              {timestamp ? <span>{timestamp}</span> : null}
-              {action}
+      {/* The text column. Below `sm` it is `display: contents`, so the title
+          line and the description line become grid items of the row itself —
+          that is what lets the amount sit on the title line and the timestamp
+          on the description line (#4572). At `sm` and up it is one block
+          again, exactly as before. */}
+      <div className="contents sm:col-start-2 sm:row-start-1 sm:block sm:min-w-0">
+        <div className="col-start-2 row-start-1 flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--v2-ink)] sm:flex-initial">{title}</p>
+          {hasBadges ? (
+            <div className="flex w-full flex-wrap items-center gap-2 sm:contents">
+              {countLabel ? (
+                <span className="text-xs font-medium text-[var(--v2-ink-3)]">{countLabel}</span>
+              ) : null}
+              {status ? <StatusBadge tone={statusTone}>{status}</StatusBadge> : null}
+              {extraBadges}
             </div>
-          ) : timestamp && isCompact ? (
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{timestamp}</p>
           ) : null}
         </div>
+        {description ? (
+          // Compact density tightens the title→description gap to match Row's mt-0.5.
+          <div
+            className={`col-start-2 row-start-2 ${isCompact ? 'mt-0.5 truncate' : 'mt-1'} text-xs text-[var(--v2-ink-2)]`}
+          >
+            {description}
+          </div>
+        ) : null}
+        {details.length > 0 && !isCompact ? (
+          <dl className="col-start-2 col-span-2 row-start-3 mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--v2-ink-3)]">
+            {details.map((detail) => (
+              <div key={detail.label} className="flex min-w-0 items-center gap-1">
+                <dt className="flex-shrink-0">{detail.label}:</dt>
+                <dd className="min-w-0 truncate text-[var(--v2-ink-2)]">{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+
+      {/* The amount column. Below `sm` it is `display: contents` for the same
+          reason: the amount lands on the title line, right-aligned, and the
+          timestamp on the description line. At `sm` and up it is the
+          right-hand block, unchanged. */}
+      <div className="contents sm:col-start-3 sm:row-start-1 sm:block sm:text-right">
+        <p className="col-start-3 row-start-1 text-right">
+          {fiat ? (
+            <Amount
+              amount={fiat.amount}
+              currency={fiat.currency}
+              approx={fiat.approx}
+              direction={direction === 'neutral' || direction === 'move' ? undefined : direction}
+              failed={failed}
+            />
+          ) : (
+            <Amount
+              value={value}
+              symbol={asset}
+              direction={direction === 'neutral' || direction === 'move' ? undefined : direction}
+              failed={failed}
+            />
+          )}
+        </p>
+        {(timestamp || action) && !isCompact ? (
+          <div className="col-start-3 row-start-2 mt-1 flex items-center justify-end gap-2 text-xs text-[var(--v2-ink-3)]">
+            {timestamp ? <span>{timestamp}</span> : null}
+            {action}
+          </div>
+        ) : timestamp && isCompact ? (
+          <p className="col-start-3 row-start-2 mt-0.5 text-right text-xs text-[var(--v2-ink-3)]">{timestamp}</p>
+        ) : null}
       </div>
     </div>
   )
@@ -259,16 +294,15 @@ export function TransactionActivityRow({
  */
 export function TransactionActivityRowSkeleton({ density = 'comfortable' }: { density?: Density }) {
   if (density === 'compact') {
+    // The same two-band phone shape as the loaded row (#4572): the amount
+    // placeholder rides the title line, the description bar the second band.
+    // A skeleton that kept the old three-band stack would jump on load.
     return (
-      <div className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-9 w-9 rounded-[10px]" />
-          <div>
-            <Skeleton variant="text" className="h-3.5 w-40" />
-            <Skeleton variant="text" className="mt-1.5 h-2.5 w-56" />
-          </div>
-        </div>
-        <Skeleton variant="text" className="h-4 w-24 sm:justify-self-end" />
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-0 px-4 py-3 sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
+        <Skeleton className="col-start-1 row-start-1 row-span-2 h-8 w-8 rounded-[10px] sm:row-span-1" />
+        <Skeleton variant="text" className="col-start-2 row-start-1 h-3.5 w-40" />
+        <Skeleton variant="text" className="col-start-3 row-start-1 h-4 w-24 sm:justify-self-end" />
+        <Skeleton variant="text" className="col-start-2 row-start-2 mt-1.5 h-2.5 w-56" />
       </div>
     )
   }

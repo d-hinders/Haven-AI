@@ -907,6 +907,116 @@ test.describe('design-system visual regression', () => {
   })
 
   /**
+   * #4572: the phone ledger row at 375px.
+   *
+   * The committed viewports are 1280 and 390, and the issue measured the
+   * three-line row at 375 — narrower than either, so this is the stricter
+   * render and the width the acceptance cases name. Two cases the 390px
+   * ledger clip cannot show: a 40-character title (the amount must stay on
+   * the title line while the title truncates) and the crowded worst case
+   * (long title + amount + payment-status badge + accounting badge), plus a
+   * grouped `×N` row.
+   *
+   * Same clock freeze and zone as the ledger clip above: `DS_PHONE_LEDGER_ROWS`
+   * stamps its timestamps from `Date.now()` at module load, and the clock
+   * times it renders are LOCAL.
+   */
+  test.describe('phone ledger row (#4572)', () => {
+    test.use({ timezoneId: LEDGER_TZ })
+
+    test('/design-system phone ledger row renders pixel-stable at 375px', async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.clock.setFixedTime(FROZEN_LEDGER_NOW)
+      await page.setViewportSize({ width: 375, height: 812 })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-activity-ledger-phone')
+      await expect(sample).toHaveCount(1)
+      // Three rows under one day band: the truncation case, the crowded worst
+      // case and the grouped ×N row. Without this the clip could photograph
+      // an empty card and still pass.
+      await expect(sample.getByRole('button')).toHaveCount(3)
+      await expect(sample.getByText('×3')).toHaveCount(1)
+      await expect(sample.getByText('Pending')).toHaveCount(1)
+
+      // The acceptance cases, asserted structurally before the pixels — a
+      // baseline diff says "something moved", these say WHAT broke.
+      const geometry = await sample.evaluate((root) => {
+        const rows = Array.from(root.querySelectorAll('[role="button"]'))
+        const read = (row: Element) => {
+          const title = row.querySelector('p') as HTMLElement
+          const spans = Array.from(row.querySelectorAll('span')) as HTMLElement[]
+          const amount = spans.find((s) => /^-\d/.test((s.textContent ?? '').trim()))
+          const titleRect = title.getBoundingClientRect()
+          const amountRect = amount?.getBoundingClientRect()
+          return {
+            titleLength: (title.textContent ?? '').trim().length,
+            truncated: title.scrollWidth > title.clientWidth,
+            amountOnTitleLine:
+              amountRect !== undefined &&
+              amountRect.top >= titleRect.top - 4 &&
+              amountRect.top <= titleRect.bottom,
+            titleBottom: titleRect.bottom,
+            badgeTops: spans
+              .filter((s) => ['Pending', '×3'].includes((s.textContent ?? '').trim()))
+              .map((s) => s.getBoundingClientRect().top),
+          }
+        }
+        const longTitle = rows.find((r) =>
+          (r.textContent ?? '').includes('Merchant settlement for September charge'),
+        )
+        const crowded = rows.find((r) => (r.textContent ?? '').includes('Pending'))
+        const grouped = rows.find((r) => (r.textContent ?? '').includes('×3'))
+        return {
+          longTitle: longTitle ? read(longTitle) : null,
+          crowded: crowded ? read(crowded) : null,
+          grouped: grouped ? read(grouped) : null,
+        }
+      })
+
+      // The 40-character title truncates with an ellipsis instead of pushing
+      // the amount down, and the amount stays on the title line.
+      expect(geometry.longTitle, 'the 40-character title row did not render').not.toBeNull()
+      expect(geometry.longTitle!.titleLength).toBe(40)
+      expect(geometry.longTitle!.truncated, 'the 40-character title should truncate').toBe(true)
+      expect(geometry.longTitle!.amountOnTitleLine, 'the amount should stay on the title line').toBe(true)
+
+      // The crowded worst case: long title + amount + status badge +
+      // accounting badge. The amount keeps the title line; the badges drop to
+      // a subordinate line rather than squeezing it.
+      expect(geometry.crowded, 'the crowded worst-case row did not render').not.toBeNull()
+      expect(geometry.crowded!.amountOnTitleLine, 'the crowded row lost its amount to a badge').toBe(true)
+      expect(geometry.crowded!.badgeTops.length, 'the crowded row lost its status badge').toBeGreaterThan(0)
+      for (const top of geometry.crowded!.badgeTops) {
+        expect(top, 'a badge stayed on the title line and squeezed the amount').toBeGreaterThanOrEqual(
+          geometry.crowded!.titleBottom - 1,
+        )
+      }
+
+      // The grouped ×N row: the count label is a badge too, so it rides the
+      // subordinate line while the amount keeps the title line.
+      expect(geometry.grouped, 'the grouped ×N row did not render').not.toBeNull()
+      expect(geometry.grouped!.amountOnTitleLine, 'the grouped row lost its amount to the ×N label').toBe(true)
+      for (const top of geometry.grouped!.badgeTops) {
+        expect(top, 'the ×N label stayed on the title line').toBeGreaterThanOrEqual(
+          geometry.grouped!.titleBottom - 1,
+        )
+      }
+
+      await expectShowcaseClip(
+        sample,
+        812,
+        'the phone ledger row sample',
+        `design-system-activity-ledger-phone-375${schemeSuffix}.png`,
+        SAMPLE_MAX_DIFF_PIXELS,
+      )
+    })
+  })
+
+  /**
    * ── The #3441 guard: content above a showcase sample cannot move its clip ──
    *
    * Every clip above is captured through `expectShowcaseClip`, which always
@@ -941,6 +1051,7 @@ test.describe('design-system visual regression', () => {
     ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
     ['SegmentedControl sample', (p) => p.getByTestId('ds-segmented-control')],
     ['list-controls paging sample', (p) => p.getByTestId('ds-list-controls-paging')],
+    ['phone ledger row sample', (p) => p.getByTestId('ds-activity-ledger-phone')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]

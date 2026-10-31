@@ -1064,3 +1064,113 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText(/recent transactions/i)).not.toBeInTheDocument()
   })
 })
+
+/**
+ * #4566 — the account rename dialog on `ui/Modal`.
+ *
+ * The dialog had no direct test before this slice. Moving it onto `Modal`
+ * moved the dismissal, the focus placement and the focus return into the
+ * shared primitive, so this suite pins what the caller still owns: validation,
+ * the save call, and the busy guards that must hold while a rename is in
+ * flight.
+ */
+describe('AccountDetailClient — rename dialog (#4566)', () => {
+  function openRename() {
+    openAccountMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+  }
+
+  it('opens on the account name with focus in the field', () => {
+    render(<AccountDetailClient />)
+    openRename()
+
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+    const field = screen.getByLabelText('Account name')
+    expect(field).toHaveValue('Main account')
+    expect(field).toHaveFocus()
+  })
+
+  it('refuses an empty name without calling the API', () => {
+    const renameAccount = vi.fn()
+    mockUseAccounts.mockReturnValue({ renameAccount, removeAccount: vi.fn(), setDefault: vi.fn(), loading: false })
+
+    render(<AccountDetailClient />)
+    openRename()
+
+    fireEvent.change(screen.getByLabelText('Account name'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(screen.getByText('Enter an account name.')).toBeInTheDocument()
+    expect(renameAccount).not.toHaveBeenCalled()
+    // The dialog stays open so the user can correct it.
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+  })
+
+  it('saves the trimmed name and closes', async () => {
+    const renameAccount = vi.fn().mockResolvedValue(undefined)
+    mockUseAccounts.mockReturnValue({ renameAccount, removeAccount: vi.fn(), setDefault: vi.fn(), loading: false })
+
+    render(<AccountDetailClient />)
+    openRename()
+
+    fireEvent.change(screen.getByLabelText('Account name'), { target: { value: '  Household  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(renameAccount).toHaveBeenCalledWith('safe-1', 'Household'))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Rename account' })).not.toBeInTheDocument())
+  })
+
+  it('surfaces a failed rename in the dialog instead of closing it', async () => {
+    const renameAccount = vi.fn().mockRejectedValue(new Error('That name is already taken.'))
+    mockUseAccounts.mockReturnValue({ renameAccount, removeAccount: vi.fn(), setDefault: vi.fn(), loading: false })
+
+    render(<AccountDetailClient />)
+    openRename()
+
+    fireEvent.change(screen.getByLabelText('Account name'), { target: { value: 'Household' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(await screen.findByText('That name is already taken.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+  })
+
+  it('gives focus back to the menu trigger when it closes', () => {
+    render(<AccountDetailClient />)
+    openRename()
+    expect(screen.getByLabelText('Account name')).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('heading', { name: 'Rename account' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Account options')).toHaveFocus()
+  })
+
+  /**
+   * The rename is in flight (`loading`), so every way out must be inert: the
+   * ✕ is disabled, the backdrop has no handler, Escape is guarded and Cancel
+   * is disabled. Otherwise the ✕ becomes the one unguarded exit from a request
+   * that is still running.
+   */
+  it('cannot be closed while a rename is in flight', () => {
+    mockUseAccounts.mockReturnValue({
+      renameAccount: vi.fn(() => new Promise(() => {})),
+      removeAccount: vi.fn(),
+      setDefault: vi.fn(),
+      loading: true,
+    })
+
+    const { container } = render(<AccountDetailClient />)
+    openRename()
+
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+
+    const backdrop = container.querySelector('.v2-modal-backdrop')
+    expect(backdrop).not.toBeNull()
+    fireEvent.click(backdrop!)
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+  })
+})

@@ -55,7 +55,7 @@ import {
 } from '@/hooks/useAgentActivity'
 import { api } from '@/lib/api'
 import { errorCodeLabel, toolCallLabel } from '@/lib/tool-call-labels'
-import { timeAgo } from '@/lib/format'
+import { formatClockTime } from '@/lib/format'
 import { periodToBounds } from './AgentActivityTab'
 
 interface AgentToolCallsTabProps {
@@ -414,7 +414,9 @@ function ToolCallRow({
           {badged ? (
             <StatusBadge tone={resultTone(item.result_status)}>{item.result_status}</StatusBadge>
           ) : null}
-          <span className="text-xs text-[var(--v2-ink-3)]">{timeAgo(item.created_at)}</span>
+          {/* #4572: the row sits under a day band, so it shows the clock
+              time — the band already states the day. */}
+          <span className="text-xs text-[var(--v2-ink-3)]">{formatClockTime(item.created_at)}</span>
         </span>
       }
       className={

@@ -89,6 +89,42 @@ describe('TransactionActivityRow same-day divider (#4165)', () => {
   })
 })
 
+describe('TransactionActivityRow phone layout (#4572)', () => {
+  it('places the amount on the title row and the timestamp on the description row', () => {
+    const { container } = renderRow({ density: 'compact', timestamp: '14:05' })
+    const row = container.firstElementChild as HTMLElement
+    // One grid, three columns: mark | text | amount.
+    expect(row.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
+    // The text and amount blocks dissolve below `sm` (`display: contents`), so
+    // their children become grid items of the row itself — that is what lets
+    // the amount sit on the title line and the time on the description line.
+    expect(row.querySelectorAll('.contents')).toHaveLength(2)
+    const amount = screen.getByText('12.00 USDC').closest('p')!
+    expect(amount.className).toContain('row-start-1')
+    const time = screen.getByText('14:05')
+    expect(time.className).toContain('row-start-2')
+  })
+
+  it('puts badges on a subordinate line below `sm`, back on the title line at `sm`', () => {
+    const { container } = renderRow({ status: 'Pending', countLabel: '×3' })
+    const badgeLine = container.querySelector('.w-full')
+    expect(badgeLine, 'the badges should share one subordinate line').not.toBeNull()
+    // `sm:contents` restores the pre-#4572 desktop title line exactly.
+    expect(badgeLine!.className).toContain('sm:contents')
+    expect(badgeLine!.textContent).toContain('×3')
+    expect(badgeLine!.textContent).toContain('Pending')
+  })
+
+  it('keeps the title truncating rather than pushing the amount down', () => {
+    const { container } = renderRow({ density: 'compact' })
+    const title = container.querySelector('p')!
+    expect(title.className).toContain('truncate')
+    // `flex-1` below `sm` (fill the title line), the flex default at `sm`+.
+    expect(title.className).toContain('flex-1')
+    expect(title.className).toContain('sm:flex-initial')
+  })
+})
+
 describe('transactionDayGroups', () => {
   const today = new Date()
   const iso = (date: Date) => date.toISOString()
@@ -223,7 +259,9 @@ describe('TransactionActivityRowSkeleton (#4568)', () => {
     const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
     const row = container.firstElementChild!
     expect(row.className).toContain('grid')
-    expect(row.className).toContain('sm:grid-cols-[minmax(0,1fr)_auto]')
+    // #4572: the same three-column grid the loaded row uses — mark, text,
+    // amount — so the amount placeholder rides the title line below `sm`.
+    expect(row.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
     expect(row.className).toContain('sm:items-center')
     expect(row.className).toContain('sm:h-[72px]')
     // Below `sm` the row sizes to its content — the same breakpoint scope the
@@ -236,12 +274,16 @@ describe('TransactionActivityRowSkeleton (#4568)', () => {
     const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
     const row = container.firstElementChild!
     const blocks = row.querySelectorAll('[aria-hidden="true"]')
-    // icon + two bars + the amount column.
+    // mark + title bar + amount placeholder + description bar.
     expect(blocks).toHaveLength(4)
-    const amount = blocks[3]
+    const amount = blocks[2]
     expect(amount.className).toContain('h-4')
     expect(amount.className).toContain('w-24')
     expect(amount.className).toContain('sm:justify-self-end')
+    // #4572: the amount placeholder sits on the title row, the description bar
+    // on the second band — the loaded row's two-band phone shape.
+    expect(amount.className).toContain('row-start-1')
+    expect(blocks[3].className).toContain('row-start-2')
   })
 
   it('every block is a Skeleton — no inline animate-pulse div survives', () => {

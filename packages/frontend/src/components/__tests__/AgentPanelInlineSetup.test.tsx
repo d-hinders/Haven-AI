@@ -231,7 +231,12 @@ function chooseHeaderMenuItem(name: string) {
 
 function pressEscape() {
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    // Dispatched on `document` with `bubbles: true` so it reaches BOTH kinds of
+    // listener in this tree: `ui/Modal` binds Escape on `document` (#4565), and
+    // the inline setup flow's `useEscapeToClose` binds it on `window`. An event
+    // dispatched straight on `window` never travels down to `document`, so the
+    // manager dialogs would look deaf to Escape.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   })
 }
 
@@ -297,8 +302,8 @@ describe('AgentPanel inline first-agent flow (#4065)', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Agents' })).toBeInTheDocument()
     expect(headerMenu()).toBeInTheDocument()
     fireEvent.click(headerMenu()!)
-    expect(screen.getByRole('menuitem', { name: 'Labels' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Organizations' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Manage labels' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Manage organisations' })).toBeInTheDocument()
   })
 
   it('has no Cancel on step 1 — the one action is Set agent budget', () => {
@@ -575,8 +580,8 @@ describe('Escape never resets the inline flow (#4065)', () => {
   })
 
   it.each([
-    ['Labels', 'Manage labels'],
-    ['Organizations', 'Manage organizations'],
+    ['Manage labels', 'Manage labels'],
+    ['Manage organisations', 'Manage organisations'],
   ])('Escape that closes the %s manager leaves the flow as it was', (button, dialogName) => {
     render(<AgentPanel />)
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Research agent' } })

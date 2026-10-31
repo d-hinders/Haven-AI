@@ -615,13 +615,14 @@ describe('AgentPanel page header (#4209)', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Connect agent' })).toBeInTheDocument()
-    // The Labels and Organizations BUTTONS are gone; they are menu items now.
-    expect(screen.queryByRole('button', { name: 'Labels' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Organizations' })).toBeNull()
+    // The manager BUTTONS are gone; they are menu items now, and each item
+    // reads the same words as the dialog it opens (#4565).
+    expect(screen.queryByRole('button', { name: 'Manage labels' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Manage organisations' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
     // #4491: the page header hosts this menu — nothing above it may clip.
     expectMenuNotClipped(screen.getByRole('menu'))
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Labels', 'Organizations'])
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Manage labels', 'Manage organisations'])
   })
 
   it("passes Connect agent and the ⋯ trigger straight to PageHeader's wrapping actions row (#4401)", () => {
@@ -655,7 +656,7 @@ describe('AgentPanel page header (#4209)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'More agent actions' }))
     expectMenuNotClipped(screen.getByRole('menu'))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Labels' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Manage labels' }))
     expect(screen.getByRole('dialog', { name: 'Manage labels' })).toBeInTheDocument()
   })
 

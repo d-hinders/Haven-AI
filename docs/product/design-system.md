@@ -9,6 +9,10 @@ covers:
   - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/EditBudgetModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/MoveAgentModal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/IssueSubBudgetModal.tsx
+  - packages/frontend/src/components/SetBudgetDialog.tsx
   - packages/frontend/src/components/ListManagerModal.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
@@ -2537,13 +2541,13 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
-`ui/Modal` is the shared dialog shell — twenty product files import it
-directly (twenty-one with `/design-system`), three of which (`ConfirmDialog`,
+`ui/Modal` is the shared dialog shell — twenty-four product files import it
+directly (twenty-five with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: five older dialogs, `ReceiveDialog` among them
-(below), are still bespoke dialog shells. A new dialog uses `Modal`. Anything
-changed here is changed everywhere, so the structure is worth stating rather
-than re-deriving from the file.
+Not every dialog uses it yet: one dialog, `ReceiveDialog` (below), is still a
+bespoke dialog shell. A new dialog uses `Modal`. Anything changed here is
+changed everywhere, so the structure is worth stating rather than re-deriving
+from the file.
 
 **One list manager, two vocabularies.** `ListManagerModal` (#4565) is the
 shared shape behind the labels and organisations dialogs: the `Modal` shell,
@@ -2577,11 +2581,16 @@ does not also carry a ✕.
 **A dialog that guards closing while busy must guard the ✕ too.** Escape and the
 backdrop are guarded per caller (`closeOnEscape={!busy}`, `closeOnBackdrop={!busy}`),
 so a default ✕ would otherwise be the one unguarded way out of a request in
-flight. Every busy-guarded caller passes `closeButtonDisabled={busy}` — the
-pattern `NewAccountDialog` already used. The five sites: `ApiKeyConnectModal`
-(`busy`), `BackfillDialog` (`busy`), the contact delete dialog (`deleting`), the
-contact add/edit dialog (`saving`) and the company-details delete
-(`deleting`).
+flight. Every busy-guarded caller passes `closeButtonDisabled` — the pattern
+`NewAccountDialog` already used. Fifteen call sites across fourteen files:
+`ApiKeyConnectModal` (`busy`), `BackfillDialog` (`busy`), the contact add/edit
+dialog (`saving`) and the contact delete dialog (`deleting`) — both in
+`contacts/page.tsx` — the company-details delete (`deleting`),
+`ConnectAgentModal` (`flow.busy`), `EditAgentModal` (`busy`),
+`EditBudgetModal` (`busy`), `FundMerchantModal` (`busy`),
+`IssueSubBudgetModal` (`busy`), `ListManagerModal` (`saving || deleting`),
+`MoveAgentModal` (`saving`), `NewAccountDialog` (`busy`), `SetBudgetDialog`
+(`busy`) and the account rename dialog (`loading`).
 
 **Open-time focus goes to the body, not to the ✕.** `Modal` focuses
 `initialFocusRef` when a caller passes one; otherwise the **body's** first
@@ -2602,7 +2611,7 @@ one style: `mb-1.5 block text-sm font-medium text-[var(--v2-ink)]`. Uppercase,
 letter-spaced labels (`text-xs uppercase tracking-wide` in ink-3) are retired —
 they read as a different product from the sentence-case titles and buttons
 around them. The Connect agent flow's three uppercase labels moved onto it in
-#4562; Edit agent's labels move in #4565.
+#4562; Edit agent's labels moved onto it in #4565.
 
 **Widths say what the content is, not how big the page is.** `sm` (384px) for a
 single question or a short confirmation; `md` (448px, the default) for a form of
@@ -2801,12 +2810,12 @@ dialog. Three placements in that flow are decided rather than incidental:
 ### Dialog result states (`ui/DialogResult`)
 
 A dialog that performs a request ends on one of three screens: busy, success,
-failure. `ui/DialogResult` is that screen. `EditBudgetModal` (#4564) and
-`EditAgentModal` (#4565) read through it today; `FundMerchantModal` still
-hand-builds its busy screen and moves onto it in #4566. It owns the **centred block
-only**: the icon, the title, the description, and any extra notices the caller
-needs. The action row stays the caller's, in `Modal`'s footer, because it is
-the screen's own decision (Close, Try again, Stop old budget).
+failure. `ui/DialogResult` is that screen. `EditBudgetModal` (#4564),
+`EditAgentModal` (#4565) and `FundMerchantModal` (#4566) all read through it
+today. It owns the **centred block only**: the icon, the title, the description,
+and any extra notices the caller needs. The action row stays the caller's, in
+`Modal`'s footer, because it is the screen's own decision (Close, Try again,
+Stop old budget).
 
 | State | Mark | Tone |
 |---|---|---|

@@ -12,7 +12,7 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading, mockHasPasskeys, mockPasskeyElsewhere } = vi.hoisted(() => ({
+const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSignersLoading, mockHasPasskeys, mockPasskeyElsewhere, grantState } = vi.hoisted(() => ({
   mockSignersLoading: vi.fn(() => false),
   mockHasPasskeys: vi.fn((): boolean | null => null),
   mockPasskeyElsewhere: vi.fn(() => false),
@@ -21,6 +21,9 @@ const { mockGrant, mockReady, mockBudgets, mockBudgetsError, mockReload, mockSig
   mockBudgets: vi.fn((): unknown[] | null => []),
   mockBudgetsError: vi.fn(() => false),
   mockReload: vi.fn(),
+  // #4566: the hook's `busy` is the real in-flight flag, so a deferred grant
+  // makes the modal's close guards observable instead of assumed.
+  grantState: { inFlight: 0 },
 }))
 
 // The modal's Stop-set read (#3933), over the mocked list: the real helper
@@ -35,7 +38,7 @@ vi.mock('@/hooks/useDelegationBudget', () => ({
     isOwnAttemptedGrant: () => false,
     reload: mockReload,
     grant: mockGrant,
-    busy: false,
+    busy: grantState.inFlight > 0,
     ready: mockReady(),
     signersLoading: mockSignersLoading(),
     hasPasskeys: mockHasPasskeys(),
@@ -157,6 +160,7 @@ const PROPS = {
 beforeEach(() => {
   mockGrant.mockReset()
   mockGrant.mockResolvedValue({ ok: true })
+  grantState.inFlight = 0
   mockReady.mockReset()
   mockReady.mockReturnValue(true)
   mockSignersLoading.mockReturnValue(false)
@@ -682,6 +686,44 @@ describe('FundMerchantModal (#3331)', () => {
   it('outcome language only — no delegation/caveat/recipient-pin/ERC-7710 jargon anywhere in the modal', () => {
     const { container } = render(<FundMerchantModal {...PROPS} />)
     expect(container.textContent).not.toMatch(/delegation|caveat|recipient pin|erc-?7710/i)
+  })
+
+  /**
+   * #4566: the busy guards moved onto `Modal`'s own props. A signature in
+   * flight must disable every way out together — the ✕, the backdrop and
+   * Escape — or the ✕ becomes the one unguarded exit from a request that is
+   * still running. The grant is left deliberately unresolved so the dialog is
+   * observed mid-operation, not after it.
+   */
+  it('cannot be closed while a grant is in flight — ✕, backdrop and Escape are all guarded', async () => {
+    mockGrant.mockImplementation(() => {
+      grantState.inFlight += 1
+      return new Promise(() => {})
+    })
+    const { container } = render(<FundMerchantModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Approve budget' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve budget' }))
+
+    // The waiting screen is up and the request has not answered.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Waiting for your approval…'))
+    expect(mockGrant).toHaveBeenCalledTimes(1)
+
+    // The ✕ is disabled, not merely inert.
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+
+    // The backdrop has no handler while busy.
+    const backdrop = container.querySelector('.v2-modal-backdrop')
+    expect(backdrop).not.toBeNull()
+    fireEvent.click(backdrop!)
+
+    // Escape is guarded too.
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(PROPS.onClose).not.toHaveBeenCalled()
+    // Still on the waiting screen — nothing was dismissed.
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for your approval…')
   })
 })
 

@@ -9,6 +9,10 @@ covers:
   - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/EditBudgetModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/MoveAgentModal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/IssueSubBudgetModal.tsx
+  - packages/frontend/src/components/SetBudgetDialog.tsx
   - packages/frontend/src/components/ListManagerModal.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx

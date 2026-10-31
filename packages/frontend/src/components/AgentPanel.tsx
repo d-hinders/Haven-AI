@@ -308,12 +308,14 @@ export default function AgentPanel() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => panel.setLabelsManagerOpen(true)}>
-                  Labels
+                  Manage labels
                 </DropdownMenuItem>
                 {/* #3164: the organization manager — create/rename/move/delete.
-                    The tree above the list appears once one exists. */}
+                    The tree above the list appears once one exists.
+                    #4565: the menu item and the dialog title are the same
+                    words, and the manager's name uses the British spelling. */}
                 <DropdownMenuItem onSelect={() => panel.setOrganizationsManagerOpen(true)}>
-                  Organizations
+                  Manage organisations
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

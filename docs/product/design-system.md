@@ -9,6 +9,7 @@ covers:
   - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/EditBudgetModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/ListManagerModal.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
@@ -1078,7 +1079,9 @@ glyph). `connect-agent/ConnectSteps.tsx` is the one that already gates. (The
 #4563 audit said four; the census is five — the count is the command's, not this
 paragraph's.) #4567/#4568 move them onto the primitive; this slice adds it and
 the `/design-system` demo. #4564 already moved `EditBudgetModal`'s busy screen
-onto `DialogResult`, which uses the primitive — so the census is four today.
+onto `DialogResult`, which uses the primitive, and #4568 moved the remaining
+four — so the census is zero today. `EditAgentModal`'s busy screen is
+`DialogResult` since #4565.
 
 ### Detail-page section rule (#3692)
 
@@ -2534,13 +2537,23 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
-`ui/Modal` is the shared dialog shell — seventeen product files import it
-directly (eighteen with `/design-system`), three of which (`ConfirmDialog`,
+`ui/Modal` is the shared dialog shell — twenty product files import it
+directly (twenty-one with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: about ten older dialogs, `ReceiveDialog` among
-them (below), are still bespoke `role="dialog"` shells. A new dialog uses
-`Modal`. Anything changed here is changed everywhere, so the
-structure is worth stating rather than re-deriving from the file.
+Not every dialog uses it yet: five older dialogs, `ReceiveDialog` among them
+(below), are still bespoke dialog shells. A new dialog uses `Modal`. Anything
+changed here is changed everywhere, so the structure is worth stating rather
+than re-deriving from the file.
+
+**One list manager, two vocabularies.** `ListManagerModal` (#4565) is the
+shared shape behind the labels and organisations dialogs: the `Modal` shell,
+the fetched list, a per-row rename field, a per-row delete with its
+confirmation **inline inside the same dialog**, and row errors through
+`InlineAlert`. Each caller passes in only what is its own — labels keep the
+chip preview and the colour palette, organisations keep the create form, the
+move picker and their nesting. It is an extraction of a shape that already
+shipped twice, not a new pattern, and it is why neither caller defines its own
+`startRename`, `saveRename` or `confirmDelete`.
 
 **Anatomy.** Every dialog built on `Modal` reads the same, top to bottom:
 
@@ -2788,9 +2801,9 @@ dialog. Three placements in that flow are decided rather than incidental:
 ### Dialog result states (`ui/DialogResult`)
 
 A dialog that performs a request ends on one of three screens: busy, success,
-failure. `ui/DialogResult` is that screen. `EditBudgetModal` reads through it
-today (#4564); `EditAgentModal` and `FundMerchantModal` still hand-build their
-busy screens and move onto it in #4565 and #4566. It owns the **centred block
+failure. `ui/DialogResult` is that screen. `EditBudgetModal` (#4564) and
+`EditAgentModal` (#4565) read through it today; `FundMerchantModal` still
+hand-builds its busy screen and moves onto it in #4566. It owns the **centred block
 only**: the icon, the title, the description, and any extra notices the caller
 needs. The action row stays the caller's, in `Modal`'s footer, because it is
 the screen's own decision (Close, Try again, Stop old budget).

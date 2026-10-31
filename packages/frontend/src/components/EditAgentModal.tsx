@@ -1,11 +1,7 @@
 'use client'
 
-import { Check, X } from 'lucide-react'
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Icon } from '@/components/ui/Icon'
-import { Spinner } from '@haven_ai/ui/Spinner'
 import { api } from '@/lib/api'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useLabels } from '@/hooks/useLabels'
 import { useOrganizations } from '@/hooks/useOrganizations'
 import type { Agent } from '@/hooks/useAgents'
@@ -14,10 +10,12 @@ import { LABEL_EDITOR_NOTE } from '@/lib/label-copy'
 import { organizationPath } from '@/lib/agent-organizations'
 import { ORG_PICKER_LABEL, ORG_PICKER_NOTE } from '@/lib/organization-copy'
 import { Button } from './ui/Button'
+import { DialogActions } from './ui/DialogActions'
+import { DialogResult } from './ui/DialogResult'
 import { Input } from './ui/Input'
+import { Modal } from './ui/Modal'
 import { Select } from './ui/Select'
 import { Textarea } from './ui/Textarea'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 type Step = 'form' | 'review' | 'saving' | 'done'
 
@@ -32,6 +30,14 @@ type Step = 'form' | 'review' | 'saving' | 'done'
  * (the API's unit of intent). Tag-only saves are allowed: `canReview` no
  * longer requires a name/description change, only that SOMETHING changed.
  * A label that does not exist yet can be created inline while tagging.
+ *
+ * #4565: the dialog is `ui/Modal` — the shared shell, its ✕, its focus trap and
+ * its focus return — instead of a bespoke dialog panel with its own close
+ * button and its own Escape hook. The screen's action pair lives in
+ * `Modal`'s `footer`, outside the scroll box, so a short viewport can never push
+ * the forward action off screen (#1946); a multi-screen dialog uses
+ * `DialogActions`. The busy, success and failure screens are `ui/DialogResult`
+ * (#4564), so they read the same as the budget dialog's.
  */
 export default function EditAgentModal({
   open,
@@ -44,8 +50,6 @@ export default function EditAgentModal({
   agent: Agent
   onUpdated: () => void
 }) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useFocusTrap(panelRef, open)
   const [step, setStep] = useState<Step>('form')
   const [agentName, setAgentName] = useState(agent.name)
   const [agentDescription, setAgentDescription] = useState(agent.description ?? '')
@@ -131,13 +135,17 @@ export default function EditAgentModal({
     wasOpenRef.current = open
   }, [open, resetForm])
 
+  // A request in flight is the only state that guards closing. The failure
+  // screen keeps `step === 'saving'` (it is the same screen, with the error
+  // filled in), so it must not inherit the guard — its ✕, Escape and backdrop
+  // are the way out of a save that did not land.
+  const busy = step === 'saving' && !error
+
   const handleClose = useCallback(() => {
-    if (step === 'saving') return
+    if (busy) return
     resetForm()
     onClose()
-  }, [onClose, resetForm, step])
-
-  useEscapeToClose(open, handleClose, { enabled: step !== 'saving' })
+  }, [busy, onClose, resetForm])
 
   const trimmedName = agentName.trim()
   const trimmedDescription = agentDescription.trim()
@@ -172,243 +180,229 @@ export default function EditAgentModal({
     }
   }
 
-  if (!open) return null
+  // #4565: the screen's action pair lives in `Modal`'s footer — outside the
+  // scroll box, so a short viewport can never push the forward action off
+  // screen (#1946). A multi-screen dialog uses `DialogActions`; a screen with
+  // a single action renders one full-width primary.
+  const footer =
+    step === 'form' ? (
+      <DialogActions className="w-full">
+        <Button variant="ghost" onClick={handleClose} className="flex-1">
+          Cancel
+        </Button>
+        <Button onClick={() => setStep('review')} disabled={!canReview} className="flex-1">
+          Review changes
+        </Button>
+      </DialogActions>
+    ) : step === 'review' ? (
+      <DialogActions className="w-full">
+        <Button variant="ghost" onClick={() => setStep('form')} className="flex-1">
+          Back
+        </Button>
+        <Button onClick={() => void saveDetails()} className="flex-1">
+          Save details
+        </Button>
+      </DialogActions>
+    ) : step === 'done' ? (
+      <Button variant="ghost" onClick={handleClose} className="w-full">
+        Done
+      </Button>
+    ) : error ? (
+      <DialogActions className="w-full">
+        <Button variant="ghost" onClick={() => setStep('review')} className="flex-1">
+          Back
+        </Button>
+        <Button onClick={() => void saveDetails()} className="flex-1">
+          Retry
+        </Button>
+      </DialogActions>
+    ) : undefined
 
   return (
-    // `v2-safe-overlay` + a 1rem gutter is `p-4` that also clears the notch and
-    // the home indicator (#2730), unchanged wherever the insets are 0. This
-    // wrapper paints its own backdrop rather than nesting one, which is why the
-    // first sweep missed it: the grep that enumerated the overlays excluded
-    // every line carrying `v2-modal-backdrop`.
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem] v2-modal-backdrop">
-      <div className="absolute inset-0" onClick={step !== 'saving' ? handleClose : undefined} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Edit agent"
-        className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title="Edit agent"
+      subtitle="Update the name, description, labels and organization shown in Haven."
+      width="lg"
+      // A save in flight disables every way out together — the ✕, the backdrop
+      // and Escape — or the ✕ becomes the one unguarded exit.
+      closeButtonDisabled={busy}
+      closeOnBackdrop={!busy}
+      closeOnEscape={!busy}
+      footer={footer}
+    >
+      {step === 'form' && (
+        <div className="space-y-5">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Edit agent</h2>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">Update the name, description, labels and organization shown in Haven.</p>
+            <label htmlFor="edit-agent-name" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+              Agent name
+            </label>
+            <Input
+              id="edit-agent-name"
+              value={agentName}
+              onChange={(event) => setAgentName(event.target.value)}
+              placeholder="Agent name"
+            />
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={step === 'saving'}
-            aria-label="Close"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:opacity-50"
-          >
-            <Icon icon={X} className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-6">
-          {step === 'form' && (
-            <div className="space-y-5">
-              <div>
-                <label htmlFor="edit-agent-name" className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
-                  Agent name
-                </label>
-                <Input
-                  id="edit-agent-name"
-                  value={agentName}
-                  onChange={(event) => setAgentName(event.target.value)}
-                  placeholder="Agent name"
-                />
-              </div>
-              <div>
-                <label htmlFor="edit-agent-description" className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]">
-                  Description <span className="text-[var(--v2-ink-3)]">(optional)</span>
-                </label>
-                <Textarea
-                  id="edit-agent-description"
-                  value={agentDescription}
-                  onChange={(event) => setAgentDescription(event.target.value)}
-                  placeholder="What does this agent do?"
-                  rows={3}
-                />
-              </div>
-              {/*
-                #3167: the label editor — checkbox list over the user's whole
-                vocabulary, inline create below it. Checking a box is NOT a
-                save: every tag change lands through the review step's one
-                PUT, the same review+save path the name and description take.
-              */}
-              <div>
-                <p className="mb-1.5 text-xs font-medium text-[var(--v2-ink-3)]">Labels</p>
-                {labelsReady && vocabulary.length === 0 ? (
-                  <p className="text-xs text-[var(--v2-ink-3)]">
-                    No labels yet. Add one below to start organising your agents.
-                  </p>
-                ) : (
-                  <div className="space-y-1" data-testid="label-editor-list">
-                    {vocabulary.map((label) => (
-                      <LabelOptionRow
-                        key={label.id}
-                        label={label}
-                        checked={checkedSet.has(label.id)}
-                        onToggle={() => toggleLabel(label.id)}
-                      />
-                    ))}
-                  </div>
-                )}
-                <div className="mt-2 flex gap-2">
-                  <Input
-                    id="edit-agent-new-label"
-                    value={newLabelName}
-                    onChange={(event) => setNewLabelName(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        void addNewLabel()
-                      }
-                    }}
-                    placeholder="New label name"
-                    aria-label="New label name"
-                    className="flex-1"
+          <div>
+            <label htmlFor="edit-agent-description" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+              Description <span className="text-[var(--v2-ink-3)]">(optional)</span>
+            </label>
+            <Textarea
+              id="edit-agent-description"
+              value={agentDescription}
+              onChange={(event) => setAgentDescription(event.target.value)}
+              placeholder="What does this agent do?"
+              rows={3}
+            />
+          </div>
+          {/*
+            #3167: the label editor — checkbox list over the user's whole
+            vocabulary, inline create below it. Checking a box is NOT a
+            save: every tag change lands through the review step's one
+            PUT, the same review+save path the name and description take.
+          */}
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-[var(--v2-ink)]">Labels</p>
+            {labelsReady && vocabulary.length === 0 ? (
+              <p className="text-xs text-[var(--v2-ink-3)]">
+                No labels yet. Add one below to start organising your agents.
+              </p>
+            ) : (
+              <div className="space-y-1" data-testid="label-editor-list">
+                {vocabulary.map((label) => (
+                  <LabelOptionRow
+                    key={label.id}
+                    label={label}
+                    checked={checkedSet.has(label.id)}
+                    onToggle={() => toggleLabel(label.id)}
                   />
-                  <Button
-                    type="button"
-                    variant="tertiary"
-                    size="sm"
-                    onClick={() => void addNewLabel()}
-                    disabled={newLabelName.trim().length === 0}
-                  >
-                    Add
-                  </Button>
-                </div>
-                {newLabelError ? (
-                  <p role="alert" className="mt-1 text-xs text-[var(--v2-danger)]">{newLabelError}</p>
-                ) : null}
-                <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{LABEL_EDITOR_NOTE}</p>
+                ))}
               </div>
-              {/*
-                #3164: the organization picker — placement alongside identity
-                and labels, the same review+save flow. Top level is the
-                explicit choice; the note says what the choice changes
-                (placement, nothing else).
-              */}
-              <div>
-                <label
-                  htmlFor="edit-agent-organization"
-                  className="mb-1.5 block text-xs font-medium text-[var(--v2-ink-3)]"
-                >
-                  {ORG_PICKER_LABEL}
-                </label>
-                <Select
-                  id="edit-agent-organization"
-                  value={orgChoice}
-                  onChange={(event) => setOrgChoice(event.target.value)}
-                >
-                  <option value="">Top level</option>
-                  {organizations.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {organizationPath(organizations, org.id)}
-                    </option>
-                  ))}
-                </Select>
-                <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{ORG_PICKER_NOTE}</p>
-              </div>
-              {!canReview ? (
-                <p className="text-xs text-[var(--v2-ink-3)]">Edit the name, description or labels to continue.</p>
-              ) : null}
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={handleClose} className="flex-1">Cancel</Button>
-                <Button onClick={() => setStep('review')} disabled={!canReview} className="flex-1">
-                  Review changes
-                </Button>
-              </div>
+            )}
+            <div className="mt-2 flex gap-2">
+              <Input
+                id="edit-agent-new-label"
+                value={newLabelName}
+                onChange={(event) => setNewLabelName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void addNewLabel()
+                  }
+                }}
+                placeholder="New label name"
+                aria-label="New label name"
+                className="flex-1"
+              />
+              <Button
+                type="button"
+                variant="tertiary"
+                size="sm"
+                onClick={() => void addNewLabel()}
+                disabled={newLabelName.trim().length === 0}
+              >
+                Add
+              </Button>
             </div>
-          )}
+            {newLabelError ? (
+              <p role="alert" className="mt-1 text-xs text-[var(--v2-danger)]">{newLabelError}</p>
+            ) : null}
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{LABEL_EDITOR_NOTE}</p>
+          </div>
+          {/*
+            #3164: the organization picker — placement alongside identity
+            and labels, the same review+save flow. Top level is the
+            explicit choice; the note says what the choice changes
+            (placement, nothing else).
+          */}
+          <div>
+            <label
+              htmlFor="edit-agent-organization"
+              className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]"
+            >
+              {ORG_PICKER_LABEL}
+            </label>
+            <Select
+              id="edit-agent-organization"
+              value={orgChoice}
+              onChange={(event) => setOrgChoice(event.target.value)}
+            >
+              <option value="">Top level</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {organizationPath(organizations, org.id)}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{ORG_PICKER_NOTE}</p>
+          </div>
+          {!canReview ? (
+            <p className="text-xs text-[var(--v2-ink-3)]">Edit the name, description or labels to continue.</p>
+          ) : null}
+        </div>
+      )}
 
-          {step === 'review' && (
-            <div className="space-y-5">
-              <div className="space-y-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
-                <div>
-                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Agent name</p>
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">{trimmedName}</p>
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Description</p>
-                  <p className="text-sm text-[var(--v2-ink-2)]">{trimmedDescription || 'No description'}</p>
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Labels</p>
-                  {labelsChanged ? (
-                    <div className="flex flex-wrap items-center gap-1" data-testid="review-label-chips">
-                      {vocabulary
-                        .filter((l) => checkedSet.has(l.id))
-                        .map((l) => (
-                          <LabelChip key={l.id} label={l} />
-                        ))}
-                      {checkedLabelIds.length === 0 ? (
-                        <span className="text-sm text-[var(--v2-ink-2)]">No labels</span>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
-                  )}
-                </div>
-                <div>
-                  <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">{ORG_PICKER_LABEL}</p>
-                  {orgChanged ? (
-                    <p className="text-sm text-[var(--v2-ink)]" data-testid="review-organization">
-                      {orgChoice
-                        ? organizationPath(organizations, orgChoice)
-                        : 'Top level'}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep('form')} className="flex-1">Back</Button>
-                <Button onClick={() => void saveDetails()} className="flex-1">Save details</Button>
-              </div>
+      {step === 'review' && (
+        <div className="space-y-5">
+          <div className="space-y-3 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
+            <div>
+              <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Agent name</p>
+              <p className="text-sm font-medium text-[var(--v2-ink)]">{trimmedName}</p>
             </div>
-          )}
-
-          {step === 'saving' && (
-            <div className="space-y-4 py-8 text-center">
-              {error ? (
-                <>
-                  <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
-                    <Icon icon={X} className="h-5 w-5 text-[var(--v2-danger)]" />
-                  </div>
-                  <p className="text-sm font-medium text-[var(--v2-danger)]">Update failed</p>
-                  <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">{error}</p>
-                  <div className="flex gap-3 pt-2">
-                    <Button variant="ghost" onClick={() => setStep('review')} className="flex-1">Back</Button>
-                    <Button onClick={() => void saveDetails()} className="flex-1">Retry</Button>
-                  </div>
-                </>
+            <div>
+              <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Description</p>
+              <p className="text-sm text-[var(--v2-ink-2)]">{trimmedDescription || 'No description'}</p>
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">Labels</p>
+              {labelsChanged ? (
+                <div className="flex flex-wrap items-center gap-1" data-testid="review-label-chips">
+                  {vocabulary
+                    .filter((l) => checkedSet.has(l.id))
+                    .map((l) => (
+                      <LabelChip key={l.id} label={l} />
+                    ))}
+                  {checkedLabelIds.length === 0 ? (
+                    <span className="text-sm text-[var(--v2-ink-2)]">No labels</span>
+                  ) : null}
+                </div>
               ) : (
-                <>
-                  <Spinner size="md" />
-                  <p className="text-sm font-medium text-[var(--v2-ink)]">Saving changes…</p>
-                </>
+                <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
               )}
             </div>
-          )}
-
-          {step === 'done' && (
-            <div className="space-y-5">
-              <div className="py-4 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
-                  <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
-                </div>
-                <p className="text-sm font-medium text-[var(--v2-ink)]">Agent updated</p>
-                <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Details, labels and organization saved</p>
-              </div>
-              <Button variant="ghost" onClick={handleClose} className="w-full">Done</Button>
+            <div>
+              <p className="mb-1 text-xs font-medium text-[var(--v2-ink-3)]">{ORG_PICKER_LABEL}</p>
+              {orgChanged ? (
+                <p className="text-sm text-[var(--v2-ink)]" data-testid="review-organization">
+                  {orgChoice
+                    ? organizationPath(organizations, orgChoice)
+                    : 'Top level'}
+                </p>
+              ) : (
+                <p className="text-sm text-[var(--v2-ink-2)]">Unchanged</p>
+              )}
             </div>
-          )}
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+
+      {step === 'saving' && !error && (
+        <DialogResult state="busy" title="Saving changes…" />
+      )}
+
+      {step === 'saving' && error && (
+        <DialogResult state="error" title="Update failed" description={error} />
+      )}
+
+      {step === 'done' && (
+        <DialogResult
+          state="success"
+          title="Agent updated"
+          description="Details, labels and organization saved"
+        />
+      )}
+    </Modal>
   )
 }

@@ -1,8 +1,9 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { Check, Loader2 } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { Icon } from '../ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 
 /**
  * #3832: the connect step's status checklist — copy → paste → approve. Each
@@ -87,7 +88,7 @@ function Marker({ state }: { state: ConnectStepRowState }) {
   if (state === 'working') {
     return (
       <span aria-hidden="true" className={`${base} border-transparent bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]`}>
-        <Icon icon={Loader2} className="h-4 w-4 motion-safe:animate-spin" strokeWidth={2} />
+        <Spinner size="sm" />
       </span>
     )
   }

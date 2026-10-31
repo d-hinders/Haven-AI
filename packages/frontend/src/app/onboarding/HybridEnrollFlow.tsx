@@ -28,6 +28,7 @@ import {
 import { rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import type { User } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { classifyAgentUserAgent } from '@/lib/discovery'
 import { AgentPasskeyHandoff } from '@/components/onboarding/AgentHandoffNote'
 import { PASSKEY_REQUIRED_MESSAGE } from './copy'
@@ -207,7 +208,7 @@ export default function HybridEnrollFlow({
       role="status"
       className="flex items-center gap-3 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3"
     >
-      <div className="h-2 w-2 animate-pulse rounded-full bg-[var(--v2-brand)]" />
+      <Skeleton variant="circle" className="h-2 w-2 bg-[var(--v2-brand)]" />
       <span className="text-sm text-[var(--v2-ink-2)]">
         {stage === 'creating_passkey' ? 'Waiting for your passkey…' : 'Setting up your account…'}
       </span>

@@ -11,6 +11,7 @@ export { Address, truncateAddress } from './Address'
 export {
   ExternalDetailsLink,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   TransactionActivityDayHeader,
   transactionDayGroups,
   transactionDayKey,

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
   transactionDayKey,
   transactionDayLabel,
@@ -189,5 +190,66 @@ describe('TransactionActivityRow move direction (#4264)', () => {
       fiat: { amount: 12, currency: 'SEK' },
     })
     expect(container.querySelector('span.v2-tabular')!.textContent).toMatch(/^[-+\u2212]/)
+  })
+})
+
+/**
+ * The ledger-row placeholder (#4568) — one shape, four call sites, two
+ * densities. The compact variant is the dashboard preview's, and the two
+ * properties that make it a different shape are pinned here: the amount
+ * placeholder and the 72px desktop height (#1833).
+ */
+describe('TransactionActivityRowSkeleton (#4568)', () => {
+  it('comfortable is the icon square and two bars, with no amount column', () => {
+    const { container } = render(<TransactionActivityRowSkeleton />)
+    const row = container.firstElementChild!
+    expect(row.className).toContain('flex')
+    expect(row.className).toContain('px-5')
+    expect(row.className).toContain('py-3.5')
+    // The dashboard's grid and height pin belong to the compact variant only.
+    expect(row.className).not.toContain('sm:h-[72px]')
+    expect(row.className).not.toContain('sm:grid-cols-[minmax(0,1fr)_auto]')
+
+    const blocks = row.querySelectorAll('[aria-hidden="true"]')
+    expect(blocks).toHaveLength(3)
+    expect(blocks[0].className).toContain('h-9')
+    expect(blocks[0].className).toContain('w-9')
+    expect(blocks[0].className).toContain('rounded-[10px]')
+    expect(blocks[1].className).toContain('h-3.5')
+    expect(blocks[2].className).toContain('h-2.5')
+  })
+
+  it('compact keeps the responsive grid and the 72px desktop height', () => {
+    const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
+    const row = container.firstElementChild!
+    expect(row.className).toContain('grid')
+    expect(row.className).toContain('sm:grid-cols-[minmax(0,1fr)_auto]')
+    expect(row.className).toContain('sm:items-center')
+    expect(row.className).toContain('sm:h-[72px]')
+    // Below `sm` the row sizes to its content — the same breakpoint scope the
+    // loaded row uses, so the two never disagree about where the pin applies.
+    expect(row.className).toContain('py-3')
+    expect(row.className).toContain('sm:py-0')
+  })
+
+  it('compact adds the amount placeholder the ledgers do not have', () => {
+    const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
+    const row = container.firstElementChild!
+    const blocks = row.querySelectorAll('[aria-hidden="true"]')
+    // icon + two bars + the amount column.
+    expect(blocks).toHaveLength(4)
+    const amount = blocks[3]
+    expect(amount.className).toContain('h-4')
+    expect(amount.className).toContain('w-24')
+    expect(amount.className).toContain('sm:justify-self-end')
+  })
+
+  it('every block is a Skeleton — no inline animate-pulse div survives', () => {
+    const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
+    const blocks = container.querySelectorAll('[aria-hidden="true"]')
+    for (const block of blocks) {
+      expect(block.className).toContain('animate-pulse')
+      expect(block.className).toContain('bg-[var(--v2-surface-2)]')
+    }
   })
 })

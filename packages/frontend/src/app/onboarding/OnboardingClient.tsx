@@ -33,6 +33,7 @@ import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Select } from '@/components/ui/Select'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 import HybridEnrollFlow from './HybridEnrollFlow'
 
 type Phase = 'create' | 'success'
@@ -149,10 +150,7 @@ export default function OnboardingClient() {
   if (loading || !user) {
     return (
       <div className="min-h-screen bg-[var(--v2-bg)] flex items-center justify-center">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-          <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
-        </div>
+        <RouteLoading />
       </div>
     )
   }

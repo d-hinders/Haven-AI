@@ -105,6 +105,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import {
@@ -362,10 +363,7 @@ export default function AccountDetailClient() {
       <div className="max-w-5xl">
         {/* The way back exists in every state of the page (#4028). */}
         <BackLink href="/accounts" label="Accounts" />
-        <div role="status" aria-busy="true" aria-label="Loading account" className="py-16 flex items-center justify-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-          <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
-        </div>
+        <RouteLoading label="Loading account…" className="py-16 justify-center" />
       </div>
     )
   }
@@ -482,7 +480,7 @@ export default function AccountDetailClient() {
           <section aria-label="Balance" className="p-5 sm:p-6">
             <p className="text-sm font-medium text-[var(--v2-ink-2)]">Balance</p>
             {portfolioLoading ? (
-              <div className="mt-3 h-9 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              <Skeleton className="mt-3 h-9 w-44" />
             ) : balanceUnavailable ? (
               <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">
                 Unavailable
@@ -517,8 +515,8 @@ export default function AccountDetailClient() {
             </div>
             {portfolioLoading ? (
               <div className="mt-3 space-y-2" role="status" aria-busy="true" aria-label="Loading holdings">
-                <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton variant="text" className="h-4 w-32" />
+                <Skeleton variant="text" className="h-4 w-24" />
               </div>
             ) : holdings.length === 0 ? (
               <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No tokens yet</p>
@@ -602,8 +600,8 @@ export default function AccountDetailClient() {
                 aria-busy="true"
                 aria-label="Loading the last 30 days"
               >
-                <div className="h-5 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="h-5 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton variant="text" className="h-5 w-24" />
+                <Skeleton variant="text" className="h-5 w-24" />
               </div>
             ) : moneyFlow.error ? (
               <div className="mt-2">
@@ -688,10 +686,10 @@ export default function AccountDetailClient() {
               <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading agents">
                 {[0, 1, 2].map((item) => (
                   <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
+                    <Skeleton variant="circle" className="h-8 w-8" />
                     <div className="min-w-0 flex-1">
-                      <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                      <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                      <Skeleton variant="text" className="h-3.5 w-36" />
+                      <Skeleton variant="text" className="mt-1.5 h-2.5 w-48" />
                     </div>
                   </div>
                 ))}

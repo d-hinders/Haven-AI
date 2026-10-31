@@ -10,6 +10,7 @@ import { LABEL_COLORS, DEFAULT_LABEL_COLOR, type LabelColor } from '@haven_ai/co
 import { labelChipClass } from '@/lib/label-colors'
 import { LABEL_DELETE_BODY } from '@/lib/label-copy'
 import { LabelChip } from '@/components/haven/LabelChip'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import ConfirmDialog from './ConfirmDialog'
@@ -149,8 +150,8 @@ export default function LabelsManagerModal({
         <div className="p-6">
           {loading ? (
             <div role="status" aria-busy="true" className="space-y-2">
-              <div className="h-9 animate-pulse rounded-md bg-[var(--v2-surface-2)]" />
-              <div className="h-9 animate-pulse rounded-md bg-[var(--v2-surface-2)]" />
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
               <span className="sr-only">Loading labels</span>
             </div>
           ) : error ? (

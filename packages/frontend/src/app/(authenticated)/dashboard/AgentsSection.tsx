@@ -45,6 +45,7 @@ import { useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { AgentRow, agentBadge, CURRENCY_KEY, type DashboardAgent, type DashboardCurrency } from '@/components/haven'
 import type { AttentionRuleItem, DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
 
@@ -212,10 +213,10 @@ export function AgentsSection({
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading agents">
           {[0, 1, 2].map((item) => (
             <div key={item} className="flex items-center gap-3 px-5 h-[72px]">
-              <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
+              <Skeleton variant="circle" className="h-8 w-8" />
               <div className="min-w-0 flex-1">
-                <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton variant="text" className="h-3.5 w-36" />
+                <Skeleton variant="text" className="mt-1.5 h-2.5 w-48" />
               </div>
             </div>
           ))}

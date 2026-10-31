@@ -68,6 +68,7 @@ import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 import { Spinner } from '@haven_ai/ui/Spinner'
 import { StatTile } from '@/components/ui/StatTile'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -97,6 +98,7 @@ import {
   RiskExplainer,
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
   TransactionMovement,
   WalletIdentityBlock,
@@ -3990,6 +3992,37 @@ export default function DesignSystemPage() {
             body="Check your network connection, then try again. Existing agent budgets are unchanged."
             action={<Button size="sm" variant="ghost">Try again</Button>}
           />
+        </div>
+      </Section>
+
+      <Section
+        title="Loading states — RouteLoading and the activity-row skeleton"
+        description="Two shapes that already shipped ten and four times over, now one each. RouteLoading is the route and auth fallback: one brand dot, one ink tone, and a visible Loading… label that is also the element's accessible name (role=status, aria-busy, aria-live=polite). TransactionActivityRowSkeleton stands in for a ledger row at the row's own density — comfortable for the ledgers, compact for the dashboard preview, where it keeps the amount placeholder and the 72px desktop height."
+        testId="ds-loading-states"
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">RouteLoading</p>
+            <div className="mt-4">
+              <RouteLoading />
+            </div>
+            <div className="mt-4">
+              <RouteLoading label="Loading account…" />
+            </div>
+          </Card>
+          <Card hover={false} className="overflow-hidden">
+            <Card.Header title="TransactionActivityRowSkeleton" />
+            <div
+              className="divide-y divide-[var(--v2-border)]"
+              role="status"
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading activity"
+            >
+              <TransactionActivityRowSkeleton />
+              <TransactionActivityRowSkeleton density="compact" />
+            </div>
+          </Card>
         </div>
       </Section>
 

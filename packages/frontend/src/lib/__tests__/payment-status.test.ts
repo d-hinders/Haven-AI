@@ -56,10 +56,12 @@ describe('payment status presentation', () => {
     })
     // The AGENT `pending_approval` is alive (#1069) and must keep saying
     // "Needs setup" — it is a different field from the retired payment queue,
-    // and #2120 must not have collapsed the two.
+    // and #2120 must not have collapsed the two. Its tone is `brand` (#4567,
+    // owner decision 2026-10-30): the owner has one step to take, and
+    // `warning` is earned by a change in posture, not an unfinished setup.
     expect(agentStatusPresentation('pending_approval')).toEqual({
       label: 'Needs setup',
-      tone: 'warning',
+      tone: 'brand',
     })
   })
 

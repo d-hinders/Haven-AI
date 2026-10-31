@@ -843,9 +843,10 @@ and, until #4563, no entry here.
 | `brand` | `--v2-brand-soft` / `--v2-brand` | a next step for the owner, not a problem |
 
 **One label and one tone per state.** The tables below are the source of truth
-for the status families the app renders. Slice 7 (#4567) moves the code onto
-them; where the code disagrees today, the table wins and the disagreement is
-named in the row rather than left for the next reader to rediscover.
+for the status families the app renders. Slice 7 (#4567) moved the code onto
+them; `lib/__tests__/status-vocabulary.test.ts` walks these tables and the
+code's maps together, so a label or tone that drifts from a row here goes red
+rather than waiting for the next reader to rediscover it.
 
 #### Agents
 
@@ -853,7 +854,7 @@ named in the row rather than left for the next reader to rediscover.
 |---|---|---|---|
 | `active` | Connected | `success` | `lib/payment-status.ts` `AGENT_STATUS` |
 | `paused` | Paused | `warning` | `AGENT_STATUS`, `AgentRow`'s `agentBadge` |
-| `pending_approval` | **Needs setup** | **`brand`** | `AGENT_STATUS` renders `warning` today — #4567 moves it; `agentBadge` already renders `brand` |
+| `pending_approval` | **Needs setup** | **`brand`** | `AGENT_STATUS`, `AgentRow`'s `agentBadge` |
 | `revoked` | Revoked | `danger` | `AGENT_STATUS`, `AgentCard`'s `agentCardBadge` |
 | `archived_at` set | Archived | `neutral` | `agent-panel/AgentCard.tsx` `agentCardBadge` |
 | budget ended | Budget ended | `neutral` | `AgentRow.tsx` `agentBadge` |
@@ -863,7 +864,9 @@ named in the row rather than left for the next reader to rediscover.
 agent exists and is reachable; it has no budget yet, so the owner has one step
 to take. `brand` is the tone for a next step. `warning` is earned by a change
 in posture — `Paused`, `Suspended`, `Revoking…` — not by a setup that has not
-finished. `AGENT_STATUS`'s `warning` is the drift #4567 removes.
+finished. `AGENT_STATUS` said `warning` until #4567; `agentBadge` and
+`lib/dashboard-attention.ts` already said `brand`, and the map is the drift
+that slice removed.
 
 #### Payments
 
@@ -888,13 +891,23 @@ chain drifts from this the moment a rule changes.
 
 | state | label | tone | source |
 |---|---|---|---|
-| `pushed` | **In <Provider>** | `success` | `components/accounting/AccountingBadge.tsx` |
+| `pushed` | **In <Provider>** | `success` | `components/accounting/AccountingBadge.tsx` `accountingStatusPresentation` |
 | `pushed`, record-only connector | Evidence archived | `success` | same — Accounted archives the document Haven pushed, so "In …" would read as a booking the provider made (#3018) |
-| `pending` | **Sending…** | `neutral` | code renders "Feeding…" today — #4567 moves it |
-| `failed` / `skipped` | **Not sent** | `warning` | code renders "Not fed" today — #4567 moves it; the reason rides on hover/focus where the badge is interactive |
+| `pushed`, connector not live | **Tracked** | `neutral` | same — `liveSyncReady` false means nothing left Haven, so the row may not claim delivery (SR:1583) |
+| `pending` | **Sending…** | `neutral` | same |
+| `failed` / `skipped` | **Not sent** | `warning` | same; the reason rides on hover/focus where the badge is interactive |
 
 The provider name comes from the row (`accounting.provider`) through
 `providerDisplayName`, so a second provider does not read as "In Fortnox".
+
+**One function, two surfaces.** `accountingStatusPresentation` is what both the
+per-payment badge (`/transactions` rows, the detail drawer) and the
+`/accounting` page's row chip render, so the page cannot carry a second
+vocabulary — it did until #4567, with its own `STATUS` map reading Synced /
+Pending / Failed / Skipped, and that map claimed delivery on a preview
+deployment. The ledger row and the drawer have no feed status to consult, so
+they pass no `liveSyncReady` and a pushed row reads "In <Provider>" there; the
+page passes it and a preview deployment reads "Tracked".
 
 #### Merchant budgets
 
@@ -3368,8 +3381,10 @@ pattern, and it leads with the answer:
    "Payment", "Deposit", "Transfer", "Payment attempt"; dropped where it would
    only repeat the title, as on a deposit). Below it: `Amount
    size="lg"` with the token amount beside it (a move passes no sign), the
-   `StatusBadge` from `transactionRowBadge(tx)` with "Executed" as the panel's
-   own fallback, one line saying who, where and when ("Paid by Atlas from Main
+   `StatusBadge` from `transactionRowBadge(tx)` with "Sent" as the panel's
+   own fallback (the same word `PAYMENT_STATUS.confirmed` uses, #4567 — the
+   #3810 no-badge rule is for list rows, and the panel's anatomy carries a
+   status badge), one line saying who, where and when ("Paid by Atlas from Main
    · <date>"), and, when the record needs one, a `NoticeRow` callout: needs
    attention (the shared stranded-funds sentence for a merchant retry rejected
    after payment, otherwise "This payment needs your attention", and an "Open

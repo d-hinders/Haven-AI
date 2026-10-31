@@ -363,7 +363,7 @@ export default function AgentPanel() {
                 filtering="browser"
                 facets={toolbarFacets}
                 sort={{ options: SORT_OPTIONS }}
-                searchDescription="by name, description or delegate address"
+                searchDescription="by name, description or wallet address"
                 count={{ shown: listFilters.filtered.length, total: listFilters.total }}
               />
             </div>

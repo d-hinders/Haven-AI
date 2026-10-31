@@ -930,11 +930,35 @@ The provider name comes from the row (`accounting.provider`) through
 doing something in the background and the owner has nothing to do. `warning` is
 earned by `Revoking…` and `Suspended`, which are changes in posture.
 
+**The two axes are explained, not collapsed (#4571).** "Issued" beside
+"Suspended" is two true statements about two different things, and with no
+link between them it reads as a contradiction. The badge logic stays; when
+standing is not `active`, the Standing row's description says what that
+standing means for the agent — `suspended`: "The agent cannot act until Haven
+restores it. Its passport stays issued."; `revoked`: "The agent can no longer
+act. Its passport stays as a record of what was issued."; `unknown`: "Haven
+cannot confirm this agent's standing right now." `active` adds nothing, so the
+row stays the one-line badge it has always been.
+
+#### Accounts
+
+| state | label | tone | source |
+|---|---|---|---|
+| `is_default`, more than one account | Default account | `brand` | `accounts/[accountId]/AccountDetailClient.tsx`, `AccountsOverviewClient.tsx` |
+
+The default badge needs a second account to mean anything (#4021), so a lone
+account renders none on either surface. #4571 moved the overview card's
+hand-rolled chip onto this row and retired #4021's lowercase "default" label,
+so the card and the account page now say the same thing.
+
 #### Network
 
 | state | label | tone | source |
 |---|---|---|---|
 | testnet chain | Test network | `neutral` | `accounts/[accountId]/AccountDetailClient.tsx`, `AccountsOverviewClient.tsx` |
+
+Both sites render it through `StatusBadge` since #4571; the overview card's
+hand-rolled chip is gone.
 
 #### What the table does not cover
 
@@ -2158,9 +2182,12 @@ decision on #4094: wording that names a task, not a button, keeps its words) —
 that opens the Receive dialog, the exact
 sibling-above-the-overlay shape this section has always demanded: `relative z-[var(--v2-z-content)]`,
 its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
-button so the card still holds no buttons. A second holding area — the "Create another
-account" tile beside the one-account card — is NOT on the card at all; it is a page-level
-dashed button that opens the same dialog as the header's "New account" action.
+button so the card still holds no buttons. #4021's second holding area — the "Create another
+account" tile beside the one-account card — was removed by owner decision 2026-10-30 (#4571):
+the header's "New account" button opens the same dialog, so the tile was a second door to one
+room, and with it gone the single account card takes the whole row. The card's "Test network"
+and default markers are `StatusBadge`s on the vocabulary table above (#4571), not hand-rolled
+chips, so they match `/accounts/<id>`'s meta line.
 
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving
@@ -2191,10 +2218,18 @@ Agents / Security & details), and the agent page (Activity / Tool calls / Settin
   list's 1px border by 1px (`-mb-px`), so the two read as one continuous rule rather
   than a floating dash. Unselected tabs are ink-3, brand ink when selected.
 - **Hit area.** Every tab paints 38px by its class string (`py-2` around a 20px
-  `text-sm` line, plus the 2px `border-b-2`) and extends its hit area to 44px vertically —
-  never sideways, the tabs abut — the same transparent-pseudo-element mechanism as
-  `SegmentedControl` ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)); the
-  § Tap targets rules above apply.
+  `text-sm` line, plus the 2px `border-b-2`) and carries the same transparent
+  pseudo-element as `SegmentedControl`
+  ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)) that would extend its hit
+  area to 44px vertically — never sideways, the tabs abut. **On this component it does
+  not reach 44px, and #4571 measured why:** the list is a horizontal scroll container,
+  and a scroll container clips in every direction, so the pseudo-element's 4px above the
+  row and 2px below it are both clipped. The effective target is the tab's own 38px box,
+  which still clears the § Tap targets floor. The same clipping is what painted a thin
+  vertical scrollbar at the right end of the Settings tab row at 375px in dark mode —
+  `overflow-x-auto` alone makes the list a scroll container on both axes, and the clipped
+  decoration overflowed it by 3px. `overflow-y-hidden` on the list stops that; it changes
+  no painted pixel.
 - **Adornments.** An optional muted `count` rides beside the label — visible text that
   reads with the tab's accessible name — and an optional amber `warningDot` marks a view
   that needs the user: decorative to the eye, named to the ear through its screen-reader

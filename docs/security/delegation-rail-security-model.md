@@ -4060,6 +4060,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > note: the send-flow recipient selection and the unchanged hook it feeds;
 > `last-verified` is bumped to 2026-10-16 for exactly this coverage.
 
+> **Re-verified unchanged (#4571, 2026-10-31 — the New account dialog's copy
+> is two sentences):** this diff is copy only, in one covered file.
+> `components/NewAccountDialog.tsx` compresses the three #4024 facts into two
+> sentences ("Secured by the passkey you use next: …" and "Backups don't carry
+> over: …") and moves the third — "Nothing is set up on {network} yet …" — to
+> the dialog's created state, which is the new account's first screen. The
+> "Signers, in Settings" clause stays, folded into the backups sentence, for
+> #4570 to rename. No signing step, signer-set gate, `pickSigningPath` branch
+> or passkey ceremony is added, removed or reordered; the dialog still asks for
+> ONE assertion and no new passkey, and the new account's only signer is still
+> the passkey that assertion picks. No new spender, no authority grant, no
+> custody change. Scope of this re-read: that one file's copy and §5 (copy
+> rules); nothing else in this document was re-read for it, and
+> `last-verified` is not bumped.
+
 > **Re-verified unchanged (#4168, 2026-10-20 — say "passkey", never a
 > platform name):** this diff is copy only. It touches three covered files:
 > `components/AccountSignersCard.tsx` (the "Add a backup passkey" subtext now

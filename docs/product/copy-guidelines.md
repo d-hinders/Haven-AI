@@ -872,20 +872,31 @@ procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
 
 The live reference is `components/NewAccountDialog.tsx`. A further account is
 secured by a passkey the user already has, so the dialog asks for **one**
-passkey prompt and no new passkey. Before that prompt it states three facts,
-each as an outcome:
+passkey prompt and no new passkey. Before that prompt it states two facts, each
+as an outcome, in **two sentences** ([#4571](https://github.com/d-hinders/Haven-AI/issues/4571)
+compressed the three paragraphs #4024 shipped):
 
 ```text
-Secured by the passkey you use next. Your device asks for it once, and it
+Secured by the passkey you use next: your device asks for it once, and it
 becomes the only way to approve actions in the new account.
 
-Backups don't carry over. A backup passkey or wallet on another account
-doesn't protect this one, so add one on the new account's page.
-Signers, in Settings, shows which accounts each passkey and wallet approves.
-
-Nothing is set up on Base yet. That happens the first time you use the
-account, for example to give an agent a budget. You can add funds before then.
+Backups don't carry over: add one on the new account's page; Signers, in
+Settings, shows which accounts each passkey and wallet approves.
 ```
+
+The bold lead-in ends in a colon, not a full stop, so each item is one
+sentence. The third fact #4024 shipped — "Nothing is set up on {network} yet.
+That happens the first time you use the account, for example to give an agent a
+budget. You can add funds before then." — moved to the dialog's **created**
+state, which is the new account's first screen: it describes the account that
+now exists, not the choice the form asks for. It is not repeated on
+`/accounts/<id>`, whose own empty states ("No funds yet.", "No agents
+connected") carry the next step.
+
+The "Signers, in Settings" clause stays in the backups sentence because
+[#4570](https://github.com/d-hinders/Haven-AI/issues/4570) owns renaming it to
+the Settings section's own name; that slice edits the clause, not the
+paragraph.
 
 The waiting labels are onboarding's (`Waiting for your passkey…`,
 `Setting up your account…`). A dismissed passkey prompt returns to the form

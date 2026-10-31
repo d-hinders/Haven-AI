@@ -104,6 +104,7 @@ does not carry the agent's delegate address (only `agent_id`).
 | `HAVEN_OPS_TOKEN` | Gates `GET /health/ops`, where the accounting counters live (#2872; the webhook counters joined in #3019) beside the request-validation snapshot (`request_validation`: `mode`, `wouldRefuse`, `wouldCoerce`, per-route-field maps, and since #3208 `since` + `seenByRoute` — in-process, see `dev-environment.md` § *How to take a shadow reading* for the reading that survives deploys). Unset → the route is 404 | set | set |
 | `HAVEN_API_URL` (fallback `PUBLIC_API_URL`) | The public origin Accounted calls back to (#3019): the webhook subscriptions are registered as `<origin>/accounting/webhooks/accounted/<token>`. No localhost fallback — unset, an Accounted connect stores the row, registers nothing and flags it `needs_attention` with reason `no public API origin configured`; the feed still works. Dev states it in `.env.dev.example` | set | set |
 | `FORTNOX_CLIENT_ID`, `FORTNOX_CLIENT_SECRET`, `FORTNOX_REDIRECT_URI` | The Fortnox app registration. All three, or Fortnox is `configured: false` in `GET /accounting/providers` and cannot be connected. The redirect URI is `<backend>/accounting/connections/fortnox/callback` — here AND in the Fortnox developer portal (a consent returning to the pre-#2862 `/accounting/fortnox/callback` 404s and the user sees no connection) | set | client id and secret set (the dev app's — there is no separate prod app), redirect URI unset, so Fortnox is not configured on prod until #2876 |
+| `IGDRASIL_CLIENT_ID`, `IGDRASIL_CLIENT_SECRET`, `IGDRASIL_REDIRECT_URI` | The Igdrasil app registration (#4518). All three, or no Igdrasil connector is registered at boot (`igdrasilConnectorIfConfigured`) and the provider reports `configured: false`. The redirect URI is `<backend>/accounting/connections/igdrasil/callback` — here AND on the registration Igdrasil holds for the app. The provider stays `coming_soon` until the live check (#4519), so a configured deployment still refuses a connect | unset (registration requested) | unset |
 
 Availability for one account is `hosted && enabled && entitled`;
 `GET /accounting/feed/status` reports `hosted`, `enabled` (and `flagEnabled`,
@@ -1241,6 +1242,75 @@ confirmation and the product doc says booking is not observable. A
 `webhook.test` and is answered 200 (unknown_type counter) — proof the
 receiver is reachable and verifying, before the first real commit.
 
+## Provider notes: Igdrasil (#4518)
+
+**Status.** The connector is built and registers when the three
+`IGDRASIL_*` variables are set, but the descriptor stays `coming_soon`:
+`assertConnectable` refuses a connect until the live check on dev (#4519)
+flips it to `live`. Nothing in this section has run against Igdrasil itself
+yet — the tests drive hand-authored fixtures built from Igdrasil's published
+`openapi.json`.
+
+**Auth kind.** `oauth2` through the generic flow (`oauth-flow.ts`), with PKCE
+(`pkce: 'S256'`, #4517) — Igdrasil requires it. Endpoints under
+`https://accounting.igdrasil.se/api/v1/oauth/`: `authorize`, `token`,
+`revoke`. Scope `companies:read vouchers:write` (`IGDRASIL_SCOPE`,
+`igdrasil.ts`); both are `requiredScopes`, so a narrower grant is stored as
+`scope_missing`. Access tokens live 900 s and the refresh token rotates on
+every refresh — the generic refresh under the row lock already stores the
+new one.
+
+**Connect: exactly one company.** The callback reads
+`GET /api/v1/external/companies` with the fresh token. Zero companies →
+refused; more than one, or `has_more: true` → `MultiCompanyGrantError`, the
+fresh grant is revoked (`capabilities.revoke`) and the browser lands on
+`connect=error&reason=multi_company` (the frontend names it, #4520). The
+consent screen lets a person approve several companies; the feed has no
+per-push company choice. One company → the row stores its id as
+`external_company_id`. `PublicCompany` has no currency field, so
+`base_currency` is null and the feed books in SEK, as for Accounted.
+
+**The push.** `POST /api/v1/external/companies/{id}/uploads`, multipart with
+exactly one part, `file` — the receipt underlag PDF. Igdrasil stores it in
+the company's inbox; nothing books it and no voucher is proposed. The
+suggested-account hint therefore has no effect for Igdrasil: the upload
+carries no account, VAT or lines. There is no idempotency key: **Igdrasil
+keys a document on its bytes** — the same file answers 200 naming the
+existing document, a new one 201. That is why a re-push of a payment files
+nothing new: the underlag renders byte-identical for the same payment
+(`igdrasil-feed.db.test.ts` proves it on the real renderer), and two payments
+render different bytes. Delivery proof: a 2xx whose `sha256` equals the local
+SHA-256 of the bytes sent; anything else is `skipped` with no ref. The ref is
+`igdrasil:document:<document_id>`. Oversize underlag (> 25 MiB) is gated
+locally before any request. When the agent captured the merchant's own
+invoice it is uploaded as a second document; a failure there is a note on the
+pushed row, never a failed row. A merchant receipt that arrives after the push
+is not attached yet (#4521).
+
+**Error map** (by HTTP status and the open-enum `error.code`):
+
+| answer | row | connection |
+|---|---|---|
+| 403 `insufficient_scope` | `skipped`, nothing created | `scope_missing`, missing `vouchers:write` |
+| 403 `company_not_granted` / `grant_role_revoked` | `skipped` | `needs_reauthorisation` — the grant no longer reaches the company, or its approver is no longer owner/admin |
+| 400 (empty, too large, wrong type) | `skipped` — permanent for these bytes | unchanged |
+| 2xx with a different `sha256` | `skipped`, no ref | unchanged |
+| 401 `invalid_token` | thrown, retried by the sweep | unchanged; the next refresh's `invalid_grant` flips it to `needs_reauthorisation` within one token life |
+| 429 `rate_limited` | thrown with `retryAfterMs` from `Retry-After` | unchanged |
+| 503 `writes_disabled`, other 5xx, network | thrown, retried by the sweep | unchanged |
+
+`writes_disabled` means Igdrasil has not switched writes on for Haven's app —
+an operator question for Igdrasil, not a user one.
+
+**Verify and disconnect.** `capabilities.verify: false`: verify answers from
+Haven's own sync row, zero provider calls (the Accounted precedent).
+Disconnect posts the refresh token to `/oauth/revoke` (revoking it ends the
+token family) and clears the local secrets whether or not that succeeds.
+
+**Outbound surface.** `igdrasil-outbound-allowlist.test.ts` pins every request
+the connector makes to the token, revoke, companies and uploads endpoints —
+never `…/supplier-invoices`, voucher drafts, `…/book` or a delete.
+
 > **Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.**
 > Changed: the intro, the flow diagram and the providers row now say two
 > connectors are live (Fortnox and Accounted, live since #3017, `registry.ts`);
@@ -1301,3 +1371,10 @@ receiver is reachable and verifying, before the first real commit.
 > `receipt-underlag.ts`, `fortnox-connector.ts` and `accounted-connector.ts`.
 > Nothing else in this document was re-verified, and `last-verified` is not
 > bumped.
+
+> **Re-verified #4518 (2026-10-31, Igdrasil connector).** Added: the
+> `IGDRASIL_*` row in *Configuration* and the *Provider notes: Igdrasil*
+> section. Re-checked against `igdrasil.ts`, `igdrasil-client.ts`,
+> `igdrasil-connector.ts`, `routes/accounting-connections.ts` and
+> `config.ts`. Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.

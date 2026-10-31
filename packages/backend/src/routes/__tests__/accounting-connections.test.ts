@@ -162,6 +162,7 @@ import { installRequestValidation } from '../../openapi/request-validation.js'
 import {
   AccountedConnector,
   InMemoryConnector,
+  MultiCompanyGrantError,
   MultiCompanyKeyError,
   OAUTH_STATE_PURPOSE,
   UnsupportedBaseCurrencyError,
@@ -564,6 +565,16 @@ describe('accounting connection routes (#2862)', () => {
       const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
       expect(res.statusCode).toBe(302)
       expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=unsupported_currency')
+      expect(rows.size).toBe(0)
+      expect(leaks(res.headers.location as string)).toBe(false)
+    })
+
+    it('#4518: a grant that reaches SEVERAL companies is named — connect=error&reason=multi_company, nothing stored', async () => {
+      const state = await issueState()
+      flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new MultiCompanyGrantError('fortnox', 2))
+      const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=multi_company')
       expect(rows.size).toBe(0)
       expect(leaks(res.headers.location as string)).toBe(false)
     })

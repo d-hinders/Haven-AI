@@ -18,9 +18,11 @@ the architecture is in
 | **connector** | `<provider>-connector.ts`, implements `AccountingConnector` (`connector.ts`) | code: `isConnected`, `pushTransaction`, `verify`, `getCompanyInfo`, `revoke` |
 | **connection row** | `infra/repositories/accounting-connections.ts` | the user's grant, encrypted at rest (`infra/secrets.ts`), one row per (user, provider), at most one active destination per user (a partial unique index, migration 080) |
 
-A provider can be **listed without code** — Light and Igdrasil are
-`coming_soon` descriptors today (Fortnox and Accounted are `live`), and
-`GET /accounting/providers` shows them.
+A provider can be **listed without code** — Light is a `coming_soon`
+descriptor with no connector (Fortnox and Accounted are `live`), and
+`GET /accounting/providers` shows it. Igdrasil is `coming_soon` WITH a
+connector (#4518): it registers when the `IGDRASIL_*` variables are set and
+opens once the live check (#4519) flips the descriptor to `live`.
 Only a `live` provider with a registered connector accepts a connect
 (`assertConnectable` in `registry.ts`).
 

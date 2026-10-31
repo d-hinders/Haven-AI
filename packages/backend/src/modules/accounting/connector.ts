@@ -6,8 +6,8 @@ import type { ProviderCompanyInfo } from './provider.js'
  * extended by #2862, epic #2858).
  *
  * The feed pushes through this interface; Fortnox is the first adapter and
- * later providers (Accounted, Light, Igdrasil — listed in `registry.ts`) slot
- * in without callers (sync orchestration, backfill, retry, the generic
+ * later providers (Accounted and Igdrasil so far, Light next — listed in
+ * `registry.ts`) slot in without callers (sync orchestration, backfill, retry, the generic
  * connection routes) knowing the provider. Per-provider adapters behind one
  * internal interface rather than an aggregator — see #491.
  *

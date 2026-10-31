@@ -27,9 +27,9 @@
  *                     re-measured through this harness. The verdict below
  *                     turns on the ordering, not the figure, and is
  *                     unchanged.
- *   /dashboard        810  0               "3mo ago"       ADDED, clock frozen
+ *   /dashboard        810  0               "06:40"         ADDED, clock frozen
  *   /agents           549  1 (chain RPC)   none            rejected
- *   /transactions     320  0               "3mo ago"       ADDED, clock frozen
+ *   /transactions     320  0               "06:40"         ADDED, clock frozen
  *   /contacts         179  0               none            deferred
  *   /accounts         104  0               "Last payment 4mo ago"  ADDED, clock frozen
  *
@@ -129,10 +129,15 @@
  * a blocking gate that goes red on a calendar boundary, weeks after the commit
  * that "caused" it, which is the worst possible flake to diagnose.
  *
+ * Since #4572 the ledger rows under a day band render `formatClockTime`
+ * instead, so the row's own literal no longer ages — but the DAY BAND above it
+ * ("Today" / "Yesterday" / a short date) is still derived from `Date.now()`,
+ * so the freeze remains load-bearing for exactly the same reason.
+ *
  * `page.clock.setFixedTime` (not `install`) pins `Date.now()` without pausing
  * timers, so React's scheduler is untouched. And the freeze is ASSERTED rather
- * than assumed: `expectFrozenRelativeTime` pins the literal string the frozen
- * clock must produce, so a clock that stops working fails by name — "the
+ * than assumed: `frozenTimestamp` pins the literal string the frozen clock must
+ * produce, so a clock that stops working fails by name — "the
  * frozen clock is not in effect" — instead of as an unattributable pixel diff
  * three months from now.
  *
@@ -344,10 +349,11 @@ type ProductRoute = {
   anchor: (page: Page) => Locator
   /**
    * The literal the frozen clock must produce somewhere in the content, when
-   * the fixture carries a relative timestamp. Routes whose visible stamps are
-   * static strings omit it.
+   * the fixture carries a timestamp. A row under a day band renders a clock
+   * time (`06:40`, #4572); a surface with no band renders a relative phrase
+   * (`4mo ago`). Routes whose visible stamps are static strings omit it.
    */
-  frozenRelativeTime?: string
+  frozenTimestamp?: string
   /**
    * Register `serveAgentDetailResponses` for this route — the detail-page
    * reads (`passport`, `delegate-balance`, per-agent activity/stats) that the
@@ -376,23 +382,23 @@ const ROUTES: ProductRoute[] = [
      * The dashboard's activity list renders the grouped-activity fixture
      * (`haven-api.ts`, `dashboardOverview.activity`) — the SAME group the
      * /transactions row feeds (`dashboardTransaction`, #3824) — through
-     * `timeAgo(group.latestAt)` in `ActivitySection.tsx`. #3810 dropped the
-     * 5-row preview this pin used to read; the ago literal now comes from the
-     * activity row, and the single-match property still holds because the
-     * fixture carries exactly one group (its latestAt IS the transaction's
-     * timestamp). So this route needs the literal exactly as much as
-     * /transactions does.
+     * `formatClockTime(group.latestAt)` in `ActivitySection.tsx`. Since #4572
+     * the group sits under a day band, so it shows the clock time rather than
+     * repeating the day as "3mo ago". The fixture's `latestAt` IS the
+     * transaction's timestamp (2026-05-17T06:40Z), which renders `06:40` in
+     * this file's UTC zone.
+     *
+     * The freeze still matters: the day band above the row is derived from
+     * `Date.now()` ("Today" / "Yesterday" / a short date), so an unfrozen clock
+     * would move the band on a calendar boundary. The literal pins the render
+     * the baseline was taken from.
      *
      * Recorded because the first draft of this file asserted the opposite —
      * "the recent-transactions list is empty, so there is no literal to pin" —
      * off a truncated read of the rendered text, and `haven-reviewer` caught it
-     * against the fixture. The freeze was applied either way, so the baseline
-     * was already deterministic; what was missing was the DETECTION, which is
-     * the whole point of pinning a literal rather than trusting the freeze.
-     * Re-measured on #3810: `/dashboard` still renders exactly one match for
-     * `/\d+(m|h|d|mo|y) ago/`, and it is `3mo ago`.
+     * against the fixture.
      */
-    frozenRelativeTime: '3mo ago',
+    frozenTimestamp: '06:40',
   },
   {
     path: '/transactions',
@@ -409,14 +415,16 @@ const ROUTES: ProductRoute[] = [
     anchor: (page: Page) => page.getByRole('heading', { name: 'Transactions' }),
     /**
      * `dashboardTransaction.timestamp` is 1779000000 (2026-05-17T06:40Z), which
-     * is 3 months and change before `FROZEN_NOW` — `timeAgo`'s `${months}mo ago`
-     * bucket. Pinned as a literal so a clock that stops being frozen fails HERE,
-     * by name, rather than as a pixel diff on a date nobody can attribute.
-     * Asserted on BOTH axes since #4266: the ledger row prints the time under
-     * the amount at every width, where the table's mobile layout hid its date
-     * column (the old `frozenRelativeTimeHiddenOnMobile` exemption, #2817).
+     * renders `06:40` through `formatClockTime` (#4572) in this file's UTC
+     * zone. Pinned as a literal so a row that stops showing the clock time —
+     * or a zone that stops being UTC — fails HERE, by name, rather than as a
+     * pixel diff on a timestamp nobody can attribute.
+     *
+     * Asserted on BOTH axes since #4266: the ledger row prints the time on the
+     * description line at every width, where the table's mobile layout hid its
+     * date column (the old `frozenRelativeTimeHiddenOnMobile` exemption, #2817).
      */
-    frozenRelativeTime: '3mo ago',
+    frozenTimestamp: '06:40',
   },
 
   /**
@@ -470,7 +478,7 @@ const ROUTES: ProductRoute[] = [
     // only at `lg`, the composition the mobile stack never shows.
     viewports: ['mobile', 'desktop'],
     anchor: (page: Page) => page.getByRole('heading', { name: 'Research agent', exact: true }),
-    frozenRelativeTime: '4mo ago',
+    frozenTimestamp: '4mo ago',
     /** Serves the four detail-page reads the shared fixture falls through on. */
     serveDetailResponses: true,
   },
@@ -484,7 +492,7 @@ const ROUTES: ProductRoute[] = [
    * this one-account harness and the route makes no chain call — see the
    * header paragraph this row superseded.
    *
-   * `frozenRelativeTime` is pinned for the same reason as `/transactions`:
+   * `frozenTimestamp` is pinned for the same reason as `/transactions`:
    * the card footer renders `Last payment {timeAgo(...)}` off the fixture's
    * `lastOutgoingAt` (#4021, pinned to `testSafe.created_at`), which buckets
    * to `4mo ago` at `FROZEN_NOW` — assert the literal the frozen clock must
@@ -498,7 +506,7 @@ const ROUTES: ProductRoute[] = [
     /** Measured at 390 on this harness: 104 characters; re-measured under the #4021 card. */
     minChars: 100,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
-    frozenRelativeTime: 'Last payment 4mo ago',
+    frozenTimestamp: 'Last payment 4mo ago',
   },
 
   /**
@@ -518,7 +526,7 @@ const ROUTES: ProductRoute[] = [
     viewports: ['desktop'],
     minChars: 120,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
-    frozenRelativeTime: 'Last payment 17d ago',
+    frozenTimestamp: 'Last payment 17d ago',
     serve: serveTwoAccounts,
   },
 
@@ -532,7 +540,7 @@ const ROUTES: ProductRoute[] = [
    * the count is what the baseline pins. MOBILE-only by decision, per the
    * #2733/#2817 reasoning above.
    *
-   * No `frozenRelativeTime` by measurement: a contact row renders its name,
+   * No `frozenTimestamp` by measurement: a contact row renders its name,
    * its address and the "Used on" badges — no relative timestamp anywhere,
    * so there is no literal to pin. The freeze stays on as cheap insurance,
    * as on `/agents`.
@@ -696,11 +704,11 @@ test.describe('product-route visual regression', () => {
           )
         await expectNoSkeletons(main, route.path)
 
-        if (route.frozenRelativeTime) {
+        if (route.frozenTimestamp) {
           await expect(
-            main.getByText(route.frozenRelativeTime, { exact: true }).first(),
+            main.getByText(route.frozenTimestamp, { exact: true }).first(),
             `${route.path}: the frozen clock is not in effect — expected the ` +
-              `fixture's relative timestamp to render as "${route.frozenRelativeTime}" ` +
+              `fixture's timestamp to render as "${route.frozenTimestamp}" ` +
               `at ${FROZEN_NOW.toISOString()}. Without it this baseline drifts on a ` +
               `calendar boundary rather than on a code change (#2318).`,
           ).toBeVisible()

@@ -152,6 +152,29 @@ export function timeAgo(date: string | Date | number): string {
 }
 
 /**
+ * `14:05` — the ONE clock-time rule (#4572), en-GB, 24-hour.
+ *
+ * A ledger row sits under a `TransactionActivityDayHeader` band ("30 SEPT"),
+ * so the day is already stated one line above it. Repeating it as a relative
+ * time ("29d ago") says the same thing twice and says it worse: the band is
+ * exact, the relative string is not. Under a band the row shows the clock
+ * time instead; relative time stays only where no band is drawn (the
+ * dashboard's agent rows, "Last paid …", "Last active …").
+ *
+ * en-GB with `hour12: false` is the app's dominant voice (the same locale
+ * `formatLongDate` uses) and renders midnight as `00:05`, never `24:05` or
+ * `12:05 AM`. Accepts the same three input shapes as `timeAgo`.
+ */
+export function formatClockTime(date: string | Date | number): string {
+  const value = typeof date === 'string' ? new Date(date) : typeof date === 'number' ? new Date(date) : date
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(value)
+}
+
+/**
  * Remaining duration until a future ISO date, e.g. "2h 15m" or "expired".
  */
 export function timeUntil(date: string | Date | number): string {

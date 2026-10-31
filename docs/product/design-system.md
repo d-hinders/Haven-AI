@@ -3338,6 +3338,26 @@ may be a control — an interactive element nested in a button is invalid ARIA.
 The accounting badge renders as a plain pill there (`interactive={false}`); its
 `/accounting` link and reason live in the detail panel's Accounting row.
 
+**On a phone (#4572).** Below `sm` the row is two bands, not three. The title
+line carries the title and the amount, right-aligned; the description line
+carries the description and the clock time. A long title truncates with an
+ellipsis rather than pushing the amount down, and badges — the `×N` count, the
+status badge, the accounting badge — wrap to a subordinate line first, so the
+amount always keeps its place on the title line. The row sizes to its content
+below `sm`; there is no fixed height there (#1833: a 72px box meeting the
+stacked layout overlapped rows at 390px). The second band is indented by the
+row's own geometry — the mark column plus the 12px gap — which is `pl-11` at
+compact density.
+
+**Time under a day band (#4572).** A row under a `TransactionActivityDayHeader`
+band shows the clock time (`formatClockTime` in `lib/format.ts`, en-GB `14:05`),
+never a relative "29d ago": the band already states the day, and repeating it
+says the same thing twice and says it worse. The same rule holds on the
+dashboard Activity card (a group shows its latest payment's clock time) and the
+agent's Tool calls tab. Relative time (`timeAgo`) stays only where no band is
+drawn — the dashboard's agent rows ("Last paid …"), "Last active …", the
+balance freshness line and the analytics "last payment" caption.
+
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
 `noAddress` mode, so a raw address never titles a row there: the merchant's

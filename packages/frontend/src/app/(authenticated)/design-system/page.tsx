@@ -78,7 +78,7 @@ import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
-import { timeAgo, truncate } from '@/lib/format'
+import { formatClockTime, truncate } from '@/lib/format'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import { AgentCard, type AgentCardDashboard } from '@/components/agent-panel/AgentCard'
 import type { Agent } from '@/hooks/useAgents'
@@ -748,6 +748,55 @@ const DS_LEDGER_ACCOUNTING = {
   externalRef: 'fortnox:supplierinvoice:11',
   error: null,
 }
+
+/**
+ * #4572: the phone row's acceptance cases, rendered at 375px. The first row is
+ * the 40-character title (the amount stays on the title line, the title
+ * truncates); the second is the crowded worst case — long title, amount, a
+ * payment-status badge and an accounting badge; the third is a grouped `×N`
+ * row. Timestamps are `Date.now()`-relative like `DS_LEDGER_ROWS`, so the
+ * capture freezes the clock and pins the zone.
+ */
+const DS_PHONE_LEDGER_ROWS: Array<{
+  id: string
+  at: string
+  title: string
+  description: string
+  value: string
+  countLabel?: string
+  status?: string
+  statusTone?: 'warning'
+  accounting?: boolean
+  fiat?: { amount: number; currency: 'SEK' }
+}> = [
+  {
+    id: 'p1',
+    at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    // Exactly 40 characters — the acceptance case's title.
+    title: 'Merchant settlement for September charge',
+    description: 'Research assistant',
+    value: '12.00',
+  },
+  {
+    id: 'p2',
+    at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+    title: 'Merchant settlement for September charge',
+    description: 'Research assistant',
+    value: '320.00',
+    status: 'Pending',
+    statusTone: 'warning',
+    accounting: true,
+  },
+  {
+    id: 'p3',
+    at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    title: 'api.vendor.com',
+    description: 'Research assistant',
+    value: '36.00',
+    countLabel: '×3',
+    fiat: { amount: 134.5, currency: 'SEK' },
+  },
+]
 
 // ── The transaction detail panel's settlement states (#4320) ───────────────
 // The REAL shared panel (the SidePanel section above shows the primitive's
@@ -3503,7 +3552,56 @@ export default function DesignSystemPage() {
                           ) : undefined
                         }
                         asset="USDC"
-                        timestamp={timeAgo(row.at)}
+                        timestamp={formatClockTime(row.at)}
+                        onOpen={() => setDsLedgerOpened(row.title)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            {dsLedgerOpened
+              ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`
+              : 'Click a row (or press Enter) — the account page opens the shared TransactionDetailPanel from the row.'}
+          </p>
+        </div>
+      </Section>
+
+      {/* #4572: the phone row at 375px — the two acceptance cases the
+          desktop-width ledger clip above cannot show. */}
+      <Section
+        title="Activity ledger on a phone"
+        description="TransactionActivityRow below 640px (#4572): two bands, not three. The title line carries the title (truncating) and the amount, right-aligned; the description line carries the description and the clock time. Badges ride a subordinate line, so they can never squeeze the amount. The first row is a 40-character title; the second is the crowded worst case — long title, amount, a payment-status badge and an accounting badge; the third is a grouped ×N row. Rows under a day band show the clock time, never “29d ago”: the band already states the day."
+      >
+        <div className="max-w-[375px]">
+          <div data-testid="ds-activity-ledger-phone">
+            <Card hover={false} className="overflow-hidden">
+              <div className="divide-y divide-[var(--v2-border)]">
+                {transactionDayGroups(DS_PHONE_LEDGER_ROWS, (row) => row.at).map((group) => (
+                  <div key={group.dayKey}>
+                    <TransactionActivityDayHeader label={group.label} />
+                    {group.items.map((row, index) => (
+                      <TransactionActivityRow
+                        key={row.id}
+                        insetDivider={index > 0}
+                        direction="out"
+                        title={row.title}
+                        description={row.description}
+                        value={row.value}
+                        countLabel={row.countLabel}
+                        status={row.status}
+                        statusTone={row.statusTone}
+                        extraBadges={
+                          row.accounting ? (
+                            <AccountingBadge accounting={DS_LEDGER_ACCOUNTING} interactive={false} />
+                          ) : undefined
+                        }
+                        fiat={row.fiat}
+                        asset="USDC"
+                        timestamp={formatClockTime(row.at)}
+                        density="compact"
                         onOpen={() => setDsLedgerOpened(row.title)}
                       />
                     ))}

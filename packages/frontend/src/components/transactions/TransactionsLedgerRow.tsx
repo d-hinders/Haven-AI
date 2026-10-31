@@ -1,6 +1,6 @@
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { TransactionActivityRow, TransactionMovement } from '@/components/haven'
-import { timeAgo } from '@/lib/format'
+import { formatClockTime } from '@/lib/format'
 import {
   counterpartyLabel,
   transactionFiat,
@@ -59,7 +59,10 @@ export default function TransactionsLedgerRow({
     // The pill alone (#4266): the row is a whole-row button, and a link
     // inside it is invalid ARIA; the panel's Accounting row links to /accounting.
     extraBadges: <AccountingBadge accounting={tx.accounting} interactive={false} />,
-    timestamp: timeAgo(tx.timestamp * 1000),
+    // #4572: the row always sits under a `TransactionActivityDayHeader` band,
+    // so the day is already stated above it — the row shows the clock time
+    // instead of repeating the day as "29d ago".
+    timestamp: formatClockTime(tx.timestamp * 1000),
     fiat,
     density: 'compact' as const,
     onOpen,

@@ -81,9 +81,9 @@ export interface UseAgentConnectionSetupOptions {
    *
    * #4065: the inline first-agent flow on `/agents` passes false. It is
    * mounted with `open` true for as long as it shows, so Escape anywhere on
-   * the page — including the Escape that closes the Labels or Organizations
-   * dialog above it — would reset the form and drop the create-time setup
-   * token. There is nothing for Escape to dismiss there.
+   * the page — including the Escape that closes the Manage labels or Manage
+   * organisations dialog above it — would reset the form and drop the
+   * create-time setup token. There is nothing for Escape to dismiss there.
    */
   escapeToClose?: boolean
 }

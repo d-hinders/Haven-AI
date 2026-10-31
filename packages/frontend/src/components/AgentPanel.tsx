@@ -308,12 +308,14 @@ export default function AgentPanel() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => panel.setLabelsManagerOpen(true)}>
-                  Labels
+                  Manage labels
                 </DropdownMenuItem>
                 {/* #3164: the organization manager — create/rename/move/delete.
-                    The tree above the list appears once one exists. */}
+                    The tree above the list appears once one exists.
+                    #4565: the menu item and the dialog title are the same
+                    words, and the manager's name uses the British spelling. */}
                 <DropdownMenuItem onSelect={() => panel.setOrganizationsManagerOpen(true)}>
-                  Organisations
+                  Manage organisations
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -339,7 +341,7 @@ export default function AgentPanel() {
           {/* #3164: the organization tree above the list — only when the user HAS
               organizations. An empty tree would be a permanent empty management
               panel on every org-less /agents visit (product README, First-Run
-              Simplicity); the header's Organisations button is the entry point
+              Simplicity); the header's Manage organisations button is the entry point
               until one exists. */}
           {panel.organizations.length > 0 && (
             <AgentOrganizationTree

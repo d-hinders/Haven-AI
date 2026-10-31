@@ -9,6 +9,11 @@ covers:
   - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/EditBudgetModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/MoveAgentModal.tsx
+  - packages/frontend/src/components/ConnectAgentModal.tsx
+  - packages/frontend/src/components/IssueSubBudgetModal.tsx
+  - packages/frontend/src/components/SetBudgetDialog.tsx
+  - packages/frontend/src/components/ListManagerModal.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
@@ -1078,7 +1083,9 @@ glyph). `connect-agent/ConnectSteps.tsx` is the one that already gates. (The
 #4563 audit said four; the census is five — the count is the command's, not this
 paragraph's.) #4567/#4568 move them onto the primitive; this slice adds it and
 the `/design-system` demo. #4564 already moved `EditBudgetModal`'s busy screen
-onto `DialogResult`, which uses the primitive — so the census is four today.
+onto `DialogResult`, which uses the primitive, and #4568 moved the remaining
+four — so the census is zero today. `EditAgentModal`'s busy screen is
+`DialogResult` since #4565.
 
 ### Detail-page section rule (#3692)
 
@@ -2534,13 +2541,23 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
-`ui/Modal` is the shared dialog shell — seventeen product files import it
-directly (eighteen with `/design-system`), three of which (`ConfirmDialog`,
+`ui/Modal` is the shared dialog shell — twenty-four product files import it
+directly (twenty-five with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: about ten older dialogs, `ReceiveDialog` among
-them (below), are still bespoke `role="dialog"` shells. A new dialog uses
-`Modal`. Anything changed here is changed everywhere, so the
-structure is worth stating rather than re-deriving from the file.
+Not every dialog uses it yet: one dialog, `ReceiveDialog` (below), is still a
+bespoke dialog shell. A new dialog uses `Modal`. Anything changed here is
+changed everywhere, so the structure is worth stating rather than re-deriving
+from the file.
+
+**One list manager, two vocabularies.** `ListManagerModal` (#4565) is the
+shared shape behind the labels and organisations dialogs: the `Modal` shell,
+the fetched list, a per-row rename field, a per-row delete with its
+confirmation **inline inside the same dialog**, and row errors through
+`InlineAlert`. Each caller passes in only what is its own — labels keep the
+chip preview and the colour palette, organisations keep the create form, the
+move picker and their nesting. It is an extraction of a shape that already
+shipped twice, not a new pattern, and it is why neither caller defines its own
+`startRename`, `saveRename` or `confirmDelete`.
 
 **Anatomy.** Every dialog built on `Modal` reads the same, top to bottom:
 
@@ -2564,11 +2581,16 @@ does not also carry a ✕.
 **A dialog that guards closing while busy must guard the ✕ too.** Escape and the
 backdrop are guarded per caller (`closeOnEscape={!busy}`, `closeOnBackdrop={!busy}`),
 so a default ✕ would otherwise be the one unguarded way out of a request in
-flight. Every busy-guarded caller passes `closeButtonDisabled={busy}` — the
-pattern `NewAccountDialog` already used. The five sites: `ApiKeyConnectModal`
-(`busy`), `BackfillDialog` (`busy`), the contact delete dialog (`deleting`), the
-contact add/edit dialog (`saving`) and the company-details delete
-(`deleting`).
+flight. Every busy-guarded caller passes `closeButtonDisabled` — the pattern
+`NewAccountDialog` already used. Fifteen call sites across fourteen files:
+`ApiKeyConnectModal` (`busy`), `BackfillDialog` (`busy`), the contact add/edit
+dialog (`saving`) and the contact delete dialog (`deleting`) — both in
+`contacts/page.tsx` — the company-details delete (`deleting`),
+`ConnectAgentModal` (`flow.busy`), `EditAgentModal` (`busy`),
+`EditBudgetModal` (`busy`), `FundMerchantModal` (`busy`),
+`IssueSubBudgetModal` (`busy`), `ListManagerModal` (`saving || deleting`),
+`MoveAgentModal` (`saving`), `NewAccountDialog` (`busy`), `SetBudgetDialog`
+(`busy`) and the account rename dialog (`loading`).
 
 **Open-time focus goes to the body, not to the ✕.** `Modal` focuses
 `initialFocusRef` when a caller passes one; otherwise the **body's** first
@@ -2589,7 +2611,7 @@ one style: `mb-1.5 block text-sm font-medium text-[var(--v2-ink)]`. Uppercase,
 letter-spaced labels (`text-xs uppercase tracking-wide` in ink-3) are retired —
 they read as a different product from the sentence-case titles and buttons
 around them. The Connect agent flow's three uppercase labels moved onto it in
-#4562; Edit agent's labels move in #4565.
+#4562; Edit agent's labels moved onto it in #4565.
 
 **Widths say what the content is, not how big the page is.** `sm` (384px) for a
 single question or a short confirmation; `md` (448px, the default) for a form of
@@ -2788,12 +2810,12 @@ dialog. Three placements in that flow are decided rather than incidental:
 ### Dialog result states (`ui/DialogResult`)
 
 A dialog that performs a request ends on one of three screens: busy, success,
-failure. `ui/DialogResult` is that screen. `EditBudgetModal` reads through it
-today (#4564); `EditAgentModal` and `FundMerchantModal` still hand-build their
-busy screens and move onto it in #4565 and #4566. It owns the **centred block
-only**: the icon, the title, the description, and any extra notices the caller
-needs. The action row stays the caller's, in `Modal`'s footer, because it is
-the screen's own decision (Close, Try again, Stop old budget).
+failure. `ui/DialogResult` is that screen. `EditBudgetModal` (#4564),
+`EditAgentModal` (#4565) and `FundMerchantModal` (#4566) all read through it
+today. It owns the **centred block only**: the icon, the title, the description,
+and any extra notices the caller needs. The action row stays the caller's, in
+`Modal`'s footer, because it is the screen's own decision (Close, Try again,
+Stop old budget).
 
 | State | Mark | Tone |
 |---|---|---|
@@ -3401,6 +3423,26 @@ with no Sort. A ledger row is a whole-row `role="button"`, so nothing inside it
 may be a control — an interactive element nested in a button is invalid ARIA.
 The accounting badge renders as a plain pill there (`interactive={false}`); its
 `/accounting` link and reason live in the detail panel's Accounting row.
+
+**On a phone (#4572).** Below `sm` the row is two bands, not three. The title
+line carries the title and the amount, right-aligned; the description line
+carries the description and the clock time. A long title truncates with an
+ellipsis rather than pushing the amount down, and badges — the `×N` count, the
+status badge, the accounting badge — wrap to a subordinate line first, so the
+amount always keeps its place on the title line. The row sizes to its content
+below `sm`; there is no fixed height there (#1833: a 72px box meeting the
+stacked layout overlapped rows at 390px). The second band is indented by the
+row's own geometry — the mark column plus the 12px gap — which is `pl-11` at
+compact density.
+
+**Time under a day band (#4572).** A row under a `TransactionActivityDayHeader`
+band shows the clock time (`formatClockTime` in `lib/format.ts`, en-GB `14:05`),
+never a relative "29d ago": the band already states the day, and repeating it
+says the same thing twice and says it worse. The same rule holds on the
+dashboard Activity card (a group shows its latest payment's clock time) and the
+agent's Tool calls tab. Relative time (`timeAgo`) stays only where no band is
+drawn — the dashboard's agent rows ("Last paid …"), "Last active …", the
+balance freshness line and the analytics "last payment" caption.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in

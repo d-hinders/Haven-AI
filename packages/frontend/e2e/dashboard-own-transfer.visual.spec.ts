@@ -15,10 +15,11 @@
  * `withServedApprox` re-prices every default group to 12.5, and this override
  * bypasses it, so the row shows what the group carries.
  *
- * The clock is frozen and the zone and locale are pinned, and the relative
- * time is ASSERTED, not assumed: the row renders `timeAgo(latestAt)`, and a
- * capture taken against the real clock flips the day it is photographed on
- * (the `agent-panel-states` failure #4275 fixed).
+ * The clock is frozen and the zone and locale are pinned, and the rendered
+ * time is ASSERTED, not assumed: since #4572 the row sits under a day band and
+ * renders `formatClockTime(latestAt)` (`10:00`), and a capture taken against
+ * the real clock flips the day band the day it is photographed on (the
+ * `agent-panel-states` failure #4275 fixed).
  *
  * BASELINES ARE LINUX-RENDERED: compared only under `VISUAL_REGRESSION=1`.
  * `VISUAL_STRUCTURE_ONLY=1` runs every assertion here without the pixels.
@@ -43,7 +44,7 @@ const SNAPSHOT_OPTIONS = {
 
 /** The same frozen clock the other dashboard visual specs use. */
 const FROZEN_NOW = new Date('2026-09-01T12:00:00.000Z')
-/** Two hours before the frozen clock: `timeAgo` must read exactly "2h ago". */
+/** Two hours before the frozen clock: the row's clock time must read "10:00". */
 const LATEST_AT = new Date(FROZEN_NOW.getTime() - 2 * 60 * 60 * 1000).toISOString()
 
 /** One folded move, as `GET /dashboard/overview` serves it (#4268). */
@@ -98,8 +99,10 @@ test.describe('the dashboard Activity card shows an own-account move as one row 
       await expect(card.getByText('Moved between your accounts')).toBeVisible({ timeout: 60_000 })
 
       // The frozen clock is in effect: a clock that stopped working fails here
-      // by name instead of as a pixel diff weeks from now.
-      await expect(card.getByText('2h ago'), 'the frozen clock is not in effect').toBeVisible()
+      // by name instead of as a pixel diff weeks from now. Since #4572 the row
+      // sits under a day band, so it renders the clock time (`10:00` in this
+      // file's UTC zone), not "2h ago".
+      await expect(card.getByText('10:00'), 'the frozen clock is not in effect').toBeVisible()
       // One row, the movement line, and no "From <account>" subtitle.
       await expect(card.getByText('Moved between your accounts')).toHaveCount(1)
       await expect(card.getByText('Operations', { exact: true })).toBeVisible()

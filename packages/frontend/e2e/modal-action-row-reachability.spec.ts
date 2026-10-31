@@ -38,7 +38,7 @@
  * panel; a geometric-only one would pass on a body that happened to fit today.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession, testRecipientAddress } from './fixtures/haven-api'
+import { mockHavenApi, seedAuthenticatedSession, testRecipientAddress, testSafe } from './fixtures/haven-api'
 
 const BODY = '[data-modal-body]'
 
@@ -363,5 +363,72 @@ test.describe('contacts dialog — action row reachability (#1946)', () => {
       return !(a.bottom <= b.top || a.top >= b.bottom || a.right <= b.left || a.left >= b.right)
     })
     expect(overlapsSubmit, 'the cue must no longer overlap the primary action').toBe(false)
+  })
+})
+
+/**
+ * #4566 — the account rename dialog moved onto `ui/Modal`.
+ *
+ * The move puts the submit button in `Modal`'s footer, outside the `<form>` in
+ * the body, so it reaches the form by the HTML `form` attribute. That is the
+ * same shape the contacts dialog uses, and it fails the same two ways: a stale
+ * or duplicated id compares equal and submits nothing, and a `type="button"` +
+ * `onClick` rewiring silently drops implicit submission. Both are asserted
+ * here rather than assumed from the markup.
+ */
+test.describe('account rename dialog — footer submit owns the form (#4566)', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+  })
+
+  async function openRename(page: Page) {
+    await page.goto(`/accounts/${testSafe.id}`)
+    await page.getByLabel('Account options').click()
+    await page.getByRole('menuitem', { name: 'Rename' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  }
+
+  test('the footer submit button still owns the form in the body', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await openRename(page)
+
+    const m = await reachability(page)
+    expect(m.found, 'the dialog must expose a scroll body and a submit button').toBe(true)
+    if (!m.found) return
+
+    expect(m.insideScrollBody, 'the action row must not be inside [data-modal-body]').toBe(false)
+    expect(m.formAttribute, 'the submit button must carry a form attribute').toBeTruthy()
+    expect(
+      m.formOwnerMatches,
+      'the form attribute must resolve to the form element in the body',
+    ).toBe(true)
+  })
+
+  test('Enter in the name field still submits, with the button outside the form', async ({
+    page,
+  }) => {
+    let put = false
+    await page.route('**/api/user/accounts/**', async (route) => {
+      if (route.request().method() === 'PUT') {
+        put = true
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ ...testSafe, name: 'Household' }),
+        })
+        return
+      }
+      await route.fallback()
+    })
+
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await openRename(page)
+    await page.getByLabel('Account name').fill('Household')
+    await page.getByLabel('Account name').press('Enter')
+
+    await expect
+      .poll(() => put, { message: 'Enter must submit the rename form' })
+      .toBe(true)
   })
 })

@@ -3,8 +3,8 @@ import { Skeleton } from '@/components/ui/Skeleton'
 /**
  * The one route and auth fallback (#4568).
  *
- * Ten call sites hand-copied the same block — a pulsing brand dot beside
- * `Loading...` — with ASCII dots and two different ink tones (`ink-2` and
+ * Ten call sites hand-copied the same block — a pulsing brand dot beside an
+ * ASCII-dotted `Loading` label — with two different ink tones (`ink-2` and
  * `ink-3`). This is that block, once: one dot, one ink tone, one label.
  *
  * The label is `Loading…` with a real ellipsis (U+2026), the same character
@@ -14,7 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
  * when the fallback replaces content, and `aria-busy="true"` says the region
  * is still working.
  *
- * The dot is a `Skeleton` rather than an inline `animate-pulse` div: the
+ * The dot is a `Skeleton` rather than a hand-rolled pulsing div: the
  * primitive owns the pulse (§ Skeletons), and the brand colour is passed
  * through `className` the way every other caller sizes and tints it.
  *

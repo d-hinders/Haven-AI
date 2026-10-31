@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OrganizationsManagerModal from '../OrganizationsManagerModal'
 
@@ -39,6 +40,24 @@ beforeEach(() => {
 
 function renderModal() {
   return render(<OrganizationsManagerModal open onClose={vi.fn()} />)
+}
+
+/** The manager behind an opener button, so focus return has somewhere to go. */
+function Harness() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open manager
+      </button>
+      <OrganizationsManagerModal open={open} onClose={() => setOpen(false)} />
+    </>
+  )
+}
+
+/** The inline delete confirmation — the only confirmation this dialog has. */
+function deletePanel() {
+  return screen.getByTestId('list-manager-delete-panel')
 }
 
 describe('OrganizationsManagerModal', () => {
@@ -96,16 +115,16 @@ describe('OrganizationsManagerModal', () => {
   // #3236 acceptance 1: rowError had no render site on the create form, so a
   // rejected POST /organizations (409 sibling-name collision is the common
   // case) did nothing visible. The error must render on/near the create form.
-  // Mutation: deleting the create form's `{rowError ? ... : null}` site fails
-  // the getByRole('alert') assertion.
+  // Mutation: deleting the create form's `{createError ? ... : null}` site
+  // fails the getByRole('alert') assertion.
   it('surfaces a failed create next to the create form (#3236)', async () => {
-    mockPost.mockRejectedValueOnce(new Error('An organization with this name already exists here.'))
+    mockPost.mockRejectedValueOnce(new Error('An organisation with this name already exists here.'))
     renderModal()
     await vi.waitFor(() =>
       expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument(),
     )
 
-    fireEvent.change(screen.getByLabelText('New organization name'), {
+    fireEvent.change(screen.getByLabelText('New organisation name'), {
       target: { value: 'Company A' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
@@ -113,7 +132,7 @@ describe('OrganizationsManagerModal', () => {
     const form = screen.getByTestId('organization-create-form')
     await waitFor(() =>
       expect(within(form).getByRole('alert')).toHaveTextContent(
-        'An organization with this name already exists here.',
+        'An organisation with this name already exists here.',
       ),
     )
     // The list stays; the modal did not close or reset on the failure.
@@ -121,13 +140,13 @@ describe('OrganizationsManagerModal', () => {
   })
 
   // #3236 acceptance 2: confirmDelete had no catch, so a rejected DELETE
-  // escaped past the `void confirmDelete()` call site as an unhandled
-  // rejection and the dialog sat silent. The dialog must stay open, name the
-  // failure, and leave no unhandled rejection behind.
+  // escaped past the call site as an unhandled rejection and the panel sat
+  // silent. The panel must stay open, name the failure, and leave no unhandled
+  // rejection behind.
   // Mutation: reverting confirmDelete to the catchless try/finally fails the
   // alert assertion (the error never renders) and the process-level handler
   // records the rejection.
-  it('surfaces a failed delete inside the confirm dialog and does not reject unhandled (#3236)', async () => {
+  it('surfaces a failed delete inside the inline panel and does not reject unhandled (#3236)', async () => {
     const unhandled: unknown[] = []
     const onUnhandled = (reason: unknown) => {
       unhandled.push(reason)
@@ -141,20 +160,21 @@ describe('OrganizationsManagerModal', () => {
       )
 
       fireEvent.click(within(screen.getByTestId('organization-manager-list')).getByRole('button', { name: 'Delete Company A very long organization name' }))
-      fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete organisation' }))
 
-      const dialog = await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })
-      // Our words, naming the organization, not the server's raw message
+      // Our words, naming the organisation, not the server's raw message
       // (#3236 review: "An unexpected error occurred" said nothing useful).
       await waitFor(() =>
-        expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        expect(within(deletePanel()).getByRole('alert')).toHaveTextContent(
           'Company A very long organization name was not deleted. Try again.',
         ),
       )
-      expect(within(dialog).getByRole('alert')).not.toHaveTextContent('An unexpected error occurred')
-      // The dialog stays open (the organization was not deleted) with the
-      // destructive action re-enabled for a retry.
-      expect(screen.getByRole('button', { name: 'Delete organization' })).toBeEnabled()
+      expect(within(deletePanel()).getByRole('alert')).not.toHaveTextContent('An unexpected error occurred')
+      // The panel stays open (the organisation was not deleted) with the
+      // destructive action re-enabled for a retry, and focus on that retry.
+      const retry = screen.getByRole('button', { name: 'Delete organisation' })
+      expect(retry).toBeEnabled()
+      await waitFor(() => expect(retry).toHaveFocus())
       // Let a stray rejection surface before the process handler is removed.
       await new Promise((resolve) => setTimeout(resolve, 25))
       expect(unhandled).toEqual([])
@@ -163,33 +183,31 @@ describe('OrganizationsManagerModal', () => {
     }
   })
 
-  it('clears a shown delete error when the dialog is reopened for another organization (#3236)', async () => {
-    mockDelete.mockRejectedValueOnce(new Error('The organization could not be deleted.'))
+  it('clears a shown delete error when the panel is reopened for another organisation (#3236)', async () => {
+    mockDelete.mockRejectedValueOnce(new Error('The organisation could not be deleted.'))
     renderModal()
     await vi.waitFor(() =>
       expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument(),
     )
 
     fireEvent.click(within(screen.getByTestId('organization-manager-list')).getByRole('button', { name: 'Delete Company A very long organization name' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
-    await waitFor(async () =>
-      expect(
-        within(await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })).getByRole('alert'),
-      ).toHaveTextContent('Company A very long organization name was not deleted. Try again.'),
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete organisation' }))
+    await waitFor(() =>
+      expect(within(deletePanel()).getByRole('alert')).toHaveTextContent(
+        'Company A very long organization name was not deleted. Try again.',
+      ),
     )
 
-    // Cancel the failed delete, then open the dialog again: the stale error
+    // Cancel the failed delete, then open the panel again: the stale error
     // must be gone, and the second attempt (which succeeds here) closes it.
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTestId('list-manager-delete-panel')).toBeNull()
     fireEvent.click(within(screen.getByTestId('organization-manager-list')).getByRole('button', { name: 'Delete Company A very long organization name' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Delete Company A very long organization name?' })
-    expect(within(dialog).queryByRole('alert')).toBeNull()
+    expect(within(deletePanel()).queryByRole('alert')).toBeNull()
     await act(async () => {
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete organization' }))
+      fireEvent.click(within(deletePanel()).getByRole('button', { name: 'Delete organisation' }))
     })
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'Delete Company A very long organization name?' })).toBeNull(),
-    )
+    await waitFor(() => expect(screen.queryByTestId('list-manager-delete-panel')).toBeNull())
   })
 })
 
@@ -206,7 +224,7 @@ describe('OrganizationsManagerModal — move mode and delete weight (#3222 re-re
     expect(select.tagName).toBe('SELECT')
   })
 
-  it('the per-row Delete is not the solid danger button — the confirmation dialog is', async () => {
+  it('the per-row Delete is not the solid danger button — the confirmation is', async () => {
     renderModal()
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
     const list = within(screen.getByTestId('organization-manager-list'))
@@ -240,7 +258,7 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
     const list = within(screen.getByTestId('organization-manager-list'))
     fireEvent.click(list.getByRole('button', { name: 'Rename Company A very long organization name' }))
-    const input = list.getByLabelText('Organization name')
+    const input = list.getByLabelText('Organisation name')
     fireEvent.change(input, { target: { value: 'Clash' } })
     fireEvent.click(list.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(list.getByRole('alert')).toHaveTextContent('RENAME-409'))
@@ -252,15 +270,15 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
     mockPost.mockRejectedValueOnce(new Error('CREATE-409'))
     renderModal()
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText('New organization name'), { target: { value: 'Dup' } })
+    fireEvent.change(screen.getByLabelText('New organisation name'), { target: { value: 'Dup' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     const form = within(screen.getByTestId('organization-create-form'))
     await waitFor(() => expect(form.getByRole('alert')).toHaveTextContent('CREATE-409'))
     expect(within(screen.getByTestId('organization-manager-list')).queryByRole('alert')).toBeNull()
   })
 
-  it('a delete that 404s (already gone) closes the dialog, refetches and tells the page, instead of offering a retry', async () => {
-    mockDelete.mockRejectedValueOnce(Object.assign(new Error('Organization not found'), { status: 404 }))
+  it('a delete that 404s (already gone) closes the panel, refetches and tells the page, instead of offering a retry', async () => {
+    mockDelete.mockRejectedValueOnce(Object.assign(new Error('Organisation not found'), { status: 404 }))
     const onOrganizationsChanged = vi.fn()
     render(<OrganizationsManagerModal open onClose={vi.fn()} onOrganizationsChanged={onOrganizationsChanged} />)
     await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
@@ -270,11 +288,85 @@ describe('OrganizationsManagerModal — errors stay where they happened (#3236 r
         name: 'Delete Company A very long organization name',
       }),
     )
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete organization' }))
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete organization' })).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete organisation' }))
+    await waitFor(() => expect(screen.queryByTestId('list-manager-delete-panel')).toBeNull())
     expect(mockGet.mock.calls.length).toBeGreaterThan(fetchesBefore)
     // The page's tree refreshes too — not only the manager's own list.
     expect(onOrganizationsChanged).toHaveBeenCalled()
-    expect(screen.queryByText('Organization not found')).toBeNull()
+    expect(screen.queryByText('Organisation not found')).toBeNull()
+  })
+})
+
+/**
+ * #4565: the delete confirmation is INLINE, inside the manager's own dialog.
+ *
+ * The organisations manager used to mount `ConfirmDialog` over itself — two
+ * `role="dialog"` elements at once, against `docs/product/README.md` ("Never
+ * nest modals. Use inline confirmation panels…"). These assertions pin the
+ * replacement: one dialog throughout, Escape cancels the confirmation rather
+ * than the manager, and focus goes back to the row's Delete trigger.
+ */
+describe('OrganizationsManagerModal — inline delete confirmation (#4565)', () => {
+  it('holds exactly one role="dialog" while a delete is being confirmed', async () => {
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+
+    fireEvent.click(
+      within(screen.getByTestId('organization-manager-list')).getByRole('button', {
+        name: 'Delete Company A very long organization name',
+      }),
+    )
+
+    expect(deletePanel()).toBeInTheDocument()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    // The panel names the item and offers both actions.
+    expect(within(deletePanel()).getByText('Delete Company A very long organization name?')).toBeInTheDocument()
+    expect(within(deletePanel()).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(within(deletePanel()).getByRole('button', { name: 'Delete organisation' })).toBeInTheDocument()
+  })
+
+  it('Escape cancels the confirmation without closing the manager, and returns focus to the row trigger', async () => {
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const trigger = within(screen.getByTestId('organization-manager-list')).getByRole('button', {
+      name: 'Delete Company A very long organization name',
+    })
+    fireEvent.click(trigger)
+    expect(deletePanel()).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByTestId('list-manager-delete-panel')).toBeNull()
+    // The manager is still open — Escape cancelled the confirmation, not the dialog.
+    expect(screen.getByRole('dialog', { name: 'Manage organisations' })).toBeInTheDocument()
+    expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('Cancel closes the panel and returns focus to the row trigger', async () => {
+    renderModal()
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+    const trigger = within(screen.getByTestId('organization-manager-list')).getByRole('button', {
+      name: 'Delete Company A very long organization name',
+    })
+    fireEvent.click(trigger)
+    fireEvent.click(within(deletePanel()).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByTestId('list-manager-delete-panel')).toBeNull()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('Escape closes the manager itself when no confirmation is open, and returns focus to its opener', async () => {
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: 'Open manager' })
+    opener.focus()
+    fireEvent.click(opener)
+    await vi.waitFor(() => expect(screen.getByTestId('organization-manager-list')).toBeInTheDocument())
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(opener).toHaveFocus())
   })
 })

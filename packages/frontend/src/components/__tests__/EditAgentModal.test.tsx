@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import EditAgentModal from '../EditAgentModal'
 import type { Agent } from '@/hooks/useAgents'
@@ -283,5 +284,97 @@ describe('EditAgentModal', () => {
 
     expect(screen.getByLabelText('Agent name')).toHaveValue('Renamed elsewhere')
     expect(screen.queryByRole('button', { name: 'Save details' })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #4565: the editor is `ui/Modal` now — the shared shell, its ✕, its focus trap
+ * and its focus return — instead of a bespoke `role="dialog"` panel with its own
+ * close button and its own Escape hook. The action pair moved into `Modal`'s
+ * `footer`, outside the scroll box (#1946), and the busy, success and failure
+ * screens are `ui/DialogResult`.
+ */
+describe('EditAgentModal — Modal anatomy (#4565)', () => {
+  function Harness() {
+    const [open, setOpen] = useState(false)
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open editor
+        </button>
+        <EditAgentModal open={open} onClose={() => setOpen(false)} agent={AGENT} onUpdated={vi.fn()} />
+      </>
+    )
+  }
+
+  it('renders through ui/Modal: the action pair lives in the footer, outside the scroll body', () => {
+    renderModal()
+    const body = document.querySelector('[data-modal-body]') as HTMLElement | null
+    expect(body, 'the dialog must render the shared Modal body hook').not.toBeNull()
+    // The forward action is NOT inside the scroller — a short viewport cannot
+    // push it below the fold (#1946).
+    expect(within(body!).queryByRole('button', { name: 'Review changes' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Review changes' })).toBeInTheDocument()
+    // The ✕ is the shared one, not a hand-rolled `aria-label="Close"` button.
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveAttribute('data-modal-close')
+  })
+
+  it('Escape closes the dialog and returns focus to its opener', async () => {
+    render(<Harness />)
+    const opener = screen.getByRole('button', { name: 'Open editor' })
+    opener.focus()
+    fireEvent.click(opener)
+    expect(screen.getByRole('dialog', { name: 'Edit agent' })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it('keeps the dialog open on Escape while a save is in flight', async () => {
+    let resolvePut: (value: unknown) => void = () => {}
+    mockPut.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolvePut = resolve
+      }),
+    )
+    renderModal()
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save details' }))
+    // The busy screen: the shared DialogResult, whose spinner carries the title
+    // as its accessible name — so the ✕ is the honest "in flight" signal here.
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled())
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    // The request is still in flight: the ✕, the backdrop and Escape are all
+    // guarded together, so the ✕ is never the one unguarded exit.
+    expect(screen.getByRole('dialog', { name: 'Edit agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+
+    await act(async () => {
+      resolvePut({})
+    })
+  })
+
+  it('ends on the shared DialogResult screens for busy, success and failure', async () => {
+    mockPut.mockRejectedValueOnce(new Error('boom'))
+    renderModal()
+    fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save details' }))
+
+    // Failure: the shared error screen, with the caller's action pair in the footer.
+    await vi.waitFor(() => expect(screen.getByText('Update failed')).toBeInTheDocument())
+    expect(screen.getByText('boom')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+
+    // Success: the shared success screen, one full-width Done.
+    mockPut.mockResolvedValueOnce({})
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await vi.waitFor(() => expect(screen.getByText('Agent updated')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument()
   })
 })

@@ -58,6 +58,7 @@ vi.mock('../../../infra/repositories/accounting-connections.js', async (importOr
 }))
 
 import { IgdrasilConnector, igdrasilConnectorIfConfigured } from '../igdrasil-connector.js'
+import { oauth2ConfigFor } from '../connections.js'
 import { IGDRASIL_REVOKE_URL, igdrasilOAuth2Config } from '../igdrasil.js'
 import { completeOAuth2Connect } from '../oauth-flow.js'
 import { pkceVerifierFor } from '../oauth-pkce.js'
@@ -308,5 +309,23 @@ describe('registration gate (igdrasilConnectorIfConfigured)', () => {
     expect(IGDRASIL.availability).toBe('coming_soon')
     expect(IGDRASIL.capabilities).toEqual({ attachments: false, verify: false, revoke: true, companyInfo: true })
     expect(IGDRASIL.requiredScopes).toEqual(['companies:read', 'vouchers:write'])
+  })
+
+  it('the generic routes read Igdrasil\'s OAuth2 config — PKCE on, Igdrasil\'s endpoints and scope — and none while unconfigured', () => {
+    expect(oauth2ConfigFor('igdrasil')).toEqual({
+      providerId: 'igdrasil',
+      authorizeUrl: 'https://accounting.igdrasil.se/api/v1/oauth/authorize',
+      tokenUrl: 'https://accounting.igdrasil.se/api/v1/oauth/token',
+      revokeUrl: 'https://accounting.igdrasil.se/api/v1/oauth/revoke',
+      clientId: 'igd_app_fixture',
+      clientSecret: 'igd_cs_fixture',
+      redirectUri: 'https://api.test/accounting/connections/igdrasil/callback',
+      scope: 'companies:read vouchers:write',
+      pkce: 'S256',
+    })
+    const saved = configMock.igdrasilClientSecret
+    configMock.igdrasilClientSecret = ''
+    expect(oauth2ConfigFor('igdrasil')).toBeNull()
+    configMock.igdrasilClientSecret = saved
   })
 })

@@ -146,6 +146,19 @@ last-verified: "2026-10-25"
 > and holds no key material. Scope: those four areas; the document-wide
 > `last-verified` date is not re-stamped.
 
+> **Re-verified unchanged (#4569, 2026-10-31, empty and load-error states):**
+> the diff touches one covered area — `packages/frontend/src/app/(authenticated)/accounting/**`
+> — in the Accounting page's PRESENTATION only: its first-load and failed-refetch
+> branches now render the shared load-error shape (`EmptyState`, title, a
+> "what is still true" body, and a Try again wired to the hook's own `refetch`)
+> instead of a raw red line with no action. No covered payment, signing, key,
+> custody, advice, settlement or merchant-acquiring surface changes: the page
+> still reads `GET /accounting/feed/status` and posts nothing new, the sync and
+> verify controls are untouched, and the accounting guardrail's disclaimer line
+> is unchanged. Haven still signs nothing and holds no key material. Scope: the
+> Accounting page's error branches; the document-wide `last-verified` date is
+> not re-stamped.
+
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose

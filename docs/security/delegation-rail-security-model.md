@@ -87,6 +87,17 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **Re-verified unchanged (#4569, 2026-10-31, empty and load-error states):**
+> the diff touches one covered file — `packages/frontend/src/components/DelegationBudgetCard.tsx`
+> — in its PRESENTATION only: the "No budget yet." line became the shared
+> `EmptyState` one-line form (`size="inline" bare`), and the card's existing
+> load-error shape is untouched. No grant form, budget row, Stop control,
+> passkey path, delegation, caveat, enforcer term, budget pre-check, settlement
+> window, funding leg or sweep moves; the Set budget button keeps its ref and
+> its `?grant=` prefill behaviour, and the card still renders nothing that
+> grants authority on a retired agent. Scope: that one line; the document-wide
+> `last-verified` date is not re-stamped.
+
 > **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through
 > `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this bump rewrote
 > from `0.12.0-alpha.0` to `0.13.0-alpha.0`. **The edit to that file is the

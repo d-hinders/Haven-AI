@@ -236,7 +236,7 @@ const COPY = {
   nordshield: 'NordShield VPN',
   emptyTitle: 'No agent activity in this range',
   emptyBody: 'This window has no payments, refusals or fees to report.',
-  errorTitle: 'We could not load your analytics',
+  errorTitle: 'Analytics could not load',
   errorBody: 'Nothing here moved or changed.',
   retry: 'Try again',
   frozenLastPaymentRecent: '1d ago',

@@ -749,7 +749,7 @@ describe('CompanyDetailsCard — load error (m1/design review 4)', () => {
   it('always shows the plain copy.loadError sentence, never a raw err.message', async () => {
     mockApi.get.mockImplementation(() => Promise.reject(new ApiRequestError('ECONNRESET: socket hang up', 500)))
     renderCard()
-    expect(await screen.findByText('We could not load your company details. Try again in a moment.')).toBeInTheDocument()
+    expect(await screen.findByText('Your company details could not load.')).toBeInTheDocument()
     expect(screen.queryByText(/ECONNRESET/)).not.toBeInTheDocument()
   })
 

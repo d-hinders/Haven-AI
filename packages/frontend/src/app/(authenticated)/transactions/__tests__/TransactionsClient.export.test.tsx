@@ -90,7 +90,7 @@ const { totalsRows } = vi.hoisted(() => ({
 }))
 
 const { feedState } = vi.hoisted(() => ({
-  feedState: { partialFailure: false, truncated: false, empty: false, hasMore: false, loadingMore: false, total: 1, loadMore: vi.fn(), filtersError: null as string | null },
+  feedState: { partialFailure: false, truncated: false, empty: false, hasMore: false, loadingMore: false, total: 1, loadMore: vi.fn(), filtersError: null as string | null, error: null as string | null, refresh: vi.fn() },
 }))
 
 vi.mock('@/hooks/useTransactionsFeed', async () => ({
@@ -104,12 +104,12 @@ vi.mock('@/hooks/useTransactionsFeed', async () => ({
     loadingInitial: false,
     loadingMore: feedState.loadingMore,
     hasMore: feedState.hasMore,
-    error: null,
+    error: feedState.error,
     partialFailure: feedState.partialFailure,
     truncated: feedState.truncated,
     failedAccountIds: [],
     loadMore: feedState.loadMore,
-    refresh: vi.fn(),
+    refresh: feedState.refresh,
   }),
 }))
 
@@ -139,6 +139,8 @@ beforeEach(() => {
   feedState.total = 1
   feedState.loadMore = vi.fn()
   feedState.filtersError = null
+  feedState.error = null
+  feedState.refresh = vi.fn()
 })
 
 async function exportNoticeRegion(): Promise<HTMLElement> {
@@ -151,6 +153,18 @@ async function exportNoticeRegion(): Promise<HTMLElement> {
 function exportButton(): HTMLElement {
   return screen.getByRole('button', { name: /export csv/i })
 }
+
+describe('TransactionsClient — the load-error shape (#4569)', () => {
+  it('a failed read is the load-error shape, and Try again calls the feed refresh', () => {
+    feedState.error = 'boom'
+    render(<TransactionsClient />)
+
+    expect(screen.getByRole('heading', { name: 'Transactions could not load' })).toBeInTheDocument()
+    expect(screen.getByText('Your payments are unchanged.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(feedState.refresh).toHaveBeenCalledOnce()
+  })
+})
 
 /**
  * #4561 — one page name. The heading carried a name of its own while the

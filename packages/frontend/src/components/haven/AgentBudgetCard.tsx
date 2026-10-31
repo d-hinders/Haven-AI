@@ -50,7 +50,7 @@ export function AgentBudgetCard({
 
       <div className={`${compact ? 'mt-2 space-y-1.5' : 'mt-4 space-y-2'}`}>
         {isEmpty ? (
-          <EmptyState size="inline" title={emptyLabel} />
+          <EmptyState size="inline" bare title={emptyLabel} />
         ) : (
           budgets.map((row) => (
             <div

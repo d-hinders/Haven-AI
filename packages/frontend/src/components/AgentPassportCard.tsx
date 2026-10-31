@@ -138,7 +138,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
       <SettingsRow
         data-testid="agent-passport-row"
         label="Agent Passport"
-        detail="Couldn't load passport status."
+        detail="Passport status could not load."
         action={
           <button
             type="button"

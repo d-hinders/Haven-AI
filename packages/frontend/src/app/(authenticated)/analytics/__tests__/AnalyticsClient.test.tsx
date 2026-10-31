@@ -295,7 +295,7 @@ describe('Analytics — failure', () => {
   it('reports the failure as an alert and says what did not load', () => {
     render(<AnalyticsClient />)
     expect(screen.getByRole('alert')).toBeTruthy()
-    expect(screen.getByText('We could not load your analytics')).toBeTruthy()
+    expect(screen.getByText('Analytics could not load')).toBeTruthy()
   })
 
   it('does not let an outage read as a quiet window', () => {

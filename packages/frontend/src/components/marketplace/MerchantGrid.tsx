@@ -308,8 +308,8 @@ export function MerchantGrid({
       <EmptyState
         icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
         tone="danger"
-        title="Could not load the marketplace"
-        body={error}
+        title="The marketplace could not load"
+        body="The listings are unchanged."
         action={
           onRetry ? (
             <Button variant="ghost" size="sm" onClick={onRetry}>

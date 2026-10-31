@@ -40,6 +40,7 @@ import {
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Spinner } from '@haven_ai/ui/Spinner'
 import { Button } from '@/components/ui/Button'
 import WalletConnectAction from '@/components/WalletConnectAction'
@@ -519,9 +520,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
                       {payTo ? ` (${truncateAddress(payTo)})` : ''}.
                     </p>
                     {amountFormatError ? (
-                      <p id="fund-merchant-amount-error" role="alert" className="text-xs text-[var(--v2-danger)]">
-                        {amountFormatError}
-                      </p>
+                      <InlineAlert id="fund-merchant-amount-error">{amountFormatError}</InlineAlert>
                     ) : !amountValid ? (
                       <p className="text-xs text-[var(--v2-ink-3)]">Enter an amount above zero to continue.</p>
                     ) : null}

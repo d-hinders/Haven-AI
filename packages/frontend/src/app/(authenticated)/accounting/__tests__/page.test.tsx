@@ -144,6 +144,42 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
 })
 
 /**
+ * #4569: a load error needs a working retry, not only new words. The page's
+ * first-load failure used to be a raw red line with no action at all; it is
+ * the load-error shape now (#4563), and its Try again calls the hook's own
+ * `refetch`. The refetch failure — status already in hand, rows replaced —
+ * gets the same shape behind the same `refetch`.
+ */
+describe('/accounting load errors (#4569)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+  })
+
+  it('first load: the load-error shape, and Try again calls refetch', () => {
+    const refetch = vi.fn()
+    mockFeed.mockReturnValue(feed({ status: null, loading: false, error: 'boom', refetch }))
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Accounting could not load' })).toBeInTheDocument()
+    expect(screen.getByText('Your accounting connections are unchanged.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+
+  it('a failed refetch: the same shape, and Try again calls refetch', () => {
+    const refetch = vi.fn()
+    mockFeed.mockReturnValue(feed({ error: 'boom', refetch }))
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Sync status could not load' })).toBeInTheDocument()
+    expect(screen.getByText('Your synced payments are unchanged.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+})
+
+/**
  * The two OFF states, on the page (#2869). The owner decision is that they
  * read differently: `hosted && !enabled` is Coming soon, `!hosted` says the
  * feed is not available on a self-hosted box and must never suggest it is

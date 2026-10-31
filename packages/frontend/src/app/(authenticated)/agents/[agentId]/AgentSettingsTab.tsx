@@ -67,6 +67,7 @@ import { ArrowRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { timeAgo } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Row } from '@/components/ui/Row'
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsSection'
 import { LabelChipRow } from '@/components/haven/LabelChip'
@@ -195,7 +196,7 @@ export default function AgentSettingsTab({
             agent.labels.length > 0 ? (
               <LabelChipRow labels={agent.labels} />
             ) : (
-              <span className="text-[var(--v2-ink-3)]">No labels yet.</span>
+              <EmptyState size="inline" bare title="No labels yet." className="px-0 py-0 text-left" />
             )
           }
           action={

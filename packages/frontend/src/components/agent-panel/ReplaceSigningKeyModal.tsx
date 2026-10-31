@@ -59,6 +59,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Input } from '@/components/ui/Input'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -169,17 +170,6 @@ export function ReplaceSigningKeyModal({
   const [result, setResult] = useState<CompleteResult | null>(null)
   const [issuedDelegations, setIssuedDelegations] = useState<IssuedDelegation[]>([])
   const [skippedCount, setSkippedCount] = useState(0)
-  const [keyCopied, setKeyCopied] = useState(false)
-
-  const copyKey = useCallback(async (key: string) => {
-    try {
-      await navigator.clipboard.writeText(key)
-      setKeyCopied(true)
-    } catch {
-      // The key is on screen and selectable; a failed clipboard write is not
-      // worth an error banner over the one screen that shows it once.
-    }
-  }, [])
 
   useEffect(() => {
     if (open) void rekey.loadSigners()
@@ -197,7 +187,6 @@ export function ReplaceSigningKeyModal({
     setResult(null)
     setIssuedDelegations([])
     setSkippedCount(0)
-    setKeyCopied(false)
   }, [])
 
   /**
@@ -776,9 +765,10 @@ export function ReplaceSigningKeyModal({
               {result.api_key}
             </code>
             <div className="mt-3">
-              <Button size="sm" variant="ghost" onClick={() => void copyKey(result.api_key)}>
-                {keyCopied ? 'Copied' : 'Copy'}
-              </Button>
+              {/* #4573: the shared copy primitive. The key is on screen and
+                  selectable, so a failed write stays silent — the value is
+                  still there to select by hand. */}
+              <CopyButton value={result.api_key} label="credential" text="Copy" />
             </div>
           </div>
         </div>

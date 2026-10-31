@@ -1739,3 +1739,14 @@ project owner — collaborators have Viewer access, not env-var write access.
 > `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` or quote that message. Scope of this
 > note: those two passages. Nothing else in this document was re-read for it,
 > and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#4573, 2026-10-31 — the receive dialog's copy
+> affordance).** `packages/frontend/src/components/ReceiveDialog.tsx` now
+> copies the address through the shared `CopyButton` instead of a hand-rolled
+> `navigator.clipboard.writeText` with its own 1800 ms timer. The address, the
+> inline QR, the one-network rule, the faucet/onramp gates and the account
+> picker are unchanged, and the success toast still fires — now from
+> `CopyButton`'s `onCopied`, which runs only after the write resolves. Nothing
+> this document says about the dev environment, the demo gate or the receive
+> surface moves. Scope of this note: that one file. Nothing else in this
+> document was re-read for it, and `last-verified` is not bumped.

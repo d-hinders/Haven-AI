@@ -5,6 +5,7 @@ import { Amount, type AmountCurrency } from './Amount'
 import { DirectionMark } from './DirectionMark'
 import { ExternalLink } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { dayKeyInZone } from '@/lib/format'
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral' | 'brand'
 export type TransactionActivityDirection = 'in' | 'out' | 'neutral' | 'move'
@@ -303,18 +304,6 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
 // ── Ledger mode: day grouping (#4096, epic #4093) ───────────────────────────
 
 /**
- * Local calendar day of an ISO instant, `YYYY-MM-DD` (en-CA's ISO format) —
- * the same key the dashboard's ActivitySection buckets its groups by.
- */
-export function transactionDayKey(iso: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(iso))
-}
-
-/**
  * Heading for a day bucket: "Today", "Yesterday", else the short date
  * ("17 May"). Derived from the DAY KEY, not re-derived from a raw instant,
  * so a row rendered under "Today" IS from today — the label and the bucket
@@ -363,7 +352,7 @@ export function transactionDayGroups<T>(
 ): Array<TransactionDayGroup<T>> {
   const buckets = new Map<string, T[]>()
   for (const item of items) {
-    const key = transactionDayKey(timestampOf(item))
+    const key = dayKeyInZone(timestampOf(item))
     const bucket = buckets.get(key)
     if (bucket) bucket.push(item)
     else buckets.set(key, [item])

@@ -226,11 +226,11 @@ describe('WalletButton', () => {
     expect(screen.getByText('0x0802…0ce2')).toBeInTheDocument()
     expect(screen.getByText('Gnosis Chain')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Passkey address' }))
 
     await waitFor(() => {
       expect(mocks.writeText).toHaveBeenCalledWith(PASSKEY_ADDRESS)
-      expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Passkey address copied' })).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect wallet instead' }))

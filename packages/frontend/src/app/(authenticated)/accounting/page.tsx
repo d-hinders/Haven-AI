@@ -19,7 +19,7 @@ import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/Comin
 import { FeedSummary } from '@/components/accounting/FeedSummary'
 import { providerDisplayName, isRecordOnlyProvider } from '@/components/accounting/AccountingBadge'
 import { useAccountingProviders, type AccountingProvider } from '@/hooks/useAccounting'
-import { truncate } from '@/lib/format'
+import { formatTimeOfDay, truncate } from '@/lib/format'
 
 const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
   pushed: { label: 'Synced', cls: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]' },
@@ -416,7 +416,7 @@ export default function AccountingPage() {
                             >
                               {'error' in v
                                 ? v.error
-                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${formatTimeOfDay(v.checked_at)}.`}
                             </p>
                             {!('error' in v) && !v.registered && (
                               <Button

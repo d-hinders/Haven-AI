@@ -8,9 +8,9 @@ import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TransactionActivityDayHeader, TransactionActivityRow, TransactionActivityRowSkeleton, TransactionMovement, transactionDayKey, transactionDayLabel } from '@/components/haven'
+import { TransactionActivityDayHeader, TransactionActivityRow, TransactionActivityRowSkeleton, TransactionMovement, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
-import { timeAgo } from '@/lib/format'
+import { cutsItsDay, dayKeyInZone, timeAgo } from '@/lib/format'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
 
 /** One grouped-activity row from `GET /dashboard/overview` (#3824). */
@@ -182,9 +182,9 @@ export function ActivitySection({
  * Day buckets + rows. The server grouped by the USER's local day already
  * (#3824) — the client only derives each heading from the group's
  * `latestAt`, so the buckets cannot disagree with the grouping. Bucketing
- * and labelling use the ledger's shared `transactionDayKey` /
- * `transactionDayLabel` (#4225): the same helpers the account page's ledger
- * uses, so the two surfaces cannot drift.
+ * and labelling use the shared `dayKeyInZone` / `transactionDayLabel`
+ * (#4225, #4573): the same helpers the account page's ledger uses, so the
+ * two surfaces cannot drift.
  *
  * The oldest heading can cover part of a day (#3975): when
  * `activityWindowStart` is present and cuts its own local day (the
@@ -207,13 +207,13 @@ function ActivityRows({
 }) {
   const partialDayKey = useMemo(() => {
     if (activityWindowStart == null || !cutsItsDay(activityWindowStart)) return null
-    return transactionDayKey(activityWindowStart)
+    return dayKeyInZone(activityWindowStart)
   }, [activityWindowStart])
 
   const days = useMemo(() => {
     const buckets = new Map<string, ActivityGroup[]>()
     for (const group of activity) {
-      const key = transactionDayKey(group.latestAt)
+      const key = dayKeyInZone(group.latestAt)
       const bucket = buckets.get(key)
       if (bucket) bucket.push(group)
       else buckets.set(key, [group])
@@ -369,19 +369,3 @@ function EmptyActivityIcon() {
   return <Icon icon={ArrowLeftRight} className="w-full h-full" />
 }
 
-/**
- * True when the instant is not local midnight in the runtime zone — a
- * boundary that cuts its day. The analytics page applies the same rule to
- * its range edges (`SpendSection`'s `cutsItsDay`); #3975 applies it to the
- * Activity window's start so the oldest day heading can say "(partial)".
- */
-function cutsItsDay(iso: string): boolean {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(iso))
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
-  return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
-}

@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiSchema } from '@haven_ai/core'
 import { ActivitySection } from '../ActivitySection'
-import { transactionDayKey, transactionDayLabel } from '@/components/haven'
+import { transactionDayLabel } from '@/components/haven'
+import { dayKeyInZone } from '@/lib/format'
 
 type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
 
@@ -380,12 +381,13 @@ describe('ActivitySection — a move between your own accounts (#4268)', () => {
 
 describe('the shared day helpers match the dropped local copies (#4225)', () => {
   // ActivitySection used to carry its own `localDayKey` and `activityDayLabel`,
-  // word-for-word copies of the ledger's `transactionDayKey` /
-  // `transactionDayLabel`. The section now uses the shared helpers directly;
-  // this pins that their output is exactly what the local copies produced,
-  // so the swap cannot change a rendered heading. "(partial)" rides on top
-  // of the label and is pinned in the partial describe below.
-  it('transactionDayKey keys the local day; transactionDayLabel names it', () => {
+  // word-for-word copies of the ledger's day key / `transactionDayLabel`. The
+  // section now uses the shared helpers directly (#4573 moved the key itself
+  // into `lib/format.ts`); this pins that their output is exactly what the
+  // local copies produced, so the swap cannot change a rendered heading.
+  // "(partial)" rides on top of the label and is pinned in the partial
+  // describe below.
+  it('dayKeyInZone keys the local day; transactionDayLabel names it', () => {
     const today = new Date()
     const yesterday = new Date(today)
     yesterday.setDate(today.getDate() - 1)
@@ -393,7 +395,7 @@ describe('the shared day helpers match the dropped local copies (#4225)', () => 
     lastWeek.setDate(today.getDate() - 7)
 
     // The dropped `localDayKey`: the en-CA `YYYY-MM-DD` key.
-    const formatDayKey = (date: Date) => transactionDayKey(date.toISOString())
+    const formatDayKey = (date: Date) => dayKeyInZone(date.toISOString())
     expect(formatDayKey(today)).toMatch(/^\d{4}-\d{2}-\d{2}$/)
 
     // The dropped `activityDayLabel`: today, yesterday, then en-GB short date.

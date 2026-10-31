@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import type { ApiSchema } from '@haven_ai/core'
-import { timeAgo } from '@/lib/format'
+import { formatDateTime, timeAgo } from '@/lib/format'
 
 /**
  * The additive balance-freshness marker from the wire (#3295). Present on a
@@ -47,7 +47,7 @@ export function BalanceFreshnessIndicator({
   return (
     <span
       role="status"
-      title={new Date(freshness.asOf).toLocaleString()}
+      title={formatDateTime(freshness.asOf)}
       className={`inline-flex items-center whitespace-nowrap font-medium text-[var(--v2-warning)] ${size === 'compact' ? 'text-xs' : 'text-sm'}`}
     >
       <span

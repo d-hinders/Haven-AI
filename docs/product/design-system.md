@@ -2537,10 +2537,9 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 `ui/Modal` is the shared dialog shell — twenty-one product files import it
 directly (twenty-two with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: five older dialogs — `EditAgentModal`,
-`MoveAgentModal`, `LabelsManagerModal`, `OrganizationsManagerModal` (slices 4
-and 5 of #4560) and `ReceiveDialog` (below) — are still bespoke `role="dialog"`
-shells. A new dialog uses
+Not every dialog uses it yet: five older dialogs, `ReceiveDialog` among them
+(below), are still bespoke `role="dialog"` shells — slices 4 and 5 of #4560
+move the rest. A new dialog uses
 `Modal`. Anything changed here is changed everywhere, so the
 structure is worth stating rather than re-deriving from the file.
 

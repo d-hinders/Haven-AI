@@ -125,6 +125,7 @@ export function ActivitySection({
       ) : unavailable ? (
         <div className="p-6">
           <EmptyState
+            bare
             size="compact"
             title="Activity preview unavailable"
             body="Haven could not refresh recent payments right now."
@@ -134,6 +135,7 @@ export function ActivitySection({
       ) : activity.length === 0 && hasWindowOnlyActivity ? (
         <div className="p-6">
           <EmptyState
+            bare
             tone="brand"
             icon={<EmptyActivityIcon />}
             title={windowEmptyTitle}
@@ -148,6 +150,7 @@ export function ActivitySection({
       ) : activity.length === 0 ? (
         <div className="p-6">
           <EmptyState
+            bare
             tone="brand"
             icon={<EmptyActivityIcon />}
             title="No activity yet"

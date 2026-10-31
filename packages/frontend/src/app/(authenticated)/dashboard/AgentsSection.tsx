@@ -224,6 +224,7 @@ export function AgentsSection({
       ) : unavailable ? (
         <div className="p-6">
           <EmptyState
+            bare
             size="compact"
             title="Agent preview unavailable"
             body="Haven could not verify which agents are connected right now."
@@ -233,6 +234,7 @@ export function AgentsSection({
       ) : agents.length === 0 ? (
         <div className="p-6">
           <EmptyState
+            bare
             size="compact"
             title={hasAnyAgents ? 'No connected agents right now' : 'No agents connected yet'}
             body={

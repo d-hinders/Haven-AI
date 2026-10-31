@@ -515,7 +515,7 @@ export default function AccountDetailClient() {
                 <Skeleton variant="text" className="h-4 w-24" />
               </div>
             ) : holdings.length === 0 ? (
-              <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No tokens yet</p>
+              <EmptyState size="inline" bare title="No tokens yet" className="mt-2 px-0 py-0 text-left" />
             ) : (
               <ul className="mt-2 space-y-2">
                 {holdings.map((row) => {
@@ -695,6 +695,7 @@ export default function AccountDetailClient() {
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
               <div className="p-6">
                 <EmptyState
+                  bare
                   size="compact"
                   title="Agents could not load"
                   body="Haven could not verify which agents are connected right now."
@@ -707,6 +708,7 @@ export default function AccountDetailClient() {
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
               <div className="p-6">
                 <EmptyState
+                  bare
                   size="compact"
                   title="No agents connected"
                   body="Connect an agent when you want it to request payments from this Haven wallet."

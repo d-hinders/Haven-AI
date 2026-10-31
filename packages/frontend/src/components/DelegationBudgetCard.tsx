@@ -724,7 +724,7 @@ export default function DelegationBudgetCard({
         // #4261: with an active budget there is NO control here — Add budget
         // is the rows' ⋯ menu item.
         <div className="mt-3">
-          <p className="text-sm text-[var(--v2-ink-2)]">No budget yet.</p>
+          <EmptyState size="inline" bare title="No budget yet." />
           <Button
             ref={addBudgetRef}
             size="sm"

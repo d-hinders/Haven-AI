@@ -38,7 +38,7 @@ describe('AgentPassportCard (#1072)', () => {
     const refetch = vi.fn()
     mockUseAgentPassport.mockReturnValue(state({ loadError: true, refetch }))
     render(<AgentPassportCard agentId="agent-1" />)
-    expect(screen.getByText(/Couldn.t load passport status/)).toBeTruthy()
+    expect(screen.getByText(/Passport status could not load/)).toBeTruthy()
     expect(screen.queryByText(/has no passport/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Issue a passport/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
@@ -61,7 +61,7 @@ describe('AgentPassportCard (#1072)', () => {
       },
     }))
     render(<AgentPassportCard agentId="agent-1" />)
-    expect(screen.queryByText(/Couldn.t load passport status/)).toBeNull()
+    expect(screen.queryByText(/Passport status could not load/)).toBeNull()
     expect(screen.getByText('Issued')).toBeTruthy()
   })
 
@@ -304,7 +304,7 @@ describe('AgentPassportCard (#1072)', () => {
     render(<AgentPassportCard agentId="agent-1" />)
     const row = document.querySelector('[data-testid="agent-passport-row"]')
     expect(row).toBeTruthy()
-    expect(row!.textContent).toMatch(/Couldn.t load passport status/)
+    expect(row!.textContent).toMatch(/Passport status could not load/)
     expect(row!.querySelector('button')).toBeTruthy()
     expect(row!.className).not.toContain('rounded-[10px]')
     expect(row!.className).not.toContain('shadow-card')

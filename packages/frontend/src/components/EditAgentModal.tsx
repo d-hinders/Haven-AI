@@ -12,6 +12,8 @@ import { ORG_PICKER_LABEL, ORG_PICKER_NOTE } from '@/lib/organization-copy'
 import { Button } from './ui/Button'
 import { DialogActions } from './ui/DialogActions'
 import { DialogResult } from './ui/DialogResult'
+import { EmptyState } from './ui/EmptyState'
+import { InlineAlert } from './ui/InlineAlert'
 import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
 import { Select } from './ui/Select'
@@ -266,9 +268,12 @@ export default function EditAgentModal({
           <div>
             <p className="mb-1.5 text-sm font-medium text-[var(--v2-ink)]">Labels</p>
             {labelsReady && vocabulary.length === 0 ? (
-              <p className="text-xs text-[var(--v2-ink-3)]">
-                No labels yet. Add one below to start organising your agents.
-              </p>
+              <EmptyState
+                size="inline"
+                bare
+                title="No labels yet. Add one below to start organising your agents."
+                className="px-0 py-0 text-left"
+              />
             ) : (
               <div className="space-y-1" data-testid="label-editor-list">
                 {vocabulary.map((label) => (
@@ -307,7 +312,9 @@ export default function EditAgentModal({
               </Button>
             </div>
             {newLabelError ? (
-              <p role="alert" className="mt-1 text-xs text-[var(--v2-danger)]">{newLabelError}</p>
+              <div className="mt-1">
+                <InlineAlert>{newLabelError}</InlineAlert>
+              </div>
             ) : null}
             <p className="mt-2 text-xs text-[var(--v2-ink-3)]">{LABEL_EDITOR_NOTE}</p>
           </div>

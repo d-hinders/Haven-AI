@@ -164,15 +164,15 @@ describe('MerchantPage', () => {
       refetch: vi.fn(),
     })
     render(<MerchantPage />)
-    expect(screen.getByText('Could not load this merchant')).toBeDefined()
-    expect(screen.getByText('boom')).toBeDefined()
+    expect(screen.getByText('This merchant could not load')).toBeDefined()
+    expect(screen.getByText("This merchant's listing is unchanged.")).toBeDefined()
   })
 
   it('designs the merchant-less 200 (no notFound, no error) instead of rendering nothing', () => {
     const refetch = vi.fn()
     mockUseMerchant.mockReturnValue({ merchant: null, offers: [], loading: false, error: null, notFound: false, refetch })
     const { container } = render(<MerchantPage />)
-    expect(container.textContent).toContain('Could not load this merchant')
+    expect(container.textContent).toContain('This merchant could not load')
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(refetch).toHaveBeenCalledTimes(1)
     expect(mockNotFound).not.toHaveBeenCalled()

@@ -33,6 +33,7 @@
 import { useEffect, useState } from 'react'
 import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { accountingRefusal } from '@/hooks/useAccounting'
@@ -156,9 +157,9 @@ export function ApiKeyConnectModal({ open, providerName, onClose, onConnect }: A
             />
           </div>
           {error ? (
-            <p id={errorId} role="alert" className="mt-2 text-sm text-[var(--v2-danger)]" data-testid="api-key-error">
-              {error}
-            </p>
+            <div className="mt-2">
+              <InlineAlert id={errorId}>{error}</InlineAlert>
+            </div>
           ) : null}
         </div>
 

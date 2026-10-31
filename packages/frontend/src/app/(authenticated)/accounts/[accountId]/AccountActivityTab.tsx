@@ -42,6 +42,7 @@ import {
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerRow'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
@@ -445,9 +446,9 @@ export default function AccountActivityTab({
       )}
 
       {filtersError && (
-        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
-          {filtersError}
-        </p>
+        <div className="mt-2">
+          <InlineAlert>{filtersError}</InlineAlert>
+        </div>
       )}
 
       <ListExportNotice notice={listExport.notice} className="mt-3" />
@@ -481,8 +482,9 @@ export default function AccountActivityTab({
           ) : error ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Activity could not load"
-                body={error}
+                body="This wallet's payments are unchanged."
                 className="py-8"
                 action={
                   <Button
@@ -504,6 +506,7 @@ export default function AccountActivityTab({
                   a filter that matches nothing is the no-match state above
                   and never reaches here. */}
               <EmptyState
+                bare
                 title="No activity yet"
                 body="Inbound and outbound payments for this Haven wallet will appear here."
                 className="py-8"

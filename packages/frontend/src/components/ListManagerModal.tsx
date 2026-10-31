@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Pencil } from 'lucide-react'
 import { InlineAlert } from '@haven_ai/ui/InlineAlert'
+import { EmptyState } from '@haven_ai/ui/EmptyState'
 import { Skeleton } from '@haven_ai/ui/Skeleton'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from './ui/Button'
@@ -236,14 +237,19 @@ export function ListManagerModal<T extends ManagedItem>({
           <span className="sr-only">{loadingLabel}</span>
         </div>
       ) : loadError ? (
-        <div className="space-y-3 text-center">
-          <p className="text-sm text-[var(--v2-ink-2)]">{loadError}</p>
-          <Button variant="ghost" onClick={onReload}>
-            Try again
-          </Button>
-        </div>
+        <EmptyState
+          bare
+          tone="danger"
+          title="This list could not load"
+          body="Nothing here has changed."
+          action={
+            <Button variant="ghost" onClick={onReload}>
+              Try again
+            </Button>
+          }
+        />
       ) : items.length === 0 ? (
-        <p className="py-4 text-center text-sm text-[var(--v2-ink-2)]">{emptyMessage}</p>
+        <EmptyState size="inline" bare title={emptyMessage} className="py-4" />
       ) : (
         <ul className="space-y-2" data-testid={listTestId}>
           {items.map((item) => {

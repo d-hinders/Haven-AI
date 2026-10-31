@@ -616,16 +616,20 @@ describe('AgentDetailClient last-activity metadata', () => {
       expectBackToAgents()
     })
 
-    it('renders when the agent could not load', () => {
+    it('renders when the agent could not load, and Try again calls refetch (#4569)', () => {
+      const refetch = vi.fn()
       mockUseAgents.mockReturnValue({
         ...mockUseAgents(),
         agents: [],
         loading: false,
         error: new Error('offline'),
+        refetch,
       })
       render(<AgentDetailClient agentId="agent-1" />)
       expect(screen.getByRole('heading', { name: 'Agent could not load' })).toBeInTheDocument()
       expectBackToAgents()
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(refetch).toHaveBeenCalledOnce()
     })
   })
 

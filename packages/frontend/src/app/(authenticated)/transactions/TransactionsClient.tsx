@@ -36,6 +36,7 @@ import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerR
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ListExportAction, ListExportNotice, useListExport, type ListExportRequest } from '@/components/ui/ListExportAction'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
@@ -439,9 +440,9 @@ export default function TransactionsClient() {
       {/* After the hedge, so the hedge stays under the count it
           qualifies (#4196). */}
       {filtersError && (
-        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
-          {filtersError}
-        </p>
+        <div className="mt-2">
+          <InlineAlert>{filtersError}</InlineAlert>
+        </div>
       )}
 
       {showNoMatch ? (
@@ -463,8 +464,9 @@ export default function TransactionsClient() {
           ) : error ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Transactions could not load"
-                body={error}
+                body="Your payments are unchanged."
                 className="py-8"
                 action={
                   <Button
@@ -485,6 +487,7 @@ export default function TransactionsClient() {
               {/* A filter that matches nothing is the no-match state above
                   and never reaches here. */}
               <EmptyState
+                bare
                 title="No activity yet"
                 body="Payments and account funding activity will appear here."
                 className="py-8"

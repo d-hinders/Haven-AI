@@ -11,9 +11,12 @@ import {
 import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Icon } from '@/components/ui/Icon'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { CircleAlert } from 'lucide-react'
 import { ConnectOutcomeForwarderInSuspense } from '@/components/accounting/ConnectOutcomeForwarder'
 import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
 import { FeedSummary } from '@/components/accounting/FeedSummary'
@@ -160,7 +163,7 @@ function verificationSummary(
 
 export default function AccountingPage() {
   const t = useT()
-  const { status, loading, error, sync, verify, reopen } = useAccountingFeed()
+  const { status, loading, error, refetch, sync, verify, reopen } = useAccountingFeed()
   // #4520: where the descriptor list is to hand, `capabilities.verify` is what
   // decides "record-only" — a connector that flips it needs no frontend edit.
   // The badge's explicit set stays the fallback for the ledger row, which has
@@ -244,7 +247,23 @@ export default function AccountingPage() {
       <div className="max-w-3xl">
         <ConnectOutcomeForwarderInSuspense />
         {header}
-        {error ? <p className="text-sm text-[var(--v2-danger)]">{error}</p> : null}
+        {error ? (
+          // #4569: the load-error shape (#4563) — the thing that could not
+          // load, what is still true, and a Try again wired to the hook's own
+          // `refetch`. Before this the first-load failure was a raw red line
+          // with no action at all.
+          <EmptyState
+            tone="danger"
+            icon={<Icon icon={CircleAlert} className="h-full w-full" />}
+            title="Accounting could not load"
+            body="Your accounting connections are unchanged."
+            action={
+              <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+                Try again
+              </Button>
+            }
+          />
+        ) : null}
       </div>
     )
   }
@@ -335,7 +354,23 @@ export default function AccountingPage() {
             </div>
 
             {error ? (
-              <div className="px-5 pb-5 text-sm text-[var(--v2-danger)]">{error}</div>
+              // #4569: a refetch that failed replaces the rows, so it gets the
+              // load-error shape rather than a bare red line — and the same
+              // `refetch` behind Try again.
+              <div className="px-5 pb-5">
+                <EmptyState
+                  bare
+                  tone="danger"
+                  icon={<Icon icon={CircleAlert} className="h-full w-full" />}
+                  title="Sync status could not load"
+                  body="Your synced payments are unchanged."
+                  action={
+                    <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+                      Try again
+                    </Button>
+                  }
+                />
+              </div>
             ) : status.syncs.length === 0 ? (
               <div className="px-5 pb-5 text-sm text-[var(--v2-ink-3)]">
                 Nothing synced yet. Settled agent payments will appear here automatically.

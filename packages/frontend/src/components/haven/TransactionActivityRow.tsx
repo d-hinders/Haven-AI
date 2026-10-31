@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { Amount, type AmountCurrency } from './Amount'
 import { DirectionMark } from './DirectionMark'
 import { ExternalLink } from 'lucide-react'
@@ -235,6 +236,47 @@ export function TransactionActivityRow({
             <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{timestamp}</p>
           ) : null}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The ledger-row placeholder (#4568) — the icon square and two bars four
+ * surfaces hand-copied.
+ *
+ * `density` mirrors the row it stands in for, because the two densities are
+ * not the same shape. `comfortable` (the account, agent and transactions
+ * ledgers) is the icon-and-two-bars block. `compact` (the dashboard preview)
+ * adds the amount placeholder and the responsive two-column grid pinned to
+ * 72px at `sm` and up — the same breakpoint-scoped height the loaded row uses
+ * (#1833), so the skeleton does not flatten the dashboard's rhythm.
+ *
+ * The caller owns the container: `role="status"`, `aria-busy`, `aria-live`
+ * and the `divide-y` between rows stay at the call site, where the list's own
+ * label lives.
+ */
+export function TransactionActivityRowSkeleton({ density = 'comfortable' }: { density?: Density }) {
+  if (density === 'compact') {
+    return (
+      <div className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-9 w-9 rounded-[10px]" />
+          <div>
+            <Skeleton variant="text" className="h-3.5 w-40" />
+            <Skeleton variant="text" className="mt-1.5 h-2.5 w-56" />
+          </div>
+        </div>
+        <Skeleton variant="text" className="h-4 w-24 sm:justify-self-end" />
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-3 px-5 py-3.5">
+      <Skeleton className="h-9 w-9 rounded-[10px]" />
+      <div className="min-w-0 flex-1">
+        <Skeleton variant="text" className="h-3.5 w-40" />
+        <Skeleton variant="text" className="mt-1.5 h-2.5 w-48" />
       </div>
     </div>
   )

@@ -2903,6 +2903,13 @@ One limit worth knowing before you reach for it: no ref is forwarded, so `indete
 
 Use `components/ui/Skeleton.tsx` instead of inline `animate-pulse` divs. The primitive is caller-sized; choose `variant="text"`, `variant="rect"`, or `variant="circle"` for radius only. Loading containers that replace meaningful content should use `role="status"`, `aria-busy="true"`, and `aria-live="polite"` around the skeletons.
 
+Two shapes are extracted rather than re-drawn, because they had already been hand-copied ten and four times:
+
+- **`RouteLoading`** (`components/ui/RouteLoading.tsx`) is the one route and auth fallback: a brand dot on `Skeleton` beside a visible `Loading…` label (U+2026), one ink tone. It carries `role="status"`, `aria-busy="true"` and `aria-live="polite"`, and the label is the element's accessible name, so the words are both read and announced. Pass `label` only where the fallback says more than "loading" — the account page's `Loading account…`. A page's own wrapper (the `min-h-screen` centring, the `max-w-5xl` with its `BackLink`) stays at the call site; `className` carries the row's padding and centring.
+- **`TransactionActivityRowSkeleton`** (`components/haven/TransactionActivityRow.tsx`, beside the row it stands in for) is the ledger-row placeholder, and it takes the row's own `density`. `comfortable` is the icon square and two bars the account, agent and transactions ledgers use; `compact` is the dashboard preview's variant, with the amount placeholder and the responsive two-column grid pinned to 72px at `sm` and up (#1833). The container — `role="status"`, `aria-busy`, `aria-live`, the `divide-y` between rows — stays at the call site, where the list's own label lives.
+
+A pulsing dot that is not a loading placeholder (a live-status indicator, say) is not a `Skeleton`; leave it as it is and say so in the PR.
+
 ### Toasts
 
 Use `ToastProvider`, `Toaster`, and `useToast()` for short feedback after user actions such as copy, save, send, or retry. Toasts:

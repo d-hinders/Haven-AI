@@ -40,6 +40,7 @@ import {
 } from '@/lib/merchantBudgetRefusal'
 import { truncateAddress, BudgetAmountRow } from '@/components/haven'
 import { Icon } from '@/components/ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { Button } from '@/components/ui/Button'
 import WalletConnectAction from '@/components/WalletConnectAction'
 import PasskeyElsewhereHint from '@/components/PasskeyElsewhereHint'
@@ -648,7 +649,7 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
 
           {step === 'working' && (
             <div ref={stepRegionRef} tabIndex={-1} role="status" aria-live="polite" className="space-y-4 py-8 text-center outline-none">
-              <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--v2-brand)] border-t-transparent" />
+              <Spinner size="md" />
               <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your approval…</p>
               <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">
                 {/* #3331 review finding design-9: never assume a passkey — the

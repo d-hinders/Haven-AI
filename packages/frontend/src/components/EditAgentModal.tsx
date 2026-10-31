@@ -3,6 +3,7 @@
 import { Check, X } from 'lucide-react'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { Icon } from '@/components/ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { api } from '@/lib/api'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useLabels } from '@/hooks/useLabels'
@@ -387,7 +388,7 @@ export default function EditAgentModal({
                 </>
               ) : (
                 <>
-                  <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--v2-brand)] border-t-transparent" />
+                  <Spinner size="md" />
                   <p className="text-sm font-medium text-[var(--v2-ink)]">Saving changes…</p>
                 </>
               )}

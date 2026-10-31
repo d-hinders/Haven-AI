@@ -40,6 +40,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
 } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
@@ -645,13 +646,7 @@ export default function AgentActivityTab({
               aria-label="Loading activity"
             >
               {[0, 1, 2].map((item) => (
-                <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                  <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="min-w-0 flex-1">
-                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                    <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  </div>
-                </div>
+                <TransactionActivityRowSkeleton key={item} />
               ))}
             </div>
           ) : activeError ? (

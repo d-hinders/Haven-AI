@@ -45,6 +45,7 @@ import { budgetPeriodWords } from '@/lib/budget-caption'
 import { budgetEndsAt, formatBudgetEndDate } from '@/lib/budget-end'
 import { countWord, findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
 import { Icon } from './ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { Button } from './ui/Button'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
@@ -733,7 +734,7 @@ export default function EditBudgetModal({
 
           {step === 'working' && (
             <div className="space-y-4 py-8 text-center">
-              <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-[var(--v2-brand)] border-t-transparent" />
+              <Spinner size="md" />
               <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your approval…</p>
               <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">
                 Approve in your wallet or with your passkey. The budget changes only after you

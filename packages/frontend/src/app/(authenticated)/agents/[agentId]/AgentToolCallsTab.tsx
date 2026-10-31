@@ -37,6 +37,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
@@ -281,8 +282,8 @@ export default function AgentToolCallsTab({
               {[0, 1, 2].map((index) => (
                 <div key={index} className="flex items-center gap-3 px-5 py-3.5">
                   <div className="min-w-0 flex-1">
-                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                    <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                    <Skeleton variant="text" className="h-3.5 w-40" />
+                    <Skeleton variant="text" className="mt-1.5 h-2.5 w-56" />
                   </div>
                 </div>
               ))}

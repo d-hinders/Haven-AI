@@ -1,9 +1,9 @@
 'use client'
 
 import { Monogram } from '@/components/ui/Monogram'
-import { Check, Copy, Info, Pencil, Trash2, Users } from 'lucide-react'
+import { Info, Pencil, Trash2, Users } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useEffect, useId, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent } from 'react'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
 import { resolveChainOrNull } from '@/lib/chains'
@@ -11,6 +11,7 @@ import { ApiRequestError } from '@/lib/api'
 import { isValidAddress } from '@/lib/format'
 import { Address } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -207,15 +208,6 @@ interface ContactRowProps {
 }
 
 function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
-  const [copied, setCopied] = useState(false)
-
-  const copyAddress = async (event: MouseEvent) => {
-    event.preventDefault()
-    await navigator.clipboard.writeText(contact.address)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
   return (
     <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[var(--v2-surface)]">
       <Monogram name={contact.name} />
@@ -243,19 +235,8 @@ function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-1">
-        <button
-          type="button"
-          onClick={copyAddress}
-          aria-label={copied ? 'Address copied' : 'Copy address'}
-          title={copied ? 'Address copied' : 'Copy address'}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
-        >
-          {copied ? (
-            <Icon icon={Check} className="h-4 w-4 text-[var(--v2-success)]" />
-          ) : (
-            <Icon icon={Copy} className="h-4 w-4" />
-          )}
-        </button>
+        {/* #4573: the shared copy primitive — one timer, one 44px target. */}
+        <CopyButton value={contact.address} label="address" />
 
         <button
           type="button"

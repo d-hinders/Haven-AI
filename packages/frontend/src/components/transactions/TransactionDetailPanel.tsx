@@ -12,7 +12,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
-import { truncate } from '@/lib/format'
+import { formatDateTime, truncate } from '@/lib/format'
 import { parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { strandedFundsCauseWithLocation } from '@/lib/stranded-funds-copy'
 import {
@@ -252,9 +252,9 @@ function headerLine(tx: AggregatedTransaction, kind: Kind): string {
   return `${verb} from ${account}`
 }
 
-/** The header's "when": the date and the time to the minute, in the viewer's locale. */
+/** The header's "when": the date and the time to the minute, in the app's en-GB voice. */
 export function formatWhen(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatDateTime(timestamp * 1000)
 }
 
 // ── The panel ──────────────────────────────────────────────────────

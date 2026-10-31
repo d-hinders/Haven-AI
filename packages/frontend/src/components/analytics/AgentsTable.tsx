@@ -11,6 +11,7 @@ import {
   lastPaymentCaption,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
+import { formatDateTime } from '@/lib/format'
 import { agentStatusPresentation } from '@/lib/payment-status'
 import { budgetCaption } from '@/lib/budget-caption'
 import type { BudgetCaption } from '@/lib/budget-caption'
@@ -278,7 +279,7 @@ export function AgentsTable({
                 <td className={COLUMN_PAD}>
                   <span
                     className="text-sm text-[var(--v2-ink-2)]"
-                    title={agent.last_payment_at ? new Date(agent.last_payment_at).toLocaleString() : undefined}
+                    title={agent.last_payment_at ? formatDateTime(agent.last_payment_at) : undefined}
                   >
                     {lastPaymentCaption(agent.last_payment_at)}
                   </span>
@@ -388,7 +389,7 @@ function MobileAgentRow({
           <DisclosureLine
             term="Last payment"
             value={lastPaymentCaption(agent.last_payment_at)}
-            title={agent.last_payment_at ? new Date(agent.last_payment_at).toLocaleString() : undefined}
+            title={agent.last_payment_at ? formatDateTime(agent.last_payment_at) : undefined}
           />
         </dl>
       )}

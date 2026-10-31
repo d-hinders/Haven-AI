@@ -8,6 +8,7 @@ import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { timeAgo } from '@/lib/format'
 import { api } from '@/lib/api'
 
@@ -40,9 +41,6 @@ interface Props {
 export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRotated }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [showCredential, setShowCredential] = useState(false)
-  const [credentialCopied, setCredentialCopied] = useState(false)
-  const [addressCopied, setAddressCopied] = useState(false)
-  const [idCopied, setIdCopied] = useState(false)
   const [rotating, setRotating] = useState(false)
   const { toast } = useToast()
 
@@ -56,9 +54,6 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
   useEffect(() => {
     if (open) {
       setShowCredential(false)
-      setCredentialCopied(false)
-      setAddressCopied(false)
-      setIdCopied(false)
       setRotating(false)
     }
   }, [open])
@@ -69,41 +64,6 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
   const maskedCredential = credentialPrefix
     ? `${credentialPrefix}${'•'.repeat(12)}`
     : 'Credential shown only when created'
-
-  const copyCredential = useCallback(async () => {
-    if (!fullCredential) return
-    try {
-      await navigator.clipboard.writeText(fullCredential)
-      setCredentialCopied(true)
-      toast.success('Credential copied')
-      setTimeout(() => setCredentialCopied(false), 2000)
-    } catch {
-      toast.error('Could not copy credential')
-    }
-  }, [fullCredential, toast])
-
-  const copyAddress = useCallback(async () => {
-    if (!agent.delegate_address) return
-    try {
-      await navigator.clipboard.writeText(agent.delegate_address)
-      setAddressCopied(true)
-      toast.success('Signing address copied')
-      setTimeout(() => setAddressCopied(false), 2000)
-    } catch {
-      toast.error('Could not copy address')
-    }
-  }, [agent.delegate_address, toast])
-
-  const copyAgentId = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(agent.id)
-      setIdCopied(true)
-      toast.success('Agent ID copied')
-      setTimeout(() => setIdCopied(false), 2000)
-    } catch {
-      toast.error('Could not copy agent ID')
-    }
-  }, [agent.id, toast])
 
   const rotateKey = useCallback(async () => {
     setRotating(true)
@@ -173,9 +133,16 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                   <Button size="sm" variant="ghost" onClick={() => setShowCredential((value) => !value)}>
                     {showCredential ? 'Hide' : 'Show'}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void copyCredential()}>
-                    {credentialCopied ? 'Copied' : 'Copy'}
-                  </Button>
+                  {/* #4573: the shared copy primitive. A one-time credential
+                      must never fail silently, so the failure is a toast; the
+                      success is the button's own inline "Copied", not a toast
+                      as well. */}
+                  <CopyButton
+                    value={fullCredential}
+                    label="credential"
+                    text="Copy"
+                    onCopyFailed={() => toast.error('Could not copy credential')}
+                  />
                 </div>
               ) : (
                 <div className="mt-3 space-y-2">
@@ -215,14 +182,13 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                 <code className="block break-all font-mono text-xs text-[var(--v2-ink)]">
                   {agent.delegate_address}
                 </code>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void copyAddress()}
+                <CopyButton
+                  value={agent.delegate_address}
+                  label="signing address"
+                  text="Copy address"
                   className="mt-3"
-                >
-                  {addressCopied ? 'Copied' : 'Copy address'}
-                </Button>
+                  onCopyFailed={() => toast.error('Could not copy address')}
+                />
               </div>
               <p className="mt-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">
                 If you suspect this agent’s signing key is compromised, choose Replace signing key from this
@@ -246,14 +212,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
               <span>Agent ID</span>
               <span className="flex min-w-0 items-center gap-2">
                 <code className="truncate font-mono text-[var(--v2-ink-2)]">{agent.id}</code>
-                <button
-                  type="button"
-                  onClick={() => void copyAgentId()}
-                  className="flex-shrink-0 rounded text-[var(--v2-brand)] transition-colors hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-                  aria-label="Copy agent ID"
-                >
-                  {idCopied ? 'Copied' : 'Copy'}
-                </button>
+                <CopyButton value={agent.id} label="agent ID" />
               </span>
               <span>Created</span>
               <span className="text-[var(--v2-ink-2)]">{timeAgo(agent.created_at)}</span>

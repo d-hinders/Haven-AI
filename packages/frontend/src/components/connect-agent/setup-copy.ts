@@ -1,17 +1,14 @@
 import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnectionSetupStatus'
 import { runtimeIsConfigured } from '@/hooks/useAgentConnectionSetup'
+import { formatShortDateTime } from '@/lib/format'
 
 /** Presentation copy helpers for the connect-agent flow. */
 
 export function formatAbsoluteDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  // #4573: the app's one short date-and-time rule, not the device locale.
+  return formatShortDateTime(date)
 }
 
 export function restartCopyForRuntime(runtime: string): string | null {

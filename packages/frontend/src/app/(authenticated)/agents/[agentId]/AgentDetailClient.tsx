@@ -51,6 +51,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Tabs } from '@/components/ui/Tabs'
+import { useTabUrlState } from '@/components/ui/useTabUrlState'
 import { Monogram } from '@/components/ui/Monogram'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -65,9 +66,7 @@ import {
 /** The page's tabs; `activity` is the default and the unknown-value fallback. */
 type AgentTab = 'activity' | 'tool-calls' | 'settings'
 
-function agentTabFromUrl(raw: string | null): AgentTab {
-  return raw === 'tool-calls' || raw === 'settings' ? raw : 'activity'
-}
+const AGENT_TABS: readonly AgentTab[] = ['activity', 'tool-calls', 'settings']
 
 interface Props {
   agentId: string
@@ -110,7 +109,20 @@ export default function AgentDetailClient({ agentId }: Props) {
   const { user } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const activeTab = agentTabFromUrl(searchParams.get('tab'))
+  // #4573: the one `?tab=` hook. `activity` is the default and carries no
+  // parameter; a tab switch clears the tab's filters (#4226). `?grant=` is the
+  // budget card's own parameter and is read from the window there, so it
+  // survives until consumed regardless of the tab.
+  const { tab: activeTab, setTab } = useTabUrlState({
+    tabs: AGENT_TABS,
+    defaultTab: 'activity',
+    basePath: `/agents/${encodeURIComponent(agentId)}`,
+  })
+  // The hook writes the URL; whether the tab is already on screen is the
+  // page's question, so the redundant write is skipped here.
+  const handleTabChange = (tab: AgentTab) => {
+    if (tab !== activeTab) setTab(tab)
+  }
   // #4227: a Tool-calls payment link lands here — `?tab=activity&paymentId=…`.
   // Read once and handed to the Activity tab, which opens the payment's
   // detail panel and then consumes it (clearPaymentLink).
@@ -208,20 +220,6 @@ export default function AgentDetailClient({ agentId }: Props) {
   }
   const scrollToActivity = reviewStrandedPayments
 
-  // #4226: the page owns `?tab=` (the account page's pattern). `activity` is
-  // the default and carries no parameter; the replace names ONLY the tab, so
-  // switching tabs clears the tab's filters — the same rule the account page
-  // applies. `?grant=` is the budget card's own parameter and is read from
-  // the window there, so it survives until consumed regardless of the tab.
-  const handleTabChange = (tab: AgentTab) => {
-    if (tab === activeTab) return
-    router.replace(
-      tab === 'activity'
-        ? `/agents/${encodeURIComponent(agentId)}`
-        : `/agents/${encodeURIComponent(agentId)}?tab=${tab}`,
-      { scroll: false },
-    )
-  }
   // #4227: the Tool calls tab's payment link — selects the Activity tab and
   // carries the payment's id. Only the tab and the id are written; the
   // Activity tab's own filters are the Activity tab's state and a tab switch

@@ -30,8 +30,8 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   TransactionActivityDayHeader,
   transactionDayGroups,
-  transactionDayKey,
 } from '@/components/haven'
+import { dayKeyInZone } from '@/lib/format'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
@@ -125,7 +125,7 @@ export interface ToolCallRun {
  * Fold consecutive same-tool, same-result, same-day calls into one row. The
  * feed is newest-first, so the run's representative is its most recent call
  * and its timestamp is what the row shows. A run breaks on tool, result, OR
- * day — the day key is the day bands' own (`transactionDayKey`), so the fold
+ * day — the day key is the day bands' own (`dayKeyInZone`), so the fold
  * and the bands can never disagree about what "same day" means.
  */
 export function foldToolCallRuns(
@@ -138,7 +138,7 @@ export function foldToolCallRuns(
       current &&
       current.item.tool_name === item.tool_name &&
       current.item.result_status === item.result_status &&
-      transactionDayKey(current.item.created_at) === transactionDayKey(item.created_at)
+      dayKeyInZone(current.item.created_at) === dayKeyInZone(item.created_at)
     ) {
       current.count += 1
     } else {

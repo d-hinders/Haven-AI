@@ -65,7 +65,7 @@
 import { EllipsisVertical, X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useRef, useState, type FormEvent } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -100,6 +100,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { DetailList, type DetailListItem } from '@/components/ui/DetailList'
 import { Tabs } from '@/components/ui/Tabs'
+import { useTabUrlState } from '@/components/ui/useTabUrlState'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -130,16 +131,24 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 /** The page's tabs; `activity` is the default and the unknown-value fallback. */
 type AccountTab = 'activity' | 'agents' | 'security'
 
-function accountTabFromUrl(raw: string | null): AccountTab {
-  return raw === 'agents' || raw === 'security' ? raw : 'activity'
-}
+const ACCOUNT_TABS: readonly AccountTab[] = ['activity', 'agents', 'security']
 
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
-  const searchParams = useSearchParams()
   const accountId = params.accountId as string
-  const activeTab = accountTabFromUrl(searchParams.get('tab'))
+  // #4573: the one `?tab=` hook. `activity` is the default and carries no
+  // parameter, and a tab switch clears the other parameters (#4226).
+  const { tab: activeTab, setTab } = useTabUrlState({
+    tabs: ACCOUNT_TABS,
+    defaultTab: 'activity',
+    basePath: `/accounts/${encodeURIComponent(accountId)}`,
+  })
+  // The hook writes the URL; whether the tab is already on screen is the
+  // page's question, so the redundant write is skipped here.
+  const handleTabChange = (tab: AccountTab) => {
+    if (tab !== activeTab) setTab(tab)
+  }
 
   const { user, loading: authLoading, passkeys = [] } = useAuth()
   const { renameAccount, removeAccount, setDefault, loading: accountsLoading } = useAccounts()
@@ -279,18 +288,6 @@ export default function AccountDetailClient() {
     // The send's own row enters the rolling 30-day window the moment it
     // confirms, so the Money out figure refreshes with the same beat.
     void moneyFlow.refresh()
-  }
-
-  const handleTabChange = (tab: AccountTab) => {
-    if (tab === activeTab) return
-    // `activity` is the default and carries no parameter — the URL stays
-    // shareable and the default tab is the canonical address.
-    router.replace(
-      tab === 'activity'
-        ? `/accounts/${encodeURIComponent(accountId)}`
-        : `/accounts/${encodeURIComponent(accountId)}?tab=${tab}`,
-      { scroll: false },
-    )
   }
 
   const handleRename = async (name: string) => {

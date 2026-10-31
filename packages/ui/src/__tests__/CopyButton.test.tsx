@@ -113,6 +113,35 @@ describe('CopyButton', () => {
     expect(screen.queryByRole('button', { name: 'Value copied' })).toBeNull()
   })
 
+  it('calls onCopied only after a successful write, and never on a rejected one (#4573)', async () => {
+    const onCopied = vi.fn()
+    const onCopyFailed = vi.fn()
+    mockClipboard(() => Promise.resolve())
+    const { unmount } = render(
+      <CopyButton value="v" label="value" text="Copy" onCopied={onCopied} onCopyFailed={onCopyFailed} />,
+    )
+    await click(screen.getByRole('button', { name: 'Copy value' }))
+    expect(onCopied).toHaveBeenCalledTimes(1)
+    expect(onCopyFailed).not.toHaveBeenCalled()
+    unmount()
+
+    mockClipboard(() => Promise.reject(new Error('denied')))
+    render(<CopyButton value="v" label="value" text="Copy" onCopied={onCopied} onCopyFailed={onCopyFailed} />)
+    await click(screen.getByRole('button', { name: 'Copy value' }))
+    // The rejected write copied nothing, so the success callback must not fire.
+    expect(onCopied).toHaveBeenCalledTimes(1)
+    expect(onCopyFailed).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onCopied when the clipboard API is absent — nothing was copied', async () => {
+    const onCopied = vi.fn()
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    render(<CopyButton value="v" label="value" text="Copy" onCopied={onCopied} />)
+    await click(screen.getByRole('button', { name: 'Copy value' }))
+    expect(onCopied).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Value copied' })).toBeNull()
+  })
+
   it('stays silent on a rejected write when no callback is passed (the on-screen-value callers)', async () => {
     mockClipboard(() => Promise.reject(new Error('denied')))
     render(<CopyButton value="0xabc" label="address" />)

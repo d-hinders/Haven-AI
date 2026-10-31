@@ -219,7 +219,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
   themed surfaces behind it. No `backdrop-filter` blur: it is deliberately left
   out for performance (`.v2-modal-backdrop` in `globals.css`).
 - Modals must use dialog semantics, labelled titles, focus trap, and focus return after close.
-- Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog.
+- Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog. When a dialog opens another dialog, close the first, keep its typed values, and reopen it with those values and focus back where it came from when the second closes (#4564).
 
 ### Forms
 

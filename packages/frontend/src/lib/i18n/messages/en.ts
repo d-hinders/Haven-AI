@@ -31,8 +31,14 @@ export const en = {
      * says what actually happened (#2870's naming rule).
      */
     evidenceArchived: 'Evidence archived',
-    feeding: 'Feeding…',
-    notFed: 'Not fed',
+    /**
+     * A pushed row on a deployment whose live connector is not configured
+     * (#4567): nothing left Haven, so the row may not claim delivery. SR:1583
+     * — "Preview/local tracking must say `Tracked`".
+     */
+    tracked: 'Tracked',
+    sending: 'Sending…',
+    notSent: 'Not sent',
     /** Accessible name for the badge link — the label, then where it goes. */
     openAccounting: (label: string) => `${label}. Open accounting.`,
   },
@@ -450,7 +456,7 @@ export const en = {
         confirm: 'Continue',
         /** The footer's way out — the same no-op as "Feed from now". */
         notNow: 'Not now',
-        working: 'Feeding…',
+        working: 'Sending…',
         /**
          * #2915: `fed` is what the sync actually pushed, `total` what it
          * enumerated — the sentence never claims a payment that did not land.

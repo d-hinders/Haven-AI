@@ -6,7 +6,6 @@ import {
   accountingFeedOffState,
   useAccountingFeed,
   type AccountingFeedStatus,
-  type AccountingSyncStatus,
   type AccountingVerification,
 } from '@/hooks/useAccountingFeed'
 import { useT } from '@/context/LocaleContext'
@@ -14,30 +13,23 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { ConnectOutcomeForwarderInSuspense } from '@/components/accounting/ConnectOutcomeForwarder'
 import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
 import { FeedSummary } from '@/components/accounting/FeedSummary'
-import { providerDisplayName, isRecordOnlyProvider } from '@/components/accounting/AccountingBadge'
+import {
+  accountingStatusPresentation,
+  providerDisplayName,
+  isRecordOnlyProvider,
+} from '@/components/accounting/AccountingBadge'
 import { useAccountingProviders, type AccountingProvider } from '@/hooks/useAccounting'
 import { formatTimeOfDay, truncate } from '@/lib/format'
-
-const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
-  pushed: { label: 'Synced', cls: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]' },
-  pending: { label: 'Pending', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]' },
-  failed: { label: 'Failed', cls: 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]' },
-  skipped: { label: 'Skipped', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]' },
-}
 
 /** Same tone convention as `ui/Row`'s leadingTone — text-color variant (#1364 review). */
 const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
   success: 'text-[var(--v2-success)]',
   warning: 'text-[var(--v2-warning)]',
   danger: 'text-[var(--v2-danger)]',
-}
-
-function StatusChip({ status }: { status: AccountingSyncStatus }) {
-  const s = STATUS[status]
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
 }
 
 /**
@@ -352,6 +344,17 @@ export default function AccountingPage() {
               <Card.Section divided>
                 {status.syncs.map((s) => {
                   const record = s.status === 'pushed' ? externalRecord(s.external_ref) : null
+                  // #4567: the row chip is `StatusBadge` fed by the SAME
+                  // presentation the per-payment badge uses. This page used to
+                  // carry its own `STATUS` class map — Synced / Pending /
+                  // Failed / Skipped — a second vocabulary for one state, and
+                  // the one that claimed delivery on a preview deployment.
+                  // `liveSyncReady` is what makes a pushed row read "Tracked"
+                  // here instead of "In <Provider>" (SR:1583).
+                  const chip = accountingStatusPresentation(s, t.accountingBadge, {
+                    liveSyncReady: status.liveSyncReady,
+                    providers,
+                  })
                   // Self-invalidating (#1364 review): a stored verification is
                   // only rendered while the row still points at the SAME
                   // record — a re-sync that changes the row's shape drops the
@@ -403,7 +406,7 @@ export default function AccountingPage() {
                               {verifying === s.payment_id ? 'Checking…' : t.accountingPage.verify.checkIn(providerDisplayName(s.provider))}
                             </Button>
                           )}
-                          <StatusChip status={s.status} />
+                          <StatusBadge tone={chip.tone}>{chip.label}</StatusBadge>
                         </span>
                       </div>
                       <div aria-live="polite">

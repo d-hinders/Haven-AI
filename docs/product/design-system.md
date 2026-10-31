@@ -846,9 +846,10 @@ and, until #4563, no entry here.
 | `brand` | `--v2-brand-soft` / `--v2-brand` | a next step for the owner, not a problem |
 
 **One label and one tone per state.** The tables below are the source of truth
-for the status families the app renders. Slice 7 (#4567) moves the code onto
-them; where the code disagrees today, the table wins and the disagreement is
-named in the row rather than left for the next reader to rediscover.
+for the status families the app renders. Slice 7 (#4567) moved the code onto
+them; `lib/__tests__/status-vocabulary.test.ts` walks these tables and the
+code's maps together, so a label or tone that drifts from a row here goes red
+rather than waiting for the next reader to rediscover it.
 
 #### Agents
 
@@ -856,7 +857,7 @@ named in the row rather than left for the next reader to rediscover.
 |---|---|---|---|
 | `active` | Connected | `success` | `lib/payment-status.ts` `AGENT_STATUS` |
 | `paused` | Paused | `warning` | `AGENT_STATUS`, `AgentRow`'s `agentBadge` |
-| `pending_approval` | **Needs setup** | **`brand`** | `AGENT_STATUS` renders `warning` today — #4567 moves it; `agentBadge` already renders `brand` |
+| `pending_approval` | **Needs setup** | **`brand`** | `AGENT_STATUS`, `AgentRow`'s `agentBadge` |
 | `revoked` | Revoked | `danger` | `AGENT_STATUS`, `AgentCard`'s `agentCardBadge` |
 | `archived_at` set | Archived | `neutral` | `agent-panel/AgentCard.tsx` `agentCardBadge` |
 | budget ended | Budget ended | `neutral` | `AgentRow.tsx` `agentBadge` |
@@ -866,7 +867,9 @@ named in the row rather than left for the next reader to rediscover.
 agent exists and is reachable; it has no budget yet, so the owner has one step
 to take. `brand` is the tone for a next step. `warning` is earned by a change
 in posture — `Paused`, `Suspended`, `Revoking…` — not by a setup that has not
-finished. `AGENT_STATUS`'s `warning` is the drift #4567 removes.
+finished. `AGENT_STATUS` said `warning` until #4567; `agentBadge` and
+`lib/dashboard-attention.ts` already said `brand`, and the map is the drift
+that slice removed.
 
 #### Payments
 
@@ -891,13 +894,23 @@ chain drifts from this the moment a rule changes.
 
 | state | label | tone | source |
 |---|---|---|---|
-| `pushed` | **In <Provider>** | `success` | `components/accounting/AccountingBadge.tsx` |
+| `pushed` | **In <Provider>** | `success` | `components/accounting/AccountingBadge.tsx` `accountingStatusPresentation` |
 | `pushed`, record-only connector | Evidence archived | `success` | same — Accounted archives the document Haven pushed, so "In …" would read as a booking the provider made (#3018) |
-| `pending` | **Sending…** | `neutral` | code renders "Feeding…" today — #4567 moves it |
-| `failed` / `skipped` | **Not sent** | `warning` | code renders "Not fed" today — #4567 moves it; the reason rides on hover/focus where the badge is interactive |
+| `pushed`, connector not live | **Tracked** | `neutral` | same — `liveSyncReady` false means nothing left Haven, so the row may not claim delivery (SR:1583) |
+| `pending` | **Sending…** | `neutral` | same |
+| `failed` / `skipped` | **Not sent** | `warning` | same; the reason rides on hover/focus where the badge is interactive |
 
 The provider name comes from the row (`accounting.provider`) through
 `providerDisplayName`, so a second provider does not read as "In Fortnox".
+
+**One function, two surfaces.** `accountingStatusPresentation` is what both the
+per-payment badge (`/transactions` rows, the detail drawer) and the
+`/accounting` page's row chip render, so the page cannot carry a second
+vocabulary — it did until #4567, with its own `STATUS` map reading Synced /
+Pending / Failed / Skipped, and that map claimed delivery on a preview
+deployment. The ledger row and the drawer have no feed status to consult, so
+they pass no `liveSyncReady` and a pushed row reads "In <Provider>" there; the
+page passes it and a preview deployment reads "Tracked".
 
 #### Merchant budgets
 
@@ -933,11 +946,35 @@ The provider name comes from the row (`accounting.provider`) through
 doing something in the background and the owner has nothing to do. `warning` is
 earned by `Revoking…` and `Suspended`, which are changes in posture.
 
+**The two axes are explained, not collapsed (#4571).** "Issued" beside
+"Suspended" is two true statements about two different things, and with no
+link between them it reads as a contradiction. The badge logic stays; when
+standing is not `active`, the Standing row's description says what that
+standing means for the agent — `suspended`: "The agent cannot act until Haven
+restores it. Its passport stays issued."; `revoked`: "The agent can no longer
+act. Its passport stays as a record of what was issued."; `unknown`: "Haven
+cannot confirm this agent's standing right now." `active` adds nothing, so the
+row stays the one-line badge it has always been.
+
+#### Accounts
+
+| state | label | tone | source |
+|---|---|---|---|
+| `is_default`, more than one account | Default account | `brand` | `accounts/[accountId]/AccountDetailClient.tsx`, `AccountsOverviewClient.tsx` |
+
+The default badge needs a second account to mean anything (#4021), so a lone
+account renders none on either surface. #4571 moved the overview card's
+hand-rolled chip onto this row and retired #4021's lowercase "default" label,
+so the card and the account page now say the same thing.
+
 #### Network
 
 | state | label | tone | source |
 |---|---|---|---|
 | testnet chain | Test network | `neutral` | `accounts/[accountId]/AccountDetailClient.tsx`, `AccountsOverviewClient.tsx` |
+
+Both sites render it through `StatusBadge` since #4571; the overview card's
+hand-rolled chip is gone.
 
 #### What the table does not cover
 
@@ -2162,9 +2199,12 @@ decision on #4094: wording that names a task, not a button, keeps its words) —
 that opens the Receive dialog, the exact
 sibling-above-the-overlay shape this section has always demanded: `relative z-[var(--v2-z-content)]`,
 its own `min-h-[44px]` vertical hit area, no propagation guards, and a LINK rather than a
-button so the card still holds no buttons. A second holding area — the "Create another
-account" tile beside the one-account card — is NOT on the card at all; it is a page-level
-dashed button that opens the same dialog as the header's "New account" action.
+button so the card still holds no buttons. #4021's second holding area — the "Create another
+account" tile beside the one-account card — was removed by owner decision 2026-10-30 (#4571):
+the header's "New account" button opens the same dialog, so the tile was a second door to one
+room, and with it gone the single account card takes the whole row. The card's "Test network"
+and default markers are `StatusBadge`s on the vocabulary table above (#4571), not hand-rolled
+chips, so they match `/accounts/<id>`'s meta line.
 
 **Prove it rendered, not in the class string.** A pseudo-element overlay has several
 silent no-op failure modes (a clipping ancestor, a positioning context resolving
@@ -2195,10 +2235,18 @@ Agents / Security & details), and the agent page (Activity / Tool calls / Settin
   list's 1px border by 1px (`-mb-px`), so the two read as one continuous rule rather
   than a floating dash. Unselected tabs are ink-3, brand ink when selected.
 - **Hit area.** Every tab paints 38px by its class string (`py-2` around a 20px
-  `text-sm` line, plus the 2px `border-b-2`) and extends its hit area to 44px vertically —
-  never sideways, the tabs abut — the same transparent-pseudo-element mechanism as
-  `SegmentedControl` ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)); the
-  § Tap targets rules above apply.
+  `text-sm` line, plus the 2px `border-b-2`) and carries the same transparent
+  pseudo-element as `SegmentedControl`
+  ([#4056](https://github.com/d-hinders/Haven-AI/issues/4056)) that would extend its hit
+  area to 44px vertically — never sideways, the tabs abut. **On this component it does
+  not reach 44px, and #4571 measured why:** the list is a horizontal scroll container,
+  and a scroll container clips in every direction, so the pseudo-element's 4px above the
+  row and 2px below it are both clipped. The effective target is the tab's own 38px box,
+  which still clears the § Tap targets floor. The same clipping is what painted a thin
+  vertical scrollbar at the right end of the Settings tab row at 375px in dark mode —
+  `overflow-x-auto` alone makes the list a scroll container on both axes, and the clipped
+  decoration overflowed it by 3px. `overflow-y-hidden` on the list stops that; it changes
+  no painted pixel.
 - **Adornments.** An optional muted `count` rides beside the label — visible text that
   reads with the tab's accessible name — and an optional amber `warningDot` marks a view
   that needs the user: decorative to the eye, named to the ear through its screen-reader
@@ -2932,6 +2980,13 @@ One limit worth knowing before you reach for it: no ref is forwarded, so `indete
 
 Use `components/ui/Skeleton.tsx` instead of inline `animate-pulse` divs. The primitive is caller-sized; choose `variant="text"`, `variant="rect"`, or `variant="circle"` for radius only. Loading containers that replace meaningful content should use `role="status"`, `aria-busy="true"`, and `aria-live="polite"` around the skeletons.
 
+Two shapes are extracted rather than re-drawn, because they had already been hand-copied ten and four times:
+
+- **`RouteLoading`** (`components/ui/RouteLoading.tsx`) is the one route and auth fallback: a brand dot on `Skeleton` beside a visible `Loading…` label (U+2026), one ink tone. It carries `role="status"`, `aria-busy="true"` and `aria-live="polite"`, and the label is the element's accessible name, so the words are both read and announced. Pass `label` only where the fallback says more than "loading" — the account page's `Loading account…`. A page's own wrapper (the `min-h-screen` centring, the `max-w-5xl` with its `BackLink`) stays at the call site; `className` carries the row's padding and centring.
+- **`TransactionActivityRowSkeleton`** (`components/haven/TransactionActivityRow.tsx`, beside the row it stands in for) is the ledger-row placeholder, and it takes the row's own `density`. `comfortable` is the icon square and two bars the account, agent and transactions ledgers use; `compact` is the dashboard preview's variant, with the amount placeholder and the responsive two-column grid pinned to 72px at `sm` and up (#1833). The container — `role="status"`, `aria-busy`, `aria-live`, the `divide-y` between rows — stays at the call site, where the list's own label lives.
+
+A pulsing dot that is not a loading placeholder (a live-status indicator, say) is not a `Skeleton`; leave it as it is and say so in the PR.
+
 ### Toasts
 
 Use `ToastProvider`, `Toaster`, and `useToast()` for short feedback after user actions such as copy, save, send, or retry. Toasts:
@@ -3390,8 +3445,10 @@ pattern, and it leads with the answer:
    "Payment", "Deposit", "Transfer", "Payment attempt"; dropped where it would
    only repeat the title, as on a deposit). Below it: `Amount
    size="lg"` with the token amount beside it (a move passes no sign), the
-   `StatusBadge` from `transactionRowBadge(tx)` with "Executed" as the panel's
-   own fallback, one line saying who, where and when ("Paid by Atlas from Main
+   `StatusBadge` from `transactionRowBadge(tx)` with "Sent" as the panel's
+   own fallback (the same word `PAYMENT_STATUS.confirmed` uses, #4567 — the
+   #3810 no-badge rule is for list rows, and the panel's anatomy carries a
+   status badge), one line saying who, where and when ("Paid by Atlas from Main
    · <date>"), and, when the record needs one, a `NoticeRow` callout: needs
    attention (the shared stranded-funds sentence for a merchant retry rejected
    after payment, otherwise "This payment needs your attention", and an "Open

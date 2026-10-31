@@ -339,8 +339,9 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
 
     // The chip that NAMES the default account stays — only the control that
     // set it from the card is gone. BASE is the default of two accounts, so
-    // `showDefaultBadge` is satisfied.
-    expect(within(getAccountCard('Base account')).getByText('default')).toBeInTheDocument()
+    // `showDefaultBadge` is satisfied. #4571 moved it onto `StatusBadge` with
+    // the account page's own label.
+    expect(within(getAccountCard('Base account')).getByText('Default account')).toBeInTheDocument()
   })
 
   it('offers no set-default control for a lone NON-default account either', () => {
@@ -378,9 +379,10 @@ describe('AccountsOverviewClient — the card has no set-default control (#2374)
  * marker is a "Test network" chip on testnets only (driven by the SAME
  * `isTestnetChain` predicate the Receive dialog uses — no second predicate).
  *
- * Part B: with one account the card renders wide beside a dashed "Create
- * another account" tile that opens the SAME dialog as the header action;
- * with two or more the tile is gone.
+ * Part B: with one account the card takes the whole row; with two or more it
+ * joins the responsive grid. #4571 removed #4021's dashed "Create another
+ * account" tile (owner decision 2026-10-30) — the header's "New account"
+ * button was already the same dialog.
  */
 describe('AccountsOverviewClient — the card cleanup and layout (#4021)', () => {
   beforeEach(() => {
@@ -527,12 +529,18 @@ describe('AccountsOverviewClient — the card cleanup and layout (#4021)', () =>
     expect(screen.getByRole('dialog', { name: 'Receive' })).toBeInTheDocument()
   })
 
-  it('one account renders wide beside the create tile; two or more render no tile', () => {
+  it('one account renders the card alone, full row, with no create tile (#4571)', () => {
     mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
     mockUseAuth.mockReturnValue({ user: { accounts: [BASE] } })
     const { unmount } = render(<AccountsOverviewClient />)
 
-    expect(screen.getByRole('button', { name: /Create another account/ })).toBeInTheDocument()
+    // The tile is gone by owner decision 2026-10-30.
+    expect(screen.queryByRole('button', { name: /Create another account/ })).toBeNull()
+    // Non-vacuity: the card rendered, and it is NOT inside a grid that would
+    // leave it at two thirds of the row.
+    const card = getAccountCard('Base account')
+    expect(card).toBeInTheDocument()
+    expect(card.parentElement?.className ?? '').not.toMatch(/grid-cols-3|col-span-2/)
     unmount()
 
     mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
@@ -544,13 +552,33 @@ describe('AccountsOverviewClient — the card cleanup and layout (#4021)', () =>
     expect(screen.getByRole('link', { name: 'Sepolia account' })).toBeInTheDocument()
   })
 
-  it('the tile opens the same dialog as the header action', () => {
+  it('the header New account button opens the dialog with one account (#4571)', () => {
     mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
     mockUseAuth.mockReturnValue({ user: { accounts: [BASE] } })
     render(<AccountsOverviewClient />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Create another account/ }))
+    expect(screen.queryByRole('dialog', { name: 'New account' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'New account' }))
     expect(screen.getByRole('dialog', { name: 'New account' })).toBeInTheDocument()
+  })
+
+  it('the card markers are StatusBadges on #4563 vocabulary, not hand-rolled chips (#4571)', () => {
+    mockUseAccounts.mockReturnValue({ accounts: [BASE, SEPOLIA], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE, SEPOLIA] } })
+    render(<AccountsOverviewClient />)
+
+    // "Test network" is the vocabulary's neutral label; "Default account" is
+    // the brand one, matching `/accounts/<id>`'s meta line.
+    const testNetwork = within(getAccountCard('Sepolia account')).getByText('Test network')
+    expect(testNetwork.className).toContain('rounded-full')
+    expect(testNetwork.className).toContain('--v2-surface-2')
+
+    const defaultBadge = within(getAccountCard('Base account')).getByText('Default account')
+    expect(defaultBadge.className).toContain('rounded-full')
+    expect(defaultBadge.className).toContain('--v2-brand-soft')
+
+    // #4021's lowercase chip label is retired with the chip.
+    expect(screen.queryByText('default')).toBeNull()
   })
 
   it('the subtitle counts accounts from two, and never says "linked"', () => {

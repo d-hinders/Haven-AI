@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { AgentHandoffNote } from '@/components/onboarding/AgentHandoffNote'
 import { AuthShell, AuthCard } from '@/components/auth/AuthShell'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 
 // #3660: login validates like signup. Email shape is signup's rule; the
 // backend lowercases before the lookup (auth.ts normalizeEmail), so nothing
@@ -194,12 +195,7 @@ function LoginForm() {
 
 /** The Suspense fallback rendered while search params resolve. */
 function LoginLoading() {
-  return (
-    <div className="flex items-center justify-center gap-3">
-      <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-      <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
-    </div>
-  )
+  return <RouteLoading className="justify-center" />
 }
 
 // The sign-in screen (#3578, epic #3572): the mockup's auth shell (public

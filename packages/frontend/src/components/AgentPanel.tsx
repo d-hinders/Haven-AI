@@ -1,7 +1,8 @@
 'use client'
 
-import { Archive, CircleAlert, Clock, EllipsisVertical, LoaderCircle, Plus } from 'lucide-react'
+import { Archive, CircleAlert, Clock, EllipsisVertical, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
@@ -363,7 +364,7 @@ export default function AgentPanel() {
                 filtering="browser"
                 facets={toolbarFacets}
                 sort={{ options: SORT_OPTIONS }}
-                searchDescription="by name, description or delegate address"
+                searchDescription="by name, description or wallet address"
                 count={{ shown: listFilters.filtered.length, total: listFilters.total }}
               />
             </div>
@@ -439,8 +440,8 @@ export default function AgentPanel() {
               <EmptyState
                 tone="neutral"
                 icon={
-                  /* Heavier stroke: matches the original spinner's 3px ring weight. */
-                  <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
+                  /* The one busy indicator (#4563), at the standalone size. */
+                  <Spinner size="md" />
                 }
                 title="Finalizing your agent…"
                 body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."

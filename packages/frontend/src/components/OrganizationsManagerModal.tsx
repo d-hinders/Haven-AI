@@ -11,6 +11,7 @@ import { orgDeleteBody } from '@/lib/organization-copy'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
+import { Skeleton } from './ui/Skeleton'
 import ConfirmDialog from './ConfirmDialog'
 
 /**
@@ -268,8 +269,8 @@ export default function OrganizationsManagerModal({
 
           {loading ? (
             <div role="status" aria-busy="true" className="space-y-2">
-              <div className="h-9 animate-pulse rounded-md bg-[var(--v2-surface-2)]" />
-              <div className="h-9 animate-pulse rounded-md bg-[var(--v2-surface-2)]" />
+              <Skeleton className="h-9" />
+              <Skeleton className="h-9" />
               <span className="sr-only">Loading organizations</span>
             </div>
           ) : error ? (

@@ -1,7 +1,8 @@
 'use client'
 
-import { LoaderCircle, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -187,8 +188,7 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
                   >
                     {rotating ? (
                       <span className="flex items-center gap-1.5">
-                        {/* Heavier stroke: matches the original spinner's ring weight. */}
-                        <Icon icon={LoaderCircle} className="animate-spin h-3.5 w-3.5" strokeWidth={3} />
+                        <Spinner size="sm" />
                         Rotating…
                       </span>
                     ) : (

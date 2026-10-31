@@ -602,7 +602,9 @@ Structure:
    state, and no Connect agent.
 2. Toolbar: the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
    pattern (#4113), browser-filtered: search ("Search agents";
-   name, description and delegate address, as its screen-reader description),
+   name, description and wallet address, as its screen-reader description —
+   #4571 replaced "delegate address", an internal term, with the copy
+   guidelines' plain word),
    the multi-select facets from the page's registry (Status, Budget, and
    Account and Organization when registered), **Archived** (single-select,
    Hidden / Shown, no All row, Hidden by default), and a **Sort: Name** chip.
@@ -1586,8 +1588,12 @@ Structure:
    the Accounting section of Settings → Business (#2868, #4359); the feed page
    links there and offers none.
 5. Show draft transaction states with retry where supported. Only a live
-   connector may say `Synced`. Preview/local tracking must say `Tracked`,
-   `Prepared`, or `Not delivered`; it must not imply external delivery.
+   connector may say `In <Provider>`. Preview/local tracking must say `Tracked`,
+   `Prepared`, or `Not delivered`; it must not imply external delivery. The
+   one vocabulary is `In <Provider>` / `Evidence archived` / `Tracked` /
+   `Sending…` / `Not sent`, rendered through `StatusBadge` from
+   `accountingStatusPresentation` on both the ledger badge and the
+   `/accounting` row chip (#4567).
 
 Regulatory and trust clarity:
 - Records are factual, draft, and non-asserting. The user or accountant codes
@@ -1597,10 +1603,14 @@ Regulatory and trust clarity:
 - Keep empty, loading, error, unavailable, disconnected, preview, and sync
   states honest.
 
-Known implementation gap: the preview currently maps backend `pushed` records
-to a `Synced` chip even when `liveSyncReady` is false. The preview banner is not
-enough to make that row label safe; change it before treating the surface as
-live-delivery accurate.
+Known implementation gap — **closed by #4567**: the preview used to map backend
+`pushed` records to a `Synced` chip even when `liveSyncReady` was false. The
+`/accounting` page now passes `liveSyncReady` to `accountingStatusPresentation`,
+so a pushed row on a preview deployment reads `Tracked`; the preview banner is
+no longer the only thing standing between the row and a delivery claim. The
+ledger badge and the detail drawer still read `In <Provider>` for a pushed row,
+because neither has a feed status to consult — that is the remaining edge, and
+it is named here rather than left to be rediscovered.
 
 ## Settings And Recovery
 

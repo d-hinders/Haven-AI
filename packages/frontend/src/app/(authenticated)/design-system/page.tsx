@@ -69,6 +69,7 @@ import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 import { Spinner } from '@haven_ai/ui/Spinner'
 import { StatTile } from '@/components/ui/StatTile'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -98,6 +99,7 @@ import {
   RiskExplainer,
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
   TransactionMovement,
   WalletIdentityBlock,
@@ -918,7 +920,7 @@ function ListControlsExample({
         filtering="browser"
         facets={facets}
         sort={DS_LIST_SORT}
-        searchDescription="By name or delegate address"
+        searchDescription="by name or address"
         searchEpoch={searchEpoch}
         actions={actions}
         count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}
@@ -4082,6 +4084,37 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Loading states — RouteLoading and the activity-row skeleton"
+        description="Two shapes that already shipped ten and four times over, now one each. RouteLoading is the route and auth fallback: one brand dot, one ink tone, and a visible Loading… label that is also the element's accessible name (role=status, aria-busy, aria-live=polite). TransactionActivityRowSkeleton stands in for a ledger row at the row's own density — comfortable for the ledgers, compact for the dashboard preview, where it keeps the amount placeholder and the 72px desktop height."
+        testId="ds-loading-states"
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">RouteLoading</p>
+            <div className="mt-4">
+              <RouteLoading />
+            </div>
+            <div className="mt-4">
+              <RouteLoading label="Loading account…" />
+            </div>
+          </Card>
+          <Card hover={false} className="overflow-hidden">
+            <Card.Header title="TransactionActivityRowSkeleton" />
+            <div
+              className="divide-y divide-[var(--v2-border)]"
+              role="status"
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading activity"
+            >
+              <TransactionActivityRowSkeleton />
+              <TransactionActivityRowSkeleton density="compact" />
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
         title="EmptyState — sizes, the in-card form, and the load-error shape"
         description="One primitive for every absence. The dashed shell is a filled surface, so inside a Card it must be dropped with `bare` — otherwise the card holds a second filled surface, which the surface-hierarchy rule forbids."
         testId="ds-empty-state"
@@ -4183,6 +4216,8 @@ export default function DesignSystemPage() {
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Accounting, merchants, passport, network</h3>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <StatusBadge tone="success">In Fortnox</StatusBadge>
+              <StatusBadge tone="success">Evidence archived</StatusBadge>
+              <StatusBadge tone="neutral">Tracked</StatusBadge>
               <StatusBadge tone="neutral">Sending…</StatusBadge>
               <StatusBadge tone="warning">Not sent</StatusBadge>
             </div>

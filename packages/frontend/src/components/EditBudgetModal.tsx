@@ -44,6 +44,7 @@ import { budgetPeriodWords } from '@/lib/budget-caption'
 import { budgetEndsAt, formatBudgetEndDate } from '@/lib/budget-end'
 import { countWord, findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
 import { Button } from './ui/Button'
+import { StatusBadge } from './ui/StatusBadge'
 import { DialogActions } from './ui/DialogActions'
 import { DialogResult } from './ui/DialogResult'
 import { Modal } from './ui/Modal'
@@ -649,13 +650,9 @@ export default function EditBudgetModal({
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-medium text-[var(--v2-ink-3)]">Budget</p>
                   {changes.raised ? (
-                    <span className="rounded-full border border-warning/30 bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink)]">
-                      Raise
-                    </span>
+                    <StatusBadge tone="warning">Raise</StatusBadge>
                   ) : changes.lowered ? (
-                    <span className="rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
-                      Lower
-                    </span>
+                    <StatusBadge tone="neutral">Lower</StatusBadge>
                   ) : null}
                 </div>
                 <div>

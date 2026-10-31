@@ -8,7 +8,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TransactionActivityDayHeader, TransactionActivityRow, TransactionMovement, transactionDayKey, transactionDayLabel } from '@/components/haven'
+import { TransactionActivityDayHeader, TransactionActivityRow, TransactionActivityRowSkeleton, TransactionMovement, transactionDayKey, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { timeAgo } from '@/lib/format'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
@@ -116,19 +116,10 @@ export function ActivitySection({
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading activity">
           {[0, 1, 2].map((item) => (
-            // Same breakpoint-scoped height as the loaded row it stands in
-            // for (#1833): the `sm:`-gated two-column grid pinned to 72px,
-            // sizing to content below `sm`.
-            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                <div>
-                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                </div>
-              </div>
-              <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
-            </div>
+            // The compact density carries the same breakpoint-scoped height as
+            // the loaded row it stands in for (#1833): the `sm:`-gated
+            // two-column grid pinned to 72px, sizing to content below `sm`.
+            <TransactionActivityRowSkeleton key={item} density="compact" />
           ))}
         </div>
       ) : unavailable ? (

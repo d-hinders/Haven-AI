@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -372,16 +373,20 @@ export function ListToolbar({
         data-testid="list-summary"
         className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-0.5 text-[13px] text-[var(--v2-ink-2)]"
       >
+        {/* While the count is in flight the region is named for what it is
+            waiting on; once the figure arrives the name goes away and the
+            live region announces the count itself. */}
         <span
           role="status"
           aria-live="polite"
+          aria-label={count ? undefined : `Loading ${noun.other}`}
           data-testid="list-toolbar-count"
           className="tabular-nums text-[var(--v2-ink-3)]"
         >
           {count ? (
             countLabel(noun, count, filtered)
           ) : (
-            <span className="inline-block h-3 w-24 animate-pulse rounded bg-[var(--v2-surface-2)]" aria-label={`Loading ${noun.other}`} />
+            <Skeleton variant="text" className="inline-block h-3 w-24" />
           )}
         </span>
         {summary ? <div className="ml-auto min-w-0 text-right">{summary}</div> : null}

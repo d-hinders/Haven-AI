@@ -318,7 +318,7 @@ describe('AccountDetailClient', () => {
       mockUseAuth.mockReturnValue({ ...mockUseAuth(), user: null, loading: true })
       render(<AccountDetailClient />)
       expectBackToAccounts()
-      const status = screen.getByRole('status', { name: 'Loading account' })
+      const status = screen.getByRole('status', { name: 'Loading account…' })
       expect(status.contains(screen.getByRole('link', { name: 'Accounts' }))).toBe(false)
     })
 

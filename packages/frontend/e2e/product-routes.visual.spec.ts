@@ -31,7 +31,10 @@
  *   /agents           549  1 (chain RPC)   none            rejected
  *   /transactions     320  0               "3mo ago"       ADDED, clock frozen
  *   /contacts         179  0               none            deferred
- *   /accounts         104  0               "Last payment 4mo ago"  ADDED, clock frozen
+ *   /accounts          72  0               "Last payment 4mo ago"  ADDED, clock frozen
+ *                   ^ 104 before #4571 removed the "Create another account"
+ *                     tile; re-measured through this harness at 72 on the
+ *                     tile-less page.
  *
  * `/dashboard` is the post-login landing screen and the densest composition of
  * shared primitives in the product; `/transactions` is the money-history screen
@@ -498,8 +501,13 @@ const ROUTES: ProductRoute[] = [
     path: '/accounts',
     slug: 'accounts',
     viewports: ['mobile'],
-    /** Measured at 390 on this harness: 104 characters; re-measured under the #4021 card. */
-    minChars: 100,
+    /**
+     * Measured at 390 on this harness: 72 characters. Re-derived under #4571,
+     * which removed the "Create another account" tile — that tile carried ~100
+     * characters of copy, so the tile-less page renders 72 where #4021 measured
+     * 104. The floor keeps the same 4-character headroom that derivation used.
+     */
+    minChars: 68,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
     frozenRelativeTime: 'Last payment 4mo ago',
   },

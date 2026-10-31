@@ -197,16 +197,35 @@ describe('NewAccountDialog — the happy path (#4024)', () => {
   })
 })
 
-describe('NewAccountDialog — the copy (#4024 acceptance)', () => {
-  it('says the passkey secures it, backups are per account, and nothing is set up until first use', () => {
+describe('NewAccountDialog — the copy (#4024 acceptance, #4571 compression)', () => {
+  it('says the passkey secures it and backups are per account, in two sentences', () => {
     setup()
     const facts = screen.getByTestId('new-account-facts')
-    expect(within(facts).getByText('Secured by the passkey you use next.')).toBeInTheDocument()
+    expect(within(facts).getByText('Secured by the passkey you use next:')).toBeInTheDocument()
     expect(facts).toHaveTextContent('it becomes the only way to approve actions in the new account')
-    expect(within(facts).getByText('Backups don’t carry over.')).toBeInTheDocument()
-    expect(facts).toHaveTextContent('A backup passkey or wallet on another account doesn’t protect this one')
+    expect(within(facts).getByText('Backups don’t carry over:')).toBeInTheDocument()
+    expect(facts).toHaveTextContent('add one on the new account’s page')
+    // #4570 owns this sentence; #4571 keeps it, folded into the backups fact.
     expect(facts).toHaveTextContent('Signers, in Settings, shows which accounts each passkey and wallet approves.')
-    expect(within(facts).getByText('Nothing is set up on Base Sepolia yet.')).toBeInTheDocument()
+
+    // #4571: at most two sentences above the footer — two list items, one
+    // sentence each. The bold lead-ins end in a colon, so they do not add a
+    // sentence boundary of their own.
+    const items = facts.querySelectorAll('li')
+    expect(items).toHaveLength(2)
+    expect((facts.textContent ?? '').match(/\./g) ?? []).toHaveLength(2)
+  })
+
+  it('moves "nothing is set up yet" to the created account, not the form (#4571)', async () => {
+    setup()
+    expect(screen.getByTestId('new-account-facts')).not.toHaveTextContent('Nothing is set up')
+
+    typeName('Reserve')
+    await submit()
+
+    const done = await screen.findByTestId('new-account-created')
+    expect(done).toHaveTextContent('Nothing is set up on Base Sepolia yet.')
+    expect(done).toHaveTextContent('You can add funds before then.')
   })
 })
 

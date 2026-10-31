@@ -61,7 +61,10 @@ the retry sweep, what on-call reads when something is stuck — is in
   carries a small dot when the connection needs a reconnect or a payment has
   given up retrying — it says "look", the page says what.
 - **Transactions** shows a small badge on each fed payment — *In Fortnox*,
-  *Feeding…*, *Not fed* — and links to `/accounting` (#2870).
+  *Sending…*, *Not sent* — and links to `/accounting` (#2870). A pushed row on
+  a deployment whose live connector is not configured reads *Tracked* instead
+  of *In Fortnox*: nothing left Haven, so the row may not claim delivery
+  (#4567, SR:1583).
 
 The feature is **on for every account in dev and production**. Production
 connects Accounted; Fortnox comes to production later (#2876). A self-hosted

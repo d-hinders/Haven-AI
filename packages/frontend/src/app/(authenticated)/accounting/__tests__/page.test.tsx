@@ -407,3 +407,81 @@ describe('/accounting: an Igdrasil row (#4520)', () => {
     expect(screen.queryByText(/invoice/i)).toBeNull()
   })
 })
+
+/**
+ * The row chip's vocabulary (#4567): the page renders `StatusBadge` from the
+ * SAME `accountingStatusPresentation` the per-payment badge uses, so one state
+ * has one label and one tone on both surfaces. The page used to carry its own
+ * `STATUS` map — Synced / Pending / Failed / Skipped — and that map claimed
+ * delivery on a preview deployment.
+ */
+describe('/accounting: one status vocabulary on the row chip (#4567)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+  })
+
+  function syncRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 's1', user_id: 'u1', provider: 'fortnox', payment_id: 'pay_1',
+      external_ref: 'fortnox:supplierinvoice:7', status: 'pushed' as const,
+      error: null, attempts: 1,
+      created_at: '2026-09-12T09:00:00.000Z', updated_at: '2026-09-12T09:00:00.000Z',
+      ...overrides,
+    }
+  }
+
+  /** The chip is the row's `StatusBadge` — the only pill in the row's trailing slot. */
+  function chip(): HTMLElement {
+    const badge = screen.getByText(/^(In Fortnox|Evidence archived|Tracked|Sending…|Not sent)$/)
+    expect(badge.className).toContain('rounded-full')
+    return badge
+  }
+
+  it('pushed and live → In Fortnox, success tone', () => {
+    withStatus({ liveSyncReady: true, syncs: [syncRow()] })
+    renderPage()
+    expect(chip()).toHaveTextContent('In Fortnox')
+    expect(chip().className).toContain('--v2-success')
+  })
+
+  it('pushed with the connector not live → Tracked, neutral tone (SR:1583)', () => {
+    withStatus({ liveSyncReady: false, syncs: [syncRow()] })
+    renderPage()
+    expect(chip()).toHaveTextContent('Tracked')
+    expect(chip().className).toContain('--v2-surface-2')
+    // The preview banner is not the only thing standing between the row and a
+    // delivery claim any more.
+    expect(screen.queryByText('In Fortnox')).toBeNull()
+  })
+
+  it('pushed to a record-only provider → Evidence archived', () => {
+    withStatus({
+      liveSyncReady: true,
+      syncs: [syncRow({ provider: 'accounted', external_ref: 'accounted:document:3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10' })],
+    })
+    renderPage()
+    expect(chip()).toHaveTextContent('Evidence archived')
+  })
+
+  it('pending → Sending…', () => {
+    withStatus({ syncs: [syncRow({ status: 'pending', external_ref: null })] })
+    renderPage()
+    expect(chip()).toHaveTextContent('Sending…')
+  })
+
+  it.each(['failed', 'skipped'] as const)('%s → Not sent, warning tone', (status) => {
+    withStatus({ syncs: [syncRow({ status, external_ref: null, error: 'Fortnox 503' })] })
+    renderPage()
+    expect(chip()).toHaveTextContent('Not sent')
+    expect(chip().className).toContain('--v2-warning')
+  })
+
+  it('carries no hand-rolled chip class map — the page renders StatusBadge', () => {
+    withStatus({ syncs: [syncRow()] })
+    renderPage()
+    // `StatusBadge`'s own shape: inline-flex + whitespace-nowrap + the tone fill.
+    expect(chip().className).toContain('inline-flex')
+    expect(chip().className).toContain('whitespace-nowrap')
+  })
+})

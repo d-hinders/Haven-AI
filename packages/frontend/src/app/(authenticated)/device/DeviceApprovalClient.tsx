@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { api, ApiRequestError } from '@/lib/api'
@@ -261,9 +262,7 @@ export default function DeviceApprovalClient() {
           </div>
 
           {outcome.kind === 'error' && (
-            <p role="alert" className="text-sm text-[var(--v2-danger)]">
-              {outcome.message}
-            </p>
+            <InlineAlert>{outcome.message}</InlineAlert>
           )}
 
           <div className="flex gap-3">

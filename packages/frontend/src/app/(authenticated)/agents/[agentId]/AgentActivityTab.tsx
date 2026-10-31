@@ -652,8 +652,9 @@ export default function AgentActivityTab({
           ) : activeError ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Activity could not load"
-                body={activeError}
+                body="This agent's payments are unchanged."
                 className="py-8"
                 action={
                   <Button variant="ghost" size="sm" onClick={() => void activeRefresh()}>
@@ -666,6 +667,7 @@ export default function AgentActivityTab({
             refusalRows.length === 0 ? (
               <div className="p-6">
                 <EmptyState
+                  bare
                   title="No refused attempts"
                   body="When a guardrail or budget stops one of this agent's payments, the attempt shows here."
                   className="py-8"
@@ -692,6 +694,7 @@ export default function AgentActivityTab({
           ) : rows.length === 0 ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="No payments yet"
                 body={
                   needsSetup

@@ -303,7 +303,7 @@ export const en = {
        */
       disclaimer:
         'Haven provides data tooling, not accounting or tax advice. Payments are fed as drafts — you and your accountant remain responsible for coding, correctness, and filing.',
-      loadError: 'We could not load accounting connections. Try again in a moment.',
+      loadError: 'Accounting connections could not load.',
       // #4359: the card's footer link — the feed page keeps the sync rows;
       // the link is only rendered when at least one connector shows.
       seeSyncedPayments: 'See synced payments on Accounting',
@@ -532,7 +532,7 @@ export const en = {
       // flag-off erasure path).
       purpose:
         'Optional. For a sole trader, the organisation number is your personal identity number. You can remove these details here at any time.',
-      loadError: 'We could not load your company details. Try again in a moment.',
+      loadError: 'Your company details could not load.',
       retry: 'Try again',
 
       // #4359: the "Not added yet" state — one line, then the reveal.

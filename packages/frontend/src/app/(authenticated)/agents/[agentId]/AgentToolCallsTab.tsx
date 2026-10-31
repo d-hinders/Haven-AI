@@ -291,8 +291,9 @@ export default function AgentToolCallsTab({
           ) : error ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Tool calls could not load"
-                body={error}
+                body="This agent's tool-call log is unchanged."
                 className="py-8"
                 action={
                   <Button variant="ghost" size="sm" onClick={() => void refresh()}>
@@ -306,6 +307,7 @@ export default function AgentToolCallsTab({
             // being empty is a fact about the agent, not a dead surface.
             <div className="p-6" data-testid="tool-calls-empty">
               <EmptyState
+                bare
                 title="No tool calls"
                 body="When this agent's MCP runtime calls Haven, each call shows here."
                 className="py-8"

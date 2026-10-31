@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, Folder, Network, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import type { Organization } from '@/hooks/useOrganizations'
 import { buildOrganizationTree, flattenOrganizationTree, TOP_LEVEL_OPTION } from '@/lib/agent-organizations'
 
@@ -101,10 +102,17 @@ export function AgentOrganizationTree({
   if (error && organizations.length === 0) {
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
-        <p className="text-sm text-[var(--v2-ink-2)]">{error}</p>
-        <Button className="mt-2" size="sm" variant="tertiary" onClick={onRetry}>
-          Try again
-        </Button>
+        <EmptyState
+          bare
+          tone="danger"
+          title="Organizations could not load"
+          body="Your organizations are unchanged."
+          action={
+            <Button size="sm" variant="tertiary" onClick={onRetry}>
+              Try again
+            </Button>
+          }
+        />
       </div>
     )
   }
@@ -172,9 +180,12 @@ export function AgentOrganizationTree({
       ) : null}
 
       {organizations.length === 0 ? (
-        <p className="mt-2 text-sm text-[var(--v2-ink-3)]">
-          No organisations yet. Add one to start grouping your agents.
-        </p>
+        <EmptyState
+          size="inline"
+          bare
+          title="No organisations yet. Add one to start grouping your agents."
+          className="mt-2 px-0 py-0 text-left"
+        />
       ) : (
         <div
           id="organization-tree-rows"

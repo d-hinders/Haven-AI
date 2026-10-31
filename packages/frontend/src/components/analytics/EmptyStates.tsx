@@ -87,7 +87,7 @@ export function AnalyticsErrorState({ onRetry }: { onRetry: () => void }) {
       <EmptyState
         icon={<Icon icon={CircleAlert} className="w-full h-full" />}
         tone="danger"
-        title="We could not load your analytics"
+        title="Analytics could not load"
         body="Nothing here moved or changed. Your agents keep spending under the rules you set while this does not load."
         action={
           <Button variant="ghost" size="sm" onClick={onRetry}>

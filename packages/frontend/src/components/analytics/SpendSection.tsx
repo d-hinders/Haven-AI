@@ -247,6 +247,7 @@ export function SpendSection({
           <Card.Header as="h2" title="Spend over time" description={SPEND_SUBTITLE} />
           <div className="px-5 pb-5 pt-2">
             <EmptyState
+              bare
               icon={<Icon icon={CircleDollarSign} className="w-full h-full" />}
               tone="neutral"
               title="No spend in this window"

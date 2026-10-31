@@ -452,7 +452,7 @@ export default function ContactsPage() {
         <EmptyState
           icon={<ContactIcon />}
           title="Contacts could not load"
-          body={error}
+          body="Your saved recipients are unchanged."
           action={<Button onClick={() => { void refetch() }}>Try again</Button>}
         />
       )}

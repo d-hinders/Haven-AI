@@ -1004,7 +1004,7 @@ one thing.
 
 ### EmptyState
 
-`packages/ui/src/EmptyState.tsx` is the app's one empty/absent state (39 JSX
+`packages/ui/src/EmptyState.tsx` is the app's one empty/absent state (51 JSX
 sites). Three sizes, one shell:
 
 | size | padding | type | use |
@@ -1019,8 +1019,9 @@ in `EmptyState.tsx`).
 Inside a `Card` that shell is a **second filled surface**, which `CLAUDE.md`
 § UI Surface Hierarchy forbids: tinted surfaces are for callouts, table headers,
 day bands, the `anchor` elevation, chips, code blocks and overlays — never for a
-wrapper that groups a card's own content. The dashboard's Transactions card is
-the live case.
+wrapper that groups a card's own content. The dashboard's Transactions card was
+the live case; #4569 moved every in-card site to the `bare` form, so the shell
+now only ever sits on a page or section surface of its own.
 
 **The in-card form is `bare`.** Pass `bare` to drop the shell and keep
 everything else — icon halo, title, body, action. It is a separate prop rather

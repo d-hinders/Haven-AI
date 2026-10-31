@@ -94,8 +94,8 @@ export default function MerchantPage() {
         <EmptyState
           icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
           tone="danger"
-          title="Could not load this merchant"
-          body={error}
+          title="This merchant could not load"
+          body="This merchant's listing is unchanged."
           action={
             <Button variant="ghost" size="sm" onClick={() => void refetch()}>
               Try again
@@ -115,7 +115,7 @@ export default function MerchantPage() {
         <EmptyState
           icon={<Icon icon={AlertTriangle} className="h-5 w-5" />}
           tone="danger"
-          title="Could not load this merchant"
+          title="This merchant could not load"
           body="The merchant answered without a listing."
           action={
             <Button variant="ghost" size="sm" onClick={() => void refetch()}>

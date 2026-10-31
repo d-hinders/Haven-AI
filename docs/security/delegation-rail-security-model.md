@@ -4397,3 +4397,21 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > pre-check, the settlement window or custody reads the label. Scope of this
 > note: that one comment. Nothing else in this document was re-verified for it,
 > and `last-verified` already reads 2026-10-30.
+
+> **Re-verified unchanged (#4564, 2026-10-31 — the Set budget dialog):** this
+> diff touched two files in this document's coverage list,
+> `packages/frontend/src/components/DelegationBudgetCard.tsx` and
+> `packages/frontend/src/components/PasskeyElsewhereHint.tsx`, and neither
+> changes what is signed, who signs it, or what the signer accepts. The grant
+> form moved out of the Spending card into a shared-shell dialog
+> (`SetBudgetDialog.tsx`, new, outside this document's coverage) and the
+> `PasskeyElsewhereHint` moved from the top of the card to the moment of
+> approval — inside that dialog and in the Stop confirm. The hint's copy,
+> markup and class are byte-identical; only its mount sites changed. The
+> signing hooks (`useDelegationBudget.ts`) are untouched: the same
+> `grant`/`editBudget`/`revoke` calls, the same owner-signature ceremonies, the
+> same `slot_occupied` routing to the edit flow, the same sub-budget entry. No
+> caveat, enforcer term, budget pre-check, settlement window, custody or
+> authority surface changes. Scope of this note: those two files. Nothing else
+> in this document was re-verified for it, and `last-verified` already reads
+> 2026-10-30.

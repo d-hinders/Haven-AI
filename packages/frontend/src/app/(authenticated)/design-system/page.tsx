@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { DialogResult } from '@/components/ui/DialogResult'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { LinkChip } from '@/components/ui/LinkChip'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
@@ -4094,6 +4095,41 @@ export default function DesignSystemPage() {
             </Button>
           </div>
         </Card>
+      </Section>
+
+      <Section
+        title="DialogResult"
+        description="A dialog's outcome screen, in one place (#4564). Three states — busy, success, error — with the same icon circle, title and description rhythm, so Edit budget, Edit agent and Fund merchant cannot drift. It owns the centred block only; the action row stays the caller's, in Modal's footer."
+        testId="ds-dialog-result"
+      >
+        <div className="grid gap-5 lg:grid-cols-3">
+          <Card hover={false} className="p-5">
+            <DialogResult
+              state="busy"
+              title="Waiting for your approval…"
+              description="Approve in your wallet or with your passkey. The budget changes only after you approve."
+            />
+          </Card>
+          <Card hover={false} className="p-5">
+            <DialogResult
+              state="success"
+              title="Budget updated"
+              description="The new limits are live and the previous budget is stopped."
+            />
+          </Card>
+          <Card hover={false} className="p-5">
+            <DialogResult
+              state="error"
+              title="Budget update failed"
+              description="Nothing changed — your current budget still works. Try again."
+            />
+          </Card>
+        </div>
+        <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+          The busy state uses the shared <code className="rounded bg-[var(--v2-surface)] px-1">Spinner</code>{' '}
+          (#4563), whose rotation is gated behind <code className="rounded bg-[var(--v2-surface)] px-1">motion-safe:</code>.
+          Tone is the state&apos;s, never the caller&apos;s.
+        </p>
       </Section>
 
       <Section

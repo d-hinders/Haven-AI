@@ -472,11 +472,14 @@ const ROUTES: ProductRoute[] = [
     slug: 'agent-detail-research',
     // #4476: the Spending section's description was removed (the section rule
     // makes descriptions optional), so the floor drops from 700 to the
-    // re-measured content — 694 characters at desktop, 673 at 390. Headroom
-    // stays ~45 characters, which is still far under a half-rendered page
-    // (the failure this floor exists to catch renders a few hundred).
-    minChars: 650,
-    minCharsMobile: 630,
+    // re-measured content — 694 characters at desktop, 673 at 390. #4564 then
+    // moved the card-level `PasskeyElsewhereHint` (101 characters) out of the
+    // card to the moment of approval, so the floor is re-measured again: 591
+    // characters at desktop, 570 at 390. Headroom stays ~45 characters, which
+    // is still far under a half-rendered page (the failure this floor exists
+    // to catch renders a few hundred).
+    minChars: 546,
+    minCharsMobile: 525,
     // #4260: desktop too — the Spending hero's two halves sit side by side
     // only at `lg`, the composition the mobile stack never shows.
     viewports: ['mobile', 'desktop'],

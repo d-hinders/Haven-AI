@@ -173,6 +173,20 @@ async function openGrantForm() {
   fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Set budget' })))
 }
 
+/**
+ * #4564: the grant form is a DIALOG now. `screen` queries the whole document,
+ * so a test that clicks the submit must scope to the dialog — the card's own
+ * "Set budget" opener is still in the DOM behind it.
+ */
+function grantDialog() {
+  return screen.getByRole('dialog')
+}
+
+/** The dialog's submit — the shared grant control's own button. */
+function clickGrantSubmit(name = 'Set budget') {
+  fireEvent.click(within(grantDialog()).getByRole('button', { name }))
+}
+
 beforeEach(() => {
   mockSigner.ready = true
   mockSigner.passkeyElsewhere = false
@@ -197,25 +211,30 @@ beforeEach(() => {
   mockToast.info.mockClear()
 })
 
-// #3825: one cross-device heads-up for every signature the card asks for.
-describe('DelegationBudgetCard cross-device hint (#3825)', () => {
-  it('shows the hint once when this device can sign but the passkey is elsewhere', async () => {
+// #3825 / #4564: the cross-device heads-up moved from the top of the card to
+// the moment of approval — inside the Set budget dialog and beside Stop.
+describe('DelegationBudgetCard cross-device hint (#3825, #4564)', () => {
+  it('shows the hint inside the Set budget dialog when this device can sign but the passkey is elsewhere', async () => {
     mockSigner.passkeyElsewhere = true
+    mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
-    expect(await screen.findAllByText(/passkey may be on another device/)).toHaveLength(1)
+    await openGrantForm()
+    expect(within(grantDialog()).getAllByText(/passkey may be on another device/)).toHaveLength(1)
   })
 
   it('shows no hint when the passkey is on this device', async () => {
+    mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
-    await screen.findByText('Spending')
+    await openGrantForm()
     expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
   })
 
-  it('a retired agent with a live budget still shows the hint — its Stop is an owner signature too', async () => {
+  it('a retired agent with a live budget shows the hint on Stop — its Stop is an owner signature too', async () => {
     mockSigner.passkeyElsewhere = true
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} retired="archived" />)
-    expect(await screen.findAllByText(/passkey may be on another device/)).toHaveLength(1)
+    await openStopViaMenu('5 USDC per day')
+    expect(within(screen.getByRole('dialog')).getAllByText(/passkey may be on another device/)).toHaveLength(1)
   })
 
   it('a retired agent with no active budget shows no hint — nothing to approve', async () => {
@@ -229,8 +248,9 @@ describe('DelegationBudgetCard cross-device hint (#3825)', () => {
   it('shows no hint while nobody here can sign', async () => {
     mockSigner.passkeyElsewhere = true
     mockSigner.ready = false
+    mockGet.mockReturnValue([])
     render(<DelegationBudgetCard {...PROPS} />)
-    await screen.findByText('Spending')
+    await openGrantForm()
     expect(screen.queryByText(/passkey may be on another device/)).toBeNull()
   })
 })
@@ -294,7 +314,7 @@ describe('DelegationBudgetCard (#833)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2.5' } })
-    fireEvent.click(screen.getByText('Set budget'))
+    clickGrantSubmit()
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     expect(mockGrant.mock.calls[0][0]).toMatchObject({
       tokenAddress: USDC,
@@ -312,7 +332,7 @@ describe('DelegationBudgetCard (#833)', () => {
     await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: R } })
-    fireEvent.click(screen.getByText('Set budget'))
+    clickGrantSubmit()
     await waitFor(() => expect(mockGrant.mock.calls[0][0].recipientAddress).toBe(R))
   })
 
@@ -325,7 +345,7 @@ describe('DelegationBudgetCard (#833)', () => {
     render(<DelegationBudgetCard {...PROPS} />)
     await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '1' } })
-    fireEvent.click(screen.getByText('Set budget'))
+    clickGrantSubmit()
 
     const message = await screen.findByText(
       'Haven could not set the budget. Nothing changed — try again.',
@@ -339,7 +359,9 @@ describe('DelegationBudgetCard (#833)', () => {
     // #4226: the opener opens the form; the submit inside it stays disabled
     // until the amount parses.
     await openGrantForm()
-    expect((screen.getByRole('button', { name: 'Set budget' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (within(grantDialog()).getByRole('button', { name: 'Set budget' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
   })
 
   // ── #3812: the owner wallet's way in, on the card itself ──
@@ -691,13 +713,18 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
   // Design review (#2473): a failed budget fetch is the same CATEGORY of
   // problem as a failed signer fetch, so it gets the same shape — an inline
   // banner inside the card — instead of collapsing the card and taking the
-  // grant form with it.
+  // grant form with it. #4564: the form is a dialog now, so the card keeps a
+  // Set budget button beside the load-error shape and the dialog opens from
+  // it.
   it('keeps the card and its grant form when the budget fetch failed', async () => {
     mockGet.mockReturnValue(null)
     mockBudgetsError.mockReturnValue(true)
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/could not load/i)).toBeTruthy())
     expect(screen.getByText('Set budget')).toBeTruthy()
+    // The form is reachable, not forced open: the dialog opens on the button.
+    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    await openGrantForm()
     expect(screen.getByLabelText('Budget amount')).toBeTruthy()
     // The unknown budget list must not read as "you have no budget".
     expect(screen.queryByText(/No budget yet/i)).toBeNull()
@@ -713,8 +740,9 @@ describe('DelegationBudgetCard load failure (#2473)', () => {
     mockBudgetsError.mockReturnValue(true)
     render(<DelegationBudgetCard {...PROPS} />)
     await waitFor(() => expect(screen.getByText(/could not load/i)).toBeTruthy())
+    await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2.5' } })
-    fireEvent.click(screen.getByText('Set budget'))
+    clickGrantSubmit()
     await waitFor(() => expect(screen.getByText(/Reload the current budgets/i)).toBeTruthy())
     expect(mockGrant).not.toHaveBeenCalled()
   })
@@ -1034,7 +1062,9 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(screen.getByLabelText('Budget amount')).toBeTruthy()
     // No rows, so no ⋯ menu offers Add budget (#4261).
     expect(screen.queryByRole('button', { name: /^Budget options/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
+    // #4564: the form is a dialog, so it always carries its own Cancel — the
+    // way out a dialog must have, whether or not a budget is listed.
+    expect(within(grantDialog()).getByRole('button', { name: 'Cancel' })).toBeTruthy()
   })
 
   // #3695 review S1: an `active` row past its `expires_at` cannot spend — it
@@ -1222,18 +1252,36 @@ describe('DelegationBudgetCard budget ⋯ menus (#4261)', () => {
     expect(within(dialog).getByRole('button', { name: 'Connect wallet' })).toBeTruthy()
   })
 
-  it('a collapse while the trigger is disabled (busy) sends focus to the section heading, never <body> (#4261)', async () => {
+  // #4564: while a grant is in flight the dialog cannot be closed at all —
+  // the ✕, the backdrop and Escape are disabled together, and Cancel is dead.
+  // The old collapse-focus chain is unreachable in that state by design: a
+  // dialog that guards closing must guard every way out, or the ✕ becomes the
+  // one unguarded exit.
+  it('while a grant is in flight the dialog cannot be closed by Cancel, ✕, backdrop or Escape (#4564)', async () => {
     mockGet.mockReturnValue([budget()])
     const view = render(<DelegationBudgetCard {...PROPS} />)
     await openAddViaMenu()
-    // A lifecycle action starts while the form is up — the trigger disables.
+    // A lifecycle action starts while the dialog is up.
     mockSigner.busy = true
     view.rerender(<DelegationBudgetCard {...PROPS} />)
-    expect(
-      (screen.getByRole('button', { name: 'Budget options 5 USDC per day' }) as HTMLButtonElement).disabled,
-    ).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Spending' }))
+
+    const dialog = grantDialog()
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' }) as HTMLButtonElement
+    const close = within(dialog).getByRole('button', { name: 'Close' }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(true)
+    expect(close.disabled).toBe(true)
+
+    fireEvent.click(cancel)
+    fireEvent.click(close)
+    fireEvent.click(dialog.querySelector('.v2-modal-backdrop') as HTMLElement)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByRole('dialog')).toBeTruthy()
+
+    // The idle transition: once the action settles, Cancel closes it again.
+    mockSigner.busy = false
+    view.rerender(<DelegationBudgetCard {...PROPS} />)
+    fireEvent.click(within(grantDialog()).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
 
@@ -1283,30 +1331,30 @@ describe('DelegationBudgetCard sub-budget entry in the Add budget panel (#3716)'
     expect(screen.queryByText('Or share part of an existing budget with another agent')).toBeNull()
   })
 
-  it('clicking the entry collapses the form, opens the modal inside focus, and returns focus to the opening trigger on close', async () => {
+  it('clicking the entry closes Set budget, opens the sub-budget modal alone, and reopens Set budget with its values and focus on close (#4564)', async () => {
     mockGet.mockReturnValue([budget()])
     render(<DelegationBudgetCard {...PROPS} />)
     await openAddViaMenu()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '2' } })
     // act-wrapped: the modal's open/close state lands in effects (its own
-    // child effect and the card's focus-restore) that outlive the event.
+    // child effect and the card's reopen) that outlive the event.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Issue sub-budget' }))
     })
 
-    // The form is gone; the modal is open with focus INSIDE the dialog (the
-    // card's focus effect must not pull it back out).
-    expect(screen.queryByLabelText('Budget amount')).toBeNull()
+    // Exactly ONE dialog is mounted — never nested (docs/product/README.md).
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
     const dialog = screen.getByRole('dialog', { name: 'Issue sub-budget' })
     expect(dialog.contains(document.activeElement)).toBe(true)
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     })
-    expect(screen.queryByRole('dialog')).toBeNull()
-    // #4261: the same target as a form collapse — the ⋯ trigger that opened
-    // the form (its entry lives in the open panel).
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Budget options 5 USDC per day' }))
+    // Set budget is back, with the typed amount, and focus is on the entry
+    // that opened the sub-budget dialog — where it came from.
+    const reopened = screen.getByRole('dialog')
+    expect(within(reopened).getByLabelText('Budget amount')).toHaveValue('2')
+    expect(document.activeElement).toBe(within(reopened).getByRole('button', { name: 'Issue sub-budget' }))
   })
 })
 
@@ -1351,7 +1399,7 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     await openFormAndType('10', OTHER)
     // #4350: the pre-sign helper names the chosen end date (90-day default).
     expect(screen.getByText(/One approval\. Refills every period automatically until \d{1,2} \w{3} \d{4}\./)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    clickGrantSubmit()
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
     expect(screen.queryByRole('dialog', { name: 'Edit budget' })).toBeNull()
   })
@@ -1364,7 +1412,7 @@ describe('DelegationBudgetCard — occupied slot and replaced-but-enabled budget
     await openGrantForm()
     fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
     fireEvent.change(screen.getByLabelText('Recipient'), { target: { value: PINNED } })
-    fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
+    clickGrantSubmit()
     await waitFor(() => expect(mockGrant).toHaveBeenCalled())
   })
 

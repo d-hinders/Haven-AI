@@ -110,6 +110,14 @@ async function openModal(page: Page) {
   await expect(dialog).toHaveCount(1)
   const panel = page.getByTestId('issue-sub-budget-modal')
   await expect(panel).toHaveCount(1)
+  // #4564: the entry moved into the Set budget dialog, so the pointer
+  // Playwright leaves after clicking it now lands over the sub-budget modal's
+  // Cancel button — a ghost button whose `hover:bg` (`--v2-surface`) is not in
+  // the blessed pixels. Measured on `empty-mobile`: 2664 px at x90-168
+  // y700-737, `#f6f9fc` against the baseline's `#ffffff`. Park the pointer
+  // before any capture (the documented pointer-artifact pattern, as in
+  // `retired-agent-budget-card.visual.spec.ts`); the component is unchanged.
+  await page.mouse.move(0, 0)
   return { dialog, panel }
 }
 

@@ -250,6 +250,18 @@ test.describe('agent detail at 390px (#2733)', () => {
         '(scrollWidth > clientWidth)',
     ).toBe(false)
 
+    // ── 3b. Dismiss the dialog before measuring the page behind it ──────────
+    // #4564 moved the grant form into the ONE Set budget dialog (ui/Modal), so
+    // while it is open the page behind it is inert: `elementFromPoint` at the
+    // header's Pause centre returns the dialog's overlay, and the step-4 walk
+    // reports a phantom 1px target. A modal SHOULD block the page — the probe
+    // has to run on an unobstructed page, so the dialog is dismissed here
+    // (Escape, the documented way out) and its removal awaited.
+    const setBudgetDialog = page.getByTestId('set-budget-dialog')
+    await expect(setBudgetDialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(setBudgetDialog).toHaveCount(0)
+
     // ── 4. Actions row and kebab clear the 44px floor ──────────────────────
     // The header's Pause action (#3694 moved it out of the old rules footer,
     // deleted Update budget and put Remove in the kebab) is an `lg` Button,

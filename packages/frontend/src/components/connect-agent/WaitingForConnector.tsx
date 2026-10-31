@@ -322,7 +322,7 @@ export function WaitingForConnector({
                   onClick={onCreateManualCredential}
                   disabled={manualCreating}
                 >
-                  {manualCreating ? 'Creating credentials...' : 'Generate credentials'}
+                  {manualCreating ? 'Creating credentials…' : 'Generate credentials'}
                 </Button>
               </>
             ) : (

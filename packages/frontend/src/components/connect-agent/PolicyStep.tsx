@@ -143,7 +143,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           }
           className="flex-1"
         >
-          {flow.creating ? 'Creating setup...' : 'Create setup prompt'}
+          {flow.creating ? 'Creating setup…' : 'Create setup prompt'}
         </Button>
       </DialogActions>
     </>

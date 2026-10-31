@@ -230,15 +230,15 @@ export function AgentCard({
     if (isPaused) menuItems.push({ key: 'resume', label: 'Resume payments', onSelect: () => onResume(agent) })
     // #3222: Move only when there is somewhere to move to.
     if (organizations.length > 0) {
-      menuItems.push({ key: 'move', label: 'Move to organization', onSelect: () => setMoveModalOpen(true) })
+      menuItems.push({ key: 'move', label: 'Move to organisation', onSelect: () => setMoveModalOpen(true) })
     }
     if (menuItems.length > 0) menuItems.push('separator')
     // #1402: Remove stops the live delegation and archives the credential.
-    menuItems.push({ key: 'remove', label: 'Remove', onSelect: () => setRemoveModalOpen(true), danger: true })
+    menuItems.push({ key: 'remove', label: 'Remove…', onSelect: () => setRemoveModalOpen(true), danger: true })
   } else if (isArchived) {
     menuItems.push({ key: 'restore', label: 'Restore to list', onSelect: () => onRestore(agent) })
   } else {
-    menuItems.push({ key: 'remove', label: 'Remove from list', onSelect: () => setRemoveModalOpen(true) })
+    menuItems.push({ key: 'remove', label: 'Remove from list…', onSelect: () => setRemoveModalOpen(true) })
   }
 
   return (

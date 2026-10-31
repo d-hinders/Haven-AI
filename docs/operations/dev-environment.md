@@ -39,6 +39,16 @@ covers:
 last-verified: "2026-10-25"
 ---
 
+> **Re-verified #4570 (2026-10-31, British spelling in the organisations copy):**
+> this diff touched one file in this document's coverage list,
+> `packages/frontend/src/hooks/useOrganizations.ts`. The change is one
+> user-facing string: the fetch-failure message now reads "We could not load
+> your organisations. Try again in a moment." (British spelling, owner decision
+> 2026-10-30). The hook's shape, its `GET /organizations` call, its error state
+> and its CRUD calls are unchanged, and no env variable, port, service or
+> workflow moves. Nothing else in this document was re-verified, and
+> `last-verified` is not bumped.
+
 > **Re-verified #4407 (2026-10-25, the catalog ingestion cooldown):** this
 > diff touched one file in this document's coverage list,
 > `packages/backend/src/index.ts`. The catalog ingestion tick now

@@ -283,7 +283,7 @@ export function ConnectStep({
       {connectView?.kind === 'unknown_status' && (
         <SetupStatusState
           title="Setup status updated"
-          body="Haven received a setup status this preview does not recognize yet. Refresh the page or create a new setup if this does not resolve."
+          body="Haven received a setup status this preview does not recognise yet. Refresh the page or create a new setup if this does not resolve."
           tone="neutral"
           primaryLabel="Done"
           onPrimary={flow.handleClose}

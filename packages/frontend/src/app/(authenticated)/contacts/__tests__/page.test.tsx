@@ -287,3 +287,72 @@ describe('ContactsPage', () => {
     expect(screen.getByText('Gnosis Vendor')).toBeInTheDocument()
   })
 })
+
+/**
+ * #4570: the contact delete is a `ConfirmDialog`, not a bespoke `Modal`. The
+ * dialog carries the delete's own busy verb and its failure, so neither is
+ * lost by moving onto the shared component.
+ */
+describe('ContactsPage — delete confirmation (#4570)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    chainsState.map = new Map()
+    urlState.query = ''
+    window.history.replaceState(null, '', '/contacts')
+  })
+
+  function openDeleteDialog() {
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Acme Services' }))
+    return screen.getByRole('dialog', { name: 'Delete contact' })
+  }
+
+  it('renders the shared ConfirmDialog with the contact named in the body', () => {
+    setupContacts({ contacts: [CONTACT] })
+    render(<ContactsPage />)
+
+    const dialog = openDeleteDialog()
+
+    expect(within(dialog).getByText(/This removes the saved\s+name from Haven/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Delete contact' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+  })
+
+  it('shows "Deleting…" on the confirm button while the delete is in flight', async () => {
+    let resolveDelete!: () => void
+    const deleteContact = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveDelete = resolve
+        }),
+    )
+    setupContacts({ contacts: [CONTACT], deleteContact })
+    render(<ContactsPage />)
+
+    const dialog = openDeleteDialog()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete contact' }))
+
+    // The dialog's own verb, not ConfirmDialog's generic "Working…".
+    const busy = await within(dialog).findByRole('button', { name: 'Deleting…' })
+    expect(busy).toBeDisabled()
+    expect(within(dialog).queryByRole('button', { name: 'Working…' })).not.toBeInTheDocument()
+
+    resolveDelete()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete contact' })).not.toBeInTheDocument())
+  })
+
+  it('shows the failure inside the dialog and keeps it open', async () => {
+    const deleteContact = vi.fn().mockRejectedValue(new Error('nope'))
+    setupContacts({ contacts: [CONTACT], deleteContact })
+    render(<ContactsPage />)
+
+    const dialog = openDeleteDialog()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete contact' }))
+
+    expect(
+      await within(dialog).findByText('We could not delete this contact. Try again.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Delete contact' })).toBeInTheDocument()
+    // The action is available again for a retry.
+    expect(within(dialog).getByRole('button', { name: 'Delete contact' })).toBeEnabled()
+  })
+})

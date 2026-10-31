@@ -11,6 +11,7 @@ import { ApiRequestError } from '@/lib/api'
 import { isValidAddress } from '@/lib/format'
 import { Address } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
@@ -123,7 +124,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
             Cancel
           </Button>
           <Button type="submit" form={formId} disabled={saving || !!duplicateContact}>
-            {saving ? 'Saving...' : mode === 'add' ? 'Add contact' : 'Save changes'}
+            {saving ? 'Saving…' : mode === 'add' ? 'Add contact' : 'Save changes'}
           </Button>
         </>
       }
@@ -163,7 +164,7 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
                 setAddress(event.target.value)
                 setError('')
               }}
-              placeholder="0x..."
+              placeholder="0x…"
               className="font-mono"
             />
           </div>
@@ -286,39 +287,38 @@ function DeleteConfirm({ contact, onConfirm, onClose }: DeleteConfirmProps) {
   }
 
   return (
-    <Modal
+    <ConfirmDialog
       open
-      onClose={deleting ? () => {} : onClose}
-      closeOnBackdrop={!deleting}
-      closeButtonDisabled={deleting}
+      onCancel={onClose}
+      onConfirm={handleDelete}
       title="Delete contact"
-    >
-      <div className="space-y-4">
-        <p>
-          Delete <span className="font-medium text-[var(--v2-ink)]">{contact.name}</span>? This removes the saved
-          name from Haven, but it does not affect past payments.
-        </p>
-        <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
-          <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-          <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-            <Address value={contact.address} />
+      body={
+        <div className="space-y-4">
+          <p>
+            Delete <span className="font-medium text-[var(--v2-ink)]">{contact.name}</span>? This removes the saved
+            name from Haven, but it does not affect past payments.
           </p>
+          <div className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3">
+            <p className="text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
+            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+              <Address value={contact.address} />
+            </p>
+          </div>
         </div>
-        {error && (
+      }
+      confirmLabel="Delete contact"
+      // #4570: the button keeps saying what is happening, and the failure
+      // stays inside the dialog that caused it.
+      busyLabel="Deleting…"
+      loading={deleting}
+      error={
+        error ? (
           <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2.5 text-sm text-[var(--v2-danger)]">
             {error}
           </div>
-        )}
-        <div className="flex gap-3 pt-1">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={deleting} className="flex-1">
-            Cancel
-          </Button>
-          <Button type="button" variant="danger" onClick={handleDelete} disabled={deleting} className="flex-1">
-            {deleting ? 'Deleting...' : 'Delete contact'}
-          </Button>
-        </div>
-      </div>
-    </Modal>
+        ) : null
+      }
+    />
   )
 }
 

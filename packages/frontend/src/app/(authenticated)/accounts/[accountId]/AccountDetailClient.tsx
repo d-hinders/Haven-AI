@@ -461,7 +461,7 @@ export default function AccountDetailClient() {
                 ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem tone="danger" onSelect={() => setRemoveOpen(true)}>
-                  Remove account
+                  Remove account…
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -934,7 +934,7 @@ function RenameModal({
             Cancel
           </Button>
           <Button type="submit" form="rename-account-form" disabled={loading}>
-            {loading ? 'Saving...' : 'Save changes'}
+            {loading ? 'Saving…' : 'Save changes'}
           </Button>
         </>
       }

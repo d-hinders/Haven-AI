@@ -341,7 +341,7 @@ export default function AgentPanel() {
           {/* #3164: the organization tree above the list — only when the user HAS
               organizations. An empty tree would be a permanent empty management
               panel on every org-less /agents visit (product README, First-Run
-              Simplicity); the header's Organizations button is the entry point
+              Simplicity); the header's Manage organisations button is the entry point
               until one exists. */}
           {panel.organizations.length > 0 && (
             <AgentOrganizationTree

@@ -206,7 +206,7 @@ describe('NewAccountDialog — the copy (#4024 acceptance, #4571 compression)', 
     expect(within(facts).getByText('Backups don’t carry over:')).toBeInTheDocument()
     expect(facts).toHaveTextContent('add one on the new account’s page')
     // #4570 owns this sentence; #4571 keeps it, folded into the backups fact.
-    expect(facts).toHaveTextContent('Signers, in Settings, shows which accounts each passkey and wallet approves.')
+    expect(facts).toHaveTextContent('Passkeys and wallets, in Settings, shows which accounts each one approves.')
 
     // #4571: at most two sentences above the footer — two list items, one
     // sentence each. The bold lead-ins end in a colon, so they do not add a

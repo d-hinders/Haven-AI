@@ -255,7 +255,7 @@ export default function DeviceApprovalClient() {
             </p>
             <p>
               <strong className="text-[var(--v2-ink)]">It cannot</strong> sign anything, approve a
-              budget, change your signers, move funds, change your credentials, or re-key an
+              budget, change who can approve, move funds, change your credentials, or re-key an
               agent — neither its delegate key nor its API key. Approving a budget stays with
               you, here.
             </p>

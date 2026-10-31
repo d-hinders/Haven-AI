@@ -93,7 +93,7 @@ export function AgentOrganizationTree({
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-3)]" role="status" aria-busy="true" aria-live="polite">
-          Loading organizations…
+          Loading organisations…
         </p>
       </div>
     )
@@ -105,8 +105,8 @@ export function AgentOrganizationTree({
         <EmptyState
           bare
           tone="danger"
-          title="Organizations could not load"
-          body="Your organizations are unchanged."
+          title="Organisations could not load"
+          body="Your organisations are unchanged."
           action={
             <Button size="sm" variant="tertiary" onClick={onRetry}>
               Try again
@@ -126,7 +126,7 @@ export function AgentOrganizationTree({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon icon={Network} className="h-3.5 w-3.5 text-[var(--v2-ink-3)]" />
-          <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organizations</span>
+          <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organisations</span>
           {/* #3236: a refetch with rows present says so in place — the rows
               stay, so nothing below the tree moves. Deliberately NOT a live
               region: it fires after every agent move, and `aria-busy` on the
@@ -138,9 +138,9 @@ export function AgentOrganizationTree({
             Manage
           </Button>
           {/* The label hides below `sm` so the header stays one line at 390. */}
-          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organization">
+          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organisation">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Add organization</span>
+            <span className="hidden sm:inline">Add organisation</span>
           </Button>
         </div>
       </div>
@@ -183,7 +183,7 @@ export function AgentOrganizationTree({
         <EmptyState
           size="inline"
           bare
-          title="No organizations yet. Add one to start grouping your agents."
+          title="No organisations yet. Add one to start grouping your agents."
           className="mt-2 px-0 py-0 text-left"
         />
       ) : (

@@ -225,7 +225,7 @@ export default function EditAgentModal({
       open={open}
       onClose={handleClose}
       title="Edit agent"
-      subtitle="Update the name, description, labels and organization shown in Haven."
+      subtitle="Update the name, description, labels and organisation shown in Haven."
       width="lg"
       // A save in flight disables every way out together — the ✕, the backdrop
       // and Escape — or the ✕ becomes the one unguarded exit.
@@ -407,7 +407,7 @@ export default function EditAgentModal({
         <DialogResult
           state="success"
           title="Agent updated"
-          description="Details, labels and organization saved"
+          description="Details, labels and organisation saved"
         />
       )}
     </Modal>

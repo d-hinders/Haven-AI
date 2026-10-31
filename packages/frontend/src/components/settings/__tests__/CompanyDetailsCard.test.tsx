@@ -731,13 +731,13 @@ describe('CompanyDetailsCard — delete', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
 
-    // #4562: the header ✕ is on by default now, and this dialog's `onClose` is
-    // unguarded — only the backdrop and Escape check `!deleting`. Without
-    // `closeButtonDisabled={deleting}` the ✕ would be the one way to close it
-    // mid-delete.
-    const closeButton = within(dialog).getByRole('button', { name: 'Close' })
-    expect(closeButton).toBeDisabled()
-    fireEvent.click(closeButton)
+    // #4570: the dialog is the shared `ConfirmDialog`, which carries no header
+    // ✕ (a confirmation's Cancel IS the dismiss). While the delete is in
+    // flight, Cancel is disabled and the backdrop is inert — the two ways out
+    // are both closed.
+    expect(within(dialog).getByRole('button', { name: 'Keep details' })).toBeDisabled()
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).not.toBeInTheDocument()
+    fireEvent.click(document.querySelector('.v2-modal-backdrop') as HTMLElement)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
 
     resolveDelete({ ok: true })

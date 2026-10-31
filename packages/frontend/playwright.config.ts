@@ -369,6 +369,7 @@ export default defineConfig({
         '**/home.visual.spec.ts',
         '**/dev-agent-pages.visual.spec.ts',
         '**/more-sheet.visual.spec.ts',
+        '**/settings-tabs.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

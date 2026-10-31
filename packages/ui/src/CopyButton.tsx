@@ -10,13 +10,19 @@
  * focus ring, none of which a second hand-rolled copy would have got right by
  * accident for long.
  *
- * The catch is deliberate and belongs here rather than at each call site:
- * `navigator.clipboard` rejects on an insecure origin, a denied permission,
- * and in most headless captures. Where the value is already on screen the
- * button is only an accelerator, so failing silently is right — the value is
- * still readable and selectable. A caller whose value is NOT printed (the
- * marketplace's labelled Copy prompt, #3998, #4003) passes `onCopyFailed` and
- * reveals the value itself, because there a silent failure loses it.
+ * The catch is deliberate and belongs in `useCopyToClipboard` rather than at
+ * each call site: `navigator.clipboard` rejects on an insecure origin, a
+ * denied permission, and in most headless captures. Where the value is already
+ * on screen the button is only an accelerator, so failing silently is right —
+ * the value is still readable and selectable. A caller whose value is NOT
+ * printed (the marketplace's labelled Copy prompt, #3998, #4003) passes
+ * `onCopyFailed` and reveals the value itself, because there a silent failure
+ * loses it.
+ *
+ * `onCopied` (#4573) is the success twin: it fires only after the write
+ * resolves, so a caller whose copy advances a step (#3832) or latches a
+ * one-time value can act on a copy that actually happened. The button's own
+ * "Copied" state is transient (1.5s) and is not a record of anything.
  *
  * Two shapes (#3998): icon-only by default; with `text`, a labelled ghost
  * `Button` ("Copy prompt" → "Copied"). The accessible name keeps the
@@ -41,6 +47,7 @@ import { Check, Clipboard } from 'lucide-react'
 import { Button } from './Button'
 import { Icon } from './Icon'
 import { useCopyTimeout } from './hooks/useCopyTimeout'
+import { useCopyToClipboard } from './hooks/useCopyToClipboard'
 
 /** "address" -> "Address". Only the first character; "MCP server name" keeps its caps. */
 function sentenceCase(label: string): string {
@@ -52,6 +59,7 @@ export function CopyButton({
   label,
   text,
   copiedText,
+  onCopied,
   onCopyFailed,
   className = '',
 }: {
@@ -76,6 +84,13 @@ export function CopyButton({
    */
   copiedText?: string
   /**
+   * Called only after `navigator.clipboard.writeText` resolves — the success
+   * twin of `onCopyFailed` (#4573). A caller whose copy advances a step
+   * (#3832) or latches a one-time value uses it; the button's own "Copied"
+   * state is transient and is not a record.
+   */
+  onCopied?: () => void
+  /**
    * Called only when `navigator.clipboard.writeText` rejects, the
    * `CodeBlock` precedent. A caller whose value is not on screen must use it
    * to reveal the value; for an on-screen value it can stay unset.
@@ -84,16 +99,17 @@ export function CopyButton({
   className?: string
 }) {
   const { copied, markCopied } = useCopyTimeout(1500)
+  const copy = useCopyToClipboard()
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
+    if (await copy(value)) {
       markCopied()
-    } catch {
-      // Clipboard unavailable. Silent for an on-screen value; a caller that
-      // does not print the value hears about it and reveals it (#3998).
-      onCopyFailed?.()
+      onCopied?.()
+      return
     }
+    // Clipboard unavailable. Silent for an on-screen value; a caller that
+    // does not print the value hears about it and reveals it (#3998).
+    onCopyFailed?.()
   }
 
   const accessibleName = copied ? `${sentenceCase(label)} copied` : `Copy ${label}`

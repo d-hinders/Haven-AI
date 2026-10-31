@@ -602,7 +602,9 @@ Structure:
    state, and no Connect agent.
 2. Toolbar: the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
    pattern (#4113), browser-filtered: search ("Search agents";
-   name, description and delegate address, as its screen-reader description),
+   name, description and wallet address, as its screen-reader description —
+   #4571 replaced "delegate address", an internal term, with the copy
+   guidelines' plain word),
    the multi-select facets from the page's registry (Status, Budget, and
    Account and Organization when registered), **Archived** (single-select,
    Hidden / Shown, no All row, Hidden by default), and a **Sort: Name** chip.

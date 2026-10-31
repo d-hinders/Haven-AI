@@ -7094,3 +7094,14 @@ to call next in structured fields, and those fields are typed end to end
 > Scope of this note: that response field, the two writers' `details` key, the
 > parser and the instruction copies. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#4573, 2026-10-31 — the connect flow's expiry
+> stamp).** `packages/frontend/src/components/connect-agent/setup-copy.ts`'s
+> `formatAbsoluteDate` now formats through `lib/format.ts`'s
+> `formatShortDateTime` (en-GB) instead of the device locale's
+> `toLocaleString(undefined, …)`. The value it renders, the sentence it sits
+> in ("Expires …"), the NaN guard that returns the raw string, and every
+> runtime-compatibility statement in this document are unchanged — the
+> connector command, the runtime registry, the restart modes and the version
+> floors do not read this helper. Scope of this note: that one helper. Nothing
+> else in this document was re-verified.

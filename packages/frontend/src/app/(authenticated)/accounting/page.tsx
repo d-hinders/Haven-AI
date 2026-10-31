@@ -23,7 +23,7 @@ import {
   isRecordOnlyProvider,
 } from '@/components/accounting/AccountingBadge'
 import { useAccountingProviders, type AccountingProvider } from '@/hooks/useAccounting'
-import { truncate } from '@/lib/format'
+import { formatTimeOfDay, truncate } from '@/lib/format'
 
 /** Same tone convention as `ui/Row`'s leadingTone — text-color variant (#1364 review). */
 const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
@@ -419,7 +419,7 @@ export default function AccountingPage() {
                             >
                               {'error' in v
                                 ? v.error
-                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${formatTimeOfDay(v.checked_at)}.`}
                             </p>
                             {!('error' in v) && !v.registered && (
                               <Button

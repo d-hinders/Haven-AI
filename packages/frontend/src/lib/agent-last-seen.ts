@@ -1,4 +1,4 @@
-import { timeAgo } from '@/lib/format'
+import { formatDateTime, timeAgo } from '@/lib/format'
 
 const NO_ACTIVITY_COPY = 'No activity yet'
 
@@ -17,5 +17,5 @@ export function formatAgentLastActivity(lastSeenAt: string | null | undefined): 
 export function formatAgentLastActivityTitle(lastSeenAt: string | null | undefined): string | undefined {
   const ms = parseLastSeenMs(lastSeenAt)
   if (ms === null) return undefined
-  return new Date(ms).toLocaleString()
+  return formatDateTime(ms)
 }

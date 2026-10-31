@@ -272,6 +272,18 @@ last-verified: "2026-10-25"
 > bullet drops its Chiado line. Nothing else in this document was re-verified,
 > and `last-verified` is not bumped.
 
+> **Re-verified #4571 (2026-10-31):** `playwright.config.ts`'s dark-project
+> `testMatch` gains `settings-tabs.visual.spec.ts` — the Settings tab strip
+> joins the pixel gate at 375px in dark, the width the 2026-10-30 UX audit
+> measured the thin vertical line at. The spec pins 375 itself rather than
+> adding a width to `scripts/evidence-viewports.mjs`, because that list mints
+> blocking baselines for every route in every evidence run (#2006); it is the
+> file's only capture, so the extra width costs one PNG. `webServer.env` and
+> every other project are untouched, so the Playwright build surfaces this
+> document describes are unchanged. No environment variable changes name,
+> meaning, surface, or where it is set. Nothing else in this file's coverage
+> was touched; this note is the only edit.
+
 > **Re-verified #4053 (2026-10-17):** `playwright.config.ts`'s dark-project
 > `testMatch` gains `more-sheet.visual.spec.ts` — the phone More sheet joins
 > the pixel gate in light and dark with the same seed-before-navigation dark
@@ -1739,3 +1751,14 @@ project owner — collaborators have Viewer access, not env-var write access.
 > `HAVEN_ACCOUNTING_ENTITLEMENT_MODE` or quote that message. Scope of this
 > note: those two passages. Nothing else in this document was re-read for it,
 > and `last-verified` is not bumped.
+
+> **Re-verified unchanged (#4573, 2026-10-31 — the receive dialog's copy
+> affordance).** `packages/frontend/src/components/ReceiveDialog.tsx` now
+> copies the address through the shared `CopyButton` instead of a hand-rolled
+> `navigator.clipboard.writeText` with its own 1800 ms timer. The address, the
+> inline QR, the one-network rule, the faucet/onramp gates and the account
+> picker are unchanged, and the success toast still fires — now from
+> `CopyButton`'s `onCopied`, which runs only after the write resolves. Nothing
+> this document says about the dev environment, the demo gate or the receive
+> surface moves. Scope of this note: that one file. Nothing else in this
+> document was re-read for it, and `last-verified` is not bumped.

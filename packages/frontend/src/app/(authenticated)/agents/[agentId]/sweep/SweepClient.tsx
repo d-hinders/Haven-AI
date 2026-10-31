@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { SectionHeading } from '@/components/ui/SectionHeading'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useAgents } from '@/hooks/useAgents'
 import { resolveChainOrNull } from '@/lib/chains'
@@ -174,7 +175,7 @@ export default function SweepClient({ agentId }: { agentId: string }) {
         <div className="space-y-4">
           <Card>
             <div className="px-6 py-5">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-4">Recoverable balance</h2>
+              <SectionHeading title="Recoverable balance" />
               <p className="mb-3 text-xs text-[var(--v2-ink-3)]">{agentLabel} · {network ?? `Chain ${balance!.chain_id}`}</p>
 
               <div className="space-y-2">
@@ -200,12 +201,10 @@ export default function SweepClient({ agentId }: { agentId: string }) {
 
           <Card elevation="anchor">
             <div className="px-6 py-5">
-              <h2 className="text-sm font-semibold text-[var(--v2-ink)] mb-2">How to recover</h2>
-              <p className="text-sm text-[var(--v2-ink-2)] mb-4">
-                Only your agent can do this, because only it holds the signing key.
-                Tell your agent to run this tool — it signs the transfer and Haven covers the gas,
-                so the funds come straight back to your Haven wallet.
-              </p>
+              <SectionHeading
+                title="How to recover"
+                description="Only your agent can do this, because only it holds the signing key. Tell your agent to run this tool — it signs the transfer and Haven covers the gas, so the funds come straight back to your Haven wallet."
+              />
 
               <div className="rounded-lg bg-[var(--v2-surface-2)] px-4 py-3">
                 <div className="flex items-center justify-between mb-1">

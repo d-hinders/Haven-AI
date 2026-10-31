@@ -31,7 +31,10 @@
  *   /agents           549  1 (chain RPC)   none            rejected
  *   /transactions     320  0               "06:40"         ADDED, clock frozen
  *   /contacts         179  0               none            deferred
- *   /accounts         104  0               "Last payment 4mo ago"  ADDED, clock frozen
+ *   /accounts          72  0               "Last payment 4mo ago"  ADDED, clock frozen
+ *                   ^ 104 before #4571 removed the "Create another account"
+ *                     tile; re-measured through this harness at 72 on the
+ *                     tile-less page.
  *
  * `/dashboard` is the post-login landing screen and the densest composition of
  * shared primitives in the product; `/transactions` is the money-history screen
@@ -503,8 +506,13 @@ const ROUTES: ProductRoute[] = [
     path: '/accounts',
     slug: 'accounts',
     viewports: ['mobile'],
-    /** Measured at 390 on this harness: 104 characters; re-measured under the #4021 card. */
-    minChars: 100,
+    /**
+     * Measured at 390 on this harness: 72 characters. Re-derived under #4571,
+     * which removed the "Create another account" tile — that tile carried ~100
+     * characters of copy, so the tile-less page renders 72 where #4021 measured
+     * 104. The floor keeps the same 4-character headroom that derivation used.
+     */
+    minChars: 68,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Accounts', exact: true }),
     frozenTimestamp: 'Last payment 4mo ago',
   },
@@ -776,7 +784,9 @@ test.describe('transaction detail panel visual regression (#4267)', () => {
       axis: 'desktop' as const,
       row: 'research.example',
       // `dashboardTransaction.timestamp` 1779000000 = 2026-05-17T06:40:00Z.
-      when: /^Paid by Research agent from Operations · May 17, 2026, 6:40\sAM$/,
+      // #4573: the panel's "when" is `lib/format.ts`'s en-GB rule, not the
+      // device locale — the spec's `locale: 'en-US'` no longer reaches it.
+      when: /^Paid by Research agent from Operations · 17 May 2026, 06:40$/,
       needsAttention: false,
     },
     {
@@ -784,7 +794,7 @@ test.describe('transaction detail panel visual regression (#4267)', () => {
       axis: 'mobile' as const,
       row: 'api.example.dev',
       // `x402UnrecordedSettlementTransaction.timestamp` 1778900000 = 2026-05-16T02:53:20Z.
-      when: /^Paid by Research agent from Operations · May 16, 2026, 2:53\sAM$/,
+      when: /^Paid by Research agent from Operations · 16 May 2026, 02:53$/,
       needsAttention: true,
     },
   ]

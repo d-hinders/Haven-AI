@@ -347,6 +347,14 @@ function NewAccountDialogBody({
           The passkey you just used is its only way to approve, and it has no backup yet. Add one from the
           account&rsquo;s page.
         </p>
+        {/* #4571: the "nothing is set up yet" fact moved here from the form.
+            It is about the account that now exists, not about the choice the
+            form asks for, and the form's two #4024 facts had to fit in two
+            sentences. */}
+        <p className="text-sm text-[var(--v2-ink-2)]">
+          Nothing is set up on {getChainConfig(created.chain_id).name} yet. That happens the first time you use
+          the account, for example to give an agent a budget. You can add funds before then.
+        </p>
       </div>
     )
     footer = (
@@ -470,18 +478,12 @@ function NewAccountDialogBody({
 
         <ul className="space-y-2 text-sm text-[var(--v2-ink-2)]" data-testid="new-account-facts">
           <li>
-            <span className="font-medium text-[var(--v2-ink)]">Secured by the passkey you use next.</span> Your
+            <span className="font-medium text-[var(--v2-ink)]">Secured by the passkey you use next:</span> your
             device asks for it once, and it becomes the only way to approve actions in the new account.
           </li>
           <li>
-            <span className="font-medium text-[var(--v2-ink)]">Backups don&rsquo;t carry over.</span> A backup
-            passkey or wallet on another account doesn&rsquo;t protect this one, so add one on the new
-            account&rsquo;s page. Signers, in Settings, shows which accounts each passkey and wallet approves.
-          </li>
-          <li>
-            <span className="font-medium text-[var(--v2-ink)]">Nothing is set up on {networkName} yet.</span> That
-            happens the first time you use the account, for example to give an agent a budget. You can add funds
-            before then.
+            <span className="font-medium text-[var(--v2-ink)]">Backups don&rsquo;t carry over:</span> add one on the
+            new account&rsquo;s page; Signers, in Settings, shows which accounts each passkey and wallet approves.
           </li>
         </ul>
 

@@ -27,7 +27,8 @@
     "./StatusBadge": "./src/StatusBadge.tsx",
     "./Table": "./src/Table.tsx",
     "./Tooltip": "./src/Tooltip.tsx",
-    "./hooks/useCopyTimeout": "./src/hooks/useCopyTimeout.ts"
+    "./hooks/useCopyTimeout": "./src/hooks/useCopyTimeout.ts",
+    "./hooks/useCopyToClipboard": "./src/hooks/useCopyToClipboard.ts"
   },
   "scripts": {
     "test": "vitest run",

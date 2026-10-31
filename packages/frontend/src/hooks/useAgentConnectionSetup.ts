@@ -10,6 +10,7 @@ import { resolveDiscoverySource } from '@/lib/discovery'
 import type { ApiSchema } from '@haven_ai/core'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useCopyToClipboard } from '@haven_ai/ui/hooks/useCopyToClipboard'
 import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
@@ -383,6 +384,9 @@ export function useAgentConnectionSetup({
   const creatingRef = useRef(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
+  // #4573: the shared clipboard write, so the setup prompt's copy is the same
+  // primitive `CopyButton` uses — and a failed write cannot advance the step.
+  const copyToClipboard = useCopyToClipboard()
   // #3832: LATCHED, and keyed to the setup it was copied for. `copied` is
   // single-valued — copying the local command or the .env block overwrites
   // 'prompt' — so the connect step's row 1 reads this instead, and a later
@@ -609,12 +613,13 @@ export function useAgentConnectionSetup({
   }
 
   async function copyText(kind: CopyKind, value: string) {
-    const clipboard = navigator.clipboard
-    await clipboard?.writeText(value)
+    // #4573: the shared clipboard write. A failed write copied nothing, so it
+    // must neither paint "Copied" nor latch the setup step forward (#3832) —
+    // latching would hide the prompt's only on-screen copy (row 1's "View the
+    // prompt") for nothing.
+    if (!(await copyToClipboard(value))) return
     setCopied(kind)
-    // Without a clipboard API nothing was copied; latching would hide the
-    // prompt's only on-screen copy (row 1's "View the prompt") for nothing.
-    if (kind === 'prompt' && clipboard && setup) setPromptCopiedFor(setup.setup_id)
+    if (kind === 'prompt' && setup) setPromptCopiedFor(setup.setup_id)
   }
 
   async function handleCancelSetup() {

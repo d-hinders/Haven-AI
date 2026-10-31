@@ -33,6 +33,7 @@ import { Card } from '@/components/ui/Card'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { ATTENTION_STATUSES, type AccountingFeedStatus } from '@/hooks/useAccountingFeed'
 import { INTL_LOCALE, type Locale } from '@/lib/i18n'
+import { formatDateTime } from '@/lib/format'
 import { ACCOUNTED_SCOPE_WEBHOOKS_MANAGE } from './accounted-copy'
 
 /** Where the connection is managed (#2868): Settings owns Connect / Reconnect / Disconnect. */
@@ -141,7 +142,7 @@ export function FeedSummary({ status }: { status: AccountingFeedStatus }) {
             <StatusBadge tone={TONE[state]}>{chip}</StatusBadge>
             <p
               className="text-sm font-medium text-[var(--v2-ink)]"
-              title={state === 'connected' && destination?.lastPushAt ? new Date(destination.lastPushAt).toLocaleString() : undefined}
+              title={state === 'connected' && destination?.lastPushAt ? formatDateTime(destination.lastPushAt) : undefined}
             >
               {line}
             </p>

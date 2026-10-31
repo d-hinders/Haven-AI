@@ -6,9 +6,9 @@ import {
   TransactionActivityRow,
   TransactionActivityRowSkeleton,
   transactionDayGroups,
-  transactionDayKey,
   transactionDayLabel,
 } from '../TransactionActivityRow'
+import { dayKeyInZone } from '@/lib/format'
 
 /**
  * Ledger mode (#4096, epic #4093): the row opens the detail panel from a
@@ -153,16 +153,16 @@ describe('transactionDayGroups', () => {
     ]
     const groups = transactionDayGroups(items, (item) => item.at)
     expect(groups.map((group) => group.dayKey)).toEqual([
-      transactionDayKey(iso(today)),
-      transactionDayKey(iso(lastWeek)),
-      transactionDayKey(iso(yesterday)),
+      dayKeyInZone(iso(today)),
+      dayKeyInZone(iso(lastWeek)),
+      dayKeyInZone(iso(yesterday)),
     ])
   })
 })
 
 describe('transactionDayLabel', () => {
   it('names today, yesterday, and older days by short date', () => {
-    const format = (date: Date) => transactionDayKey(date.toISOString())
+    const format = (date: Date) => dayKeyInZone(date.toISOString())
     const today = new Date()
     const yesterday = new Date(today)
     yesterday.setDate(today.getDate() - 1)

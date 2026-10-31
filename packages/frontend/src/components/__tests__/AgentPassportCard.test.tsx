@@ -216,6 +216,58 @@ describe('AgentPassportCard (#1072)', () => {
     expect(screen.getByText(/on-chain record has not caught up/i)).toBeTruthy()
   })
 
+  // #4571 — the two badges are on two axes and both are true. A non-Active
+  // standing explains itself in words, so "Issued" beside "Suspended" stops
+  // reading as a contradiction. The badge logic itself is unchanged.
+  describe('a non-Active standing explains itself (#4571)', () => {
+    const anchored = (standing: 'active' | 'suspended' | 'revoked' | 'unknown') =>
+      state({
+        passport: {
+          status: 'anchored', assurance_level: 0, attestation_uid: '0x' + '11'.repeat(32),
+          tx_hash: null, chain_id: 84532, attempts: 1, last_error: null,
+          requested_at: '2026-06-02T10:00:00.000Z', anchored_at: '2026-06-02T10:00:12.000Z',
+        },
+        standing: {
+          agentId: 'agent-1', standing, anchor: 'anchored',
+          attestationUid: '0x' + '11'.repeat(32), chainLagging: false, revocationConfirmedAt: null,
+        },
+      })
+
+    it('suspended: says the agent cannot act while the passport stays issued', () => {
+      mockUseAgentPassport.mockReturnValue(anchored('suspended'))
+      render(<AgentPassportCard agentId="agent-1" />)
+
+      // Both badges still render, unchanged — the contradiction is explained,
+      // not hidden.
+      expect(screen.getByText('Issued')).toBeTruthy()
+      expect(screen.getByText('Suspended')).toBeTruthy()
+
+      const description = screen.getByTestId('agent-passport-standing-description')
+      expect(description).toHaveTextContent('The agent cannot act until Haven restores it.')
+      expect(description).toHaveTextContent('Its passport stays issued.')
+    })
+
+    it('revoked: says the agent can no longer act and the passport is a record', () => {
+      mockUseAgentPassport.mockReturnValue(anchored('revoked'))
+      render(<AgentPassportCard agentId="agent-1" />)
+
+      expect(screen.getByText('Issued')).toBeTruthy()
+      expect(screen.getByText('Revoked')).toBeTruthy()
+
+      const description = screen.getByTestId('agent-passport-standing-description')
+      expect(description).toHaveTextContent('The agent can no longer act.')
+      expect(description).toHaveTextContent('Its passport stays as a record of what was issued.')
+    })
+
+    it('active: adds no description — there is nothing to explain', () => {
+      mockUseAgentPassport.mockReturnValue(anchored('active'))
+      render(<AgentPassportCard agentId="agent-1" />)
+
+      expect(screen.getByText('Active')).toBeTruthy()
+      expect(screen.queryByTestId('agent-passport-standing-description')).toBeNull()
+    })
+  })
+
   it('calls issuePassport when the opt-in button is clicked', async () => {
     const { fireEvent } = await import('@testing-library/react')
     mockUseAgentPassport.mockReturnValue(state())

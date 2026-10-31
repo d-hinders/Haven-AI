@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { formatLongDate } from '@/lib/format'
 import {
   getSubmissionStatus,
   submitCatalog,
@@ -474,11 +475,7 @@ export default function CatalogSubmitModal({
 
               <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
                 The ownership proof expires on{' '}
-                {new Date(instructions.expires_at).toLocaleDateString(undefined, {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
+                {formatLongDate(instructions.expires_at)}
                 . Verification keeps running after you close this window.
               </p>
             </div>

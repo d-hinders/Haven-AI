@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
-import { Check, Clipboard, CreditCard, Droplet, X } from 'lucide-react'
+import { CreditCard, Droplet, X } from 'lucide-react'
 import { resolveChainOrNull } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 import type { SmartAccount } from '@/context/AuthContext'
 import { getFaucetUrl } from '@haven_ai/core'
 import { isTestnetChain } from '@/lib/marketplace'
 import { Button } from '@/components/ui/Button'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { Address, ApprovalRequiredBanner } from '@/components/haven'
 import { Card } from '@/components/ui/Card'
 import { Select } from '@/components/ui/Select'
@@ -83,7 +84,6 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
   const { toast } = useToast()
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
-  const [copied, setCopied] = useState(false)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   // The picker's selection, when the caller handed us several accounts.
   // `null` until the user picks; the effective account then falls back to the
@@ -102,7 +102,6 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
     if (!open) {
       setPickerId(null)
       setQrDataUrl(null)
-      setCopied(false)
     }
   }, [open])
 
@@ -156,14 +155,6 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
   const faucetUrl = isTestnet ? getFaucetUrl(chainConfig.chainId) : undefined
   const onrampAvailable =
     Boolean(ONRAMP_APP_ID && accountAddress && chainConfig) && !isTestnet
-
-  function copyAddress() {
-    if (!accountAddress) return
-    void navigator.clipboard.writeText(accountAddress)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1800)
-    toast.success('Address copied')
-  }
 
   function handleBuyWithCard() {
     if (!accountAddress || !chainConfig) return
@@ -265,9 +256,16 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
                   <Address value={accountAddress} truncate={false} />
                 </p>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <Button onClick={copyAddress} size="sm">
-                    {copied ? 'Address copied' : 'Copy address'}
-                  </Button>
+                  {/* #4573: the shared copy primitive. Receive keeps its
+                      success toast (SR:444) — the copy is the screen's
+                      instruction, so the confirmation is announced, not only
+                      painted on the button. */}
+                  <CopyButton
+                    value={accountAddress}
+                    label="address"
+                    text="Copy address"
+                    onCopied={() => toast.success('Address copied')}
+                  />
                 </div>
               </div>
 

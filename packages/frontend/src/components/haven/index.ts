@@ -14,7 +14,6 @@ export {
   TransactionActivityRowSkeleton,
   TransactionActivityDayHeader,
   transactionDayGroups,
-  transactionDayKey,
   transactionDayLabel,
   type TransactionActivityDirection,
   type TransactionActivityDetail,

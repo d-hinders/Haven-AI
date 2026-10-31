@@ -19,6 +19,93 @@ export function formatLongDate(date: string | Date): string {
   }).format(typeof date === 'string' ? new Date(date) : date)
 }
 
+/** ISO string, Date or epoch milliseconds -> Date. */
+function toDate(date: string | Date | number): Date {
+  return typeof date === 'string' ? new Date(date) : typeof date === 'number' ? new Date(date) : date
+}
+
+/**
+ * "31 Oct 2026, 14:05" — the ONE absolute date-and-time rule (#4573).
+ *
+ * Twelve call sites rendered `toLocaleString()` with no locale argument, so
+ * the same instant read differently on a device set to en-US ("10/31/2026,
+ * 2:05:00 PM") than on the en-GB voice the rest of the app uses. Most were
+ * `title` tooltips on the analytics tables, where the tooltip is the only
+ * route to the exact instant — a tooltip that disagrees with the row beside
+ * it is worse than no tooltip.
+ *
+ * en-GB, medium date, short time: the date is unambiguous (no 10/11 vs 11/10)
+ * and the seconds are dropped, because a tooltip is read, not compared.
+ */
+export function formatDateTime(date: string | Date | number): string {
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    toDate(date),
+  )
+}
+
+/**
+ * "14:05:09" — the ONE time-of-day rule (#4573), for a stamp whose date is
+ * already on screen (the accounting page's "Checked …" line).
+ */
+export function formatTimeOfDay(date: string | Date | number): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(toDate(date))
+}
+
+/**
+ * "31 Oct, 14:05" — the ONE short date-and-time rule (#4573), for a stamp
+ * inside a sentence where the year is noise (the connect-agent expiry line).
+ */
+export function formatShortDateTime(date: string | Date | number): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(toDate(date))
+}
+
+/**
+ * `YYYY-MM-DD` of an ISO instant in a zone — the ONE day-key rule (#4573).
+ *
+ * `tz` is optional: omitted, the key is the runtime zone's day, which is what
+ * the ledger's day bands and the dashboard's Activity groups bucket by. The
+ * analytics page passes the range's zone, because its `by_day` buckets are the
+ * endpoint's (`infra/repositories/analytics.ts`), not the browser's.
+ *
+ * en-CA is the ISO-shaped locale: `format` yields `YYYY-MM-DD` directly.
+ */
+export function dayKeyInZone(iso: string, tz?: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(iso))
+}
+
+/**
+ * True when the instant is not midnight in the zone — a window boundary that
+ * cuts its day. The ONE rule (#4573): the dashboard's Activity window and the
+ * analytics range edges ask the same question, and the analytics one takes the
+ * range's zone.
+ */
+export function cutsItsDay(iso: string, tz?: string): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso))
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
+}
+
 /**
  * `0x1234…abcd` — the ONE address truncation rule (6 + ellipsis + 4).
  * Render addresses through `<Address>` (components/haven) where possible;
@@ -125,7 +212,7 @@ function fiatOf(value: number, currency: 'USD' | 'EUR' | 'SEK', fractionDigits: 
 
 /**
  * Humanised "x minutes ago" relative time. For the absolute value, pair
- * the result with `title={new Date(iso).toLocaleString()}` on the element.
+ * the result with `title={formatDateTime(iso)}` on the element.
  *
  * Accepts: ISO string, Date, or number (milliseconds since epoch).
  */
@@ -164,14 +251,19 @@ export function timeAgo(date: string | Date | number): string {
  * en-GB with `hour12: false` is the app's dominant voice (the same locale
  * `formatLongDate` uses) and renders midnight as `00:05`, never `24:05` or
  * `12:05 AM`. Accepts the same three input shapes as `timeAgo`.
+ *
+ * The second-precision sibling is `formatTimeOfDay` (#4573, "14:05:09"), for a
+ * stamp whose date is already on screen and whose seconds are the point (the
+ * accounting page's "Checked …" line). A row's clock time drops the seconds:
+ * a ledger is read, not compared. Both coerce through `toDate`, so the two
+ * cannot disagree about what an input means.
  */
 export function formatClockTime(date: string | Date | number): string {
-  const value = typeof date === 'string' ? new Date(date) : typeof date === 'number' ? new Date(date) : date
   return new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(value)
+  }).format(toDate(date))
 }
 
 /**

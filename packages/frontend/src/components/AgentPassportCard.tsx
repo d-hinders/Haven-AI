@@ -86,6 +86,30 @@ function standingBadge(standing: 'active' | 'suspended' | 'revoked' | 'unknown')
   return { label: 'Unknown', tone: 'neutral' }
 }
 
+/**
+ * #4571: what a non-Active standing MEANS for the agent, in words.
+ *
+ * The card carries two badges on two axes — the title's issuance badge
+ * ("Issued", from the attestation) and the Standing row's badge (from the
+ * registry). Both are true at once, and side by side with no explanation they
+ * read as a contradiction: "Issued" next to "Suspended". The badge logic is
+ * right and stays; this sentence is what links the two, so the reader learns
+ * that the passport still exists while the agent's authority does not.
+ *
+ * `active` returns null: there is nothing to explain, and the row stays the
+ * one-line badge it has always been.
+ */
+function standingDescription(standing: 'active' | 'suspended' | 'revoked' | 'unknown'): string | null {
+  if (standing === 'active') return null
+  if (standing === 'suspended') {
+    return 'The agent cannot act until Haven restores it. Its passport stays issued.'
+  }
+  if (standing === 'revoked') {
+    return 'The agent can no longer act. Its passport stays as a record of what was issued.'
+  }
+  return 'Haven cannot confirm this agent’s standing right now.'
+}
+
 /** The row's one-line description, in every state that has one. */
 const DESCRIPTION =
   'A signed record that this agent was issued by Haven, bound to this wallet, and revocable at any time.'
@@ -171,6 +195,17 @@ export default function AgentPassportCard({ agentId, agentRevoked = false }: Pro
                         <StatusBadge tone={standingBadge(standing.standing).tone}>
                           {standingBadge(standing.standing).label}
                         </StatusBadge>
+                        {/* #4571: a non-Active standing explains itself, so the
+                            title's "Issued" and this badge stop reading as a
+                            contradiction. */}
+                        {standingDescription(standing.standing) ? (
+                          <p
+                            className="mt-1 text-xs text-[var(--v2-ink-3)]"
+                            data-testid="agent-passport-standing-description"
+                          >
+                            {standingDescription(standing.standing)}
+                          </p>
+                        ) : null}
                       </dd>
                     </div>
                   ) : null}

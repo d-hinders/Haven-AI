@@ -26,7 +26,6 @@
  * Outcome language only — "delegation" never appears.
  */
 
-import { Check, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAddress, parseUnits, formatUnits } from 'viem'
 import type { Address } from 'viem'
@@ -44,15 +43,14 @@ import { truncateAddress, BudgetAmountRow, BudgetEndDateSelect, NoticeRow } from
 import { budgetPeriodWords } from '@/lib/budget-caption'
 import { budgetEndsAt, formatBudgetEndDate } from '@/lib/budget-end'
 import { countWord, findOccupyingBudget, sameSlot } from '@/lib/budget-slot'
-import { Icon } from './ui/Icon'
-import { Spinner } from '@haven_ai/ui/Spinner'
 import { Button } from './ui/Button'
 import { StatusBadge } from './ui/StatusBadge'
+import { DialogActions } from './ui/DialogActions'
+import { DialogResult } from './ui/DialogResult'
+import { Modal } from './ui/Modal'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Input } from './ui/Input'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
 interface TokenOption {
   address: string
@@ -160,8 +158,6 @@ export default function EditBudgetModal({
   prefill,
   merchant,
 }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useFocusTrap(panelRef, open)
   const { budgets, editBudget, editStopSet, isOwnAttemptedGrant, revoke, busy, ready, signersError, signersLoading, reloadSigners, passkeyElsewhere } = useDelegationBudget(
     agentId,
     chainId,
@@ -345,8 +341,6 @@ export default function EditBudgetModal({
     onClose()
   }, [busy, onClose])
 
-  useEscapeToClose(open, handleClose, { enabled: !busy })
-
   const run = useCallback(async () => {
     if (!input || !changes) return
     setStep('working')
@@ -456,49 +450,105 @@ export default function EditBudgetModal({
     return `${amountText} ${token?.symbol ?? ''} ${budgetPeriodWords(budget.period_seconds)}`.replace(/\s+/g, ' ')
   })()
 
-  return (
-    // `v2-safe-overlay` + a 1rem gutter is `p-4` that also clears the notch and
-    // the home indicator (#2730), the same wrapper EditAgentModal paints.
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay [--v2-safe-gutter:1rem] v2-modal-backdrop">
-      <div className="absolute inset-0" onClick={busy ? undefined : handleClose} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Edit budget"
-        className="relative max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] w-full max-w-lg overflow-y-auto rounded-2xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-6 py-5">
-          <div>
-            <h2 className="text-lg font-semibold text-[var(--v2-ink)]">Edit budget</h2>
-            <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
-              Change what this agent can spend. Nothing changes until you approve.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={busy}
-            aria-label="Close"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:opacity-50"
+  // #4564: the screen's action pair lives in `Modal`'s footer — outside the
+  // scroll box, so a short viewport can never push the forward action off
+  // screen (#1946). A multi-screen dialog uses `DialogActions`; a screen with
+  // a single action renders one full-width primary.
+  const footer =
+    step === 'form' ? (
+      <DialogActions className="w-full">
+        <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
+          Cancel
+        </Button>
+        <Button onClick={() => setStep('review')} disabled={!changed || !!targetOccupant} className="flex-1">
+          Review changes
+        </Button>
+      </DialogActions>
+    ) : step === 'review' ? (
+      <DialogActions className="w-full">
+        <Button variant="ghost" onClick={() => setStep('form')} className="flex-1" disabled={busy}>
+          Back
+        </Button>
+        <Button
+          onClick={() => void run()}
+          // #3812 design review: dead while the hint above says no one here
+          // can sign, the same gate BudgetGrantAction applies.
+          disabled={busy || (!ready && !signersError && !signersLoading)}
+          className="flex-1"
+        >
+          Approve new budget
+        </Button>
+      </DialogActions>
+    ) : step === 'done' ? (
+      <Button variant="ghost" onClick={handleClose} className="w-full">
+        Done
+      </Button>
+    ) : step === 'error' && outcome && !outcome.ok ? (
+      outcome.reason === 'revoke_unfinished' ? (
+        <DialogActions className="w-full">
+          <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
+            Close
+          </Button>
+          <Button
+            onClick={() => void finishStop()}
+            className="flex-1"
+            disabled={busy || finishState === 'stopping' || (!ready && !signersError && !signersLoading)}
           >
-            <Icon icon={X} className="h-4 w-4" />
-          </button>
-        </div>
+            {finishState === 'stopping' ? 'Stopping…' : 'Stop old budget'}
+          </Button>
+        </DialogActions>
+      ) : outcome.reason === 'target_slot_occupied' ? (
+        <DialogActions className="w-full">
+          <Button variant="ghost" onClick={handleClose} className="flex-1">
+            Close
+          </Button>
+          <Button onClick={() => setStep('form')} className="flex-1">
+            Pick another recipient
+          </Button>
+        </DialogActions>
+      ) : permanentRefusal || outcome.reason === 'slot_occupied' ? (
+        <Button onClick={handleClose} className="w-full">
+          Close
+        </Button>
+      ) : (
+        <DialogActions className="w-full">
+          <Button variant="ghost" onClick={handleClose} className="flex-1">
+            Close
+          </Button>
+          <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
+            Try again
+          </Button>
+        </DialogActions>
+      )
+    ) : undefined
 
-        <div className="p-6">
-          {signersError ? (
-            <NoticeRow
-              className="mb-5"
-              action={
-                <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
-                  Try again
-                </Button>
-              }
-            >
-              Haven could not load how this account is approved.
-            </NoticeRow>
-          ) : null}
+  return (
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title="Edit budget"
+      subtitle="Change what this agent can spend. Nothing changes until you approve."
+      width="lg"
+      // A signature in flight disables every way out together — the ✕, the
+      // backdrop and Escape — or the ✕ becomes the one unguarded exit.
+      closeButtonDisabled={busy}
+      closeOnBackdrop={!busy}
+      closeOnEscape={!busy}
+      footer={footer}
+      panelTestId="edit-budget-modal"
+    >
+      {signersError ? (
+        <NoticeRow
+          className="mb-5"
+          action={
+            <Button size="sm" variant="ghost" onClick={() => void reloadSigners()}>
+              Try again
+            </Button>
+          }
+        >
+          Haven could not load how this account is approved.
+        </NoticeRow>
+      ) : null}
 
           {step === 'form' && (
             <div className="space-y-5">
@@ -591,18 +641,6 @@ export default function EditBudgetModal({
                 nowSec={nowSec}
                 keepUntilSec={budget.expires_at}
               />
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => setStep('review')}
-                  disabled={!changed || !!targetOccupant}
-                  className="flex-1"
-                >
-                  Review changes
-                </Button>
-              </div>
             </div>
           )}
 
@@ -712,215 +750,118 @@ export default function EditBudgetModal({
                   <WalletConnectAction />
                 </div>
               ) : null}
-              <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep('form')} className="flex-1" disabled={busy}>
-                  Back
-                </Button>
-                <Button
-                  onClick={() => void run()}
-                  // #3812 design review: dead while the hint above says no one
-                  // here can sign, the same gate BudgetGrantAction applies.
-                  disabled={busy || (!ready && !signersError && !signersLoading)}
-                  className="flex-1"
-                >
-                  Approve new budget
-                </Button>
-              </div>
             </div>
           )}
 
           {step === 'working' && (
-            <div className="space-y-4 py-8 text-center">
-              <Spinner size="md" />
-              <p className="text-sm font-medium text-[var(--v2-ink)]">Waiting for your approval…</p>
-              <p className="mx-auto max-w-xs text-xs text-[var(--v2-ink-3)]">
-                Approve in your wallet or with your passkey. The budget changes only after you
-                approve.
-              </p>
-            </div>
+            <DialogResult
+              state="busy"
+              title="Waiting for your approval…"
+              description="Approve in your wallet or with your passkey. The budget changes only after you approve."
+            />
           )}
 
           {step === 'done' && (
-            <div className="space-y-5">
-              <div className="py-4 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
-                  <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
-                </div>
-                <p className="text-sm font-medium text-[var(--v2-ink)]">Budget updated</p>
-                {outcome?.ok && outcome.earlierLimits ? (
-                  // #3933 round 4: an earlier attempt landed first, with the
-                  // limits the owner set then — say so, never "the new limits".
-                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                    Your earlier change went through first, so the budget has the amount, period and
-                    recipient you chose then, and the previous budget is stopped. Edit it again to
-                    make this change.
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-                    The new limits are live
-                    {outcome?.ok && !outcome.oldDelegationRevoked
-                      ? ' — the previous budget was already stopped'
-                      : ' and the previous budget is stopped'}
-                    .
-                  </p>
-                )}
-              </div>
-              <Button variant="ghost" onClick={handleClose} className="w-full">
-                Done
-              </Button>
-            </div>
+            <DialogResult
+              state="success"
+              title="Budget updated"
+              description={
+                outcome?.ok && outcome.earlierLimits
+                  ? // #3933 round 4: an earlier attempt landed first, with the
+                    // limits the owner set then — say so, never "the new limits".
+                    'Your earlier change went through first, so the budget has the amount, period and recipient you chose then, and the previous budget is stopped. Edit it again to make this change.'
+                  : `The new limits are live${
+                      outcome?.ok && !outcome.oldDelegationRevoked
+                        ? ' — the previous budget was already stopped'
+                        : ' and the previous budget is stopped'
+                    }.`
+              }
+            />
           )}
 
           {step === 'error' && outcome && !outcome.ok && (
-            <div className="space-y-5">
-              <div className="space-y-3 py-2 text-center">
-                <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
-                  <Icon icon={X} className="h-5 w-5 text-[var(--v2-danger)]" />
-                </div>
-                {outcome.reason === 'revoke_unfinished' ? (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      {earlierLimits ? 'Your earlier change went through' : 'New budget is live — one step left'}
-                    </p>
-                    {/* #3933: name the still-enabled budget, say what it can
-                        still do, and offer the Stop right here. */}
-                    {earlierLimits ? (
-                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                        The budget has the amount, period and recipient you chose then, not the ones
-                        you entered now. The previous{' '}
-                        {previousBudgetPhrase} budget{' '}
-                        {outcomeMoved
-                          ? 'pays a different recipient, so it keeps working, in Haven and outside it,'
-                          : 'can still be spent outside Haven'}{' '}
-                        until it is stopped. Stopping it also ends any open task budget or
-                        sub-budget taken from it. Then edit the budget again to make this change.
-                      </p>
-                    ) : outcomeMoved ? (
-                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                        The new limits took effect. The previous {previousBudgetPhrase} budget pays
-                        a different recipient, so it keeps working, in Haven and outside it, until
-                        it is stopped. Stopping it also ends any open task budget or sub-budget
-                        taken from it.
-                      </p>
-                    ) : (
-                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                        The new limits took effect. The previous {previousBudgetPhrase} budget can
-                        still be spent outside Haven until it is stopped. Stopping it also ends any
-                        open task budget or sub-budget taken from it.
-                      </p>
-                    )}
-                    {unstoppedCount > 1 ? (
-                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                        It is held in {countWord(unstoppedCount)} parts, so stopping it takes{' '}
-                        {countWord(unstoppedCount)} approvals.
-                      </p>
-                    ) : null}
-                    {finishState === 'failed' ? (
-                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-danger)]">
-                        The previous budget could not be stopped. Try again.
-                      </p>
-                    ) : finishState === 'cancelled' ? (
-                      <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                        No approval yet. The previous budget is not stopped.
-                      </p>
-                    ) : null}
-                  </>
+            <DialogResult
+              state="error"
+              title={
+                outcome.reason === 'revoke_unfinished'
+                  ? earlierLimits
+                    ? 'Your earlier change went through'
+                    : 'New budget is live — one step left'
+                  : outcome.reason === 'slot_occupied'
+                    ? 'This budget has changed'
+                    : outcome.reason === 'target_slot_occupied'
+                      ? 'This recipient already has a budget'
+                      : outcome.reason === 'unconfirmed'
+                        ? 'The change could not be confirmed'
+                        : outcome.reason === 'refused'
+                          ? 'The budget could not be changed'
+                          : 'Budget update failed'
+              }
+              description={
+                outcome.reason === 'revoke_unfinished' ? (
+                  // #3933: name the still-enabled budget and say what it can
+                  // still do. The Stop itself is the footer's action.
+                  earlierLimits ? (
+                    <>
+                      The budget has the amount, period and recipient you chose then, not the ones
+                      you entered now. The previous {previousBudgetPhrase} budget{' '}
+                      {outcomeMoved
+                        ? 'pays a different recipient, so it keeps working, in Haven and outside it,'
+                        : 'can still be spent outside Haven'}{' '}
+                      until it is stopped. Stopping it also ends any open task budget or
+                      sub-budget taken from it. Then edit the budget again to make this change.
+                    </>
+                  ) : outcomeMoved ? (
+                    <>
+                      The new limits took effect. The previous {previousBudgetPhrase} budget pays
+                      a different recipient, so it keeps working, in Haven and outside it, until
+                      it is stopped. Stopping it also ends any open task budget or sub-budget
+                      taken from it.
+                    </>
+                  ) : (
+                    <>
+                      The new limits took effect. The previous {previousBudgetPhrase} budget can
+                      still be spent outside Haven until it is stopped. Stopping it also ends any
+                      open task budget or sub-budget taken from it.
+                    </>
+                  )
                 ) : outcome.reason === 'slot_occupied' ? (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      This budget has changed
-                    </p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      This agent&apos;s budgets changed after you opened this, so nothing was
-                      changed. Close this and edit the current budget.
-                    </p>
-                  </>
+                  'This agent\u2019s budgets changed after you opened this, so nothing was changed. Close this and edit the current budget.'
                 ) : outcome.reason === 'target_slot_occupied' ? (
                   // #3933 review finding 2: the edited budget is untouched —
                   // the recipient chosen for the new one is the problem.
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      This recipient already has a budget
-                    </p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      The recipient you chose already has a live budget for this token, so nothing
-                      was changed and this budget is still the same. Edit that budget instead, or pick
-                      another recipient.
-                    </p>
-                  </>
+                  'The recipient you chose already has a live budget for this token, so nothing was changed and this budget is still the same. Edit that budget instead, or pick another recipient.'
                 ) : outcome.reason === 'unconfirmed' ? (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      The change could not be confirmed
-                    </p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      The new budget may already be in place. Try again in a moment: Haven checks
-                      first and does not add a second budget.
-                    </p>
-                  </>
+                  'The new budget may already be in place. Try again in a moment: Haven checks first and does not add a second budget.'
                 ) : outcome.reason === 'refused' ? (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      The budget could not be changed
-                    </p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      {mappedRefusalCopy ??
-                        `${outcome.detail ?? 'Haven could not prepare the change.'} Your current budget is unchanged.`}
-                    </p>
-                  </>
+                  mappedRefusalCopy ??
+                  `${outcome.detail ?? 'Haven could not prepare the change.'} Your current budget is unchanged.`
                 ) : (
-                  <>
-                    <p className="text-sm font-medium text-[var(--v2-ink)]">
-                      Budget update failed
+                  'Nothing changed — your current budget still works. Try again.'
+                )
+              }
+            >
+              {outcome.reason === 'revoke_unfinished' ? (
+                <>
+                  {unstoppedCount > 1 ? (
+                    <p>
+                      It is held in {countWord(unstoppedCount)} parts, so stopping it takes{' '}
+                      {countWord(unstoppedCount)} approvals.
                     </p>
-                    <p className="mx-auto max-w-xs text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                      Nothing changed — your current budget still works. Try again.
+                  ) : null}
+                  {finishState === 'failed' ? (
+                    <p className="text-[var(--v2-danger)]">
+                      The previous budget could not be stopped. Try again.
                     </p>
-                  </>
-                )}
-              </div>
-              <div className="flex gap-3">
-                {outcome.reason === 'revoke_unfinished' ? (
-                  <>
-                    <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={busy}>
-                      Close
-                    </Button>
-                    <Button
-                      onClick={() => void finishStop()}
-                      className="flex-1"
-                      disabled={busy || finishState === 'stopping' || (!ready && !signersError && !signersLoading)}
-                    >
-                      {finishState === 'stopping' ? 'Stopping…' : 'Stop old budget'}
-                    </Button>
-                  </>
-                ) : outcome.reason === 'target_slot_occupied' ? (
-                  <>
-                    <Button variant="ghost" onClick={handleClose} className="flex-1">
-                      Close
-                    </Button>
-                    <Button onClick={() => setStep('form')} className="flex-1">
-                      Pick another recipient
-                    </Button>
-                  </>
-                ) : permanentRefusal || outcome.reason === 'slot_occupied' ? (
-                  <Button onClick={handleClose} className="flex-1">
-                    Close
-                  </Button>
-                ) : (
-                  <>
-                    <Button variant="ghost" onClick={handleClose} className="flex-1">
-                      Close
-                    </Button>
-                    <Button onClick={() => setStep('review')} className="flex-1" disabled={busy}>
-                      Try again
-                    </Button>
-                  </>
-                )}
-              </div>
-            </div>
+                  ) : finishState === 'cancelled' ? (
+                    <p className="text-[var(--v2-ink-2)]">
+                      No approval yet. The previous budget is not stopped.
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+            </DialogResult>
           )}
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

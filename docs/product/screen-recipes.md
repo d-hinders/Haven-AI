@@ -797,19 +797,23 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    exists. With payments but no recorded time, Last paid reads "—". A revoked
    or otherwise uncovered agent is not in the overview, so it renders no
    Last 30 days column; its history is under Activity.
-   **Add budget is collapsed once a budget exists**: with no budget the
-   section reads "No budget yet." with a "Set budget" control that opens the
-   grant form; once one exists, adding another is the rows' ⋯ menu "Add
-   budget" item (#4261 — no button under the list), which opens the form in
-   place (Cancel collapses it and returns focus to the row's trigger; after a
-   `?grant=` prefill, which has no origin, focus goes to the first row's
-   trigger, or to Set budget when there are no rows), never a permanent
-   second form — unless `?grant=` asks for the form, in which case it opens
-   expanded. Sharing part of an existing budget with another agent lives
-   INSIDE the Add budget panel — a quiet line and an "Issue sub-budget"
-   button below the grant form, shown only while the panel is open (#3716) —
-   never as a permanent card row; the Sub-agent budgets list of issued slices
-   stays on the card, outside the panel. A revoked or removed agent's
+   **Setting a budget always happens in a dialog** (owner decision D3,
+   2026-10-30; #4564). With no budget the section reads "No budget yet." with
+   a "Set budget" button; once one exists, adding another is the rows' ⋯ menu
+   "Add budget" item (#4261 — no button under the list). Both open the ONE
+   Set budget dialog, which hosts the grant form and its Cancel in the
+   dialog's action row; closing it returns focus to the row's trigger (after
+   a `?grant=` prefill, which has no origin, focus goes to the first row's
+   trigger, or to Set budget when there are no rows). `?grant=` opens the
+   dialog prefilled. A failed budget read shows the load-error shape with
+   Try again plus a Set budget button, so the form stays reachable (#2473).
+   Sharing part of an existing budget with another agent lives INSIDE the
+   dialog — a quiet line and an "Issue sub-budget" button below the grant
+   form, shown only while it is open (#3716) — never as a permanent card row;
+   opening it closes the dialog first (no nested modals), and closing it
+   reopens the dialog with the typed amount and recipient and focus back on
+   the entry. The Sub-agent budgets list of issued slices stays on the card,
+   outside the dialog. A revoked or removed agent's
    section is read-only plus Stop (#3549). The one read-only budget summary
    on the page is the **Received budgets** block (#3988): when the agent
    RECEIVES sub-budget grants (not closed), the card lists each — the

@@ -7,6 +7,9 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/components/ui/DialogActions.tsx
+  - packages/frontend/src/components/EditBudgetModal.tsx
+  - packages/frontend/src/components/EditAgentModal.tsx
+  - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
@@ -1074,7 +1077,8 @@ CSS ring each), and `AgentPanel.tsx` and `PaymentCredentialsModal.tsx` (a lucide
 glyph). `connect-agent/ConnectSteps.tsx` is the one that already gates. (The
 #4563 audit said four; the census is five — the count is the command's, not this
 paragraph's.) #4567/#4568 move them onto the primitive; this slice adds it and
-the `/design-system` demo.
+the `/design-system` demo. #4564 already moved `EditBudgetModal`'s busy screen
+onto `DialogResult`, which uses the primitive — so the census is four today.
 
 ### Detail-page section rule (#3692)
 
@@ -2530,8 +2534,8 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
-`ui/Modal` is the shared dialog shell — fifteen product files import it
-directly (sixteen with `/design-system`), three of which (`ConfirmDialog`,
+`ui/Modal` is the shared dialog shell — seventeen product files import it
+directly (eighteen with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
 Not every dialog uses it yet: about ten older dialogs, `ReceiveDialog` among
 them (below), are still bespoke `role="dialog"` shells. A new dialog uses
@@ -2781,6 +2785,30 @@ dialog. Three placements in that flow are decided rather than incidental:
   a 40px ghost, not a 44px one-off (Button's own hit area keeps the 44px tap
   target).
 
+### Dialog result states (`ui/DialogResult`)
+
+A dialog that performs a request ends on one of three screens: busy, success,
+failure. `ui/DialogResult` is that screen. `EditBudgetModal` reads through it
+today (#4564); `EditAgentModal` and `FundMerchantModal` still hand-build their
+busy screens and move onto it in #4565 and #4566. It owns the **centred block
+only**: the icon, the title, the description, and any extra notices the caller
+needs. The action row stays the caller's, in `Modal`'s footer, because it is
+the screen's own decision (Close, Try again, Stop old budget).
+
+| State | Mark | Tone |
+|---|---|---|
+| `busy` | `Spinner` (#4563), `md`, named by the title | neutral |
+| `success` | lucide `Check`, 24px, in a 48px circle | `--v2-success` |
+| `error` | lucide `X`, 20px, in a 40px circle | `--v2-danger` |
+
+The busy state uses the shared `Spinner`, whose rotation is gated behind
+`motion-safe:` — the hand-rolled `animate-spin` rings it replaces had no gate
+at all. The spinner carries the title as its accessible name, so a screen
+reader hears the sentence once, from the status region, rather than reading a
+decorative glyph. Tone is the state's, never the caller's: a caller that needs
+a different tone is describing a different state, not recolouring this one.
+Showcased on `/design-system` → *DialogResult*.
+
 ### Wizard progress (`StepProgress`)
 
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
@@ -2899,8 +2927,9 @@ marker rather than a paragraph, which is why the card's paused notice is the
 neutral `ApprovalRequiredBanner` (#2764). So
 the honest options for "legible but not alarming" are this or plain muted text.
 Muted text is the right weight for mild friction — the #1097 "passkey may be on
-another device" hint (shown on every owner-signing flow since #3825) is
-deliberately unmarked. This marker is for the step above that: a fact the user
+another device" hint (shown on every owner-signing flow since #3825, and since
+#4564 at the moment of approval: inside the Set budget dialog and beside Stop)
+is deliberately unmarked. This marker is for the step above that: a fact the user
 would want to act on, on an authority-bearing surface.
 
 **Recorded as a pattern on ONE call site, which is thinner than this section's

@@ -112,7 +112,10 @@ test.describe('edit budget modal visual regression (#3398)', () => {
     await expect(dialog.getByRole('button', { name: 'Review changes' })).toBeDisabled()
 
     await page.evaluate(() => document.fonts.ready)
-    await expect(dialog).toHaveScreenshot('agents-edit-budget-modal-mobile.png', {
+    // #4564: the modal is built on `ui/Modal`, whose `role="dialog"` is the
+    // `fixed inset-0` WRAPPER — a clip of it is a screenshot of the page
+    // behind the dialog. The panel is the honest handle (`panelTestId`).
+    await expect(page.getByTestId('edit-budget-modal')).toHaveScreenshot('agents-edit-budget-modal-mobile.png', {
       animations: 'disabled',
       caret: 'hide',
       maxDiffPixels: 50,

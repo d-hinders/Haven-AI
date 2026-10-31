@@ -2534,11 +2534,13 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 ### Modal (`ui/Modal`)
 
-`ui/Modal` is the shared dialog shell — seventeen product files import it
-directly (eighteen with `/design-system`), three of which (`ConfirmDialog`,
+`ui/Modal` is the shared dialog shell — twenty-one product files import it
+directly (twenty-two with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: about ten older dialogs, `ReceiveDialog` among
-them (below), are still bespoke `role="dialog"` shells. A new dialog uses
+Not every dialog uses it yet: five older dialogs — `EditAgentModal`,
+`MoveAgentModal`, `LabelsManagerModal`, `OrganizationsManagerModal` (slices 4
+and 5 of #4560) and `ReceiveDialog` (below) — are still bespoke `role="dialog"`
+shells. A new dialog uses
 `Modal`. Anything changed here is changed everywhere, so the
 structure is worth stating rather than re-deriving from the file.
 
@@ -2565,10 +2567,10 @@ does not also carry a ✕.
 backdrop are guarded per caller (`closeOnEscape={!busy}`, `closeOnBackdrop={!busy}`),
 so a default ✕ would otherwise be the one unguarded way out of a request in
 flight. Every busy-guarded caller passes `closeButtonDisabled={busy}` — the
-pattern `NewAccountDialog` already used. The five sites: `ApiKeyConnectModal`
+pattern `NewAccountDialog` already used. The seven sites: `ApiKeyConnectModal`
 (`busy`), `BackfillDialog` (`busy`), the contact delete dialog (`deleting`), the
-contact add/edit dialog (`saving`) and the company-details delete
-(`deleting`).
+contact add/edit dialog (`saving`), the company-details delete (`deleting`),
+`FundMerchantModal` (`busy`) and the account rename dialog (`loading`).
 
 **Open-time focus goes to the body, not to the ✕.** `Modal` focuses
 `initialFocusRef` when a caller passes one; otherwise the **body's** first
@@ -2789,8 +2791,9 @@ dialog. Three placements in that flow are decided rather than incidental:
 
 A dialog that performs a request ends on one of three screens: busy, success,
 failure. `ui/DialogResult` is that screen. `EditBudgetModal` reads through it
-today (#4564); `EditAgentModal` and `FundMerchantModal` still hand-build their
-busy screens and move onto it in #4565 and #4566. It owns the **centred block
+today (#4564), and `FundMerchantModal` joined it in #4566; `EditAgentModal`
+still hand-builds its busy screen and moves onto it in #4565. It owns the
+**centred block
 only**: the icon, the title, the description, and any extra notices the caller
 needs. The action row stays the caller's, in `Modal`'s footer, because it is
 the screen's own decision (Close, Try again, Stop old budget).

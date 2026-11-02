@@ -862,7 +862,9 @@ async function main() {
 
   // #4612: the partition is PRINTED, never silent (#2323). A release bump that
   // clears both docs by partition must say so, or the next reader sees a green
-  // tick and no reason for it.
+  // tick and no reason for it. Each file is re-run through `implicatedDocs` on
+  // its own, so the section names the docs the partition actually cleared rather
+  // than asserting that it cleared none.
   if (versionOnly.length > 0) {
     let body = outputBody ? '\n' : '<!-- docs-coupling-gate -->\n'
     body += '### ⏭️ Version literal only — not implicating\n\n'
@@ -871,7 +873,14 @@ async function main() {
       'constants (`scripts/release-version-constants.mjs`), so no doc is ' +
       'implicated by them. A behavioural change to any of these files still ' +
       'implicates its doc — the partition is per-file and per-hunk, not per-path.\n\n'
-    for (const f of versionOnly) body += `- \`${f}\`\n`
+    for (const f of versionOnly) {
+      body += `- \`${f}\`\n`
+      // Contract docs only: those are the ones whose absence from the blocking
+      // list a reader needs explained. The advisory ones would be noise here.
+      for (const d of implicatedDocs([f], docs, { strict, added })) {
+        if (d.contract) body += `  - would have implicated \`${d.doc}\`\n`
+      }
+    }
     outputBody += body
     console.log(`Coupling gate: ${versionOnly.length} file(s) version literal only — not implicating:`)
     for (const f of versionOnly) console.log(`  - [version-only] ${f}`)

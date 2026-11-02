@@ -1156,8 +1156,13 @@ test4612('#4612: a release bump whose diffs are version literals only implicates
         `${rel} must be PRINTED as partitioned, never silently dropped (#2323)`,
       )
     }
-    assert4612.doesNotMatch(comment, /delegation-rail-security-model/)
-    assert4612.doesNotMatch(comment, /package-dev-channel/)
+    // Both release-coupled docs are named in the partition section — the gate
+    // says WHICH docs the partition cleared, not merely that it cleared some.
+    assert4612.match(comment, /would have implicated `docs\/security\/delegation-rail-security-model\.md`/)
+    assert4612.match(comment, /would have implicated `docs\/operations\/package-dev-channel\.md`/)
+    // And neither is in the blocking list.
+    assert4612.doesNotMatch(comment, /- ⚠️ `docs\/security\/delegation-rail-security-model\.md`/)
+    assert4612.doesNotMatch(comment, /- ⚠️ `docs\/operations\/package-dev-channel\.md`/)
   })
 })
 

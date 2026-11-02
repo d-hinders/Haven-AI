@@ -16,6 +16,7 @@ covers:
   - packages/frontend/src/components/SetBudgetDialog.tsx
   - packages/frontend/src/components/ListManagerModal.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
+  - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
@@ -883,7 +884,7 @@ that slice removed.
 |---|---|---|---|
 | `pending_signature` | Awaiting signature | `brand` | `PAYMENT_STATUS` |
 | `submitted` | Submitted | `brand` | `PAYMENT_STATUS` |
-| `confirmed` | **Sent** | `success` | `PAYMENT_STATUS` — a confirmed payment is **Sent** everywhere |
+| `confirmed` | **Sent** | `success` | `PAYMENT_STATUS` — **Sent** in the detail panel; a ledger row carries no badge (#4608) |
 | `failed` | Failed | `danger` | `PAYMENT_STATUS`, `transactionRowBadge`'s fallback |
 | `expired` | Expired | `neutral` | `PAYMENT_STATUS` |
 | delegate sweep | Recovered | `success` | `lib/transaction-presentation.tsx` `transactionStatus` |
@@ -1102,26 +1103,29 @@ four — so the census is zero today. `EditAgentModal`'s busy screen is
 
 ### Detail-page section rule (#3692)
 
-On an **entity detail page** — an agent or an account — the page is a stack of
-labelled sections, and every section is assembled the same way. The rule is
-scoped to entity detail pages and **settings pages** (owner decision
-2026-10-23, on #4357): not list pages, not modals (a modal keeps its own
-callout vocabulary — see #3690's in-modal neutral callout, which this rule
-does not touch). The Settings page assembles its sections with the shared
-`components/ui/SettingsSection.tsx`, which renders this shape so every caller
-follows without edits. The heading block itself is
-`components/ui/SectionHeading.tsx` (#4475), which `SettingsSection` composes —
-a detail page that does not use `SettingsSection` renders it directly above
-its card, so the heading, its optional description and its optional trailing
-link are one shape everywhere.
+On a **signed-in page** — an entity detail page, a settings page, or any other
+page behind the app shell — the page is a stack of labelled sections, and every
+section is assembled the same way. The rule is scoped to **page sections on
+every signed-in page** (owner decision 2026-11-02, on #4608, widening the
+2026-10-23 scope that covered entity detail pages and settings pages only): not
+modals (a modal keeps its own callout vocabulary — see #3690's in-modal neutral
+callout, which this rule does not touch). The Settings page assembles its
+sections with the shared `components/ui/SettingsSection.tsx`, which renders this
+shape so every caller follows without edits. The heading block itself is
+`components/ui/SectionHeading.tsx` (#4475), which `SettingsSection` composes — a
+page that does not use `SettingsSection` renders it directly above its content,
+so the heading, its optional description and its optional trailing link are one
+shape everywhere.
 
-- Each section's heading (`v2-text-h3`) sits **above** its `Card`, not inside
-  it — on detail pages **and on settings pages**. A description is
-  **optional** (#4476; owner decision 2026-10-27 on the #4224 walk): it
-  appears only when it tells the reader something the heading and the card
-  don't. The agent page's **Spending** section is the example of a section
-  with none — "Spending" over a card that already names each budget, its
-  period and its meter; the sentence that used to sit there ("Budgets are
+- Each section's heading (`v2-text-h3`) sits **above** its content, not inside
+  it — above its `Card` on detail and settings pages, and above its table or
+  list where the section's content is one (the merchant page's **Offers** over
+  `OffersTable`, **Agent budgets for this merchant** over its `ul`; #4608). A
+  description is **optional** (#4476; owner decision 2026-10-27 on the #4224
+  walk): it appears only when it tells the reader something the heading and
+  the card don't. The agent page's **Spending** section is the example of a
+  section with none — "Spending" over a card that already names each budget,
+  its period and its meter; the sentence that used to sit there ("Budgets are
   enforced on-chain…") repeated the card and is gone. On settings the shared
   `SettingsSection` enforces the shape: the heading is sentence case
   `v2-text-h3` (never the old uppercase band) and carries the heading-to-card
@@ -1134,6 +1138,14 @@ link are one shape everywhere.
   page had: "Agent budgets" was headed from inside its card while "Recent
   activity" was headed from above — epic #3691's later slices apply the rule
   there.)
+- **A title inside a card is not a section heading.** A card's own heading —
+  including a `Card.Header` heading — belongs to the card's content and stays
+  as it is; this rule governs the heading ABOVE a section's content, never one
+  inside it. That is a **class**, not a list of exceptions (owner decision
+  2026-11-02, on #4608): Accounting's "Available as an add-on" and "Sent
+  transactions", the dashboard money card's two "Agent spending" labels,
+  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:324`'s "How
+  to buy" are instances of it, and none of them moves onto `SectionHeading`.
 - **An optional trailing link on the heading's line** (#4475; owner-approved
   2026-10-27 as a new design-system pattern). A section whose content has a
   fuller surface elsewhere — the account Security tab's signer list, whose

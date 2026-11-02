@@ -355,10 +355,10 @@ spelling and the identifier is left alone.
 
 `npm run lint:copy` cannot hold this rule — see § Enforcement, bare tokens.
 
-### Destructive verbs — one per meaning (owner decision 2026-10-30)
+### Destructive verbs — one per meaning (owner decision 2026-10-30; Disconnect added 2026-11-02)
 
-Four verbs, four meanings. Do not use one for another, and do not invent a
-fifth.
+Five verbs, five meanings. Do not use one for another, and do not invent a
+sixth.
 
 | verb | means | examples |
 |---|---|---|
@@ -366,6 +366,7 @@ fifth.
 | **Delete** | permanently erase a record you created | a contact, a label, an organisation |
 | **Stop** | end a budget | "Stop budget", "Stop this budget?" |
 | **Revoke** | the on-chain act, shown only where the user must know it | "Revoke", "Revoked on-chain" |
+| **Disconnect** | end a live connection; the thing on the other side survives | a browser wallet on this device, an accounting connection |
 
 "Remove" is the default for taking something off a surface, because it is
 honest about reversibility: the agent still exists, it is no longer in your
@@ -374,7 +375,10 @@ good — say so in the confirmation. "Stop" is the budget verb and only the
 budget verb; a budget that ends is stopped, never deleted or removed. "Revoke"
 names the on-chain act, so it appears only where the user has to understand
 that authority is being withdrawn on-chain — not as a synonym for "remove" in a
-menu.
+menu. "Disconnect" ends a live connection and says nothing about the other
+side: the wallet still exists on the device, the accounting provider still
+holds the books — only Haven's link to it ends (#4608, owner decision
+2026-11-02).
 
 **A menu item that opens a confirmation ends in "…"** — "Stop budget…",
 "Delete contact…", "Remove agent…". The ellipsis says a dialog follows; a menu

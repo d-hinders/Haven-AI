@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PaymentActivityItem } from '@/hooks/useAgentActivity'
+import { transactionRowBadge } from '@/lib/transaction-presentation'
 import { activityToTransaction } from '../AgentActivityTab'
 
 /**
@@ -72,5 +73,51 @@ describe('activityToTransaction — the eip3009 legs (#4267)', () => {
     expect(row.settlementScheme).toBeNull()
     expect(row.settlementTxHash).toBeNull()
     expect(row.fundingTxHash).toBeNull()
+  })
+})
+
+/**
+ * #4608 (owner decision 2026-11-02): an agent Activity row carries NO badge
+ * for a confirmed payment, like Transactions — the epic's ledger-row rule
+ * wins over DS:886's "Sent everywhere" on rows. The detail panel keeps
+ * "Sent" through its own fallback, which `TransactionDetailPanel.test.tsx`
+ * pins on the rendered word.
+ */
+describe('activityToTransaction — a confirmed row carries no badge (#4608)', () => {
+  it('leaves statusBadge off a confirmed payment, so the row renders no badge', () => {
+    const row = activityToTransaction(item({ status: 'confirmed' }), 'Atlas', 'Main')
+    expect(row.statusBadge).toBeUndefined()
+    // The shared precedence finds nothing to render: the row is badge-less.
+    expect(transactionRowBadge(row)).toBeNull()
+  })
+
+  it('keeps the badge on every other status', () => {
+    expect(activityToTransaction(item({ status: 'pending_signature' }), 'Atlas', 'Main').statusBadge).toEqual({
+      label: 'Awaiting signature',
+      tone: 'brand',
+    })
+    expect(activityToTransaction(item({ status: 'submitted' }), 'Atlas', 'Main').statusBadge).toEqual({
+      label: 'Submitted',
+      tone: 'brand',
+    })
+    expect(activityToTransaction(item({ status: 'failed' }), 'Atlas', 'Main').statusBadge).toEqual({
+      label: 'Failed',
+      tone: 'danger',
+    })
+    expect(activityToTransaction(item({ status: 'expired' }), 'Atlas', 'Main').statusBadge).toEqual({
+      label: 'Expired',
+      tone: 'neutral',
+    })
+  })
+
+  it('still resolves to "Sent" in the detail panel — its fallback, not the row', () => {
+    const row = activityToTransaction(item({ status: 'confirmed' }), 'Atlas', 'Main')
+    // `TransactionDetailPanel.tsx:286`:
+    //   transactionRowBadge(tx) ?? { label: 'Sent', tone: 'success' }
+    // The row contributes nothing, so the panel's own word is what shows.
+    expect(transactionRowBadge(row) ?? { label: 'Sent', tone: 'success' }).toEqual({
+      label: 'Sent',
+      tone: 'success',
+    })
   })
 })

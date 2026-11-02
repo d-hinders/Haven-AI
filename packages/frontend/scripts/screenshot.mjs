@@ -6568,10 +6568,10 @@ export const SCENARIOS = {
           })),
         }
       }
-      // A task budget is carved from an active budget (#3329), so an agent
-      // with none has no open task budget either. The shared fixture's open
+      // A task budget is carved from an active budget (#3329), so the common
+      // no-budget state has no open task budget. The shared fixture's open
       // one would otherwise sit under "No budget yet." as "taken from the
-      // budget above" with nothing above it — a state no user can reach.
+      // budget above" with nothing above it.
       if (apiPath === '/agents/agent-research/task-budgets' && agentBudgetStage === 'no-budget') {
         return { task_budgets: [] }
       }

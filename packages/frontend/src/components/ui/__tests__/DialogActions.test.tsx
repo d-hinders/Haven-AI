@@ -42,7 +42,8 @@ describe('DialogActions', () => {
   // In Modal's footer — a `justify-end` flex row — a pair with no width of its
   // own shrank to its content: the /design-system alternative-footer demo
   // never showed equal halves. A minimum, so a negative-margin outdent still
-  // widens it (ROW_FOOTER_OUTDENT_CLASS).
+  // widens it (ROW_FOOTER_OUTDENT_CLASS). jsdom does no layout, so this pins
+  // the class; the wrapper only mirrors Modal's footer for the reader.
   it('spans the full width of a flex-row footer without a caller className', () => {
     render(
       <div className="flex justify-end">

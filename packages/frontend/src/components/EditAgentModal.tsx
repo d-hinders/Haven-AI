@@ -303,7 +303,6 @@ export default function EditAgentModal({
               />
               <Button
                 type="button"
-                variant="tertiary"
                 size="sm"
                 onClick={() => void addNewLabel()}
                 disabled={newLabelName.trim().length === 0}

@@ -710,6 +710,8 @@ export default function FundMerchantModal({ open, onClose, merchant, funding, of
           )}
 
           {step === 'error' && outcome && !outcome.ok && (
+            // #4607: keeps `role="alert"` — this is the focus-managed step
+            // region (`tabIndex={-1}`), not a text line.
             <div ref={stepRegionRef} tabIndex={-1} role="alert" className="outline-none">
               {/* #3331 review finding F9: ONE heading for every failure shape
                   — "the budget could not be set" — followed by named copy

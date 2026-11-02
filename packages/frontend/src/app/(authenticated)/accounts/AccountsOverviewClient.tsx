@@ -10,6 +10,7 @@ import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { ARCHIVED_FACET, facetMatches } from '@/lib/agent-list-filters'
 import { formatFiat, timeAgo } from '@/lib/format'
 import { isTestnetChain } from '@/lib/marketplace'
 import { hasNonZeroBalance } from '@/lib/portfolio-breakdown'
@@ -274,10 +275,13 @@ export default function AccountsOverviewClient() {
   const { currency } = usePreferences()
   const [newAccountOpen, setNewAccountOpen] = useState(false)
 
-  // Count agents per account
+  // Count agents per account. #4607: the card and the Agents page must agree,
+  // so the count goes through the page's own archived facet — archived agents
+  // are hidden by default there, revoked ones are not. One definition, not a
+  // second `archived_at` check.
   const agentCountByAccount = new Map<string, number>()
   for (const agent of agents) {
-    if (agent.account_id) {
+    if (agent.account_id && facetMatches(ARCHIVED_FACET, agent, ['hidden'])) {
       agentCountByAccount.set(agent.account_id, (agentCountByAccount.get(agent.account_id) ?? 0) + 1)
     }
   }

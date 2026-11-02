@@ -32,7 +32,9 @@ export function CodeBlock({
    */
   wrap?: boolean
 }) {
-  const { copied, markCopied } = useCopyTimeout(2000)
+  // #4607: 1.5 s, the DS's check-pop (DS:1876) — the same hold `CopyButton`
+  // uses, so the two copy controls agree.
+  const { copied, markCopied } = useCopyTimeout(1500)
 
   const handleCopy = async () => {
     try {

@@ -414,6 +414,8 @@ export default function CatalogSubmitModal({
       )}
 
       {phase === 'error' && (
+        // #4607: keeps `role="alert"` — a larger failed-state panel (title +
+        // body), which DS § Inline alerts leaves in its own panel.
         <div
           role="alert"
           className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3"
@@ -511,6 +513,8 @@ export default function CatalogSubmitModal({
       )}
 
       {phase === 'failed' && (
+        // #4607: keeps `role="alert"` — a larger failed-state panel (title +
+        // body), which DS § Inline alerts leaves in its own panel.
         <div
           role="alert"
           className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3"

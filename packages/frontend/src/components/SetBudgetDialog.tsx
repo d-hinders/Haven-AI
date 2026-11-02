@@ -229,7 +229,7 @@ export default function SetBudgetDialog({
   const title = budgetsError ? 'Set a budget' : hasActive ? 'Add a budget' : 'Set its first budget'
   const subtitle =
     receivedGrants && receivedGrants.length > 0
-      ? 'It spends through the received budgets below; a budget of its own adds to that.'
+      ? 'It already spends through its received budgets; a budget of its own adds to that.'
       : 'The agent can start paying within it.'
 
   return (

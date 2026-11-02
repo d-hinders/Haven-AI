@@ -109,33 +109,6 @@ npm run test:e2e:live -w packages/frontend
 npm run qa:dev -w packages/qa-agent
 ```
 
-The commands and artifact paths in this template were re-verified against the
-repos on 2026-10-25 (weekly docs audit #3645, at dev `615686369`; previous
-verification 2026-09-30, audit #3413 at `5b5bd059`): the five script names
-above in `packages/frontend/package.json` and
-`packages/qa-agent/package.json`, and both Playwright `outputDir` values in
-`playwright.config.ts` / `playwright.live.config.ts` — all unchanged as
-documented (the `output/playwright*/` paths are gitignored working dirs).
-The intervening commits (#4372 parts A–I, #4405 agent-dir paths, #4407
-catalog probe cooldown, #4352 expired-only budgets) changed the suites and
-covered code, not the template's fields, tables or artifact layout. The
-scenario table's over-budget claims still match the code: the typed HTTP 403
-`delegation_budget_exceeded` pre-check covers both the EIP-3009 leg and the
-erc7710 direct-settlement scheme (`modules/x402/delegation-authorize.ts`).
-
-Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). No claim
-needed rewriting. Re-checked at this head: the five canonical commands
-(`test:e2e:gate`, `test:e2e:desktop`, `test:e2e:mobile`, `test:e2e:live` in
-`packages/frontend/package.json`; `qa:dev` in `packages/qa-agent/package.json`);
-both Playwright `outputDir` values (`../../output/playwright/test-results`,
-`../../output/playwright-live/test-results`); the two QA workflows and the
-three `.claude/commands/qa-*.md` files; and the typed HTTP 403
-`delegation_budget_exceeded` pre-check on both the EIP-3009 leg and the
-erc7710 direct-settlement scheme. The week's drift (the typed task-/sub-budget
-payment-scope refusals #4483, `delegation_expired` #4376, the x402 merchant
-rejection reason #4558) adds refusal codes a run may record; the template's
-fields, tables and artifact layout are unchanged.
-
 ## Agent Connection — When In Scope
 
 | Check | Expected evidence | Result | Actual evidence / notes |
@@ -199,3 +172,5 @@ A failed secret review blocks committing the report or artifacts.
 ## Notes For The Coding Agent
 
 <!-- Concrete suggestions or open questions to feed back for improvement. -->
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

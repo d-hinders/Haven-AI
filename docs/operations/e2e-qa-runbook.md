@@ -174,15 +174,4 @@ evidence and artifact paths, cleanup, and secret review. A required skip makes
 the run partial/blocked even if its process exits zero. File concrete bugs as
 separate issues.
 
-## Verification notes
-
-Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.
-Changed: the mobile-viewport row no longer says the spec "gates every PR" —
-the *Frontend browser smoke* job (`ci.yml`, `browser_smoke`) runs it on PRs
-that touch the frontend, and the repository rulesets require that check on
-`main` only (`gh api repos/d-hinders/Haven-AI/rules/branches/<branch>`).
-Re-checked without change: the automated-coverage table's other rows, the
-mocked-suite command, the #419 steps (no runtime picker since #1720, the
-per-deployment connector package since #2422, the per-agent pair names since
-#3737, the over-budget pre-checks #3503 / #2082 / #2706), the #420 steps and
-edge cases, and the reporting rules.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

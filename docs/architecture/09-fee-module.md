@@ -61,26 +61,4 @@ See [x402 payment sequence](04-x402-payment-sequence.md) for the current funding
 mechanics and [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
 for authority constraints.
 
-Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
-needed rewriting; `modules/fee/` and migration 029 have no commits since the
-last verification. Re-read at this head: `quoteFee` still returns the zero
-quote unconditionally — including when `HAVEN_FEE_ENABLED` is set
-(`fee-module.ts` zero-quote branch at both flag states); the ledger write
-stays the best-effort zero-fee row, idempotent per payment via
-`ON CONFLICT DO NOTHING` in `infra/repositories/payment-fees.ts`; the SDK
-still maps the same public `fee` shape (`payment-mappers.ts`). The covered
-commits that did move (`routes/payments.ts`, `modules/mpp/`,
-`modules/payments/agent-payment-status.ts` — #3423 settle semantics, #3420
-terminal delivered-unsettled status, #3479 settlement recording) changed
-payment status and settlement handling around the scaffold, not the fee
-shape or the zero-fee path.
-
-Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
-epic #386 is named as closed (2026-06-17). Re-checked without change:
-`quoteFee` returns the zero quote at both flag states (`fee-module.ts`); the
-one ledger writer is `recordSettledFee`, called best-effort from
-`modules/mpp/evidence.ts` after settlement and idempotent through
-`ON CONFLICT (payment_id) DO NOTHING` (`infra/repositories/payment-fees.ts`);
-no `RailFeeExecutor` implementation exists; `routes/payments.ts` and
-`modules/payments/agent-payment-status.ts` surface the zero fee and the SDK
-maps it (`payment-mappers.ts`); `HAVEN_FEE_ENABLED` is read in `config.ts`.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

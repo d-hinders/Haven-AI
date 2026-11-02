@@ -219,7 +219,10 @@ const GUARDED_FILES = [
  *                                              that says the rail *is retired*
  *   docs/architecture/06-hosted-mcp-connect-   the hit is inside its own
  *   flow.md                                    `last-verified` note recording
- *                                              the #2102 fix
+ *                                              the #2102 fix, which #4613
+ *                                              moved to
+ *                                              docs/archive/re-verification-
+ *                                              notes-2026-11.md
  *   frontend custody/page.tsx                  names the module inside the
  *                                              LEGACY-rail branch (#2106),
  *                                              where it is the right answer

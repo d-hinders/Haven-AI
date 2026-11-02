@@ -166,7 +166,6 @@ Use this instead of the pattern it replaces. #1803's 320px evidence came from a 
 
 **And do not read a 320px PNG as coverage.** [#1944](https://github.com/d-hinders/Haven-AI/issues/1944) declined to put 320 in the committed set and that decision stands: Haven has no breakpoint between 320 and 390 (Tailwind's `sm` is 640; the two container queries are at 718/974), so a 320 capture buys a picture of the same branches the mobile baseline already renders, at the cost of a blocking full-page `/design-system` baseline (~1.8 MB) plus a TopBar baseline plus a third PNG of every route in every evidence run, forever. What actually differs at 320 is **layout arithmetic**, and an overlap photographs perfectly happily ([#1858](https://github.com/d-hinders/Haven-AI/issues/1858)) — which is why 320 is gated by *measuring* specs (`mobile-nav-tap-target.mobile.spec.ts`, `mobile-nav-layering.mobile.spec.ts`, `transaction-row.mobile.spec.ts`, `navigation.mobile.spec.ts` all sweep it) and not by a baseline. The flag is for **seeing**; those specs are the coverage. (The "#1944 cost" figures above date from when `/design-system` also minted a top-bar baseline; that baseline is gone with the bar, #4029 — the sidebar baseline is the chrome clip that remains.)
 
-
 **Capturing a palette — a PR that touches colour captures BOTH schemes ([#2929](https://github.com/d-hinders/Haven-AI/issues/2929)).** A theme-aware diff can look right in the palette the author happens to use and be wrong in the other one, and that half of the pair is exactly what a code review can read past. So a frontend PR that changes colour — a token, a shared primitive's classes, a surface, a shadow, a focus ring — attaches **paired** captures, light and dark, for every screen its sweep touched. The flag is the sibling of `--viewport`, and behaves like it:
 
 ```bash
@@ -261,8 +260,6 @@ The missing 40 CSS px (80 device px at `deviceScaleFactor: 2`) is the three `All
 **Reproducing it on demand (a knob #2331 retired with the chain reads it stalled).** `SCREENSHOT_CHAIN_STALL_MS=<ms>` stalled each JSON-RPC read *client-side*, before the request leaves the page. That detail is the whole lever and it cost a diagnosis: delaying the **answer** reproduces nothing (measured at 500 / 2000 / 6000ms — `networkidle` simply waits the in-flight request out, and all three came back at 1936px). Stalling before the fetch opens a window with no in-flight request, `networkidle` fires into it, and the shutter lands mid-load. It was also the real mechanism — the hook issued four *sequential* reads, and under load the client-side gap between two of them could exceed networkidle's own 500ms threshold, which is why the bad run was 1 in 4 on a busy machine and 0 in 10 on an idle one. Evidence from #2204: with the guard mutated off, `SCREENSHOT_CHAIN_STALL_MS=900` produced `RESULT ok` and an **1856px** PNG; with it on, the identical run produced 1936px, and 18 consecutive captures (10 plain, 8 forced-race) were byte-identical.
 
 **Known gap, unrelated to readiness:** `npm run screenshot -w packages/frontend -- /accounts/safe-main` cannot render that route — the harness fixture uses `FIXTURE_ACCOUNT.id = 'safe-fixture'` (named `FIXTURE_SAFE` until #2913) while the e2e fixture uses `safe-main`, so the id in the URL matches nothing the fixture serves. #2108 deliberately did not fix it; do not read a failure there as a readiness problem.
-
-
 
 **The previous run survives this one, and it says so ([#1888](https://github.com/d-hinders/Haven-AI/issues/1888)).** Every run used to open with `rm -rf .screenshots/`, so the *normal* shape of iterating — a narrow `--scenario=X` after a wide `--scenario=all` — destroyed the wider run unconditionally. During #1879's review it did exactly that to both the candidate and the control directories (70 PNGs down to 24, 48 down to 16), leaving a summary log describing a set that no longer existed on disk; the reviewer could not visually confirm `replace-signing-key-point-of-no-return`, the largest hidden-content number in the run and the highest-stakes screen in the batch, and correctly refused to sign off by inference. Retention is not tidiness here: **a same-code control is the standard technique on this harness, and a control is only a control while you can still hold it next to the candidate.**
 
@@ -465,58 +462,6 @@ Change one thing and the answer changes with it. Had the reviewer labelled it `s
 
 **It reads the working tree, and it says what it compared ([#2826](https://github.com/d-hinders/Haven-AI/issues/2826)).** Every run that computes a diff opens with `design-system coupling: comparing <range>` — `origin/dev...HEAD + working tree` locally, the pull request's own range in CI. That line exists because the scope used to change silently: a local run diffed committed work alone, so a primitive that was written but not yet committed produced `no undocumented primitives added` and exit 0, and the required check then failed on the same tree. This step runs during review — before the commit — which is exactly the window that was blind. The local scope is now the union a reviewer would look at (committed branch work, staged and unstaged changes, untracked files); for the tree in front of you it can only be wider than CI's range, never narrower, so it cannot go green on something CI turns red. The docs coupling gate hit the same false green ([#1076](https://github.com/d-hinders/Haven-AI/issues/1076)) and has read the working tree since the fix ([#1077](https://github.com/d-hinders/Haven-AI/issues/1077)).
 
-Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed:
-- **Primitives.** 18 live in `packages/ui/src` (16 moved by #3508, `BackLink` and `Tabs` added there since), and 17 have a re-export shim in `components/ui`. Modal, SidePanel, the charts and the list controls are among those still in `components/ui`.
-- **Inline `@/lib/api` mocks.** The count is now 56 of 60 files, re-measured.
-- **`toHaveCount(1)`.** The count is now 229 across 22 visual specs, 24 of them in `design-system.visual.spec.ts`.
-- **Required checks.** The pixel gate and *Frontend browser smoke* are described as required on `main` (the *Dev gate* ruleset) and advisory on `dev`, as the rulesets say, wherever the doc calls them blocking or gating.
-- **Coverage grades.** These now name the whole-page baselines `product-routes.visual.spec.ts` and seven other specs commit (agent detail, `/accounts`, mobile `/agents`, `/contacts`). `/dashboard` and `/transactions` are no longer called the only ones.
-- **#2331 retirements.** The chain-read harness paragraphs (#1935 `chain()`, #2106 silent routes, `makeAllowanceChainFixture`, `SCREENSHOT_CHAIN_STALL_MS`, `CHAIN_SILENT_CAPTURES`, `UnmanagedDelegateCard`) are marked as retired by #2331, and `AllowanceBarSkeleton` as deleted by #2848.
-- **`usePortfolio` residual risk.** This is now marked closed by #2732.
-- **#1801.** This is now marked closed.
-- **`/investor-briefing`.** This example is replaced (removed by #2468).
-- **`shoot()` and `ui/Modal` references.** The `shoot()` call-site counts and the `ui/Modal` line references are updated.
-- **Required contexts.** The count on `dev` is updated to 16.
-- **Wire-type baseline.** This is now 11 shapes in 6 files.
-- **The two product-route rejections.** These are marked superseded.
-- **The 500-pixel budget.** This is now attributed to the removed whole-page capture.
-- **Review round 1.**
-  - `ui/Modal` is cited at `packages/frontend/src/components/ui/Modal.tsx:205`/`:259`.
-  - The `shoot()` dialog count is 36 `getByRole('dialog')` locators.
-  - The design-system coupling scope names `packages/ui/src/**`.
-  - The viewport override's gate consumers are counted (24 e2e files import `VIEWPORTS`; only `screenshot.mjs` resolves the override).
-  - Driven-spec rule (5) is in the past tense about `canUseWalletActions`/`isDelegationAgent` and the legacy-agent fixture, and counts `mockHavenApi` callers (59).
-  - The product-route rejections are rewritten in the past tense, with #2817 as the `/accounts` supersession and the current `haven-api.ts:1360`/`:1388` anchors; "Fix #2225 in both fixtures first" is dropped.
-  - The auto-merge note names the *Dev gate* ruleset.
-
-Re-checked without change:
-- the `test:local` constants (86/87, 5 min / 30 min);
-- Playwright 1.60.0's Desktop Chrome and Pixel 5 numbers;
-- `SUITE_IGNORE`, `evidence-viewports.mjs` (1280/390) and the `:built` and `test:visual*` scripts;
-- the capture-identity and e2e port ranges (3111–3230, 3300–3419);
-- the readiness budgets;
-- retention (`DEFAULT_KEEP_RUNS = 3`);
-- the content floors (30/6, 30 s);
-- `CLIP_TOLERANCE_PX`, `THEME_STORAGE_KEY` and `SEED_STORAGE_KEYS`;
-- the onramp placeholder wiring;
-- the baseline-verdict-gate line format and scope;
-- `vitest.config.ts` setting no `pool`/`maxWorkers`/`testTimeout`/`isolate`;
-- the copy lint's scan directories.
-
 Not re-derived: the dated laptop timings, and #2730's "36/36 (37 today)", whose suite this re-read could not identify.
 
-Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
-the primitive count is 19, not 18 — `Spinner` joined `packages/ui/src` with
-#4563/#4588, and it has no `components/ui` shim, so the shim count stays 17.
-Re-checked without change: the `test:local` wrapper and its 86/87 stall/cap
-codes; the `test:e2e:*` and `test:visual*` scripts and what each selects; the
-`chromium-desktop-dark` project and its `testMatch`; the onramp placeholder
-wiring (`NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in `ReceiveDialog.tsx`, set by
-`test:visual:structure` and `test:e2e:gate:built`); the capture-identity and
-e2e port ranges; the readiness budgets; retention (`DEFAULT_KEEP_RUNS = 3`);
-the content floors; `CLIP_TOLERANCE_PX`; the baseline-verdict-gate line format
-and scope; the copy lint's scan directories; and the workflows the doc names
-(`docs.yml`, `docs-coupling.yml`, `design-system-coupling.yml`,
-`frontend-copy-lint.yml`, `update-visual-baselines.yml`,
-`baseline-verdict-gate.yml`). The week's UI sweep (#4562–#4603) moved screens
-and baselines, not the gates or commands this playbook states.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

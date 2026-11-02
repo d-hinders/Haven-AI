@@ -264,27 +264,4 @@ copied out of the very `--help` output the work existed to fix.
 - For money movement, test the selected account, selected chain, selected token, recipient, and signer context rather than only the happy path rendering.
 - If review feedback finds a bug that survived tests, add or update the smallest regression test that would have caught it.
 
-> **Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), a full re-read.**
-> Changed: *Inline Gate Placement* no longer names `EditAgentModal` as the
-> canonical hoisted notice (#2331 removed it; `git grep OnchainActionNotice --
-> packages/frontend/src` finds only `OnchainActionGate.tsx` and tests). The
-> Tailwind fix names the shared preset `packages/ui/tailwind.preset.js`
-> (#3508), where `boxShadow.card` and the `brand` colour now live. Two Safe
-> leftovers became account and smart-account wording (#1440). No rule was
-> added or weakened.
-> Re-checked without change: the *Captain Self-Check Preflight* heading in
-> `ai-agent-workflow.md` and the *Recurring traps* list in `reviewer.md`;
-> `useActiveSigner`'s `address && walletClient` EOA rung (`lib/signer.ts`);
-> #2413's notice deletion (PR #2460 removed `RetiredRailNotice.tsx`); the
-> `#patterns` anchor in `design-system.md`; `design:lint`; the
-> `focus-ring`, `shadow-token` and `compiled-colour-utilities` tests;
-> `humanAmountToAtomic`, `formatTokenValue` and the `allowanceHumanAmount`
-> pattern `^(0|[0-9]+\.[0-9]{2,6})$` (`openapi/spec.ts:332`); the coupling
-> gate exiting 0 without `--strict` and `docs:coupling` being the `--strict`
-> form CI runs (`docs-coupling.yml`); ship-next *Implement* step 5; the four
-> 2026-10-20 PRs (#4131, #4133, #4144, #4145, all merged that day) and the
-> five cited commits, each a commit of the PR it is listed under; the
-> `SETTLEMENT_PENDING` negative case in `x402-hosted-mcp-signer.test.ts`.
-> Not changed here: `reviewer.md:139` still names `EditAgentModal`, so the
-> three lists this doc keeps in sync now disagree on that one item (see the
-> PR's *Not filed* list).
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

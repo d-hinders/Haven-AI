@@ -370,8 +370,10 @@ needed rewriting. Re-checked at this head: `POST /passkeys` is still absent and
 `assembleSettlementPayload` (`modules/x402/x402-delegation.ts`) and
 `buildRedemptionCall` (`rails/delegation-rail.ts`) are the two places the
 signed chain is embedded; `refuseAgentCaller` still guards every re-key route
-(`routes/agent-rekey.ts`); `X402_BINDING_PRIVATE_KEY` is still read only by
-`infra/chain/x402-binding-signer.ts`; `disableDelegation` still backs
+(`routes/agent-rekey.ts`); `X402_BINDING_PRIVATE_KEY` is read by
+`infra/chain/x402-binding-signer.ts` and `rails/sweep.ts` (the sweep
+authorization-context binding — same dedicated key, distinct message
+namespace); `disableDelegation` still backs
 revocation and revoke-all (`routes/agent-delegations.ts`); and
 `infra/repositories/user-passkeys.ts` still stores `credential_id`,
 `public_key_x/y`, `signer_address`, `chain_id` and the raw attestation. The

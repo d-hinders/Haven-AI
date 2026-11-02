@@ -1494,7 +1494,7 @@ covered commits since 10-25, all narrowing, additive or doc-fix in kind.
   `requireDelegationBound` (`modules/x402/settlement-sweeper.ts`),
   `assertNonAsserting` (`modules/accounting/fortnox-connector.ts`),
   `resolveExecutionRail`, `SUPPORTED_X402_EXPECTED_VERSIONS`
-  (`signer/src/core.ts`, consumed by `capabilities.ts` and `sign-context.ts`),
+  (`signer/src/core.ts`, consumed by `capabilities.ts` and `tools.ts`),
   `legacyBookkeepingEnabled` and
   `HAVEN_HOSTED_MCP_URL` (`config.ts`), `modules/passport/issuance.ts`,
   `routes/__tests__/allowance-rail-retired.test.ts`, both

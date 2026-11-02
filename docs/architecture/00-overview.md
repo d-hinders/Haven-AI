@@ -295,8 +295,8 @@ needed rewriting. Re-checked at this head: the package table against
 `packages/*` (still 13 packages), the accounting registry (`fortnox` +
 `accounted` live, `light` + `igdrasil` coming soon,
 `modules/accounting/registry.ts`), the hosted instructions' pre-payment read
-(`haven_get_agent` first, `haven_get_allowances` for the breakdown,
-`mcp-server/src/server.ts`), the retired rails' 410s
+(`haven_get_agent` first, `mcp-server/src/server.ts`; `haven_get_allowances`
+for the breakdown), the retired rails' 410s
 (`isRetiredRailIntent` in `routes/payments.ts`), the nine runtime profiles
 (`connect/src/runtime-registry.ts`), `/ops` answering 404 until configured,
 and the chain facts (Base 8453, Base Sepolia 84532, Gnosis 100 history-only).

@@ -2800,7 +2800,13 @@ to `flex-none` that keeps the stacked buttons 40px tall). Until then each caller
 had to pass `flex-1` on both buttons, and the Set budget dialog's ghost Cancel
 did not: at 1288px it rendered 78px beside a 308px primary. A caller's own
 `flex-1` is now redundant; a pair that is meant to be unequal is not a
-`DialogActions` pair.
+`DialogActions` pair. It owns spanning the body too (`min-w-full`): `Modal`'s
+`footer` is a `justify-end` flex row, where a pair with no width of its own
+shrank to its content, so the *Single-screen with DialogActions (alternative)*
+demo under *Footer* showed the shipped right-aligned shape instead of equal
+halves. It is a minimum, not `w-full`, because the Connect agent approve row
+outdents the pair with a negative left margin and needs its auto width to grow
+past 100%. A caller's own `className="w-full"` is redundant.
 
 In the Connect agent modal it carries every pair — Cancel / Set agent budget,
 Back / Create setup prompt, Cancel / Approve budget (through

@@ -38,4 +38,22 @@ describe('DialogActions', () => {
     expect(row).toHaveClass('sm:[&>*]:flex-1')
     expect(screen.getByRole('button', { name: 'Cancel' })).not.toHaveClass('flex-1')
   })
+
+  // In Modal's footer — a `justify-end` flex row — a pair with no width of its
+  // own shrank to its content: the /design-system alternative-footer demo
+  // never showed equal halves. A minimum, so a negative-margin outdent still
+  // widens it (ROW_FOOTER_OUTDENT_CLASS).
+  it('spans the full width of a flex-row footer without a caller className', () => {
+    render(
+      <div className="flex justify-end">
+        <DialogActions>
+          <Button variant="ghost">Cancel</Button>
+          <Button>Save budget</Button>
+        </DialogActions>
+      </div>,
+    )
+    const row = screen.getByRole('button', { name: 'Cancel' }).parentElement!
+    expect(row).toHaveClass('min-w-full')
+    expect(row).not.toHaveClass('w-full')
+  })
 })

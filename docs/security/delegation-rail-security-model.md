@@ -1637,6 +1637,20 @@ resolved differently) but has no remaining frontend caller.
 > re-read: this paragraph and the card; `last-verified` already reads
 > 2026-10-23 and is left as is.
 
+> **Re-verified unchanged (#4607, 2026-11-02 — copy only):** this diff is
+> presentation copy only in `components/AccountSignersCard.tsx`. The "Lost a
+> device?" paragraph's "approved by a signer you already hold" now reads
+> "approved by a passkey or wallet you already hold", and the card's three
+> i18n strings (`lib/i18n/messages/en.ts`) say "passkeys and wallets" where
+> they said "signers" — the owner's term for the approver set (epic #4560 §
+> Owner decisions; `copy-guidelines.md` CG:129). No signing step, signer-set
+> gate, `pickSigningPath` branch, route, `wayCount < 2` last-way gate or
+> authority claim is touched: the card remains the ONLY surface that can
+> change signers or run recovery, and nothing about who signs, what may be
+> spent, or when revocation bites changed. Scope of this re-read: this
+> paragraph and the card; the document-wide `last-verified` date is not
+> re-stamped.
+
 The two surfaces differ only in how the account is resolved: agent lookup
 versus an owner-scoped `(address, chain)` lookup on `smart_accounts`. Authority
 rules, the last-signer refusal (§7), the calldata encoding and the signed-op

@@ -346,16 +346,13 @@ export function ExternalDetailsLink({ href, label = 'Open externally' }: { href:
  */
 export function transactionDayLabel(dayKey: string): string {
   const today = new Date()
-  const localDay = (date: Date) =>
-    new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(date)
-  if (dayKey === localDay(today)) return 'Today'
+  // #4607: the day key is `lib/format.ts`'s one rule (`dayKeyInZone`), not a
+  // second `en-CA` formatter here. It takes an ISO string, so convert at the
+  // call.
+  if (dayKey === dayKeyInZone(today.toISOString())) return 'Today'
   const yesterday = new Date(today)
   yesterday.setDate(today.getDate() - 1)
-  if (dayKey === localDay(yesterday)) return 'Yesterday'
+  if (dayKey === dayKeyInZone(yesterday.toISOString())) return 'Yesterday'
   const [year, month, day] = dayKey.split('-').map(Number)
   const date = new Date(year, month - 1, day)
   return new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' }).format(date)

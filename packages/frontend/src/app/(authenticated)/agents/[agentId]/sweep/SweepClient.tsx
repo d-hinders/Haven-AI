@@ -101,6 +101,8 @@ export default function SweepClient({ agentId }: { agentId: string }) {
         </Card>
       ) : error ? (
         <Card>
+          {/* #4607: keeps `role="alert"` — the block holds the retry button,
+              which `InlineAlert` (a single text line) cannot carry. */}
           <div role="alert" className="px-6 py-6">
             <p className="text-sm font-medium text-[var(--v2-danger)]">
               Could not load recovery balance

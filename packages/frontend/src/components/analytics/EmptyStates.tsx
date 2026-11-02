@@ -83,6 +83,8 @@ export function NoActivityEmptyState() {
  */
 export function AnalyticsErrorState({ onRetry }: { onRetry: () => void }) {
   return (
+    // #4607: keeps `role="alert"` — it wraps the load-error `EmptyState`,
+    // which carries no role of its own (DS:1057).
     <div role="alert">
       <EmptyState
         icon={<Icon icon={CircleAlert} className="w-full h-full" />}

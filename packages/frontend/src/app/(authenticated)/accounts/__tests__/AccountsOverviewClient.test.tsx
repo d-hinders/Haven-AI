@@ -599,3 +599,45 @@ describe('AccountsOverviewClient — the card cleanup and layout (#4021)', () =>
     expect(within(loneHeader as HTMLElement).queryByText(/linked/)).toBeNull()
   })
 })
+
+/**
+ * #4607 (N13): the card's agent count must equal the Agents page's default
+ * count for the same account. That page hides archived agents by default and
+ * shows revoked ones, so the card counts through the same `ARCHIVED_FACET`
+ * predicate — one definition, not a second `archived_at` check.
+ */
+describe('AccountsOverviewClient — the agent count matches the Agents page default (#4607)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUsePreferences.mockReturnValue({ currency: 'USD' })
+    mockUsePortfolio.mockReturnValue({ totalUsd: 0, totalEur: 0, totalSek: 0, breakdown: [], lastOutgoingAt: null, loading: false })
+    mockUseAccounts.mockReturnValue({ accounts: [BASE], loading: false })
+    mockUseAuth.mockReturnValue({ user: { accounts: [BASE] } })
+  })
+
+  function agent(id: string, status: string, archivedAt: string | null) {
+    return { id, name: id, account_id: BASE.id, status, archived_at: archivedAt }
+  }
+
+  it('counts a revoked agent and skips an archived one', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [
+        agent('active-one', 'active', null),
+        agent('revoked-one', 'revoked', null),
+        agent('archived-one', 'active', '2026-10-01T00:00:00Z'),
+      ],
+    })
+    render(<AccountsOverviewClient />)
+
+    expect(within(getAccountCard('Base account')).getByText('2 agents')).toBeInTheDocument()
+  })
+
+  it('counts nothing when every agent on the account is archived', () => {
+    mockUseAgents.mockReturnValue({
+      agents: [agent('archived-one', 'active', '2026-10-01T00:00:00Z')],
+    })
+    render(<AccountsOverviewClient />)
+
+    expect(within(getAccountCard('Base account')).getByText('0 agents')).toBeInTheDocument()
+  })
+})

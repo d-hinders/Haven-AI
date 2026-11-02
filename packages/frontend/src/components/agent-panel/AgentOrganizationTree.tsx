@@ -148,6 +148,8 @@ export function AgentOrganizationTree({
       {error ? (
         // A failed refetch: the last-known rows stay below, with the error
         // and a retry above them (#3236).
+        // #4607: keeps `role="alert"` — the row holds the retry button, which
+        // `InlineAlert` (a single text line) cannot carry.
         <div className="mt-2 flex flex-wrap items-center gap-2" role="alert">
           {/* The rows below ARE loaded — say the refresh failed and they may
               be out of date, not that nothing could be loaded. */}

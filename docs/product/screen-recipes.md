@@ -823,8 +823,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    a closing one "closing") — inside the same card, with no actions: closing
    a grant is the granting agent's owner's move. When the agent holds
    received grants and no budget of its own, the grant form's heading still
-   reads "Set its first budget" but its line says the agent spends through
-   the received budgets below — it must never imply the agent cannot pay.
+   reads "Set its first budget" but its line says the agent already spends
+   through its received budgets — it must never imply the agent cannot pay.
 5. Tabs and Activity (#4226): below the hero, the tab row (no counts), then
    the tab's panel. **Activity** — the agent's OWN payments (`payment_intents`,
    failed and pending included — deliberately NOT the wallet-scoped

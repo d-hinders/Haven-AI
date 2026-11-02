@@ -2557,10 +2557,12 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 `ui/Modal` is the shared dialog shell — twenty-four product files import it
 directly (twenty-five with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: one dialog, `ReceiveDialog` (below), is still a
-bespoke dialog shell. A new dialog uses `Modal`. Anything changed here is
-changed everywhere, so the structure is worth stating rather than re-deriving
-from the file.
+Not every dialog uses it yet: four surfaces render their own `role="dialog"`
+shell, each documented in its own section — `ReceiveDialog` (below), `MoreSheet`
+(§ Authenticated shell), the `ListToolbar` phone filter sheet (§ List controls)
+and `SidePanel` (§ Safe areas). A new dialog uses `Modal`. Anything changed
+here is changed everywhere, so the structure is worth stating rather than
+re-deriving from the file.
 
 **One list manager, two vocabularies.** `ListManagerModal` (#4565) is the
 shared shape behind the labels and organisations dialogs: the `Modal` shell,

@@ -3219,18 +3219,18 @@ const BACKUP_RECOVERY_STAGES = {
 }
 
 /**
- * #2473: the agent budget card's three no-happy-path states.
+ * #2473: the agent budget card's no-happy-path states, plus two budgets.
  *
- * The bug this scenario is evidence for: the grant form's token options came
- * from `currentAgent.allowances`, a view over ACTIVE delegations — empty for
- * exactly the agent that has no budget yet — so a budget-less agent got no
- * form at all and the page's "Add budget" scrolled to an empty anchor. The
- * fixed empty state is therefore the one state a reviewer most needs to see,
- * and no route capture reaches it: the shared fixture's `agent-research`
- * always has a budget.
+ * The bug this scenario was first evidence for: the grant form's token
+ * options came from `currentAgent.allowances`, a view over ACTIVE delegations
+ * — empty for exactly the agent that has no budget yet — so a budget-less
+ * agent got no way to set one. The no-budget state is therefore the one a
+ * reviewer most needs to see, and no route capture reaches it: the shared
+ * fixture's `agent-research` always has a budget.
  *
- *   no-budget   delegations `[]` AND allowances `[]` — the state the fix is
- *               about. The card must show the grant form, not nothing.
+ *   no-budget   delegations `[]` AND allowances `[]` — "No budget yet." with
+ *               Set budget under it (#4226), then the Set budget dialog it
+ *               opens, titled "Set its first budget" (#4564).
  *   load-error  the delegations fetch FAILS. Reachable only as a throw:
  *               `useDelegationBudget`'s `reload` sets `budgetsError` in its
  *               `catch`, and `lib/api.ts` throws only on `!response.ok`, so
@@ -3239,8 +3239,8 @@ const BACKUP_RECOVERY_STAGES = {
  *   loading     the fetch stays pending. The skeleton has to hold the card's
  *               shape, which is a claim only a render can settle.
  *   two-budgets two ACTIVE budgets (#3695) — each row's meter and caption,
- *               the grant form collapsed behind "Add budget", and (shot
- *               after clicking it) the form opened in place.
+ *               no control at the foot (#4261: Add budget is a row's ⋯ menu
+ *               item), and (shot after choosing it) the Add a budget dialog.
  */
 const AGENT_BUDGET_TWO_ROWS = [
   {
@@ -3250,7 +3250,8 @@ const AGENT_BUDGET_TWO_ROWS = [
     delegation_hash: '0x' + '6a'.repeat(32),
     version: 1, status: 'active', is_live: true,
     budget_atomic: '250000000', period_seconds: 604_800,
-    start_date: '2026-06-02T10:00:00.000Z',
+    // #3806: Unix-seconds digit string on the wire, never ISO.
+    start_date: '1780394400',
     expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
     created_at: '2026-06-02T10:00:00.000Z',
   },
@@ -3261,11 +3262,17 @@ const AGENT_BUDGET_TWO_ROWS = [
     delegation_hash: '0x' + '6b'.repeat(32),
     version: 1, status: 'active', is_live: true,
     budget_atomic: '20000000', period_seconds: 86_400,
-    start_date: '2026-06-02T10:00:00.000Z',
+    // #3806: Unix-seconds digit string on the wire, never ISO.
+    start_date: '1780394400',
     expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
     created_at: '2026-06-02T10:00:00.000Z',
   },
 ]
+/** The end (ms) of the period running now, for a row anchored at `startSec`. */
+function currentPeriodEndMs(startSec, periodSeconds) {
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - startSec)
+  return (startSec + (Math.floor(elapsed / periodSeconds) + 1) * periodSeconds) * 1000
+}
 const AGENT_BUDGET_STAGES = {
   'no-budget': { kind: 'ok', delegations: [] },
   'load-error': { kind: 'error' },
@@ -3275,7 +3282,7 @@ const AGENT_BUDGET_STAGES = {
 
 let agentBudgetStage = 'no-budget'
 
-/** Move `agent-budget-card` onto one of its three states. */
+/** Move `agent-budget-card` onto one of its four states. */
 function setAgentBudgetStage(next) {
   if (!(next in AGENT_BUDGET_STAGES)) {
     throw new Error(
@@ -6531,7 +6538,7 @@ export const SCENARIOS = {
    */
   'agent-budget-card': {
     stages: AGENT_BUDGET_STAGES,
-    /** Exposed so the fixture-contract test can pin each stage (#1409). */
+    /** Exposed the #1409 way; `screenshot-fixture.test.ts` has no case for this scenario. */
     stage: setAgentBudgetStage,
     api(apiPath) {
       // A scenario hook sees the request PATH only (the router strips the
@@ -6553,7 +6560,10 @@ export const SCENARIOS = {
             ...r,
             remaining_atomic: (BigInt(r.budget_atomic) * (4n - usedShare[i % 2]) / 4n).toString(),
             remaining_from_chain: true,
-            period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+            // The CURRENT period's end, from the real clock: this harness
+            // freezes none, and a fixed end in the past reads as a stale
+            // read ("refilled-updating"), which draws no meter at all.
+            period_end: new Date(currentPeriodEndMs(Number(r.start_date), r.period_seconds)).toISOString(),
           })),
         }
       }
@@ -6597,9 +6607,16 @@ export const SCENARIOS = {
       // #3695: the heading sits ABOVE the card, so the capture target is the
       // section holding both.
       const card = page.locator('section', { has: heading })
-      const emptyCopy = card.getByText('Set its first budget')
-      const errorCopy = card.getByText(/could not load this agent.s current budgets/)
+      const emptyCopy = card.getByText('No budget yet.')
+      const errorCopy = card.getByText('Agent budgets could not load')
+      // The Set budget dialog mounts INSIDE this section (#4564), so once it
+      // is open `card` matches its submit too: dialog locators go through the
+      // panel's test id, and `setBudget` is read only while it is closed.
       const setBudget = card.getByRole('button', { name: 'Set budget' })
+      const rowMenu = card.getByRole('button', { name: /^Budget options/ })
+      // Never `getByRole('dialog')` as a shot target: that wrapper is
+      // `fixed inset-0` (ui/Modal) and would capture the page behind it.
+      const dialogPanel = page.getByTestId('set-budget-dialog')
 
       const openStage = async (stage) => {
         setAgentBudgetStage(stage)
@@ -6607,18 +6624,27 @@ export const SCENARIOS = {
       }
 
       // ── no budget yet ─────────────────────────────────────────────────────
-      // The grant form is the SUBJECT: before #2473 it did not render here at
-      // all. Waiting on the heading alone would accept the broken state as
-      // the evidence.
+      // "No budget yet." with Set budget under it is the SUBJECT: before
+      // #2473 a budget-less agent had no way to set one. Waiting on the
+      // heading alone would accept the broken state as the evidence.
       await emptyCopy.waitFor({ timeout: 15_000 })
       await setBudget.waitFor({ timeout: 15_000 })
       await refuseIfPresent(errorCopy, 'agent-budget-card · no-budget · error copy')
+      await refuseIfPresent(rowMenu, 'agent-budget-card · no-budget · a budget row')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'no-budget')
 
+      // ...then the dialog it opens (#4564), titled for a first budget.
+      await setBudget.click()
+      await dialogPanel.getByRole('heading', { name: 'Set its first budget' }).waitFor({ timeout: 15_000 })
+      // The click leaves the pointer on the panel; park it off any hover fill.
+      await page.mouse.move(0, 0)
+      await shoot(dialogPanel, 'no-budget-dialog')
+
       // ── load failure ──────────────────────────────────────────────────────
-      // The card must KEEP its form here rather than collapse to a bare error,
-      // which is the design-review finding this state exists to show.
+      // The card must keep Set budget REACHABLE here rather than collapse to a
+      // bare error, which is the design-review finding this state exists to
+      // show — and must not read the unknown list as "no budget yet".
       await openStage('load-error')
       await errorCopy.waitFor({ timeout: 15_000 })
       await setBudget.waitFor({ timeout: 15_000 })
@@ -6627,29 +6653,32 @@ export const SCENARIOS = {
       await shoot(card, 'load-error')
 
       // ── loading ───────────────────────────────────────────────────────────
-      // The skeleton branch renders no form and no list, so both are the
-      // negative proof that this is the loading card and not a settled one.
+      // The skeleton branch renders no Set budget, no empty line and no row,
+      // the negative proof that this is the loading card and not a settled one.
       await openStage('loading')
-      await refuseIfPresent(setBudget, 'agent-budget-card · loading · settled form')
+      await refuseIfPresent(setBudget, 'agent-budget-card · loading · settled Set budget')
       await refuseIfPresent(emptyCopy, 'agent-budget-card · loading · empty copy')
+      await refuseIfPresent(rowMenu, 'agent-budget-card · loading · a budget row')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'loading')
 
       // ── two budgets (#3695) ───────────────────────────────────────────────
-      // Collapsed first: the form must NOT be on screen, the meters must be.
+      // Both meters, and NO control at the foot (#4261): no Set budget, no
+      // empty line. Add budget is a row's ⋯ menu item.
       await openStage('two-budgets')
-      const addBudget = card.getByRole('button', { name: 'Add budget' })
-      await addBudget.waitFor({ timeout: 15_000 })
+      await rowMenu.nth(1).waitFor({ timeout: 15_000 })
       await card.getByRole('progressbar').nth(1).waitFor({ timeout: 15_000 })
-      await refuseIfPresent(setBudget, 'agent-budget-card · two-budgets · form open before Add budget')
+      await refuseIfPresent(setBudget, 'agent-budget-card · two-budgets · Set budget at the foot')
+      await refuseIfPresent(emptyCopy, 'agent-budget-card · two-budgets · empty copy')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'two-budgets')
 
-      // ...then the form opened in place.
-      await addBudget.click()
-      await setBudget.waitFor({ timeout: 15_000 })
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'form-open')
+      // ...then ⋯ → Add budget, which opens the same dialog as "Add a budget".
+      await rowMenu.first().click()
+      await page.getByRole('menuitem', { name: 'Add budget' }).click()
+      await dialogPanel.getByRole('heading', { name: 'Add a budget' }).waitFor({ timeout: 15_000 })
+      await page.mouse.move(0, 0)
+      await shoot(dialogPanel, 'form-open')
     },
   },
   // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it
@@ -7104,9 +7133,11 @@ export const SCENARIOS = {
       // ── the Stop budget confirm, from the live row ───────────────────────
       await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      const stopButton = page.getByRole('button', { name: /^Stop budget/ })
-      await stopButton.waitFor({ timeout: 20_000 })
-      await stopButton.click()
+      // #4261: Stop budget… is an item in the row's ⋯ menu, not a button.
+      const rowMenu = page.getByRole('button', { name: /^Budget options/ }).first()
+      await rowMenu.waitFor({ timeout: 20_000 })
+      await rowMenu.click()
+      await page.getByRole('menuitem', { name: 'Stop budget…' }).click()
       const confirm = page.getByRole('dialog', { name: 'Stop this budget?' })
       await confirm.waitFor({ timeout: 20_000 })
       await confirm.getByText(/Research agent can no longer spend from this 250 USDC\/week budget\./).waitFor({ timeout: 20_000 })

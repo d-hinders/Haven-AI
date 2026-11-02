@@ -102,7 +102,7 @@ apply. The PR template remains the source of truth for every other pull request.
 
 ## Before Merging
 
-- Re-check that the PR has no conflicts with `dev`.
+- Confirm that the PR has no conflicts with `dev`.
 - **Diagnosis rule (#1366): "only the labeler ran" on a push means the PR is
   CONFLICTING** — GitHub silently creates NO `pull_request`-triggered check
   runs when the merge commit cannot be built, while `pull_request_target`

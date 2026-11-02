@@ -1536,7 +1536,7 @@ covered commits since 10-25, all narrowing, additive or doc-fix in kind.
 
 ## Verification log
 
-Every re-verification of this document, newest last. A contract doc covering
+Every verification pass on this document, newest last. A contract doc covering
 broad globs is touched by nearly every backend change, so this is the audit
 trail of *what was checked and found unchanged* — not a changelog of the
 document's own edits.

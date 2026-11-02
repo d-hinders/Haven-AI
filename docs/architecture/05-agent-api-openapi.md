@@ -511,7 +511,7 @@ the rule as "no *accidental* open envelope" rather than "none":
   for "an OpenAPI document" that the spec could hold about itself, so the open
   shape is the honest one.
 
-Count the pattern, not the prose, if you re-check this: the literal is
+Count the pattern, not the prose, when checking this: the literal is
 `schema: { type: 'object', additionalProperties: true }`, and a first pass at
 this section reported **one** because its regex required no trailing comma —
 `/openapi.json` writes the property across lines and ends it with one. Both

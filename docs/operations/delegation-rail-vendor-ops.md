@@ -229,7 +229,7 @@ warning. Operator response:
    node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
    ```
 
-   The command re-verifies the row is really the wedge before sending anything
+   The command verifies the row is really the wedge before sending anything
    (fail-closed: it refuses a young/slow broadcast, an already-mined one, a
    row already cancelled, or a rebroadcast-safe row the bump worker still owns
    because its lane is below the bump cap — and it closes a mined row from the

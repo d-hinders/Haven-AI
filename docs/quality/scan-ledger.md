@@ -2610,3 +2610,56 @@ versus its migration, a census figure with no command), four nits. All
 applied in place; corrected figures are marked above and in the report's § 5.
 
 **Disposition: pending owner decision** (C1, C2).
+
+**Disposition (owner, 2026-11-02): file both.** The owner answered "Both" in
+the captain's session, then the four follow-up questions the filing raised.
+The scan PR is #4609 (reviewed at `410384353`, corrected at `b7eb36a4a`), merged
+or merging before this disposition (stacked PR). Every issue went through
+new-task with an independent spec review; no owner question is open and
+`pending-review` is lifted on all of them.
+
+- C1 → epic [#4610](https://github.com/d-hinders/Haven-AI/issues/4610)
+  (`epic`, `area:docs`, `area:ci`, `money-path`), slices #4612 (gate), #4613
+  (archive), #4614 (guard). **The scan's C1 figures understate the class by
+  an order of magnitude, found by the spec reviews:** the report's census saw
+  only the bare-paragraph shape (69 paragraphs / 30 docs / 72,877 bytes by
+  its own method; 68,773 in the current docs); the first review found the
+  `> **Re-verified …` blockquote-bold shape — the #2938 incident's — and the
+  second found `Re-verification (#N …)`, `Recent re-verification` and
+  `Re-verified, …`. By the paragraph-start census the epic now defines (first
+  70 characters say re-verif / re-check / re-read / rubber-stamp, outside
+  fences; the reference script is in #4613's Method block), `status: current`
+  docs carry **539 openers in 51 of 79 docs, 736,170 of 3,755,152 bytes
+  (19.6 %)** at `e0617aa9f` — more than the 461 KB #2681 retired; 123 are
+  coupling-gate `Re-verified unchanged` notes; the agent-served security model
+  is 123 openers, 180,245 of 299,914 bytes. The largest source is not the
+  weekly audit but code PRs satisfying the strict contract-doc coupling gate,
+  which needs an edit to the doc, so the candidate became three PRs on the
+  owner's word: the gate first (a version-literal-only diff never implicates;
+  a `Re-verified-unchanged:` commit trailer records a re-read, never for a
+  `satisfied-by:` doc — a PR-body marker and a `*-release.md` `satisfied-by`
+  glob were both rejected by review as forgeable), then the archive (verbatim,
+  hashed, records left as written), then the `docs:check` guard by the same
+  census rule. Owner decisions the same day: archive verbatim; include the
+  `release-bump.mjs` and `scripts/README.md` instruction sites; the partition
+  and the trailer; the slice-1 threat model confirmed. Two spec-review passes
+  (4 blocking / 5 should-fix / 6 nits on the single-task form; 4 blocking /
+  13 should-fix on the epic); verdict on #4610, Corrections: 31.
+- C2 → [#4611](https://github.com/d-hinders/Haven-AI/issues/4611)
+  (`area:docs`). Owner decision: reference only — the six SDK files stay out
+  of the copy lint's `SCAN_FILES` (the lint's decision under #2317). Spec
+  review re-ran 14 claims: 12 reproduced, 2 wrong and fixed (the glob line's
+  exclusion filter changed in `fe491ac24`; the docs-boundary command is not
+  pinned, only its prose says to pin); 11 corrections, among them: the
+  acceptance grep re-anchored to the command line, the content read pinned
+  with `git show <sha>:<file>`, the "nine entries" instrument replaced (the
+  figures wrap, so a single-line grep finds 2), the control run after the
+  filter with a frontend twin.
+
+The copy-lint perimeter series is unchanged by C2 until its PR lands; the
+next scan's block 6 reads both commands. Block-3 note for the next run: the
+2026-11-02 report's C1 figures are superseded by #4610's census — cite the
+epic, not the report, for that class.
+
+Drive: `ship-next epic=#4610` (slice order #4612 → #4613 → #4614),
+`ship-next 4611`.

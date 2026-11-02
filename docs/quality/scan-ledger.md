@@ -2437,3 +2437,161 @@ owner question, and `pending-review` is lifted on all five. The scan PR is
 Drive: `ship-next 4576`, `ship-next 4577`, `ship-next 4578`, `ship-next 4579`,
 `ship-next 4580`. C2 and C4 both edit `MachinePaymentReceipt`; whichever lands
 second regenerates `api-types.ts`.
+
+## 2026-11-02 — whole repo, weighted to the landings since 2026-10-30
+
+Full report: `docs/bug-reports/quality-scan-2026-11-02-whole-repo.md` (it
+carries the file:line evidence; this entry stays path-free). Measured on
+`origin/dev` @ `e0617aa9f` by one agent in the main checkout (the branch tip
+equals `origin/dev`, no linked worktree), `npm ci`'d under Node 24 with core,
+the SDK, the signer and the hosted MCP built; the clone arrived shallow and was
+unshallowed before any history figure. The window is `99ef8d063..e0617aa9f` →
+**24** first-parent landings / 334 files / +11,033 −3,385. Blocks 8 and 9
+recorded the backend suite against a disposable local Postgres 16 database;
+the block-1 census ran through the repo's mutation runner, which restored and
+verified each file. One read-only worker took the GitHub Actions reads. GitHub
+was read-only. No live Haven, MCP, dev or production call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced and none of the re-measured figures worsened
+materially. C1 sits beside the retired block 7 and the 2026-10-26 run B's C2
+(#4459, `shipped`): that candidate took dated records out of the audit's
+ranking and forbade re-check sections on them; C1 is the same growth on the
+docs the audit still ranks, which no prior entry measured.
+
+**Structural findings:** none in the examined sample. The window is one
+tracked frontend epic (13 slices, 4 walkthrough rounds) plus the builds of the
+2026-10-30 candidates.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the weekly docs audit regrows the retired `last-verified` chain as body
+  prose on the docs it still ranks. #2681 (2026-09-07) retired the per-doc
+  chain — "a plain `last-verified: <date>` and nothing else", because "prose
+  to prove prose was checked" had reached 20 % of governed prose — and #2775
+  archived it verbatim. Since the first audit after that, each audit landing
+  appends a dated `Re-verified …` paragraph to every doc it touched: at the
+  scan SHA **69 paragraphs in 30 non-archive docs** (65 in 28 `status: current`
+  docs, 4 in 2 records), 68,773 bytes in the current docs; by the wider shape
+  (heading, bold, blockquote or bare opener) 92 openers in 42 docs. Control: 0
+  at the parent of the first post-retirement audit, 9 at it; 22 landings
+  added one (3 in September, 18 in October, 1 in November). The architecture
+  overview is 35 % re-verification prose by bytes (7,533 of 21,626). Cost on
+  record: #2938 (2026-09-13), a re-verification blockquote in a served doc
+  carried a literal `covers:` and turned the required *Frontend checks* red
+  queue-wide; the guard that failed then still reads served bodies, and one of
+  the four docs served to agents carries one such paragraph today (1,573
+  bytes). Nothing requires the shape: the audit issue asks only for a
+  re-verify and a date bump; the release skill's step 3 is the one instruction
+  that asks for a *Re-verified* note. One PR: a guard beside the front-matter
+  validator refusing the shape in a governed body (with fixture controls), the
+  rule stated once, and the 69 paragraphs moved verbatim to the #2775 archive
+  or deleted — the owner's call; two PRs if the migration goes apart. Off the
+  money path, except that a guard placed inside the validator itself lands on
+  a control glob (#2200).
+- C2 — block 6's copy-lint perimeter command cannot see the SDK's top-level
+  files. Its `git ls-files '…/src/**/*.ts'` globs need a separator after `**`,
+  so `grep -cE '^packages/sdk/src/[^/]+\.ts$'` over the reference's list → 0
+  against 46 non-test files at the SHA (and the frontend's `middleware.ts`).
+  The figure every entry since 2026-09-03 reports (**66 unscanned / 4 with
+  hits** today, 72 / 5 then) becomes **111 / 14** over a `git ls-tree` list
+  with the same exclusions; the 10 newly visible hit files carry 16 hits, 6 in
+  agent-facing strings (two tool descriptions, three refusal texts, one
+  next-step message) and 10 in JSDoc, the documented false-positive class. The
+  lint's own `SCAN_FILES` names two files at that level, so the level is
+  inside the lint's content class by its own allowlist. Same instrument class
+  as the 2026-10-30 C1 (#4576). One PR to the dimensions reference: a pinned
+  `ls-tree` listing, a re-baseline at 111 / 14 with the split, and a non-zero
+  control line; whether the six strings join `SCAN_FILES` is the lint's
+  decision under #2317, not part of this PR unless the owner says so. Routing
+  `(none)`, off the money path.
+- Notes, not proposed: block 8 prints three unmarked typed codes on agent
+  payment routes (`rail_not_supported` 422, `budget_requires_recipient` 409,
+  `balance_changed` 409) and five on the two sign-context reads — named so
+  the next run can tell new from baseline, since the 2026-10-27 baseline
+  counted its 13 payment-route codes without naming them; four dialogs
+  outside the shared Modal still set `role="dialog"` after the epic's
+  bespoke-dialog slice (no cost evidence; the epic's walkthrough rounds are
+  deciding them); two backend files are environment-red in this container
+  (the enforcer probe's RPC denied by the proxy, an IPv6 loopback listen).
+
+**Dispositions observed (upkeep):** 2026-10-26 A C1 → #4456 closed
+2026-10-26 via PR #4463 → `shipped`. 2026-10-26 B C1 → #4458 closed
+2026-10-26 via PR #4465 → `shipped`; C2 → #4459 closed 2026-10-26 via PR #4464
+(`807e6d5c1`) → `shipped`. 2026-10-30 C1 → #4576 closed 2026-10-30 after PR
+#4584 (`a254800`, `Refs`; `landed-partial`) → `shipped`; C2 → #4577 via PR
+#4583 (`69d5f98`) → `shipped`; C3 → #4578 via PR #4585 (`c787bd3`) →
+`shipped`; C4 → #4579 via PR #4587 (`1406e9c`) → `shipped`; C5 → #4580 open,
+built by PR #4582 (`f11274a`, `Refs`), its operator-verify burst outstanding.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `e0617aa9f`; parentheses are the 2026-10-30 entry at `99ef8d063`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`
+  → backend 121,063 / 160,892 (120,895 / 160,644); frontend 78,593 / 86,898
+  (77,394 / 84,225); sdk 19,642 / 22,647; core 25,754 / 985; qa-agent 15,133 /
+  13,283; mcp-server 14,114 / 25,456; signer 5,564 / 9,363; connect 12,436 /
+  15,676; cli 3,207 / 3,609; ops 3,143 / 2,222; ui 2,822 / 2,328; mcp 2,817 /
+  5,038; demo-merchant-mcp 3,788 / 4,210. Fat controllers: census only → 50
+  route files, 4 ≥ 1,000 lines, 212 registrations, largest 1,572 (unchanged).
+- block 1 (guard falsifiability) → examined → the census script → **1**
+  candidate file over 1 of the last 20 landings; runner: 1 census mutation +
+  2 probes → **3 caught**, 0 survived, 0 shadowed, 0 mutation-red (an
+  undeclared emitted receipt key, 2 red of 65; the deprecated parent alias
+  emitting null, 1 of 7 on the real database — pinned only there; a
+  count-preserving skeleton swap, 1 of 23 — the pin reads the column, so it
+  is not count-only). The first cells file was refused whole (family `other`
+  is not a census family); nothing was mutated by it.
+- block 2 (`covers:` completeness) → examined → front-matter selector, both
+  fixture controls pass → 7 contract docs; the loop under bash with `set -f`,
+  each miss confirmed with the strict gate → **15 across 5 of 7**
+  (unchanged); `npm run docs:covers-gaps` → 124 pairs / 33 docs (unchanged).
+- block 3 (stale numbers) → partial → positive control 3 / 3; the 25 newest
+  shards (`2026-10-26-4429` … `2026-11-02-4601`) → **13 figure lines, 2 with a
+  command** (16 / 2); `any` 39 (39); db-mock gauge 54 / 270 / 57 (unchanged);
+  zod 0; guard scripts 78 (75 on 10-26); non-spawning self-tests 25 of 78.
+- block 4 (retired vocabulary) → examined → positive control 36 shards; 196
+  files, 47 historical / 149 live (unchanged); ratchet green 32 / 30; code
+  half unchanged.
+- block 5 (merge-method drift) → examined → since 2026-08-10T00:00:00Z →
+  **282 merge-commit / 1,420 squash / 1,705** (282 / 1,396 / 1,681); since
+  2026-10-30T00:00:00Z → 0 / 29 / 29; the window 0 / 24. *First reading
+  corrected:* the shallow clone read 0 / 50 / 50.
+- block 6 (nets with holes) → examined, all four halves → copy lint **66 / 4**
+  by the reference command (unchanged; corrected 111 / 14 is C2); money
+  perimeter 32 / 20; visual gate 15 of 27; docs boundary 43; freshness-gate
+  exit branches unchanged (all unchanged).
+- block 8 (refusal census) → examined → 549 files, 547 green, 2 environment
+  reds, 6,921 tests, 472 s; **2,203 rows; 1,614 error rows; 574 keys; 142
+  typed rows reach the generic branch** (142 after #4468), 3 unmarked on agent
+  payment routes (notes); 5xx transient 36; non-answers 2; SDK error sites 31
+  (26 literal / 5 variable; 41 on 2026-10-27); positive control passed.
+- block 9 (field round-trip) → examined → emitted-never-read **5** (the same
+  five as after #4469); read-never-emitted **13** (12 + one status key emitted
+  in an unreached state); positive control passed; the #4577 pair round-trips.
+- incident clustering → examined → issues created since 2026-10-30T00:00:00Z
+  → **29** (4 open / 25 closed): UX-consistency epic 18, the 2026-10-30
+  scan's 5, release process 2, SDK/x402 3, docs audit 1; open PRs 1. No
+  untracked recurring mechanism.
+- workflow archaeology → examined → `ci.yml` newest 100 → **77 / 14 / 9**; 5
+  with attempt > 1, all feature branches; `dev` 37 → 33 / 4 cancelled / 0
+  failure; failed jobs: visual regression 7, frontend checks 1, browser smoke
+  1 (3 of the 9 one branch in 20 minutes). qa-dev at the `money-flow` job
+  level → 173 runs since 2026-10-30, money-flow ran in **33 (33 success on
+  attempt 1/2, 17 of 17 legs)**, gate-skipped in 140.
+- comment archaeology → examined → TODO / FIXME / HACK / XXX → 0 (control
+  `import` → 2,223 files); most-repeated comment 25 copies of one
+  request-validation boilerplate line.
+- cross-package duplication → partial (one status-literal census, 20 files
+  across six packages, not read further); validation / contracts → partial
+  (blocks 8, 9 and M1); data-layer coverage → partial (gauge, the recording's
+  real-DB run, P1); live exercise → not examined.
+- novelty → the full ledger, the bug reports' names, GitHub searches per
+  candidate; bug-report bodies not otherwise re-read.
+
+Instrument lessons: unshallow the cloud clone before block 5, every time; a
+git pathspec `**/` never matches a file directly under the directory it
+follows (C2); the census runner accepts `census` and the two probe kinds only;
+the real-DB harness reads `DATABASE_URL` from the runner's environment; the
+container's proxy denies the Base Sepolia RPC and its loopback has no IPv6.
+
+**Review:** pending the `haven-reviewer` pass on this PR.
+
+**Disposition: pending owner decision** (C1, C2).

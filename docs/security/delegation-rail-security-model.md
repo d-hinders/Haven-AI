@@ -87,6 +87,16 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **Re-verified unchanged (Refs #4560, 2026-11-02, Set budget layout fix):**
+> the diff touches one covered file, `packages/frontend/src/components/DelegationBudgetCard.tsx`,
+> and only in PRESENTATION. The "No budget yet." line passes `align="start"`
+> to `EmptyState`, so it sits on the column's left edge above the Set budget
+> button. No grant form, budget row, Stop control, passkey path, delegation,
+> caveat, enforcer term, budget pre-check, settlement window, funding leg or
+> sweep moves. The Set budget button keeps its ref, its handler and its
+> `?grant=` prefill. Scope: that one line. The document-wide `last-verified`
+> date is not re-stamped.
+
 > **Re-verified unchanged (#4569, 2026-10-31, empty and load-error states):**
 > the diff touches one covered file — `packages/frontend/src/components/DelegationBudgetCard.tsx`
 > — in its PRESENTATION only: the "No budget yet." line became the shared

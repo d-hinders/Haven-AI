@@ -96,6 +96,19 @@ describe('EditAgentModal', () => {
     expect(screen.queryByText(/budget/i)).not.toBeInTheDocument()
   })
 
+  // The empty vocabulary line sits under the left-aligned "Labels" label. Its
+  // old `className="px-0 py-0 text-left"` override lost to EmptyState's own
+  // `text-center px-3` in Tailwind's emitted order, so it rendered centred.
+  it('the no-labels line is left-aligned under its label', async () => {
+    mockGet.mockImplementation((url: string) =>
+      url === '/organizations' ? Promise.resolve(ORGANIZATIONS) : Promise.resolve({ labels: [] }),
+    )
+    renderModal()
+    const line = await screen.findByText(/No labels yet/)
+    expect(line).toHaveClass('text-left')
+    expect(line).not.toHaveClass('text-center')
+  })
+
   it('saves a changed name and description', async () => {
     const { onUpdated } = renderModal()
     fireEvent.change(screen.getByLabelText('Agent name'), { target: { value: 'Meals' } })

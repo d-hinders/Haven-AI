@@ -271,8 +271,8 @@ export default function EditAgentModal({
               <EmptyState
                 size="inline"
                 bare
+                align="start"
                 title="No labels yet. Add one below to start organising your agents."
-                className="px-0 py-0 text-left"
               />
             ) : (
               <div className="space-y-1" data-testid="label-editor-list">

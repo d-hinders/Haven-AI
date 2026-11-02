@@ -1030,6 +1030,17 @@ than a fourth size because the two axes are independent: `size` is density,
 the in-card page-level state; `size="inline" bare` keeps the one-line shape
 without the shell. `EmptyState.test.tsx` holds all three.
 
+**Alignment is `align`, not a className.** The state centres by default, which
+is right where it stands alone: a page, a section, a list body. Where it sits
+in **left-aligned content** and must line up with it — a card column under a
+left-aligned heading, a settings row's value — pass `align="start"`: text, icon
+and body start at the content edge, and `size="inline" bare` also drops its
+`px-3 py-2.5`, so the line is plain text where a value would be. Do not reach
+for `className="text-left px-0"`: the class list already holds `text-center`
+and `px-3`, and Tailwind emits those after `text-left` and `px-0`, so the
+override silently loses. That is how the agent page's Spending card showed "No
+budget yet." centred above a left-aligned Set budget button.
+
 **When to add a call to action.** Add one when the user can act from where they
 are and the action is the obvious next step — "Create agent budget" on an empty
 budget list, "Try again" on a load error. Do not add one when the absence is
@@ -2776,12 +2787,26 @@ sits full width at the bottom, at `Button`'s default `md` (40px), on the body's
 edges — secondary left, primary right, equal halves.** A screen with a single
 action gets one full-width primary. Below `sm` the pair **stacks**, primary on
 top, both full width: two 140px halves at 375px wrapped "Set agent budget" and
-"Create a new setup" onto two lines. `DialogActions` owns only that layout
-(`flex-col-reverse` → `sm:flex-row`); its children are `Button`s with `flex-1`,
-secondary first in the markup, so the desktop Tab order matches the screen.
+"Create a new setup" onto two lines. `DialogActions` owns that layout, the
+equal halves included (`flex-col-reverse` → `sm:flex-row`); its children are
+`Button`s, secondary first in the markup, so the desktop Tab order matches the screen.
 Below `sm` the stack is visually reversed, so Tab reaches the lower secondary
 before the upper primary — accepted, since reordering the markup would break
 the desktop order instead and a phone is rarely tabbed.
+
+**`DialogActions` owns the equal split, not its callers.** From `sm` up it gives
+every child `flex-1` itself (`sm:[&>*]:flex-1`, the twin of the `max-sm` reset
+to `flex-none` that keeps the stacked buttons 40px tall). Until then each caller
+had to pass `flex-1` on both buttons, and the Set budget dialog's ghost Cancel
+did not: at 1288px it rendered 78px beside a 308px primary. A caller's own
+`flex-1` is now redundant; a pair that is meant to be unequal is not a
+`DialogActions` pair. It owns spanning the body too (`min-w-full`): `Modal`'s
+`footer` is a `justify-end` flex row, where a pair with no width of its own
+shrank to its content, so the *Single-screen with DialogActions (alternative)*
+demo under *Footer* showed the shipped right-aligned shape instead of equal
+halves. It is a minimum, not `w-full`, because the Connect agent approve row
+outdents the pair with a negative left margin and needs its auto width to grow
+past 100%. A caller's own `className="w-full"` is redundant.
 
 In the Connect agent modal it carries every pair — Cancel / Set agent budget,
 Back / Create setup prompt, Cancel / Approve budget (through

@@ -4263,6 +4263,22 @@ export default function DesignSystemPage() {
               />
             </div>
           </Card>
+          <Card hover={false} className="p-5" data-testid="ds-empty-state-align-start">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">In left-aligned content — `align=&quot;start&quot;`</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Where the state sits in a left-aligned column and must line up with it. This is the agent
+              page&apos;s Spending card with no budget: the line and the button share the left edge.
+            </p>
+            <div className="mt-4">
+              <p className="text-sm font-medium text-[var(--v2-ink-2)]">Budget</p>
+              <div className="mt-3">
+                <EmptyState size="inline" bare align="start" title="No budget yet." />
+                <Button size="sm" variant="ghost" className="mt-2">
+                  Set budget
+                </Button>
+              </div>
+            </div>
+          </Card>
         </div>
       </Section>
 

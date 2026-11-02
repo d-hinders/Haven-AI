@@ -183,8 +183,9 @@ export function AgentOrganizationTree({
         <EmptyState
           size="inline"
           bare
+          align="start"
           title="No organisations yet. Add one to start grouping your agents."
-          className="mt-2 px-0 py-0 text-left"
+          className="mt-2"
         />
       ) : (
         <div

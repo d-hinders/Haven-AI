@@ -398,9 +398,20 @@ exiting 1 on the marker.
 
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and
-# SCAN_FILES, run through the lint's own matcher.
-git ls-files 'packages/frontend/src/**/*.ts' 'packages/frontend/src/**/*.tsx' 'packages/sdk/src/**/*.ts' | grep -vE '\.test\.|__tests__|/app/|/components/|/hooks/' > "$SCRATCH/cl.txt"
-node -e 'import("./scripts/frontend-copy-lint.mjs").then(async (m) => { const fs = await import("node:fs"); const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter((f) => !m.SCAN_FILES.includes(f)); let hit = 0; for (const f of files) { const n = m.findCopyIssues(fs.readFileSync(f, "utf8")).length; if (n) { hit++; console.log(n, f) } } console.log("unscanned:", files.length, "with hits:", hit) })' "$SCRATCH/cl.txt"
+# SCAN_FILES, run through the lint's own matcher. The list is a pinned
+# `git ls-tree`, not a pathspec: in a plain pathspec `**` is not special (`*`
+# already crosses `/`), so `packages/sdk/src/**/*.ts` forces one more
+# directory level and reaches 0 of the 46 non-test files directly under
+# `packages/sdk/src` (115 before the `.test.` exclusion) — #4611. The content
+# read is pinned to the same SHA — `git show <sha>:<file>` — because
+# `fs.readFileSync` reads the live checkout, and a file deleted after <sha>
+# would crash the read.
+SHA=e0617aa9f
+git ls-tree -r --name-only "$SHA" packages/frontend/src packages/sdk/src | grep -E '\.(ts|tsx)$' | grep -vE '\.test\.|__tests__|/app/|/components/|/hooks/' > "$SCRATCH/cl.txt"
+# Positive control: the listing must reach the top level of both trees.
+grep -cE '^packages/sdk/src/[^/]+\.ts$' "$SCRATCH/cl.txt"             # 46 at e0617aa9f
+grep -cE '^packages/frontend/src/[^/]+\.(ts|tsx)$' "$SCRATCH/cl.txt"  # 1 at e0617aa9f
+node -e 'import("./scripts/frontend-copy-lint.mjs").then(async (m) => { const fs = await import("node:fs"); const cp = await import("node:child_process"); const sha = process.argv[2]; const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter((f) => !m.SCAN_FILES.includes(f)); let hit = 0; for (const f of files) { const n = m.findCopyIssues(cp.execFileSync("git", ["show", sha + ":" + f], { encoding: "utf8" })).length; if (n) { hit++; console.log(n, f) } } console.log("unscanned:", files.length, "with hits:", hit) })' "$SCRATCH/cl.txt" "$SHA"
 # Money-path perimeter: files that call a money verb but match no glob.
 rg -l -e 'sendTransaction|redeemDelegation|signTypedData|sendUserOperation|executeTransaction|broadcastTransaction' packages --type ts -g '!*test*' -g '!**/dist/**' > "$SCRATCH/mv.txt"
 node -e 'import("./scripts/ci/qa-freshness.mjs").then(async (q) => { const fs = await import("node:fs"); const globs = [...q.loadMoneyPathGlobs(), ...q.loadMoneyPathControlGlobs()]; const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n"); const out = files.filter((f) => !globs.some((g) => q.matchesGlob(f, g))); console.log("verb files:", files.length, "outside perimeter:", out.length); console.log(out.join("\n")) })' "$SCRATCH/mv.txt"
@@ -433,12 +444,32 @@ docs-boundary count pinned** — `git ls-tree -r --name-only <sha>` rather than
 `git ls-files`, which reads the live worktree: re-taken unpinned on a branch
 that ADDS a Markdown file, this block reads 37 where the pinned figure is 36,
 and the extra file is the reader's own change. (Observed on this block's own
-review; the same hazard is why block 5 prints its SHA.) On `893d74f6`:
-copy lint 72 unscanned files, 5 with hits (all identifier-shaped — the
-documented false-positive class); money path 29 verb files, 20 outside the
-perimeter (qa-agent pilots, backend scripts, `sdk/src/sweep.ts`,
-`frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of 24 app routes
-shot; 36 Markdown files outside both docs-quality boundaries.
+review; the same hazard is why block 5 prints its SHA.) On `e0617aa9f`:
+copy lint 111 unscanned files, 14 with hits — the frontend's 4, unchanged
+from the glob's reading, plus 10 files at the SDK's top level the glob could
+not see, carrying 16 hits: 6 in agent-facing strings (one each in six files)
+and 10 in JSDoc (the documented false-positive class); money path 29 verb
+files, 20 outside the perimeter (qa-agent pilots, backend scripts,
+`sdk/src/sweep.ts`, `frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of
+24 app routes shot; 36 Markdown files outside both docs-quality boundaries.
+
+The series converts: every ledger entry from 2026-09-15 to 2026-11-02
+(#4609 adds the tenth) quoted the glob's reading — 75 / 6, 87 / 6, 98 / 6,
+52 / 4, 56 / 4, 60 / 4, 64 / 4, 64 / 4, 66 / 4 — and this block's own
+recorded 72 / 5 at `893d74f6` was taken the same way, with that SHA's
+`SCAN_FILES` and the filter before `fe491ac24` added `/hooks/` (re-run with
+today's allowlist and filter it reads 35 / 4). So the next entry's step from
+66 / 4 to 111 / 14 is the selector change, not 45 new unscanned files.
+
+**Observation for the lint's owner, not a decision of this block:** the six
+agent-facing strings the glob never reached are
+`packages/sdk/src/tools.ts:158`, `tool-descriptions.ts:261`,
+`x402-protocol.ts:459`, `merchant-completion.ts:570`,
+`x402-funding-leg.ts:440` and `types.ts:2058` — all `transaction hash`, in
+tool descriptions or agent-read error text. Whether they join `SCAN_FILES`
+is #2317's call (#3882 is the precedent); this block only reports them. The
+money-path, visual-gate and docs-boundary halves of this fence still read
+the live tree — out of scope for #4611, which fixes the copy-lint half only.
 
 **8. Refusal census — what the backend suite's own answers become at the hosted
 mapper.** The 2026-10-27 channel measurement found the refusal class came

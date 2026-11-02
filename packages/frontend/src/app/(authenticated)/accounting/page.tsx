@@ -329,8 +329,13 @@ export default function AccountingPage() {
           <Card className="p-0" hover={false}>
             <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <h2 className="v2-text-h3 text-[var(--v2-ink)]">Synced transactions</h2>
-                <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Drafts fed to your accounting tool. Failures retry on sync.</p>
+                {/* #4601 (N4): the page text says "sent", the verb the row
+                    chips already use (In <Provider> / Sending… / Not sent,
+                    #4567). "Feed" stays the name of the connection — "Feed
+                    settings", "Feeding {provider}", "Sync now" and the
+                    disclaimer are unchanged. */}
+                <h2 className="v2-text-h3 text-[var(--v2-ink)]">Sent transactions</h2>
+                <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Drafts sent to your accounting tool. Failures retry on sync.</p>
                 {hasFeedActivity(status) ? (
                   <div className="mt-2">
                     <FeedCounts counts={status.counts} />
@@ -363,7 +368,7 @@ export default function AccountingPage() {
                   tone="danger"
                   icon={<Icon icon={CircleAlert} className="h-full w-full" />}
                   title="Sync status could not load"
-                  body="Your synced payments are unchanged."
+                  body="Your sent payments are unchanged."
                   action={
                     <Button variant="ghost" size="sm" onClick={() => void refetch()}>
                       Try again
@@ -373,7 +378,7 @@ export default function AccountingPage() {
               </div>
             ) : status.syncs.length === 0 ? (
               <div className="px-5 pb-5 text-sm text-[var(--v2-ink-3)]">
-                Nothing synced yet. Settled agent payments will appear here automatically.
+                Nothing sent yet. Settled agent payments will appear here automatically.
               </div>
             ) : (
               <Card.Section divided>

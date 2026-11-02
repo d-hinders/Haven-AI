@@ -47,7 +47,7 @@ the retry sweep, what on-call reads when something is stuck — is in
   (2026-10-23, #4359 — superseding the 2026-09-11 decision to list them as
   *Coming soon*): a provider that is not live, or live but not configured on
   the deployment, renders no row, and when nothing qualifies the whole card
-  renders nothing. A footer link, *See synced payments on Accounting*, leads
+  renders nothing. A footer link, *See sent payments on Accounting*, leads
   to the feed page when at least one connector shows. The card lives on the
   Business tab (`/settings?tab=business`), whose own visibility follows the
   same rule — it appears only when company details or the accounting card

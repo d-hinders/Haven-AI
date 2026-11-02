@@ -76,6 +76,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
+import { AGENT_STATUS, type AgentStatus } from '@/lib/payment-status'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
@@ -869,7 +870,19 @@ type DsSettlementState = keyof typeof DS_SETTLEMENT_ROWS
 
 const DS_LIST_NOUN = { one: 'agent', other: 'agents' }
 
-const DS_LIST_AGENTS = [
+// #4601 (N9): `status` is typed as `AgentStatus` so the demo's badge can be
+// rendered from `AGENT_STATUS` — the same map the product's agent rows use.
+// The demo used to build its label from the raw status (`Active`) and its tone
+// from `active ? success : neutral`, so an active agent read "Active" instead
+// of **Connected**, and paused and revoked both got `neutral` where the table
+// gives them warning and danger.
+const DS_LIST_AGENTS: Array<{
+  id: string
+  name: string
+  status: AgentStatus
+  budget: string
+  seen: number
+}> = [
   { id: 'a1', name: 'Agent naming', status: 'active', budget: 'recurring', seen: 3 },
   { id: 'a2', name: 'Atlas', status: 'active', budget: 'recurring', seen: 1 },
   { id: 'a3', name: 'Demo agent', status: 'paused', budget: 'none', seen: 5 },
@@ -1000,8 +1013,11 @@ function ListControlsExample({
                     title={row.name}
                     subtitle={row.budget === 'none' ? 'No budget' : 'Has a budget'}
                     trailing={
-                      <StatusBadge tone={row.status === 'active' ? 'success' : 'neutral'}>
-                        {row.status[0].toUpperCase() + row.status.slice(1)}
+                      // #4601 (N9): the demo's badge comes from `AGENT_STATUS`,
+                      // the map the product's agent rows use — Connected /
+                      // success, Paused / warning, Revoked / danger.
+                      <StatusBadge tone={AGENT_STATUS[row.status].tone}>
+                        {AGENT_STATUS[row.status].label}
                       </StatusBadge>
                     }
                   />

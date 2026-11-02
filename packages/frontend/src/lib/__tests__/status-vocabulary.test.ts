@@ -175,7 +175,16 @@ describe('StatusBadge vocabulary — accounting sync', () => {
 
 describe('the retired words are gone from the app source', () => {
   const SRC = path.join(repo, 'packages/frontend/src')
+  // Quoted tokens: a label or a copy string. Matched WITH their quotes, so a
+  // longer sentence that merely contains the word is not what this list is
+  // about — that is the phrase list below.
   const RETIRED = ["'Executed'", "'Synced'", "'Not fed'", "'Feeding…'"]
+  // #4601 (N4): JSX text carries no quotes, so the quoted-token list above
+  // could not see the Accounting page's "Synced transactions" heading or its
+  // "Nothing synced yet" empty line — both passed this guard while the page
+  // still said "synced". These are matched as plain substrings, which is what
+  // a JSX text node is.
+  const RETIRED_PHRASES = ['Synced transactions', 'Nothing synced']
 
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir).flatMap((entry) => {
@@ -192,6 +201,11 @@ describe('the retired words are gone from the app source', () => {
 
   it.each(RETIRED)('%s appears in no source file', (word) => {
     const offenders = sourceFiles(SRC).filter((file) => readFileSync(file, 'utf8').includes(word))
+    expect(offenders.map((file) => path.relative(repo, file))).toEqual([])
+  })
+
+  it.each(RETIRED_PHRASES)('%s appears in no source file', (phrase) => {
+    const offenders = sourceFiles(SRC).filter((file) => readFileSync(file, 'utf8').includes(phrase))
     expect(offenders.map((file) => path.relative(repo, file))).toEqual([])
   })
 })

@@ -39,7 +39,7 @@ import type { ReactNode } from 'react'
  */
 export function DialogActions({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div data-dialog-actions="" className={`flex min-w-full flex-col-reverse gap-3 max-sm:[&>*]:flex-none sm:flex-row sm:items-center sm:[&>*]:flex-1 ${className}`}>
+    <div data-dialog-actions="" className={`flex min-w-full flex-col-reverse gap-3 max-sm:[&>*]:flex-none sm:flex-row sm:items-center ${className}`}>
       {children}
     </div>
   )

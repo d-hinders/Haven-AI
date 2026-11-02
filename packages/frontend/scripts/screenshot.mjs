@@ -4049,7 +4049,7 @@ export const SCENARIOS = {
 
   /**
    * The `/accounting` feed page after #2868 (#2903 review): the connection
-   * row that now only points at Settings, the Synced transactions list with
+   * row that now only points at Settings, the Sent transactions list with
    * a pushed row (invoice number + Check in Fortnox) and a failed one.
    * Needs the feed-status fixture above — without `hosted && flagEnabled`
    * the page renders null, which is exactly why there was no evidence.
@@ -4116,7 +4116,7 @@ export const SCENARIOS = {
       await main.getByText('Manage your accounting connection in Settings.').waitFor({ timeout: 15_000 })
       await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · Connect')
       await refuseIfPresent(main.getByRole('button', { name: 'Disconnect', exact: true }), 'accounting-feed · Disconnect')
-      await main.getByRole('heading', { name: 'Synced transactions' }).waitFor({ timeout: 15_000 })
+      await main.getByRole('heading', { name: 'Sent transactions' }).waitFor({ timeout: 15_000 })
       await main.getByTestId('feed-counts').waitFor({ timeout: 15_000 })
       await main.getByText('Fortnox invoice 1042', { exact: true }).waitFor({ timeout: 15_000 })
       await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })

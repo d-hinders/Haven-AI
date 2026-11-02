@@ -7,6 +7,7 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/components/ui/DialogActions.tsx
+  - packages/frontend/src/components/BudgetGrantAction.tsx
   - packages/frontend/src/components/EditBudgetModal.tsx
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/MoveAgentModal.tsx
@@ -2781,6 +2782,17 @@ shown beside this rule on `/design-system` → *Modal* → *Footer*. The owner p
 on the PR that introduced this section; if they pick the alternative, this
 paragraph and the `/design-system` entry change together and the single-screen
 callers move in a follow-up slice, not in the design-system slice.
+
+**One named exception: Set budget.** The Set budget dialog
+(`components/SetBudgetDialog.tsx`, #4564) is a single screen, but its footer is
+`BudgetGrantAction`'s dialog-footer mode — `DialogActions`, the multi-screen
+shape. The reason is that the control is shared: the same `BudgetGrantAction`
+draws the Connect agent approval step's pair, and that step IS multi-screen, so
+the pair cannot be two shapes depending on which flow opened it. The owner
+recorded the exception on #4601 (2026-11-02): the dialog keeps the stacked
+`DialogActions` footer and is named here rather than moved. The sub-budget
+entry under the actions stays where it is — it is an entry point, not a footer
+action.
 
 The multi-screen rule: **the screen's main action pair
 sits full width at the bottom, at `Button`'s default `md` (40px), on the body's

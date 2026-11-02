@@ -82,7 +82,7 @@ test.describe('accounting feed page states', () => {
     await expect(summary).toHaveCount(1)
     await expect(summary).toHaveAttribute('data-status', 'connected')
     await expect(summary.getByText(/Feeding Fortnox/)).toHaveCount(1)
-    await expect(main.getByRole('heading', { name: 'Synced transactions' })).toHaveCount(1)
+    await expect(main.getByRole('heading', { name: 'Sent transactions' })).toHaveCount(1)
     await expect(main.getByTestId('feed-counts')).toHaveCount(1)
     await expect(main.getByRole('button', { name: 'Check in Fortnox', exact: true })).toHaveCount(1)
     // The connection itself is managed in Settings (#2868).

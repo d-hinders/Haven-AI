@@ -116,3 +116,42 @@ describe('DashboardActionPickerModal (#4566)', () => {
     opener.remove()
   })
 })
+
+/**
+ * #4601 (N5) — the options are `Row`s, not hand-styled buttons.
+ *
+ * The old buttons carried a tinted `--v2-surface` fill and no `focus-visible`
+ * style, so keyboard focus fell back to the browser's default outline
+ * (measured on dev at 375 px: `outline: rgb(229, 151, 0) auto 1px`). `Row` with
+ * `onClick` renders a full-width `<button>` with the shared brand ring, and the
+ * divided container supplies the separation the per-button borders used to.
+ */
+describe('DashboardActionPickerModal options are Rows (#4601, N5)', () => {
+  it('every option is a full-width button carrying the shared focus-visible ring', () => {
+    renderPicker()
+    for (const name of [/Main account/, /Savings/]) {
+      const option = screen.getByRole('button', { name })
+      expect(option.tagName).toBe('BUTTON')
+      expect(option.className).toContain('w-full')
+      expect(option.className).toContain('focus-visible:ring-2')
+      expect(option.className).toContain('focus-visible:ring-inset')
+      expect(option.className).toContain('focus-visible:ring-brand/80')
+    }
+  })
+
+  it('no option carries the old tinted surface fill', () => {
+    renderPicker()
+    for (const name of [/Main account/, /Savings/]) {
+      // Matched exactly: `Row`'s `hover:bg-[var(--v2-surface-hover)]` is the
+      // expected hover, and it is a different token.
+      expect(screen.getByRole('button', { name }).className).not.toContain('bg-[var(--v2-surface)]')
+    }
+  })
+
+  it('the rows sit in a divided container, since Row has no border of its own', () => {
+    const { container } = renderPicker()
+    const list = container.querySelector('.divide-y')
+    expect(list).not.toBeNull()
+    expect(list!.querySelectorAll('button')).toHaveLength(ACCOUNTS.length)
+  })
+})

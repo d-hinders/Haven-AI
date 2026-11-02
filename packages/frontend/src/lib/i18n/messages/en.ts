@@ -306,7 +306,10 @@ export const en = {
       loadError: 'Accounting connections could not load.',
       // #4359: the card's footer link — the feed page keeps the sync rows;
       // the link is only rendered when at least one connector shows.
-      seeSyncedPayments: 'See synced payments on Accounting',
+      // #4601 (N4): the link names the Accounting section, whose text now says
+      // "sent" (the row chips already did, #4567). The identifier keeps its
+      // name — it is not user-facing.
+      seeSyncedPayments: 'See sent payments on Accounting',
       /**
        * One line per coming-soon provider — listed, never endorsed. The chip
        * and the disabled action already say it is not connectable, so the

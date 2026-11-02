@@ -4,6 +4,7 @@ import { ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Modal } from '@/components/ui/Modal'
+import { Row } from '@haven_ai/ui/Row'
 import { resolveChainOrNull } from '@/lib/chains'
 import type { SmartAccount } from '@/context/AuthContext'
 
@@ -22,6 +23,15 @@ interface Props {
  * overlay. It is a single-screen chooser with no action row of its own: the
  * account rows ARE the actions, so the footer stays empty and the ✕ (on by
  * default) plus the backdrop and Escape are the dismissals.
+ *
+ * #4601 (N5): the options are `Row`s, not hand-styled `<button>`s. The old
+ * buttons carried a tinted `--v2-surface` fill and no `focus-visible` style, so
+ * keyboard focus fell back to the browser's default outline (measured on dev at
+ * 375 px: `outline: rgb(229, 151, 0) auto 1px`). `Row` with `onClick` renders a
+ * full-width `<button>` with the shared `focus-visible:ring-2 ring-inset
+ * ring-brand/80`, and its `title` slot takes the Default `StatusBadge`. `Row`
+ * has no border of its own, so the divided container below supplies the
+ * separation the per-button borders used to.
  */
 export default function DashboardActionPickerModal({
   open,
@@ -48,30 +58,23 @@ export default function DashboardActionPickerModal({
       title={title}
       subtitle="Money actions stay explicit when you have multiple accounts."
       width="md"
-      bodyClassName="space-y-2"
     >
-      {accounts.map((account) => (
-        <button
-          key={account.id}
-          onClick={() => onSelect(account.id)}
-          className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left transition-colors hover:border-brand/30 hover:bg-[var(--v2-brand-soft)]"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{account.name}</span>
-                {account.is_default && (
-                  <StatusBadge tone="brand">Default</StatusBadge>
-                )}
-              </div>
-              <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                {resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
-              </p>
-            </div>
-            <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" />
-          </div>
-        </button>
-      ))}
+      <div className="divide-y divide-[var(--v2-border)] overflow-hidden rounded-lg border border-[var(--v2-border)]">
+        {accounts.map((account) => (
+          <Row
+            key={account.id}
+            onClick={() => onSelect(account.id)}
+            title={
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate">{account.name}</span>
+                {account.is_default ? <StatusBadge tone="brand">Default</StatusBadge> : null}
+              </span>
+            }
+            subtitle={resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
+            trailing={<Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />}
+          />
+        ))}
+      </div>
     </Modal>
   )
 }

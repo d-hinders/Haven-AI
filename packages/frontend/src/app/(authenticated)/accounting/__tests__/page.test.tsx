@@ -173,7 +173,7 @@ describe('/accounting load errors (#4569)', () => {
     renderPage()
 
     expect(screen.getByRole('heading', { name: 'Sync status could not load' })).toBeInTheDocument()
-    expect(screen.getByText('Your synced payments are unchanged.')).toBeInTheDocument()
+    expect(screen.getByText('Your sent payments are unchanged.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(refetch).toHaveBeenCalledOnce()
   })
@@ -323,7 +323,7 @@ describe('/accounting with the feed on (#2869)', () => {
     withStatus({ counts: { pending: 0, failed: 0, exhausted: 0 }, syncs: [] })
     renderPage()
     expect(screen.queryByTestId('feed-counts')).toBeNull()
-    expect(screen.getByText(/Nothing synced yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing sent yet/)).toBeInTheDocument()
   })
 
   it('keeps the counts row when the counts are zero but rows are listed', () => {

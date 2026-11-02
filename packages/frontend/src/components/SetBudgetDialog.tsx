@@ -45,8 +45,7 @@ import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
-import { Select } from './ui/Select'
-import { BudgetEndDateSelect, NoticeRow } from '@/components/haven'
+import { BudgetAmountRow, BudgetEndDateSelect, NoticeRow } from '@/components/haven'
 
 interface TokenOption {
   address: string
@@ -261,29 +260,28 @@ export default function SetBudgetDialog({
           </NoticeRow>
         ) : null}
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="Amount"
-            className="sm:w-32"
-            aria-label="Budget amount"
-          />
-          {tokens.length > 1 ? (
-            <Select value={token} onChange={(e) => setToken(e.target.value)} aria-label="Token" className="sm:w-28">
-              {tokens.map((t) => (
-                <option key={t.address} value={t.address}>{t.symbol}</option>
-              ))}
-            </Select>
-          ) : (
-            <span className="self-center text-sm text-[var(--v2-ink-2)]">{tokenCfg?.symbol}</span>
-          )}
-          <Select value={String(period)} onChange={(e) => setPeriod(Number(e.target.value))} aria-label="Period" className="sm:w-36">
-            {periodOptions.map((p) => (
-              <option key={p} value={p}>{budgetPeriodWords(p)}</option>
-            ))}
-          </Select>
-        </div>
+        {/* #4601 (N6): the amount row is the shared `BudgetAmountRow` — the
+            token symbol rides inside the amount input as a suffix, so below
+            `sm` no line holds only the token label (it used to orphan on its
+            own stacked line, `self-center`). The multi-token offer keeps its
+            `Select` beside the input, and the aria-labels the tests use
+            ("Budget amount", "Token", "Period") come from the primitive. */}
+        <BudgetAmountRow
+          amount={amount}
+          onAmountChange={setAmount}
+          tokens={tokens}
+          selectedTokenAddress={token}
+          onTokenChange={setToken}
+          period={period}
+          onPeriodChange={setPeriod}
+          periods={periodOptions.map((p) => ({ label: budgetPeriodWords(p), seconds: p }))}
+          // w-40, not w-32: the symbol now lives INSIDE the input, and a
+          // 128px box (minus padding and the suffix reservation) cannot hold
+          // the "Amount" placeholder beside it. 160px keeps placeholder and
+          // symbol in one box.
+          inputClassName="sm:w-40"
+          periodSelectClassName="sm:w-36"
+        />
         <Input
           value={recipient}
           onChange={(e) => setRecipient(e.target.value)}

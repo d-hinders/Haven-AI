@@ -278,7 +278,7 @@ a separate manual decision, and unsetting it is the rollback.
 
 | `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
 |---|---|---|---|---|
-| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868); a footer link, *See synced payments on Accounting* (#4359) |
+| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868); a footer link, *See sent payments on Accounting* (#4359) |
 | true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | **renders nothing at all (#4359, 2026-10-23 — superseding the 2026-09-11 decision to list every provider as *Coming soon* with no action)**: coming-soon providers are hidden, so there is no row and no card; the deep link `?tab=business` falls back to the General body with the URL untouched |
 | **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** — same backend 404 underneath (#2918). The explanation is information: it renders whenever the Business tab is visible (e.g. because company details render), but on its own it does not make the tab appear (#4359) |
 

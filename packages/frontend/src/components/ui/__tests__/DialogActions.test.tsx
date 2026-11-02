@@ -23,4 +23,19 @@ describe('DialogActions', () => {
     const buttons = screen.getAllByRole('button')
     expect(buttons.map((b) => b.textContent)).toEqual(['Back', 'Create setup prompt'])
   })
+
+  // The Set budget dialog passed a ghost Cancel without `flex-1`: 78px beside
+  // a 308px primary at 1288px. The equal split is the component's, not each
+  // caller's, so a bare Button child still gets it.
+  it('gives every child an equal share from sm up, even one without flex-1', () => {
+    render(
+      <DialogActions>
+        <Button variant="ghost">Cancel</Button>
+        <Button>Set budget</Button>
+      </DialogActions>,
+    )
+    const row = screen.getByRole('button', { name: 'Cancel' }).parentElement!
+    expect(row).toHaveClass('sm:[&>*]:flex-1')
+    expect(screen.getByRole('button', { name: 'Cancel' })).not.toHaveClass('flex-1')
+  })
 })

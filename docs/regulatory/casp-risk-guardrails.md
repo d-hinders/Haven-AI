@@ -167,7 +167,7 @@ last-verified: "2026-11-02"
 > minus the two `EXEMPT` entries, none of the 17 `controlGlobs`; #4381 added
 > the two `domain/x402-*` files), where the text still carried the 50-of-67
 > measurement from #4303; and `SUPPORTED_X402_EXPECTED_VERSIONS` is defined in
-> `signer/src/core.ts` and consumed by `capabilities.ts` and `sign-context.ts`,
+> `signer/src/core.ts` and consumed by `capabilities.ts` and `tools.ts`,
 > so the scope note now names the definition. The week's
 > behaviour changes (#4465, #4483, #4516, #4558, #4536, #4535, #4544, #4546,
 > #4583, #4587, #4369) are narrowings or descriptive additions, each

@@ -5,7 +5,7 @@ covers:
   - docs/regulatory/casp-changelog/**
   - scripts/docs/coupling-gate.mjs
   - scripts/release-bump.mjs
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -63,7 +63,7 @@ also edits.
   (frozen as of 2026-08-12). Its `last-verified` now reflects genuine
   re-verification of the BODY claims (for example a pass the weekly docs
   audit asks for: `docs-audit.yml` runs on Mondays and keeps one tracking
-  issue, #3645 at present), not per-PR bumps.
+  issue, #4605 at present), not per-PR bumps.
 
 ## Once merged, a shard is immutable
 
@@ -175,3 +175,17 @@ Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), end to end:
   #3645.
 - **Exemption.** `validate-frontmatter.mjs:236` exempts every file here but
   this README.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
+the live *The parent doc* bullet named #3645 as the tracking issue, but #3645
+was closed on 2026-10-25 and `docs-audit.yml`'s upsert opened #4605 in its
+place, so the bullet now names #4605. Re-checked without change: the filename
+conventions and the release-shard rule; the `satisfied-by` globs on both
+`casp-risk-guardrails.md` and `04-x402-payment-sequence.md`; the added-match
+rule (#2192) in `scripts/docs/coupling-gate.mjs`; the advisory
+"coupling satisfied, body NOT re-read" finding (#2323); the immutability
+rules and the transcription-defect exception; `release-bump.mjs`'s
+`<date>-<version>-release.md` next step; and the front-matter exemption at
+`validate-frontmatter.mjs:236`. The directory now holds 713 shards plus this
+README (714 files), up from the 677 the 2026-10-24 note measured; the newest
+shard is `2026-11-02-4601.md`.

@@ -25,12 +25,13 @@ covers:
   - packages/ui/src/Button.tsx
   - packages/ui/src/Card.tsx
   - packages/ui/src/Input.tsx
+  - packages/ui/src/Spinner.tsx
   - packages/ui/src/Tooltip.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/**
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Haven Product & UX Guide
@@ -234,6 +235,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 ### Loading And Feedback
 
 - Use `Skeleton` instead of inline pulse divs.
+- Use the shared `Spinner` for an in-flight action or a standalone busy indicator; it never replaces the words that say what is happening (`design-system.md` § Spinner).
 - Loading regions that replace meaningful content should preserve approximate dimensions and use `role="status"`, `aria-busy="true"`, and `aria-live="polite"` where practical.
 - Use toasts for short feedback after actions such as copy, save, send, or retry.
 - Toasts should supplement visible state. If the user needs to fix something, keep the error next to the relevant field or panel.
@@ -349,3 +351,19 @@ on `/agents`; Analytics second in the Overview group; the raised money panel
 with the 30-day spending; `design-system.md` § Cards; `.v2-modal-backdrop` with
 no blur; `MaxButton`/`PasteButton`; the `#main-content` skip link; `Button`
 `sm` 36px and `md` 40px with a 44px hit area (#1726).
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
+the Loading And Feedback rules now name the shared `Spinner` beside `Skeleton`
+(#4563/#4568 made it the one busy indicator, and the section named only
+`Skeleton`). Re-checked without change: the theme control under Settings →
+General → Preferences; "Get started", "N of 3 done", "Hide for now" and
+"You're set up" (`dashboard/NeedsYou.tsx`); the low-balance and zero-USDC
+hold-back; the inline "Connect your first agent" on `/agents`; Analytics second
+in the Overview group (`sidebar/Sidebar.tsx`); the raised money panel with the
+30-day spending; `design-system.md` § Cards; `.v2-modal-backdrop` with no blur;
+`MaxButton`/`PasteButton`; the `#main-content` skip link; `Button` `sm` 36px
+and `md` 40px with a 44px hit area (#1726); `TransactionActivityRow` in ledger
+mode under day bands; and `PageHeader`'s `back` prop with `BackLink` for the
+branches that have no `PageHeader`. The week's UI sweep (#4562–#4603) changed
+screens this guide governs without changing any rule, primitive name or
+process step here.

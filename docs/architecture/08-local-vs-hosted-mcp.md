@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/routes/transactions.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/modules/transactions/x402.ts
-last-verified: "2026-10-23"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer
@@ -698,3 +698,18 @@ change: the five
 signer tools, the report-settlement-evidence arguments, the hosted egress
 deadlines and the DNS residual (`sdk/src/merchant-egress.ts:16-18`), the qa-dev
 env pins, and the #1986 410 (`modules/x402/authorize.ts:106`).
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). No claim
+needed rewriting. Re-checked at this head: the five signer tools
+(`SignerToolName`, `packages/signer/src/tools.ts`); the strict/permissive
+census lists (`STRICT_INPUT_TOOLS` / `PERMISSIVE_INPUT_TOOLS`,
+`mcp-server/src/tools/contracts.ts`); the next-step vocabulary and its
+shrink-only lint (`scripts/ci/vocabulary-map.json`, `scripts/lint-next-steps.mjs`,
+`sdk/src/next-step.ts`, `signer/src/next-step.ts`); the next-step
+characterization and signer-parity suites; and the hosted egress constants
+(`HOSTED_MAX_GET_REDIRECTS = 3`, `sdk/src/merchant-egress.ts`). The week's
+drift is additive to what this doc states: retry-or-stop is decided by the
+failure's cause rather than its status (#4516), the x402 merchant rejection
+reason is recorded and echoed on rejected retries (#4558), settlement-evidence
+handoffs prefill `payment_header` (#4536, already noted above), and the ten
+typed task-/sub-budget payment-scope refusals answer in the MCP layer (#4483).

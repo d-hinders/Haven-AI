@@ -69,7 +69,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Architecture Overview
@@ -289,3 +289,23 @@ proof-header settlement reports #4075, request-mode x402, SIWX sign-in,
 multi-account overview #4080, expired-only budgets #4376, catalog probe
 cooldown #4407) changed what covered surfaces report and render without
 moving any boundary, actor or custody split this overview states.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). No claim
+needed rewriting. Re-checked at this head: the package table against
+`packages/*` (still 13 packages), the accounting registry (`fortnox` +
+`accounted` live, `light` + `igdrasil` coming soon,
+`modules/accounting/registry.ts`), the hosted instructions' pre-payment read
+(`haven_get_agent` first, `mcp-server/src/server.ts`; `haven_get_allowances`
+for the breakdown), the retired rails' 410s
+(`isRetiredRailIntent` in `routes/payments.ts`), the nine runtime profiles
+(`connect/src/runtime-registry.ts`), `/ops` answering 404 until configured,
+and the chain facts (Base 8453, Base Sepolia 84532, Gnosis 100 history-only).
+The week's drift (receipts declaring their six served keys #4587, the parent
+receipt field rename #4583, accounting transaction kind #4535 and purchase
+correlation key #4544, the direct-payment underlag #4546, MCP retry-or-stop by
+failure cause #4516, the typed task-/sub-budget payment-scope refusals #4483,
+the expired-only budget's `delegation_expired` #4376, the x402 merchant
+rejection reason #4558, settlement-evidence `payment_header` prefill #4536,
+`avatar_tint` migration 121 #4433) changed what covered surfaces report and
+render without moving any boundary, actor or custody split this overview
+states.

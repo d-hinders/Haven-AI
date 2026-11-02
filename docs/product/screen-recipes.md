@@ -55,7 +55,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
 
 # Haven Screen Recipes
@@ -1154,7 +1154,10 @@ Structure:
    (merchant-first, `counterpartyLabel` no-address mode); the subline names who
    acted ("You" or the agent) plus " · <account>" when the user has two or more
    accounts; the badge is `transactionRowBadge(tx)` plus the accounting badge; the
-   amount sits right with the time under it. An own-account transfer (the
+   amount sits right with the time under it. Below `sm` the row is two bands
+   instead of three (#4572): title and amount on the first line, description and
+   the clock time on the second, with badges wrapping to a subordinate line so
+   the amount keeps its place. An own-account transfer (the
    backend's `foldOwnTransfers=1`, #4265) reads "Moved between your accounts"
    with `DirectionMark direction="move"`, the subline "You · <from> → <to>" (or
    "Your accounts · …"), and an unsigned amount. The dashboard's Transactions card
@@ -1632,3 +1635,19 @@ Money and risk clarity:
 - Company details (`CompanyDetailsCard`, #3332, reshaped #4359) is the same shape of Settings section as Accounting beside it: no frontend-side flag of its own (it reads the API's status alone — 404 hides it; 200 `null` shows "No company details" with **Add company details**, which reveals the blank form; a row renders the filled form), the purpose text shown above the form and the Add button, in the empty state too but not in the error state (not behind a tooltip), Country a native `Select` of ISO 3166-1 names that saves the same alpha-2 code (a stored code outside the list renders as its own option and round-trips unchanged), the VIES state a `StatusBadge` ("Checked against VIES" success / "Not found in VIES" warning / everything else neutral — never "verified"), and "Remove company details" a `ghost` trigger in the footer row left of Save, a confirm dialog before `DELETE`, the same danger-button pattern Accounting's Disconnect uses. See [`docs/product/owner-company-details.md`](owner-company-details.md).
 - "Passkeys and wallets" is a Security-tab section (owner decision 2026-10-09, #3825; tabbed #4358; pills #4472): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves — each account an outline pill link (`LinkChip`, design-system.md § *Account link pill*) to its `/accounts/<id>?tab=security`, in a wrapping row under the signer's label. The pill shows the account name alone; the `(network)` suffix is appended to EVERY pill in the section only when the listed accounts span more than one network, so one account reads the same on every row (owner decision 2026-10-27). A passkey whose credential this device holds carries a neutral "This device" `StatusBadge` beside its label; wallet rows never do. The section speaks in outcomes ("Browser wallet", "Passkey · added {date}", "This device"), never "signer" (`copy-guidelines.md`); the account card's link to it ("Passkeys and wallets", on the "Who can approve" heading row since #4474 — the link text is the owner's 2026-10-30 decision, #4563, superseding the mockup's "All signers in Settings") targets `?tab=security#signers`. No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Passkeys and wallets reads as one more signer), now that the top bar carries no wallet pill.
 - Avoid duplicating account summary facts already shown on Dashboard, Account details, or the Profile section.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
+the Transaction History ledger row now states the phone layout — below `sm` it
+is two bands, title and amount then description and clock time (#4572), where
+the recipe described only the desktop arrangement. Re-checked without change:
+the agent card's one `StatusBadge` and its `agentBadge` labels ("Needs setup",
+"Budget ended", "Paused", "N% used" at 90% or more, plus "Archived" and
+"Revoked"); the one Set budget dialog and its `?grant=` prefill (#4564/#4600);
+the accounting vocabulary rendered through `StatusBadge` from
+`accountingStatusPresentation` (`In <Provider>` / `Evidence archived` /
+`Tracked` / `Sending…` / `Not sent`, #4567); the Receive dialog's QR
+`Skeleton`; the tool-call tab's `MCP_TOOL_NAMES` labels, `errorCodeLabel` and
+`ListShowMore` footer; the connect flow's close affordances (X, backdrop,
+Escape) and the step past the line that removes them; and the Settings
+Business-tab sections. The week's UI sweep (#4562–#4603) changed screens these
+recipes describe without changing any structure, label or rule they state.

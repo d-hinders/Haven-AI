@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Haven AI UX Review
@@ -74,7 +74,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
   three elevations `Card` implements (`flat`, `raised`, `anchor`); do not
   invent additional elevations.
 - Inputs use the shared `Input` primitive for visible borders, focus, validation, Max/Paste actions, and helper text.
-- Skeleton loading uses `Skeleton` rather than inline pulse divs.
+- Skeleton loading uses `Skeleton` rather than inline pulse divs, and an in-flight action or standalone busy indicator uses the shared `Spinner` (`design-system.md` § Spinner).
 - Toast and Tooltip are used through shared primitives, not one-off floating elements.
 - Amounts, addresses, percentages, counters, step numbers, and numeric metadata
   use `.v2-tabular`.
@@ -212,3 +212,21 @@ permanently-open showcase (`WalletPopover`, pinned by
 in `Table`; the every-PR `haven-reviewer` rule in `CLAUDE.md` § How shipping
 is governed; the environment badge beside the sidebar wordmark and the
 `#main-content` skip link.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
+the loading bullet now names the shared `Spinner` beside `Skeleton` (#4563/
+#4568 made it the one busy indicator, and the checklist named only `Skeleton`).
+Re-checked without change: the shared primitives' home in `@haven_ai/ui` with
+`components/ui` re-export shims; `TransactionActivityRow` in ledger mode under
+day bands on `/transactions` and both Activity tabs; `Card`'s three elevations
+(`flat`/`raised`/`anchor`); the `#patterns` anchor and the #4109 new-pattern
+rule; the one permanently-open showcase (`WalletPopover`'s two states, pinned
+by `showcase-permanently-open-pin.test.ts`); the #2038 Tooltip rule;
+`aria-sort` in `Table`; the *Design visual regression* job name and its
+required-on-`main`/advisory-on-`dev` split; the every-PR `haven-reviewer` rule
+in `CLAUDE.md` § How shipping is governed; and the environment badge beside the
+sidebar wordmark. The week's UI sweep (#4562–#4603: `ui/Modal` dialog anatomy,
+`DialogResult`, `EmptyState`/`InlineAlert` load-error states, the one
+`StatusBadge` vocabulary, `RouteLoading` and `Spinner`, the one `CopyButton`
+path) changed screens this checklist reviews without changing any criterion,
+primitive name or process step here.

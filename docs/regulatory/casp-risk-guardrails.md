@@ -91,7 +91,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
 
 > **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
@@ -158,6 +158,20 @@ last-verified: "2026-10-25"
 > is unchanged. Haven still signs nothing and holds no key material. Scope: the
 > Accounting page's error branches; the document-wide `last-verified` date is
 > not re-stamped.
+
+> **Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`):** a
+> targeted pass over the week's drift, not a second full re-read — the scope is
+> stated in § *Scope of the current `last-verified`* below, which this pass
+> rewrote. No obligation, red line or invariant changed. Two factual
+> corrections: the money-path floor is now **52 of the 71** globs (54 runtime
+> minus the two `EXEMPT` entries, none of the 17 `controlGlobs`; #4381 added
+> the two `domain/x402-*` files), where the text still carried the 50-of-67
+> measurement from #4303; and `SUPPORTED_X402_EXPECTED_VERSIONS` is defined in
+> `signer/src/core.ts` and consumed by `capabilities.ts` and `tools.ts`,
+> so the scope note now names the definition. The week's
+> behaviour changes (#4465, #4483, #4516, #4558, #4536, #4535, #4544, #4546,
+> #4583, #4587, #4369) are narrowings or descriptive additions, each
+> shard-covered or recorded in the note above.
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
@@ -1161,11 +1175,12 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120).**
-Measured at `ffca80f36`, the pin asserts **50 of the 67
-globs**: the 52 runtime `globs` minus the two `EXEMPT` entries above, and none
-of the 15 `controlGlobs` (measured at `82540f71b` with #4122 applied, before
-#4120 added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120, #4381).**
+Measured at `fc8ac1eb6`, the pin asserts **52 of the 71
+globs**: the 54 runtime `globs` minus the two `EXEMPT` entries above, and none
+of the 17 `controlGlobs` (measured at `ffca80f36` it was 50 of 67 — 52 runtime
+globs and 15 control globs; at `82540f71b` with #4122 applied, before #4120
+added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
 `userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
 (the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617),
@@ -1173,10 +1188,14 @@ of the 15 `controlGlobs` (measured at `82540f71b` with #4122 applied, before
 `modules/sub-budgets/**`, `routes/task-budgets.ts`, `routes/sub-budgets.ts`,
 `routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
 `sub-budget-guards.ts`), #4122 `packages/sdk/src/merchant-completion.ts`
-(the SDK's post-funding merchant-answer decision), and #4120 (PR #4153)
-`packages/sdk/src/merchant-answer.ts`; all were already covered
+(the SDK's post-funding merchant-answer decision), #4120 (PR #4153)
+`packages/sdk/src/merchant-answer.ts`, and #4381
+`packages/backend/src/domain/x402-settlement-timing.ts` and
+`domain/x402-sweep-window.ts` (the settlement-window constants moved out of
+`modules/x402/`); all were already covered
 here — budget-scope since #3648, the budget families since #3659, the SDK
-files by `packages/sdk/src/**` — so the pin was satisfied on arrival each
+files by `packages/sdk/src/**`, and the two domain files joined `covers:` in
+#4381's own PR — so the pin was satisfied on arrival each
 time. #3661 also added three `modules/payments/` files, `direct-sign-context.ts`,
 `submission-reconciler.ts` and `agent-payment-status.ts`, which were NOT
 covered: they joined `covers:` in the same PR, so edits to them now owe a
@@ -1455,7 +1474,7 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-10-25, weekly docs audit #3645)
+## Scope of the current `last-verified` (2026-11-02, weekly docs audit #4605)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
 unable to say **how much** of the document a re-verification covered. That
@@ -1465,36 +1484,49 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-verified against `615686369`** (from the staleness audit #3645; the
-replaced 2026-10-23 pass read `ffca80f36` end to end, #4303). This was a
-targeted pass over the week's drift, not a second full re-read: 27 covered
-commits since 10-23, all narrowing or doc-fix in kind.
+**Re-verified against `fc8ac1eb6`** (from the staleness audit #4605; the
+replaced 2026-10-25 pass read `615686369` as a targeted pass over that week's
+drift, and the 2026-10-23 pass before it read `ffca80f36` end to end, #4303).
+This was a targeted pass over the week's drift, not a second full re-read: 34
+covered commits since 10-25, all narrowing, additive or doc-fix in kind.
 
 - **Every named file, symbol and test was re-checked to exist at this head:**
   `requireDelegationBound` (`modules/x402/settlement-sweeper.ts`),
   `assertNonAsserting` (`modules/accounting/fortnox-connector.ts`),
   `resolveExecutionRail`, `SUPPORTED_X402_EXPECTED_VERSIONS`
-  (`signer/src/capabilities.ts`), `legacyBookkeepingEnabled` and
+  (`signer/src/core.ts`, consumed by `capabilities.ts` and `tools.ts`),
+  `legacyBookkeepingEnabled` and
   `HAVEN_HOSTED_MCP_URL` (`config.ts`), `modules/passport/issuance.ts`,
   `routes/__tests__/allowance-rail-retired.test.ts`, both
   `non-custody-onchain-*.contract.test.ts` suites, and the census pin.
 - **Measured claims were re-measured:** `node --test
-  scripts/ci/money-path.test.mjs` — 23/23 pass, the pin holds at the current
-  globs (the "50 of 67" figure stands as measured at #4303).
+  scripts/ci/money-path.test.mjs` — 24/24 pass, the pin holds at the current
+  globs, and the floor is now **52 of the 71** (54 runtime globs minus the two
+  `EXEMPT` entries, none of the 17 `controlGlobs`; #4381 added the two
+  `domain/x402-*` files). The previous "50 of 67" was measured at #4303.
 - **The fail-closed sweep attribution is intact after #4075** (proof-header
   settlement reports, AuthorizationUsed↔Transfer pairing): the observation
   path still passes `requireDelegationBound: true`
   (`settlement-sweeper.ts:764`), and the never-from-transfer-shape property
   is unchanged.
-- **The week's behaviour changes are narrowings, each shard-covered:**
-  #4376's `delegation_expired` refusal (an expired-only budget now answers
-  403 with the end date — authority-narrowing, in `modules/budget-scope/`),
-  #4407's catalog probe cooldown (availability), #4372 part I (README prose),
-  #4405 (skill-text paths). CASP shards exist for the week
-  (`2026-10-24-4389.md`, `2026-10-24-4390.md`, `2026-10-25-4372.md`,
-  `2026-10-25-4407.md`, `2026-10-25-4415.md`, and the
-  `2026-10-23-0.11.0-alpha.0-release.md` release shard that carries #4075
-  and #4376).
+- **The week's behaviour changes are narrowings or descriptive additions, each
+  shard-covered:** #4376's `delegation_expired` refusal (an expired-only
+  budget answers 403 with the end date, in `modules/budget-scope/`), #4465's
+  typed `delegation_expired` body on the x402 expired-budget path, #4483's ten
+  typed task-/sub-budget payment-scope refusals (MCP layer), #4516's
+  retry-or-stop by failure cause, #4558's recorded merchant rejection reason,
+  #4536's settlement-evidence `payment_header` prefill, #4535/#4544/#4546's
+  accounting transaction kind, purchase correlation key and direct-payment
+  underlag, #4583/#4587's receipt field renames and six declared served keys,
+  and #4369's 365-day `expires_at` cap. None widens authority, custody or the
+  merchant-acquiring surface; CASP shards exist for each
+  (`2026-10-26-4429.md`, `2026-10-26-4458.md`, `2026-10-27-4468.md`,
+  `2026-10-27-4470.md`, `2026-10-29-4530.md`, `2026-10-29-4532.md`,
+  `2026-10-29-4533.md`, `2026-10-30-4552.md`, `2026-10-30-4577.md`,
+  `2026-10-30-4578.md`, `2026-10-30-4579.md`, `2026-11-02-4601.md`, and the
+  `2026-10-30-0.13.0-alpha.0-release.md` release shard), except #4534, which
+  used the parent-doc escape hatch and is recorded in the note at the top of
+  this file.
 - **Deliberately NOT covered by this date, as before:** the inline *Current
   state* notes' dated history (present-tense claims were checked; narratives
   were read, not re-derived), the frozen historical bullet log, the MiCA /

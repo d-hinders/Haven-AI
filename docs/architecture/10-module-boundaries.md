@@ -12,7 +12,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
 
 # Module Boundaries
@@ -272,7 +272,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Signal | Achieved |
 |---|---|
 | `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` except `modules/dashboard/` (#3847), which deliberately has none: its one file, the display-only budget-remaining cache, is reached only through the waived import in `routes/dashboard-budget-remaining.ts` (#3804) |
-| Largest route | `routes/payments.ts`, 1561 lines, then `routes/agent-connection-setups.ts` at 1525 and `routes/agent-delegations.ts` at 1389 (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997; re-measured 2026-10-26 with `wc -l packages/backend/src/routes/*.ts` — further route slimming is post-epic work) |
+| Largest route | `routes/payments.ts`, 1572 lines, then `routes/agent-connection-setups.ts` at 1525 and `routes/agent-delegations.ts` at 1389 (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997; re-measured 2026-11-02 with `wc -l packages/backend/src/routes/*.ts` — further route slimming is post-epic work) |
 | Inline SQL call sites | 35 `.query(` call sites across 9 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`npm run lint:deps`; re-measured 2026-10-25 by the weekly docs audit, #4418) and capped by the shrink-only ceiling, now also 35 (#1166; `packages/backend/dep-lint-callsite-ceiling.json`, 9 per-file entries). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) and later moves account for the rest; the ceiling was locked down from 58 to 35 by #4044 |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |
@@ -364,6 +364,18 @@ ceiling shrunk to 35 (last locked by #4044); and the live lint prints
 `no-circular` (`scripts/dep-lint.mjs:39`), the #2138 passport SQL exception
 and the rule-4 port (`infra/chain/index.ts` `getChainClient`) are as
 written.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`), with
+`npm run lint:deps` run at this head. Changed: the largest-route line is
+re-measured at `routes/payments.ts` 1572 lines (it grew 11 lines across the
+receipts and accounting work since 2026-10-26), and the live lint now prints
+0 violations across 513 source files with the same 15 waived edges (8
+`pg-only-in-infra`, 3 `no-deep-cross-module-import`, 4
+`no-deep-module-to-module-import`). Re-checked without change: the 17
+`modules/**` directories and their `index.ts` rule (only `modules/dashboard/`
+has none), the nine `rails/delegation-*` / `rails/hybrid-*` files, the
+inline-SQL gauge (35 `.query(` call sites across 9 files, ceiling 35), the
+`session_key` seam, the #2138 exception, and `getChainClient`.
 
 ## Non-goals
 

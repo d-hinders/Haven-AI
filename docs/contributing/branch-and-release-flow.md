@@ -182,6 +182,23 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
+> **Re-verified #4612 (2026-11-02, the contract-doc count drops from five to
+> one):** coupled through `scripts/release-bump.mjs` and
+> `scripts/release-version-constants.mjs`. The bump's printed next-steps block
+> now says a release implicates ONE contract doc that needs action
+> (`casp-risk-guardrails.md`, cleared by the CASP shard) instead of five, because
+> the docs coupling gate partitions out a file whose entire diff is
+> release-version constants. `release-version-constants.mjs` gains
+> `DEDICATED_VERSION_CONSTANT_FILES` (`MCP_VERSION`) and
+> `ALL_VERSION_CONSTANT_FILES`; `SOURCE_VERSION_CONSTANT_FILES` is unchanged, so
+> the bump's generic writer loop is unchanged. No version, pin, channel,
+> dist-tag, build order or credential path moves, and `release-bump.test.mjs` is
+> 96/96. **Nothing in this document was made false or stale by that edit** — it
+> describes the flow the bump sits in, not the bump's list of files.
+> `last-verified` deliberately NOT bumped: this is a scoped check of two script
+> edits, not a re-verification of the document, and #1366 rates a rubber-stamped
+> date worse than a stale one.
+
 > **Re-verification (#3819, 2026-10-09):** coupled through
 > `.github/workflows/publish.yml`: the dependency-presence ledger inside the
 > loop (`dep_state`) was rewritten from a bash-4 associative array

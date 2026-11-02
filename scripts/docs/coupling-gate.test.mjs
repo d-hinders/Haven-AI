@@ -984,3 +984,301 @@ test('#2638/#4459: isGoverned leaves out archived and research, and keeps record
   assert.equal(isGoverned('research'), false)
   assert.equal(isGoverned('record'), true)
 })
+
+// ── #4612: version-literal partition + Re-verified-unchanged trailer ──────────
+//
+// Both mechanisms read git objects — a per-file diff and a commit body — so
+// these fixtures drive the REAL CLI against a REAL git repository rather than
+// calling a pure function with a hand-built diff. The repository is a copy of
+// the files the gate needs: the scripts, the four root gravity docs, the five
+// contract docs this file set implicates, and the source files they cover. The
+// front matter under test is therefore the repository's own, not a paraphrase.
+//
+// Each fixture is a fresh repo so a mutation in one cannot leak into another,
+// and every one asserts the exit code AND the printed reason: a gate that
+// passed by silence would satisfy the exit code and none of the intent.
+
+import { test as test4612 } from 'node:test'
+import assert4612 from 'node:assert/strict'
+import { execFileSync as exec4612 } from 'node:child_process'
+import {
+  mkdtempSync as mkdtemp4612,
+  mkdirSync as mkdir4612,
+  copyFileSync as copyFile4612,
+  readFileSync as readFile4612,
+  writeFileSync as writeFile4612,
+  rmSync as rm4612,
+} from 'node:fs'
+import { tmpdir as tmpdir4612 } from 'node:os'
+import { dirname as dirname4612, join as join4612 } from 'node:path'
+import { fileURLToPath as fileURL4612 } from 'node:url'
+
+const ROOT4612 = join4612(dirname4612(fileURL4612(import.meta.url)), '..', '..')
+
+const FIXTURE_FILES = [
+  'scripts/docs/coupling-gate.mjs',
+  'scripts/docs/validate-frontmatter.mjs',
+  'scripts/docs/package-docs.mjs',
+  'scripts/ci/qa-freshness.mjs',
+  'scripts/release-version-constants.mjs',
+  'CLAUDE.md',
+  'AGENTS.md',
+  'README.md',
+  'ABOUT_HAVEN.md',
+  'docs/security/delegation-rail-security-model.md',
+  'docs/operations/package-dev-channel.md',
+  'docs/operations/mcp-runtime-compatibility.md',
+  'docs/regulatory/casp-risk-guardrails.md',
+  'docs/architecture/04-x402-payment-sequence.md',
+  'packages/signer/src/tools.ts',
+  'packages/connect/src/runtime.ts',
+  'packages/mcp/src/server.ts',
+  'packages/backend/src/rails/delegation-policy.ts',
+  'packages/backend/src/domain/user-signers.ts',
+]
+
+const SECURITY_MODEL = 'docs/security/delegation-rail-security-model.md'
+const DEV_CHANNEL = 'docs/operations/package-dev-channel.md'
+const MCP_COMPAT = 'docs/operations/mcp-runtime-compatibility.md'
+const GUARDRAILS_4612 = 'docs/regulatory/casp-risk-guardrails.md'
+
+// The three files a release bump rewrites to a version literal, and the constant
+// each one declares. `MCP_VERSION` is the one the bump writes through a
+// dedicated writer rather than the SOURCE_VERSION_CONSTANT_FILES loop, which is
+// why it is in `DEDICATED_VERSION_CONSTANT_FILES` — without it the partition
+// would miss `packages/mcp/src/server.ts` and implicate the dev-channel doc.
+const VERSION_BUMPS = [
+  ['packages/signer/src/tools.ts', 'SIGNER_VERSION'],
+  ['packages/connect/src/runtime.ts', 'CONNECTOR_VERSION'],
+  ['packages/mcp/src/server.ts', 'MCP_VERSION'],
+]
+
+function git4612(dir, args) {
+  return exec4612('git', args, { cwd: dir, encoding: 'utf8' })
+}
+
+function makeFixtureRepo() {
+  const dir = mkdtemp4612(join4612(tmpdir4612(), 'coupling-4612-'))
+  for (const rel of FIXTURE_FILES) {
+    const dest = join4612(dir, rel)
+    mkdir4612(dirname4612(dest), { recursive: true })
+    copyFile4612(join4612(ROOT4612, rel), dest)
+  }
+  git4612(dir, ['init', '-q', '-b', 'main'])
+  git4612(dir, ['config', 'user.email', 'fixture@example.invalid'])
+  git4612(dir, ['config', 'user.name', 'coupling fixture'])
+  git4612(dir, ['config', 'commit.gpgsign', 'false'])
+  git4612(dir, ['add', '-A'])
+  git4612(dir, ['commit', '-q', '-m', 'fixture base'])
+  return { dir, base: git4612(dir, ['rev-parse', 'HEAD']).trim() }
+}
+
+function commitFixture(fx, message) {
+  git4612(fx.dir, ['add', '-A'])
+  git4612(fx.dir, ['commit', '-q', '-m', message])
+  return git4612(fx.dir, ['rev-parse', 'HEAD']).trim()
+}
+
+/** Rewrite one `export const NAME = '...'` literal, exactly as the bump does. */
+function bumpLiteral(fx, rel, name, from, to) {
+  const p = join4612(fx.dir, rel)
+  const src = readFile4612(p, 'utf8')
+  const next = src.replace(`export const ${name} = '${from}'`, `export const ${name} = '${to}'`)
+  assert4612.notEqual(next, src, `fixture: ${name} literal not found in ${rel}`)
+  writeFile4612(p, next)
+}
+
+function appendLine(fx, rel, line) {
+  const p = join4612(fx.dir, rel)
+  writeFile4612(p, `${readFile4612(p, 'utf8')}\n${line}\n`)
+}
+
+function writeFixtureFile(fx, rel, body) {
+  const p = join4612(fx.dir, rel)
+  mkdir4612(dirname4612(p), { recursive: true })
+  writeFile4612(p, body)
+}
+
+/** Run the real CLI over the fixture's own BASE_SHA..HEAD, as CI does. */
+function runFixtureGate(fx) {
+  const out = join4612(fx.dir, 'coupling-comment.md')
+  let status = 0
+  let output = ''
+  try {
+    output = exec4612(
+      process.execPath,
+      [join4612(fx.dir, 'scripts', 'docs', 'coupling-gate.mjs'), '--strict', `--out=${out}`],
+      {
+        cwd: fx.dir,
+        encoding: 'utf8',
+        env: { ...process.env, BASE_SHA: fx.base, HEAD_SHA: 'HEAD', GITHUB_OUTPUT: '' },
+      },
+    )
+  } catch (err) {
+    status = err.status ?? 1
+    output = `${err.stdout ?? ''}${err.stderr ?? ''}`
+  }
+  let comment = ''
+  try {
+    comment = readFile4612(out, 'utf8')
+  } catch {
+    comment = ''
+  }
+  return { status, output, comment }
+}
+
+function withFixture(fn) {
+  const fx = makeFixtureRepo()
+  try {
+    fn(fx)
+  } finally {
+    rm4612(fx.dir, { recursive: true, force: true })
+  }
+}
+
+test4612('#4612: a release bump whose diffs are version literals only implicates neither release-coupled doc', () => {
+  withFixture((fx) => {
+    for (const [rel, name] of VERSION_BUMPS) {
+      bumpLiteral(fx, rel, name, '0.13.0-alpha.0', '0.13.1-alpha.0')
+    }
+    // The bump re-pins the manifest table itself, so that doc is in the changed
+    // set — exactly as a release PR looks.
+    appendLine(fx, MCP_COMPAT, '| `0.13.1-alpha.0` | re-pinned by the bump |')
+    commitFixture(fx, 'chore(release): 0.13.1-alpha.0')
+
+    const { status, output, comment } = runFixtureGate(fx)
+    assert4612.equal(status, 0, `a version-literal-only release bump must pass --strict:\n${output}`)
+    assert4612.match(comment, /version literal only — not implicating/i)
+    for (const [rel] of VERSION_BUMPS) {
+      assert4612.match(
+        comment,
+        new RegExp(rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+        `${rel} must be PRINTED as partitioned, never silently dropped (#2323)`,
+      )
+    }
+    assert4612.doesNotMatch(comment, /delegation-rail-security-model/)
+    assert4612.doesNotMatch(comment, /package-dev-channel/)
+  })
+})
+
+test4612('#4612 MUTATION PROOF: one behavioural line in tools.ts still implicates the security model', () => {
+  withFixture((fx) => {
+    for (const [rel, name] of VERSION_BUMPS) {
+      bumpLiteral(fx, rel, name, '0.13.0-alpha.0', '0.13.1-alpha.0')
+    }
+    appendLine(fx, MCP_COMPAT, '| `0.13.1-alpha.0` | re-pinned by the bump |')
+    // The negative control for the fixture above: same changed set, one line
+    // that is not a version literal. If the partition were per-PATH rather than
+    // per-diff, this would pass and a real signing-surface change would hide.
+    appendLine(fx, 'packages/signer/src/tools.ts', "export const SIGNER_VERSION_SOURCE = 'tools'")
+    commitFixture(fx, 'chore(release): 0.13.1-alpha.0')
+
+    const { status, output } = runFixtureGate(fx)
+    assert4612.equal(status, 1, 'a behavioural line in tools.ts must still block')
+    assert4612.match(output, /BLOCKING/)
+    assert4612.match(output, /delegation-rail-security-model/)
+  })
+})
+
+test4612('#4612: an added casp-changelog shard does not satisfy the security model', () => {
+  withFixture((fx) => {
+    appendLine(fx, 'packages/backend/src/rails/delegation-policy.ts', '// behavioural change')
+    writeFixtureFile(
+      fx,
+      'docs/regulatory/casp-changelog/2026-11-03-4999-release.md',
+      '# 4999\n\nPerimeter unchanged.\n',
+    )
+    commitFixture(fx, 'feat: delegation policy change')
+
+    const { status, output } = runFixtureGate(fx)
+    // The shard clears `casp-risk-guardrails.md` (it declares `satisfied-by:`),
+    // and must NOT clear the security model, which declares none. This is the
+    // forged-name bypass a `satisfied-by`-glob design would have opened: any PR
+    // could add a `*-release.md` file and clear a doc it never read.
+    assert4612.equal(status, 1, 'a shard must not satisfy a doc that declares no satisfied-by')
+    assert4612.match(output, /BLOCKING/)
+    assert4612.match(output, /delegation-rail-security-model/)
+    assert4612.doesNotMatch(
+      output,
+      /BLOCKING: \d+ contract doc\(s\)[\s\S]*casp-risk-guardrails/,
+      'the shard still satisfies casp-risk-guardrails.md',
+    )
+  })
+})
+
+test4612('#4612: a Re-verified-unchanged trailer satisfies the doc it names', () => {
+  withFixture((fx) => {
+    appendLine(fx, 'packages/backend/src/domain/user-signers.ts', '// behavioural change')
+    const head = commitFixture(
+      fx,
+      `feat: user signers change\n\nRe-verified-unchanged: ${SECURITY_MODEL} @ ${fx.base}\n`,
+    )
+
+    const { status, output, comment } = runFixtureGate(fx)
+    assert4612.equal(status, 0, `a trailer naming the doc must clear --strict:\n${output}`)
+    assert4612.match(comment, /re-verified unchanged by commit/)
+    assert4612.match(comment, new RegExp(head.slice(0, 7)))
+    assert4612.match(comment, /delegation-rail-security-model/)
+  })
+})
+
+test4612('#4612: a trailer never satisfies a doc that declares satisfied-by', () => {
+  withFixture((fx) => {
+    appendLine(fx, 'packages/backend/src/rails/delegation-policy.ts', '// behavioural change')
+    commitFixture(
+      fx,
+      `feat: delegation policy change\n\nRe-verified-unchanged: ${GUARDRAILS_4612} @ ${fx.base}\n`,
+    )
+
+    const { status, output, comment } = runFixtureGate(fx)
+    assert4612.equal(status, 1, 'a satisfied-by doc is never trailer-satisfied')
+    assert4612.match(output, /BLOCKING/)
+    assert4612.match(output, /casp-risk-guardrails/)
+    assert4612.match(comment, /Commit trailers that cleared nothing/)
+    assert4612.match(comment, /declares `satisfied-by:`/)
+  })
+})
+
+test4612('#4612: a trailer whose SHA is not an ancestor of head satisfies nothing', () => {
+  withFixture((fx) => {
+    // A real commit, on a branch this PR does not contain. A SHA that merely
+    // exists is not enough: the record has to point at a commit the PR holds.
+    git4612(fx.dir, ['checkout', '-q', '-b', 'side'])
+    appendLine(fx, 'packages/backend/src/domain/user-signers.ts', '// side branch')
+    const sideSha = commitFixture(fx, 'side: unrelated commit')
+    git4612(fx.dir, ['checkout', '-q', 'main'])
+
+    appendLine(fx, 'packages/backend/src/domain/user-signers.ts', '// behavioural change')
+    commitFixture(
+      fx,
+      `feat: user signers change\n\nRe-verified-unchanged: ${SECURITY_MODEL} @ ${sideSha}\n`,
+    )
+
+    const { status, output, comment } = runFixtureGate(fx)
+    assert4612.equal(status, 1, 'a non-ancestor SHA must not satisfy the gate')
+    assert4612.match(output, /BLOCKING/)
+    assert4612.match(output, /delegation-rail-security-model/)
+    assert4612.match(comment, /is not an ancestor of the PR head/)
+  })
+})
+
+test4612('#4612: a trailer naming a doc the PR does not implicate is ignored and printed', () => {
+  withFixture((fx) => {
+    appendLine(fx, 'packages/backend/src/domain/user-signers.ts', '// behavioural change')
+    // `package-dev-channel.md` is governed and declares no `satisfied-by:`, so
+    // the only reason it can fail to satisfy is that this diff never implicates
+    // it — which is the case this fixture is about.
+    commitFixture(
+      fx,
+      `feat: user signers change\n\nRe-verified-unchanged: ${DEV_CHANNEL} @ ${fx.base}\n`,
+    )
+
+    const { status, comment } = runFixtureGate(fx)
+    // The security model is still implicated and still blocks; the trailer about
+    // a doc this diff never touched cleared nothing and says so.
+    assert4612.equal(status, 1)
+    assert4612.match(comment, /Commit trailers that cleared nothing/)
+    assert4612.match(comment, /this PR does not implicate it/)
+  })
+})
+

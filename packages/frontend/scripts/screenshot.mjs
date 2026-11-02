@@ -6533,8 +6533,9 @@ export const SCENARIOS = {
     },
   },
   /**
-   * #2473: the budget card with no budget, with a failed fetch, and loading.
-   * See AGENT_BUDGET_STAGES above for why each stage is reachable.
+   * #2473: the budget card with no budget (and its dialog), a failed fetch,
+   * loading, and two budgets (and the Add a budget dialog). See
+   * AGENT_BUDGET_STAGES above for why each stage is reachable.
    */
   'agent-budget-card': {
     stages: AGENT_BUDGET_STAGES,
@@ -7087,7 +7088,7 @@ export const SCENARIOS = {
             delegation_hash: '0x' + '8b'.repeat(32),
             version: 1, status: 'active', is_live: true,
             budget_atomic: '150000000', period_seconds: 604_800,
-            start_date: '2026-06-02T10:00:00.000Z',
+            start_date: '1780394400', // #3806: Unix seconds, never ISO
             expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
             created_at: '2026-06-02T10:00:00.000Z',
           }],
@@ -7097,8 +7098,8 @@ export const SCENARIOS = {
       // page) and agent-research, whose Stop budget confirm is captured from
       // its live row. One enrolled passkey and no owner wallet — the same
       // ready answer the half-revoked agents carry for their affordances.
-      // Without it the row's button stays `disabled` (`busy || !ready`) and
-      // the confirm can never open.
+      // Without it the row menu's Stop budget… item stays `disabled` (`!ready`)
+      // and the confirm can never open.
       if (apiPath === '/agents/agent-paused/account-signers' || apiPath === '/agents/agent-research/account-signers') {
         return {
           account_address: FIXTURE_ACCOUNT.account_address,

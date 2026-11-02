@@ -726,7 +726,7 @@ export default function DelegationBudgetCard({
         // column's left edge with the button under it, like "Last 30 days"
         // beside it — centred, it floated over a left-aligned button.
         <div className="mt-3">
-          <EmptyState size="inline" bare title="No budget yet." />
+          <EmptyState size="inline" bare align="start" title="No budget yet." />
           <Button
             ref={addBudgetRef}
             size="sm"

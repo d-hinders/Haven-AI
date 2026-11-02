@@ -2621,18 +2621,24 @@ new-task with an independent spec review; no owner question is open and
 - C1 → epic [#4610](https://github.com/d-hinders/Haven-AI/issues/4610)
   (`epic`, `area:docs`, `area:ci`, `money-path`), slices #4612 (gate), #4613
   (archive), #4614 (guard). **The scan's C1 figures understate the class by
-  an order of magnitude, found by the spec reviews:** the report's census saw
-  only the bare-paragraph shape (69 paragraphs / 30 docs / 72,877 bytes by
-  its own method; 68,773 in the current docs); the first review found the
-  `> **Re-verified …` blockquote-bold shape — the #2938 incident's — and the
-  second found `Re-verification (#N …)`, `Recent re-verification` and
-  `Re-verified, …`. By the paragraph-start census the epic now defines (first
-  70 characters say re-verif / re-check / re-read / rubber-stamp, outside
-  fences; the reference script is in #4613's Method block), `status: current`
-  docs carry **539 openers in 51 of 79 docs, 736,170 of 3,755,152 bytes
-  (19.6 %)** at `e0617aa9f` — more than the 461 KB #2681 retired; 123 are
-  coupling-gate `Re-verified unchanged` notes; the agent-served security model
-  is 123 openers, 180,245 of 299,914 bytes. The largest source is not the
+  an order of magnitude, found by the spec reviews:** the report's headline
+  figure was the bare-paragraph shape (69 paragraphs / 30 docs / 72,877 bytes
+  by its own method; 68,773 in the current docs), and its wider regex (92
+  openers / 42 docs) still missed the `> **Re-verified …` blockquote-bold
+  shape — the #2938 incident's — which the first review found; the second
+  found `Re-verification (#N …)`, `Recent re-verification`, `#N
+  re-verification`, `Re-read, not rubber-stamped` and `Re-verified, …`; the
+  review of this PR found paragraphs after a bare `>` line inside a blockquote
+  run (149 more). By the paragraph-start census the epic now defines (a line
+  after a blank line, a bare `>` line, a heading or at the start of a
+  blockquote run, whose first 70 characters say re-verif / re-check / re-read /
+  rubber-stamp, outside fences; the reference script is in #4613's Method
+  block, and every figure here is that script's output), `status: current`
+  docs carry **688 openers in 51 of 79 docs, 751,135 of 3,755,152 bytes
+  (20.0 %)** at `e0617aa9f` — more than the 461 KB #2681 retired; 123 of the
+  688 are coupling-gate `Re-verified unchanged` notes; the agent-served
+  security model is 158 openers, 182,157 of its 299,914 bytes. The largest
+  source is not the
   weekly audit but code PRs satisfying the strict contract-doc coupling gate,
   which needs an edit to the doc, so the candidate became three PRs on the
   owner's word: the gate first (a version-literal-only diff never implicates;
@@ -2641,12 +2647,17 @@ new-task with an independent spec review; no owner question is open and
   glob were both rejected by review as forgeable), then the archive (verbatim,
   hashed, records left as written), then the `docs:check` guard by the same
   census rule. Owner decisions the same day: archive verbatim; include the
-  `release-bump.mjs` and `scripts/README.md` instruction sites; the partition
-  and the trailer; the slice-1 threat model confirmed. Two spec-review passes
-  (4 blocking / 5 should-fix / 6 nits on the single-task form; 4 blocking /
-  13 should-fix on the epic); verdict on #4610, Corrections: 31.
+  release bump's printed guidance and the scripts README among the
+  instruction sites; the partition and the trailer; the slice-1 threat model
+  confirmed. Two spec-review passes (4 blocking / 5 should-fix / 6 nits on the
+  single-task form; 4 blocking / 13 should-fix on the epic); verdict on #4610,
+  Corrections: 31, plus the census amendment above recorded there after this
+  PR's review.
 - C2 → [#4611](https://github.com/d-hinders/Haven-AI/issues/4611)
-  (`area:docs`). Owner decision: reference only — the six SDK files stay out
+  (`area:docs`) → **`shipped`** the same day: closed 2026-11-02 via PR #4615
+  (`3d348ef93`, into `dev`) by a partner pipeline, 80 minutes before this
+  entry was first written — the next scan's block 6 reads the pinned
+  `ls-tree` command only. Owner decision: reference only — the six SDK files stay out
   of the copy lint's `SCAN_FILES` (the lint's decision under #2317). Spec
   review re-ran 14 claims: 12 reproduced, 2 wrong and fixed (the glob line's
   exclusion filter changed in `fe491ac24`; the docs-boundary command is not
@@ -2656,10 +2667,9 @@ new-task with an independent spec review; no owner question is open and
   figures wrap, so a single-line grep finds 2), the control run after the
   filter with a frontend twin.
 
-The copy-lint perimeter series is unchanged by C2 until its PR lands; the
-next scan's block 6 reads both commands. Block-3 note for the next run: the
-2026-11-02 report's C1 figures are superseded by #4610's census — cite the
-epic, not the report, for that class.
+Block-3 note for the next run: the 2026-11-02 report's C1 figures are
+superseded by #4610's census — cite the epic, not the report, for that
+class — and block 6's copy-lint figure steps from 66 / 4 to the `ls-tree`
+command's reading by #4615's selector change, not by new files.
 
-Drive: `ship-next epic=#4610` (slice order #4612 → #4613 → #4614),
-`ship-next 4611`.
+Drive: `ship-next epic=#4610` (slice order #4612 → #4613 → #4614).

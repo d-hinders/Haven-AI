@@ -2468,32 +2468,39 @@ tracked frontend epic (13 slices, 4 walkthrough rounds) plus the builds of the
   prose on the docs it still ranks. #2681 (2026-09-07) retired the per-doc
   chain — "a plain `last-verified: <date>` and nothing else", because "prose
   to prove prose was checked" had reached 20 % of governed prose — and #2775
-  archived it verbatim. Since the first audit after that, each audit landing
-  appends a dated `Re-verified …` paragraph to every doc it touched: at the
-  scan SHA **69 paragraphs in 30 non-archive docs** (65 in 28 `status: current`
-  docs, 4 in 2 records), 68,773 bytes in the current docs; by the wider shape
-  (heading, bold, blockquote or bare opener) 92 openers in 42 docs. Control: 0
-  at the parent of the first post-retirement audit, 9 at it; 22 landings
-  added one (3 in September, 18 in October, 1 in November). The architecture
+  archived it verbatim. Since the second audit after that (2026-09-21; the
+  first added none), audit closings append a dated `Re-verified …` paragraph
+  to docs they re-verified, and the #4372 re-verify epic adopted the shape: at
+  the scan SHA **69 paragraphs in 30 non-archive docs** (65 in 28
+  `status: current` docs, 4 in 2 records), 68,773 bytes in the current docs;
+  by the wider shape (heading, bold, blockquote or bare opener) 92 openers in
+  42 docs (73 in 28 current, 19 in 14 records). Control: 0 at the parent of
+  the first landing that added the shape, 9 at it; 22 landings added one (3 in
+  September, 18 in October, 1 in November) — 40 from 9 weekly-audit closings,
+  23 from 8 #4372 parts, 6 from 5 unrelated landings. The architecture
   overview is 35 % re-verification prose by bytes (7,533 of 21,626). Cost on
   record: #2938 (2026-09-13), a re-verification blockquote in a served doc
   carried a literal `covers:` and turned the required *Frontend checks* red
   queue-wide; the guard that failed then still reads served bodies, and one of
   the four docs served to agents carries one such paragraph today (1,573
   bytes). Nothing requires the shape: the audit issue asks only for a
-  re-verify and a date bump; the release skill's step 3 is the one instruction
-  that asks for a *Re-verified* note. One PR: a guard beside the front-matter
-  validator refusing the shape in a governed body (with fixture controls), the
-  rule stated once, and the 69 paragraphs moved verbatim to the #2775 archive
-  or deleted — the owner's call; two PRs if the migration goes apart. Off the
+  re-verify and a date bump; the release skill's items 2 and 3 are the only
+  instructions that ask for a scoped *Re-verified* note. One PR: a guard
+  beside the front-matter validator refusing the wide shape in a
+  `status: current` body (with fixture controls; records left as written per
+  #4459), the rule stated once, and the 73 current-doc notes moved verbatim to
+  the #2775 archive or deleted — the owner's call; two PRs if the migration
+  goes apart. *Corrected in review:* first written as "the first audit after",
+  "each audit … every doc", "the 69 paragraphs" and "step 3". Off the
   money path, except that a guard placed inside the validator itself lands on
   a control glob (#2200).
 - C2 — block 6's copy-lint perimeter command cannot see the SDK's top-level
   files. Its `git ls-files '…/src/**/*.ts'` globs need a separator after `**`,
   so `grep -cE '^packages/sdk/src/[^/]+\.ts$'` over the reference's list → 0
   against 46 non-test files at the SHA (and the frontend's `middleware.ts`).
-  The figure every entry since 2026-09-03 reports (**66 unscanned / 4 with
-  hits** today, 72 / 5 then) becomes **111 / 14** over a `git ls-tree` list
+  The figure nine prior entries quote (**66 unscanned / 4 with hits** today,
+  72 / 5 at `893d74f6`, when that level held 26 files) becomes **111 / 14**
+  over a `git ls-tree` list
   with the same exclusions; the 10 newly visible hit files carry 16 hits, 6 in
   agent-facing strings (two tool descriptions, three refusal texts, one
   next-step message) and 10 in JSDoc, the documented false-positive class. The
@@ -2506,7 +2513,8 @@ tracked frontend epic (13 slices, 4 walkthrough rounds) plus the builds of the
   `(none)`, off the money path.
 - Notes, not proposed: block 8 prints three unmarked typed codes on agent
   payment routes (`rail_not_supported` 422, `budget_requires_recipient` 409,
-  `balance_changed` 409) and five on the two sign-context reads — named so
+  `balance_changed` 409) and 8 rows (5 codes) on the two x402 context reads —
+  named so
   the next run can tell new from baseline, since the 2026-10-27 baseline
   counted its 13 payment-route codes without naming them; four dialogs
   outside the shared Modal still set `role="dialog"` after the epic's
@@ -2518,7 +2526,8 @@ tracked frontend epic (13 slices, 4 walkthrough rounds) plus the builds of the
 2026-10-26 via PR #4463 → `shipped`. 2026-10-26 B C1 → #4458 closed
 2026-10-26 via PR #4465 → `shipped`; C2 → #4459 closed 2026-10-26 via PR #4464
 (`807e6d5c1`) → `shipped`. 2026-10-30 C1 → #4576 closed 2026-10-30 after PR
-#4584 (`a254800`, `Refs`; `landed-partial`) → `shipped`; C2 → #4577 via PR
+#4584 (`a254800`, `Refs`; `landed-partial`, a label #4458 and #4459 carry
+too) → `shipped`; C2 → #4577 via PR
 #4583 (`69d5f98`) → `shipped`; C3 → #4578 via PR #4585 (`c787bd3`) →
 `shipped`; C4 → #4579 via PR #4587 (`1406e9c`) → `shipped`; C5 → #4580 open,
 built by PR #4582 (`f11274a`, `Refs`), its operator-verify burst outstanding.
@@ -2579,8 +2588,9 @@ built by PR #4582 (`f11274a`, `Refs`), its operator-verify burst outstanding.
 - comment archaeology → examined → TODO / FIXME / HACK / XXX → 0 (control
   `import` → 2,223 files); most-repeated comment 25 copies of one
   request-validation boilerplate line.
-- cross-package duplication → partial (one status-literal census, 20 files
-  across six packages, not read further); validation / contracts → partial
+- cross-package duplication → partial (one status-literal census with its
+  command in the report, 40 files across 8 packages — first written as 20 /
+  six without one — not read further); validation / contracts → partial
   (blocks 8, 9 and M1); data-layer coverage → partial (gauge, the recording's
   real-DB run, P1); live exercise → not examined.
 - novelty → the full ledger, the bug reports' names, GitHub searches per
@@ -2592,6 +2602,11 @@ follows (C2); the census runner accepts `census` and the two probe kinds only;
 the real-DB harness reads `DATABASE_URL` from the runner's environment; the
 container's proxy denies the Base Sepolia RPC and its loopback has no IPv6.
 
-**Review:** pending the `haven-reviewer` pass on this PR.
+**Review:** `haven-reviewer` at head `410384353`, bound through the
+review-isolation guard, re-derived every quoted command; no blocking, five
+should-fix (the first-audit label and the per-doc overstatement in C1, C2's
+"eight scans / 45 files", a three-versus-two red count, the C1 guard's shape
+versus its migration, a census figure with no command), four nits. All
+applied in place; corrected figures are marked above and in the report's § 5.
 
 **Disposition: pending owner decision** (C1, C2).

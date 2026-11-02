@@ -85,9 +85,11 @@ governed prose, "narrative that no reader reaches", loaded "into every session
 and every reviewer pass". The chains were moved verbatim to the archive and a
 script verifies that archive.
 
-Since the first weekly audit after that retirement, the audit's closing PR has
-appended a dated paragraph to each doc it re-verified — the same record, in the
-body instead of the front matter. At `e0617aa9f`:
+Since the second weekly audit after that retirement (#3211, `2f8a666cb`,
+2026-09-21; the first, #3009 on 2026-09-15, added none), audit closings have
+appended a dated paragraph to docs they re-verified — the same record, in the
+body instead of the front matter — and the #4372 re-verify epic and five
+unrelated landings adopted the shape. At `e0617aa9f`:
 
 ```bash
 # Narrow shape: a paragraph that opens `Re-verified YYYY-MM-DD`, outside the archive.
@@ -104,24 +106,28 @@ git grep -h -E '^Re-verified 20[0-9]{2}-[0-9]{2}-[0-9]{2}' origin/dev -- 'docs/*
 git grep -l -E '^(#+ |\*\*|_|> )?Re-(verified|checked) (on )?20[0-9]{2}-[0-9]{2}-[0-9]{2}|^#+ .*[Rr]e-(verif|check).*20[0-9]{2}-[0-9]{2}' origin/dev -- 'docs/*.md' ':!docs/archive/*' | wc -l
 # 42 docs (28 current, 14 record), 92 openers
 
-# Positive control and start date: zero at the parent of the first audit after the retirement, 9 at that audit.
+# Positive control and start date: zero at the parent of the first landing that added the shape (the second post-retirement audit), 9 at it.
 git grep -h -E '^Re-verified 20[0-9]{2}-[0-9]{2}-[0-9]{2}' 2f8a666cb^ -- 'docs/*.md' ':!docs/archive/*' | wc -l   # 0
 git grep -h -E '^Re-verified 20[0-9]{2}-[0-9]{2}-[0-9]{2}' 2f8a666cb  -- 'docs/*.md' ':!docs/archive/*' | wc -l   # 9
 
 # Landings that added one, by month.
 git log --first-parent origin/dev --format='%ad' --date=short -G'^Re-verified 20[0-9]{2}-' -- 'docs/*.md' | cut -c1-7 | sort | uniq -c
-# 3 in 2026-09, 18 in 2026-10, 1 in 2026-11
+# 3 in 2026-09, 18 in 2026-10, 1 in 2026-11 — 22 landings. Net `+Re-verified` lines per landing,
+# attributed by subject: 40 from the 9 weekly-audit closings (#3206, #3413, #3645 ×5, #4438,
+# #4605), 23 from the 8 #4372 parts, 6 from 5 unrelated landings; 69 in all.
 ```
 
 The heaviest doc is the architecture overview: 6 paragraphs, **7,533 of its
 21,626 bytes** (35 %) are re-verification prose. The 2026-11-02 audit landing
-(`e0617aa9f`, 14 files, `+290/−46`) added 12 narrow-shape paragraphs; the
-2026-10-26 one (`ba99cdc5d`, `+536/−16`) appended its notes as `## Dispositions
-re-checked …` sections instead, which is why the narrow shape undercounts and
-the wide shape is reported too. The shape is not required by anything: the
+(`e0617aa9f`, 14 files, `+290/−46`) added 12 narrow-shape paragraphs (none to
+2 of its 14 files); the 2026-10-26 one (`ba99cdc5d`, `+536/−16`) added 2 and
+appended the rest as `## Dispositions re-checked …` sections, which is why the
+narrow shape undercounts and the wide shape is reported too. The wide shape
+splits **73 openers in 28 `status: current` docs** and 19 in 14 records. The shape is not required by anything: the
 audit issue's body asks to "re-verify it against the code and bump
-`last-verified`, or update it", and the only instruction that asks for a
-*Re-verified* note is the release skill's step 3 for the security model.
+`last-verified`, or update it", and the only instructions that ask for a
+scoped *Re-verified* note are the release skill's items 2 and 3 (the
+package-dev-channel doc and the security model, at a release).
 
 Two costs the repository has already paid for this class:
 
@@ -133,8 +139,10 @@ Two costs the repository has already paid for this class:
   `packages/frontend/scripts/serve-docs.mjs`) carries one narrow-shape
   paragraph of 1,573 bytes today, served to every agent that fetches it.
 - **#2681's own measurement** is the reason the front-matter form was retired;
-  the body form is 15 % of that size after eight weeks and grows at the audit's
-  cadence (one paragraph per ranked doc per week).
+  the body form is 68,773 bytes against the 461 KB it retired (15 %), or 9,173
+  words against its 68,029 (13 %, `wc -w` over the 30 docs' paragraphs), seven
+  and a half weeks after #2775, and it grows with every audit closing (2 to 12
+  paragraphs per landing above).
 
 **Expected benefit.** The audit's closing PR stops writing prose to prove the
 reading happened; the PR body and the `last-verified` bump are the record, as
@@ -142,18 +150,23 @@ reading happened; the PR body and the `last-verified` bump are the record, as
 silently reverse under a new syntax, because a guard names the shape.
 
 **Approximate scope.** One PR: a guard beside the front-matter validator that
-refuses a dated re-verification opener in a governed doc's body (the shape
-above, with the two fixture controls the block-2 selector now carries), the
-rule stated once in `docs/contributing/docs-quality-system.md` and in the
-release skill's step 3, and the 69 existing paragraphs moved verbatim to the
-archive file the #2775 retirement created (or deleted, since each landing's PR
-carries the same text — the owner's call). Two PRs if the owner wants the
-migration apart from the guard. Off the money path.
+refuses the **wide shape** (a dated `Re-verified` / `Re-checked` opener as a
+bare line, heading, bold or blockquote) in the body of a `status: current`
+doc, with the two fixture controls the block-2 selector now carries; `record`
+docs are left as written, per #4459's rule, so the guard skips them and the
+migration does not touch their 19 openers. The rule stated once in
+`docs/contributing/docs-quality-system.md` and in the release skill's items 2
+and 3, and the **73 current-doc notes** (65 narrow paragraphs and 8 other-shape
+notes) moved verbatim to the archive file the #2775 retirement created (or
+deleted, since each landing's PR carries the same text — the owner's call).
+Two PRs if the owner wants the migration apart from the guard. Off the money
+path.
 
 **Verified at scan** (`e0617aa9f`):
 
 - criterion grep → 69 paragraphs / 30 docs (narrow), 92 openers / 42 docs
-  (wide); control 0 → 9 at `2f8a666cb^` → `2f8a666cb`, as above;
+  (wide; 73 in 28 current, 19 in 14 records); control 0 → 9 at `2f8a666cb^`
+  → `2f8a666cb`, as above;
 - routing: `scripts/docs/audit-staleness.mjs`, `docs/contributing/docs-quality-system.md`,
   `.agents/skills/release/SKILL.md`, `docs/architecture/00-overview.md` and
   the archive file → `(none)`; `.github/workflows/docs-audit.yml` → `full`
@@ -171,7 +184,7 @@ without it accepted), per the #2720 convention; the archive move is proven by
 the byte-equality diff #2681 required of #2775; `served-docs.test.ts` stays
 green on the four served docs.
 
-### C2 — block 6's copy-lint perimeter command cannot see the SDK's top-level files, so eight scans' "unscanned" figure was 45 files short
+### C2 — block 6's copy-lint perimeter command cannot see the SDK's top-level files, so the "unscanned" figure nine entries quote is 46 files short today
 
 **Opportunity and evidence.** The copy-lint half of block 6 lists candidate
 files with `git ls-files 'packages/frontend/src/**/*.ts' 'packages/frontend/src/**/*.tsx' 'packages/sdk/src/**/*.ts'`.
@@ -186,7 +199,9 @@ git ls-tree -r --name-only origin/dev packages/sdk/src | grep -E '^packages/sdk/
 ```
 
 The reference command, run as written → **66 unscanned / 4 with hits**, the
-figure every entry since 2026-09-03 reports in this series (72 / 5 then). The
+figure nine prior entries quote in this series (72 / 5 at `893d74f6`, when the
+SDK's top level held 26 non-test files; the glob was added once, in
+`a770ac268` on 2026-09-03, and never changed). The
 same filter over a list that includes the top level (`git ls-tree -r
 --name-only origin/dev packages/frontend/src packages/sdk/src`, `.ts`/`.tsx`,
 the same exclusions, minus `SCAN_FILES`) → **111 unscanned / 14 with hits**.
@@ -205,7 +220,7 @@ simply never reached it.
 This is the instrument class the 2026-10-30 C1 (#4576, the block-2 selector)
 and the 2026-09-21 `set -f` lesson belong to: a block's own sample excluded
 part of what it claimed to measure, and the figure was quoted as a baseline
-for eight runs. No product incident is claimed.
+in nine entries. No product incident is claimed.
 
 **Expected benefit.** The block's figure says what it claims; the six
 agent-facing strings become a visible decision (name the files in
@@ -240,8 +255,9 @@ self-test.
 - **Block 8 prints three unmarked typed codes on agent payment routes**
   (`POST /machine-payments/send` 422 `rail_not_supported`,
   `POST /machine-payments/budget-precheck` 409 `budget_requires_recipient`,
-  `POST /machine-payments/sweep/submit` 409 `balance_changed`) and five on the
-  `GET …/sign-context` and `…/merchant-call-context` reads. The 2026-10-27
+  `POST /machine-payments/sweep/submit` 409 `balance_changed`) and 8 rows on
+  the x402 `sign-context` and `merchant-call-context` reads (13 rows counting
+  the payments `sign-context` read; 5 distinct codes). The 2026-10-27
   baseline listed its 13 payment-route codes by count, not by name, and the
   issue it filed (#4468) names none of these three, so whether they were in
   that set is not determinable from the ledger; they are reported here by name
@@ -251,8 +267,7 @@ self-test.
   design-system entry), the wallet button, the connect-flow close guard and
   the sidebar sheet. No cost evidence; the epic's own walkthrough rounds
   (#4601, #4602, #4607, #4608) are where that judgement is being made.
-- **Three environment reds in the backend suite** are coverage limits, not
-  findings: the caveat-enforcer contract test cannot reach `sepolia.base.org`
+- **Two environment-red backend files** are coverage limits, not findings: the caveat-enforcer contract test cannot reach `sepolia.base.org`
   through this container's proxy, and the loopback net test's IPv6 listen
   fails with `EAFNOSUPPORT` here.
 
@@ -352,9 +367,9 @@ All measurements at `e0617aa9f`; parentheses are the 2026-10-30 entry at
   -- 'packages/*/src/*'` → 0; control `import` → 2,223 files. Most-repeated
   source comment: 25 copies of one request-validation boilerplate line; the
   21-copy #1464 line is the 2026-10-26 note.
-- **Cross-package duplication → partial.** One census only: the
-  `pending_approval` literal sits in 20 non-test files across six packages;
-  not read further.
+- **Cross-package duplication → partial.** One census only:
+  `git grep -l -w pending_approval origin/dev -- 'packages/*/src/*.ts' 'packages/*/src/*.tsx' ':!*.test.*' ':!*__tests__*' ':!*migrations*'`
+  → 40 non-test files across 8 packages; not read further.
 - **Validation / contracts → partial.** Blocks 8 and 9 and the #4579 guard
   (M1); no shadow-residue census.
 - **Data-layer coverage → partial.** The db-mock gauge, 549 backend files run
@@ -380,8 +395,27 @@ All measurements at `e0617aa9f`; parentheses are the 2026-10-30 entry at
 
 ## 5. Independent review
 
-Pending — filled in when the `haven-reviewer` pass on this PR has bound its
-verdict to the reviewed SHA.
+`haven-reviewer` at head `410384353` (base `e0617aa9f`), bound through
+`review-isolation.mjs`, briefed to re-derive every figure and every claim about
+a past event from its instrument or artifact at the scan SHA. Verdict: **no
+blocking, five should-fix, four nits**; every quoted command reproduced (the
+list is in the review), blocks 2–4, the 25-copy comment, the failed-job split
+and the money-flow split were not re-derived. All nine corrections are applied
+above and marked where a figure or claim changed:
+
+- C1 named `2f8a666cb` as the first post-retirement audit; it is the second
+  (#3009 added none), and "each audit appends to every doc" was overstated —
+  the 69 are now attributed by landing (40 / 23 / 6);
+- C2's "eight scans … 45 files short" → nine entries; 46 today, 26 at
+  `893d74f6`;
+- "three environment reds" → two files;
+- C1's guard and migration now name one shape (the wide shape, current docs
+  only, 73 notes) and leave records alone;
+- the `pending_approval` census carries its command → 40 files / 8 packages
+  (first written as 20 / six, with no command);
+- nits: the 15 % now has its unit beside the word figure, the release skill's
+  item 2 joins item 3, the block-8 note counts rows and codes apart, and the
+  `landed-partial` label is noted on #4458 and #4459 too.
 
 Instrument lessons: the cloud clone is shallow (50 commits) — unshallow
 before block 5, every time; a git pathspec `**/` never matches a top-level

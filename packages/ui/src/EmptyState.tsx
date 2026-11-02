@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger'
 type Size = 'default' | 'compact' | 'inline'
+type Align = 'center' | 'start'
 
 interface EmptyStateProps {
   icon?: ReactNode
@@ -27,6 +28,20 @@ interface EmptyStateProps {
    * is the in-card preview; `bare` alone is the in-card page-level state.
    */
   bare?: boolean
+  /**
+   * `center` (default) — the state stands on its own: a page, a section, a
+   * list body.
+   * `start` — the state sits in left-aligned content and must line up with it:
+   * a card column under a left-aligned heading, a settings row's value.
+   * Everything starts at the content edge; with `bare` and `inline` the line
+   * also drops its padding, so it is plain text where a value would be.
+   *
+   * An option, not a `className="text-left px-0"` override: that class list
+   * also holds `text-center` and `px-3`, and Tailwind emits those AFTER
+   * `text-left` and `px-0`, so the override silently lost (the Spending card's
+   * "No budget yet." sat centred above a left-aligned Set budget button).
+   */
+  align?: Align
   className?: string
 }
 
@@ -70,19 +85,27 @@ export function EmptyState({
   action,
   size = 'default',
   bare = false,
+  align = 'center',
   className = '',
 }: EmptyStateProps) {
   const palette = TONE_CLASSES[tone]
+  const start = align === 'start'
+  const textAlign = start ? 'text-left' : 'text-center'
+  // Centred blocks need `mx-auto`; at `start` they sit on the content edge.
+  const blockAlign = start ? '' : 'mx-auto'
   // #4563: `bare` drops the shell but keeps everything else. The shell is a
   // filled surface (`--v2-surface`), so inside a `Card` it would be a second
   // filled surface — CLAUDE.md § UI Surface Hierarchy forbids that.
   const shell = bare
-    ? 'text-center'
-    : 'rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] text-center'
+    ? textAlign
+    : `rounded-[10px] border border-dashed border-[var(--v2-border-strong)] bg-[var(--v2-surface)] ${textAlign}`
 
   if (size === 'inline') {
+    // The padding insets the text from the dashed shell; with no shell and
+    // nothing to centre it would only push the text off the content edge.
+    const padding = bare && start ? '' : 'px-3 py-2.5'
     return (
-      <div className={`${shell} px-3 py-2.5 text-xs text-[var(--v2-ink-3)] ${className}`}>
+      <div className={`${shell} ${padding} text-xs text-[var(--v2-ink-3)] ${className}`}>
         {title}
       </div>
     )
@@ -93,7 +116,7 @@ export function EmptyState({
     <div className={`${shell} ${isCompact ? 'p-6' : 'px-6 py-10'} ${className}`}>
       {icon && (
         <div
-          className={`mx-auto flex items-center justify-center rounded-full ring-4 ${
+          className={`${blockAlign} flex items-center justify-center rounded-full ring-4 ${
             isCompact ? 'mb-3 h-8 w-8' : 'mb-4 h-10 w-10'
           } ${palette.iconBg} ${palette.iconColor} ${palette.halo}`}
         >
@@ -107,7 +130,7 @@ export function EmptyState({
       </h3>
       {body && (
         <div
-          className={`mx-auto mt-2 max-w-sm leading-relaxed text-[var(--v2-ink-2)] ${
+          className={`${blockAlign} mt-2 max-w-sm leading-relaxed text-[var(--v2-ink-2)] ${
             isCompact ? 'text-xs' : 'text-sm'
           }`}
         >

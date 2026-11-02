@@ -515,7 +515,7 @@ export default function AccountDetailClient() {
                 <Skeleton variant="text" className="h-4 w-24" />
               </div>
             ) : holdings.length === 0 ? (
-              <EmptyState size="inline" bare title="No tokens yet" className="mt-2 px-0 py-0 text-left" />
+              <EmptyState size="inline" bare align="start" title="No tokens yet" className="mt-2" />
             ) : (
               <ul className="mt-2 space-y-2">
                 {holdings.map((row) => {

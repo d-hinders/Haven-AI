@@ -196,7 +196,7 @@ export default function AgentSettingsTab({
             agent.labels.length > 0 ? (
               <LabelChipRow labels={agent.labels} />
             ) : (
-              <EmptyState size="inline" bare title="No labels yet." className="px-0 py-0 text-left" />
+              <EmptyState size="inline" bare align="start" title="No labels yet." />
             )
           }
           action={

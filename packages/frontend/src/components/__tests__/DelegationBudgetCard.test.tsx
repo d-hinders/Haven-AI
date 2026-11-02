@@ -1067,6 +1067,16 @@ describe('DelegationBudgetCard Spending section (#3695)', () => {
     expect(within(grantDialog()).getByRole('button', { name: 'Cancel' })).toBeTruthy()
   })
 
+  // #4569 put "No budget yet." on a bare EmptyState, which centres: the line
+  // floated in the middle of the column over a left-aligned Set budget.
+  it('the no-budget line is left-aligned, on the same edge as Set budget', () => {
+    mockGet.mockReturnValue([])
+    render(<DelegationBudgetCard {...PROPS} />)
+    const line = screen.getByText('No budget yet.')
+    expect(line).toHaveClass('text-left')
+    expect(line).not.toHaveClass('text-center')
+  })
+
   // #3695 review S1: an `active` row past its `expires_at` cannot spend — it
   // must not count down "expires in 1m" forever, nor carry a usage meter.
   it('a budget past its expiry says it has expired — no meter, no countdown', () => {

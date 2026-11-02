@@ -88,4 +88,38 @@ describe('EmptyState (#854)', () => {
     expect(root.className).toContain('px-3')
     expect(root.textContent).toBe('No budget set yet')
   })
+
+  // The Spending card's "No budget yet." sat centred above a left-aligned
+  // Set budget button: `bare` keeps `text-center`, and a `text-left`
+  // className loses to it in Tailwind's emitted order.
+  it('align="start" left-aligns the state and keeps it on the content edge', () => {
+    const { container } = render(<EmptyState bare size="inline" align="start" title="No budget yet." />)
+    const root = container.firstElementChild!
+    expect(root).toHaveClass('text-left')
+    expect(root).not.toHaveClass('text-center')
+    // No shell to inset from, so no padding pushing it off the edge.
+    expect(root).not.toHaveClass('px-3')
+    expect(root).not.toHaveClass('py-2.5')
+  })
+
+  it('align="start" un-centres the icon and body of the larger sizes', () => {
+    const { container } = render(
+      <EmptyState
+        bare
+        align="start"
+        icon={<span data-testid="icon" />}
+        title="No payments yet"
+        body="Payments your agents make appear here."
+      />,
+    )
+    const root = container.firstElementChild!
+    expect(root).toHaveClass('text-left')
+    expect(screen.getByTestId('icon').parentElement!.parentElement!).not.toHaveClass('mx-auto')
+    expect(screen.getByText('Payments your agents make appear here.')).not.toHaveClass('mx-auto')
+  })
+
+  it('centres by default, shell or not', () => {
+    const { container } = render(<EmptyState bare size="inline" title="No budget set yet" />)
+    expect(container.firstElementChild!).toHaveClass('text-center')
+  })
 })

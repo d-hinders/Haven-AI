@@ -6568,6 +6568,13 @@ export const SCENARIOS = {
           })),
         }
       }
+      // A task budget is carved from an active budget (#3329), so an agent
+      // with none has no open task budget either. The shared fixture's open
+      // one would otherwise sit under "No budget yet." as "taken from the
+      // budget above" with nothing above it — a state no user can reach.
+      if (apiPath === '/agents/agent-research/task-budgets' && agentBudgetStage === 'no-budget') {
+        return { task_budgets: [] }
+      }
       // The agent's own `allowances` is a VIEW over active delegations
       // (#1090), so a no-budget agent whose allowances still listed a token
       // would be a shape the product cannot produce — and would hide the very

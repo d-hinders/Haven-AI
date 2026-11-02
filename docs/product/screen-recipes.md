@@ -869,8 +869,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carry the Needs attention badge while the Status facet can narrow to them.
    The row badge reads the machine-payment lifecycle before the intent's own
    status, the same precedence as the wallet feed's rows: a stranded
-   payment's intent is `confirmed` (its funding settled), so the status alone
-   would say Sent (#4249).
+   payment's intent is `confirmed` (its funding settled), and a confirmed
+   payment's row carries no badge at all (#4608), so the lifecycle badge is
+   what reads (#4249).
    **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
    below).
 6. Settings (#4228, rebuilt on the shared settings rows by #4477): the tab is
@@ -888,12 +889,14 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       tooltip. An agent with no name AND no `mcp_last_seen_at` reads
       "**No MCP connection recorded**" — and does NOT say "API key": a null
       name alone also means an MCP agent connected before names were
-      recorded. The **API key** prefix line (the visible prefix half of the
+      recorded. The **API key** prefix (the visible prefix half of the
       credential; the full key is shown once at creation and in the
-      credentials modal) lives on THIS row's value slot, beside the server
-      name, in every connection state. It did not move to Payment
-      credentials because that row is hidden for revoked and archived
-      agents, while the prefix must stay visible on the tab in every state.
+      credentials modal) is NOT on this row (#4608, owner decision
+      2026-11-02): it shows only under Payment credentials → View. That
+      reverses #4477's reason for the placement — a revoked or archived agent
+      therefore shows its prefix nowhere, because Payment credentials is
+      hidden for those agents (`canManageCredentials`), and the owner
+      accepted that residual.
    2. **Payment credentials**: **View** (opens `PaymentCredentialsModal`) and
       **Replace signing key** (`ReplaceSigningKeyModal`) — hidden for
       revoked and archived agents, matching the header ⋮ menu's

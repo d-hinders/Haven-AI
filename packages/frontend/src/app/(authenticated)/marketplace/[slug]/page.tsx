@@ -6,6 +6,7 @@ import { BackLink } from '@haven_ai/ui/BackLink'
 import { Icon } from '@/components/ui/Icon'
 import { notFound as nextNotFound, useParams } from 'next/navigation'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SectionHeading } from '@/components/ui/SectionHeading'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Button } from '@/components/ui/Button'
 import Link from 'next/link'
@@ -247,7 +248,7 @@ export default function MerchantPage() {
           ) : null}
 
           <section>
-            <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Offers</h2>
+            <SectionHeading title="Offers" />
             <OffersTable
               offers={offers}
               agents={agents}

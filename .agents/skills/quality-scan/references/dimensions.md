@@ -442,24 +442,31 @@ model. Report per gate: what it does not reach, which entries carry the
 content class, and the exit-branch list with line numbers. **Take the
 docs-boundary count pinned** — `git ls-tree -r --name-only <sha>` rather than
 `git ls-files`, which reads the live worktree: re-taken unpinned on a branch
-that ADDS a Markdown file, this block reads 37 where the pinned figure is 36,
+that ADDS a Markdown file, this block reads 44 where the pinned figure is 43,
 and the extra file is the reader's own change. (Observed on this block's own
 review; the same hazard is why block 5 prints its SHA.) On `e0617aa9f`:
 copy lint 111 unscanned files, 14 with hits — the frontend's 4, unchanged
 from the glob's reading, plus 10 files at the SDK's top level the glob could
 not see, carrying 16 hits: 6 in agent-facing strings (one each in six files)
-and 10 in JSDoc (the documented false-positive class); money path 29 verb
+and 10 in JSDoc (the documented false-positive class); money path 32 verb
 files, 20 outside the perimeter (qa-agent pilots, backend scripts,
-`sdk/src/sweep.ts`, `frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of
-24 app routes shot; 36 Markdown files outside both docs-quality boundaries.
+`sdk/src/sweep.ts`, `frontend/src/lib/hybridAccountOps.ts`); visual gate 15 of
+27 app routes shot (12 not shot); 43 Markdown files outside both docs-quality
+boundaries. The copy-lint figure is pinned to that SHA; the other three are
+live-tree readings taken at that checkout, so they drift with the tree (see
+the note below).
 
 The series converts: every ledger entry from 2026-09-15 to 2026-11-02
 (#4609 adds the tenth) quoted the glob's reading — 75 / 6, 87 / 6, 98 / 6,
 52 / 4, 56 / 4, 60 / 4, 64 / 4, 64 / 4, 66 / 4 — and this block's own
 recorded 72 / 5 at `893d74f6` was taken the same way, with that SHA's
-`SCAN_FILES` and the filter before `fe491ac24` added `/hooks/` (re-run with
-today's allowlist and filter it reads 35 / 4). So the next entry's step from
-66 / 4 to 111 / 14 is the selector change, not 45 new unscanned files.
+`SCAN_FILES`, that SHA's matcher and the filter before `fe491ac24` added
+`/hooks/`. The 72 reproduces on that list; the 5 is that SHA's matcher —
+today's matcher reads 7 on the same list, because the three `src/hooks/`
+files are hits under the pre-`/hooks/` filter and the matcher changed 222
+lines between the two SHAs. Re-run with today's allowlist and filter it reads
+35 / 4. So the next entry's step from 66 / 4 to 111 / 14 is the selector
+change, not 45 new unscanned files.
 
 **Observation for the lint's owner, not a decision of this block:** the six
 agent-facing strings the glob never reached are

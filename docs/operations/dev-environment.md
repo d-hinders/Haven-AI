@@ -39,6 +39,17 @@ covers:
 last-verified: "2026-10-25"
 ---
 
+> **Re-verified #4612 (2026-11-02, the version-only partition gains a constant
+> set):** the one covered file this diff touches is `scripts/ci/qa-freshness.mjs`.
+> `isVersionOnlyDiff` and `partitionVersionOnly` gain an optional `constants`
+> argument naming the `export const <NAME>_VERSION` set to recognise; the default
+> is the same two constants this gate has always used, so every existing caller
+> and every decision this document describes are unchanged. The wider set is
+> passed only by the docs coupling gate, which partitions files this gate never
+> looks at. No env variable, port, service, workflow or freshness threshold
+> moves. Nothing else in this document was re-verified, and `last-verified` is
+> not bumped.
+
 > **Re-verified #4570 (2026-10-31, British spelling in the organisations copy):**
 > this diff touched one file in this document's coverage list,
 > `packages/frontend/src/hooks/useOrganizations.ts`. The change is one

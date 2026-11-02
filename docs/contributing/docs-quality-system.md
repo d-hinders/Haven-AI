@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - scripts/docs/**
+  - scripts/release-version-constants.mjs
   - scripts/ci/queue-framing-census.test.mjs
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
@@ -88,6 +89,29 @@ last-verified: "2026-06-28"
 - **A shard clears the blocking half, not the doc (#2323).** The advisory
   comment names such a parent in its own *"Parent docs cleared by a shard — body
   not re-read"* section; re-read it against the changed files.
+- **A version-literal-only diff does not implicate a doc (#4612).** A changed
+  file whose **entire** diff is release-version constants — the `export const
+  <NAME>_VERSION` literals `scripts/release-version-constants.mjs` owns, plus
+  `package.json` version fields and `@haven_ai/*` pins — is partitioned out
+  before the gate matches `covers:`. That is why a release bump no longer
+  implicates the security model or the package-dev-channel doc: the bump's only
+  edit to the signer's and the connector's version constants is a version string.
+  The partition is per-file and per-hunk, so one behavioural
+  line in the same file implicates the doc again, and the partitioned files are
+  printed in the gate's comment as *"version literal only — not implicating"*,
+  never silently. It needs a diff range: CI passes `BASE_SHA`/`HEAD_SHA`, and a
+  bare `--changed=` list has no diff, so it treats every file as behavioural.
+- **A commit trailer records a re-read (#4612).** `Re-verified-unchanged: <doc
+  path> @ <sha>` on any commit in the PR satisfies the gate for that doc, and the
+  comment prints *"re-verified unchanged by commit `<short sha>`"*. It is a
+  trailer rather than a PR body because the body is fork-injectable when
+  interpolated into a shell step, is not re-run when edited, and is absent from
+  git after a squash merge — `squash_merge_commit_message: COMMIT_MESSAGES` keeps
+  commit bodies. Three limits, each of which can only refuse to satisfy: the doc
+  must be governed; a doc declaring `satisfied-by:` is **never** trailer-satisfied
+  (the shard requirement is untouched by construction); and the `<sha>` must be an
+  ancestor of the PR head. A trailer that clears nothing is printed with the
+  reason.
 - **Bump `last-verified` only on a genuine re-read.** It is a date, not a change
   log — a rubber stamp is worse than a stale one, because the weekly staleness
   audit ranks on it. A `verified:` block or an inline annotation on the

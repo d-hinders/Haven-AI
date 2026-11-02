@@ -31,6 +31,26 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **Re-verified #4612 (2026-11-02, this doc stops being implicated by a version
+> bump):** coupled through `scripts/release-bump.mjs` and
+> `scripts/release-version-constants.mjs`. The bump's printed next-steps block
+> now says this document needs **no edit** for a release whose only change to
+> `packages/connect/src/runtime.ts` and `packages/mcp/src/server.ts` is the
+> version literal, because the docs coupling gate partitions a version-literal-only
+> diff out (#4612). `release-version-constants.mjs` gains
+> `DEDICATED_VERSION_CONSTANT_FILES` (`MCP_VERSION`) and
+> `ALL_VERSION_CONSTANT_FILES`; `SOURCE_VERSION_CONSTANT_FILES` is unchanged.
+> Re-read against the diff and unchanged: the snapshot version format
+> (`0.0.0-dev.<ts>.<sha>`, `scripts/release-snapshot-version.mjs`), the channel
+> resolution and its guards (`scripts/release-channel.mjs`,
+> `packages/sdk/src/connector-channel.ts`,
+> `packages/mcp-server/src/connector-channel.ts`), `HAVEN_CONNECTOR_CHANNEL` and
+> `parseConnectorChannel` in `packages/backend/src/config.ts`, the credential-file
+> shape and consent inputs, and the `dev` dist-tag publish in
+> `.github/workflows/publish.yml`. None of those files is in this diff.
+> `last-verified` is not bumped: this is a scoped check of two script edits, not
+> a re-verification of the document.
+
 > **Re-verified (0.13.0-alpha.0 release, 2026-10-30):** coupled through
 > `CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`, which this bump
 > rewrote from `0.12.0-alpha.0` to `0.13.0-alpha.0`. That literal is the ONLY

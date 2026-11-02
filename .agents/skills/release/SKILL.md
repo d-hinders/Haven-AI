@@ -335,44 +335,56 @@ rather than greps. If the guard fires, read what it names.
 
 ## Satisfy The Contract-Doc Gate
 
-**A bump implicates FIVE contract docs.** This step said two until
-2026-09-16, and three until 2026-09-29, when #3454 moved `SIGNER_VERSION` into
-the signer's `tools.ts`, which two more docs cover. The blocking
-`Contract-doc coupling` check fails without all five, and forgetting one is the
-single most common way a release PR goes red.
-Measured rather than remembered — the gate's own answer for the files every
-bump writes:
+**A bump implicates ONE contract doc that needs action: `casp-risk-guardrails.md`,
+cleared by the CASP shard.** This step said five until 2026-11-02, three until
+2026-09-29, and two until 2026-09-16. The five was right for the gate as it
+stood: every bump rewrote `SIGNER_VERSION` in `packages/signer/src/tools.ts` and
+`CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`, so the security model
+and the package-dev-channel doc were implicated by a diff that changed nothing
+but a version string. #4612 removed that — a file whose **entire** diff is
+release-version constants does not implicate a doc.
+
+Measured rather than remembered. Run it over the range a release PR actually
+has; a bare `--changed=` list carries no diff, so it treats every file as
+behavioural and still reports the old five:
 
 ```sh
-node scripts/docs/coupling-gate.mjs --strict \
-  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/tools.ts
-# BLOCKING: 5 contract doc(s) … 04-x402-payment-sequence.md,
-#           mcp-runtime-compatibility.md, package-dev-channel.md,
-#           casp-risk-guardrails.md, delegation-rail-security-model.md
+BASE_SHA=<base> HEAD_SHA=<head> node scripts/docs/coupling-gate.mjs --strict
+# BLOCKING: 1 contract doc(s) cover changed code but were not touched in this PR:
+#   - docs/regulatory/casp-risk-guardrails.md — or add a verification shard …
 ```
 
-Three must be **edited directly** (none carries `satisfied-by:`, so no shard
-clears them); the other two are cleared by the shard you write anyway:
+On a simulated `0.13.1-alpha.0` bump, 13 files partition as *version literal
+only — not implicating*: the six `package.json`s (`cli`, `connect`, `mcp`,
+`mcp-server`, `sdk`, `signer` — `VERSIONED_PACKAGES` is the published five plus
+`mcp-server`), `package-lock.json`, and the six source constants. The one
+blocking doc is `casp-risk-guardrails.md`, implicated by two files:
+`packages/connect/src/runtime-manifest.ts` and `packages/signer/CHANGELOG.md`.
+`runtime-manifest.ts` does **not** partition — its `sdkVersion`/`signerVersion`
+literals are property assignments, not `export const` lines, so they match none
+of the gate's version-line shapes; the CHANGELOG heading is prose, not a version
+literal either.
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
    Manifest* table is re-pinned by the bump (#1790); update its
    `last-verified` date only after reading the table. Record the release's
    verification evidence in the PR and release shard rather than front matter.
-2. `docs/operations/package-dev-channel.md` — **the one the old wording
-   dropped.** The bump rewrites `CONNECTOR_VERSION`
-   (`packages/connect/src/runtime.ts`), which is in this doc's `covers:`, so
-   every release couples it. It was never optional: the 0.1.37, 0.2.0 and
-   0.2.1 releases all touched it, the first two by bumping `last-verified`
-   alone. Prefer a scoped note saying what you actually re-verified — and if
-   `last-verified` already reads today from an earlier change, say so and do
-   NOT re-stamp it, because a rubber-stamped date is worse than a stale one
-   (#1366).
-3. `docs/security/delegation-rail-security-model.md`: the bump rewrites
-   `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this doc covers.
-   It has no `satisfied-by:`, so add a scoped *Re-verified* note saying that
-   the release's edit to that file is the version literal only. Name any
-   signing-surface change in the range as already re-verified where it merged,
-   or re-verify it now.
+2. `docs/operations/package-dev-channel.md` — **no edit needed.** The bump
+   rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`) and
+   `MCP_VERSION` (`packages/mcp/src/server.ts`), both in this doc's `covers:`,
+   and both diffs are version literals only, so the gate partitions them out
+   (#4612). The exception is a release that changes the connector **channel**:
+   `connector-channel.ts` then changes too, that is not a version literal, and
+   the doc is implicated again — edit it, or record the re-read with a
+   `Re-verified-unchanged:` trailer.
+3. `docs/security/delegation-rail-security-model.md` — **no edit needed**, for
+   the same reason: the bump's only edit to `packages/signer/src/tools.ts` is the
+   `SIGNER_VERSION` literal. A release that changes signing behaviour in that
+   file implicates the doc again, and then it needs an edit or a
+   `Re-verified-unchanged: docs/security/delegation-rail-security-model.md @ <sha>`
+   trailer on a commit in the PR. **Name any signing-surface change in the range
+   in the release shard**, which is where a release's real signing-surface
+   changes are recorded.
 4. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
    shard ending in a perimeter verdict. The **version**, not the PR number
    (#1789): the shard must exist before the PR is opened, because the gate blocks
@@ -380,7 +392,8 @@ clears them); the other two are cleared by the shard you write anyway:
    This shard is what clears `casp-risk-guardrails.md` and
    `docs/architecture/04-x402-payment-sequence.md`, whose front matter both
    declare `satisfied-by: docs/regulatory/casp-changelog/**`. That is why
-   neither needs an edit of its own.
+   neither needs an edit of its own. It is the one hand-written artifact a
+   release PR still owes.
 
 **The shard's Shipped delta figures come from `npm run release:records`, not
 from you.** It prints the file count, the `+/−` line counts, the per-package

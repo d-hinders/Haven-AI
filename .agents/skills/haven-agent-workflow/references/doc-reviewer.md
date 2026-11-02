@@ -65,7 +65,7 @@ Start from what the gate already derived: since PR #2478 `npm run docs:coupling`
 
 ## 4. Re-run every re-runnable figure (#2421, #2423, #2444)
 
-Any count, pass/fail total, byte size or version quoted in the diff — body, shard, comment, `last-verified` note — is reproduced from its instrument at the reviewed head, and the command is quoted next to the result. The shard said "39 passed"; the one command a reviewer re-ran returned 38/1 (#2421). "27 files" became 30, 32, 33 (#2423). A figure you cannot reproduce is a **finding**, not a nit, and the fix to prefer is *name the test* over *state the number*.
+Any count, pass/fail total, byte size or version quoted in the diff — body, shard, comment, `last-verified` note, `Re-verified-unchanged:` trailer — is reproduced from its instrument at the reviewed head, and the command is quoted next to the result. The shard said "39 passed"; the one command a reviewer re-ran returned 38/1 (#2421). "27 files" became 30, 32, 33 (#2423). A figure you cannot reproduce is a **finding**, not a nit, and the fix to prefer is *name the test* over *state the number*.
 
 **A behavioural claim is executed, not read — above all in a compliance
 artifact.** "Pinned by its own test" means you find that test by name and run it;

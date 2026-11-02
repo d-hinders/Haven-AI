@@ -89,6 +89,21 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **Re-verified #4612 (2026-11-02, the bump's contract-doc guidance and the
+> version-constant table):** coupled through `scripts/release-bump.mjs`,
+> `scripts/release-version-constants.mjs` and their two test files. The bump's
+> printed next-steps block now says a release implicates ONE contract doc that
+> needs action (`casp-risk-guardrails.md`, cleared by the CASP shard) instead of
+> five, and `release-version-constants.mjs` gains
+> `DEDICATED_VERSION_CONSTANT_FILES` (`MCP_VERSION`) plus
+> `ALL_VERSION_CONSTANT_FILES`. No tool, input schema, strict-input list,
+> expected-context version, consent hash, version floor or
+> `tools-list.snapshot.json` entry moves; the manifest table, the connector
+> command and the setup prompt are untouched, and the bump still re-pins the
+> table from the source constants exactly as this document describes.
+> `last-verified` is not re-stamped for a guidance-only note. Nothing else in
+> this document was re-verified.
+
 > **Re-verified #4570 (2026-10-31, copy only in the connect flow's waiting
 > screen):** the one covered file this slice touches is
 > `packages/frontend/src/components/connect-agent/WaitingForConnector.tsx`, and

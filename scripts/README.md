@@ -311,28 +311,41 @@ form for a second attempt at a version that failed to publish.
 
 ### The contract-doc gate
 
-**Five** contract docs are coupled to the files every version bump writes, and
-the blocking `Contract-doc coupling` check fails until a PR that touches those
-files also satisfies each. A version bump touches all five packages, so **every
-release PR needs all five**. None is optional or conditional. **This paragraph
-said "two" until 2026-09-16**, having silently dropped `package-dev-channel.md`,
-and "three" until 2026-09-29, when #3454's move of `SIGNER_VERSION` into
-the signer's `tools.ts` added two more.
+**One** contract doc blocks a release PR: `casp-risk-guardrails.md`, cleared by
+the CASP shard. The other release-coupled docs are satisfied without an edit —
+`mcp-runtime-compatibility.md` because the bump writes it, and the security model
+and the package-dev-channel doc because the bump's edits to the files they cover
+are version literals only, which the gate partitions out (#4612).
 
-The count is the gate's, not a memory:
+**This paragraph said "five" until 2026-11-02**, "two" before 2026-09-16, and
+"three" before 2026-09-29. The five was right for the gate as it stood: every
+release bump rewrote `SIGNER_VERSION` in `packages/signer/src/tools.ts` and
+`CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`, so the security model
+and the package-dev-channel doc were implicated by a diff that changed nothing
+but a version string, and the only way to clear them was a hand-written note.
+#4612 removed that: a file whose **entire** diff is release-version constants
+does not implicate a doc.
+
+The count is the gate's, not a memory. Run it over the range a release PR
+actually has — a bare `--changed=` list carries no diff, so it treats every file
+as behavioural and still reports the old five:
 
 ```sh
-node scripts/docs/coupling-gate.mjs --strict \
-  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/tools.ts
-# BLOCKING: 5 contract doc(s) …
+BASE_SHA=<base> HEAD_SHA=<head> node scripts/docs/coupling-gate.mjs --strict
+# BLOCKING: 1 contract doc(s) cover changed code but were not touched in this PR:
+#   - docs/regulatory/casp-risk-guardrails.md — or add a verification shard …
 ```
 
-Five since #3454 moved `SIGNER_VERSION` into the signer's `tools.ts`, which
-`04-x402-payment-sequence.md` and `delegation-rail-security-model.md` cover.
-Three are edited directly: the two below and
-`docs/security/delegation-rail-security-model.md`, which takes a scoped note
-that the release touches only the version literal in `tools.ts`. The shard
-clears the other two, since both carry `satisfied-by`:
+Measured on a simulated `0.13.1-alpha.0` bump: 13 files partitioned as *version
+literal only — not implicating* — the six `package.json`s (`cli`, `connect`,
+`mcp`, `mcp-server`, `sdk`, `signer`; `VERSIONED_PACKAGES` is the published five
+plus `mcp-server`), `package-lock.json`, and the six source constants. The only
+blocking doc is `casp-risk-guardrails.md`, implicated by two files:
+`packages/connect/src/runtime-manifest.ts` and `packages/signer/CHANGELOG.md`.
+`runtime-manifest.ts` stays behavioural because its `sdkVersion`/`signerVersion`
+literals are property assignments, not `export const` lines, so they match none
+of the gate's version-line shapes; the CHANGELOG heading is prose, not a version
+literal either.
 
 1. **`docs/operations/mcp-runtime-compatibility.md`** — the *Supported Runtime
    Manifest* table is **re-pinned by the bump** ([#1790](https://github.com/d-hinders/Haven-AI/issues/1790)),
@@ -341,15 +354,23 @@ clears the other two, since both carry `satisfied-by`:
    any tool, capability or version-skew surface moved — on a release that does
    move one, say which, rather than reaching for "nothing moved". Bump
    `last-verified` only if you re-verified the document; if it already reads
-   today from an earlier change, say so and leave it, per the rule in item 2.
+   today from an earlier change, say so and leave it, per the rule in item 4.
    See *The manifest table writes itself* below.
-2. **`docs/operations/package-dev-channel.md`** — the doc the old "two" dropped.
-   The bump rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`),
-   which sits in this doc's `covers:`, so every release couples it; the 0.1.37,
-   0.2.0 and 0.2.1 releases all touched it. Write a scoped note naming what you
-   re-verified. If `last-verified` already reads today from an earlier change,
-   say so and leave it — a rubber-stamped date is worse than a stale one.
-3. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
+2. **`docs/operations/package-dev-channel.md`** — **no edit needed.** The bump
+   rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`) and
+   `MCP_VERSION` (`packages/mcp/src/server.ts`), both in this doc's `covers:`,
+   and both diffs are version literals only, so the gate partitions them out
+   (#4612). The exception is a release that changes the connector **channel**:
+   `connector-channel.ts` then changes too, that is not a version literal, and
+   the doc is implicated again — edit it, or record the re-read with a
+   `Re-verified-unchanged:` trailer.
+3. **`docs/security/delegation-rail-security-model.md`** — **no edit needed**,
+   for the same reason: the bump's only edit to `packages/signer/src/tools.ts` is
+   the `SIGNER_VERSION` literal. A release that changes signing behaviour in that
+   file implicates the doc again, and then it needs an edit or a
+   `Re-verified-unchanged: docs/security/delegation-rail-security-model.md @ <sha>`
+   trailer on a commit in the PR.
+4. **`docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md`** — a new
    shard, named for the **version** and not the PR number (#1789): the gate
    blocks the PR until the shard exists, so the shard has to be written *before*
    there is a PR number to name it after. The version is known from the moment
@@ -360,6 +381,8 @@ clears the other two, since both carry `satisfied-by`:
    gate without touching the shared parent (which is what stops concurrent PRs
    conflicting — #1366). State what changed, the authority/custody argument for
    why the CASP perimeter is unaffected, and end with `Perimeter unchanged.`
+   This is the one hand-written artifact a release PR still owes, and it is
+   where a release's real signing-surface changes are named.
 
 #### The manifest table writes itself, and the check does not trust the write
 
@@ -369,12 +392,13 @@ anyway — four numbers, out of a file the script had just written and already
 verified. Since #1790 the bump writes it (`scripts/release-manifest-doc.mjs`).
 
 **What that deliberately does NOT do is satisfy the coupling gate for you.** A
-bump alone cannot produce a green release PR, because the gate needs *both*
-contract docs and the CASP shard is wholly hand-written. The `last-verified`
-note is a required hand edit too. Those are the parts that carry an argument —
-what the release contains, and why the perimeter is unaffected. A table of four
-identical version strings carries none, which is the whole reason it could be
-generated.
+bump alone cannot produce a green release PR, because the CASP shard is wholly
+hand-written. Since #4612 the `last-verified` note is no longer a required hand
+edit: the two docs the bump used to implicate are partitioned out, so the shard
+is the only hand-written artifact left. It is also the part that carries an
+argument — what the release contains, and why the perimeter is unaffected. A
+table of four identical version strings carries none, which is the whole reason
+it could be generated.
 
 **Be precise about what enforces that, because it is not what you would
 assume** (review finding on #1790). The gate's per-doc satisfaction test is

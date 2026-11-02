@@ -355,10 +355,15 @@ BASE_SHA=<base> HEAD_SHA=<head> node scripts/docs/coupling-gate.mjs --strict
 ```
 
 On a simulated `0.13.1-alpha.0` bump, 13 files partition as *version literal
-only — not implicating* (the five `package.json`s, `package-lock.json`,
-`runtime-manifest.ts`, and the six source constants). The one blocking doc is
-`casp-risk-guardrails.md`, implicated by `packages/signer/CHANGELOG.md` — the
-bump's CHANGELOG heading is prose, not a version literal.
+only — not implicating*: the six `package.json`s (`cli`, `connect`, `mcp`,
+`mcp-server`, `sdk`, `signer` — `VERSIONED_PACKAGES` is the published five plus
+`mcp-server`), `package-lock.json`, and the six source constants. The one
+blocking doc is `casp-risk-guardrails.md`, implicated by two files:
+`packages/connect/src/runtime-manifest.ts` and `packages/signer/CHANGELOG.md`.
+`runtime-manifest.ts` does **not** partition — its `sdkVersion`/`signerVersion`
+literals are property assignments, not `export const` lines, so they match none
+of the gate's version-line shapes; the CHANGELOG heading is prose, not a version
+literal either.
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
    Manifest* table is re-pinned by the bump (#1790); update its

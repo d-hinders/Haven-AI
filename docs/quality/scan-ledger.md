@@ -2630,13 +2630,16 @@ new-task with an independent spec review; no owner question is open and
   re-verification`, `Re-read, not rubber-stamped` and `Re-verified, …`; the
   review of this PR found paragraphs after a bare `>` line inside a blockquote
   run (149 more). By the paragraph-start census the epic now defines (a line
-  after a blank line, a bare `>` line, a heading or at the start of a
-  blockquote run, whose first 70 characters say re-verif / re-check / re-read /
-  rubber-stamp, outside fences; the reference script is in #4613's Method
-  block, and every figure here is that script's output), `status: current`
-  docs carry **688 openers in 51 of 79 docs, 751,135 of 3,755,152 bytes
+  after a blank line or a bare `>` line, a heading line, or the first line of
+  a blockquote run, whose first 70 characters say re-verif / re-check /
+  re-read / rubber-stamp, outside fences; the reference script is in #4613's
+  Method block, and every census figure here is its output — the doc totals
+  and byte totals come from the status read beside it), `status: current`
+  docs carry **686 openers in 51 of 79 docs, 751,135 of 3,755,152 bytes
   (20.0 %)** at `e0617aa9f` — more than the 461 KB #2681 retired; 123 of the
-  688 are coupling-gate `Re-verified unchanged` notes; the agent-served
+  686 are coupling-gate `Re-verified unchanged` notes (a first reading of 688
+  counted two wrapped `#NNNN …` body lines as headings; the delta review of
+  this PR caught it); the agent-served
   security model is 158 openers, 182,157 of its 299,914 bytes. The largest
   source is not the
   weekly audit but code PRs satisfying the strict contract-doc coupling gate,

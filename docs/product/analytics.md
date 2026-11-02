@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Analytics
@@ -420,5 +420,20 @@ Payments caption; the agents-table columns and the #3540 inclusion rule; the
 merchant naming order (`counterparty-name.ts`), its kind lines and the
 `/transactions?search=…` target; the balance copy and "Net change"; the
 `tz` default and 400; `MIN_CHARTABLE_DAYS = 3`; migration 086's date.
-"Spend over time" beyond the colour sentence is unchanged here: #4334
-(claimed by @PhilipEriksson) rewrites that paragraph.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
+the trailing note that said #4334 "rewrites that paragraph" is gone — #4334
+landed in `ee7fdd27c` on 2026-10-24 and the *Spend over time* paragraph above
+already carries its content (one slot per local calendar date, sub-cent tick
+decimals, the refusal mark under a slot), so the note was describing shipped
+work as pending. Re-checked without change: the endpoint's `range` /
+`currency` / `tz` / `agentId` parameters (`routes/analytics-overview.ts`); the
+`PeriodPicker` presets and `haven.analytics.range`; the Agent facet's
+`?agentId=` and its 404 notice; the Refused tile's Review link
+(`/agents/<id>?tab=activity&status=refused`); the "N/M" budget band; the
+agents-table columns and the compact `style: 'row'` budget caption; the Fees
+tile as a fifth tile; the spend chart above the agents table with the avatar
+stack in Top merchants (#4509); the green Net change tone (#4480); migration
+086's date and migration 090's SEK column; and the three screenshot scenarios
+(`analytics-populated`, `analytics-empty`, `analytics-error`) in
+`scripts/screenshot.mjs`.

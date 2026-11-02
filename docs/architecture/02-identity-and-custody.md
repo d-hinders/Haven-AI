@@ -34,7 +34,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-10-23"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -360,3 +360,22 @@ split and `refuseAgentCaller` (`connect/src/rekey.ts`,
 platform-level encryption at rest for `agent_delegations` (migration 042),
 and the signer-set ops (`rails/hybrid-signer-actions.ts`,
 `hybrid_account_passkeys`).
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). No claim
+needed rewriting. Re-checked at this head: `POST /passkeys` is still absent and
+`GET /passkeys` is the only route in `routes/passkeys.ts`; migrations 042
+(`agent_delegations`) and 044 (`hybrid_account_passkeys`) are the ones named;
+`machine_payment_evidence.payment_proof_header` is the evidence column
+(migration 014) and `modules/mpp/evidence.ts` still reads it;
+`assembleSettlementPayload` (`modules/x402/x402-delegation.ts`) and
+`buildRedemptionCall` (`rails/delegation-rail.ts`) are the two places the
+signed chain is embedded; `refuseAgentCaller` still guards every re-key route
+(`routes/agent-rekey.ts`); `X402_BINDING_PRIVATE_KEY` is still read only by
+`infra/chain/x402-binding-signer.ts`; `disableDelegation` still backs
+revocation and revoke-all (`routes/agent-delegations.ts`); and
+`infra/repositories/user-passkeys.ts` still stores `credential_id`,
+`public_key_x/y`, `signer_address`, `chain_id` and the raw attestation. The
+week's drift (the 365-day `expires_at` cap #4369, the expired-only budget's
+`delegation_expired` #4376, the EIP-3009 settlement proof ladder #4337, the
+receipts field renames #4583/#4587) narrowed or renamed covered behaviour
+without moving a custody zone, invariant or boundary.

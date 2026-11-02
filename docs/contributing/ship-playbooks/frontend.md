@@ -15,7 +15,7 @@ covers:
   - packages/frontend/src/__tests__/api-mock-builder.test.ts
   - packages/frontend/src/__tests__/fixture-shape-parity.test.ts
   - packages/ui/**
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Frontend playbook
@@ -44,7 +44,7 @@ product already ships, on the diff that writes its second copy, is absorption
 (same PR); a composition with no shipped instance and no `/design-system`
 entry is a **new pattern** (earlier slice, owner approval).
 
-Inspect `packages/ui/src` (the 18 primitives in `packages/ui/src` — 16 moved by #3508, `BackLink` (#4037) and `Tabs` (#4103) added there since; 17 have a re-export shim at `components/ui/<Name>.tsx`), the primitives still at home in `packages/frontend/src/components/ui` (`Modal`, `SidePanel`, the charts and the list controls among them) and `packages/frontend/src/components/haven` (domain components) before adding UI. Prefer composition; do **not** invent new card styles, spacing, shadows, radius, or typography unless the existing system genuinely can't express the need. Use the v2 tokens in `packages/ui/src/tokens.css` (imported into the app before `globals.css`; shared `@haven_ai/ui` package since #3508) and the Tailwind aliases from the frontend config, which consumes the `@haven_ai/ui` preset.
+Inspect `packages/ui/src` (the 19 primitives in `packages/ui/src` — 16 moved by #3508, `BackLink` (#4037), `Tabs` (#4103) and `Spinner` (#4563) added there since; 17 have a re-export shim at `components/ui/<Name>.tsx`), the primitives still at home in `packages/frontend/src/components/ui` (`Modal`, `SidePanel`, the charts and the list controls among them) and `packages/frontend/src/components/haven` (domain components) before adding UI. Prefer composition; do **not** invent new card styles, spacing, shadows, radius, or typography unless the existing system genuinely can't express the need. Use the v2 tokens in `packages/ui/src/tokens.css` (imported into the app before `globals.css`; shared `@haven_ai/ui` package since #3508) and the Tailwind aliases from the frontend config, which consumes the `@haven_ai/ui` preset.
 
 **Absorb a pattern on its 2nd occurrence, not its 12th ([#901](https://github.com/d-hinders/Haven-AI/issues/901)).** If this diff writes the same markup shape a second time — a header band, badge, row, empty-state, inline `<svg>`, address slice — or re-creates something a primitive already covers, extract it into a `ui/`/`haven/` primitive **and** document it on `/design-system`, in this same PR. This is the Captain Self-Check Preflight's **Pattern Absorption** item; it's the mechanism that prevents the debt clusters epic #859 had to clean retroactively. Only skip it if the two uses will genuinely diverge — and say so.
 
@@ -504,3 +504,19 @@ Re-checked without change:
 - the copy lint's scan directories.
 
 Not re-derived: the dated laptop timings, and #2730's "36/36 (37 today)", whose suite this re-read could not identify.
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
+the primitive count is 19, not 18 — `Spinner` joined `packages/ui/src` with
+#4563/#4588, and it has no `components/ui` shim, so the shim count stays 17.
+Re-checked without change: the `test:local` wrapper and its 86/87 stall/cap
+codes; the `test:e2e:*` and `test:visual*` scripts and what each selects; the
+`chromium-desktop-dark` project and its `testMatch`; the onramp placeholder
+wiring (`NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID` in `ReceiveDialog.tsx`, set by
+`test:visual:structure` and `test:e2e:gate:built`); the capture-identity and
+e2e port ranges; the readiness budgets; retention (`DEFAULT_KEEP_RUNS = 3`);
+the content floors; `CLIP_TOLERANCE_PX`; the baseline-verdict-gate line format
+and scope; the copy lint's scan directories; and the workflows the doc names
+(`docs.yml`, `docs-coupling.yml`, `design-system-coupling.yml`,
+`frontend-copy-lint.yml`, `update-visual-baselines.yml`,
+`baseline-verdict-gate.yml`). The week's UI sweep (#4562–#4603) moved screens
+and baselines, not the gates or commands this playbook states.

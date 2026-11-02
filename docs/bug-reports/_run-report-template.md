@@ -23,7 +23,7 @@ covers:
   - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
 
 <!--
@@ -122,6 +122,19 @@ covered code, not the template's fields, tables or artifact layout. The
 scenario table's over-budget claims still match the code: the typed HTTP 403
 `delegation_budget_exceeded` pre-check covers both the EIP-3009 leg and the
 erc7710 direct-settlement scheme (`modules/x402/delegation-authorize.ts`).
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). No claim
+needed rewriting. Re-checked at this head: the five canonical commands
+(`test:e2e:gate`, `test:e2e:desktop`, `test:e2e:mobile`, `test:e2e:live` in
+`packages/frontend/package.json`; `qa:dev` in `packages/qa-agent/package.json`);
+both Playwright `outputDir` values (`../../output/playwright/test-results`,
+`../../output/playwright-live/test-results`); the two QA workflows and the
+three `.claude/commands/qa-*.md` files; and the typed HTTP 403
+`delegation_budget_exceeded` pre-check on both the EIP-3009 leg and the
+erc7710 direct-settlement scheme. The week's drift (the typed task-/sub-budget
+payment-scope refusals #4483, `delegation_expired` #4376, the x402 merchant
+rejection reason #4558) adds refusal codes a run may record; the template's
+fields, tables and artifact layout are unchanged.
 
 ## Agent Connection — When In Scope
 

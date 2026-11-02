@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/authorize.ts
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
-last-verified: "2026-10-23"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -483,6 +483,24 @@ next step (`tools/catalog-purchase.ts`), the #3768 redaction and
 `include_merchant_credentials`, the 15-minute grace window
 (`domain/merchant-report-grace.ts`), and both authorize pre-checks with
 their fail-open shapes (`modules/x402/delegation-authorize.ts`).
+
+Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). No claim
+needed rewriting. Re-checked at this head: the five signer tools
+(`SignerToolName`, `packages/signer/src/tools.ts`); the strict/permissive input
+lists (`STRICT_INPUT_TOOLS` / `PERMISSIVE_INPUT_TOOLS`,
+`mcp-server/src/tools/contracts.ts`); `haven_check_funds`'s `covered`
+true/false/null; the task-budget tools (`haven_open_task_budget`,
+`haven_get_task_budget`, `haven_close_task_budget`); both sign-context reads
+(`GET /x402/:id/sign-context`, `GET /payments/:id/sign-context`); the
+`retired-agents` report window (`RETIRED_AGENTS_REPORT_WINDOW_MINUTES =
+SETUP_TOKEN_TTL_MINUTES = 30`); `HOSTED_MAX_GET_REDIRECTS = 3`
+(`sdk/src/merchant-egress.ts`); and the 15-minute merchant-report grace
+(`domain/merchant-report-grace.ts`). The week's drift added behaviour this doc
+does not contradict: retry-or-stop is decided by the failure's cause rather
+than its status (#4516), the x402 merchant rejection reason is recorded and
+echoed on rejected retries (#4558), settlement-evidence handoffs prefill
+`payment_header` (#4536, already noted above), and the ten typed task-/
+sub-budget payment-scope refusals answer in the MCP layer (#4483).
 
 ## Related docs
 

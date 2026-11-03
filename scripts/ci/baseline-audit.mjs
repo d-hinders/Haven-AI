@@ -5,7 +5,7 @@
 // ## The defect this exists for
 //
 // The workflow ran Playwright with a hardcoded `--update-snapshots=all`. In the
-// installed Playwright (1.60.0, `playwright/lib/matchers/expect.js`), `all`
+// installed Playwright (1.64.1, unchanged since 1.60.0, `playwright/lib/matchers/expect.js`), `all`
 // passes `expected: undefined` into `_expectScreenshot`, so NO comparison
 // happens; the baseline is then rewritten whenever the bytes differ:
 //

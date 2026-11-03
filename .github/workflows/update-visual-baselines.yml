@@ -23,7 +23,8 @@ on:
       # #2218. This was a hardcoded `all`, and `all` is why a dispatch aimed at
       # one baseline could silently re-bless others.
       #
-      # In the installed Playwright (1.60.0), the two values are not variations
+      # In the installed Playwright (1.64.1; re-read at the 1.60.0 → 1.64.1 bump,
+      # same code paths), the two values are not variations
       # on a theme — they take different code paths in
       # `playwright/lib/matchers/expect.js`:
       #
@@ -36,7 +37,9 @@ on:
       #
       # (A bare `--update-snapshots` with no value means `changed` — the flag's
       # `preset` in `playwright/lib/program.js`. Running with no flag at all
-      # means `missing`.)
+      # means `default` — 1.64 renamed what 1.60 called `missing`, same
+      # behaviour: a missing baseline is written AND the test fails. An
+      # explicit `--update-snapshots=missing` now PASSES instead.)
       #
       # Measured cost of `all` being the default, on PR #2217: a dispatch that
       # regenerated one deliberately-changed baseline also rewrote

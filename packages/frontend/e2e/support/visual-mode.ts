@@ -115,7 +115,7 @@ export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
  *
  * The enumeration is version-bound: a future Playwright that adds a value-less
  * short option would widen the cluster silently. `package.json` carries a
- * CARET range (`^1.60.0`), so that version can arrive without a diff anyone
+ * CARET range (`^1.64.1`), so that version can arrive without a diff anyone
  * re-reads — re-check this against the lockfile, not against a bump you expect
  * to see.
  */

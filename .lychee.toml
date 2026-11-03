@@ -20,5 +20,10 @@ exclude = [
   "your-app\\.up\\.railway\\.app",
 ]
 
-# Mail / file links are out of scope for doc link health.
-exclude_mail = true
+# Mail links are out of scope for doc link health. Local file links are in
+# scope: they are what catches a relative path that points nowhere (#4623).
+# The key is `include_mail`, off: lychee removed `--exclude-mail` in v0.19.0
+# (lychee issue 1669), and v0.24.2 refused the old key as an unknown field, so
+# this advisory job loaded no config and checked no link from at least
+# 2026-08-05 until this line changed.
+include_mail = false

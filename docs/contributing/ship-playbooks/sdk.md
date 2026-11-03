@@ -37,4 +37,4 @@ Run the package `typecheck` (`tsc --noEmit`) as the **final** gate step, after e
 
 `area:sdk` / `area:mcp` PRs auto-merge on green CI + clean review. A change that also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`) is classified `money-path` — which loads `money.md` and its characterization-test bar, but does not pause the merge (#1024). Only database migrations are hard-gated, by `.github/CODEOWNERS`.
 
-Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

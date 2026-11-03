@@ -1885,22 +1885,6 @@ export default function DesignSystemPage() {
               widening it would let a button steal taps from its neighbour in a tight
               toolbar.
             </p>
-            {/* #4639: icons on buttons — one per button, by the kind of action. */}
-            <div className="mt-4 flex flex-wrap items-center gap-3" data-testid="ds-button-icons">
-              <Button leadingIcon={Plus}>New account</Button>
-              <Button leadingIcon={ArrowUp}>Send</Button>
-              <Button variant="ghost" leadingIcon={ArrowDown}>Receive</Button>
-              <Button variant="ghost" size="sm" leadingIcon={Clipboard}>Copy setup prompt</Button>
-              <Button variant="ghost" size="sm" leadingIcon={Download}>Export CSV</Button>
-              <Button variant="tertiary" size="sm" href="https://sepolia.basescan.org" target="_blank" rel="noopener noreferrer" trailingIcon={ExternalLink}>View on explorer</Button>
-              <Button variant="ghost" trailingIcon>Continue</Button>
-            </div>
-            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
-              An icon names the kind of action: Plus to create, the direction marks
-              for money out and in, Clipboard to copy, Download to export, and a
-              trailing ExternalLink or forward arrow. One icon per button, never on
-              Cancel, Back, Close, Save, Approve or a dialog&apos;s confirm.
-            </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button variant="tertiary" disabled aria-busy>
                 Preparing…
@@ -2274,6 +2258,26 @@ export default function DesignSystemPage() {
                 <LinkChip href="/accounts/ds-2?tab=security">Reserve (4024)</LinkChip>
               </div>
             </div>
+          </Card>
+          {/* #4639: its own card, last in the grid, so adding it moves no
+              earlier sample (the /design-system clips are fold-positioned). */}
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Icons on buttons</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-3" data-testid="ds-button-icons">
+              <Button leadingIcon={Plus}>New account</Button>
+              <Button leadingIcon={ArrowUp}>Send</Button>
+              <Button variant="ghost" leadingIcon={ArrowDown}>Receive</Button>
+              <Button variant="ghost" size="sm" leadingIcon={Clipboard}>Copy setup prompt</Button>
+              <Button variant="ghost" size="sm" leadingIcon={Download}>Export CSV</Button>
+              <Button variant="tertiary" size="sm" href="https://sepolia.basescan.org" target="_blank" rel="noopener noreferrer" trailingIcon={ExternalLink}>View on explorer</Button>
+              <Button variant="ghost" trailingIcon>Continue</Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              An icon names the kind of action: Plus to create, the direction marks
+              for money out and in, Clipboard to copy, Download to export, and a
+              trailing ExternalLink or forward arrow. One icon per button, never on
+              Cancel, Back, Close, Save, Approve or a dialog&apos;s confirm.
+            </p>
           </Card>
         </div>
 

@@ -1695,7 +1695,7 @@ rather than repeated per entry:
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
   affordances on the legacy landing and protocols pages (both retired by the site
   switch-over, #3579) — none of which were `Button`s. Corrected in #1830.)
-- **`trailingIcon` also takes a lucide icon (#4639).** `trailingIcon` keeps
+- **`trailingIcon` also takes a lucide icon (#4639).** A bare `trailingIcon` (`true`) keeps
   `ArrowRight`; `trailingIcon={ExternalLink}` draws that glyph after the label instead — the
   trailing-affordance convention of § Arrows for a link that leaves the app.
 - **`leadingIcon` (#4639)** draws a lucide icon before the label: `aria-hidden` (the label
@@ -1726,6 +1726,12 @@ rather than repeated per entry:
   (icon-only below `sm`, its label `hidden sm:inline`, named by `aria-label`); `CopyButton` (the icon *is* its
   state — `Clipboard` swaps for a success-tinted `Check`); and `packages/ops/**` (an
   internal tool, exempt like the list-controls standard).
+- **A busy label keeps its icon.** While the label reads `Verbing…` (§ Busy state) the
+  icon stays — Export CSV's `Download` beside "Preparing…" (#4473), Add a backup passkey's
+  `Plus` beside "Working…": the action's kind has not changed.
+- **Known deviation:** `ReceiveDialog`'s "Open Circle's faucet" leaves the app and still
+  trails the bare `ArrowRight`. The dialog is a CASP trigger path
+  (`casp-risk-guardrails.md`), outside #4639; it moves to `ExternalLink` in its own change.
 - **Before #4639** eight buttons drew their icon by hand in their children. They moved onto
   the props; the two "Add …" signer actions took `Plus` (create) in place of `KeyRound` /
   `Wallet`, and Rename dropped its `Pencil` — neither glyph is in the rule.

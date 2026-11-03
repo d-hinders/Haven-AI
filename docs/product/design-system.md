@@ -25,6 +25,8 @@ covers:
   - packages/frontend/src/components/ui/SegmentedControl.tsx
   - packages/frontend/tailwind.config.js
   - packages/frontend/src/components/ui/**
+  - packages/frontend/src/components/RecipientField.tsx
+  - packages/frontend/e2e/design-system.visual.spec.ts
   - packages/ui/**
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/e2e/safe-area-insets.mobile.spec.ts
@@ -656,7 +658,8 @@ Marketing pages may still use larger hero type:
 **The Patterns catalog (#4109).** This section and the compositions shown on
 `/design-system` are the documented Patterns that `CLAUDE.md`, `AGENTS.md`, the
 frontend playbook and the design reviewer point to. List controls join it with
-#4110. A composition with no shipped instance and no entry here is a **new
+#4110, and Combobox and the recipient field join it with #4640. A composition
+with no shipped instance and no entry here is a **new
 pattern**: extend the design system first, in its own owner-approved slice,
 before a page uses it. Extracting a shape the product already ships, on the
 diff that writes its second copy, is not a new pattern; that extraction stays
@@ -3457,6 +3460,124 @@ render `ListToolbar`; an intentional exception is a hand edit to the baseline
 in its own reviewed commit, and the ratchet only ever shrinks. `packages/ops`
 is exempt (owner decision 2026-10-20), as are `packages/ui/src`, the
 `FilterPill` shim, and the `/design-system` demos.
+
+### Combobox ([#4640](https://github.com/d-hinders/Haven-AI/issues/4640))
+
+`components/ui/Combobox.tsx` is the design system's searchable picker. Before
+it, the system had no editable combobox at all: `Select` wraps the native
+`<select>` (no filtering, no rich options) and `DropdownMenu` is a
+`role="menu"` of actions. Reach for `Combobox` rather than `Select` when the
+list is **searchable**, has **more than about seven options**, or has **rich
+options** — a Monogram, a name and an address. A short, fixed list of plain
+values stays a `Select`.
+
+**Anatomy.** An `<input role="combobox" aria-autocomplete="list">` carrying
+`aria-expanded`, `aria-controls` (the listbox id) and `aria-activedescendant`
+(the active option's id, absent while nothing is active). The list is a
+`role="listbox"` of `role="option"` items, each with an `id` and
+`aria-selected` — `true` on the active one, `false` on the rest. Groups are
+`role="group"`, each **named by its visible label** through `aria-labelledby`
+pointing at the label element inside the group; the label is not duplicated
+into an `aria-label`.
+
+Options look like `Row` — a leading slot (a `Monogram` or a 16px icon), a
+title, an optional subtitle, an optional trailing slot — and the active option
+fills with `--v2-surface-hover`. The markup is the Combobox's own rather than
+`Row` itself: an interactive `Row` renders a `<button>` and passes no `role`,
+`id` or `aria-selected`, and an option cannot be a button. Widening a shared
+primitive's render contract for one consumer was the worse trade.
+
+**Keyboard.** Arrow down/up opens the list if it is closed and moves the active
+option, scrolling it into view (`block: 'nearest'`). Enter picks the active
+option. Tab closes the list and moves on **without picking**.
+
+**Escape is a three-stage state machine**, and the stages exist because
+`ui/Modal.tsx` closes the dialog on any Escape that reaches its `document`
+listener. The input consumes the key (`preventDefault` + `stopPropagation` on
+its own keydown) while it still has something of its own to undo:
+
+1. **List open** — Escape closes the list; the dialog stays.
+2. **List closed, query not empty** — Escape clears the query; the dialog stays.
+3. **List closed, query empty** — Escape is not handled, so it reaches the
+   dialog and closes it.
+
+`DropdownMenu`'s window listener runs too late to be a precedent for this: by
+the time it sees the event the dialog's own listener has already fired.
+
+**Pointer.** Click or tap on an option picks it. `mousedown` on the list is
+prevented, so the input does not blur before the click lands. A click or tap
+outside, or a blur to another element, closes the list without picking.
+
+**Placement.** From `sm` up the list is a popover under the field with
+`shadow-popover`, rendered through `createPortal` against the input — `Modal`'s
+body scrolls (`overflow-y-auto`), so a list rendered inside the field would be
+clipped by the dialog's scroll box. It repositions on scroll and resize, and
+closes when the field itself leaves the viewport. Below `sm` the list opens
+**inline under the field**, so the on-screen keyboard cannot cover it. The
+portaled list sits on `--v2-z-tooltip`: the scale has no popover tier above
+`--v2-z-modal`, and a list anchored to a field inside a dialog must outrank the
+dialog.
+
+**It owns no data.** `query` and `groups` are props; the caller filters and the
+caller decides what an option means. The component owns only whether the list
+is open and which option is active — presentation, not data.
+
+**The input is not a search field.** `hand-built-list-control`
+(`scripts/design-lint.mjs`) fires on a `type="search"` input or a placeholder
+containing "search". A combobox is not a search box: the input is a plain text
+field and the placeholder names what the caller filters on ("Name or address").
+No lint exemption was needed, and none was added.
+
+### Recipient field ([#4640](https://github.com/d-hinders/Haven-AI/issues/4640))
+
+`components/RecipientField.tsx` is the field the Send dialog uses to pick who
+to pay. It is a `Combobox` with the recipient's groups, its paste rules and its
+chip.
+
+**It owns no data and calls no data hook.** Each `useContacts()` call keeps its
+own list (`useState` in `hooks/useContacts.ts`) and `addContact` updates only
+the instance it was called on. A field that called its own hook would never see
+a contact the Send dialog saves, so **the caller owns one `useContacts()` and
+one `useAccounts()` and passes them in**. `rg -n "useContacts|useAccounts"` on
+`RecipientField.tsx` returns nothing, and that is the contract.
+
+**Props.** `value: Recipient | null` and `onChange(next)` are the controlled
+pair, where `Recipient` is `{ address, name?, kind: 'account' | 'contact' |
+'new' }`. `presetAddress` is an address to resolve into a chip; it may arrive
+before the data loads, in which case the field shows the short address and
+resolves it to a name and kind once `accounts` and `contacts` are available,
+calling `onChange` once. `chainId` limits the own accounts offered to that
+chain, `excludeAddress` is the sending account and is never offered, and
+`accounts`, `contacts`, `contactsLoading` and `contactsError` come from the
+caller's hooks.
+
+**Groups**, in order: **Your accounts**, then **Contacts**. A footer line reads
+"Or paste a wallet address". Typing filters by name or address prefix,
+case-insensitively.
+
+**Pasting.** A valid address (viem `isAddress`) is matched case-insensitively.
+**Precedence when an address matches more than one source: own account, then
+contact, then new** — one option is shown, with that kind. The account is the
+thing Haven itself tracks, so it is the more specific answer, and two options
+for one address would ask the user a question with no consequence. A known
+address collapses the list to its entry ("Saved contact · 0x2c9D…77ab" or
+"Your account · …"); any other valid address shows one option, "Send to
+0x3b7E…D09a / New address".
+
+**The chip.** A chosen recipient renders as Monogram, name, kind and short
+address, with a "Change recipient" icon button that clears it (`onChange(null)`)
+and returns focus to the input. A new address renders with a neutral wallet
+glyph instead of a Monogram.
+
+**Contacts loading or failing.** While `contactsLoading`, the Contacts group
+shows a one-line skeleton. On `contactsError`, the group shows "Saved
+recipients are unavailable. You can still paste an address." — the line
+`docs/product/screen-recipes.md` requires. Your accounts and paste keep working
+in both cases.
+
+**No last-paid line.** Contacts are `{ id, name, address, created_at,
+updated_at }` — no chain and no last-paid date — so the mockup's "Paid 3 days
+ago" is out. No backend change.
 
 ### Transaction ledger
 

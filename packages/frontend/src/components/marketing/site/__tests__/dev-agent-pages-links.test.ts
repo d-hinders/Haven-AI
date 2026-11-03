@@ -5,8 +5,9 @@ import { join } from 'node:path'
 /**
  * Link check for `/developers` and `/for-agents` (#3577, epic #3572).
  *
- * Neither page is in `public/`, so `.lychee.toml` (docs-only) never crawls
- * them. The `/demo` link test's resolver (`app/demo/__tests__/links.test.ts`)
+ * Neither page is Markdown, and lychee crawls Markdown only (the `args` glob
+ * in `.github/workflows/docs.yml`), so it never crawls them. The `/demo` link
+ * test's resolver (`app/demo/__tests__/links.test.ts`)
  * accepts only `src/app<path>/page.tsx` and `public<path>`; these pages also
  * link to API routes and to the `/api/*` rewrite, so the resolver here knows
  * all three shapes.

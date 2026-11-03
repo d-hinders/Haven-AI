@@ -49,7 +49,7 @@ jobs:
       - name: Re-measure at the pushed SHA
         id: remeasure
         run: |
-          node scripts/docs/scan-remeasure.mjs --sha "$GITHUB_SHA" --scratch "$RUNNER_TEMP/scan-remeasure" > report.md
+          node scripts/docs/scan-remeasure.mjs --sha "$GITHUB_SHA" --scratch "$RUNNER_TEMP/scan-remeasure" --attention-out attention.json > report.md
           cat report.md
           {
             echo 'report<<REMEASURE_EOF'
@@ -58,6 +58,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upsert the standing issue
+        id: upsert
         env:
           GH_TOKEN: ${{ github.token }}
           REPORT: ${{ steps.remeasure.outputs.report }}
@@ -72,4 +73,33 @@ jobs:
             --author 'app/github-actions' \
             --list-args '--label scan-remeasure --state open --json' \
             --label scan-remeasure \
-            --repo "$GITHUB_REPOSITORY"
+            --repo "$GITHUB_REPOSITORY" > upsert.out
+          cat upsert.out
+          # The upsert's last stdout line is {"action","number"}.
+          NUMBER="$(tail -n 1 upsert.out | jq -r .number)"
+          # A missing number would make the alert step silently do nothing.
+          [[ "$NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::the upsert printed no issue number"; exit 1; }
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      # The alert (owner decision 2026-11-03): a week where a row is flagged,
+      # failed, refused or has a failed control, or a doc figure moved or lost
+      # its anchor, labels the standing issue `scan-attention` and @mentions
+      # the owner in a comment, so it reaches a notification instead of waiting
+      # for a reader. A quiet week removes the label and stays silent. Still
+      # advisory: the job never fails on a moved figure.
+      - name: Alert when something needs attention
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ steps.upsert.outputs.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          NEEDS="$(jq -r .needsAttention attention.json)"
+          if [ "$NEEDS" = 'true' ]; then
+            LINE="$(grep -m1 '^\*\*Needs attention:\*\*' report.md)"
+            # The comment first: a label failure must not suppress the notification.
+            printf '@d-hinders the weekly quality-scan re-measurement needs a look.\n\n%s\n\nThe rows are in the issue body above; the run is %s. Advisory: nothing here is a finding until a scan reads it.\n' "$LINE" "$RUN_URL" \
+              | gh issue comment "$NUMBER" --body-file - --repo "$GITHUB_REPOSITORY"
+            gh issue edit "$NUMBER" --add-label scan-attention --repo "$GITHUB_REPOSITORY"
+          else
+            gh issue edit "$NUMBER" --remove-label scan-attention --repo "$GITHUB_REPOSITORY" || true
+          fi

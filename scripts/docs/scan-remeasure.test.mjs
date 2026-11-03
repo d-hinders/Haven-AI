@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { runGuard } from '../test-support/guard-cli.mjs'
-import { parseFigures, refusalLine, verdict } from './scan-remeasure.mjs'
+import { attentionLine, attentionSummary, parseFigures, refusalLine, verdict } from './scan-remeasure.mjs'
 
 const MANIFEST = 'docs/quality/scan-baselines.json'
 
@@ -287,4 +287,73 @@ test('doc figures: a command that does not read $SHA is an exit-2 defect', () =>
 test('doc figures: a row requiring a missing tool is refused, not run', () => {
   const { out } = runDoc([docRow({ id: 'needs-rg', requires: ['rg'] })], { env: { RG: '/nonexistent/rg' } })
   assert.match(docLine(out, 'needs-rg'), /refused — rg missing/)
+})
+
+// ── The attention signal: what wakes the owner, and what does not ──────────
+
+/** Run the full report with --attention-out and return the parsed summary. */
+function runAttention({ rows = [], docFigures = [], env = {} }) {
+  const res = runGuard('docs/scan-remeasure.mjs', {
+    files: { ...TREE, 'docs/product/fixture.md': DOC, [MANIFEST]: JSON.stringify({ rows, docFigures }, null, 2) },
+    gitCommit: true,
+    args: ['--sha', 'HEAD', '--attention-out', 'attention.json'],
+    env,
+    readBack: ['attention.json'],
+  })
+  assert.equal(res.status, 0, res.out)
+  return { ...res, attention: JSON.parse(res.wrote['attention.json']) }
+}
+
+test('attention: a quiet run (unchanged, grew, within tolerance, head sample) needs none', () => {
+  const { attention, out } = runAttention({
+    rows: [
+      row({ id: 'same', figures: [6], command: 'echo 6 # $SHA' }),
+      row({ id: 'grew', kind: 'grows', figures: [1], command: 'echo 2 # $SHA' }),
+      row({ id: 'tol', figures: [200], tolerance: 0.05, command: 'echo 205 # $SHA' }),
+      row({ id: 'head', kind: 'head-sample', figures: [3], command: 'echo 1 # $SHA' }),
+      row({ id: 'ctl', kind: 'control', expect: 'nonzero', figures: [5], command: 'echo 5 # $SHA' }),
+    ],
+    docFigures: [docRow({ id: 'doc-same' })],
+  })
+  assert.equal(attention.needsAttention, false)
+  assert.match(attention.sha, /^[0-9a-f]{40}$/)
+  assert.match(out, /\*\*Needs attention:\*\* no$/m)
+})
+
+const ATTENTION_CASES = [
+  ['a flagged row', { rows: [row({ id: 'x', kind: 'invariant', figures: [1], command: 'echo 2 # $SHA' })] }, 'flagged', /1 flagged/],
+  ['a failed row', { rows: [row({ id: 'x', command: 'exit 3 # $SHA' })] }, 'failed', /1 failed/],
+  ['a failed control', { rows: [row({ id: 'x', kind: 'control', expect: 'nonzero', figures: [1], command: 'echo 0 # $SHA' })] }, 'controlFailed', /1 control failed/],
+  ['a refused row', { rows: [row({ id: 'x', requires: ['rg'], command: '"$RG" -l x . | wc -l # $SHA' })], env: { RG: '/nonexistent/rg' } }, 'refused', /1 refused/],
+  ['a moved doc figure', { docFigures: [docRow({ id: 'x', figures: [3, 5] })] }, 'docMoved', /1 doc figure moved/],
+  ['a doc figure whose anchor is gone', { docFigures: [docRow({ id: 'x', anchor: 'not in the doc' })] }, 'docProblems', /1 doc figure failed or lost its anchor/],
+  ['a doc figure whose command fails', { docFigures: [docRow({ id: 'x', command: 'exit 3 # $SHA' })] }, 'docProblems', /1 doc figure failed or lost its anchor/],
+  ['a doc figure refused for a missing tool', { docFigures: [docRow({ id: 'x', requires: ['rg'], command: '"$RG" -c x docs | wc -l # $SHA' })], env: { RG: '/nonexistent/rg' } }, 'docProblems', /1 doc figure failed or lost its anchor/],
+]
+
+for (const [what, input, key, line] of ATTENTION_CASES) {
+  test(`attention: ${what} needs it, counted under ${key}`, () => {
+    const { attention, out } = runAttention(input)
+    assert.equal(attention.needsAttention, true)
+    assert.equal(attention[key], 1)
+    assert.match(out, /\*\*Needs attention:\*\* yes — /)
+    assert.match(out.split('\n').find((l) => l.startsWith('**Needs attention:**')) ?? '', line)
+  })
+}
+
+test('attention: --doc-figures-only keeps the docs-audit report shape (no attention line)', () => {
+  const { out } = runDoc([docRow({ id: 'moved', figures: [3, 5] })])
+  assert.doesNotMatch(out, /Needs attention/)
+})
+
+test('unit: attentionSummary ignores grew, tolerance and head samples; attentionLine names each count', () => {
+  const rows = [{ id: 'a' }, { id: 'b' }]
+  const results = new Map([
+    ['a', { verdict: { status: 'ok' } }],
+    ['b', { verdict: { status: 'flagged' } }],
+  ])
+  const s = attentionSummary({ rows, results })
+  assert.deepEqual(s, { needsAttention: true, flagged: 1, failed: 0, controlFailed: 0, refused: 0, docMoved: 0, docProblems: 0 })
+  assert.equal(attentionLine(s), '**Needs attention:** yes — 1 flagged')
+  assert.equal(attentionLine(attentionSummary({ rows: [rows[0]], results })), '**Needs attention:** no')
 })

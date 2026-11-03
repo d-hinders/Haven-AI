@@ -69,9 +69,20 @@
 // sentence, because refreshing a doc row without touching the doc would mark a
 // stale figure unchanged for good.
 //
+// ## The attention signal
+//
+// The job stays advisory (exit 0), but a week that needs a reader should not
+// wait for one to wander by. `--attention-out <path>` writes a JSON summary —
+// `needsAttention` plus the counts behind it — and the full report ends with a
+// `Needs attention:` line. Attention means: a row flagged, failed, refused or
+// with a failed control, or a doc figure that moved, lost its anchor, failed or
+// was refused. `grew`, `within tolerance` and a moving head sample do not. The
+// workflow reads the file to label the standing issue and @mention the owner
+// (`scan-remeasure.yml`); a quiet week stays silent.
+//
 // Usage:
 //   node scripts/docs/scan-remeasure.mjs --sha <sha> [--scratch <dir>] [--manifest <path>]
-//                                        [--doc-figures-only] [--out <path>]
+//                                        [--doc-figures-only] [--out <path>] [--attention-out <path>]
 //
 // Exit 0 with the report on stdout, whatever moved (advisory). Exit 2 on a
 // usage error, an unreadable manifest or an unresolvable SHA.
@@ -97,7 +108,7 @@ export function refusalLine(tool) {
 }
 
 export function parseArgs(argv) {
-  const out = { sha: null, scratch: null, manifest: DEFAULT_MANIFEST, docFiguresOnly: false, out: null }
+  const out = { sha: null, scratch: null, manifest: DEFAULT_MANIFEST, docFiguresOnly: false, out: null, attentionOut: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const value = () => {
@@ -110,6 +121,7 @@ export function parseArgs(argv) {
     else if (arg === '--manifest') out.manifest = resolve(value())
     else if (arg === '--doc-figures-only') out.docFiguresOnly = true
     else if (arg === '--out') out.out = resolve(value())
+    else if (arg === '--attention-out') out.attentionOut = resolve(value())
     else throw new Error(`unknown argument ${arg}`)
   }
   if (!out.sha) throw new Error('--sha <sha> is required')
@@ -311,6 +323,46 @@ export function renderReport({ sha, rows, results }) {
 }
 
 /**
+ * Does this run need a reader? Counts the rows behind the answer; see the
+ * docblock's "attention signal" for what counts.
+ */
+export function attentionSummary({ rows, results, docRows = [], docResults = new Map() }) {
+  const summary = { flagged: 0, failed: 0, controlFailed: 0, refused: 0, docMoved: 0, docProblems: 0 }
+  for (const row of rows) {
+    const r = results.get(row.id)
+    if (!r) continue
+    if (r.refused) summary.refused++
+    else if (r.verdict.status === 'flagged') summary.flagged++
+    else if (r.verdict.status === 'failed') summary.failed++
+    else if (r.verdict.status === 'control-failed') summary.controlFailed++
+  }
+  for (const row of docRows) {
+    const r = docResults.get(row.id)
+    if (!r) continue
+    if (r.refused || r.verdict.status === 'anchor-not-found' || r.verdict.status === 'failed') summary.docProblems++
+    else if (r.verdict.status === 'moved') summary.docMoved++
+  }
+  const needsAttention = Object.values(summary).some((n) => n > 0)
+  return { needsAttention, ...summary }
+}
+
+/** The report's last line: what needs a reader, or `no`. */
+export function attentionLine(summary) {
+  if (!summary.needsAttention) return '**Needs attention:** no'
+  const parts = [
+    [summary.flagged, 'flagged'],
+    [summary.failed, 'failed'],
+    [summary.controlFailed, 'control failed'],
+    [summary.refused, 'refused'],
+    [summary.docMoved, 'doc figure moved'],
+    [summary.docProblems, 'doc figure failed or lost its anchor'],
+  ]
+    .filter(([n]) => n > 0)
+    .map(([n, what]) => `${n} ${what}`)
+  return `**Needs attention:** yes — ${parts.join(', ')}`
+}
+
+/**
  * The doc-figure section (#4631). Plain lines, not a markdown table:
  * `docs-audit.yml` wraps its report in a code fence, and a table inside a fence
  * is unreadable in the issue body.
@@ -342,7 +394,7 @@ export function renderDocFigures({ sha, rows, results }) {
   return lines.join('\n')
 }
 
-export async function remeasure({ sha, scratch, manifest, docFiguresOnly = false, out = null }) {
+export async function remeasure({ sha, scratch, manifest, docFiguresOnly = false, out = null, attentionOut = null }) {
   const rows = docFiguresOnly ? [] : loadManifest(manifest)
   const docRows = loadDocFigures(manifest)
   let full
@@ -416,8 +468,13 @@ export async function remeasure({ sha, scratch, manifest, docFiguresOnly = false
     if (ownScratch) rmSync(base, { recursive: true, force: true })
   }
   const docSection = renderDocFigures({ sha: full, rows: docRows, results: docResults })
-  const report = docFiguresOnly ? docSection : `${renderReport({ sha: full, rows, results })}\n\n${docSection}`
+  const attention = attentionSummary({ rows, results, docRows, docResults })
+  // The doc-figures-only report (docs-audit.yml) keeps its own shape.
+  const report = docFiguresOnly
+    ? docSection
+    : `${renderReport({ sha: full, rows, results })}\n\n${docSection}\n\n${attentionLine(attention)}`
   if (out) writeFileSync(out, `${report}\n`)
+  if (attentionOut) writeFileSync(attentionOut, `${JSON.stringify({ sha: full, ...attention })}\n`)
   return report
 }
 
@@ -428,7 +485,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } catch (err) {
     console.error(`scan-remeasure: ${err.message}`)
     console.error(
-      'usage: node scripts/docs/scan-remeasure.mjs --sha <sha> [--scratch <dir>] [--manifest <path>] [--doc-figures-only] [--out <path>]',
+      'usage: node scripts/docs/scan-remeasure.mjs --sha <sha> [--scratch <dir>] [--manifest <path>] [--doc-figures-only] [--out <path>] [--attention-out <path>]',
     )
     process.exit(2)
   }

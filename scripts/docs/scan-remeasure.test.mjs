@@ -118,6 +118,16 @@ test('RG=/nonexistent refuses only the rg rows, with the reference wording; the 
   assert.match(lineFor(out, 'plain'), /\| 6 \| 0 \| unchanged \|/)
 })
 
+test('--scratch may name a directory that does not exist yet (the workflow passes one)', () => {
+  const { status, out } = runGuard('docs/scan-remeasure.mjs', {
+    files: { ...TREE, [MANIFEST]: JSON.stringify({ rows: [row({ id: 'n', figures: [6], command: 'git ls-tree -r --name-only "$SHA" | grep -c "^packages/sdk/src/"' })] }) },
+    gitCommit: true,
+    args: ['--sha', 'HEAD', '--scratch', 'not-yet/scan-remeasure'],
+  })
+  assert.equal(status, 0, out)
+  assert.match(lineFor(out, 'n'), /\| 6 \| 0 \| unchanged \|/)
+})
+
 test('the commands read $SHA — the resolved commit, not a branch', () => {
   const { out } = run([row({ id: 'sha', figures: [40], command: 'printf "%s" "$SHA" | wc -c' })])
   assert.match(lineFor(out, 'sha'), /\| 40 \| 0 \| unchanged \|/)

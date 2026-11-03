@@ -235,8 +235,10 @@ export async function remeasure({ sha, scratch, manifest }) {
     throw new Error(`cannot resolve ${sha} to a commit in ${REPO_ROOT} (shallow clone?)`)
   }
   const ownScratch = !scratch
+  // Create before resolving: the workflow passes a `$RUNNER_TEMP` path that
+  // does not exist yet, and `realpathSync` refuses a missing path.
+  if (scratch) mkdirSync(scratch, { recursive: true })
   const base = realpathSync(scratch ?? mkdtempSync(join(tmpdir(), 'scan-remeasure-')))
-  mkdirSync(base, { recursive: true })
   const tree = join(base, `tree-${full.slice(0, 12)}`)
   if (existsSync(tree)) throw new Error(`${tree} already exists — pass an empty --scratch`)
   execFileSync('git', ['-C', REPO_ROOT, 'worktree', 'add', '--detach', '--quiet', tree, full], { stdio: ['ignore', 'ignore', 'inherit'] })

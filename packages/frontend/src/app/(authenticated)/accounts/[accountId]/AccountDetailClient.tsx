@@ -62,7 +62,7 @@
  * so the mapping and the URL write live here.
  */
 
-import { EllipsisVertical } from 'lucide-react'
+import { ArrowDown, ArrowUp, EllipsisVertical } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -421,12 +421,14 @@ export default function AccountDetailClient() {
                   onClick={() => setSendOpen(true)}
                   variant={accountHoldsMoney ? 'primary' : 'ghost'}
                   disabled={!accountHoldsMoney}
+                  leadingIcon={ArrowUp}
                 >
                   Send
                 </Button>
                 <Button
                   variant={accountHoldsMoney ? 'ghost' : 'primary'}
                   onClick={() => setReceiveOpen(true)}
+                  leadingIcon={ArrowDown}
                 >
                   Receive
                 </Button>

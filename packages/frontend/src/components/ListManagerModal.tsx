@@ -26,11 +26,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Pencil } from 'lucide-react'
 import { InlineAlert } from '@haven_ai/ui/InlineAlert'
 import { EmptyState } from '@haven_ai/ui/EmptyState'
 import { Skeleton } from '@haven_ai/ui/Skeleton'
-import { Icon } from '@/components/ui/Icon'
 import { Button } from './ui/Button'
 import { Input } from './ui/Input'
 import { Modal } from './ui/Modal'
@@ -303,7 +301,6 @@ export function ListManagerModal<T extends ManagedItem>({
                           onClick={api.startRename}
                           aria-label={`Rename ${item.name}`}
                         >
-                          <Icon icon={Pencil} className="h-3.5 w-3.5" />
                           Rename
                         </Button>
                         <Button

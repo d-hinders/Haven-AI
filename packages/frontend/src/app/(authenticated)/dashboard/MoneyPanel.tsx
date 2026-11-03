@@ -30,6 +30,7 @@
  *   `BalanceFreshnessIndicator`** — the same #3295 contract the hero had.
  */
 
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useCountUp } from '@/hooks/useCountUp'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -572,12 +573,13 @@ export default function MoneyPanel({
                 // is unchanged (#4167): Send primary once funded, Receive
                 // primary with Send disabled when known empty.
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
-                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
+                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled} leadingIcon={ArrowUp}>
                     Send
                   </Button>
                   <Button
                     onClick={onReceive}
                     variant={sendPrimary || receiveSecondary ? 'ghost' : 'primary'}
+                    leadingIcon={ArrowDown}
                   >
                     Receive
                   </Button>

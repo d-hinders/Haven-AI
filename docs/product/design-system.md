@@ -1695,6 +1695,47 @@ rather than repeated per entry:
   one. `group-hover:gap-2` is real, but it belongs to three hand-rolled marketing link
   affordances on the legacy landing and protocols pages (both retired by the site
   switch-over, #3579) — none of which were `Button`s. Corrected in #1830.)
+- **`trailingIcon` also takes a lucide icon (#4639).** A bare `trailingIcon` (`true`) keeps
+  `ArrowRight`; `trailingIcon={ExternalLink}` draws that glyph after the label instead — the
+  trailing-affordance convention of § Arrows for a link that leaves the app.
+- **`leadingIcon` (#4639)** draws a lucide icon before the label: `aria-hidden` (the label
+  stays and is the accessible name), 14px (`h-3.5 w-3.5`, § 5's rung beside the button
+  label, at every size), in
+  the label's colour, at the base `gap-1.5`, on every variant, size and element. An
+  icon-only button is a different control; its patterns are unchanged.
+- **One icon per button — a compile error, not a review note.** `leadingIcon` and
+  `trailingIcon` are a union in `ButtonProps`, so a button cannot be given both.
+
+**Icons on buttons — the usage rule (#4639, owner decision 2026-11-03).** An icon names the
+*kind* of action, so it appears only where the kind is one of these:
+
+| Lead with | For | Examples |
+|---|---|---|
+| `Plus` | Create | Add …, New …, Connect agent, Add a backup passkey, Add a wallet |
+| `ArrowUp` / `ArrowDown` | Money out / in — the § Direction marks glyphs, so a sent row and the Send button use the same mark | Send / Receive |
+| `Clipboard` | Copy — `CopyButton`'s glyph | Copy setup prompt, Copy again |
+| `Download` | Export / download | Export CSV |
+
+| Trail with | For |
+|---|---|
+| `ExternalLink` | A link that leaves the app (View on explorer) |
+| `ArrowRight` (`trailingIcon`) | Forward to the next step |
+
+- **Never on** Cancel, Back, Close, Save, Approve or a dialog footer's confirm, and never on
+  an action outside the table (Rename, Remove, Edit): the label says it.
+- **Exempt, by name:** the `/agents` organization tree's new-organization button
+  (icon-only below `sm`, its label `hidden sm:inline`, named by `aria-label`); `CopyButton` (the icon *is* its
+  state — `Clipboard` swaps for a success-tinted `Check`); and `packages/ops/**` (an
+  internal tool, exempt like the list-controls standard).
+- **A busy label keeps its icon.** While the label reads `Verbing…` (§ Busy state) the
+  icon stays — Export CSV's `Download` beside "Preparing…" (#4473), Add a backup passkey's
+  `Plus` beside "Working…": the action's kind has not changed.
+- **Known deviation:** `ReceiveDialog`'s "Open Circle's faucet" leaves the app and still
+  trails the bare `ArrowRight`. The dialog is a CASP trigger path
+  (`casp-risk-guardrails.md`), outside #4639; it moves to `ExternalLink` in its own change.
+- **Before #4639** eight buttons drew their icon by hand in their children. They moved onto
+  the props; the two "Add …" signer actions took `Plus` (create) in place of `KeyRound` /
+  `Wallet`, and Rename dropped its `Pencil` — neither glyph is in the rule.
 
 **Busy state: no spinner, no `loading` prop (#2871).** An action in flight
 disables its button and swaps the label to `Verbing…` — `Preparing…`,

@@ -208,6 +208,9 @@ describe('AccountsOverviewClient — the Safe inflow is closed (#1984)', () => {
     // scan below would see it — it is the delegation-rail New account, not
     // the Safe flow.
     expect(screen.getByRole('button', { name: 'New account' })).toBeInTheDocument()
+    // #4639: a create action leads with Plus.
+    const newAccount = screen.getByRole('button', { name: 'New account' })
+    expect(Array.from(newAccount.firstElementChild?.classList ?? []).find((c) => c.startsWith('lucide-') && c !== 'lucide-icon')).toBe('lucide-plus')
 
     expectNoSafeInflow()
   })

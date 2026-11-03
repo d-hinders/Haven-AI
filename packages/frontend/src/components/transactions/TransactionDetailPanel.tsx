@@ -481,9 +481,9 @@ export default function TransactionDetailPanel({
             target="_blank"
             rel="noopener noreferrer"
             className="-ml-3.5"
+            trailingIcon={ExternalLink}
           >
             View on explorer
-            <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
           </Button>
         ) : undefined
       }

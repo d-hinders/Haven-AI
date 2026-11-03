@@ -387,6 +387,14 @@ describe('AccountDetailClient', () => {
       ).toBeTruthy()
     })
 
+    it('Send leads with ArrowUp and Receive with ArrowDown (#4639)', () => {
+      render(<AccountDetailClient />)
+      const glyph = (b: HTMLElement) =>
+        Array.from(b.firstElementChild?.classList ?? []).find((c) => c.startsWith('lucide-') && c !== 'lucide-icon')
+      expect(glyph(screen.getByRole('button', { name: 'Send' }))).toBe('lucide-arrow-up')
+      expect(glyph(screen.getByRole('button', { name: 'Receive' }))).toBe('lucide-arrow-down')
+    })
+
     it('Money in and Money out sit on ONE row beside their direction icons (#4197)', () => {
       render(<AccountDetailClient />)
       const section = screen.getByRole('region', { name: 'Last 30 days' })

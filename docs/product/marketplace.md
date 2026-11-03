@@ -335,9 +335,9 @@ in the future — the dormant half of a re-key is not spendable.
 Between the header and the offers, a live merchant with at least one offer
 renders a one-Card panel (`components/marketplace/HowToBuyPanel.tsx`) —
 its title in the house `Card.Header` band, one hairline above step 1
-(#4015) — with three steps, each claimed from data the page already loads —
-`useAgents`, the two budget wires (#4004) and the funding targets — never
-asserted. Coming-soon and no-offer merchants show no panel.
+(#4015) — with three steps, each claimed from data the page already loads — `useAgents`,
+the two budget wires (#4004) and the funding targets — never asserted.
+Coming-soon and no-offer merchants show no panel.
 
 One step is current at a time (#4646): the open ring marks the first step
 that is not done, every step after it is later, so a blocked step 2 is the

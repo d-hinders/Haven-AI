@@ -178,9 +178,19 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
 ## Method
 
 1. Read `docs/quality/scan-ledger.md`; collect prior findings + dispositions.
+   Then read the standing issue *Quality-scan re-measurement (weekly)*
+   (label `scan-remeasure`, #4625): its table is this scan's starting delta —
+   every manifest figure re-run at a recent `dev` SHA by
+   `scripts/docs/scan-remeasure.mjs`, with flagged rows, failed rows, failed
+   controls and refused rows listed apart. A flagged or failed row is where
+   to look first, not a finding.
 2. Size the repo: lines per package, largest files, per-layer
    source-vs-test ratios.
-3. Probe the dimensions where structural problems live: test architecture and
+3. Probe the dimensions where structural problems live (the numbered blocks
+   are `references/dimensions.md`; their machine-readable commands and last
+   figures are `docs/quality/scan-baselines.json`, which the weekly job
+   re-runs — start each block from its row's re-run, then go beyond it):
+   test architecture and
    what is mocked away; validation and contract enforcement; data-layer
    coverage; cross-package duplication; fat controllers; `any` density;
    **incident clustering** — group the recent issue history by failure class
@@ -276,7 +286,15 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
 7. Append the run to the ledger and open the report and the entry as a pull
    request. The report's front-matter reads `status: record` (#4459): it is a
    dated record of the scan, so the staleness audit never ranks it, while its
-   `covers:` still route it. The ledger stays `current`. **Run its independent review before presenting anything for
+   `covers:` still route it. The ledger stays `current`. **A whole-repo
+   scan updates `docs/quality/scan-baselines.json` in the same PR as its
+   entry**: run `node scripts/docs/scan-remeasure.mjs --sha <entry sha>` and
+   give **every** row the figures it printed and the entry's `sha` — the run
+   is cheap, so no row keeps a SHA its figures were not taken at — and a row
+   whose instrument changed its new `command`
+   (`scripts/docs/scan-baselines.test.mjs` pins every row's `sha` to the
+   newest whole-repo entry with a `Probed clean` section). A scoped scan — a
+   scope is a filter — does not update the manifest. **Run its independent review before presenting anything for
    decision** — the `haven-reviewer` pass `CLAUDE.md` § *How shipping is
    governed* makes mandatory on every pull request, briefed explicitly to
    re-derive every figure and every claim about a past event from its

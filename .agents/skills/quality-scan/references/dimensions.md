@@ -3,7 +3,10 @@
 Loaded by [`quality-scan`](../SKILL.md) § *Method* step 3. Each block states
 the **command**, the **sample** and **what clean looks like**; the figures
 under each block are the run in which the command last produced a number —
-its positive control until the ledger supersedes them.
+its positive control until the ledger supersedes them. The prose here and in
+the ledger explains; the machine-readable source of the commands and their
+latest figures is `docs/quality/scan-baselines.json` (#4625), whose rows the
+weekly `scan-remeasure.yml` re-runs at one SHA.
 
 Blocks 1–6 are the classes the 2026-09-03 retrospective measured the 600-issue
 wave to consist of. Blocks 8 and 9 are not: they come from the 2026-10-27
@@ -245,8 +248,9 @@ done
 # how many of those lines also quote the command that produced the figure.
 rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | wc -l
 rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | rg -c '`(rg|grep|git|node|npm|find|ls|wc) '
-# Sample B: the previous ledger entry's `Probed clean:` lines — re-run each
-# recorded command verbatim and diff the number.
+# Sample B: the manifest's rows (`docs/quality/scan-baselines.json`, #4625) —
+# run `node scripts/docs/scan-remeasure.mjs --sha <sha>` and read each delta;
+# the ledger's `Probed clean:` lines are prose and carry no runnable command.
 rg -c ': any\b|as any' packages/*/src --type ts -g '!*test*' | awk -F: '{s+=$2} END{print s}'
 npm run lint:db-mocks 2>&1 | rg 'db-mock gauge'
 ```

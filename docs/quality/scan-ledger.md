@@ -2676,3 +2676,12 @@ class — and block 6's copy-lint figure steps from 66 / 4 to the `ls-tree`
 command's reading by #4615's selector change, not by new files.
 
 Drive: `ship-next epic=#4610` (slice order #4612 → #4613 → #4614).
+
+**Disposition upkeep (2026-11-03):** all three slices shipped the same night
+by partner pipelines — #4612 via PR #4619 (`850e48023`), #4613 via PR #4620
+(`383908c3a`), #4614 via PR #4621 (`bd05485ea`); the epic stays open for its
+promotion checklist. The scan record (#4609, `c9a2eca51`) merged after #4621
+without a re-run against the new base and turned the required docs job red
+on `dev`: #4613's test pins the record-doc census at 25 and the record's own
+bullet about #2938 opens with "re-verification" (26). The pin moves to 26 in
+the PR carrying this entry (#4617), with the reason beside it.

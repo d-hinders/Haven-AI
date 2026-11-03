@@ -1255,8 +1255,11 @@ yet — the tests drive hand-authored fixtures built from Igdrasil's published
 (`pkce: 'S256'`, #4517) — Igdrasil requires it. Endpoints under
 `https://accounting.igdrasil.se/api/v1/oauth/`: `authorize`, `token`,
 `revoke`. Scope `companies:read vouchers:write` (`IGDRASIL_SCOPE`,
-`igdrasil.ts`); both are `requiredScopes`, so a narrower grant is stored as
-`scope_missing`. Access tokens live 900 s and the refresh token rotates on
+`igdrasil.ts`); both are `requiredScopes`. A grant without `vouchers:write`
+is stored as `scope_missing`. A grant without `companies:read` never gets
+that far: the company read at the callback answers 403 `insufficient_scope`,
+the connect throws, the fresh grant is revoked and the user lands on a plain
+`connect=error` — nothing is stored. Access tokens live 900 s and the refresh token rotates on
 every refresh — the generic refresh under the row lock already stores the
 new one.
 
@@ -1284,7 +1287,11 @@ SHA-256 of the bytes sent; anything else is `skipped` with no ref. The ref is
 `igdrasil:document:<document_id>`. Oversize underlag (> 25 MiB) is gated
 locally before any request. When the agent captured the merchant's own
 invoice it is uploaded as a second document; a failure there is a note on the
-pushed row, never a failed row. A merchant receipt that arrives after the push
+pushed row, never a failed row. Byte-keyed dedup applies to that file too: a
+merchant invoice fetched by URL that is byte-identical across two payments (a
+static subscription PDF, say) answers 200 with the FIRST payment's document,
+so both payments' `merchantInvoiceRef` name one Igdrasil document. The
+underlag is per payment and never collides. A merchant receipt that arrives after the push
 is not attached yet (#4521).
 
 **Error map** (by HTTP status and the open-enum `error.code`):
@@ -1301,6 +1308,14 @@ is not attached yet (#4521).
 
 `writes_disabled` means Igdrasil has not switched writes on for Haven's app —
 an operator question for Igdrasil, not a user one.
+
+Anything not in the table — a 403 with a code Haven does not know (the enum
+is open), a 404 `resource_missing` (the company deleted at Igdrasil), any
+other status — is **thrown and retried** until the sweep's attempt limit. That
+is deliberate: the connector never guesses a grant verdict from a code it
+cannot name, and the error `type` is not read. A run of such failures shows in
+the sweep's counters; the fix is a mapping here once the live run (#4519) has
+seen the code.
 
 **Verify and disconnect.** `capabilities.verify: false`: verify answers from
 Haven's own sync row, zero provider calls (the Accounted precedent).

@@ -94,9 +94,26 @@ beforeEach(() => {
 describe('IgdrasilConnector.getCompanyInfo', () => {
   it('one company: its id and name, baseCurrency null (no currency on PublicCompany), read with the bearer token', async () => {
     const { impl, state } = igdrasilRouter()
-    const info = await new IgdrasilConnector(impl).getCompanyInfo(SECRETS)
+    const headers: unknown[] = []
+    const seen = (async (url: string | URL | Request, init?: RequestInit) => {
+      headers.push(init?.headers)
+      return impl(url, init)
+    }) as typeof fetch
+    const info = await new IgdrasilConnector(seen).getCompanyInfo(SECRETS)
     expect(info).toEqual({ externalCompanyId: IGDRASIL_COMPANY_ID, name: 'Testbolaget Igdrasil AB', baseCurrency: null })
     expect(state.requests).toEqual([{ method: 'GET', path: '/api/v1/external/companies' }])
+    expect(headers).toEqual([expect.objectContaining({ Authorization: 'Bearer igd_oat_live' })])
+  })
+
+  it('a grant that reaches no company is a ProviderError, not a TypeError on an empty list', async () => {
+    const empty = (async () =>
+      new Response(JSON.stringify({ object: 'list', data: [], has_more: false, url: '/api/v1/external/companies' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch
+    const err = await new IgdrasilConnector(empty).getCompanyInfo(SECRETS).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ProviderError)
+    expect(err).toMatchObject({ status: 403, message: expect.stringMatching(/reaches no company/) })
   })
 
   it('multi-company: two companies refuse with MultiCompanyGrantError', async () => {
@@ -175,7 +192,10 @@ describe('IgdrasilConnector.pushTransaction', () => {
 
     const failing = igdrasilRouter()
     failing.state.failSecondUpload = true
-    const degraded = await new IgdrasilConnector(failing.impl).pushTransaction(USER, feedTransaction('pay-4', { merchantReceipt: receipt }))
+    // Caught into a value: a rethrown invoice failure must fail the assertions, not the harness.
+    const degraded = await new IgdrasilConnector(failing.impl)
+      .pushTransaction(USER, feedTransaction('pay-4', { merchantReceipt: receipt }))
+      .catch((err: unknown) => ({ status: 'thrown', externalRef: null, merchantInvoiceRef: undefined, note: String(err) }))
     expect(degraded.status).toBe('pushed')
     expect(degraded.externalRef).toBe(REF)
     expect(degraded.merchantInvoiceRef).toBeUndefined()
@@ -200,6 +220,20 @@ describe('IgdrasilConnector.pushTransaction', () => {
     const result = await new IgdrasilConnector(impl).pushTransaction(USER, feedTransaction('pay-7'))
     expect(result).toMatchObject({ externalRef: null, status: 'skipped' })
     expect(result.reason).toMatch(/sha256 mismatch/)
+  })
+
+  it('a 2xx without a document id is not a delivery: thrown, so no row is stored with an undefined ref', async () => {
+    const { impl } = igdrasilRouter()
+    const noId = (async (url: string | URL | Request, init?: RequestInit) => {
+      const res = await impl(url, init)
+      if (!String(url).endsWith('/uploads')) return res
+      const body = await res.json()
+      delete body.document_id
+      return new Response(JSON.stringify(body), { status: res.status, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    const err = await new IgdrasilConnector(noId).pushTransaction(USER, feedTransaction('pay-8')).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ProviderError)
+    expect((err as Error).message).toMatch(/no document id/)
   })
 })
 

@@ -5177,7 +5177,7 @@ export default function DesignSystemPage() {
         subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} halo />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

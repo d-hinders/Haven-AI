@@ -416,13 +416,14 @@ test.describe('design-system visual regression', () => {
       }
 
       // #4638: the halo is dialog-only and opt-in. No always-mounted specimen
-      // carries it, and the Modal specimen mirrors the Connect agent header,
-      // which stays static, so the page shows none before or after opening it.
+      // carries it; the opened-on-demand Modal specimen is the one example,
+      // so the page shows none until it opens and exactly one, inside it, after.
       await expect(page.locator('.v2-step-halo')).toHaveCount(0)
       await page.getByRole('button', { name: 'Open modal', exact: true }).click()
       const dialog = page.getByRole('dialog')
       await expect(dialog).toBeVisible()
-      await expect(page.locator('.v2-step-halo')).toHaveCount(0)
+      await expect(page.locator('.v2-step-halo')).toHaveCount(1)
+      await expect(dialog.locator('.v2-step-halo')).toHaveCount(1)
       await page.keyboard.press('Escape')
     })
   }

@@ -26,4 +26,11 @@ describe('step halo motion gate', () => {
     expect(media).toMatch(/\.v2-step-halo\s*{[^}]*animation:\s*v2-step-halo 1\.8s/)
     expect(css.slice(0, mediaStart) + css.slice(mediaStart + media.length)).not.toMatch(/\.v2-step-halo\s*{/)
   })
+
+  it('grows and fades in one direction rather than breathing back in', () => {
+    const keyframes = blockStartingAt(css, '@keyframes v2-step-halo')
+    expect(keyframes).toMatch(/0%\s*{\s*box-shadow:\s*0 0 0 0 color-mix\(in srgb, var\(--v2-ink-2\) 30%, transparent\)/)
+    expect(keyframes).toMatch(/70%,\s*100%\s*{\s*box-shadow:\s*0 0 0 8px transparent/)
+    expect(keyframes).not.toMatch(/[^0-9]0%,\s*100%/)
+  })
 })

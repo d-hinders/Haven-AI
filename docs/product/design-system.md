@@ -2871,7 +2871,9 @@ Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
 its `/design-system` specimen is the "StepProgress" section, after SidePanel.
 The optional `halo` is dialog-only and defaults off: the Connect agent header
 stays static while its active checklist row pulses, Replace signing key opts in,
-and always-mounted or inline specimens never animate on first paint.
+and always-mounted or inline specimens never animate on first paint. The one
+`/design-system` example is the opened-on-demand Modal specimen, whose header
+band carries the halo so the motion can be seen there.
 
 ### Step status checklist (`ConnectSteps`, #3832)
 

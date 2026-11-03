@@ -1,0 +1,75 @@
+name: Quality-scan re-measurement
+
+# #4625. Weekly: re-runs every row of `docs/quality/scan-baselines.json` (the
+# quality-scan ledger's `Probed clean` figures, with commands written for the
+# manifest) at the pushed SHA, and upserts the table into ONE standing issue.
+# Advisory: it never fails on a moved figure, never judges, never files a
+# defect — the next quality scan starts from its table. The runner's docblock
+# (`scripts/docs/scan-remeasure.mjs`) records why the job is not registered in
+# `guard-freshness.mjs`.
+
+on:
+  schedule:
+    # 06:37 UTC Tuesdays. Odd minute to dodge the top-of-hour Actions surge,
+    # and a day clear of docs-audit.yml's Monday 06:00.
+    - cron: '37 6 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# A manual dispatch must not overlap the cron: two runs would race the upsert.
+concurrency:
+  group: scan-remeasure
+  cancel-in-progress: false
+
+jobs:
+  remeasure:
+    name: Quality-scan re-measurement
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — block 5 counts merge commits on dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      # The block commands call ripgrep through `$RG`; no other workflow
+      # installs it, and a missing rg is a broken-instrument zero, so the
+      # runner refuses those rows instead of running them.
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
+      - name: Re-measure at the pushed SHA
+        id: remeasure
+        run: |
+          node scripts/docs/scan-remeasure.mjs --sha "$GITHUB_SHA" --scratch "$RUNNER_TEMP/scan-remeasure" > report.md
+          cat report.md
+          {
+            echo 'report<<REMEASURE_EOF'
+            cat report.md
+            echo 'REMEASURE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upsert the standing issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.remeasure.outputs.report }}
+        run: |
+          TITLE='Quality-scan re-measurement (weekly)'
+          BODY="$(printf '%s\n\n_Regenerated weekly by scan-remeasure.yml (#4625) — do not edit by hand. The quality-scan skill reads this table as its delta._' "$REPORT")"
+          # Bot-ownership upsert (#3341): select by author plus exact title,
+          # with the label in --list-args (the app author resolves only on the
+          # label-filtered list path) and on create.
+          printf '%s' "$BODY" | node scripts/ci/standing-issue-upsert.mjs \
+            --title "$TITLE" \
+            --author 'app/github-actions' \
+            --list-args '--label scan-remeasure --state open --json' \
+            --label scan-remeasure \
+            --repo "$GITHUB_REPOSITORY"

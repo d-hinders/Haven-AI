@@ -61,3 +61,11 @@
 - name: "external"
   color: "e99695"
   description: "From outside the maintainers — not built or merged until a maintainer removes this label"
+
+# Not a surface label: the standing issue of the weekly quality-scan
+# re-measurement (#4625, `.github/workflows/scan-remeasure.yml`). It marks the
+# one bot-owned issue the job upserts and queues no work — never reuse
+# `code-quality` or `ci-health` for it, which do (`guard-freshness.yml`).
+- name: "scan-remeasure"
+  color: "bfdadc"
+  description: "Weekly re-run of the quality-scan Probed-clean figures — advisory, queues no work"

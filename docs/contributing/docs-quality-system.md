@@ -7,6 +7,8 @@ covers:
   - scripts/ci/queue-framing-census.test.mjs
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
+  - .github/workflows/scan-remeasure.yml
+  - docs/quality/scan-baselines.json
   - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
   - scripts/ci/review-isolation.mjs
   - scripts/ci/standing-issue-upsert.mjs
@@ -180,6 +182,7 @@ finish in seconds, which is why `docs.yml` needs no `npm ci`.
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**` so engineering docs may say "Safe", "AllowanceModule", "signer") | Advisory |
 | Weekly staleness audit | `scripts/docs/audit-staleness.mjs`, `docs-audit.yml` Mondays 06:00 UTC | Advisory (upserts one tracking issue, selected by bot author plus exact title through `scripts/ci/standing-issue-upsert.mjs`, so a human issue is never adopted — #3341) |
+| Weekly quality-scan re-measurement ([#4625](https://github.com/d-hinders/Haven-AI/issues/4625)) | `scripts/docs/scan-remeasure.mjs --sha <sha>` over `docs/quality/scan-baselines.json`, `scan-remeasure.yml` Tuesdays 06:37 UTC: each row's command re-run under `bash -c` in a detached worktree at the pushed SHA, verdict by the row's `kind` | Advisory (upserts one standing issue, label `scan-remeasure`, through `scripts/ci/standing-issue-upsert.mjs`; never judges, never files a defect) |
 | Doc-health JSON for the ops console ([#3511](https://github.com/d-hinders/Haven-AI/issues/3511)) | `scripts/docs/doc-health.mjs [--out <path>] [--generated-at <ISO>]`: per-doc owner, status, `last-verified` and flags (`no-front-matter`, `no-owner`, `empty-covers`, and `unverified-90d`, which is age only and not the commit-based audit above) over the validator's population minus `docs/archive/**`, plus the governed package docs | Report only (for the ops app's `prebuild`, [#3515](https://github.com/d-hinders/Haven-AI/issues/3515); never gates) |
 | `haven-doc-reviewer` | [`doc-reviewer.md`](../../.agents/skills/haven-agent-workflow/references/doc-reviewer.md); binds its verdict to the reviewed head via `scripts/ci/review-isolation.mjs` | Advisory, except a wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement: **blocking** in any doc, whether or not it is `contract: true` (#4174) |
 

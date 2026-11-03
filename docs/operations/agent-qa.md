@@ -1773,7 +1773,7 @@ findings report under [`bug-reports/`](../bug-reports/).
 
 > You are running exploratory **UI** QA against Haven's **dev** dashboard (testnet /
 > Base Sepolia — never prod), read-oriented. Attach a Playwright MCP browser driver
-> (`npx @playwright/mcp@0.0.84`, reusing the installed Chromium). Open the given
+> (`npx @playwright/mcp@0.0.84`; it downloads its own Chromium build). Open the given
 > **non-production** Vercel URL with `?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app`
 > appended, sign in as the seeded QA user, and confirm the `DEV` badge + real dev data.
 > Then explore the dashboard, transactions + detail panel, agents + connect-agent

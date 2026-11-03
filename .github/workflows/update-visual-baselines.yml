@@ -37,7 +37,7 @@ on:
       #
       # (A bare `--update-snapshots` with no value means `changed` — the flag's
       # `preset` in `playwright/lib/program.js`. Running with no flag at all
-      # means `default` — 1.64 renamed what 1.60 called `missing`, same
+      # means `default` — by 1.64 that is the name for what 1.60 called `missing`, same
       # behaviour: a missing baseline is written AND the test fails. An
       # explicit `--update-snapshots=missing` now PASSES instead.)
       #

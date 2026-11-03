@@ -68,6 +68,8 @@ describe('isUpdatingSnapshots covers every spelling Playwright accepts (#2827)',
     ['a spec filter', ['design-system.visual.spec.ts']],
     // -g takes a REQUIRED value, so this is grep "u" — an ordinary run.
     ['-gu, which is grep "u" and not an update', ['-gu']],
+    // -G (grep-invert, since Playwright 1.64) takes a REQUIRED value as well.
+    ['-Gu, which is grep-invert "u" and not an update', ['-Gu']],
     // Pins the RATIONALE for `/^-x*u/` over `/^-[xh]*u/`: `-h` never clusters
     // (`playwright test -hu` is rejected as an unknown option), so no runtime
     // behaviour distinguishes the two classes — only this case records why.

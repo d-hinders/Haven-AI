@@ -88,6 +88,7 @@ test('docs:check order: package.json runs the validators in the documented order
     'validate-readme-agent-section.mjs',
     'ui-gate-wording.mjs',
     'covers-gaps.mjs',
+    'no-reverification-prose.mjs',
   ]
   const names = steps.map((s) => s.split('/').pop())
   assert.deepEqual(names, prefix, 'docs:check order')

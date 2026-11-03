@@ -134,7 +134,7 @@ npm run docs:new -- docs/research/idea.md --owner "@you"   # status inferred as 
 ### Validate locally
 
 ```bash
-npm run docs:check     # front-matter + covers globs, agent skills, README agent section, retired UI merge-gate wording, covers gaps
+npm run docs:check     # front-matter + covers globs, agent skills, README agent section, retired UI merge-gate wording, covers gaps, re-verification prose
 npm run docs:test      # unit tests for the docs and agent-skill validators
 npm run docs:coupling  # the STRICT, CI-equivalent coupling gate
 npm run docs:measure   # re-derives the #2678 epic's figures; gates nothing, writes nothing
@@ -156,6 +156,9 @@ for a run that never happens (#933; see [`autonomous-pr-loop.md`](autonomous-pr-
 § One-time GitHub setup). Doc/config drift is surface-gated — it rides the
 backend vitest job, so a PR touching no backend surface never runs it.
 
+All six blocking scripts in the `docs:check` chain are dependency-free and
+finish in seconds, which is why `docs.yml` needs no `npm ci`.
+
 | Check | Tool | Blocking? |
 | --- | --- | --- |
 | Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | **Blocking** |
@@ -164,6 +167,7 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | Agent-facing README section, six copies ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533)) | `scripts/docs/validate-readme-agent-section.mjs` | **Blocking** |
 | Retired UI merge-gate wording ([#2657](https://github.com/d-hinders/Haven-AI/issues/2657)) | `scripts/docs/ui-gate-wording.mjs` | **Blocking** (shrink-only baseline; `--update` refuses a rise, [#2747](https://github.com/d-hinders/Haven-AI/issues/2747)) |
 | `covers:` gaps — a doc naming a file its `covers:` cannot reach ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679)) | `scripts/docs/covers-gaps.mjs` | **Blocking** (shrink-only baseline of gap FILES; `--accept-new` is the explicit override) |
+| Re-verification prose in a governed doc ([#4614](https://github.com/d-hinders/Haven-AI/issues/4614)) | `scripts/docs/no-reverification-prose.mjs` | **Blocking** (a paragraph opener in the body of a `status: current` doc; `--census` reports every status and never refuses) |
 | `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843)) | `scripts/docs/chain-integrity.mjs` | **Retired** by [#2681](https://github.com/d-hinders/Haven-AI/issues/2681) |
 | Archive integrity | `retire-verified-chains.mjs verify()`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
 | Re-verification archive integrity ([#4613](https://github.com/d-hinders/Haven-AI/issues/4613)) | `scripts/docs/re-verification-notes.test.mjs`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
@@ -208,6 +212,17 @@ filter — is what makes the blocking column above true (the haven-doc-reviewer 
   record, correct as written": never append a re-check section, never bump its
   `last-verified`. `npm run docs:new` scaffolds a path under `docs/bug-reports/`
   as `record`; the run-report template there stays `current`.
+- **A body paragraph is not the record (#4614).** The record of a genuine
+  re-read is the `last-verified` bump, the `Re-verified-unchanged:` commit
+  trailer, the version-literal partition or the release shard (#4612) — never a
+  paragraph in the doc. `docs:check` refuses a paragraph-opening line whose
+  first 70 characters carry `re-verif`, `re-check`, `re-read` or `rubber-stamp`
+  (case-insensitive, hyphen optional) in the body of a governed doc: `status:
+  current`, or no status at all. `record`, `archived` and `research` docs are
+  reported by `--census` and never refused; a match inside a fenced block,
+  mid-paragraph, or in the front matter is not an opener. The rule is a census
+  rule rather than a shape list, so a new spelling of the same note is refused
+  without editing the guard.
 - **Test and generated files are incidental.** `__tests__/`, `*.test.*`,
   `*.spec.*`, `__screenshots__/` and `packages/core/src/api-types.ts` implicate a
   doc only when `covers` names the path exactly. Two carve-outs, in this order:

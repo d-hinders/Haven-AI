@@ -69,3 +69,11 @@
 - name: "scan-remeasure"
   color: "bfdadc"
   description: "Weekly re-run of the quality-scan Probed-clean figures — advisory, queues no work"
+
+# Not a surface label: set on the `scan-remeasure` standing issue by
+# `scan-remeasure.yml` while its latest run needs a look (a row flagged,
+# failed, refused or with a failed control; a doc figure moved or failed), and
+# removed by the next quiet run. Like `scan-remeasure`, it queues no work.
+- name: "scan-attention"
+  color: "e4e669"
+  description: "The latest weekly quality-scan re-measurement needs a look — set and cleared by the job"

@@ -27,6 +27,11 @@ export function violations(text) {
   if (!/^concurrency:\s*\n\s+group:\s*\S+/m.test(src)) out.push('a top-level concurrency group is missing (a dispatch would race the cron)')
   if (!/scan-remeasure\.mjs --sha "\$GITHUB_SHA"/.test(src)) out.push('the runner must take --sha "$GITHUB_SHA" (one resolved SHA, never origin/dev)')
   if (/origin\/dev/.test(src)) out.push('the workflow must not read origin/dev')
+  if (!/scan-remeasure\.mjs [^\n]*--attention-out attention\.json/.test(src)) out.push('the runner must write --attention-out attention.json (the alert reads it)')
+  if (!/jq -r \.needsAttention attention\.json/.test(src)) out.push('the alert must decide from attention.json needsAttention')
+  if (!/gh issue edit "\$NUMBER" --add-label scan-attention/.test(src)) out.push('a week that needs attention must add the scan-attention label')
+  if (!/@d-hinders[^\n]*\n[^]*?gh issue comment "\$NUMBER"/.test(src)) out.push('a week that needs attention must @mention the owner in a comment')
+  if (!/--remove-label scan-attention/.test(src)) out.push('a quiet week must remove the scan-attention label')
   if (!/--author 'app\/github-actions'/.test(src)) out.push("the upsert must select by --author 'app/github-actions'")
   if (!/TITLE='Quality-scan re-measurement \(weekly\)'/.test(src)) out.push('the standing issue title moved')
   if (!/--list-args '[^']*--label scan-remeasure[^']*'/.test(src)) out.push('--list-args must carry --label scan-remeasure (standing-issue-upsert.mjs:53-58)')
@@ -46,6 +51,7 @@ test('the workflow passes every pin', () => {
 
 test('the scan-remeasure label is declared', () => {
   assert.match(readFileSync(LABELS, 'utf8'), /^- name: "scan-remeasure"$/m)
+  assert.match(readFileSync(LABELS, 'utf8'), /^- name: "scan-attention"$/m)
 })
 
 // Each pin, made to fail by the nearest wrong edit to the real file.
@@ -62,6 +68,11 @@ const MUTATIONS = [
   ['--label', (t) => t.replace(/^(\s+)--label scan-remeasure \\$/m, '$1--label scan-other \\'), /--label scan-remeasure must be passed/],
   ['queue label', (t) => t.replace(/^(\s+)--repo/m, '$1--label code-quality \\\n$1--repo'), /queue work/],
   ['pull_request', (t) => t.replace(/^ {2}workflow_dispatch:$/m, '  workflow_dispatch:\n  pull_request:'), /no pull_request trigger/],
+  ['attention-out', (t) => t.replace(' --attention-out attention.json', ''), /must write --attention-out/],
+  ['needsAttention', (t) => t.replace('jq -r .needsAttention attention.json', 'echo true'), /decide from attention\.json/],
+  ['add-label', (t) => t.replace('--add-label scan-attention', '--add-label scan-other'), /add the scan-attention label/],
+  ['mention', (t) => t.replace('@d-hinders the weekly', 'The weekly'), /@mention the owner/],
+  ['remove-label', (t) => t.replace('--remove-label scan-attention', '--remove-label scan-other'), /remove the scan-attention label/],
   ['commented-out fetch-depth', (t) => t.replace(/fetch-depth: 0/, 'fetch-depth: 1 # fetch-depth: 0'), /fetch-depth: 0/],
 ]
 

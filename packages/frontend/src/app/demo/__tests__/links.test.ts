@@ -6,8 +6,9 @@ import { DEMO_MD_CONTENT } from '@/lib/demo-md-content'
 /**
  * Link check for `/demo` and `/demo.md` (#3477).
  *
- * Neither page is in `public/`, so `.lychee.toml` (docs-only) never crawls
- * them, and `discovery-artifacts.test.ts`'s `ARTIFACTS` list deliberately
+ * Neither page is Markdown, and lychee crawls Markdown only (the `args` glob
+ * in `.github/workflows/docs.yml`), so it never crawls them, and
+ * `discovery-artifacts.test.ts`'s `ARTIFACTS` list deliberately
  * excludes `/demo.md` (see its route handler's header comment) — so this is
  * the one place that checks these links resolve.
  */

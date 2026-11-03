@@ -11,6 +11,16 @@ timeout = 20
 retry_wait_time = 2
 max_retries = 2
 
+# Root-relative links in crawled docs are served from the site root, which is
+# `packages/frontend/public` (`/402.md`, `/llms.txt`, `/agent-skills/*.md`).
+# Without this, lychee reports them as "provide a root dir" errors even though
+# they are correct as served. The setting is global: a root-relative link in
+# ANY crawled doc resolves under `public/`, which is what every such link in
+# the tree means today. The path is relative to the working directory (the
+# repo root in CI); the `--root-dir` flag requires an absolute path, this key
+# does not.
+root_dir = "packages/frontend/public"
+
 # Localhost / placeholder / example hosts and known-flaky external targets.
 exclude = [
   "^https?://localhost",
@@ -18,7 +28,27 @@ exclude = [
   "^https?://0\\.0\\.0\\.0",
   "example\\.com",
   "your-app\\.up\\.railway\\.app",
+  # `/releases` is a Next app route (src/app/releases/page.tsx), not a file
+  # under `public/`, so lychee cannot verify it offline. Anchored to the
+  # resolved target: a loose `releases` would also silence the GitHub Releases
+  # URL in docs/contributing/branch-and-release-flow.md and the EBA
+  # press-release URL in docs/regulatory/casp-risk-guardrails.md.
+  "^file://.*/packages/frontend/public/releases$",
 ]
+
+# Historical records are not crawled as inputs. `docs/archive/**` is 12 of 12
+# `archived` and `docs/research/**` 14 of 14 `research` — the two statuses the
+# docs system exempts from governance (#2638) — and `docs/bug-reports/**` is
+# 21 `record` plus one `current` template; a `record` doc is governed but
+# append-only history, so its link rot has no fix anyone will make (#4459).
+# `exclude_path` skips inputs only: links from current docs INTO `docs/archive/`
+# are still checked.
+exclude_path = ["^docs/(archive|bug-reports|research)/"]
+
+# www.npmjs.com answers 403 to the runner (bot-blocking), including for our own
+# `@haven_ai/sdk` page in packages/frontend/public/402.md. Ask the registry
+# instead: it still 404s a misspelled package, so no failure class is hidden.
+remap = ["^https://www\\.npmjs\\.com/package/(.+)$ https://registry.npmjs.org/$1"]
 
 # Mail links are out of scope for doc link health. Local file links are in
 # scope: they are what catches a relative path that points nowhere (#4623).

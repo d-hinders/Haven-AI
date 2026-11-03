@@ -14,7 +14,7 @@ name: Docs quality
 # Vale) are separate jobs on purpose:
 #
 #   * `continue-on-error` protects against a step FAILING, not against the job
-#     TIMING OUT. Sharing a job meant a slow lychee run over ~130 external URLs
+#     TIMING OUT. Sharing a job meant a slow lychee run over the whole tree
 #     could cancel the whole job — and a cancelled required check blocks
 #     auto-merge just as hard as a failing one, despite "only front-matter
 #     blocks" being the intent.
@@ -45,7 +45,7 @@ name: Docs quality
 #
 # `advisory` opts OUT of `edited` instead of the trigger staying narrow,
 # because its inputs are entirely in the repository: re-running lychee over
-# ~130 external URLs because someone reworded a description is waste, and the
+# the whole tree because someone reworded a description is waste, and the
 # job's whole reason for existing is that those network steps are slow. It is
 # not a required check, so a skipped run reports as skipped and blocks nothing
 # — the #933 hazard applies to `validate`, which is why `validate` does not
@@ -170,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Nothing here reads the pull request itself, so a reworded description
-    # cannot change any verdict below. Skipping keeps ~130 external URL checks
+    # cannot change any verdict below. Skipping keeps the whole link check
     # off every description tweak. Safe to skip precisely because this job is
     # advisory — see the `edited` note in the header.
     #

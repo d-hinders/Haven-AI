@@ -2610,3 +2610,78 @@ versus its migration, a census figure with no command), four nits. All
 applied in place; corrected figures are marked above and in the report's § 5.
 
 **Disposition: pending owner decision** (C1, C2).
+
+**Disposition (owner, 2026-11-02): file both.** The owner answered "Both" in
+the captain's session, then the four follow-up questions the filing raised.
+The scan PR is #4609 (reviewed at `410384353`, corrected at `b7eb36a4a`), merged
+or merging before this disposition (stacked PR). Every issue went through
+new-task with an independent spec review; no owner question is open and
+`pending-review` is lifted on all of them.
+
+- C1 → epic [#4610](https://github.com/d-hinders/Haven-AI/issues/4610)
+  (`epic`, `area:docs`, `area:ci`, `money-path`), slices #4612 (gate), #4613
+  (archive), #4614 (guard). **The scan's C1 figures understate the class by
+  an order of magnitude, found by the spec reviews:** the report's headline
+  figure was the bare-paragraph shape (69 paragraphs / 30 docs / 72,877 bytes
+  by its own method; 68,773 in the current docs), and its wider regex (92
+  openers / 42 docs) still missed the `> **Re-verified …` blockquote-bold
+  shape — the #2938 incident's — which the first review found; the second
+  found `Re-verification (#N …)`, `Recent re-verification`, `#N
+  re-verification`, `Re-read, not rubber-stamped` and `Re-verified, …`; the
+  review of this PR found paragraphs after a bare `>` line inside a blockquote
+  run (149 more). By the paragraph-start census the epic now defines (a line
+  after a blank line or a bare `>` line, a heading line, or the first line of
+  a blockquote run, whose first 70 characters say re-verif / re-check /
+  re-read / rubber-stamp, outside fences; the reference script is in #4613's
+  Method block, and every census figure here is its output — the doc totals
+  and byte totals come from the status read beside it), `status: current`
+  docs carry **686 openers in 51 of 79 docs, 751,135 of 3,755,152 bytes
+  (20.0 %)** at `e0617aa9f` — more than the 461 KB #2681 retired; 123 of the
+  686 are coupling-gate `Re-verified unchanged` notes (a first reading of 688
+  counted two wrapped `#NNNN …` body lines as headings; the delta review of
+  this PR caught it); the agent-served
+  security model is 158 openers, 182,157 of its 299,914 bytes. The largest
+  source is not the
+  weekly audit but code PRs satisfying the strict contract-doc coupling gate,
+  which needs an edit to the doc, so the candidate became three PRs on the
+  owner's word: the gate first (a version-literal-only diff never implicates;
+  a `Re-verified-unchanged:` commit trailer records a re-read, never for a
+  `satisfied-by:` doc — a PR-body marker and a `*-release.md` `satisfied-by`
+  glob were both rejected by review as forgeable), then the archive (verbatim,
+  hashed, records left as written), then the `docs:check` guard by the same
+  census rule. Owner decisions the same day: archive verbatim; include the
+  release bump's printed guidance and the scripts README among the
+  instruction sites; the partition and the trailer; the slice-1 threat model
+  confirmed. Two spec-review passes (4 blocking / 5 should-fix / 6 nits on the
+  single-task form; 4 blocking / 13 should-fix on the epic); verdict on #4610,
+  Corrections: 31, plus the census amendment above recorded there after this
+  PR's review.
+- C2 → [#4611](https://github.com/d-hinders/Haven-AI/issues/4611)
+  (`area:docs`) → **`shipped`** the same day: closed 2026-11-02 via PR #4615
+  (`3d348ef93`, into `dev`) by a partner pipeline, 80 minutes before this
+  entry was first written — the next scan's block 6 reads the pinned
+  `ls-tree` command only. Owner decision: reference only — the six SDK files stay out
+  of the copy lint's `SCAN_FILES` (the lint's decision under #2317). Spec
+  review re-ran 14 claims: 12 reproduced, 2 wrong and fixed (the glob line's
+  exclusion filter changed in `fe491ac24`; the docs-boundary command is not
+  pinned, only its prose says to pin); 11 corrections, among them: the
+  acceptance grep re-anchored to the command line, the content read pinned
+  with `git show <sha>:<file>`, the "nine entries" instrument replaced (the
+  figures wrap, so a single-line grep finds 2), the control run after the
+  filter with a frontend twin.
+
+Block-3 note for the next run: the 2026-11-02 report's C1 figures are
+superseded by #4610's census — cite the epic, not the report, for that
+class — and block 6's copy-lint figure steps from 66 / 4 to the `ls-tree`
+command's reading by #4615's selector change, not by new files.
+
+Drive: `ship-next epic=#4610` (slice order #4612 → #4613 → #4614).
+
+**Disposition upkeep (2026-11-03):** all three slices shipped the same night
+by partner pipelines — #4612 via PR #4619 (`850e48023`), #4613 via PR #4620
+(`383908c3a`), #4614 via PR #4621 (`bd05485ea`); the epic stays open for its
+promotion checklist. The scan record (#4609, `c9a2eca51`) merged after #4621
+without a re-run against the new base and turned the required docs job red
+on `dev`: #4613's test pins the record-doc census at 25 and the record's own
+bullet about #2938 carries "re-verification" on its opening line (26). The pin moves to 26 in
+the PR carrying this entry (#4617), with the reason beside it.

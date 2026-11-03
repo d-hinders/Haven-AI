@@ -1699,7 +1699,8 @@ rather than repeated per entry:
   `ArrowRight`; `trailingIcon={ExternalLink}` draws that glyph after the label instead — the
   trailing-affordance convention of § Arrows for a link that leaves the app.
 - **`leadingIcon` (#4639)** draws a lucide icon before the label: `aria-hidden` (the label
-  stays and is the accessible name), 14px (`h-3.5 w-3.5`, § 5's rung beside `text-sm`), in
+  stays and is the accessible name), 14px (`h-3.5 w-3.5`, § 5's rung beside the button
+  label, at every size), in
   the label's colour, at the base `gap-1.5`, on every variant, size and element. An
   icon-only button is a different control; its patterns are unchanged.
 - **One icon per button — a compile error, not a review note.** `leadingIcon` and

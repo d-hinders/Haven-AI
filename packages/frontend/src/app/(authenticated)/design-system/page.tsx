@@ -2260,8 +2260,9 @@ export default function DesignSystemPage() {
             </div>
           </Card>
           {/* #4639: its own card, last in the grid, so adding it moves no
-              earlier sample (the /design-system clips are fold-positioned). */}
-          <Card hover={false} className="p-5">
+              earlier sample (the /design-system clips are fold-positioned).
+              `self-start`: it does not stretch to its grid row's height. */}
+          <Card hover={false} className="self-start p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Icons on buttons</h3>
             <div className="mt-4 flex flex-wrap items-center gap-3" data-testid="ds-button-icons">
               <Button leadingIcon={Plus}>New account</Button>

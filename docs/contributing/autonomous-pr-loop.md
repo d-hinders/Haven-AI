@@ -91,7 +91,6 @@ Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
 pings you only for a real decision, a blocking review finding, a live work
 overlap, or stuck CI.
 
-
 ## Feeding work in
 
 The queue is always **GitHub issues** — nothing is tracked in the repo. Issue
@@ -608,26 +607,6 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    gh api repos/d-hinders/Haven-AI/rules/branches/main
    ```
 
-   Re-verified **2026-10-13** (#3798): the strict flags, the required-check
-   lists (15 on `dev`, 19 on `main`), the merge methods and the code-owner
-   requirements are unchanged. Re-verified **2026-10-25** (#4372) with the same
-   commands: three active rulesets; 16 required contexts on `dev` and 19 on
-   `main`; strict only on *Dev gate*; squash only on `dev` and merge only on
-   `main`; code-owner review on *Haven automerge rules* and *Dev gate*, not on
-   *Dev merge*; PR ownership gate still not required. The 2026-10-09 authenticated read also shows
-   `Dev gate` with **no bypass actors** (the admin-role `always` bypass lives
-   only on *Haven automerge rules*) — see
-   [`branch-and-release-flow.md`](branch-and-release-flow.md) § *Promotion to
-   production*.
-   The `rules/branches/{main,dev}` form is the fastest way to re-check the
-   effective branch rules without admin UI access: it reports each rule once per
-   matching ruleset, which is the union above seen from the other side. Two
-   rulesets match each branch, so both report `pull_request`, `deletion` and
-   `non_fast_forward` twice. Since the External intake gate went on *Dev
-   merge*, `required_status_checks` also comes back **twice** on each branch:
-   on `dev` from *Haven automerge rules* and *Dev merge*, on `main` from that
-   ruleset and *Dev gate*.
-
    **How a red push run gets noticed (#3890).** Nothing watched that run.
    #3886 is the case: #3855's merge broke `MCP server checks` on its own push,
    and nobody noticed for about five hours (job failed 09:47Z; #3886 filed
@@ -800,3 +779,5 @@ least twice.
   change to existing money-path behavior. Since #1024 that requirement is
   backstopped by the reviewer pass rather than by a human seeing the PR before
   merge — a real reduction in independence, accepted knowingly.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

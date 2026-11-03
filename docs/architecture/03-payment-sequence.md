@@ -144,7 +144,6 @@ sequenceDiagram
 > [Delegation rail](#delegation-rail-new-accounts) below and
 > [04-x402-payment-sequence.md](04-x402-payment-sequence.md).
 
-
 - **The DB config is an eligibility gate; on-chain state is the spend
   envelope.** Haven requires a configured token allowance row, then reads the
   AllowanceModule state and latest chain timestamp. `computeEffectiveAllowance`
@@ -368,29 +367,4 @@ Haven never holds the settlement key, never off-ramps, and never settles for
 third parties — the position recorded with counsel in
 [docs/regulatory/casp-risk-guardrails.md](../regulatory/casp-risk-guardrails.md).
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: the retired-rail section credits #2020, not #1987, with deleting
-> the backend's `computeEffectiveAllowance` (#1987 deleted the signature path
-> and the callers), and the key-invariants bullet no longer points at
-> `relayer-reads.ts` as the function's home; the x402-payTo match no longer
-> says the matched intent id is never served — `GET /receive/{accountAddress}`
-> returns it as `matched_payment_intent_id`. Re-checked without change: the
-> 410 rail gates on `/payments` and `/x402` (`rails/execution-rail.ts`,
-> `modules/x402/authorize.ts`), `/safe/exec` and `/approvals` gone (#2847,
-> #2055 / migration 070), the 10-minute signing window, the delegation-rail
-> steps (native-token 400, selection by hash, the #3503 pre-check body and
-> its fail-open, the smallest-link rule, the #3500 and period-revert 403s,
-> the 502, the `eip712_userop` 201), the erc7710 child (600s cap,
-> `/x402/:id/settle`, `eip712_delegation`), the EIP-3009 bridge
-> (`merchantPayTo`, open budget, `settlement_scheme`), the #961 one-shot 400,
-> replay and hourly cap (default 100, replays exempt), the #956 receipt
-> capture (first write wins), and the receive side (migration 097 keying,
-> the explorer-fed index, the payer-signed drop, the owner-only off-ramp
-> routes, the submit-time calldata pin, the panel removed by #4142 under
-> #4097). Every cited issue was read with `gh api`; all are closed.
->
-> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** The matched-intent
-> sentence now says the field is null unless `match_kind` is `x402_payto`
-> (the repository's `matchInboundTransfer` comment; the OpenAPI
-> `ReceiveLedgerTransfer` description) and that it is documented in the
-> OpenAPI schema.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

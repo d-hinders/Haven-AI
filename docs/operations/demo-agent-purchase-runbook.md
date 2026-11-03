@@ -151,29 +151,6 @@ reverse-charge VAT 2645/2614), then import in Fortnox
   balance and retry; `GET /healthz` on the merchant shows the same
   `settlement.status` band ahead of time.
 
-## Verification notes
-
-Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.
-Changed: Act 0's Fortnox connect is in Settings → Business since #4358, its
-check is `/accounting` or `GET /accounting/feed/status` (there is no
-`/fortnox/status` route), and the fallback script is a backend workspace script;
-Act 1 names `haven_prepare_catalog_purchase` and `haven_settle_mcp_tool`; Act 2
-shows a funding tx only on the EIP-3009 bridge; Act 3's refusal is the
-off-chain `403 delegation_budget_exceeded` pre-check (#3503) and the revoke
-answer is a `403` with the "no active budget delegation" message and no
-`error_code` (`routes/payments.ts`; `no_delegation_for_target` is only the
-ledger reason); Act 4A pushes through the live feed, not the legacy voucher
-route; Act 5's out-of-gas `MERCHANT_NOT_READY` comes from the quote step that
-`haven_quote_mcp_tool`, `haven_pay_mcp_tool` and both catalog tools share
-(`quoteMcpToolCall`, defined with the refusal in
-`tools/support/mcp-context.ts` and called from `catalog-purchase.ts`), so it
-names `haven_prepare_catalog_purchase` first (review round 1 on #4386); Act
-2's erc7710 condition is the merchant's `MERCHANT_ERC7710_DELEGATION_MANAGER`
-pin plus its settlement-method list (`demo-merchant-mcp/src/index.ts`,
-`resolveErc7710Config`; review round 2).
-Re-checked without change: the connector-package handout, the SIE flag and
-export route (`routes/accounting.ts`, 410 otherwise), the `storage_50gb`
-skip-settle fixture, and the rehearsal list.
 
 ## Rehearsal checklist
 
@@ -182,3 +159,5 @@ skip-settle fixture, and the rehearsal list.
 - [ ] SIE downloads and imports into the sandbox company
 - [ ] Over-budget refusal + revoke rehearsed
 - [ ] Fallback material verified openable offline
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

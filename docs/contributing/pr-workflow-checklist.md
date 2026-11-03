@@ -102,7 +102,7 @@ apply. The PR template remains the source of truth for every other pull request.
 
 ## Before Merging
 
-- Re-check that the PR has no conflicts with `dev`.
+- Confirm that the PR has no conflicts with `dev`.
 - **Diagnosis rule (#1366): "only the labeler ran" on a push means the PR is
   CONFLICTING** — GitHub silently creates NO `pull_request`-triggered check
   runs when the merge commit cannot be built, while `pull_request_target`
@@ -269,33 +269,4 @@ Notes:
 - [ ] PR target is `dev` (or `main` for a `hotfix/*`)
 - [ ] Conflicts with `dev` checked before merge
 
-> **Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), a full re-read.**
-> Changed: the backend gate count is 39, not 36 (the snippet above prints
-> `39 11`; the raw-string variant still prints 9 and the whole-document
-> variant 12). `qa-agent` has had a CI job since #3005 (*QA agent checks*),
-> so "not one" was wrong. The docs row names all five `docs:check` steps.
-> The payment row says "account or signer setup" for the retired Safe term.
-> `guard-freshness.yml` is push-driven with a weekly floor, so the two guards
-> are no longer both called scheduled.
-> Re-checked without change: `dev-gate.yml`'s `dev`/`hotfix/*` rule; the
-> three active rulesets (`gh api …/rulesets`): *Haven automerge rules* on
-> `main` and `dev`, with the 15 required checks (*Banned product-copy terms*
-> and *Design-system coupling (strict)* among them), strict policy off and
-> code-owner review required; *Dev gate* on `main`, requiring `gate`,
-> `qa-freshness`, *Design visual regression* and *Frontend browser smoke*,
-> strict policy on and code-owner review required; and *Dev merge* on `dev`,
-> requiring *External intake gate* (#4200), strict policy off and no
-> code-owner review of its own;
-> `CODEOWNERS` on migrations; every npm script the doc names; the preflight
-> flags and exit codes 0/1/2/3 and `PREFLIGHT_SILENCE_MS`; the CI jobs that
-> run `lint:next-steps`, `lint:vocabulary`, `lint:runbook-parity`,
-> `design:lint` and the backend ratchets; the classifier's CLAUDE.md,
-> `frontend/public`, allowlist and `docs/exit/README.md` arms and
-> `--no-renames`; the ten-package `build` chain; the dependency lint with no
-> baseline; the *Update visual baselines* `mode` default `changed`, the
-> *Baseline change audit* and `baseline-before-after` artifact, and
-> `BASELINE_PUSH_TOKEN` absent from `gh secret list` (which lists 12 others);
-> `verify-merged-head.mjs` taking a PR number; the coupling gate's #2323
-> section heading and its exit 0 without `--strict`; the `ui-gate-wording`
-> baseline's one sentence in `ship-playbooks/frontend.md`; the anchors into
-> `ship-playbooks/frontend.md`, `ship-next` and `autonomous-pr-loop.md`.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

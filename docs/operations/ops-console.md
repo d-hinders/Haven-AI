@@ -16,46 +16,6 @@ covers:
 last-verified: "2026-10-06"
 ---
 
-> **Re-verified #4192 (2026-10-21, ignore-step tests: event-loop yield and
-> real git):** this diff touched `scripts/vercel/ignore-build-harness.mjs`
-> and `packages/ops/src/__tests__/vercel-ignore-build.test.ts`. Two
-> test-only changes. First, the harness gains `yieldToEventLoop`, which the
-> ops test registers as an `afterEach`. The harness spawns git synchronously,
-> so a file that runs past 60 s without a turn of the event loop outlasts the
-> 60 s timer of the vitest worker's `onTaskUpdate` RPC. vitest then reports an
-> unhandled error and `npm run test -w packages/ops` exits 1 with every test
-> passing. Second, on macOS the harness resolves the real git once (`xcrun -f
-> git`) and puts its directory first on PATH, skipping the slow `/usr/bin/git`
-> shim. That cut the ops file from 135-153 s to about 25 s run alone at idle
-> load. No assertion, watched path or script behaviour changed, so the Ignored Build
-> Step paragraph in § 1 stands as written. Nothing else in this document was
-> re-verified, and `last-verified` is not bumped.
-
-> **Re-verified #3913 (2026-10-19, after the toggle):** only the "Skipped - Not
-> affected" records paragraph and step 4 of § 1 changed; step 4 now names
-> the setting's required value. The paragraph now records that the setting was seen
-> **Enabled** on haven-ops in the dashboard and turned off on 2026-10-15, and
-> gives the measured result (GitHub deployment records, 2026-10-15 to
-> 2026-10-18). Nothing else in this document was re-verified, and
-> `last-verified` is not bumped.
-
-> **Re-verified #3913 (2026-10-13, Vercel skip-setting doc corrections):** the
-> *Deploys from `dev` only* paragraph was reflowed and a new "Skipped - Not
-> affected" records paragraph added, naming the per-project Vercel setting
-> "Skip deployments when there are no changes to the root directory or its
-> dependencies" and its required value **off** on haven-ops. The setting's
-> on/off state per project and the record counts (103 preview, 8 of 40
-> production) come from #3913's GitHub deployment-records census — an
-> inference; nobody has checked the dashboard yet (superseded by the 2026-10-19
-> note above: the dashboard was checked). Nothing else in this
-> document was re-verified, and `last-verified` is not bumped.
-
-> **Re-verified #3821 (2026-10-09):** only the *Deploys from `dev` only*
-> paragraph (the "Skipped - Not affected" residual) and the Ignored Build Step
-> paragraph changed — the frontend project takes the first-preview path for opt-in
-> `preview/*` branches only. Nothing else in this document was re-verified,
-> and `last-verified` is not bumped.
-
 # Ops console
 
 The private operations console (`@haven/ops`, epic #3507): a founders-only,
@@ -393,3 +353,5 @@ unauthenticated render of the sign-in screen is not reachable without a
 Vercel seat. Do not let it stand in for anything the console actually
 guards — the audit trail, the allowlist and the read-only role are the
 controls that matter; this only trims who can reach the front door.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

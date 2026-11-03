@@ -1639,18 +1639,4 @@ Money and risk clarity:
 - "Passkeys and wallets" is a Security-tab section (owner decision 2026-10-09, #3825; tabbed #4358; pills #4472): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves — each account an outline pill link (`LinkChip`, design-system.md § *Account link pill*) to its `/accounts/<id>?tab=security`, in a wrapping row under the signer's label. The pill shows the account name alone; the `(network)` suffix is appended to EVERY pill in the section only when the listed accounts span more than one network, so one account reads the same on every row (owner decision 2026-10-27). A passkey whose credential this device holds carries a neutral "This device" `StatusBadge` beside its label; wallet rows never do. The section speaks in outcomes ("Browser wallet", "Passkey · added {date}", "This device"), never "signer" (`copy-guidelines.md`); the account card's link to it ("Passkeys and wallets", on the "Who can approve" heading row since #4474 — the link text is the owner's 2026-10-30 decision, #4563, superseding the mockup's "All signers in Settings") targets `?tab=security#signers`. No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Passkeys and wallets reads as one more signer), now that the top bar carries no wallet pill.
 - Avoid duplicating account summary facts already shown on Dashboard, Account details, or the Profile section.
 
-Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
-the Transaction History ledger row now states the phone layout — below `sm` it
-is two bands, title and amount then description and clock time (#4572), where
-the recipe described only the desktop arrangement. Re-checked without change:
-the agent card's one `StatusBadge` and its `agentBadge` labels ("Needs setup",
-"Budget ended", "Paused", "N% used" at 90% or more, plus "Archived" and
-"Revoked"); the one Set budget dialog and its `?grant=` prefill (#4564/#4600);
-the accounting vocabulary rendered through `StatusBadge` from
-`accountingStatusPresentation` (`In <Provider>` / `Evidence archived` /
-`Tracked` / `Sending…` / `Not sent`, #4567); the Receive dialog's QR
-`Skeleton`; the tool-call tab's `MCP_TOOL_NAMES` labels, `errorCodeLabel` and
-`ListShowMore` footer; the connect flow's close affordances (X, backdrop,
-Escape) and the step past the line that removes them; and the Settings
-Business-tab sections. The week's UI sweep (#4562–#4603) changed screens these
-recipes describe without changing any structure, label or rule they state.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

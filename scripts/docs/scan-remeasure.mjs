@@ -355,7 +355,7 @@ export function attentionLine(summary) {
     [summary.controlFailed, 'control failed'],
     [summary.refused, 'refused'],
     [summary.docMoved, 'doc figure moved'],
-    [summary.docProblems, 'doc figure failed'],
+    [summary.docProblems, 'doc figure failed or lost its anchor'],
   ]
     .filter(([n]) => n > 0)
     .map(([n, what]) => `${n} ${what}`)

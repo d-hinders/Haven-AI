@@ -326,7 +326,9 @@ const ATTENTION_CASES = [
   ['a failed control', { rows: [row({ id: 'x', kind: 'control', expect: 'nonzero', figures: [1], command: 'echo 0 # $SHA' })] }, 'controlFailed', /1 control failed/],
   ['a refused row', { rows: [row({ id: 'x', requires: ['rg'], command: '"$RG" -l x . | wc -l # $SHA' })], env: { RG: '/nonexistent/rg' } }, 'refused', /1 refused/],
   ['a moved doc figure', { docFigures: [docRow({ id: 'x', figures: [3, 5] })] }, 'docMoved', /1 doc figure moved/],
-  ['a doc figure whose anchor is gone', { docFigures: [docRow({ id: 'x', anchor: 'not in the doc' })] }, 'docProblems', /1 doc figure failed/],
+  ['a doc figure whose anchor is gone', { docFigures: [docRow({ id: 'x', anchor: 'not in the doc' })] }, 'docProblems', /1 doc figure failed or lost its anchor/],
+  ['a doc figure whose command fails', { docFigures: [docRow({ id: 'x', command: 'exit 3 # $SHA' })] }, 'docProblems', /1 doc figure failed or lost its anchor/],
+  ['a doc figure refused for a missing tool', { docFigures: [docRow({ id: 'x', requires: ['rg'], command: '"$RG" -c x docs | wc -l # $SHA' })], env: { RG: '/nonexistent/rg' } }, 'docProblems', /1 doc figure failed or lost its anchor/],
 ]
 
 for (const [what, input, key, line] of ATTENTION_CASES) {

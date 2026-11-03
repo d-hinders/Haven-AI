@@ -16,6 +16,7 @@ covers:
   - packages/frontend/src/components/SetBudgetDialog.tsx
   - packages/frontend/src/components/ListManagerModal.tsx
   - packages/frontend/src/components/marketplace/FundMerchantModal.tsx
+  - packages/frontend/src/components/marketplace/OffersTable.tsx
   - packages/frontend/src/components/connect-agent/ConnectStepShell.tsx
   - packages/frontend/src/context/ThemeContext.tsx
   - packages/frontend/src/lib/theme-bootstrap.ts
@@ -124,47 +125,6 @@ last-verified: 2026-10-30
 ---
 
 # Haven Design System
-
-> Re-verified 2026-10-30 for #4562: § Modal (the dialog anatomy — close button
-> by default, open-time focus in the body, the field-label style, the width
-> mapping) and § Dialog actions (the single-screen footer rule beside the
-> multi-screen one). This note covers those passages only.
->
-> Re-verified 2026-10-22 for #4237: the navigation bullets (floating tab bar —
-> the concentric-capsule indicator, the pill's `p-1` inset, the bar-only
-> "Home" label and the relaxed one-active-idiom rule for the bar). This note
-> covers those passages only.
-
-> Re-verified 2026-10-19 for #4063: the navigation bullets (floating tab bar —
-> the dark pill's own token pair and the re-measured ratios — and active
-> idiom). This note covers those passages only.
-
-> Re-verified 2026-10-17 for #4058: § z-index scale (the rule paragraph and the
-> nav-tier paragraph), § Safe areas (the phone-navigation paragraph), the
-> navigation bullets (floating tab bar, active idiom, More cell, More sheet) and
-> § Tap targets' "both states" bullet.
-> This note covers those passages only.
-
-> Re-verified 2026-10-17 for #4056: § Tap targets' `SegmentedControl` passage
-> (44px hit area, inset brand outline on the selected option). This note covers
-> that passage only.
-
-> Re-verified 2026-10-27 for #4496: § Tap targets' `SegmentedControl` passage
-> (44px hit area, the 5px overhang past the group's border, the outlined/divided
-> look and the selected segment's brand-soft fill + brand ink + semibold with no
-> outline), and § *Below `lg`*'s tab-bar bullet, where `SegmentedControl`'s
-> selected option is named. This note covers those passages only.
-
-> Re-verified 2026-09-03 for #2468: the investor-briefing route, its tap-target
-> borrower, and its marketing exemption were retired; the surviving focus-ring
-> census intentionally keeps a one-member anti-vacuity floor. This note covers
-> the affected references only; the rest of this document was not re-read.
-
-> Re-verified 2026-10-06 for #3701: § Arrows' expected-output table was retired
-> (the shell pipeline's output had drifted from the table pasted beside it) and
-> the comment-aware allowlist test is named the check of record instead. This
-> note covers § Arrows and the § Icons pointer to it only; the rest of this
-> document was not re-read.
 
 This is the source of truth for Haven's current light visual language. Companion to the product UX guide (`docs/product/README.md`, which documents product doctrine, vocabulary, and IA — those rules **still apply**). If older docs mention a dark app surface system, **this document supersedes them**.
 
@@ -883,7 +843,7 @@ that slice removed.
 |---|---|---|---|
 | `pending_signature` | Awaiting signature | `brand` | `PAYMENT_STATUS` |
 | `submitted` | Submitted | `brand` | `PAYMENT_STATUS` |
-| `confirmed` | **Sent** | `success` | `PAYMENT_STATUS` — a confirmed payment is **Sent** everywhere |
+| `confirmed` | **Sent** | `success` | `PAYMENT_STATUS` — **Sent** in the detail panel; a ledger row carries no badge (#4608) |
 | `failed` | Failed | `danger` | `PAYMENT_STATUS`, `transactionRowBadge`'s fallback |
 | `expired` | Expired | `neutral` | `PAYMENT_STATUS` |
 | delegate sweep | Recovered | `success` | `lib/transaction-presentation.tsx` `transactionStatus` |
@@ -1102,26 +1062,29 @@ four — so the census is zero today. `EditAgentModal`'s busy screen is
 
 ### Detail-page section rule (#3692)
 
-On an **entity detail page** — an agent or an account — the page is a stack of
-labelled sections, and every section is assembled the same way. The rule is
-scoped to entity detail pages and **settings pages** (owner decision
-2026-10-23, on #4357): not list pages, not modals (a modal keeps its own
-callout vocabulary — see #3690's in-modal neutral callout, which this rule
-does not touch). The Settings page assembles its sections with the shared
-`components/ui/SettingsSection.tsx`, which renders this shape so every caller
-follows without edits. The heading block itself is
-`components/ui/SectionHeading.tsx` (#4475), which `SettingsSection` composes —
-a detail page that does not use `SettingsSection` renders it directly above
-its card, so the heading, its optional description and its optional trailing
-link are one shape everywhere.
+On a **signed-in page** — an entity detail page, a settings page, or any other
+page behind the app shell — the page is a stack of labelled sections, and every
+section is assembled the same way. The rule is scoped to **page sections on
+every signed-in page** (owner decision 2026-11-02, on #4608, widening the
+2026-10-23 scope that covered entity detail pages and settings pages only): not
+modals (a modal keeps its own callout vocabulary — see #3690's in-modal neutral
+callout, which this rule does not touch). The Settings page assembles its
+sections with the shared `components/ui/SettingsSection.tsx`, which renders this
+shape so every caller follows without edits. The heading block itself is
+`components/ui/SectionHeading.tsx` (#4475), which `SettingsSection` composes — a
+page that does not use `SettingsSection` renders it directly above its content,
+so the heading, its optional description and its optional trailing link are one
+shape everywhere.
 
-- Each section's heading (`v2-text-h3`) sits **above** its `Card`, not inside
-  it — on detail pages **and on settings pages**. A description is
-  **optional** (#4476; owner decision 2026-10-27 on the #4224 walk): it
-  appears only when it tells the reader something the heading and the card
-  don't. The agent page's **Spending** section is the example of a section
-  with none — "Spending" over a card that already names each budget, its
-  period and its meter; the sentence that used to sit there ("Budgets are
+- Each section's heading (`v2-text-h3`) sits **above** its content, not inside
+  it — above its `Card` on detail and settings pages, and above its table or
+  list where the section's content is one (the merchant page's **Offers** over
+  `OffersTable`, **Agent budgets for this merchant** over its `ul`; #4608). A
+  description is **optional** (#4476; owner decision 2026-10-27 on the #4224
+  walk): it appears only when it tells the reader something the heading and
+  the card don't. The agent page's **Spending** section is the example of a
+  section with none — "Spending" over a card that already names each budget,
+  its period and its meter; the sentence that used to sit there ("Budgets are
   enforced on-chain…") repeated the card and is gone. On settings the shared
   `SettingsSection` enforces the shape: the heading is sentence case
   `v2-text-h3` (never the old uppercase band) and carries the heading-to-card
@@ -1134,6 +1097,14 @@ link are one shape everywhere.
   page had: "Agent budgets" was headed from inside its card while "Recent
   activity" was headed from above — epic #3691's later slices apply the rule
   there.)
+- **A title inside a card is not a section heading.** A card's own heading —
+  including a `Card.Header` heading — belongs to the card's content and stays
+  as it is; this rule governs the heading ABOVE a section's content, never one
+  inside it. That is a **class**, not a list of exceptions (owner decision
+  2026-11-02, on #4608): Accounting's "Available as an add-on" and "Sent
+  transactions", the dashboard money card's two "Agent spending" labels,
+  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:324`'s "How
+  to buy" are instances of it, and none of them moves onto `SectionHeading`.
 - **An optional trailing link on the heading's line** (#4475; owner-approved
   2026-10-27 as a new design-system pattern). A section whose content has a
   fuller surface elsewhere — the account Security tab's signer list, whose
@@ -2557,10 +2528,12 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 `ui/Modal` is the shared dialog shell — twenty-four product files import it
 directly (twenty-five with `/design-system`), three of which (`ConfirmDialog`,
 `InfoModal`, `ComingSoonModal`) are themselves wrappers with many call sites.
-Not every dialog uses it yet: one dialog, `ReceiveDialog` (below), is still a
-bespoke dialog shell. A new dialog uses `Modal`. Anything changed here is
-changed everywhere, so the structure is worth stating rather than re-deriving
-from the file.
+Not every dialog uses it yet: four surfaces render their own `role="dialog"`
+shell, each documented in its own section — `ReceiveDialog` (below), `MoreSheet`
+(§ Authenticated shell), the `ListToolbar` phone filter sheet (§ List controls)
+and `SidePanel` (§ Safe areas). A new dialog uses `Modal`. Anything changed
+here is changed everywhere, so the structure is worth stating rather than
+re-deriving from the file.
 
 **One list manager, two vocabularies.** `ListManagerModal` (#4565) is the
 shared shape behind the labels and organisations dialogs: the `Modal` shell,
@@ -3665,7 +3638,6 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 - Decorative by default (`aria-hidden`); pass `label` only when the icon is the sole carrier of meaning.
 - No emoji in product UI or marketing.
 
-
 ### Size
 
 **The scale is six values, and they are the six Tailwind steps that express them:**
@@ -3679,7 +3651,6 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 | 24 | `h-6 w-6` | The icon inside a **48 px** (`h-12 w-12`) status medallion |
 | 28 | `h-7 w-7` | The icon inside a **56 px** (`h-14 w-14`) status medallion |
 
-
 **The 12 px row is not a licence for sub-44 px targets.** The shared `CopyButton` (`packages/ui/src/CopyButton.tsx`, re-exported by `components/ui/CopyButton.tsx`) hosts this rung's copy glyph inside an `inline-flex min-h-11 min-w-11` box, so every `Address`, `McpServerName` and account-detail copy control that renders it meets the 44 px target; its labelled variant renders the glyph at 14. The legacy hand-rolled controls were removed with the retired Safe agent surfaces, while the code-block control remains the documented local 14px exception below. An icon-only button owes its own tap-target treatment whatever size glyph it holds.
 
 **A small icon-only button's GEOMETRY does not pick its rung — what the glyph is doing does ([#1923](https://github.com/d-hinders/Haven-AI/issues/1923)).** The legacy Safe budget-row examples that motivated this rule were retired with the Safe agent-management surface in [#2258](https://github.com/d-hinders/Haven-AI/issues/2258). The live delegation budget card uses a labelled `Stop budget` action rather than an icon-only remove control. The general rule still applies to any future remove or dismiss control: decide its glyph size from its role, then add the live call site to the design-system review and coverage test.
@@ -3689,7 +3660,6 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 **What #1923 did NOT settle, said out loud so the row above is not over-read.** The *copy glyph after a mono address* is split for the same job and stays split: the shared `CopyButton` primitive (#1878, extracted from `Address`) renders it at **12** in a `min-h-11 min-w-11` box, nested in the address run — the precedent the 12 px row cites — while `ui/CodeBlock.tsx` still hand-rolls its own copy control at **14** in an `h-6 w-6` box, beside comparable text. Account-detail copy now uses the shared primitive as well. That is a second which-rung judgement with two live answers; it is recorded here rather than converged, because unlike remove-budget the two are not the same control in the same place, and picking one blind would repeat the coin flip this section is trying to end. What is checkable is narrower, and it is not a clean universal: the census counts 15 `h-3 w-3` sites at `fb2da6b92`, mostly chevrons, carets, arrows and copy glyphs inside a run of type. Four are not: the list toolbar's filter-chip remove `X` (`ui/ListToolbar.tsx`, an icon-only remove control at 12 in a 24 px chip button, so not a data-row control in #1923's sense), `FacetMenu`'s checkbox-mark check, and the glyphs in two 20 px medallions (`AgentPanel.tsx`'s toast alert, `DashboardOnboardingGuide.tsx`'s done step). Re-derive it — do not trust this sentence past its date — with `node packages/frontend/scripts/design-lint.mjs --icons` and by reading the `h-3 w-3` sites it counts.
 
 **Always square.** lucide's `viewBox` is `0 0 24 24` with the SVG default `preserveAspectRatio`, so a non-square box does not stretch the glyph — it **letterboxes** it and leaves dead space on the long axis. `h-3 w-5` renders a 12 px arrow in a 20 px-wide hole; it looks like a sizing decision and is actually padding in the wrong place.
-
 
 **One live case the table does not name:** a diagram connector — a standalone arrow joining two boxes, not inline with type and not inside a container. `InfoModal.tsx`'s `Arrow` is the only instance and it is currently dead code (nothing imports it), so it is recorded rather than given a row: one unrendered call site is not enough to found a precedent on. If a connector ships for real, decide the rung here first.
 
@@ -4032,7 +4002,6 @@ compiles to no `box-shadow`, #1945). Neither is a spelling rule — each boots
 real Tailwind over the shared preset (`packages/ui/tailwind.preset.js`) and reads the OUTPUT — and each carries a
 positive control so a "paints nothing" verdict cannot come from a broken reader.
 
-
 One design rule is also enforced by the **type system**: `Icon`'s `size` prop is typed
 `IconSize` (12 | 14 | 16 | 20 | 24 | 28), so `tsc` rejects an off-scale numeric size before
 design-lint ever runs — and a wrapper that threads a size through to `<Icon>` closes the
@@ -4042,29 +4011,4 @@ Marketing/landing surfaces are exempt from the lint gates (intentionally bespoke
 
 **Escape markers (reviewed exceptions).** One placement rule for the line-scanning gates: put the marker on the offending line **or the line directly above** — `design-lint-disable-line` (design-lint) and `// copy-lint-ignore` (copy-lint) both work either way (shared helper: `scripts/lib/lint-escapes.mjs`) — except design-lint's `hand-built-list-control`, which ignores the marker on purpose (`ignoreEscapes`): only a reviewed baseline edit carries its debt (#4129). The coupling gate's `// design-system-exempt: <reason>` is different by design — it exempts an *export*, sits as a trailing comment on the export line, and requires the colon + reason. Use escapes sparingly; each one is a standing reviewed exception.
 
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-token table was checked mechanically against `globals.css`: all 16 rows match
-the light and dark definitions exactly, zero mismatches. The dark-mode
-sections (#2927–#2929) already describe the shipped three-part work, and the
-theme picker reads "Settings → Theme" with the row rendering `Theme`
-(`SettingsClient.tsx`, `t.settings.theme.label`), matching the product README.
-Intervening commits that touched covered files (#3147 marketing dark sweep,
-#3167 labels + `LabelChip`, #3197 AgentCard wrapper, #3204/#3205 analytics
-primitives and `Row.tsx`) changed components inside the documented system; the
-doc's token, typography, and gate claims needed no rewrite. `StatTile` and the
-`/analytics` work it shipped remain consistent with the § Statistics tile
-guidance.
-
-Re-verified 2026-09-30 for #3195 (the round-2 design nits from PR #3176's
-review), scope = § Statistics tile's formatting guidance and § Buttons'
-distribution paragraph: the dashboard's metric tiles now render their compact
-SEK tier in the UI's voice (en-US: `SEK 5.19K`) instead of sv-SE's scale
-words (`5,19 tn kr` — "tn" is tusen), scoped so the standard tier keeps the
-#3127 currency-locale voice byte-for-byte; the hero's change line writes its
-percent half through `Intl` in the currency's locale (`+1,00 %` under
-sv-SE/de-DE, byte-identical `+1.00%` under en-US), so the line stops mixing
-a decimal comma with a hand-rolled English percent scaffold; and the
-per-currency locale rule lives once in `lib/format.ts` (`currencyLocale`),
-with the dashboard wrappers and `lib/analytics-format.ts` delegating to it
-instead of carrying a third copy of the ternary. The three items are fixes
-the round-2 review had pinned; the rest of this document was NOT re-read.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

@@ -256,10 +256,6 @@ at all since #1986, so there is no second answer here any more.)
 
 Then test a tiny in-budget payment. The expected direct payment sequence is:
 
-> **Re-verified #3495 (2026-09-30):** steps 2 and 3, for the compact-by-default
-> result and its opt-in relay. Nothing else in this file was re-verified in
-> this pass.
-
 1. Agent calls hosted `haven_pay`.
 2. Hosted MCP returns a COMPACT result (#3495, mirroring the x402 quote
    tools' #1272 contract): `{ payment_id, status, idempotency_key,
@@ -368,35 +364,11 @@ Keep the signing key under the agent operator's control and get product, legal,
 and security review before introducing any hosted signing arrangement. Haven
 must not become the party that holds or operates agent private keys.
 
-Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
-re-read. Changed: the hosted-URL handout (step 3 and the variables table) now
-says the backend's `HAVEN_HOSTED_MCP_URL` serves both the dashboard and the
-connector — the frontend variable and its not-configured state went with #1823
-— which also matches `hosted-mcp.md`; the signer table and its network use name
-the task- and sub-budget sign-contexts (#3329/#3330); the decline paragraph
-separates a refusal from the #3495 `payload_hash: null` replay; the
-troubleshooting entry no longer says a bad key empties the tool list (a live
-probe of the dev hosted MCP listed every tool for an invalid key, and the first
-call answered 401); and Connect Agent 2's registration names its non-secret
-setup metadata. Re-checked without change: the package tags, the signer flags
-and variables, the production URL default, the tool names, the erc7710
-`haven_submit` header, the hosted boot refusal, step 2, and the rest of steps 3–4.
-
-Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.
-Changed: Connect Agent 2's registration now also names the one-time setup token
-and challenge id that authenticate it and its `connector_context` labels
-(`packages/connect/src/api.ts`, `registerSetup`); the identity/authority/
-enforcement line names the delegation's caveat enforcers instead of the retired
-module; and step 5 names `haven_get_agent`, which the hosted server's
-instructions tell every session to call first, alongside `haven_get_allowances`.
-Re-checked without change: the package tags, the signer tool list and flags,
-the hosted URL handout and variables table, the production URL default, the
-erc7710 `haven_submit` header, the #3495 compact result, the custody
-invariant, and the troubleshooting entries.
-
 ## Related Docs
 
 - [Hosted MCP deploy guide](./hosted-mcp.md)
 - [Architecture - hosted MCP connect flow](../architecture/06-hosted-mcp-connect-flow.md)
 - [Edge signer](../architecture/07-edge-signer.md)
 - [Regulatory guardrails (CASP / MiCA)](../regulatory/casp-risk-guardrails.md)
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

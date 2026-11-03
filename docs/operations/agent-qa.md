@@ -1279,7 +1279,6 @@ The skip reason is worth reading too, since the run title carries it: a
 (`34339884272`), and that one is refused by the environment filter and by
 ancestry, not by de-duplication.
 
-
 #### Provenance — why a curl can no longer mute the alarm (#2271)
 
 The old trigger's confirmation command (`gh api …/dispatches -f
@@ -1374,9 +1373,6 @@ them is a string a caller supplies:
   reach further back), plus the lookup accounting (attempted/failed/cached) —
   the diagnostics that would have told the leading hypothesis apart from a
   failed lookup at the time, rather than only after the fact.
-  > **Re-verified #3321 (2026-09-30):** the guard-freshness listing-coherence
-  > / page-1 retry passage only; nothing else in this document was
-  > re-verified.
 
   **A transient stale read is now retried, for both guard kinds (#3321).**
   #3409's leading hypothesis — an anomalous listing page — went from a guess
@@ -2196,40 +2192,4 @@ the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
 - [`dev-environment.md`](./dev-environment.md) — shared dev topology
 - [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) — promotion checks
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: the scenario table now follows `SCENARIOS` in
-> `packages/qa-agent/src/run.ts` (the text says "in order"), and
-> `x402-erc7710-hosted` names its two sibling legs instead of "the two legs
-> above"; the sweep fixture spends 0.0005 USDC, not 0.001 (`storage_50gb`'s
-> `price_usdc: 500n`); an unconfigured `x402-delegation-3009` skip fails the
-> run under `QA_REQUIRE_ALL_LEGS=1`, which is set; the 3009 legs run live
-> (qa-dev run 40048064262 passed all three); the wire-contract test pins v2
-> only, v1 retired by #3272; #2268 closed on 2026-09-02; the exploratory
-> prompt's within-budget step names the hosted tools beside the local
-> `haven_pay_x402`; the dev relayer does not sponsor UserOps (#3264).
-> Re-checked without change: every file path and `npm run` script the
-> document names, the seed's routes and reuse rules, the preflight floors
-> (`TREASURY_RUN_COST_ATOMIC`, `MIN_SETTLEMENT_HEADROOM_FAIL`/`_WARN`), the
-> merchant's `/healthz` and 503 bodies, the #4119 record check and its
-> 45 s / 60 s / 120 s timings, the qa-dev and qa-balances workflows (secrets,
-> variables, cron, concurrency, the green-close step), the balance and faucet
-> constants, the freshness gate and guard constants, the window line's
-> budgets, the failure classifier's signatures, the sign-failure codes and
-> their 300-character bound, `SWEEP_MIN_USDC`, the merchant session TTL and
-> #3171 data, the RPC probe flags and the observer's 10-block range, and all
-> 137 cited issues with `gh api` (#3933 and #4215 are open, `landed-partial`;
-> the text describes their shipped parts).
->
-> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** Also changed:
-> `x402-erc7710-sdk` names `x402-erc7710-settle` rather than "the leg above",
-> and its hosted variant is `x402-erc7710-hosted` (#1456 is closed); the
-> post-deploy trigger's history is no longer "exactly one deploy" (2,685
-> `deployment_status` runs created 2026-10-01 → 10-23, 0 to 265 a day, from
-> per-day `created=` counts; rounds 2 and 3 corrected an earlier 2500, the
-> filtered listing's cap, and a "hundreds a day" drawn from one peak day); the 3009 scenarios run in every `qa-dev` money-flow job, not
-> every run; the dev relayer deploys the treasury at first activation and a
-> fresh agent's delegate account at its first erc7710 authorize; #2268 is the
-> issue that reported the old trigger never fired; and two stale conditionals
-> found re-scanning for the same class — the catalog leg is no longer "NEW",
-> and #3171 is deployed (dev's demo merchant answers an unknown session with
-> its data, probed 2026-10-24).
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

@@ -660,6 +660,8 @@ export default function AgentDetailClient({ agentId }: Props) {
       ) : null}
 
       {agentsError ? (
+        // #4607: keeps `role="alert"` — the block holds the retry button, and
+        // `InlineAlert` is a single text line with no room for one.
         <div
           role="alert"
           className="rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"

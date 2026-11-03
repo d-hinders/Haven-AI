@@ -94,85 +94,6 @@ satisfied-by:
 last-verified: "2026-11-02"
 ---
 
-> **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
-> covered CLI commands and regression fixture send no own-transfer-folding flag
-> and keep both transaction legs plus the existing local CSV behavior. No
-> covered payment, signing, key, custody, advice, settlement or
-> merchant-acquiring surface changes. Scope: §7's factual-history preference
-> and the non-custody boundary for the published CLI only;
-> the document-wide `last-verified` date is not re-stamped.
->
-> **Re-verified #4350 (2026-10-23, the budget end date):** the diff touches
-> covered SDK/CLI files only in their agent-facing PROSE — the runbook's
-> "What Haven is" paragraph (`packages/sdk/src/agent-guidance.ts`, its CLI
-> copy and the served skill files) now says the budget ends on a date the
-> user chose (30, 90, 180 or 365 days) and that renewal is a new approval.
-> That CLOSES the § *Make All Agent Authority User-Approved* ":725" gap for
-> expiry disclosure on the dashboard surfaces, and it is authority-NARROWING
-> only: the owner-facing presets keep an expiry mandatory (no "never"
-> option), the on-chain `Timestamp` caveat is unchanged, and #4351 adds the
-> server-side 365-day cap. No covered payment, signing, key, custody,
-> advice, settlement or merchant-acquiring surface changes; Haven still
-> signs nothing. Scope: the guidance text only; the document-wide
-> `last-verified` date is not re-stamped.
-
-> **Re-verified unchanged (#4408, 2026-10-25, migration comment truthing):**
-> the diff touches one covered file — `db/migrations/066_catalog_submissions.ts`
-> — in its doc comment only: the status-progression block now says `delisted`
-> is set by operator SQL and that no lifecycle path sets it (verified by
-> sweep on `dev`), replacing the stale "operator action, or lifecycle expiry"
-> wording. No covered payment, signing, key, custody, advice, settlement or
-> merchant-acquiring surface changes; the migration's DDL is untouched.
-> Scope: the migration comment only; the document-wide `last-verified` date
-> is not re-stamped.
-
-> **Re-verified unchanged (#4534, 2026-10-29, the purchase correlation key):**
-> the diff touches four covered areas — `modules/mpp/**` (a new
-> `purchase-group.ts` derivation module plus two OPTIONAL inputs on the
-> evidence report), `infra/repositories/machine-payments.ts` (three new
-> evidence-row SQL helpers), `modules/accounting/**` (the entry, feed payload
-> and receipt underlag carry two more fields) and `db/migrations/**`
-> (migration 123 adds two NULLABLE columns to `machine_payment_evidence`).
-> None of them is a payment, signing, key, custody, advice, settlement or
-> merchant-acquiring surface. The two fields are DESCRIPTIVE metadata on a
-> document the accounting feed already produces: `purchase_group_id` is the
-> merchant's own invoice/order id (or an agent-supplied group key) and
-> `parent_payment_id` is the purchase payment a fee call paid for. They
-> authorize nothing, gate nothing, change no amount, and are written
-> first-write-wins on the evidence row only — `payment_intents`, settlement
-> and custody are untouched. An ungrouped payment is fed exactly as before
-> with both fields null, so nothing is withheld because its group could not
-> be resolved, and no historical row is backfilled. Haven still signs nothing
-> and holds no key material. Scope: those four areas; the document-wide
-> `last-verified` date is not re-stamped.
-
-> **Re-verified unchanged (#4569, 2026-10-31, empty and load-error states):**
-> the diff touches one covered area — `packages/frontend/src/app/(authenticated)/accounting/**`
-> — in the Accounting page's PRESENTATION only: its first-load and failed-refetch
-> branches now render the shared load-error shape (`EmptyState`, title, a
-> "what is still true" body, and a Try again wired to the hook's own `refetch`)
-> instead of a raw red line with no action. No covered payment, signing, key,
-> custody, advice, settlement or merchant-acquiring surface changes: the page
-> still reads `GET /accounting/feed/status` and posts nothing new, the sync and
-> verify controls are untouched, and the accounting guardrail's disclaimer line
-> is unchanged. Haven still signs nothing and holds no key material. Scope: the
-> Accounting page's error branches; the document-wide `last-verified` date is
-> not re-stamped.
-
-> **Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`):** a
-> targeted pass over the week's drift, not a second full re-read — the scope is
-> stated in § *Scope of the current `last-verified`* below, which this pass
-> rewrote. No obligation, red line or invariant changed. Two factual
-> corrections: the money-path floor is now **52 of the 71** globs (54 runtime
-> minus the two `EXEMPT` entries, none of the 17 `controlGlobs`; #4381 added
-> the two `domain/x402-*` files), where the text still carried the 50-of-67
-> measurement from #4303; and `SUPPORTED_X402_EXPECTED_VERSIONS` is defined in
-> `signer/src/core.ts` and consumed by `capabilities.ts` and `tools.ts`,
-> so the scope note now names the definition. The week's
-> behaviour changes (#4465, #4483, #4516, #4558, #4536, #4535, #4544, #4546,
-> #4583, #4587, #4369) are narrowings or descriptive additions, each
-> shard-covered or recorded in the note above.
-
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
 ## Purpose
@@ -288,82 +209,6 @@ Haven backend
 > #1328 log entry below as current on this point — it says the module was
 > "kept, unreferenced", which was true when written and stopped being true two
 > slices later.
->
-> The one caveat this section carried — recorded by the #2244 re-verification
-> and now **closed** ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
-> on `POST /x402/authorize` a caller-supplied `settlementScheme: 'erc7710'` or
-> `facilitatorAddresses` used to be validated *above* the rail resolution, so a
-> retired-rail account setting that field got a 400 — whose body asserted that
-> the retired rail "settles via EIP-3009 only" — instead of the 410 tombstone.
-> The spend decision was never affected (both answers were refusals, both
-> fail-closed with nothing read on-chain and nothing written), which is why the
-> sentence above was true throughout; what was affected was what the account
-> was TOLD. #2245 deleted those two rail-dependent guards
-> (`validateGenericSchemeRail`) rather than rewording them: both tested
-> `agent.execution_rail !== 'delegation'`, the same field `resolveExecutionRail`
-> reads, so the seam already refused every input they refused. The seam is once
-> again the only thing that decides whether a retired-rail account may spend AND
-> the only thing that makes a rail-specific claim to it, on this route as on the
-> others. Note the second half is narrower than "the only thing that answers it",
-> deliberately: refusals that are not rail claims still precede the seam, and a
-> sentence that swallowed them would be false. What still precedes the 410 there
-> is rail-INDEPENDENT and makes no claim about any rail. **Since #3031 most of
-> it is the request SCHEMA, not the route**: required fields, address and
-> network shape and the `settlementScheme` enum are refused by the
-> request-validation plugin at `preValidation`, and the route keeps only the
-> rules JSON Schema cannot state (a non-zero amount, the network/chain
-> agreement, the 64 KB `paymentRequired` bound). The position is unchanged —
-> ahead of the seam, the same place `POST /payments` puts its own gate, the
-> same class as the 401 auth hook — and so is the property: the refusal names
-> a FIELD, never a rail. One consequence is recorded rather than glossed: a
-> request that is BOTH malformed and on a retired rail now meets the 400
-> before the 410. Pinned by
-> `routes/__tests__/allowance-rail-retired.test.ts` → "a caller-supplied
-> settlementScheme cannot divert the tombstone (#2245)", whose assertions
-> moved to the plugin's envelope in that slice.
->
-> **Token resolution no longer belongs in that list**
-> ([#2274](https://github.com/d-hinders/Haven-AI/issues/2274)). This sentence
-> named it as still preceding the 410, and it did, on both routes: a retired-rail
-> account naming an unsupported asset received a 400 carrying `supported: [...]`
-> — the assets it can pay with — before being told the rail is gone and it can
-> pay with none of them. Rail-INDEPENDENT, so the sentence above was true as
-> written and the spend decision was again never affected (both answers refusals,
-> nothing read on-chain, nothing written); what was affected was again what the
-> account was TOLD. #2274 moved the rail gate ABOVE token and amount resolution
-> on `POST /x402/authorize` and `POST /payments` **together** — one route alone
-> would recreate the asymmetry #2245 removed. Pinned by the same file →
-> "the 410 precedes TOKEN RESOLUTION too (#2274)", with positive controls proving
-> a delegation-rail account still receives its 400 *with* the supported list, and
-> a structural-precedence assertion proving the tombstone did not become the
-> route's error handler. Full analysis:
-> `docs/regulatory/casp-changelog/2026-08-31-2274.md`.
->
-> Since #1986 (epic #1440) that covers BOTH retired rails — the session rail
-> (#834) and the legacy Safe AllowanceModule rail — so the delegation rail is
-> the only rail that can spend. The #1121 queued-approval carve-out is
-> history: #1986 closed the approval queue's approvable path (the only rail
-> that ever fed the queue was being retired, so leaving it approvable would
-> have left Haven manufacturing executable payment transactions for a rail it
-> had declared gone), and #2055 dropped the `approval_requests` table itself
-> under the recorded #2021 owner decision.
-> Since #1130 a valid key on a `pending_approval` agent gets a NAMED
-> `403 agent_pending_approval` with the required action on normal agent API
-> requests, instead of the false `401 Invalid or revoked API key` — the
-> authentication gate stays a positive allow-list (revoked and unknown statuses
-> still 401). The exact sweep-recovery routes are a narrow exception for
-> recovering stranded delegate balances; they grant no spending authority.
-> Since #988 the agents/smart-accounts data access lives in
-> `infra/repositories/` with tenant scoping as REQUIRED function parameters —
-> the `WHERE user_id = $1` authorization that used to hide in inline route
-> SQL is now a signature the type checker enforces; the SQL itself moved
-> verbatim and is PREPARE-checked against the real schema in CI.
-> #1167 extended the same treatment to the user, dashboard and agent-activity
-> surfaces. Two of those had NO tenant column to make required: the
-> agent-activity reads filter by `agent_id`, so the authorization is the
-> caller's prior ownership check rather than a parameter — stated as an
-> explicit contract in the repository's header and on each function, and
-> unchanged from what the inline SQL did.
 
 > **Current state (2026-08-30, #2092/#2094/#2096/#2117/#2213):** Haven now runs
 > a **passive settlement observer** on the erc7710 path
@@ -1484,59 +1329,9 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-verified against `fc8ac1eb6`** (from the staleness audit #4605; the
-replaced 2026-10-25 pass read `615686369` as a targeted pass over that week's
-drift, and the 2026-10-23 pass before it read `ffca80f36` end to end, #4303).
-This was a targeted pass over the week's drift, not a second full re-read: 34
-covered commits since 10-25, all narrowing, additive or doc-fix in kind.
-
-- **Every named file, symbol and test was re-checked to exist at this head:**
-  `requireDelegationBound` (`modules/x402/settlement-sweeper.ts`),
-  `assertNonAsserting` (`modules/accounting/fortnox-connector.ts`),
-  `resolveExecutionRail`, `SUPPORTED_X402_EXPECTED_VERSIONS`
-  (`signer/src/core.ts`, consumed by `capabilities.ts` and `tools.ts`),
-  `legacyBookkeepingEnabled` and
-  `HAVEN_HOSTED_MCP_URL` (`config.ts`), `modules/passport/issuance.ts`,
-  `routes/__tests__/allowance-rail-retired.test.ts`, both
-  `non-custody-onchain-*.contract.test.ts` suites, and the census pin.
-- **Measured claims were re-measured:** `node --test
-  scripts/ci/money-path.test.mjs` — 24/24 pass, the pin holds at the current
-  globs, and the floor is now **52 of the 71** (54 runtime globs minus the two
-  `EXEMPT` entries, none of the 17 `controlGlobs`; #4381 added the two
-  `domain/x402-*` files). The previous "50 of 67" was measured at #4303.
-- **The fail-closed sweep attribution is intact after #4075** (proof-header
-  settlement reports, AuthorizationUsed↔Transfer pairing): the observation
-  path still passes `requireDelegationBound: true`
-  (`settlement-sweeper.ts:764`), and the never-from-transfer-shape property
-  is unchanged.
-- **The week's behaviour changes are narrowings or descriptive additions, each
-  shard-covered:** #4376's `delegation_expired` refusal (an expired-only
-  budget answers 403 with the end date, in `modules/budget-scope/`), #4465's
-  typed `delegation_expired` body on the x402 expired-budget path, #4483's ten
-  typed task-/sub-budget payment-scope refusals (MCP layer), #4516's
-  retry-or-stop by failure cause, #4558's recorded merchant rejection reason,
-  #4536's settlement-evidence `payment_header` prefill, #4535/#4544/#4546's
-  accounting transaction kind, purchase correlation key and direct-payment
-  underlag, #4583/#4587's receipt field renames and six declared served keys,
-  and #4369's 365-day `expires_at` cap. None widens authority, custody or the
-  merchant-acquiring surface; CASP shards exist for each
-  (`2026-10-26-4429.md`, `2026-10-26-4458.md`, `2026-10-27-4468.md`,
-  `2026-10-27-4470.md`, `2026-10-29-4530.md`, `2026-10-29-4532.md`,
-  `2026-10-29-4533.md`, `2026-10-30-4552.md`, `2026-10-30-4577.md`,
-  `2026-10-30-4578.md`, `2026-10-30-4579.md`, `2026-11-02-4601.md`, and the
-  `2026-10-30-0.13.0-alpha.0-release.md` release shard), except #4534, which
-  used the parent-doc escape hatch and is recorded in the note at the top of
-  this file.
-- **Deliberately NOT covered by this date, as before:** the inline *Current
-  state* notes' dated history (present-tense claims were checked; narratives
-  were read, not re-derived), the frozen historical bullet log, the MiCA /
-  ESMA / Finansinspektionen / EBA citations (legal claims, no legal review
-  here), the #1985 dust-Safe live balances, the #832 exit story's live
-  demonstration, and the #3333 counsel position (recorded, not asserted).
-
 ## Verification log
 
-Every re-verification of this document, newest last. A contract doc covering
+Every verification pass on this document, newest last. A contract doc covering
 broad globs is touched by nearly every backend change, so this is the audit
 trail of *what was checked and found unchanged* — not a changelog of the
 document's own edits.
@@ -1625,3 +1420,5 @@ per-PR bump.
 - **#1362** — Fortnox reporting-feed visibility: the dashboard now shows the pushed supplier-invoice number per synced payment, and a new read-only `GET /accounting/reporting/verify/:paymentId` performs the feed's FIRST read-back against Fortnox — does the invoice we pushed still exist (registered), and has a human booked it (voucher assigned)? Perimeter analysis: strictly read-only (test-pinned: a full verification makes no POST and writes nothing), user-scoped through the same entitlement gate as the sync action, and the non-asserting principle (#491) is untouched — Haven still creates only unattested supplier invoices and cannot book, cancel, or modify them; verification REPORTS the accountant's action, never performs it. The cross-check that the invoice carries our `HAVEN-<paymentId>` external number is mutation-proven (a number collision after a Fortnox company switch must read as not-found, never as falsely registered). A new operations runbook (docs/operations/accounting-feed.md) documents the purchase→Fortnox flow, the verification walkthrough, and the failure taxonomy. No payment authority, no custody, no key material — observability over an existing reporting write path. Perimeter unchanged.
 - **#1360** — server-truth hardening of the funding-shape decision, closing the #1358-review gap: the SDK's two EIP-3009-shape writers (`createX402Intent` and the local-key `authorizeX402`) now ALWAYS send `settlementScheme: 'eip3009'`, so a `payTo` made stale by a delegate rotation mid-flow hits the EXISTING `validateDelegationSchemeShape` refusal (400, before any funding intent, selector never consulted — test-pinned) instead of silently reading as a merchant address and routing an open-budget agent to the erc7710 settlement branch. No new validation was added and none was removed — the fix is that the intent's meaning is now declared rather than inferred from an address comparison. The pre-#1360 shape-only selection is characterization-tested for old SDKs (a stale `payTo` without the declaration still reaches the erc7710 selector — documented, not hidden), and legacy-rail backends accept and ignore the declaration (compatibility-pinned). No authority, route, or verification change; a misroute class became a refusal. Perimeter unchanged.
 - **#1328** — the legacy internal `mpp_demo` merchant flow is RETIRED, the #834 session-rail pattern applied to a flow instead of a whole rail: `POST /demo/mpp/*` (`routes/demo-mpp.ts`, its `MPP_DEMO_RECIPIENT_ADDRESS` config, and its route-specific tests) is deleted outright; `POST /machine-payments/authorize` now refuses UNCONDITIONALLY with HTTP 410 before the body is inspected or `authorizeMachinePayment` is called — fail-closed, mutation-proven (severing the refusal made three characterization tests fail); a forward migration (059) DELISTS the seeded "Haven MPP demo resource" catalog row (status vocabulary, not a delete — `GET /catalog` and the periodic refresh probe already exclude `status = 'delisted'`, proven on real Postgres) so discovery stops returning it and the probe stops re-verifying a route that no longer exists. The SDK's demo challenge/quote/resume client surface (`mpp.ts`; `quoteMpp`/`payMppChallenge`/`resumeAuthorizedMpp`/`resumeMppPayment`/the `MACHINE-PAYMENT-CHALLENGE` branch in `haven.fetch()`) and both MCP tool surfaces' `haven_quote_mpp`/`haven_pay_mpp_challenge`/`haven_resume_mpp_payment` tools are removed the same way — MACHINE-PAYMENT-CHALLENGE was never produced by anything besides the now-deleted demo route, confirmed by search before deleting. Narrows the surface; adds no authority, no key material, no new signing path. What is explicitly PRESERVED, unchanged: the generic `/machine-payments/*` reads (identity, allowances, status, receipts, evidence, reconciliation, sweep) and existing `mpp_demo` payment/receipt/evidence/status rows, which stay readable (mutation-proven — severing the evidence-eligibility gate for `mpp_demo` made seven historical-read tests fail); the rail-agnostic `authorizeMachinePayment` orchestration in `modules/mpp/authorize.ts` (kept, unreferenced by any route today, for a possible future non-demo MPP rail — out of this issue's scope per its own file-ownership note); and the `mpp_crypto`/`stripe_deposit`/`spt` type vocabulary everywhere it appears (`MachinePaymentRail`, `AgentPaymentRail`), touched nowhere — the issue explicitly reserves any change there for a separate, reviewed follow-up. Review hardening (#1339 finding 1): historical mpp_demo records are now non-EXECUTABLE as well as non-creatable — the generic sign path (`POST /payments/:id/sign`) refuses an mpp_demo intent 410-with-nothing-written before the claim (mutation-proven: removing the rail guard flips the test to a live execution), and the approval surface refuses approve/proposed for mpp_demo rows via a race-free WHERE-clause exclusion (reject remains allowed as cleanup). The retained `POST /machine-payments/authorize` 410 is a DOCUMENTED deliberate exception (compatibility tombstone — a 410 tells old clients the flow is permanently gone where a 404 invites retries), recorded in the OpenAPI description. Perimeter narrowed, not widened.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

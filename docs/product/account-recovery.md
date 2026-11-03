@@ -103,7 +103,7 @@ under **Who can approve**:
   when it's your *last backup* is allowed: Haven first shows you what you are
   giving up, and you decide.
 
-Each takes one approval from a signer you already have.
+Each takes one approval from a passkey or wallet you already have.
 
 ## Several accounts: a backup protects one account
 
@@ -145,7 +145,7 @@ you hold.
   by an existing signer of yours. Haven prepares the operation and relays gas;
   it holds no key that can approve anything.
 - **Freeze, seize, or move your funds.** The delegation rail's whole point is
-  that authority lives in your signers, not our servers.
+  that authority lives in your passkeys and wallets, not our servers.
 
 If Haven disappeared entirely, an account with a **wallet** signer stays fully
 recoverable through the public contracts — see the

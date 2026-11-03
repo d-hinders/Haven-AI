@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react'
 
 /**
- * The heading block of a detail-page section (#4475): the `v2-text-h3` title
- * ABOVE the card, an optional description and note under it, and an optional
- * trailing `action` on the heading's own line.
+ * The heading block of a page section (#4475): the `v2-text-h3` title ABOVE
+ * the section's content — a card, a table or a list — an optional description
+ * and note under it, and an optional trailing `action` on the heading's own
+ * line.
  *
  * The detail-page section rule (`docs/product/design-system.md` § *Detail-page
  * section rule*) put a heading and a one-line description above the card with

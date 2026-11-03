@@ -15,7 +15,7 @@ last-verified: "2026-10-24"
 
 # Loop Harness Index
 
-Last updated: 2026-10-24 (#4372 part G — whole index re-read at dev
+Last updated: 2026-10-24 (#4372 part G — whole index read at dev
 `b79b112ec`: LP-2's closing paragraph changed, because #3806 replaced the
 budget card's own period roll-forward with the shared caption helper;
 everything else unchanged)

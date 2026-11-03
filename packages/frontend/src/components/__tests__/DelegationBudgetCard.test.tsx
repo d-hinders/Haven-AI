@@ -1617,7 +1617,7 @@ describe('DelegationBudgetCard received budgets (#3988)', () => {
     // #4226: the received-budget nuance lives on the form's own line — open it.
     fireEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     expect(screen.getByText('Set its first budget')).toBeTruthy()
-    expect(screen.getByText(/spends through the received budgets below/)).toBeTruthy()
+    expect(screen.getByText(/already spends through its received budgets/)).toBeTruthy()
     expect(document.body.textContent).not.toContain('The agent can start paying within it.')
   })
 

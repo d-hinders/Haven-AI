@@ -471,29 +471,4 @@ since **2026-06-26**. That was a promotion backlog, not a deploy bug, and
 promotions have run since: the latest at this doc's last verification is
 #4338 (0.11.0-alpha.0), merged to `main` on 2026-10-23 with a merge commit.
 
-> **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):**
-> the whole checklist was re-read. Changed: the npm item names the #3797
-> hold-back; the request-validation item names the right three routes enforced
-> on test evidence (#3223) and keeps reconciliation-events in shadow; the docs
-> audit item points at the open standing issue rather than the closed #2645;
-> and the closing note no longer says `main` has not moved since June.
-> Checked and accurate: the 19 required contexts (15 + 4, read from the live
-> rulesets), `dismiss_stale_reviews_on_push` and the strict up-to-date rule on
-> `main`, the one CODEOWNERS rule, `release:scope`'s exit codes 2 and 1, the
-> RPC probe's defaults (batch 10, burst 20, cap 50), the public RPC defaults,
-> `SWEEP_MIN_USDC`'s `0.01` default, and the `enforce` default. Not checkable
-> from the repo: the npm token's expiry date.
-
-> **Re-verified 2026-10-25 (#4372 part H, at dev `e778da444`):** the whole
-> checklist was re-read. Changed: the merge item records that *Dev gate* now
-> allows only the `merge` method on `main`, and the closing note names #4338
-> as the latest promotion. Checked and accurate: the 19 required contexts (15
-> on *Haven automerge rules* for `main` and `dev`, plus `gate`, `qa-freshness`,
-> *Design visual regression* and *Frontend browser smoke* on *Dev gate*), the
-> strict up-to-date rule on `main` only, `dismiss_stale_reviews_on_push`, the
-> one CODEOWNERS rule (migration files), *External intake gate* required on
-> `dev` only, the workflow names, `publish.yml`'s `promote-tags` job and its
-> FAILED rows, `release:scope`'s exit codes 2 and 1, the RPC probe's defaults
-> (batch 10, burst 20, cap 50, logs range 500), `SWEEP_MIN_USDC`'s `0.01`
-> default, the `enforce` default, and every link anchor. Not checkable from the
-> repo: the npm token's expiry date.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

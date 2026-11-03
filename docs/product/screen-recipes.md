@@ -823,8 +823,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    a closing one "closing") — inside the same card, with no actions: closing
    a grant is the granting agent's owner's move. When the agent holds
    received grants and no budget of its own, the grant form's heading still
-   reads "Set its first budget" but its line says the agent spends through
-   the received budgets below — it must never imply the agent cannot pay.
+   reads "Set its first budget" but its line says the agent already spends
+   through its received budgets — it must never imply the agent cannot pay.
 5. Tabs and Activity (#4226): below the hero, the tab row (no counts), then
    the tab's panel. **Activity** — the agent's OWN payments (`payment_intents`,
    failed and pending included — deliberately NOT the wallet-scoped
@@ -869,8 +869,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carry the Needs attention badge while the Status facet can narrow to them.
    The row badge reads the machine-payment lifecycle before the intent's own
    status, the same precedence as the wallet feed's rows: a stranded
-   payment's intent is `confirmed` (its funding settled), so the status alone
-   would say Sent (#4249).
+   payment's intent is `confirmed` (its funding settled), and a confirmed
+   payment's row carries no badge at all (#4608), so the lifecycle badge is
+   what reads (#4249).
    **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
    below).
 6. Settings (#4228, rebuilt on the shared settings rows by #4477): the tab is
@@ -888,12 +889,14 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       tooltip. An agent with no name AND no `mcp_last_seen_at` reads
       "**No MCP connection recorded**" — and does NOT say "API key": a null
       name alone also means an MCP agent connected before names were
-      recorded. The **API key** prefix line (the visible prefix half of the
+      recorded. The **API key** prefix (the visible prefix half of the
       credential; the full key is shown once at creation and in the
-      credentials modal) lives on THIS row's value slot, beside the server
-      name, in every connection state. It did not move to Payment
-      credentials because that row is hidden for revoked and archived
-      agents, while the prefix must stay visible on the tab in every state.
+      credentials modal) is NOT on this row (#4608, owner decision
+      2026-11-02): it shows only under Payment credentials → View. That
+      reverses #4477's reason for the placement — a revoked or archived agent
+      therefore shows its prefix nowhere, because Payment credentials is
+      hidden for those agents (`canManageCredentials`), and the owner
+      accepted that residual.
    2. **Payment credentials**: **View** (opens `PaymentCredentialsModal`) and
       **Replace signing key** (`ReplaceSigningKeyModal`) — hidden for
       revoked and archived agents, matching the header ⋮ menu's
@@ -1636,18 +1639,4 @@ Money and risk clarity:
 - "Passkeys and wallets" is a Security-tab section (owner decision 2026-10-09, #3825; tabbed #4358; pills #4472): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves — each account an outline pill link (`LinkChip`, design-system.md § *Account link pill*) to its `/accounts/<id>?tab=security`, in a wrapping row under the signer's label. The pill shows the account name alone; the `(network)` suffix is appended to EVERY pill in the section only when the listed accounts span more than one network, so one account reads the same on every row (owner decision 2026-10-27). A passkey whose credential this device holds carries a neutral "This device" `StatusBadge` beside its label; wallet rows never do. The section speaks in outcomes ("Browser wallet", "Passkey · added {date}", "This device"), never "signer" (`copy-guidelines.md`); the account card's link to it ("Passkeys and wallets", on the "Who can approve" heading row since #4474 — the link text is the owner's 2026-10-30 decision, #4563, superseding the mockup's "All signers in Settings") targets `?tab=security#signers`. No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Passkeys and wallets reads as one more signer), now that the top bar carries no wallet pill.
 - Avoid duplicating account summary facts already shown on Dashboard, Account details, or the Profile section.
 
-Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
-the Transaction History ledger row now states the phone layout — below `sm` it
-is two bands, title and amount then description and clock time (#4572), where
-the recipe described only the desktop arrangement. Re-checked without change:
-the agent card's one `StatusBadge` and its `agentBadge` labels ("Needs setup",
-"Budget ended", "Paused", "N% used" at 90% or more, plus "Archived" and
-"Revoked"); the one Set budget dialog and its `?grant=` prefill (#4564/#4600);
-the accounting vocabulary rendered through `StatusBadge` from
-`accountingStatusPresentation` (`In <Provider>` / `Evidence archived` /
-`Tracked` / `Sending…` / `Not sent`, #4567); the Receive dialog's QR
-`Skeleton`; the tool-call tab's `MCP_TOOL_NAMES` labels, `errorCodeLabel` and
-`ListShowMore` footer; the connect flow's close affordances (X, backdrop,
-Escape) and the step past the line that removes them; and the Settings
-Business-tab sections. The week's UI sweep (#4562–#4603) changed screens these
-recipes describe without changing any structure, label or rule they state.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

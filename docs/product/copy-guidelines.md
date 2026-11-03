@@ -355,10 +355,10 @@ spelling and the identifier is left alone.
 
 `npm run lint:copy` cannot hold this rule — see § Enforcement, bare tokens.
 
-### Destructive verbs — one per meaning (owner decision 2026-10-30)
+### Destructive verbs — one per meaning (owner decision 2026-10-30; Disconnect added 2026-11-02)
 
-Four verbs, four meanings. Do not use one for another, and do not invent a
-fifth.
+Five verbs, five meanings. Do not use one for another, and do not invent a
+sixth.
 
 | verb | means | examples |
 |---|---|---|
@@ -366,6 +366,7 @@ fifth.
 | **Delete** | permanently erase a record you created | a contact, a label, an organisation |
 | **Stop** | end a budget | "Stop budget", "Stop this budget?" |
 | **Revoke** | the on-chain act, shown only where the user must know it | "Revoke", "Revoked on-chain" |
+| **Disconnect** | end a live connection; the thing on the other side survives | a browser wallet on this device, an accounting connection |
 
 "Remove" is the default for taking something off a surface, because it is
 honest about reversibility: the agent still exists, it is no longer in your
@@ -374,7 +375,10 @@ good — say so in the confirmation. "Stop" is the budget verb and only the
 budget verb; a budget that ends is stopped, never deleted or removed. "Revoke"
 names the on-chain act, so it appears only where the user has to understand
 that authority is being withdrawn on-chain — not as a synonym for "remove" in a
-menu.
+menu. "Disconnect" ends a live connection and says nothing about the other
+side: the wallet still exists on the device, the accounting provider still
+holds the books — only Haven's link to it ends (#4608, owner decision
+2026-11-02).
 
 **A menu item that opens a confirmation ends in "…"** — "Stop budget…",
 "Delete contact…", "Remove agent…". The ellipsis says a dialog follows; a menu
@@ -810,51 +814,6 @@ These guidelines are enforced on frontend copy, not just documented. `npm run li
 - Docs under `docs/product` are separately checked by the Vale `Haven.Terminology` rule (`.vale.ini`). Vale is **advisory** — `level: suggestion`, and the docs workflow runs it `continue-on-error` — so it nudges, it does not block.
 - Where the lint and this guide disagree, **this guide wins**. Known divergence: the lint rewrites "session key(s)" to "agent credential(s)", which pulls copy toward the very framing "Separate authentication from payment signing" warns against; the correct replacement is "private signing key" per the mapping table.
 
-Re-verified 2026-10-02 (#3596, the agent-skills index and step files): this
-PR touches `packages/sdk/src/agent-guidance.ts` (three cross-reference fixes
-inside `HAVEN_AGENT_RUNBOOK_MD`, so no standalone step file points at another
-section by position) and adds no new agent-facing prose file under `lib/` — the new
-`packages/frontend/src/lib/agent-skill-steps.ts` and `agent-skill-index.ts`
-hold slug/title/description metadata and JSON-builder code, not rendered
-copy, so neither belongs in `SCAN_FILES`. No wording constraint in this guide
-or `casp-risk-guardrails.md` § Product Copy Rules is affected: all three are
-cross-reference fixes (a dangling "(below)"; a "Steps 1-3 … as above" that
-leaned on two other sections once split; a "the setup above"), not changes to
-what the runbook claims. Nothing else in this document was re-verified.
-
-Re-verified 2026-10-10 (#3882): the 2026-10-02 call above is reversed for
-the agent-skills index. Its slugs and builder code are not copy, but each
-step's `description`, the index's own first entry and its `mcp.note` are
-agent-read prose served in `/.well-known/agent-skills/index.json` that
-appears nowhere else (no description is in the runbook), which is the bar
-`agent-guidance.ts` and `for-agents.md` already meet. `agent-skill-steps.ts`
-and `agent-skill-index.ts` are now in `SCAN_FILES`, with four more `lib/`
-prose files the naming convention could not catch: `dashboard-attention.ts`
-(the "Needs attention" titles, subtitles and empty-state lines), `agent-list-filters.ts` (agent-list filter
-and sort labels), `agent-credential.ts` (the `notes` prose in the downloaded
-credential file) and `sub-budget.ts` (form validation and error copy). A pin
-test keeps all six listed. `src/hooks` prose (step headings, `setError`
-strings) stays unscanned — a separate follow-up. The script's `SCAN_FILES`
-is the list; the named files in the bullets above are examples.
-
-Re-verified 2026-10-10 (#3884): that follow-up landed. `src/hooks` is now a
-scanned directory. Measured first: 49 files, two hits, both code rather than
-copy (a regex in `useAgentRekey.ts`, a JSDoc comment in
-`useAccountSigners.ts`), held as permanent reviewed entries in
-`packages/frontend/copy-lint-baseline.json` — the reason is on `SCAN_DIRS` in
-the script, since the baseline file cannot carry one. Nothing else in this
-document was re-verified.
-
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-enforcement claims above match the code at this head: `npm run lint:copy` /
-`lint:copy:update` in the root `package.json`, the scan set (`src/app`,
-`src/components`, plus the explicit `SCAN_FILES` allowlist for prose-holding
-`lib/` files), the cannot-add ratchet in `scripts/lib/ratchet.mjs` (#2728), and
-the baseline file (currently one entry: `page.tsx` "policy engine"). The
-biggest intervening commit (#3167, per-user labels) followed exactly this
-procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
-`SCAN_FILES`.
-
 ## Writing rules
 
 1. Lead with the user outcome, not the infrastructure.
@@ -1048,3 +1007,5 @@ precedents:
   throughout.
 
 Correct these in product-copy changes; do not weaken this guide to match them.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

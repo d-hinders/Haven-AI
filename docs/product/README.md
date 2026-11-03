@@ -339,31 +339,4 @@ mechanism and its one constraint (keep stacked controls ~8px apart, or two
 targets fight over the same pixels). Controls that are **not** a `Button` inherit
 nothing from this — verify their mobile placement and spacing explicitly.
 
-Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
-the focused first-run view's money card steps its Receive down to ghost with
-Send disabled (#4105 replaced Add funds and Deposit address with Receive,
-#4167); "Coming soon" is no longer acceptable on Settings (#4356 owner decision
-3, #4358/#4359); the money-movement rule says account funds, not Safe funding.
-Re-checked without change: the theme control under Settings → General →
-Preferences; "Get started", "N of 3 done", "Hide for now" and "You're set up";
-the low-balance and zero-USDC hold-back; the inline "Connect your first agent"
-on `/agents`; Analytics second in the Overview group; the raised money panel
-with the 30-day spending; `design-system.md` § Cards; `.v2-modal-backdrop` with
-no blur; `MaxButton`/`PasteButton`; the `#main-content` skip link; `Button`
-`sm` 36px and `md` 40px with a 44px hit area (#1726).
-
-Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`). Changed:
-the Loading And Feedback rules now name the shared `Spinner` beside `Skeleton`
-(#4563/#4568 made it the one busy indicator, and the section named only
-`Skeleton`). Re-checked without change: the theme control under Settings →
-General → Preferences; "Get started", "N of 3 done", "Hide for now" and
-"You're set up" (`dashboard/NeedsYou.tsx`); the low-balance and zero-USDC
-hold-back; the inline "Connect your first agent" on `/agents`; Analytics second
-in the Overview group (`sidebar/Sidebar.tsx`); the raised money panel with the
-30-day spending; `design-system.md` § Cards; `.v2-modal-backdrop` with no blur;
-`MaxButton`/`PasteButton`; the `#main-content` skip link; `Button` `sm` 36px
-and `md` 40px with a 44px hit area (#1726); `TransactionActivityRow` in ledger
-mode under day bands; and `PageHeader`'s `back` prop with `BackLink` for the
-branches that have no `PageHeader`. The week's UI sweep (#4562–#4603) changed
-screens this guide governs without changing any rule, primitive name or
-process step here.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

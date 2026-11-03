@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - scripts/docs/**
+  - scripts/release-version-constants.mjs
   - scripts/ci/queue-framing-census.test.mjs
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
@@ -88,6 +89,29 @@ last-verified: "2026-06-28"
 - **A shard clears the blocking half, not the doc (#2323).** The advisory
   comment names such a parent in its own *"Parent docs cleared by a shard — body
   not re-read"* section; re-read it against the changed files.
+- **A version-literal-only diff does not implicate a doc (#4612).** A changed
+  file whose **entire** diff is release-version constants — the `export const
+  <NAME>_VERSION` literals `scripts/release-version-constants.mjs` owns, plus
+  `package.json` version fields and `@haven_ai/*` pins — is partitioned out
+  before the gate matches `covers:`. That is why a release bump no longer
+  implicates the security model or the package-dev-channel doc: the bump's only
+  edit to the signer's and the connector's version constants is a version string.
+  The partition is per-file and per-hunk, so one behavioural
+  line in the same file implicates the doc again, and the partitioned files are
+  printed in the gate's comment as *"version literal only — not implicating"*,
+  never silently. It needs a diff range: CI passes `BASE_SHA`/`HEAD_SHA`, and a
+  bare `--changed=` list has no diff, so it treats every file as behavioural.
+- **A commit trailer records a re-read (#4612).** `Re-verified-unchanged: <doc
+  path> @ <sha>` on any commit in the PR satisfies the gate for that doc, and the
+  comment prints *"re-verified unchanged by commit `<short sha>`"*. It is a
+  trailer rather than a PR body because the body is fork-injectable when
+  interpolated into a shell step, is not re-run when edited, and is absent from
+  git after a squash merge — `squash_merge_commit_message: COMMIT_MESSAGES` keeps
+  commit bodies. Three limits, each of which can only refuse to satisfy: the doc
+  must be governed; a doc declaring `satisfied-by:` is **never** trailer-satisfied
+  (the shard requirement is untouched by construction); and the `<sha>` must be an
+  ancestor of the PR head. A trailer that clears nothing is printed with the
+  reason.
 - **Bump `last-verified` only on a genuine re-read.** It is a date, not a change
   log — a rubber stamp is worse than a stale one, because the weekly staleness
   audit ranks on it. A `verified:` block or an inline annotation on the
@@ -110,7 +134,7 @@ npm run docs:new -- docs/research/idea.md --owner "@you"   # status inferred as 
 ### Validate locally
 
 ```bash
-npm run docs:check     # front-matter + covers globs, agent skills, README agent section, retired UI merge-gate wording, covers gaps
+npm run docs:check     # front-matter + covers globs, agent skills, README agent section, retired UI merge-gate wording, covers gaps, re-verification prose
 npm run docs:test      # unit tests for the docs and agent-skill validators
 npm run docs:coupling  # the STRICT, CI-equivalent coupling gate
 npm run docs:measure   # re-derives the #2678 epic's figures; gates nothing, writes nothing
@@ -132,6 +156,9 @@ for a run that never happens (#933; see [`autonomous-pr-loop.md`](autonomous-pr-
 § One-time GitHub setup). Doc/config drift is surface-gated — it rides the
 backend vitest job, so a PR touching no backend surface never runs it.
 
+All six blocking scripts in the `docs:check` chain are dependency-free and
+finish in seconds, which is why `docs.yml` needs no `npm ci`.
+
 | Check | Tool | Blocking? |
 | --- | --- | --- |
 | Front-matter + `covers` resolution | `scripts/docs/validate-frontmatter.mjs` | **Blocking** |
@@ -140,8 +167,10 @@ backend vitest job, so a PR touching no backend surface never runs it.
 | Agent-facing README section, six copies ([#2533](https://github.com/d-hinders/Haven-AI/issues/2533)) | `scripts/docs/validate-readme-agent-section.mjs` | **Blocking** |
 | Retired UI merge-gate wording ([#2657](https://github.com/d-hinders/Haven-AI/issues/2657)) | `scripts/docs/ui-gate-wording.mjs` | **Blocking** (shrink-only baseline; `--update` refuses a rise, [#2747](https://github.com/d-hinders/Haven-AI/issues/2747)) |
 | `covers:` gaps — a doc naming a file its `covers:` cannot reach ([#2679](https://github.com/d-hinders/Haven-AI/issues/2679)) | `scripts/docs/covers-gaps.mjs` | **Blocking** (shrink-only baseline of gap FILES; `--accept-new` is the explicit override) |
+| Re-verification prose in a governed doc ([#4614](https://github.com/d-hinders/Haven-AI/issues/4614)) | `scripts/docs/no-reverification-prose.mjs` | **Blocking** (a paragraph opener in the body of a `status: current` doc; `--census` reports every status and never refuses) |
 | `last-verified` chain integrity ([#1843](https://github.com/d-hinders/Haven-AI/issues/1843)) | `scripts/docs/chain-integrity.mjs` | **Retired** by [#2681](https://github.com/d-hinders/Haven-AI/issues/2681) |
 | Archive integrity | `retire-verified-chains.mjs verify()`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
+| Re-verification archive integrity ([#4613](https://github.com/d-hinders/Haven-AI/issues/4613)) | `scripts/docs/re-verification-notes.test.mjs`, driven by the docs unit tests | **Blocking** (a hash mismatch fails the required job) |
 | Doc/config drift | `packages/backend/src/openapi/spec.test.ts`, `packages/backend/src/docs-drift/*.test.ts`, which pins `.env.example` in **both** directions — every variable the backend reads is listed, every listed key is read somewhere; the values and comments beside a key are prose the test does not check | **Blocking** (vitest) |
 | Queue-framing census ([#2107](https://github.com/d-hinders/Haven-AI/issues/2107)) | `scripts/ci/queue-framing-census.test.mjs`, in `ci_config_checks` | **Blocking** (zero-tolerance: a guarded file either has no hit or cannot join the list) |
 | Operator-verify close-keyword guard ([#2276](https://github.com/d-hinders/Haven-AI/issues/2276)) | `scripts/ci/operator-verify-close-guard.mjs`, a step of `docs.yml`'s required job; it reads the PR body, title and commit messages, and re-runs on `edited` ([#2839](https://github.com/d-hinders/Haven-AI/issues/2839)) | **Blocking** when a closing keyword names an issue labelled `operator-verify`, or one the pull request itself says stays open |
@@ -183,6 +212,17 @@ filter — is what makes the blocking column above true (the haven-doc-reviewer 
   record, correct as written": never append a re-check section, never bump its
   `last-verified`. `npm run docs:new` scaffolds a path under `docs/bug-reports/`
   as `record`; the run-report template there stays `current`.
+- **A body paragraph is not the record (#4614).** The record of a genuine
+  re-read is the `last-verified` bump, the `Re-verified-unchanged:` commit
+  trailer, the version-literal partition or the release shard (#4612) — never a
+  paragraph in the doc. `docs:check` refuses a paragraph-opening line whose
+  first 70 characters carry `re-verif`, `re-check`, `re-read` or `rubber-stamp`
+  (case-insensitive, hyphen optional) in the body of a governed doc: `status:
+  current`, or no status at all. `record`, `archived` and `research` docs are
+  reported by `--census` and never refused; a match inside a fenced block,
+  mid-paragraph, or in the front matter is not an opener. The rule is a census
+  rule rather than a shape list, so a new spelling of the same note is refused
+  without editing the guard.
 - **Test and generated files are incidental.** `__tests__/`, `*.test.*`,
   `*.spec.*`, `__screenshots__/` and `packages/core/src/api-types.ts` implicate a
   doc only when `covers` names the path exactly. Two carve-outs, in this order:
@@ -288,19 +328,4 @@ implementation `docs:check` runs, so the gate and the measurement cannot
 disagree), and the correction rate. Each script prints the epic's own figure
 next to its own and says which reproduce. They gate nothing and write nothing.
 
-Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
-gates table gains the operator-verify close-keyword guard (a step of the
-required *Docs front-matter & agent skills* job since #2276, on `edited` since
-#2839); *Docs served to agents* says four docs (three product docs and the
-security model) rather than four product docs, and records that
-`served-docs.test.ts` forbids a literal `last-verified:` or `covers:` in a served
-body; `covers:`
-gains `scripts/ci/operator-verify-close-guard.mjs` for the new row. Re-checked
-without change: every script the table names (`chain-integrity.mjs` absent, as
-"Retired" says), the `docs:*` scripts, `docs.yml`'s unfiltered `pull_request`
-trigger and its advisory lychee step, the Monday 06:00 UTC audit through
-`standing-issue-upsert.mjs`, `doc-health.mjs`'s four flags, the
-`doc-reviewer.md` custody rule (#4174), the required check names on `dev`,
-`isGoverned()`, the three control globs, the `package-docs.mjs` sets, the
-served-doc `ALLOWLIST` and its build wiring, the classifier's `--no-renames`
-and `ALLOWLIST` import, and the four `scripts/docs/measure/` scripts.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

@@ -341,13 +341,15 @@ async function updateRuntimeManifest(newVersion) {
  * the script had already written and already verified.
  *
  * What this does NOT do, deliberately: satisfy the contract-doc gate on its own.
- * The gate implicates FIVE contract docs (this write clears one of them by
- * presence; `package-dev-channel.md`, `delegation-rail-security-model.md` and
- * the CASP shard are hand-written, and the shard also clears
- * `04-x402-payment-sequence.md`), and
- * the shard remains entirely hand-written — as does this doc's own `last-verified` note, which says what
- * the release carries and why the perimeter is unaffected. Those are the parts
- * that need judgement; a table of four identical version strings is not.
+ * Since #4612 the gate implicates ONE contract doc that needs action —
+ * `casp-risk-guardrails.md`, cleared by the hand-written CASP shard (which also
+ * clears `04-x402-payment-sequence.md`). The security model and
+ * `package-dev-channel.md` are no longer implicated: this bump's edits to
+ * `tools.ts`, `runtime.ts` and `mcp/src/server.ts` are version literals only, and
+ * the gate partitions those out. The shard remains entirely hand-written — as
+ * does this doc's own `last-verified` note, which says what the release carries
+ * and why the perimeter is unaffected. Those are the parts that need judgement;
+ * a table of four identical version strings is not.
  */
 async function updateManifestDoc(newVersion) {
   const source = await readFile(MANIFEST_DOC, 'utf8')
@@ -939,9 +941,14 @@ async function main() {
   log('')
   log('    1. git diff --stat            review the bump')
   log('    2. Write the remaining contract docs, or the blocking gate fails.')
-  log('       A release implicates FIVE; this bump already cleared the first,')
-  log('       and the shard below clears casp-risk-guardrails.md and')
-  log('       04-x402-payment-sequence.md (both carry satisfied-by):')
+  log('       A release implicates ONE contract doc that needs action:')
+  log('       casp-risk-guardrails.md, cleared by the shard below (it carries')
+  log('       satisfied-by). The version-literal partition (#4612) clears the')
+  log('       rest: this bump\'s edits to tools.ts, runtime.ts and mcp/src/server.ts')
+  log('       are version literals only, so the gate prints them as "version')
+  log('       literal only — not implicating" and neither the security model nor')
+  log('       package-dev-channel.md needs an edit.')
+  log('       docs/operations/mcp-runtime-compatibility.md is written by this bump:')
   log('         docs/operations/mcp-runtime-compatibility.md  [cleared by this bump]')
   log('           the manifest table is ALREADY re-pinned and verified against the')
   log('           source constants, which satisfies the gate by presence. Still')
@@ -949,14 +956,16 @@ async function main() {
   log('           and what did NOT move in the release PR and shard. Bump its')
   log('           last-verified only if you re-verified the doc (#1366).')
   log('         docs/operations/package-dev-channel.md')
-  log('           coupled by CONNECTOR_VERSION in connect/src/runtime.ts, which')
-  log('           this bump just rewrote. NOT written for you. A scoped note on')
-  log('           what you re-verified; a bare date bump satisfies the gate but')
-  log('           is the rubber stamp #1366 rates worse than a stale date.')
+  log('           coupled by CONNECTOR_VERSION in connect/src/runtime.ts and')
+  log('           MCP_VERSION in mcp/src/server.ts, both rewritten by this bump.')
+  log('           NO edit needed: both diffs are version literals only (#4612).')
+  log('           A release that changes the connector CHANNEL changes')
+  log('           connector-channel.ts too, and then this doc is implicated again.')
   log('         docs/security/delegation-rail-security-model.md')
   log('           coupled by SIGNER_VERSION in signer/src/tools.ts (moved there')
-  log('           by #3454), which this bump just rewrote. NOT written for you.')
-  log('           A scoped Re-verified note: the edit is the version literal only.')
+  log('           by #3454), rewritten by this bump. NO edit needed: the diff is')
+  log('           the version literal only (#4612). Name any signing-surface')
+  log('           change in the range in the shard below.')
   // #1789: named for the VERSION, never the PR number. The shard must exist
   // before the PR is opened — the coupling gate blocks the PR without it — so a
   // PR-numbered name cannot be written at the moment it is needed. This line is

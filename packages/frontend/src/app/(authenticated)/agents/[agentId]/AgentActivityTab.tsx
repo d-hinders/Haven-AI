@@ -300,7 +300,13 @@ export function activityToTransaction(
     paymentProofStatus: item.payment_proof_status ?? null,
     paymentFlowStatus: item.payment_flow_status ?? null,
     paymentAttentionReason: item.payment_attention_reason ?? null,
-    statusBadge: { label: status.label, tone: status.tone },
+    // #4608 (owner decision 2026-11-02): a confirmed payment's ledger row
+    // carries NO badge, like Transactions — the epic's ledger-row rule wins
+    // over DS:886's "Sent everywhere" on rows. The detail panel still names
+    // it "Sent" (`TransactionDetailPanel`'s fallback). Every other status
+    // keeps its badge.
+    statusBadge:
+      item.status === 'confirmed' ? undefined : { label: status.label, tone: status.tone },
     explorerUrl: item.explorer_url,
   }
 }

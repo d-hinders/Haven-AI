@@ -391,6 +391,8 @@ export default function AgentPanel() {
           )}
 
           {agentsError && agents.length > 0 ? (
+            // #4607: keeps `role="alert"` — the block holds the retry button,
+            // which `InlineAlert` (a single text line) cannot carry.
             <div
               role="alert"
               className="mb-4 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"

@@ -93,7 +93,7 @@ test.describe('CopyButton copied state at 375px (#4561)', () => {
     await button.click()
     await expect(button).toContainText(COPIED_PREFIX)
 
-    const reading = await button.evaluate<Reading>((el) => {
+    const reading = await button.evaluate((el): Reading => {
       const b = el as HTMLElement
       const container = b.closest('[data-testid^="offer-card-"]') as HTMLElement
       const box = b.getBoundingClientRect()

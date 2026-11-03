@@ -136,6 +136,14 @@ beforeEach(() => {
 })
 
 describe('connect flow close guard — modal container (#4570)', () => {
+  it('halos exactly the active checklist row while the header band stays static', async () => {
+    const { container } = render(<ConnectAgentModal open onClose={vi.fn()} accountId={SAFE.id} starterAllowance />)
+    await startSetup()
+    expect(container.querySelectorAll('.v2-step-halo')).toHaveLength(1)
+    expect(container.querySelector('ol[aria-label="Connection steps"] .v2-step-halo')).toBeInTheDocument()
+    expect(container.querySelector('ol:not([aria-label="Connection steps"]) .v2-step-halo')).toBeNull()
+  })
+
   it('asks instead of closing, and adds no second dialog', async () => {
     const onClose = vi.fn()
     render(<ConnectAgentModal open onClose={onClose} accountId={SAFE.id} starterAllowance />)
@@ -225,6 +233,12 @@ describe('connect flow close guard — inline container (#4570)', () => {
       </ConnectAgentFlow>,
     )
   }
+
+  it('keeps every progress marker static in the inline first-paint flow', async () => {
+    const { container } = renderInline(vi.fn())
+    await startSetup()
+    expect(container.querySelector('.v2-step-halo')).toBeNull()
+  })
 
   it('asks instead of closing, with no dialog at all', async () => {
     const onClose = vi.fn()

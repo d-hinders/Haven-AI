@@ -55,7 +55,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-02"
+last-verified: "2026-11-03"
 ---
 
 # Haven Screen Recipes
@@ -274,10 +274,12 @@ only, so they cannot drift:
 - **Inline first agent** (`InlineAgentSetup`) — `/agents` for a user with no
   agents (see Agent List). A `Card` titled "Connect your first agent", the same
   subtitle and stepper band, the same steps and copy, at the modal's width.
-  Three differences, all for the same reason — there is nothing to dismiss:
+  Four differences, all for the same reason — there is nothing to dismiss:
   step 1 has no Cancel (its one action, "Set agent budget", is full width);
   Escape is not bound, so it never resets the flow or drops the setup prompt;
-  nothing is focused on page load (focus moves on a step change only). Step 3's
+  nothing is focused on page load (focus moves on a step change only); and its
+  current step-status marker stays static, while the modal may halo that one
+  user-turn row. Step 3's
   disclosure copy blocks drop their own card shell inside it (no nested filled
   card). It opens with the starter budget (10 USDC per day) prefilled. Every exit
   the flow offers — Done, or Close on the approval step, a terminal state or an

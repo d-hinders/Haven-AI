@@ -173,14 +173,23 @@ describe('HowToBuyPanel', () => {
     expect(step(1).getByText('Atlas is connected on Base Sepolia.')).toBeDefined()
     expect(step(2).getByText('Give it a budget it can spend here')).toBeDefined()
     expect(stepText(2)).toBe(
-      '✓Give it a budget it can spend hereAtlas has 20 USDC left of 25 USDC this week, and can pay anyone — so it can pay Merchant Example.',
+      'Give it a budget it can spend hereAtlas has 20 USDC left of 25 USDC this week, and can pay anyone — so it can pay Merchant Example.',
     )
+    expect(screen.getByTestId('how-to-buy-step-2').querySelector('svg.lucide-check')).toBeInTheDocument()
+    expect(screen.getByTestId('how-to-buy-step-2').querySelector('.v2-step-halo')).not.toBeInTheDocument()
     // The open budget already says it — the sentence that repeated it is gone.
     expect(stepText(2)).not.toContain("A budget limited to one recipient can't pay")
     expect(step(2).queryByRole('button')).toBeNull()
     // Step 3 names the agent the panel just claimed can pay.
     expect(stepText(3)).toContain("paste it into Atlas's chat")
     expect(step(3).getByRole('link', { name: 'Transactions' }).getAttribute('href')).toBe('/transactions')
+  })
+
+  it('uses a static unfilled ink-2 ring for the current hand-rolled step', () => {
+    const { container } = render(<HowToBuyPanel {...baseProps} />)
+    const active = container.querySelector('[data-testid="how-to-buy-step-1"] [aria-hidden="true"]')!
+    expect(active).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(active.className).not.toContain('v2-step-halo')
   })
 
   it('names the merchant-locked budget that pays, without the any-recipient appendix when the offers advertise erc7710', () => {

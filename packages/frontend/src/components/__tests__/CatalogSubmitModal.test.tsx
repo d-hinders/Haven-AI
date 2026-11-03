@@ -257,6 +257,9 @@ describe('CatalogSubmitModal (#1715)', () => {
     expect(
       screen.getByRole('listitem', { current: 'step' }),
     ).toHaveTextContent('Submitted')
+    const currentDot = screen.getByRole('listitem', { current: 'step' }).querySelector('span')!
+    expect(currentDot).toHaveClass('bg-[var(--v2-ink-2)]')
+    expect(currentDot).not.toHaveClass('v2-step-halo')
 
     // Poll 2 → domain verified.
     await act(async () => {

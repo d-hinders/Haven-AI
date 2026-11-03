@@ -22,6 +22,17 @@ describe('StepProgress', () => {
     expect(screen.getByText('Approve')).not.toHaveAttribute('aria-hidden')
   })
 
+  it('draws the active step as an unfilled ink-2 ring and only halos on explicit dialog opt-in', () => {
+    const { container, rerender } = render(<StepProgress totalSteps={2} currentStep={0} />)
+    const active = container.querySelector('li[aria-current="step"] [aria-hidden="true"]')!
+    expect(active).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(active.className).not.toContain('bg-[var(--v2-brand')
+    expect(active).not.toHaveClass('v2-step-halo')
+
+    rerender(<StepProgress totalSteps={2} currentStep={0} halo />)
+    expect(container.querySelectorAll('.v2-step-halo')).toHaveLength(1)
+  })
+
   it('draws a completed step with the lucide check ConnectSteps uses, not a text glyph', () => {
     const { container } = render(<StepProgress totalSteps={2} currentStep={1} />)
 
@@ -45,7 +56,7 @@ describe('StepProgress', () => {
     expect(items[2]).toHaveTextContent(/^Step 3 of 3, stopped: 3Connect$/)
     items.forEach((item) => expect(item).not.toHaveAttribute('aria-current'))
     // No brand "in progress" ring anywhere on the band.
-    expect(container.querySelector('[class*="border-[var(--v2-brand)]"]')).toBeNull()
+    expect(container.querySelector('[class*="border-[var(--v2-ink-2)]"]')).toBeNull()
   })
 
   it('keeps the bare step numbering when no labels are passed', () => {

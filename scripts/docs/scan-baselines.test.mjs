@@ -123,6 +123,118 @@ export function checkControls(manifest) {
   return problems
 }
 
+// ---- doc-figure rows (#4631) ---------------------------------------------
+//
+// A doc figure is a count, ratio or percentage quoted in a `status: current`
+// doc. It lives in `docFigures`, never in `rows`: the `rows` pins above are
+// about a whole-repo scan's recording and are not narrowed by this array. A
+// doc row is exact (no `kind`, no `tolerance`), its `sha` is the commit the
+// figures were taken at rather than the ledger's, and its `anchor` is the
+// sentence the figures sit in — so a row cannot outlive the prose it pins.
+
+export const DOC_FIGURE_KEYS = ['id', 'doc', 'anchor', 'command', 'figures', 'sha', 'requires']
+/** Keys a scan row carries and a doc row must not: a doc figure is exact. */
+const DOC_FIGURE_FORBIDDEN = ['block', 'name', 'kind', 'tolerance', 'expect']
+
+const normalise = (s) => s.replace(/\s+/g, ' ').trim()
+
+/** The doc's paragraphs, whitespace-normalised, blank-line delimited. */
+export function paragraphsOf(text) {
+  return text.split(/\n[ \t]*\n/).map(normalise).filter((p) => p !== '')
+}
+
+/** Does `n` occur in `text` as a decimal token (not as part of a longer number)? */
+export function hasDecimalToken(text, n) {
+  return new RegExp(`(^|[^0-9])${n}([^0-9]|$)`).test(text)
+}
+
+export function checkDocFigureSchema(manifest) {
+  const problems = []
+  if (!Array.isArray(manifest?.docFigures) || manifest.docFigures.length === 0) {
+    return ['manifest has no docFigures array']
+  }
+  const ids = new Set((manifest.rows ?? []).map((r) => r?.id))
+  for (const [i, row] of manifest.docFigures.entries()) {
+    const at = `docFigures[${i}] (${row?.id})`
+    for (const k of DOC_FIGURE_KEYS) if (!(k in row)) problems.push(`${at}: missing "${k}"`)
+    for (const k of ['id', 'doc', 'anchor', 'command', 'sha']) {
+      if (k in row && (typeof row[k] !== 'string' || row[k] === '')) problems.push(`${at}: "${k}" must be a non-empty string`)
+    }
+    for (const k of DOC_FIGURE_FORBIDDEN) if (k in row) problems.push(`${at}: a doc figure carries no "${k}"`)
+    if (typeof row.doc === 'string' && !/^docs\/.+\.md$/.test(row.doc)) {
+      problems.push(`${at}: doc must be a path under docs/ ending .md`)
+    }
+    if (typeof row.anchor === 'string' && /\d/.test(row.anchor)) problems.push(`${at}: anchor must contain no digit`)
+    if (ids.has(row.id)) problems.push(`${at}: duplicate id`)
+    ids.add(row.id)
+    if (!Array.isArray(row.figures) || row.figures.length === 0 || !row.figures.every((n) => Number.isInteger(n) && n >= 0)) {
+      problems.push(`${at}: figures must be a non-empty array of non-negative integers`)
+    }
+    if (!Array.isArray(row.requires) || !row.requires.every((t) => typeof t === 'string')) {
+      problems.push(`${at}: requires must be an array of tool names`)
+    }
+  }
+  return problems
+}
+
+/** The doc exists, is `status: current`, and the anchor occurs exactly once in it. */
+export function checkDocFigureAnchors(manifest, readDoc) {
+  const problems = []
+  for (const row of manifest.docFigures ?? []) {
+    let text
+    try {
+      text = readDoc(row.doc)
+    } catch {
+      problems.push(`${row.id}: cannot read ${row.doc}`)
+      continue
+    }
+    const status = /^---\r?\n[\s\S]*?^status:[ \t]*(\S+)/m.exec(text)?.[1]
+    if (status !== 'current') problems.push(`${row.id}: ${row.doc} is not status: current (read "${status ?? 'none'}")`)
+    const anchor = normalise(row.anchor)
+    const hits = normalise(text).split(anchor).length - 1
+    if (hits !== 1) {
+      problems.push(
+        `${row.id}: anchor occurs ${hits} time(s) in ${row.doc}, expected exactly once — update or delete the row in docs/quality/scan-baselines.json`,
+      )
+    }
+  }
+  return problems
+}
+
+/**
+ * The row is linked to the doc's number: the anchor's paragraph must state
+ * every recorded figure as a decimal token. A row whose doc says 191 while the
+ * manifest says 200 fails here, and so does a renamed sentence.
+ */
+export function checkDocFigureParagraphs(manifest, readDoc) {
+  const problems = []
+  for (const row of manifest.docFigures ?? []) {
+    let text
+    try {
+      text = readDoc(row.doc)
+    } catch {
+      problems.push(`${row.id}: cannot read ${row.doc}`)
+      continue
+    }
+    const anchor = normalise(row.anchor)
+    const paragraph = paragraphsOf(text).find((p) => p.includes(anchor))
+    if (!paragraph) {
+      problems.push(
+        `${row.id}: no paragraph in ${row.doc} contains the anchor — update or delete the row in docs/quality/scan-baselines.json`,
+      )
+      continue
+    }
+    for (const n of row.figures ?? []) {
+      if (!hasDecimalToken(paragraph, n)) {
+        problems.push(
+          `${row.id}: ${row.doc} does not state ${n} in the anchor's paragraph — update or delete the row in docs/quality/scan-baselines.json`,
+        )
+      }
+    }
+  }
+  return problems
+}
+
 const manifest = JSON.parse(readFileSync(`${repoRoot}docs/quality/scan-baselines.json`, 'utf8'))
 const ledger = readFileSync(`${repoRoot}docs/quality/scan-ledger.md`, 'utf8')
 const clone = (o) => JSON.parse(JSON.stringify(o))
@@ -234,3 +346,93 @@ test('negative: the control pin rejects a missing expect and mismatched figures'
   m.rows[ctl('no-CONTROL-FAILED-line')].command = 'echo ok'
   assert.match(checkControls(m).join('\n'), /CONTROL FAILED/)
 })
+
+// ---- doc-figure rows (#4631) ---------------------------------------------
+
+const readDoc = (rel) => readFileSync(`${repoRoot}${rel}`, 'utf8')
+
+test('every doc figure has the pinned schema', () => {
+  assert.deepEqual(checkDocFigureSchema(manifest), [])
+})
+
+test('every doc figure names a current doc and an anchor that occurs exactly once', () => {
+  assert.deepEqual(checkDocFigureAnchors(manifest, readDoc), [])
+})
+
+test('every doc figure is stated in its anchor paragraph as a decimal token', () => {
+  assert.deepEqual(checkDocFigureParagraphs(manifest, readDoc), [])
+})
+
+test('negative: the doc-figure schema rejects each key and each forbidden scan key', () => {
+  const variants = [
+    [(r) => delete r.id, /missing "id"/],
+    [(r) => delete r.doc, /missing "doc"/],
+    [(r) => delete r.anchor, /missing "anchor"/],
+    [(r) => delete r.command, /missing "command"/],
+    [(r) => delete r.figures, /missing "figures"/],
+    [(r) => delete r.sha, /missing "sha"/],
+    [(r) => delete r.requires, /missing "requires"/],
+    [(r) => (r.doc = 'packages/frontend/README.md'), /path under docs\//],
+    [(r) => (r.anchor = 'Ghost dominates: 191'), /anchor must contain no digit/],
+    [(r) => (r.figures = []), /non-empty array/],
+    [(r) => (r.figures = [1.5]), /non-empty array/],
+    [(r) => (r.requires = 'rg'), /array of tool names/],
+    [(r) => (r.kind = 'count'), /carries no "kind"/],
+    [(r) => (r.tolerance = 0), /carries no "tolerance"/],
+    [(r) => (r.id = manifest.rows[0].id), /duplicate id/],
+  ]
+  for (const [edit, expected] of variants) {
+    const m = clone(manifest)
+    edit(m.docFigures[0])
+    assert.match(checkDocFigureSchema(m).join('\n'), expected)
+  }
+  const none = clone(manifest)
+  delete none.docFigures
+  assert.deepEqual(checkDocFigureSchema(none), ['manifest has no docFigures array'])
+})
+
+test('negative: the anchor pin rejects a repeated anchor, a missing anchor and a non-current doc', () => {
+  const doc = 'docs/product/design-system.md'
+  const text = readDoc(doc)
+  let m = clone(manifest)
+  m.docFigures[0].anchor = 'a sentence that is not in the doc'
+  assert.match(checkDocFigureAnchors(m, readDoc).join('\n'), /anchor occurs 0 time/)
+  m = clone(manifest)
+  m.docFigures[0].anchor = 'Ghost dominates:'
+  assert.match(
+    checkDocFigureAnchors(m, (rel) => (rel === doc ? `${text}\n\nGhost dominates:\n` : readDoc(rel))).join('\n'),
+    /anchor occurs 2 time/,
+  )
+  m = clone(manifest)
+  assert.match(
+    checkDocFigureAnchors(m, (rel) => (rel === doc ? text.replace(/^status: current$/m, 'status: record') : readDoc(rel))).join('\n'),
+    /not status: current/,
+  )
+})
+
+test('negative: the paragraph pin rejects a figure the doc does not state, naming the row and the fix', () => {
+  const m = clone(manifest)
+  m.docFigures[0].figures = [200, 31, 8, 4]
+  const problems = checkDocFigureParagraphs(m, readDoc).join('\n')
+  assert.match(problems, /ds-button-variant-distribution/)
+  assert.match(problems, /does not state 200/)
+  assert.match(problems, /update or delete the row in docs\/quality\/scan-baselines\.json/)
+  // A renamed sentence fails with the same instruction.
+  const renamed = clone(manifest)
+  renamed.docFigures[0].anchor = 'a sentence that is not in the doc'
+  assert.match(checkDocFigureParagraphs(renamed, readDoc).join('\n'), /no paragraph .* contains the anchor/)
+})
+
+test('negative: a doc row dressed as a scan row still fails the ledger-SHA pin', () => {
+  // The escape this closes: moving a doc row into `rows` so the ledger-SHA pin
+  // skips it. A doc row's `sha` is the commit its figures were taken at, never
+  // the newest whole-repo scan's, so the pin rejects it on the sha alone.
+  const m = clone(manifest)
+  m.rows.push({ ...m.docFigures[0] })
+  const problems = checkShaMatchesLedger(m, ledger).join('\n')
+  assert.match(problems, /ds-button-variant-distribution/)
+  assert.match(problems, /24cb5e65c/)
+  // And the schema pin still refuses it as a scan row (no block, no kind).
+  assert.match(checkSchema(m).join('\n'), /missing "block"/)
+})
+

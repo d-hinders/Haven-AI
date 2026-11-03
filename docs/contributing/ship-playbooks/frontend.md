@@ -200,7 +200,8 @@ judged against the dark `/dashboard`.
 The pixel gate has a dark half too: the `chromium-desktop-dark` Playwright
 project (`npm run test:visual:dark`) is scoped to the specs that have committed
 `-dark` baselines (one of them, `settings-tabs`, has a dark baseline only:
-`find packages/frontend/e2e -name 'settings-tabs*.png'` lists one file) — the
+`find packages/frontend/e2e -name 'settings-tabs*.png'` lists 1 file; row
+`frontend-settings-tabs-dark-baseline` in `docs/quality/scan-baselines.json`) — the
 list is its `testMatch` in `packages/frontend/playwright.config.ts`,
 not restated here — and runs under the same *Design visual regression* job — advisory on
 `dev`, required on `main`, like the light project. It seeds `haven.theme` the

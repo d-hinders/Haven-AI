@@ -464,4 +464,4 @@ Change one thing and the answer changes with it. Had the reviewer labelled it `s
 
 Not re-derived: the dated laptop timings, and #2730's "36/36 (37 today)", whose suite this re-read could not identify.
 
-Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

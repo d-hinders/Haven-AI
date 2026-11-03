@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { REPO_ROOT, walk } from './validate-frontmatter.mjs'
 import { census, censusPaths, findOpeners, frontMatterStatus } from './no-reverification-prose.mjs'
@@ -43,6 +43,22 @@ export function verifyArchive(raw) {
   return entries
 }
 
+/** A Markdown link target whose file is the archive: `](<target>)`. */
+const ARCHIVE_LINK = /\]\(([^)\s]*re-verification-notes-2026-11\.md)\)/g
+
+/**
+ * Every archive-link target on one line, as written.
+ *
+ * The 49 source docs sit at two depths under `docs/`, so the target that
+ * resolves to the archive is `../archive/…` from one and `../../archive/…`
+ * from the other — the test resolves each target against its doc's directory
+ * instead of matching one literal, which passed on six links that pointed at a
+ * directory that does not exist (#4623).
+ */
+export function archiveLinkTargets(line) {
+  return [...line.matchAll(ARCHIVE_LINK)].map((match) => match[1])
+}
+
 const root = fileURLToPath(new URL('../../', import.meta.url))
 
 async function currentDocs() {
@@ -61,8 +77,10 @@ test('#4613: the checked-in archive has one hash-pinned section per source doc',
     const doc = byPath.get(entry.path)
     assert.ok(doc, `${entry.path} is not a doc the census reads`)
     assert.equal(frontMatterStatus(doc.lines), 'current', `${entry.path} is not status: current`)
-    const links = doc.lines.filter((line) => line.includes('(../archive/re-verification-notes-2026-11.md)'))
+    const links = doc.lines.flatMap((line) => archiveLinkTargets(line))
     assert.equal(links.length, 1, `${entry.path} must link the archive exactly once`)
+    const resolved = posix.normalize(posix.join(posix.dirname(entry.path), links[0]))
+    assert.equal(resolved, ARCHIVE, `${entry.path} links ${links[0]}, which resolves to ${resolved}, not the archive`)
   }
 })
 

@@ -72,4 +72,4 @@ cross-surface closeout — the Captain Self-Check Preflight before review, the
 standard doc-accuracy step, and a PR body filled from the template — is wired in.
 New checks land **advisory** first, then graduate to blocking once trusted.
 
-Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

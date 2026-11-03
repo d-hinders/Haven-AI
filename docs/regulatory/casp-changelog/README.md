@@ -137,4 +137,4 @@ version rather than an issue:
   bump itself touches (version strings and pins only)>. Perimeter unchanged.
 ```
 
-Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

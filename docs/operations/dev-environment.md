@@ -1154,6 +1154,22 @@ Fortnox is not configured on prod. Whether prod keeps sharing the dev app or
 registers its own is decided when Fortnox is enabled, under #2876. The feed
 was live-proven against dev on 2026-07-16.
 
+**Igdrasil** (#4518) is wired the same way: `IGDRASIL_CLIENT_ID`,
+`IGDRASIL_CLIENT_SECRET` and `IGDRASIL_REDIRECT_URI` (the dev backend's
+`/accounting/connections/igdrasil/callback`) register its connector at boot
+only when all three are set. They are **not set on dev yet**: the app
+registration has been requested from Igdrasil, and the secret goes straight
+into Railway when it arrives. The provider stays `coming_soon` until the live
+check on dev (#4519), so setting the variables alone opens nothing.
+[accounting-feed.md](./accounting-feed.md) is the reference.
+
+  > **Re-verified #4518 (2026-11-03):** added the Igdrasil paragraph above.
+  > The PR's covered files are `.env.dev.example`, `config.ts` and
+  > `index.ts`: three `IGDRASIL_*` string scalars and a registration gated on
+  > them. No flag, boot refusal, request-validation mode or other variable
+  > changes. Nothing else in this document was re-verified, and
+  > `last-verified` is not bumped.
+
   > **Re-verified #4497 (2026-10-29):** the paragraph above said dev uses a
   > **separate dev Fortnox app** and never the prod credentials. That is false:
   > production's `FORTNOX_CLIENT_ID` hashes identically to dev's, so prod holds

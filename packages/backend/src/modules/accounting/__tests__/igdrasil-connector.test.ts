@@ -184,9 +184,10 @@ describe('IgdrasilConnector.pushTransaction', () => {
 
   it('no live token → not_connected, no request; no company on the row → skipped, no request', async () => {
     const { impl, state } = igdrasilRouter()
-    tokenMocks.getValidOAuth2AccessToken.mockResolvedValueOnce(null)
+    tokenMocks.getValidOAuth2AccessToken.mockResolvedValue(null)
     expect(await new IgdrasilConnector(impl).pushTransaction(USER, feedTransaction('pay-5'))).toEqual({ externalRef: null, status: 'skipped', reason: 'not_connected' })
-    repoMocks.getConnection.mockResolvedValueOnce({ external_company_id: null })
+    tokenMocks.getValidOAuth2AccessToken.mockResolvedValue('igd_oat_live')
+    repoMocks.getConnection.mockResolvedValue({ external_company_id: null })
     const noCompany = await new IgdrasilConnector(impl).pushTransaction(USER, feedTransaction('pay-6'))
     expect(noCompany).toMatchObject({ status: 'skipped', externalRef: null })
     expect(noCompany.reason).toMatch(/no company recorded/)

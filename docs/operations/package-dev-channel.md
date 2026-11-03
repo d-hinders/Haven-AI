@@ -1206,3 +1206,12 @@ compatibility contract — the manifest table, version skew, `--doctor`'s checks
 > holds. `parseConnectorChannel` and `HAVEN_CONNECTOR_CHANNEL` are untouched.
 > Scope of this note: confirming that. Nothing else in this document was
 > re-verified.
+
+> **Re-verified unchanged (#4518, 2026-11-03 — three accounting scalars in
+> `packages/backend/src/config.ts`).** The only covered file this PR touches
+> is `config.ts`: it adds `igdrasilClientId`, `igdrasilClientSecret` and
+> `igdrasilRedirectUri`, plain string reads of `IGDRASIL_CLIENT_ID`,
+> `IGDRASIL_CLIENT_SECRET` and `IGDRASIL_REDIRECT_URI` (empty when unset, no
+> boot refusal). `parseConnectorChannel`, `HAVEN_CONNECTOR_CHANNEL` and every
+> field this document names are untouched. Scope of this note: confirming
+> that. Nothing else in this document was re-verified.

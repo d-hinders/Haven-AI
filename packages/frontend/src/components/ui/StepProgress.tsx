@@ -13,8 +13,8 @@ type StepProgressProps = {
   labels?: readonly string[]
   /**
    * The flow stopped at `currentStep` (expired, cancelled, failed): that step
-   * renders neutral — the pending ring and numeral, not the brand "in
-   * progress" ring — and is no longer `aria-current`. Earlier steps stay done:
+   * renders neutral — the pending ring and numeral, not the ink-2 active
+   * ring — and is no longer `aria-current`. Earlier steps stay done:
    * they did complete. Neutral rather than an error tone because the stop is
    * not always a failure (a cancel is the user's own choice); the screen body
    * carries the tone of what happened.

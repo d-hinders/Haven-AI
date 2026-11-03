@@ -1103,7 +1103,7 @@ shape everywhere.
   inside it. That is a **class**, not a list of exceptions (owner decision
   2026-11-02, on #4608): Accounting's "Available as an add-on" and "Sent
   transactions", the dashboard money card's two "Agent spending" labels,
-  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:324`'s "How
+  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:325`'s "How
   to buy" are instances of it, and none of them moves onto `SectionHeading`.
 - **An optional trailing link on the heading's line** (#4475; owner-approved
   2026-10-27 as a new design-system pattern). A section whose content has a
@@ -2862,7 +2862,7 @@ which rendered visibly different beside it).
 
 **`halted`** marks a flow that stopped on `currentStep` — the Connect agent
 modal's expired, cancelled and failed screens. That step renders with the
-pending ring and numeral instead of the brand "in progress" ring, loses
+pending ring and numeral instead of the active `--v2-ink-2` ring, loses
 `aria-current`, and its `sr-only` prefix says "stopped"; earlier steps stay
 done, because they were. Neutral, not an error tone: a cancel is the user's own
 choice, and the screen's status badge already carries the tone of what
@@ -2940,8 +2940,8 @@ Rules:
   (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
 It is local to `components/connect-agent/` because every production caller is
-part of the same connect flow; a second product use is the trigger to promote it to `components/ui/` with a
-`/design-system` specimen next to `StepProgress`.
+part of the same connect flow; a second product use is the trigger to promote it to `components/ui/`. Its
+`/design-system` specimen is the "ConnectSteps" section, after `StepProgress`.
 
 ### Local hint marker (#1952)
 

@@ -152,8 +152,8 @@ export function ConnectAgentFlow({
   // Connect step and never counts. Once the budget is approved the flow is
   // finished, so the band reads all-done rather than Connect still in
   // progress over a success screen. On an expired, cancelled or failed setup
-  // the band reads stopped: Connect goes neutral instead of showing the brand
-  // "in progress" ring over a screen that says nothing more will happen.
+  // the band reads stopped: Connect goes neutral instead of showing the active
+  // ink-2 ring over a screen that says nothing more will happen.
   const progress = (
     <StepProgress
       totalSteps={flow.setupStepCount}

@@ -635,8 +635,8 @@ describe('the status checklist on the waiting screen (#3832)', () => {
     expect(view!.textContent).toContain(SETUP.setup_prompt)
     // The brand-soft callout and its heading are gone.
     expect(container.textContent).not.toContain('Connect your agent')
-    // (The active row's marker uses brand-soft too, so match the callout's
-    // own border, which nothing else on this screen carries.)
+    // Match the callout's own border, which nothing else on this screen
+    // carries.
     expect(container.querySelector('[class*="border-brand/15"]')).toBeNull()
   })
 

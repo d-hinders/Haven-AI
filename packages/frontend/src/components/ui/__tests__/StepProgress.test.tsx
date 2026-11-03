@@ -31,6 +31,7 @@ describe('StepProgress', () => {
 
     rerender(<StepProgress totalSteps={2} currentStep={0} halo />)
     expect(container.querySelectorAll('.v2-step-halo')).toHaveLength(1)
+    expect(container.querySelector('li[aria-current="step"] .v2-step-halo')).not.toBeNull()
   })
 
   it('draws a completed step with the lucide check ConnectSteps uses, not a text glyph', () => {

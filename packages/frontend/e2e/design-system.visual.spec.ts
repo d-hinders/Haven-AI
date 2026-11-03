@@ -415,10 +415,14 @@ test.describe('design-system visual regression', () => {
         })
       }
 
+      // #4638: the halo is dialog-only and opt-in. No always-mounted specimen
+      // carries it, and the Modal specimen mirrors the Connect agent header,
+      // which stays static, so the page shows none before or after opening it.
+      await expect(page.locator('.v2-step-halo')).toHaveCount(0)
       await page.getByRole('button', { name: 'Open modal', exact: true }).click()
       const dialog = page.getByRole('dialog')
       await expect(dialog).toBeVisible()
-      await expect(dialog.locator('.v2-step-halo')).toHaveCount(1)
+      await expect(page.locator('.v2-step-halo')).toHaveCount(0)
       await page.keyboard.press('Escape')
     })
   }
@@ -1112,6 +1116,15 @@ test.describe('design-system visual regression', () => {
     const sample = get(page)
     await expect(sample).toHaveCount(1)
     await isolateShowcaseSample(sample)
+    // #4638: this guard measures layout, so motion is frozen for it. The
+    // ConnectSteps sample's working row spins the shared Spinner; a raw
+    // `screenshot` can catch the compositor mid-rotation even with
+    // `animations: 'disabled'`, and the run then failed at a DIFFERENT spacer
+    // on retry, which a real layout shift never does. `toHaveScreenshot`
+    // retries until two shots agree, so the pixel clips do not need this.
+    await page.addStyleTag({
+      content: '*, *::before, *::after { animation: none !important; transition: none !important; }',
+    })
     return async (spacerPx: number) => {
       // Resized in place after isolation: if isolation stopped hiding the
       // region above, the new height would move the sample.

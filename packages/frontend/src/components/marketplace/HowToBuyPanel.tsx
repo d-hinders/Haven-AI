@@ -56,12 +56,12 @@ function StepDot({ state, n }: { state: StepState; n: number }) {
   return (
     <div
       aria-hidden
-      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium ${
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
         state === 'done'
-          ? 'border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+          ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
           : state === 'open'
             ? 'border-2 border-[var(--v2-ink-2)] text-[var(--v2-ink-2)]'
-            : 'border-[var(--v2-border)] text-[var(--v2-ink-3)]'
+            : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
       }`}
     >
       {state === 'done' ? <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} /> : n}

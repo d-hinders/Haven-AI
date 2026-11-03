@@ -189,6 +189,8 @@ describe('HowToBuyPanel', () => {
     const { container } = render(<HowToBuyPanel {...baseProps} />)
     const active = container.querySelector('[data-testid="how-to-buy-step-1"] [aria-hidden="true"]')!
     expect(active).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    // One border width only: a bare `border` beside `border-2` lets class order decide.
+    expect(active).not.toHaveClass('border')
     expect(active.className).not.toContain('v2-step-halo')
   })
 

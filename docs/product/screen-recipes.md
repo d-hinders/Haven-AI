@@ -96,7 +96,8 @@ Structure (#3818):
    `Get started`, three numbered steps, then the rule items that still apply
    (another agent waiting for setup, a recommended backup signer once funded)
    below them in the same card. Never a second card beside it.
-3. Only the next step is highlighted and carries the primary action. Connecting
+3. Only the next step is highlighted and carries the primary action. The
+   highlight is its marker's ink-2 ring, not a tinted row (#4638). Connecting
    an agent stays available before funding, at secondary weight and without the
    highlight; step 3 stays locked until an agent can pay.
 4. The steps own the card only until the first agent payment. After it, one
@@ -274,10 +275,11 @@ only, so they cannot drift:
 - **Inline first agent** (`InlineAgentSetup`) — `/agents` for a user with no
   agents (see Agent List). A `Card` titled "Connect your first agent", the same
   subtitle and stepper band, the same steps and copy, at the modal's width.
-  Four differences, all for the same reason — there is nothing to dismiss:
-  step 1 has no Cancel (its one action, "Set agent budget", is full width);
+  Four differences. The first three have one reason, there is nothing to
+  dismiss: step 1 has no Cancel (its one action, "Set agent budget", is full width);
   Escape is not bound, so it never resets the flow or drops the setup prompt;
-  nothing is focused on page load (focus moves on a step change only); and its
+  nothing is focused on page load (focus moves on a step change only). The
+  fourth follows the dialog-only halo rule (design-system.md § Motion): its
   current step-status marker stays static, while the modal may halo that one
   user-turn row. Step 3's
   disclosure copy blocks drop their own card shell inside it (no nested filled

@@ -84,16 +84,14 @@ test('#4613: the checked-in archive has one hash-pinned section per source doc',
   }
 })
 
-test('#4613: no status: current doc carries a re-verification opener', async () => {
+test('#4613: no status: current doc carries a re-verification opener', async (t) => {
   const result = census(await currentDocs())
   assert.equal(result.byStatus.current ?? 0, 0)
-  // 25 when #4613 landed; 26 since the 2026-11-02 quality-scan record (#4609)
-  // discusses the pattern in a bullet whose opening line carries
-  // "re-verification". A `record` doc may say the word — it is never refused —
-  // so this pin moves only when a `record` doc gains or loses an opener (a new
-  // or edited record, or a `current` doc flipped to `record`), never to hide a
-  // current-doc hit.
-  assert.equal(result.byStatus.record, 26)
+  // The `record` bucket is reported, never pinned (#4622): a record doc may say
+  // the word — the guard never refuses one — so an exact count here would move
+  // with every quality-scan record and red `dev` from a PR that could not see
+  // the pin. The two `current` assertions above and below are the control.
+  t.diagnostic(`re-verification openers in status: record docs: ${result.byStatus.record ?? 0}`)
   assert.equal(result.current.size, 0)
 })
 

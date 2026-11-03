@@ -884,10 +884,8 @@ revoked agent; the approval answers the route's typed refusal instead (404, or
 refusal). Installed CLIs are unaffected: 404 and 409 map to the same exit
 class. Nothing the connector sends or does changes.
 
-`runtime_config_unreadable` is the exception, and — with
-`runtime_config_write_failed` and `runtime_install_failed` — one of the three of
-the eight that reach the dashboard with their own copy (`runtimeStatusHelper`
-branches on all three). The routing of the six
+`runtime_config_unreadable` is the exception, and the only one of the eight that
+reaches the dashboard (`runtimeStatusHelper`). The routing of the six
 `runtime_*` codes is pinned by
 [`packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts`](../../packages/frontend/src/components/connect-agent/__tests__/runtime-status-copy.test.ts)
 (#2680); the two `wiring_collision` codes precede `/register` and never reach

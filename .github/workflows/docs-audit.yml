@@ -5,6 +5,14 @@ name: Docs staleness audit
 # into a single tracking issue — the standing "which doc is lying?" queue.
 # Report-only: it never fails, and it opens ONE issue it keeps updating rather
 # than spamming new ones.
+#
+# #4631: the same job also runs the quality-scan runner's doc-figure section
+# (`scan-remeasure.mjs --doc-figures-only`) and appends it under the ranking.
+# The run step has no `GH_TOKEN`, so it does not read the runner's standing
+# issue; running the runner here keeps the figures at the same SHA as the
+# ranking instead of six days behind it. A moved figure is refreshed in the doc
+# (figures + `sha` in the row) or rewritten as a dated reading — never
+# `last-verified` alone.
 
 on:
   schedule:
@@ -31,10 +39,20 @@ jobs:
         with:
           node-version-file: '.nvmrc'
 
+      # A doc row's command may call ripgrep through `$RG`; a missing rg is a
+      # broken-instrument zero, so the runner refuses those rows instead of
+      # running them. Same install as scan-remeasure.yml.
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
+      # #4631: the doc-figure section, at the same SHA as the ranking below.
+      - name: Re-measure the doc figures
+        run: node scripts/docs/scan-remeasure.mjs --sha "$GITHUB_SHA" --doc-figures-only --out figures.txt
+
       - name: Run the audit
         id: audit
         run: |
-          node scripts/docs/audit-staleness.mjs --top=15 > report.txt
+          node scripts/docs/audit-staleness.mjs --top=15 --figures-report figures.txt > report.txt
           cat report.txt
           {
             echo 'report<<AUDIT_EOF'
@@ -48,7 +66,7 @@ jobs:
           REPORT: ${{ steps.audit.outputs.report }}
         run: |
           TITLE='Docs staleness audit (weekly)'
-          BODY="$(printf 'Automated weekly audit (#646). For each doc: re-verify it against the code and bump \`last-verified\`, or update it.\n\n```\n%s\n```\n\n_Regenerated every Monday by docs-audit.yml — do not edit by hand._' "$REPORT")"
+          BODY="$(printf 'Automated weekly audit (#646). For each doc: re-verify it against the code and bump \`last-verified\`, or update it. For each moved doc figure: refresh the figure in the doc (figures + \`sha\` in its row in \`docs/quality/scan-baselines.json\`) or rewrite it as a dated reading — never \`last-verified\` alone.\\n\\n\`\`\`\\n%s\\n\`\`\`\\n\\n_Regenerated every Monday by docs-audit.yml — do not edit by hand._' "$REPORT")"
           # Bot-ownership upsert (#3341): select by AUTHOR — the one attribute a
           # human cannot set — plus an exact title, never `in:title`, which is a
           # tokenised search that adopted any human issue whose title merely

@@ -289,11 +289,15 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    `covers:` still route it. The ledger stays `current`. **A whole-repo
    scan updates `docs/quality/scan-baselines.json` in the same PR as its
    entry**: run `node scripts/docs/scan-remeasure.mjs --sha <entry sha>` and
-   give **every** row the figures it printed and the entry's `sha` — the run
-   is cheap, so no row keeps a SHA its figures were not taken at — and a row
-   whose instrument changed its new `command`
+   give **every element of `rows`** the figures it printed and the entry's
+   `sha` — the run is cheap, so no row keeps a SHA its figures were not taken
+   at — and a row whose instrument changed its new `command`
    (`scripts/docs/scan-baselines.test.mjs` pins every row's `sha` to the
-   newest whole-repo entry with a `Probed clean` section). A scoped scan — a
+   newest whole-repo entry with a `Probed clean` section). The manifest's
+   `docFigures` array is **not** refreshed by a scan: a figure quoted in a
+   current doc moves in the PR that changes the sentence, because refreshing a
+   doc row without touching the doc would mark a stale figure unchanged for
+   good (#4631). A scoped scan — a
    scope is a filter — does not update the manifest. **Run its independent review before presenting anything for
    decision** — the `haven-reviewer` pass `CLAUDE.md` § *How shipping is
    governed* makes mandatory on every pull request, briefed explicitly to

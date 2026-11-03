@@ -251,6 +251,8 @@ rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | rg
 # Sample B: the manifest's rows (`docs/quality/scan-baselines.json`, #4625) —
 # run `node scripts/docs/scan-remeasure.mjs --sha <sha>` and read each delta;
 # the ledger's `Probed clean:` lines are prose and carry no runnable command.
+# Its `docFigures` section re-runs the figures quoted in current docs, so a doc
+# row enters this block by construction (#4631).
 rg -c ': any\b|as any' packages/*/src --type ts -g '!*test*' | awk -F: '{s+=$2} END{print s}'
 npm run lint:db-mocks 2>&1 | rg 'db-mock gauge'
 ```

@@ -1,5 +1,5 @@
 {
-  "$comment": "Machine-readable source of the quality-scan Probed-clean figures (#4625). Each command is written for this manifest, not copied from the ledger, and is run by scripts/docs/scan-remeasure.mjs under `bash -c` with its cwd at the root of a detached worktree at $SHA, using that SHA's own instrument scripts and no node_modules. A command reads $SHA (the full sha), $SCRATCH (a per-row empty directory) and $RG (ripgrep), never origin/dev, HEAD or a branch name, and prints exactly len(figures) integers, one per line (a control with expect no-CONTROL-FAILED-line prints anything and must print a line containing CONTROL FAILED on failure). `sha` is the scan that recorded the figures and must equal the newest ledger entry that carries a Probed clean section. kind: invariant must not move, grows must not shrink, head-sample is never flagged, count moves within `tolerance` (a relative fraction, 0 is exact), control is checked against `expect`. A scan PR updates `figures` and `sha` with its ledger entry; a scoped scan does not.",
+  "$comment": "Machine-readable source of the quality-scan Probed-clean figures (#4625). Each command is written for this manifest, not copied from the ledger, and is run by scripts/docs/scan-remeasure.mjs under `bash -c` with its cwd at the root of a detached worktree at $SHA, using that SHA's own instrument scripts and no node_modules. A command reads $SHA (the full sha), $SCRATCH (a per-row empty directory) and $RG (ripgrep), never origin/dev, HEAD or a branch name, and prints exactly len(figures) integers, one per line (a control with expect no-CONTROL-FAILED-line prints anything and must print a line containing CONTROL FAILED on failure). `sha` is the scan that recorded the figures and must equal the newest ledger entry that carries a Probed clean section. kind: invariant must not move, grows must not shrink, head-sample is never flagged, count moves within `tolerance` (a relative fraction, 0 is exact), control is checked against `expect`. A scan PR updates `figures` and `sha` for every element of `rows` with its ledger entry; a scoped scan does not. `docFigures` is NOT refreshed by a scan: a doc figure moves in the PR that changes the sentence, because refreshing a doc row without touching the doc would mark a stale figure unchanged for good (#4631).",
   "rows": [
     {
       "id": "sizing-source-test-lines",
@@ -330,6 +330,44 @@
       ],
       "sha": "e0617aa9f",
       "tolerance": 0,
+      "requires": []
+    }
+  ],
+  "docFigures": [
+    {
+      "id": "ds-button-variant-distribution",
+      "doc": "docs/product/design-system.md",
+      "anchor": "literal occurrences, from `packages/frontend` (measured",
+      "command": "git diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\ncd packages/frontend\nfor v in ghost tertiary primary danger; do\n  grep -rhoE \"variant=\\\"$v\\\"\" src --include='*.tsx' | wc -l | tr -d ' '\ndone",
+      "figures": [
+        191,
+        31,
+        8,
+        4
+      ],
+      "sha": "24cb5e65c",
+      "requires": []
+    },
+    {
+      "id": "ds-icon-rung-12px",
+      "doc": "docs/product/design-system.md",
+      "anchor": "Nineteen call sites at",
+      "command": "git diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\ncd packages/frontend\nnode scripts/design-lint.mjs --icons | awk '$2 == \"h-3\" && $3 == \"w-3\" { print $1 }'",
+      "figures": [
+        16
+      ],
+      "sha": "24cb5e65c",
+      "requires": []
+    },
+    {
+      "id": "frontend-settings-tabs-dark-baseline",
+      "doc": "docs/contributing/ship-playbooks/frontend.md",
+      "anchor": "has a dark baseline only",
+      "command": "git diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nfind packages/frontend/e2e -name 'settings-tabs*.png' | wc -l | tr -d ' '",
+      "figures": [
+        1
+      ],
+      "sha": "24cb5e65c",
       "requires": []
     }
   ]

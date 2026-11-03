@@ -56,14 +56,28 @@
 // scan that finds the table stale is the signal. The gap is accepted here,
 // where the next reader of the job will look.
 //
+// ## Doc figures (#4631)
+//
+// A count, ratio or percentage quoted in a `status: current` doc either carries
+// the command that produced it and the SHA it was taken at and has a row in
+// `docFigures`, or is written as a dated reading of the past. A doc row is
+// exact — no `kind`, no `tolerance` — and its `sha` is the commit the figures
+// were taken at, not the ledger's. The anchor is checked in the SHA's own copy
+// of the doc, so a SHA from before the sentence existed reports `anchor not
+// found` rather than `unchanged`. `docFigures` is never refreshed by a scan:
+// the doc's editor moves `figures` and `sha` in the PR that changes the
+// sentence, because refreshing a doc row without touching the doc would mark a
+// stale figure unchanged for good.
+//
 // Usage:
 //   node scripts/docs/scan-remeasure.mjs --sha <sha> [--scratch <dir>] [--manifest <path>]
+//                                        [--doc-figures-only] [--out <path>]
 //
 // Exit 0 with the report on stdout, whatever moved (advisory). Exit 2 on a
 // usage error, an unreadable manifest or an unresolvable SHA.
 
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -72,6 +86,8 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DEFAULT_MANIFEST = join(REPO_ROOT, 'docs', 'quality', 'scan-baselines.json')
 const KINDS = new Set(['invariant', 'grows', 'head-sample', 'count', 'control'])
 const EXPECTS = new Set(['nonzero', 'no-CONTROL-FAILED-line'])
+/** The keys a doc-figure row may carry; anything else is an exit-2 defect. */
+const DOC_FIGURE_KEYS = new Set(['id', 'doc', 'anchor', 'command', 'figures', 'sha', 'requires'])
 /** Per-row ceiling: a hung instrument names itself instead of burning the job. */
 const ROW_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -81,7 +97,7 @@ export function refusalLine(tool) {
 }
 
 export function parseArgs(argv) {
-  const out = { sha: null, scratch: null, manifest: DEFAULT_MANIFEST }
+  const out = { sha: null, scratch: null, manifest: DEFAULT_MANIFEST, docFiguresOnly: false, out: null }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     const value = () => {
@@ -92,6 +108,8 @@ export function parseArgs(argv) {
     if (arg === '--sha') out.sha = value()
     else if (arg === '--scratch') out.scratch = value()
     else if (arg === '--manifest') out.manifest = resolve(value())
+    else if (arg === '--doc-figures-only') out.docFiguresOnly = true
+    else if (arg === '--out') out.out = resolve(value())
     else throw new Error(`unknown argument ${arg}`)
   }
   if (!out.sha) throw new Error('--sha <sha> is required')
@@ -117,6 +135,68 @@ export function loadManifest(path) {
     }
   }
   return parsed.rows
+}
+
+/**
+ * Read and shape-check the manifest's `docFigures` (#4631). Its own loader: a
+ * doc row carries no `kind` and no `tolerance`, so an unknown key is an exit-2
+ * defect rather than a silently ignored field. A manifest without the array is
+ * a manifest with no doc figures, not an error.
+ */
+export function loadDocFigures(path) {
+  const parsed = JSON.parse(readFileSync(path, 'utf8'))
+  const rows = parsed?.docFigures
+  if (rows === undefined) return []
+  if (!Array.isArray(rows)) throw new Error(`${path}: "docFigures" is not an array`)
+  for (const row of rows) {
+    const where = `${path}: doc figure ${row?.id ?? '(no id)'}`
+    if (typeof row?.id !== 'string' || !row.id) throw new Error(`${where}: missing id`)
+    for (const key of Object.keys(row)) {
+      if (!DOC_FIGURE_KEYS.has(key)) throw new Error(`${where}: unknown key "${key}" (a doc figure carries ${[...DOC_FIGURE_KEYS].join(', ')})`)
+    }
+    for (const key of ['doc', 'anchor', 'command', 'sha']) {
+      if (typeof row[key] !== 'string' || !row[key]) throw new Error(`${where}: "${key}" must be a non-empty string`)
+    }
+    if (!row.doc.startsWith('docs/')) throw new Error(`${where}: doc must be a path under docs/`)
+    if (!row.command.includes('$SHA')) throw new Error(`${where}: command must be a string that reads $SHA`)
+    if (!Array.isArray(row.figures) || row.figures.length === 0 || row.figures.some((f) => !Number.isInteger(f))) {
+      throw new Error(`${where}: figures must be a non-empty array of integers`)
+    }
+    if (!Array.isArray(row.requires) || row.requires.some((t) => typeof t !== 'string')) {
+      throw new Error(`${where}: requires must be an array of tool names`)
+    }
+  }
+  return rows
+}
+
+const normalise = (s) => s.replace(/\s+/g, ' ').trim()
+
+/** How many times `anchor` occurs in `text`, whitespace-normalised. */
+export function anchorCount(text, anchor) {
+  const a = normalise(anchor)
+  if (!a) return 0
+  return normalise(text).split(a).length - 1
+}
+
+/**
+ * Compare one doc row's result to its recording. Returns
+ * `{ status: 'unchanged' | 'moved' | 'anchor-not-found' | 'failed', note }`.
+ * A doc figure is exact: any difference is `moved`.
+ */
+export function docFigureVerdict(row, { anchorFound, result }) {
+  if (!anchorFound) return { status: 'anchor-not-found', note: 'anchor not found' }
+  if (result.timedOut) return { status: 'failed', note: `timed out after ${ROW_TIMEOUT_MS / 60000} min` }
+  if (result.code !== 0) return { status: 'failed', note: `exit ${result.code}` }
+  if (result.stdout.trim() === '') return { status: 'failed', note: 'printed nothing' }
+  const now = parseFigures(result.stdout)
+  if (now === null) return { status: 'failed', note: 'printed a line that is not an integer' }
+  if (now.length !== row.figures.length) {
+    return { status: 'failed', note: `printed ${now.length} figure(s), recorded ${row.figures.length}` }
+  }
+  result.figures = now
+  return now.every((f, i) => f === row.figures[i])
+    ? { status: 'unchanged', note: 'unchanged' }
+    : { status: 'moved', note: 'moved' }
 }
 
 /** The integers a command printed, one per line; null when any line is not one. */
@@ -230,8 +310,41 @@ export function renderReport({ sha, rows, results }) {
   return lines.join('\n')
 }
 
-export async function remeasure({ sha, scratch, manifest }) {
-  const rows = loadManifest(manifest)
+/**
+ * The doc-figure section (#4631). Plain lines, not a markdown table:
+ * `docs-audit.yml` wraps its report in a code fence, and a table inside a fence
+ * is unreadable in the issue body.
+ */
+export function renderDocFigures({ sha, rows, results }) {
+  const short = sha.slice(0, 9)
+  const lines = []
+  lines.push(
+    `Doc figures that moved (#4631) at \`${short}\`. Advisory: a moved figure is refreshed in the doc (figures + \`sha\` in the row) or rewritten as a dated reading — never \`last-verified\` alone.`,
+  )
+  lines.push('')
+  if (!rows.length) {
+    lines.push('none recorded')
+    return lines.join('\n')
+  }
+  for (const row of rows) {
+    const r = results.get(row.id)
+    if (r.refused) {
+      lines.push(`${row.doc} · ${row.id} · refused — ${r.refused}`)
+      continue
+    }
+    const now = r.figures ?? null
+    const verdict = r.verdict.status === 'anchor-not-found' ? 'anchor not found' : r.verdict.status
+    const note = r.verdict.status === 'failed' ? ` — ${r.verdict.note}` : ''
+    lines.push(
+      `${row.doc} · ${row.id} · recorded ${fmt(row.figures)} @ \`${row.sha}\` · now ${fmt(now)} @ \`${short}\` · ${verdict}${note}`,
+    )
+  }
+  return lines.join('\n')
+}
+
+export async function remeasure({ sha, scratch, manifest, docFiguresOnly = false, out = null }) {
+  const rows = docFiguresOnly ? [] : loadManifest(manifest)
+  const docRows = loadDocFigures(manifest)
   let full
   try {
     full = execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', '--verify', `${sha}^{commit}`], { encoding: 'utf8' }).trim()
@@ -252,6 +365,7 @@ export async function remeasure({ sha, scratch, manifest }) {
     throw err
   }
   const results = new Map()
+  const docResults = new Map()
   try {
     const env = { ...process.env, SHA: full, RG: process.env.RG ?? 'rg' }
     for (const row of rows) {
@@ -266,6 +380,32 @@ export async function remeasure({ sha, scratch, manifest }) {
       result.verdict = verdict(row, result)
       results.set(row.id, result)
     }
+    for (const row of docRows) {
+      const missing = (row.requires ?? []).filter((tool) => !toolResolves(tool, env))
+      if (missing.length) {
+        docResults.set(row.id, { refused: missing.map(refusalLine).join('; ') })
+        continue
+      }
+      // The anchor is checked in THIS SHA's copy of the doc, so a SHA from
+      // before the sentence existed reports `anchor not found`, never
+      // `unchanged`.
+      let text = null
+      try {
+        text = readFileSync(join(tree, row.doc), 'utf8')
+      } catch {
+        text = null
+      }
+      const anchorFound = text !== null && anchorCount(text, row.anchor) === 1
+      if (!anchorFound) {
+        docResults.set(row.id, { verdict: { status: 'anchor-not-found', note: 'anchor not found' } })
+        continue
+      }
+      const rowScratch = join(base, 'rows', row.id)
+      mkdirSync(rowScratch, { recursive: true })
+      const result = await runBash(row.command, { cwd: tree, env: { ...env, SCRATCH: rowScratch } })
+      result.verdict = docFigureVerdict(row, { anchorFound, result })
+      docResults.set(row.id, result)
+    }
   } finally {
     // A cleanup failure must not replace the report: say so on stderr.
     try {
@@ -275,7 +415,10 @@ export async function remeasure({ sha, scratch, manifest }) {
     }
     if (ownScratch) rmSync(base, { recursive: true, force: true })
   }
-  return renderReport({ sha: full, rows, results })
+  const docSection = renderDocFigures({ sha: full, rows: docRows, results: docResults })
+  const report = docFiguresOnly ? docSection : `${renderReport({ sha: full, rows, results })}\n\n${docSection}`
+  if (out) writeFileSync(out, `${report}\n`)
+  return report
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -284,7 +427,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     args = parseArgs(process.argv.slice(2))
   } catch (err) {
     console.error(`scan-remeasure: ${err.message}`)
-    console.error('usage: node scripts/docs/scan-remeasure.mjs --sha <sha> [--scratch <dir>] [--manifest <path>]')
+    console.error(
+      'usage: node scripts/docs/scan-remeasure.mjs --sha <sha> [--scratch <dir>] [--manifest <path>] [--doc-figures-only] [--out <path>]',
+    )
     process.exit(2)
   }
   remeasure(args).then(

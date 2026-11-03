@@ -7,6 +7,7 @@ covers:
   - scripts/ci/queue-framing-census.test.mjs
   - .github/workflows/docs.yml
   - .github/workflows/docs-coupling.yml
+  - .github/workflows/docs-audit.yml
   - .github/workflows/scan-remeasure.yml
   - docs/quality/scan-baselines.json
   - .agents/skills/haven-agent-workflow/references/doc-reviewer.md
@@ -181,8 +182,8 @@ finish in seconds, which is why `docs.yml` needs no `npm ci`.
 | Link health | lychee (`.lychee.toml`) | Advisory (`continue-on-error`) |
 | Markdown hygiene | markdownlint-cli2 (`.markdownlint.json`) | Advisory |
 | Product-copy terminology | Vale (`.vale.ini`, scoped to `docs/product/**` so engineering docs may say "Safe", "AllowanceModule", "signer") | Advisory |
-| Weekly staleness audit | `scripts/docs/audit-staleness.mjs`, `docs-audit.yml` Mondays 06:00 UTC | Advisory (upserts one tracking issue, selected by bot author plus exact title through `scripts/ci/standing-issue-upsert.mjs`, so a human issue is never adopted — #3341) |
-| Weekly quality-scan re-measurement ([#4625](https://github.com/d-hinders/Haven-AI/issues/4625)) | `scripts/docs/scan-remeasure.mjs --sha <sha>` over `docs/quality/scan-baselines.json`, `scan-remeasure.yml` Tuesdays 06:37 UTC: each row's command re-run under `bash -c` in a detached worktree at the pushed SHA, verdict by the row's `kind` | Advisory (upserts one standing issue, label `scan-remeasure`, through `scripts/ci/standing-issue-upsert.mjs`; never judges, never files a defect) |
+| Weekly staleness audit | `scripts/docs/audit-staleness.mjs`, `docs-audit.yml` Mondays 06:00 UTC; the same job runs `scripts/docs/scan-remeasure.mjs --sha "$GITHUB_SHA" --doc-figures-only --out figures.txt` first and appends its **Doc figures that moved** section under the ranking ([#4631](https://github.com/d-hinders/Haven-AI/issues/4631)) | Advisory (upserts one tracking issue, selected by bot author plus exact title through `scripts/ci/standing-issue-upsert.mjs`, so a human issue is never adopted — #3341) |
+| Weekly quality-scan re-measurement ([#4625](https://github.com/d-hinders/Haven-AI/issues/4625)) | `scripts/docs/scan-remeasure.mjs --sha <sha>` over `docs/quality/scan-baselines.json`, `scan-remeasure.yml` Tuesdays 06:37 UTC: each row's command re-run under `bash -c` in a detached worktree at the pushed SHA, verdict by the row's `kind`; the `docFigures` section (`--doc-figures-only`) re-runs the figures quoted in current docs, whose rows the doc's editor updates and a scan never does ([#4631](https://github.com/d-hinders/Haven-AI/issues/4631)) | Advisory (upserts one standing issue, label `scan-remeasure`, through `scripts/ci/standing-issue-upsert.mjs`; never judges, never files a defect) |
 | Doc-health JSON for the ops console ([#3511](https://github.com/d-hinders/Haven-AI/issues/3511)) | `scripts/docs/doc-health.mjs [--out <path>] [--generated-at <ISO>]`: per-doc owner, status, `last-verified` and flags (`no-front-matter`, `no-owner`, `empty-covers`, and `unverified-90d`, which is age only and not the commit-based audit above) over the validator's population minus `docs/archive/**`, plus the governed package docs | Report only (for the ops app's `prebuild`, [#3515](https://github.com/d-hinders/Haven-AI/issues/3515); never gates) |
 | `haven-doc-reviewer` | [`doc-reviewer.md`](../../.agents/skills/haven-agent-workflow/references/doc-reviewer.md); binds its verdict to the reviewed head via `scripts/ci/review-isolation.mjs` | Advisory, except a wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement: **blocking** in any doc, whether or not it is `contract: true` (#4174) |
 
@@ -226,6 +227,20 @@ filter — is what makes the blocking column above true (the haven-doc-reviewer 
   mid-paragraph, or in the front matter is not an opener. The rule is a census
   rule rather than a shape list, so a new spelling of the same note is refused
   without editing the guard.
+- **A figure quoted in a `status: current` doc carries its command and SHA, or
+  is a dated reading (#4631).** A count, ratio or percentage in a current doc
+  either **(i)** carries the command that produced it and the SHA it was taken
+  at and has a row in `docs/quality/scan-baselines.json`'s `docFigures`, or
+  **(ii)** is written as a **dated reading** of the past — a figure beside the
+  SHA or date it was true at, which no runner re-takes. The quality-scan
+  ledger's header asks the same of its own entries (`command → number`), and
+  the `haven-doc-reviewer` brief asks it of a figure in a diff. Nothing new
+  blocks on prose: this is a rule reviewers apply, like pattern absorption. An
+  exhaustive-set or invariant claim stays under #2680 — a pin test beside the
+  code, cited from the prose — never a figure row. The doc's editor moves
+  `figures` and `sha` in the PR that changes the sentence; a scan never
+  refreshes `docFigures`, because refreshing a doc row without touching the doc
+  would mark a stale figure unchanged for good.
 - **Test and generated files are incidental.** `__tests__/`, `*.test.*`,
   `*.spec.*`, `__screenshots__/` and `packages/core/src/api-types.ts` implicate a
   doc only when `covers` names the path exactly. Two carve-outs, in this order:

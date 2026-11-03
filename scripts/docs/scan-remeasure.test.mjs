@@ -172,3 +172,119 @@ test('unit: parseFigures refuses a non-integer line; verdict refuses a figure-co
     note: 'printed 1 figure(s), recorded 2',
   })
 })
+
+// ---- doc figures (#4631) -------------------------------------------------
+//
+// The fixture doc states 3 widgets and 4 gadgets in one paragraph. Each case
+// drives the real CLI, so the anchor check, the command run and the verdict
+// are the shipped ones.
+
+const DOC = `---
+owner: "@d-hinders"
+status: current
+covers: []
+last-verified: "2026-11-03"
+---
+
+# Fixture
+
+The fixture states 3 widgets and 4 gadgets.
+`
+
+function docRow(overrides) {
+  return {
+    doc: 'docs/product/fixture.md',
+    anchor: 'The fixture states',
+    command: 'printf "3\\n4\\n" # $SHA',
+    figures: [3, 4],
+    sha: 'fixture',
+    requires: [],
+    ...overrides,
+  }
+}
+
+function runDoc(docFigures, { env = {}, args = [], readBack = [] } = {}) {
+  return runGuard('docs/scan-remeasure.mjs', {
+    files: { ...TREE, 'docs/product/fixture.md': DOC, [MANIFEST]: JSON.stringify({ rows: [], docFigures }, null, 2) },
+    gitCommit: true,
+    args: ['--sha', 'HEAD', '--doc-figures-only', ...args],
+    env,
+    readBack,
+  })
+}
+
+/** The report line for one doc row id. */
+function docLine(out, id) {
+  return out.split('\n').find((l) => l.includes(`· ${id} ·`)) ?? ''
+}
+
+test('doc figures: unchanged, moved, anchor missing and command failed are four distinct verdicts', () => {
+  const { status, out } = runDoc([
+    docRow({ id: 'same' }),
+    docRow({ id: 'moved', figures: [3, 5] }),
+    docRow({ id: 'gone', anchor: 'a sentence that is not in the doc', figures: [1], command: 'echo 1 # $SHA' }),
+    docRow({ id: 'boom', command: 'echo "$SHA" >/dev/null; exit 3' }),
+  ])
+  assert.equal(status, 0, out)
+  assert.match(out, /Doc figures that moved/)
+  assert.match(docLine(out, 'same'), /recorded 3 \/ 4 @ `fixture` · now 3 \/ 4 @ `[0-9a-f]{9}` · unchanged/)
+  assert.match(docLine(out, 'moved'), /recorded 3 \/ 5 @ `fixture` · now 3 \/ 4 @ `[0-9a-f]{9}` · moved/)
+  assert.match(docLine(out, 'gone'), /now — @ `[0-9a-f]{9}` · anchor not found/)
+  assert.match(docLine(out, 'boom'), /· failed — exit 3/)
+})
+
+test('doc figures: the anchor is checked in the SHA worktree, so a pre-sentence SHA is anchor not found', () => {
+  // The fixture's HEAD carries the sentence; a commit made BEFORE it does not.
+  const { out } = runGuard('docs/scan-remeasure.mjs', {
+    files: {
+      ...TREE,
+      'docs/product/fixture.md': '---\nowner: "@d-hinders"\nstatus: current\ncovers: []\nlast-verified: "2026-11-03"\n---\n\n# Fixture\n\nAn older sentence.\n',
+      [MANIFEST]: JSON.stringify({ rows: [], docFigures: [docRow({ id: 'same' })] }, null, 2),
+    },
+    gitCommit: true,
+    args: ['--sha', 'HEAD', '--doc-figures-only'],
+  })
+  assert.match(docLine(out, 'same'), /anchor not found/)
+})
+
+test('doc figures: --out writes the section to a file, and the full report carries both sections', () => {
+  const { status, out, wrote } = runGuard('docs/scan-remeasure.mjs', {
+    files: {
+      ...TREE,
+      'docs/product/fixture.md': DOC,
+      [MANIFEST]: JSON.stringify(
+        {
+          rows: [row({ id: 'scan', figures: [6], command: 'git ls-tree -r --name-only "$SHA" | grep -c "^packages/sdk/src/"' })],
+          docFigures: [docRow({ id: 'same' })],
+        },
+        null,
+        2,
+      ),
+    },
+    gitCommit: true,
+    args: ['--sha', 'HEAD', '--out', 'figures.txt'],
+    readBack: ['figures.txt'],
+  })
+  assert.equal(status, 0, out)
+  assert.match(out, /\| block \| instrument \| kind \|/)
+  assert.match(out, /Doc figures that moved/)
+  assert.match(wrote['figures.txt'], /Doc figures that moved/)
+  assert.match(wrote['figures.txt'], /· same ·/)
+})
+
+test('doc figures: an unknown key in a doc row is an exit-2 defect', () => {
+  const { status, out } = runDoc([docRow({ id: 'bad', kind: 'count' })])
+  assert.equal(status, 2)
+  assert.match(out, /unknown key "kind"/)
+})
+
+test('doc figures: a command that does not read $SHA is an exit-2 defect', () => {
+  const { status, out } = runDoc([docRow({ id: 'bad', command: 'printf "3\\n4\\n"' })])
+  assert.equal(status, 2)
+  assert.match(out, /command must be a string that reads \$SHA/)
+})
+
+test('doc figures: a row requiring a missing tool is refused, not run', () => {
+  const { out } = runDoc([docRow({ id: 'needs-rg', requires: ['rg'] })], { env: { RG: '/nonexistent/rg' } })
+  assert.match(docLine(out, 'needs-rg'), /refused — rg missing/)
+})

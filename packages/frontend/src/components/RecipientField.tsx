@@ -6,12 +6,12 @@
  *
  * ── It owns no data and calls no data hook ──────────────────────────────────
  *
- * Each `useContacts()` call keeps its own list (`useState` in
- * `hooks/useContacts.ts`) and `addContact` updates only the instance it was
- * called on. A field that called its own hook would never see a contact the
- * Send dialog saves, so the caller owns ONE `useContacts()` and ONE
- * `useAccounts()` and passes them in. `rg -n "useContacts|useAccounts"` on this
- * file returns nothing, and that is the contract, not an accident.
+ * Each call to the contacts hook keeps its own list (`useState` in the hook
+ * module) and `addContact` updates only the instance it was called on. A field
+ * that called its own hook would never see a contact the Send dialog saves, so
+ * the caller owns ONE contacts hook and ONE accounts hook and passes them in.
+ * `rg -n` for either hook name on this file returns nothing, and that is the
+ * contract, not an accident.
  *
  * ── Precedence ──────────────────────────────────────────────────────────────
  *
@@ -34,8 +34,15 @@ import { Icon } from '@haven_ai/ui/Icon'
 import { Skeleton } from '@haven_ai/ui/Skeleton'
 import { Combobox, type ComboboxGroup, type ComboboxOption } from '@/components/ui/Combobox'
 import { truncate } from '@/lib/format'
-import type { Contact } from '@/hooks/useContacts'
+import type { ApiSchema } from '@haven_ai/core'
 import type { SmartAccount } from '@/context/AuthContext'
+
+/**
+ * The `/contacts` row, from the generated schema (#1446) — the same type the
+ * contacts hook returns, taken from `@haven_ai/core` so this file imports no
+ * data hook.
+ */
+type Contact = ApiSchema<'Contact'>
 
 /** What the field reports. `kind` is where the address came from. */
 export interface Recipient {
@@ -57,9 +64,9 @@ export interface RecipientFieldProps {
   chainId: number
   /** The sending account — never offered. */
   excludeAddress: string
-  /** The caller's `useAccounts().accounts`. */
+  /** The caller's accounts, from its own accounts hook. */
   accounts: SmartAccount[]
-  /** From the caller's single `useContacts()`. */
+  /** From the caller's single contacts hook. */
   contacts: Contact[]
   contactsLoading: boolean
   contactsError: string | null

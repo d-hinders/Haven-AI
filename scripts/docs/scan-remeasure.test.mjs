@@ -163,6 +163,10 @@ test('a usage error and an unreadable manifest exit 2', () => {
 test('unit: parseFigures refuses a non-integer line; verdict refuses a figure-count mismatch', () => {
   assert.deepEqual(parseFigures('1\n2\n'), [1, 2])
   assert.equal(parseFigures('1\nfoo\n'), null)
+  assert.deepEqual(verdict({ kind: 'count', figures: [1] }, { code: 1, timedOut: true, stdout: '' }), {
+    status: 'failed',
+    note: 'timed out after 10 min',
+  })
   assert.deepEqual(verdict({ kind: 'count', figures: [1, 2] }, { code: 0, stdout: '1\n' }), {
     status: 'failed',
     note: 'printed 1 figure(s), recorded 2',

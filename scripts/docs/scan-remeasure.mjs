@@ -136,10 +136,12 @@ export function parseFigures(stdout) {
  */
 export function verdict(row, result) {
   if (row.kind === 'control' && row.expect === 'no-CONTROL-FAILED-line') {
+    if (result.timedOut) return { status: 'control-failed', note: `timed out after ${ROW_TIMEOUT_MS / 60000} min` }
     if (result.code !== 0) return { status: 'control-failed', note: `exit ${result.code}` }
     if (/CONTROL FAILED/.test(result.stdout)) return { status: 'control-failed', note: 'printed a CONTROL FAILED line' }
     return { status: 'ok', note: 'control passed' }
   }
+  if (result.timedOut) return { status: 'failed', note: `timed out after ${ROW_TIMEOUT_MS / 60000} min` }
   if (result.code !== 0) return { status: 'failed', note: `exit ${result.code}` }
   if (result.stdout.trim() === '') return { status: 'failed', note: 'printed nothing' }
   const now = parseFigures(result.stdout)
@@ -177,8 +179,10 @@ export function verdict(row, result) {
 function runBash(command, { cwd, env }) {
   return new Promise((done) => {
     execFile('bash', ['-c', command], { cwd, env, timeout: ROW_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      // A killed row names the timeout instead of reading as "exit 1".
+      const timedOut = Boolean(err?.killed)
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-      done({ code, stdout: stdout ?? '', stderr: stderr ?? '' })
+      done({ code, timedOut, stdout: stdout ?? '', stderr: stderr ?? '' })
     })
   })
 }
@@ -241,7 +245,12 @@ export async function remeasure({ sha, scratch, manifest }) {
   const base = realpathSync(scratch ?? mkdtempSync(join(tmpdir(), 'scan-remeasure-')))
   const tree = join(base, `tree-${full.slice(0, 12)}`)
   if (existsSync(tree)) throw new Error(`${tree} already exists — pass an empty --scratch`)
-  execFileSync('git', ['-C', REPO_ROOT, 'worktree', 'add', '--detach', '--quiet', tree, full], { stdio: ['ignore', 'ignore', 'inherit'] })
+  try {
+    execFileSync('git', ['-C', REPO_ROOT, 'worktree', 'add', '--detach', '--quiet', tree, full], { stdio: ['ignore', 'ignore', 'inherit'] })
+  } catch (err) {
+    if (ownScratch) rmSync(base, { recursive: true, force: true })
+    throw err
+  }
   const results = new Map()
   try {
     const env = { ...process.env, SHA: full, RG: process.env.RG ?? 'rg' }
@@ -258,7 +267,12 @@ export async function remeasure({ sha, scratch, manifest }) {
       results.set(row.id, result)
     }
   } finally {
-    execFileSync('git', ['-C', REPO_ROOT, 'worktree', 'remove', '--force', tree], { stdio: 'ignore' })
+    // A cleanup failure must not replace the report: say so on stderr.
+    try {
+      execFileSync('git', ['-C', REPO_ROOT, 'worktree', 'remove', '--force', tree], { stdio: 'ignore' })
+    } catch (err) {
+      console.error(`scan-remeasure: could not remove the worktree ${tree}: ${err.message}`)
+    }
     if (ownScratch) rmSync(base, { recursive: true, force: true })
   }
   return renderReport({ sha: full, rows, results })

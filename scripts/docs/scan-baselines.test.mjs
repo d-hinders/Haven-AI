@@ -60,14 +60,21 @@ export function checkBlocksCovered(manifest) {
   return REQUIRED_BLOCKS.filter((b) => !have.has(b)).map((b) => `no row for block "${b}"`)
 }
 
-// The SHA of the newest ledger entry that carries a `Probed clean` section. An
-// entry is a `## <date> ...` heading and everything up to the next one; a
-// heading-only entry (2026-09-18) has no such section and does not count.
+// The SHA of the newest WHOLE-REPO ledger entry that carries a `Probed clean`
+// section. An entry is a `## <date> ...` heading and everything up to the next
+// one. A heading-only entry (2026-09-18) has no such section, and a scoped
+// entry (2026-09-16 "Analytics page", 2026-09-17 "agent surface") does not
+// update the manifest — "a scope is a filter" — so neither moves the pin. The
+// scope is read off the heading line: `whole repo` or `full repo`. The SHA is
+// read from the "all at `<sha>`" phrase the 2026-11-02 entry uses; an entry
+// written another way ("at `<sha>`") fails the pin loudly rather than passing.
 export function newestProbedCleanSha(ledgerText) {
   const parts = ledgerText.split(/^## (?=\d{4}-\d{2}-\d{2})/m).slice(1)
   let best = null
   for (const [pos, part] of parts.entries()) {
     const date = /^(\d{4}-\d{2}-\d{2})/.exec(part)[1]
+    const heading = part.split('\n', 1)[0]
+    if (!/\b(whole|full) repo\b/i.test(heading)) continue
     if (!/Probed clean/.test(part)) continue
     const m = /all at `([0-9a-f]{7,40})`/.exec(part)
     if (!best || date > best.date || (date === best.date && pos > best.pos)) {
@@ -184,13 +191,17 @@ test('negative: the sha pin rejects a stale row sha and a ledger that moved on',
   let m = clone(manifest)
   m.rows[0].sha = '99ef8d063'
   assert.match(checkShaMatchesLedger(m, ledger).join('\n'), /99ef8d063/)
-  const newer = `${ledger}\n## 2099-01-01 — a later scan\n\n**Probed clean** (block → command → number, all at \`abcdef123\`):\n- sizing → x\n`
+  const newer = `${ledger}\n## 2099-01-01 — whole repo, a later scan\n\n**Probed clean** (block → command → number, all at \`abcdef123\`):\n- sizing → x\n`
   assert.match(checkShaMatchesLedger(manifest, newer).join('\n'), /abcdef123/)
+  // A later SCOPED entry with its own Probed clean section does not move the
+  // pin: a scoped scan does not update the manifest (review should-fix 1).
+  const scoped = `${ledger}\n## 2099-01-01 — Analytics page (owner mandate)\n\n**Probed clean** (all at \`deadbeef1\`):\n- block 3 → x\n`
+  assert.deepEqual(checkShaMatchesLedger(manifest, scoped), [])
   // A heading-only later entry does not move the pin.
   const headingOnly = `${ledger}\n## 2099-01-01 — heading only\n\nno probed section here\n`
   assert.deepEqual(checkShaMatchesLedger(manifest, headingOnly), [])
   // A Probed clean section without the phrase is a problem, not a silent pass.
-  const noPhrase = `${ledger}\n## 2099-01-01 — x\n\n**Probed clean** (no sha given)\n`
+  const noPhrase = `${ledger}\n## 2099-01-01 — whole repo\n\n**Probed clean** (no sha given)\n`
   assert.match(checkShaMatchesLedger(manifest, noPhrase).join('\n'), /no "all at/)
 })
 

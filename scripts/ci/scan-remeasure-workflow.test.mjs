@@ -50,22 +50,26 @@ test('the scan-remeasure label is declared', () => {
 
 // Each pin, made to fail by the nearest wrong edit to the real file.
 const MUTATIONS = [
-  ['fetch-depth', (t) => t.replace(/fetch-depth: 0/, 'fetch-depth: 1')],
-  ['ripgrep', (t) => t.replace(/sudo apt-get install -y -qq ripgrep/, 'echo skipped')],
-  ['concurrency', (t) => t.replace(/^concurrency:\n {2}group: scan-remeasure\n/m, '')],
-  ['GITHUB_SHA', (t) => t.replace('--sha "$GITHUB_SHA"', '--sha "$(git rev-parse origin/dev)"')],
-  ['--author', (t) => t.replace("--author 'app/github-actions'", "--author 'someone'")],
-  ['--list-args', (t) => t.replace("--list-args '--label scan-remeasure --state open --json'", "--list-args '--state open --json'")],
-  ['--label', (t) => t.replace(/^(\s+)--label scan-remeasure \\$/m, '$1--label code-quality \\')],
-  ['pull_request', (t) => t.replace(/^ {2}workflow_dispatch:$/m, '  workflow_dispatch:\n  pull_request:')],
-  ['commented-out fetch-depth', (t) => t.replace(/fetch-depth: 0/, 'fetch-depth: 1 # fetch-depth: 0')],
+  ['fetch-depth', (t) => t.replace(/fetch-depth: 0/, 'fetch-depth: 1'), /fetch-depth: 0/],
+  ['ripgrep', (t) => t.replace(/sudo apt-get install -y -qq ripgrep/, 'echo skipped'), /rg install step/],
+  ['concurrency', (t) => t.replace(/^concurrency:\n {2}group: scan-remeasure\n/m, ''), /concurrency group/],
+  // Each mutation names the pin it must trip: a mutation that also trips a
+  // second pin would otherwise stay green while its own pin was vacuous.
+  ['GITHUB_SHA', (t) => t.replace('--sha "$GITHUB_SHA"', '--sha "$SOME_SHA"'), /--sha "\$GITHUB_SHA"/],
+  ['origin/dev', (t) => t.replace('cat report.md\n', 'cat report.md\n          git log origin/dev -1\n'), /must not read origin\/dev/],
+  ['--author', (t) => t.replace("--author 'app/github-actions'", "--author 'someone'"), /--author/],
+  ['--list-args', (t) => t.replace("--list-args '--label scan-remeasure --state open --json'", "--list-args '--state open --json'"), /--list-args must carry/],
+  ['--label', (t) => t.replace(/^(\s+)--label scan-remeasure \\$/m, '$1--label scan-other \\'), /--label scan-remeasure must be passed/],
+  ['queue label', (t) => t.replace(/^(\s+)--repo/m, '$1--label code-quality \\\n$1--repo'), /queue work/],
+  ['pull_request', (t) => t.replace(/^ {2}workflow_dispatch:$/m, '  workflow_dispatch:\n  pull_request:'), /no pull_request trigger/],
+  ['commented-out fetch-depth', (t) => t.replace(/fetch-depth: 0/, 'fetch-depth: 1 # fetch-depth: 0'), /fetch-depth: 0/],
 ]
 
-for (const [name, mutate] of MUTATIONS) {
-  test(`mutation: ${name} turns the pins red`, () => {
+for (const [name, mutate, expected] of MUTATIONS) {
+  test(`mutation: ${name} trips its own pin`, () => {
     const real = readFileSync(WORKFLOW, 'utf8')
     const mutated = mutate(real)
     assert.notEqual(mutated, real, `the ${name} mutation did not apply — the pin it tests is unproven`)
-    assert.notDeepEqual(violations(mutated), [])
+    assert.match(violations(mutated).join('\n'), expected)
   })
 }

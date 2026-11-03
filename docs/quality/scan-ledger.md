@@ -51,8 +51,8 @@ entries predate them and stand as written):
   on):** the `Probed clean` lines here are prose. The commands and their
   latest figures live in `docs/quality/scan-baselines.json`, which
   `scripts/docs/scan-remeasure.mjs` runs weekly at one SHA into a standing
-  issue. A whole-repo entry updates the manifest's `figures` and `sha` in the
-  same PR; a scoped entry does not. No entry above is edited for it.
+  issue. A whole-repo entry updates every row's `figures` and `sha` in the
+  same PR, from a runner pass at its SHA; a scoped entry does not. No entry above is edited for it.
 - **Candidate decisions (#3025):** apply the same exclusions to both output
   levels. Append pending owner decisions, later dispositions and approved
   issue links without rewriting runs. Implementation progress belongs in

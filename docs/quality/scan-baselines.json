@@ -85,7 +85,7 @@
       "block": "3",
       "name": "figure-bearing lines in the 25 newest CASP shards, and how many quote a command",
       "kind": "head-sample",
-      "command": "R='\\b[0-9]+ of [0-9]+\\b|\\b[0-9]+/[0-9]+\\b|\\b[0-9]+%|\\*\\*[0-9]+(\\*\\*|[ ,;:)]|$)|\\b[0-9]+ (passed|failed|skipped|red|files|commits|tests|runs|rows|lines|hits|matches)\\b'\ngit ls-tree --name-only \"$SHA\" docs/regulatory/casp-changelog/ | grep -E '/2026-[^/]*\\.md$' | sort | tail -25 > \"$SCRATCH/shards.txt\"\n\"$RG\" -n \"$R\" $(cat \"$SCRATCH/shards.txt\") | wc -l\n\"$RG\" -n \"$R\" $(cat \"$SCRATCH/shards.txt\") | \"$RG\" '`(rg|grep|git|node|npm|find|ls|wc) ' | wc -l",
+      "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nR='\\b[0-9]+ of [0-9]+\\b|\\b[0-9]+/[0-9]+\\b|\\b[0-9]+%|\\*\\*[0-9]+(\\*\\*|[ ,;:)]|$)|\\b[0-9]+ (passed|failed|skipped|red|files|commits|tests|runs|rows|lines|hits|matches)\\b'\ngit ls-tree --name-only \"$SHA\" docs/regulatory/casp-changelog/ | grep -E '/2026-[^/]*\\.md$' | sort | tail -25 > \"$SCRATCH/shards.txt\"\n[ -s \"$SCRATCH/shards.txt\" ] || { echo \"no shards listed: $RG would search the whole tree\" >&2; exit 1; }\n\"$RG\" -n \"$R\" $(cat \"$SCRATCH/shards.txt\") | wc -l\n\"$RG\" -n \"$R\" $(cat \"$SCRATCH/shards.txt\") | \"$RG\" '`(rg|grep|git|node|npm|find|ls|wc) ' | wc -l",
       "figures": [
         13,
         2
@@ -142,6 +142,22 @@
       ]
     },
     {
+      "id": "block3-zod-control",
+      "block": "3",
+      "name": "control: the same path and quoting find backend files importing any module",
+      "kind": "control",
+      "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\n\"$RG\" -l \"from '\" packages/backend/src | wc -l",
+      "figures": [
+        1001
+      ],
+      "sha": "e0617aa9f",
+      "tolerance": 0.05,
+      "requires": [
+        "rg"
+      ],
+      "expect": "nonzero"
+    },
+    {
       "id": "block3-specimen-control",
       "block": "3",
       "name": "control: the figure regex matches all three founding specimen lines",
@@ -160,7 +176,7 @@
       "block": "4",
       "name": "retired-vocabulary residue: files / historical / live",
       "kind": "count",
-      "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nT='executeAllowanceTransfer|generateTransferHash|hasTokenAllowanceConfigured|decideCoverage|legacy-authorize|allowance-nonce|safe_approver_metadata|approval_requests|pendingApprovals|approval queue'\n\"$RG\" -l -i \"$T\" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' -g '!.agents/skills/quality-scan/references/dimensions.md' | sort > \"$SCRATCH/rv-files.txt\"\nlive=0; hist=0\nwhile read f; do\n  s=$(awk '/^---$/{c++; next} c==1 && /^status:/{print $2; exit}' \"$f\" 2>/dev/null)\n  case \"$f\" in\n    docs/regulatory/casp-changelog/*|docs/quality/scan-ledger.md|docs/archive/*|docs/bug-reports/*) hist=$((hist+1));;\n    *) if [ -n \"$s\" ] && [ \"$s\" != \"current\" ]; then hist=$((hist+1)); else live=$((live+1)); fi;;\n  esac\ndone < \"$SCRATCH/rv-files.txt\"\nwc -l < \"$SCRATCH/rv-files.txt\"; echo \"$hist\"; echo \"$live\"",
+      "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nT='executeAllowanceTransfer|generateTransferHash|hasTokenAllowanceConfigured|decideCoverage|legacy-authorize|allowance-nonce|safe_approver_metadata|approval_requests|pendingApprovals|approval queue'\n\"$RG\" -l -i \"$T\" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' -g '!.agents/skills/quality-scan/references/dimensions.md' -g '!docs/quality/scan-baselines.json' | sort > \"$SCRATCH/rv-files.txt\"\nlive=0; hist=0\nwhile read f; do\n  s=$(awk '/^---$/{c++; next} c==1 && /^status:/{print $2; exit}' \"$f\" 2>/dev/null)\n  case \"$f\" in\n    docs/regulatory/casp-changelog/*|docs/quality/scan-ledger.md|docs/archive/*|docs/bug-reports/*) hist=$((hist+1));;\n    *) if [ -n \"$s\" ] && [ \"$s\" != \"current\" ]; then hist=$((hist+1)); else live=$((live+1)); fi;;\n  esac\ndone < \"$SCRATCH/rv-files.txt\"\nwc -l < \"$SCRATCH/rv-files.txt\"; echo \"$hist\"; echo \"$live\"",
       "figures": [
         196,
         47,
@@ -235,7 +251,7 @@
       "name": "control: the ls-tree listing reaches the top level of packages/sdk/src and packages/frontend/src",
       "kind": "control",
       "expect": "nonzero",
-      "command": "git ls-tree -r --name-only \"$SHA\" packages/frontend/src packages/sdk/src | grep -E '\\.(ts|tsx)$' | grep -vE '\\.test\\.|__tests__|/app/|/components/|/hooks/' > \"$SCRATCH/cl.txt\"\ngrep -cE '^packages/sdk/src/[^/]+\\.ts$' \"$SCRATCH/cl.txt\"\ngrep -cE '^packages/frontend/src/[^/]+\\.(ts|tsx)$' \"$SCRATCH/cl.txt\"",
+      "command": "git ls-tree -r --name-only \"$SHA\" packages/frontend/src packages/sdk/src | grep -E '\\.(ts|tsx)$' | grep -vE '\\.test\\.|__tests__|/app/|/components/|/hooks/' > \"$SCRATCH/cl.txt\"\ngrep -E '^packages/sdk/src/[^/]+\\.ts$' \"$SCRATCH/cl.txt\" | wc -l\ngrep -E '^packages/frontend/src/[^/]+\\.(ts|tsx)$' \"$SCRATCH/cl.txt\" | wc -l",
       "figures": [
         46,
         1

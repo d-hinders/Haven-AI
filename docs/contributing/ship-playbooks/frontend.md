@@ -15,6 +15,7 @@ covers:
   - packages/frontend/src/__tests__/api-mock-builder.test.ts
   - packages/frontend/src/__tests__/fixture-shape-parity.test.ts
   - packages/ui/**
+  - .github/workflows/update-visual-baselines.yml
 last-verified: "2026-11-02"
 ---
 
@@ -403,6 +404,8 @@ design-review verdict: passed @ <sha> -- baselines: topbar-desktop.png
   - **What the gate does not know:** who wrote the lines. The author writes both, so a green tick proves the declaration EXISTS, not that the review ran — provenance is §5's job, and the gate says so in its own report.
   - **Scope:** the gate runs on pull requests into `dev` only, on `opened/edited/synchronize/reopened/ready_for_review` (a separate workflow, `baseline-verdict-gate.yml` — ci.yml has no `edited`, and a verdict added to the body during review must re-read). A dev→main promotion PR passes with that stated as the reason: squash commits keep the audit trailer but not the PR body, so a promotion cannot carry per-file verdicts — the baselines it carries were judged on the dev PRs that moved them. Added baselines (a new screen) need the declaration only; removed baselines are out of scope. The check is advisory until a ruleset makes it required (#3231 owns that decision).
   - **When it bites you:** an open PR that modifies baselines goes red-on-report on its first push after that PR merges. The failure prints the exact two lines to paste; edit the body and the `edited` trigger re-runs the gate.
+
+- **A Playwright bump is a browser bump — dispatch the regeneration on the bump's own PR.** Each Playwright release bundles a newer Chromium, and a new Chromium can change how a few pixels render with no product change. #4627 (Playwright 1.60.0 → 1.64.1, Chromium 148 → 156) merged with the gate red on its own PR: the Tailwind focus ring on the native radio in `settings-accounting-backfill-dialog-desktop.png` went from square to round (180 px). That turned *Design visual regression* red on `dev` and on every later frontend-routed PR (#4630, a docs/CI change, included) until a follow-up re-blessed it. A shape change is still a change, so diagnose it like any other diff (next bullet) before re-blessing. The gate is advisory on `dev`, so nothing stops that merge: dispatch `update-visual-baselines.yml` (`mode: changed`) on the bump branch before it lands, and declare what moved with the browser-build reason.
 
 - **Diagnose a diff before regenerating.** Same dimensions plus a continuous colour difference is drift; a clean horizontal cut, or a size-mismatch line in the failure, is a height change. Scan the diff PNG by row rather than dispatching the regeneration workflow first — `all` will bless whatever renders, including a broken render.
 

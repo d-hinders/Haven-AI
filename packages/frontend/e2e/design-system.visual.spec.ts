@@ -414,6 +414,17 @@ test.describe('design-system visual regression', () => {
           threshold: PIXEL_THRESHOLD,
         })
       }
+
+      // #4638: the halo is dialog-only and opt-in. No always-mounted specimen
+      // carries it; the opened-on-demand Modal specimen is the one example,
+      // so the page shows none until it opens and exactly one, inside it, after.
+      await expect(page.locator('.v2-step-halo')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Open modal', exact: true }).click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      await expect(page.locator('.v2-step-halo')).toHaveCount(1)
+      await expect(dialog.locator('.v2-step-halo')).toHaveCount(1)
+      await page.keyboard.press('Escape')
     })
   }
 
@@ -577,12 +588,12 @@ test.describe('design-system visual regression', () => {
   }
 
   /**
-   * ── The later showcase clips — #3805's Amount currency, AttentionList, sparkline, inline StatTile; #3845's NoticeRow; #3810's activity row ──
+   * ── The later showcase clips — step markers plus the dashboard primitives ──
    *
    * The design-system pieces the redesigned dashboard (#3801) is built from,
    * each photographed against its own sample the way the StackedBarChart
    * clips above are: one clip per `data-testid` sample, per viewport, per
-   * scheme — six samples, 24 baselines in all. Each clip asserts its own box
+   * scheme. Each clip asserts its own box
    * fits the viewport (the fold guarantee above), so an edit that pushes a
    * sample past the fold fails HERE, naming the sample.
    *
@@ -596,6 +607,34 @@ test.describe('design-system visual regression', () => {
   const SAMPLE_MAX_DIFF_PIXELS = 100
 
   for (const vp of VIEWPORTS) {
+    test(`/design-system StepProgress sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-step-progress')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.locator('.v2-step-halo')).toHaveCount(0)
+      await expectShowcaseClip(sample, vp.height, 'the StepProgress sample', `design-system-step-progress-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    test(`/design-system ConnectSteps sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-connect-steps')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.locator('.v2-step-halo')).toHaveCount(0)
+      await expectShowcaseClip(sample, vp.height, 'the ConnectSteps sample', `design-system-connect-steps-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     test(`/design-system Amount currency sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''
@@ -1039,6 +1078,8 @@ test.describe('design-system visual regression', () => {
     ['StackedBarChart wide sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(0)],
     ['StackedBarChart narrow sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(1)],
     ['StackedBarChart swatch list', (p) => p.getByTestId('ds-stacked-bar-swatch-list')],
+    ['StepProgress sample', (p) => p.getByTestId('ds-step-progress')],
+    ['ConnectSteps sample', (p) => p.getByTestId('ds-connect-steps')],
     ['Amount currency sample', (p) => p.getByTestId('ds-amount-currency')],
     ['AttentionList sample', (p) => p.getByTestId('ds-attention-list')],
     ['NoticeRow sample', (p) => p.getByTestId('ds-notice-row')],
@@ -1076,6 +1117,15 @@ test.describe('design-system visual regression', () => {
     const sample = get(page)
     await expect(sample).toHaveCount(1)
     await isolateShowcaseSample(sample)
+    // #4638: this guard measures layout, so motion is frozen for it. The
+    // ConnectSteps sample's working row spins the shared Spinner; a raw
+    // `screenshot` can catch the compositor mid-rotation even with
+    // `animations: 'disabled'`, and the run then failed at a DIFFERENT spacer
+    // on retry, which a real layout shift never does. `toHaveScreenshot`
+    // retries until two shots agree, so the pixel clips do not need this.
+    await page.addStyleTag({
+      content: '*, *::before, *::after { animation: none !important; transition: none !important; }',
+    })
     return async (spacerPx: number) => {
       // Resized in place after isolation: if isolation stopped hiding the
       // region above, the new height would move the sample.

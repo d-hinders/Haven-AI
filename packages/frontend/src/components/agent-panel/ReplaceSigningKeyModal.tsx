@@ -391,7 +391,7 @@ export function ReplaceSigningKeyModal({
       closeOnEscape={closeIsSafe}
       showCloseButton={closeIsSafe}
       headerAccessory={
-        step === 'done' ? null : <StepProgress totalSteps={STEP_ORDER.length} currentStep={stepIndex} labels={STEP_LABELS} />
+        step === 'done' ? null : <StepProgress totalSteps={STEP_ORDER.length} currentStep={stepIndex} labels={STEP_LABELS} halo />
       }
       footer={renderFooter()}
     >

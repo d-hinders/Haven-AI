@@ -89,6 +89,13 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **No contract change (#4638, 2026-11-03): a presentation-only prop on
+> `WaitingForConnector`.** It gains an optional `halo` flag, passed through to
+> the step checklist so the live Connect dialog can show one attention ring on
+> the active step. No runtime-status copy, setup command, upgrade hint, runtime
+> detection or connector behaviour moves; `runtime-status-copy.test.ts` is
+> untouched. `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change, additive (#4449, 2026-10-26): the edge signer's SUCCESS
 > results carry the next-step family.** Covered files: `packages/signer/**`
 > (`tools.ts`, `next-step.ts`, `no-funding-leg.ts`), `packages/sdk/src/next-step.ts`

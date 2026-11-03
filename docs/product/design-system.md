@@ -121,7 +121,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-10-30
+last-verified: 2026-11-03
 ---
 
 # Haven Design System
@@ -1103,7 +1103,7 @@ shape everywhere.
   inside it. That is a **class**, not a list of exceptions (owner decision
   2026-11-02, on #4608): Accounting's "Available as an add-on" and "Sent
   transactions", the dashboard money card's two "Agent spending" labels,
-  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:324`'s "How
+  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:325`'s "How
   to buy" are instances of it, and none of them moves onto `SectionHeading`.
 - **An optional trailing link on the heading's line** (#4475; owner-approved
   2026-10-27 as a new design-system pattern). A section whose content has a
@@ -2887,8 +2887,8 @@ Showcased on `/design-system` → *DialogResult*.
 ### Wizard progress (`StepProgress`)
 
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
-header (`Modal`'s `headerAccessory`): one disc per step, the current one
-brand-soft with a brand ring, finished ones success-soft with a tick, the rest
+header (`Modal`'s `headerAccessory`): one disc per step, the current one an
+unfilled 2px `--v2-ink-2` ring, finished ones success-soft with a tick, the rest
 a `--v2-border` ring, joined by 1px lines that **stretch to fill the band**, so
 the track spans the same edges as the content below it. Each disc may carry a
 short `labels` entry beneath it (a word or two — "Name", "Budget"), `--v2-ink`
@@ -2903,13 +2903,18 @@ which rendered visibly different beside it).
 
 **`halted`** marks a flow that stopped on `currentStep` — the Connect agent
 modal's expired, cancelled and failed screens. That step renders with the
-pending ring and numeral instead of the brand "in progress" ring, loses
+pending ring and numeral instead of the active `--v2-ink-2` ring, loses
 `aria-current`, and its `sr-only` prefix says "stopped"; earlier steps stay
 done, because they were. Neutral, not an error tone: a cancel is the user's own
 choice, and the screen's status badge already carries the tone of what
 happened. Call sites: the Connect agent modal (every step: Name / Budget /
 Connect) and `ReplaceSigningKeyModal` (Reason / New key / Review / Approve);
 its `/design-system` specimen is the "StepProgress" section, after SidePanel.
+The optional `halo` is dialog-only and defaults off: the Connect agent header
+stays static while its active checklist row pulses, Replace signing key opts in,
+and always-mounted or inline specimens never animate on first paint. The one
+`/design-system` example is the opened-on-demand Modal specimen, whose header
+band carries the halo so the motion can be seen there.
 
 ### Step status checklist (`ConnectSteps`, #3832)
 
@@ -2932,8 +2937,8 @@ is a straight edge:
 | State | Disc | Heading |
 |---|---|---|
 | done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
-| active | `--v2-brand-soft` fill, `--v2-brand` ring, a `--v2-brand` dot | `--v2-ink` |
-| working | `--v2-brand-soft` fill, lucide `Loader2` in `--v2-brand`, `motion-safe:animate-spin` | `--v2-ink` |
+| active | empty 2px `--v2-ink-2` ring; optional dialog-only halo | `--v2-ink` |
+| working | empty `--v2-border` disc, shared `Spinner` in `--v2-ink-2` | `--v2-ink` |
 | pending | empty `--v2-border` ring | `--v2-ink-2` |
 
 The disc is `aria-hidden`; the row heading is the accessible content, with an
@@ -2977,9 +2982,9 @@ Rules:
 - Once the step is finished (budget approved) the band reads all-done
   (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
-It is local to `components/connect-agent/` because it has one call site; a
-second call site is the trigger to promote it to `components/ui/` with a
-`/design-system` specimen next to `StepProgress`.
+It is local to `components/connect-agent/` because every production caller is
+part of the same connect flow; a second product use is the trigger to promote it to `components/ui/`. Its
+`/design-system` specimen is the "ConnectSteps" section, after `StepProgress`.
 
 ### Local hint marker (#1952)
 
@@ -3666,9 +3671,9 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 ## 4. Motion
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
-- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards.
+- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards, and the slow `v2-step-halo` on one active user-turn marker inside a dialog.
 - **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, the how-it-works cards (step 3's terminal printing its lines among them) and the accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — the developers band's **402-session transcript** (#3684), its lines revealing one step at a time to the full transcript, on the same in-view-and-visible gate — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology — the two terminals, step 3's connector terminal and the developers transcript, stay real content: their reveals are opacity-only, so the full text is readable at every moment), and confirms with text and a check icon in the success colour — never a pill or a button.
-- **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
+- **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, multiple step halos on one screen, a step halo outside a dialog, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
 
 ---
 

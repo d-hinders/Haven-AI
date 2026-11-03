@@ -13,13 +13,15 @@ type StepProgressProps = {
   labels?: readonly string[]
   /**
    * The flow stopped at `currentStep` (expired, cancelled, failed): that step
-   * renders neutral — the pending ring and numeral, not the brand "in
-   * progress" ring — and is no longer `aria-current`. Earlier steps stay done:
+   * renders neutral — the pending ring and numeral, not the ink-2 active
+   * ring — and is no longer `aria-current`. Earlier steps stay done:
    * they did complete. Neutral rather than an error tone because the stop is
    * not always a failure (a cancel is the user's own choice); the screen body
    * carries the tone of what happened.
    */
   halted?: boolean
+  /** Animate the active disc when this progress band is inside a dialog. */
+  halo?: boolean
   className?: string
 }
 
@@ -43,6 +45,7 @@ export function StepProgress({
   currentStep,
   labels,
   halted = false,
+  halo = false,
   className = '',
 }: StepProgressProps) {
   return (
@@ -65,12 +68,12 @@ export function StepProgress({
               </span>
               <div
                 aria-hidden="true"
-                className={`h-7 w-7 shrink-0 rounded-full border text-xs font-medium flex items-center justify-center transition-colors duration-300 v2-tabular sm:h-8 sm:w-8 ${
+                className={`h-7 w-7 shrink-0 rounded-full text-xs font-medium flex items-center justify-center transition-colors duration-300 v2-tabular sm:h-8 sm:w-8 ${
                   isActive
-                    ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
+                    ? `border-2 border-[var(--v2-ink-2)] text-[var(--v2-ink-2)] ${halo ? 'v2-step-halo' : ''}`
                     : isCompleted
-                      ? 'border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-                      : 'border-[var(--v2-border)] text-[var(--v2-ink-3)]'
+                      ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+                      : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
                 }`}
               >
                 {isCompleted ? <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} /> : index + 1}

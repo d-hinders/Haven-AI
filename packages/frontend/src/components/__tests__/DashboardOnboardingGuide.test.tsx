@@ -70,6 +70,15 @@ function renderGuide(overrides: Partial<Parameters<typeof DashboardOnboardingGui
 }
 
 describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
+  it('uses a static unfilled ink-2 ring without a brand-tinted active row', () => {
+    const { container } = renderGuide()
+    const active = container.querySelector('li[data-status="active"]')!
+    expect(active.className).not.toContain('brand')
+    const marker = active.querySelector('[aria-hidden="true"]')!
+    expect(marker).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(container.querySelector('.v2-step-halo')).toBeNull()
+  })
+
   it('suggests the endpoint\'s amount and offers Add funds, which opens the dialog with the faucet', async () => {
     const { props } = renderGuide({ funding: FUNDING })
     expect(document.body.textContent).toContain('We suggest 5 USDC')

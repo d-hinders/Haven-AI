@@ -26,10 +26,12 @@
 
 import type { ReactNode } from 'react'
 import Link from 'next/link'
+import { Check } from 'lucide-react'
 import { formatUnits } from 'viem'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Icon } from '@/components/ui/Icon'
 import {
   anyRecipientRule,
   chainName,
@@ -46,24 +48,23 @@ import type { MerchantBudget } from '@/hooks/useMerchantBudgets'
 type StepState = 'done' | 'open' | 'later'
 
 /**
- * The numbered dot, in StepProgress's colours: a success-tinted text ✓ for a
- * claimed step (StepProgress itself now draws lucide `Check`; this dot has not
- * followed yet), the brand dot for the step to act on now, and a muted
+ * The numbered dot, in StepProgress's colours: a success-tinted lucide check
+ * for a claimed step, an ink-2 ring for the step to act on now, and a muted
  * number for a later step that claims nothing.
  */
 function StepDot({ state, n }: { state: StepState; n: number }) {
   return (
     <div
       aria-hidden
-      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium ${
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
         state === 'done'
-          ? 'border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+          ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
           : state === 'open'
-            ? 'border-[var(--v2-brand)] bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]'
-            : 'border-[var(--v2-border)] text-[var(--v2-ink-3)]'
+            ? 'border-2 border-[var(--v2-ink-2)] text-[var(--v2-ink-2)]'
+            : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
       }`}
     >
-      {state === 'done' ? '✓' : n}
+      {state === 'done' ? <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} /> : n}
     </div>
   )
 }

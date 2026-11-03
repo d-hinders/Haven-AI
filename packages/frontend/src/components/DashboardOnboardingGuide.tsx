@@ -226,9 +226,7 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
   const isLocked = status === 'locked'
 
   // `unknown` is not dimmed like `locked`: it is a state the owner should read.
-  const rowClass = isActive
-    ? 'rounded-[10px] border border-brand/15 bg-brand-soft/40'
-    : isLocked
+  const rowClass = isLocked
       ? 'rounded-[10px] opacity-60'
       : 'rounded-[10px]'
 
@@ -292,7 +290,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-brand)] text-xs font-semibold text-[var(--v2-ink-on-brand)] v2-tabular"
+        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 border-[var(--v2-ink-2)] text-xs font-semibold text-[var(--v2-ink-2)] v2-tabular"
       >
         {number}
       </span>

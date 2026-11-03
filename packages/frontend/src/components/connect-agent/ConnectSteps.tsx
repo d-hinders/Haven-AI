@@ -18,14 +18,13 @@ import { Spinner } from '@haven_ai/ui/Spinner'
  * column under a numbered band read as a second stepper (owner review,
  * 2026-10-16, superseding #1418's hide-the-band rule).
  *
- * Local to `connect-agent/` on purpose: it has one call site, and the
- * design system treats a one-call-site pattern as too thin to promote
- * (`docs/product/design-system.md` § Step status checklist).
+ * Local to `connect-agent/` on purpose: it expresses this flow's copy → paste
+ * → approve checklist rather than a general-purpose progress primitive.
  *
  * Marker states — one disc size and StepProgress's tokens, no numerals:
  * - `done`    — success-soft disc with a check;
- * - `active`  — brand ring on brand-soft with a brand dot: the user's move;
- * - `working` — the brand spinner (lucide `Loader2`) inside a brand-soft disc,
+ * - `active`  — 2px ink-2 ring with no fill or dot: the user's move;
+ * - `working` — the shared spinner in ink-2 inside a border disc,
  *               for a row whose outcome is in flight and needs nothing from
  *               the user;
  * - `pending` — an empty `--v2-border` ring.
@@ -70,36 +69,36 @@ const STATE_LABEL: Record<ConnectStepRowState, string | null> = {
   pending: 'Not started',
 }
 
-function Marker({ state }: { state: ConnectStepRowState }) {
+function Marker({ state, halo }: { state: ConnectStepRowState; halo: boolean }) {
   // One disc for every state, so the marker column stays a straight edge (the
   // working spinner used to sit bare and ragged it). The tokens are
   // StepProgress's on purpose: the header band and this list are one
   // progress language, a counter above and a status column below.
   // Decorative: the row heading carries the state in words.
-  const base =
-    'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border sm:h-8 sm:w-8'
+  const base = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8'
   if (state === 'done') {
     return (
-      <span aria-hidden="true" className={`${base} border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]`}>
+      <span aria-hidden="true" className={`${base} border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]`}>
         <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} />
       </span>
     )
   }
   if (state === 'working') {
     return (
-      <span aria-hidden="true" className={`${base} border-transparent bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]`}>
+      <span aria-hidden="true" className={`${base} border border-[var(--v2-border)] text-[var(--v2-ink-2)]`}>
         <Spinner size="sm" />
       </span>
     )
   }
   if (state === 'active') {
     return (
-      <span aria-hidden="true" className={`${base} border-[var(--v2-brand)] bg-[var(--v2-brand-soft)]`}>
-        <span className="h-2 w-2 rounded-full bg-[var(--v2-brand)]" />
-      </span>
+      <span
+        aria-hidden="true"
+        className={`${base} border-2 border-[var(--v2-ink-2)] ${halo ? 'v2-step-halo' : ''}`}
+      />
     )
   }
-  return <span aria-hidden="true" className={`${base} border-[var(--v2-border)]`} />
+  return <span aria-hidden="true" className={`${base} border border-[var(--v2-border)]`} />
 }
 
 const TITLE_TONE: Record<ConnectStepRowState, string> = {
@@ -109,7 +108,7 @@ const TITLE_TONE: Record<ConnectStepRowState, string> = {
   pending: 'text-[var(--v2-ink-2)]',
 }
 
-export function ConnectSteps({ rows }: { rows: ConnectStepRow[] }) {
+export function ConnectSteps({ rows, halo = false }: { rows: ConnectStepRow[]; halo?: boolean }) {
   return (
     <ol aria-label="Connection steps" className="flex flex-col">
       {rows.map((row, index) => {
@@ -124,7 +123,7 @@ export function ConnectSteps({ rows }: { rows: ConnectStepRow[] }) {
           >
             <div className="flex gap-3.5">
               <div className="flex flex-col items-center gap-1.5">
-                <Marker state={row.state} />
+                <Marker state={row.state} halo={halo && row.state === 'active'} />
                 {!last && <span aria-hidden="true" className="w-px flex-1 bg-[var(--v2-border)]" />}
               </div>
               {/* The row spacing sits on THIS column, not the <li>: padding on

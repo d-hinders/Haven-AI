@@ -46,6 +46,7 @@ import { SidePanel } from '@/components/ui/SidePanel'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
+import { ConnectSteps } from '@/components/connect-agent/ConnectSteps'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
@@ -2803,13 +2804,36 @@ export default function DesignSystemPage() {
         title="StepProgress"
         description="Full-width step indicator for multi-step flows (connect agent, replace signing key): discs at the ends, connectors stretch between them, an optional short label under each disc. 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
       >
-        <Card hover={false} className="max-w-sm space-y-4 p-5">
-          <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
-          <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
-          <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
-          {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
-          <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
-        </Card>
+        {/* The testid rides a plain wrapper: `Card` forwards no extra props,
+            and the visual spec clips this sample by it. */}
+        <div className="max-w-sm" data-testid="ds-step-progress">
+          <Card hover={false} className="space-y-4 p-5">
+            <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
+            <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
+            <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
+            {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
+            <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="ConnectSteps"
+        description="Connect-agent step-status checklist: done, your turn, working, and not started. The showcase stays static; the active halo belongs only to a live dialog."
+      >
+        {/* Plain testid wrapper, for the same reason as the StepProgress sample. */}
+        <div className="max-w-sm" data-testid="ds-connect-steps">
+          <Card hover={false} className="p-5">
+            <ConnectSteps
+              rows={[
+                { id: 'done', state: 'done', title: 'Setup prompt copied' },
+                { id: 'active', state: 'active', title: 'Run the connector' },
+                { id: 'working', state: 'working', title: 'Preparing the approval' },
+                { id: 'pending', state: 'pending', title: 'Review and approve' },
+              ]}
+            />
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -5174,7 +5198,7 @@ export default function DesignSystemPage() {
         subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} halo />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

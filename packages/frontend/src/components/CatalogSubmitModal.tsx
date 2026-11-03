@@ -84,7 +84,7 @@ function StatusSteps({ status }: { status: CatalogSubmissionStatus['status'] }) 
             <span
               className={`h-1.5 w-1.5 rounded-full ${
                 isCurrent
-                  ? 'bg-[var(--v2-brand)]'
+                  ? 'bg-[var(--v2-ink-2)]'
                   : done
                     ? 'bg-[var(--v2-success)]'
                     : 'bg-[var(--v2-surface-2)]'

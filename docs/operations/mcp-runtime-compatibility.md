@@ -1827,7 +1827,7 @@ nothing to read.
 | Surface | What it states | Where |
 |---|---|---|
 | Signer `initialize` result | The version sets this signer will verify — `capabilities.experimental["haven/signer-compatibility"]` (machine-readable) and the same numbers in `instructions` (what clients show the model), which since #3738 also state the agent id and delegate address the signer is bound to | `packages/signer/src/capabilities.ts`, wired in `buildSignerMcpServer` |
-| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus in-band guidance (since #1547: branch on the signer's machine-readable version-mismatch refusal, not a pre-compare). Present on the **EIP-3009 shape** of each tool; the erc7710 shape carries none, and since #2041 that now includes `haven_pay_x402_quote` | `packages/mcp-server/src/tools.ts` (`haven_pay_x402_quote`, `haven_pay_mcp_tool`, `haven_prepare_catalog_purchase`) |
+| Hosted quote/prepare result | `signer_compatibility.x402_expected_context_version` — the version that quote will emit — plus in-band guidance (since #1547: branch on the signer's machine-readable version-mismatch refusal, not a pre-compare). Present on the **EIP-3009 shape** of each tool; the erc7710 shape carries none, and since #2041 that now includes `haven_pay_x402_quote` | `packages/mcp-server/src/tools/support/signer-compat.ts`, emitted on `haven_pay_x402_quote`, `haven_pay_mcp_tool`, `haven_prepare_catalog_purchase` |
 
 **The information is agent-mediated, and cannot be otherwise.** The signer and
 the hosted MCP are two separate servers connected to the same agent client. The

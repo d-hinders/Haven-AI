@@ -1765,9 +1765,9 @@ revoke/remove, delete contact):
   (`packages/ui/tailwind.preset.js`) and would work there too. The mixed spelling in one class string is the tell — where the
   two forms sit side by side, the one with a modifier is the one that has to be semantic.
 
-**Distribution, with the command that produced it.** Ghost dominates: 182 ghost, 30 tertiary,
-8 primary, 5 danger — 225 literal occurrences, from `packages/frontend` (re-derived
-2026-10-25 at `fb2da6b92`):
+**Distribution, with the command that produced it.** Ghost dominates: 191 ghost, 31 tertiary,
+8 primary, 4 danger — 234 literal occurrences, from `packages/frontend` (measured
+2026-11-03 at `1344f3a83`; 182 / 30 / 8 / 5 = 225 on 2026-10-25 at `fb2da6b92`):
 
 ```bash
 grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | sort | uniq -c
@@ -3611,7 +3611,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 `navy` and `indigo` carry `data-v2-dark-section`, which is what the header reads. A section declares its ink as three local properties (`--site-ink`, `--site-ink-2`, `--site-eyebrow`) that point at theme tokens on a themed ground and are fixed on a fixed one; the type roles read them, so a heading needs no per-ground class. Bands follow the mockup's rhythm: dark bands never touch.
 
-**Type roles (`SITE_TYPE`).** Display type is **Inter Tight** (h1 `clamp(40px, 6vw, 64px)`, h2 `clamp(28px, 3.6vw, 40px)`, h3 17px, all semibold with negative tracking); body stays the app's Inter; the eyebrow is 12px semibold uppercase with wide tracking; the lede is 18px at 1.6 in `ink-2`. Code and amounts use **JetBrains Mono** (`SITE_TYPE.mono`). Both faces load through `next/font` in `site/fonts.ts`, self-hosted, and exist only below an element carrying `SITE_FONT_VARIABLES` — every new-site root does, nothing else may. The authenticated app, `packages/ui` and `packages/ops` render Inter as before.
+**Type roles (`SITE_TYPE`).** Display type is **Inter Tight** (h1 `clamp(40px, 6vw, 64px)`, h2 `clamp(28px, 3.6vw, 40px)`, h3 17px, all semibold with negative tracking); body stays the app's Inter; the eyebrow is 12px semibold uppercase with wide tracking; the lede is 18px at 1.6 in `ink-2`. Code and amounts use **JetBrains Mono** (`SITE_TYPE.mono`). Both faces load through `next/font` in `site/fonts.ts`, self-hosted, and exist only below an element carrying `SITE_FONT_VARIABLES` — every new-site root does, and so does the auth shell (`components/auth/AuthShell.tsx`, the sign-in and sign-up pages); nothing else may. The authenticated app, `packages/ui` and `packages/ops` render Inter as before.
 
 **Product frame (`ProductFrame`).** A picture of a Haven screen: `Card` at `raised` elevation with a 14px radius, and a `Card.Header` bar holding an environment chip and the screen name. Because it is the product's own surface, it shows the dark UI in the dark theme. Its body is `inert`, and controls inside it are `FrameControl` spans, never buttons or links: a frame illustrates the product, it does not operate it.
 
@@ -3667,7 +3667,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 **Why six and not the three this section used to claim.** The old rule said 14/16/20 "exactly" and was [verified false](https://github.com/d-hinders/Haven-AI/issues/1858): 34 of 119 sized call sites were off it. Crucially the discrepancy resolved **both ways**, and assuming the code had to bend to the doc would have destroyed real work:
 
-- **12 px was never drift.** Nineteen call sites, and they are not scattered — every one is a chevron, caret, copy glyph or trailing arrow in the app's densest controls, the great majority of them in a `text-xs` run. Three rungs simply had no step for type that small, so authors took a fourth without the doc admitting it existed. **Stated carefully, because the first draft of this line was checkably false**: "every one sits in `text-xs`" is not true — `NetworkSwitcher.tsx:96` (deleted by #3719) sat in `text-[13px]`, `ui/Table.tsx:157` (now `packages/ui/src/Table.tsx`) in a `text-[11px]` header, and `transactions/FilterBar.tsx:329` (deleted by #4162) in `text-sm`. The rung is real; the tidy single-class story about it was not, and replacing a false absolute with the measured spread is the whole habit this section is trying to build.
+- **12 px was never drift.** Nineteen call sites at #1858 (`c8af51bfb`; 16 at `1344f3a83` by `node scripts/design-lint.mjs --icons` from `packages/frontend`, and the current spread is the census command below, not this bullet), and at #1858 they were not scattered — every one was a chevron, caret, copy glyph or trailing arrow in the app's densest controls, the great majority of them in a `text-xs` run. Three rungs simply had no step for type that small, so authors took a fourth without the doc admitting it existed. **Stated carefully, because the first draft of this line was checkably false**: "every one sits in `text-xs`" is not true — `NetworkSwitcher.tsx:96` (deleted by #3719) sat in `text-[13px]`, `ui/Table.tsx:157` (now `packages/ui/src/Table.tsx`) in a `text-[11px]` header, and `transactions/FilterBar.tsx:329` (deleted by #4162) in `text-sm`. The rung is real; the tidy single-class story about it was not, and replacing a false absolute with the measured spread is the whole habit this section is trying to build.
 - **24 and 28 were not drift either.** Four sites, two apiece, and each pair is the icon at half its status medallion (48→24, 56→28). `EmptyState` had independently hard-coded the same ratio — a 20 px slot in a 40 px ring, 16 in a 32 — so "half the container" was already built into a primitive before it was ever written down.
 - **Eleven sites WERE drift**, and all eight arbitrary values were among them. They were corrected to the nearest rung: 10→12, 11→12, 13→14 (×3), 17→16, 18→20, 22→20, 22→24, and both non-square pairs→12.
 

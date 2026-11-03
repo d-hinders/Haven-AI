@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, Clipboard, CreditCard, Download, EllipsisVertical, ExternalLink, Info, OctagonAlert, Plus, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -1884,6 +1884,22 @@ export default function DesignSystemPage() {
               loosening the layout around it. The target grows vertically only —
               widening it would let a button steal taps from its neighbour in a tight
               toolbar.
+            </p>
+            {/* #4639: icons on buttons — one per button, by the kind of action. */}
+            <div className="mt-4 flex flex-wrap items-center gap-3" data-testid="ds-button-icons">
+              <Button leadingIcon={Plus}>New account</Button>
+              <Button leadingIcon={ArrowUp}>Send</Button>
+              <Button variant="ghost" leadingIcon={ArrowDown}>Receive</Button>
+              <Button variant="ghost" size="sm" leadingIcon={Clipboard}>Copy setup prompt</Button>
+              <Button variant="ghost" size="sm" leadingIcon={Download}>Export CSV</Button>
+              <Button variant="tertiary" size="sm" href="https://sepolia.basescan.org" target="_blank" rel="noopener noreferrer" trailingIcon={ExternalLink}>View on explorer</Button>
+              <Button variant="ghost" trailingIcon>Continue</Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              An icon names the kind of action: Plus to create, the direction marks
+              for money out and in, Clipboard to copy, Download to export, and a
+              trailing ExternalLink or forward arrow. One icon per button, never on
+              Cancel, Back, Close, Save, Approve or a dialog&apos;s confirm.
             </p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button variant="tertiary" disabled aria-busy>

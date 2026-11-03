@@ -24,7 +24,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
-import { KeyRound, Wallet } from 'lucide-react'
+import { KeyRound, Plus, Wallet } from 'lucide-react'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
@@ -232,13 +232,12 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                 variant={onlyOneWay ? 'primary' : 'ghost'}
                 disabled={busy || !ready}
                 onClick={() => void handle(enrollBackupPasskey(), 'Backup added.')}
+                leadingIcon={Plus}
               >
-                <Icon icon={KeyRound} className="h-4 w-4" />
                 {busy ? 'Working…' : 'Add a backup passkey'}
               </Button>
               {!signers.owner_address ? (
-                <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)}>
-                  <Icon icon={Wallet} className="h-4 w-4" />
+                <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)} leadingIcon={Plus}>
                   Add a wallet
                 </Button>
               ) : null}

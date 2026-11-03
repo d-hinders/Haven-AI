@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Bot, CircleAlert, CreditCard } from 'lucide-react'
+import { Bot, CircleAlert, CreditCard, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import Link from 'next/link'
 import type { SmartAccount } from '@/context/AuthContext'
@@ -307,7 +307,7 @@ export default function AccountsOverviewClient() {
           // existing one, so there is no source — and ProtectedRoute sends a
           // user with no accounts to /onboarding, which creates the first.
           accounts.length > 0 ? (
-            <Button onClick={() => setNewAccountOpen(true)}>New account</Button>
+            <Button onClick={() => setNewAccountOpen(true)} leadingIcon={Plus}>New account</Button>
           ) : undefined
         }
       />

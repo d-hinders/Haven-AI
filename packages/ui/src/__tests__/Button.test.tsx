@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { ArrowUp, Download, ExternalLink } from 'lucide-react'
 import { Button } from '../Button'
 
 /**
@@ -216,5 +217,78 @@ describe('Button label wrapping (#4561)', () => {
     const classes = classesOfLabel('Copied — paste it to Atlas')
     expect(classes).toContain(floor)
     expect(classes.some((c) => /^h-\d+$/.test(c))).toBe(false)
+  })
+})
+
+/**
+ * Icons on buttons (#4639, DS § Buttons → Icons on buttons): one decorative
+ * lucide icon, before the label (`leadingIcon`) or after it (`trailingIcon`),
+ * at the 14px rung. Lucide stamps each SVG with `lucide-<name>`, so the glyph
+ * is asserted by that class — a swapped icon fails.
+ */
+
+const svgs = (el: HTMLElement) => Array.from(el.querySelectorAll('svg'))
+const glyph = (svg: SVGElement) => Array.from(svg.classList).find((c) => c.startsWith('lucide-') && c !== 'lucide-icon') ?? ''
+
+describe('Button icons (#4639)', () => {
+  it('leadingIcon draws one aria-hidden 14px icon BEFORE the label, and the label stays the accessible name', () => {
+    render(<Button leadingIcon={ArrowUp}>Send</Button>)
+    const button = screen.getByRole('button', { name: 'Send' })
+    const icons = svgs(button)
+    expect(icons).toHaveLength(1)
+    expect(glyph(icons[0])).toBe('lucide-arrow-up')
+    expect(icons[0].getAttribute('aria-hidden')).toBe('true')
+    expect(icons[0].getAttribute('class')).toMatch(/\bh-3\.5\b/)
+    expect(icons[0].getAttribute('class')).toMatch(/\bw-3\.5\b/)
+    // Order: the icon is the first child, the label text follows it.
+    expect(button.firstElementChild).toBe(icons[0])
+    expect(button.textContent).toBe('Send')
+  })
+
+  it('leadingIcon renders on the href (next/link) branch too', () => {
+    render(
+      <Button href="/export" leadingIcon={Download}>
+        Export
+      </Button>,
+    )
+    const link = screen.getByRole('link', { name: 'Export' })
+    const icons = svgs(link)
+    expect(icons).toHaveLength(1)
+    expect(glyph(icons[0])).toBe('lucide-download')
+    expect(link.firstElementChild).toBe(icons[0])
+  })
+
+  it('trailingIcon={true} still draws ArrowRight after the label', () => {
+    render(<Button trailingIcon>Continue</Button>)
+    const button = screen.getByRole('button', { name: 'Continue' })
+    const icons = svgs(button)
+    expect(icons).toHaveLength(1)
+    expect(glyph(icons[0])).toBe('lucide-arrow-right')
+    expect(button.lastElementChild).toBe(icons[0])
+  })
+
+  it('trailingIcon={ExternalLink} draws that glyph after the label', () => {
+    render(
+      <Button href="https://example.test" target="_blank" trailingIcon={ExternalLink}>
+        View on explorer
+      </Button>,
+    )
+    const link = screen.getByRole('link', { name: 'View on explorer' })
+    const icons = svgs(link)
+    expect(icons).toHaveLength(1)
+    expect(glyph(icons[0])).toBe('lucide-external-link')
+    expect(link.lastElementChild).toBe(icons[0])
+    expect(icons[0].getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('draws no icon when neither prop is given', () => {
+    render(<Button>Cancel</Button>)
+    expect(svgs(screen.getByRole('button', { name: 'Cancel' }))).toHaveLength(0)
+  })
+
+  it('one icon per button is a type error', () => {
+    // @ts-expect-error — leadingIcon and trailingIcon are mutually exclusive (#4639).
+    const both = <Button leadingIcon={ArrowUp} trailingIcon>Both</Button>
+    expect(both).toBeTruthy()
   })
 })

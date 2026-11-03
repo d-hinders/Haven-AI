@@ -294,8 +294,7 @@ export default function AgentPanel() {
           // here would make the pair one unbreakable child.
           <>
             {!showInlineSetup && (
-              <Button onClick={() => panel.setConnectAgentOpen(true)}>
-                <Icon icon={Plus} className="h-4 w-4" />
+              <Button onClick={() => panel.setConnectAgentOpen(true)} leadingIcon={Plus}>
                 Connect agent
               </Button>
             )}

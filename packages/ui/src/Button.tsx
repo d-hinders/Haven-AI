@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { forwardRef } from 'react'
 import { ArrowRight } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Icon } from './Icon'
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react'
 
@@ -94,7 +95,23 @@ const VARIANT_CLASS: Record<Variant, string> = {
     'bg-[var(--v2-danger)] text-[var(--v2-ink-on-brand)] hover:bg-danger/90 shadow-button focus-visible:ring-danger/80',
 }
 
-type ButtonProps = {
+/**
+ * The button's one icon (#4639, DS § Buttons → Icons on buttons).
+ *
+ * `leadingIcon` draws a lucide icon before the label; `trailingIcon` draws one
+ * after it — `true` keeps the forward `ArrowRight` every existing caller has,
+ * a lucide component draws that glyph instead (an `ExternalLink`). The two are
+ * MUTUALLY EXCLUSIVE in the type: the rule is one icon per button, and a union
+ * makes a second one a compile error rather than a review comment. Either way
+ * the icon is decorative (`aria-hidden`, via `Icon`) at the 14px rung beside
+ * `text-sm`, in the label's colour, at the base `gap-1.5`; the label stays and
+ * remains the accessible name.
+ */
+type IconProps =
+  | { leadingIcon?: LucideIcon; trailingIcon?: never }
+  | { leadingIcon?: never; trailingIcon?: boolean | LucideIcon }
+
+type ButtonProps = IconProps & {
   children: ReactNode
   href?: string
   target?: AnchorHTMLAttributes<HTMLAnchorElement>['target']
@@ -152,7 +169,6 @@ type ButtonProps = {
   variant?: Variant
   size?: Size
   className?: string
-  trailingIcon?: boolean
   /**
    * Let the label break onto a second line (#4561).
    *
@@ -187,6 +203,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   variant = 'primary',
   size = 'md',
   className = '',
+  leadingIcon,
   trailingIcon,
   wrap = false,
 }, ref) {
@@ -197,12 +214,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   // is a layout bug, not a wrap. `wrap` is the one opt-out, and it carries the
   // matching size class because a fixed height cannot hold a second line.
   const classes = `inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} ${wrap ? WRAP_SIZE_CLASS[size] : SIZE_CLASS[size]} ${TAP_TARGET_CLASS[size]} ${VARIANT_CLASS[variant]} ${className}`
+  const trailing = trailingIcon === true ? ArrowRight : trailingIcon || null
   const content = (
     <>
+      {leadingIcon && <Icon icon={leadingIcon} className="w-3.5 h-3.5" />}
       {children}
-      {trailingIcon && (
-        <Icon icon={ArrowRight} className="w-3.5 h-3.5" />
-      )}
+      {trailing && <Icon icon={trailing} className="w-3.5 h-3.5" />}
     </>
   )
 

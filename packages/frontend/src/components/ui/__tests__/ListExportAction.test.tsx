@@ -9,6 +9,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps, ReactNode } from 'react'
+import { Download } from 'lucide-react'
 import { ApiRequestError } from '@/lib/api'
 
 const { mockGetText, mockDownloadCsv, buttonProps } = vi.hoisted(() => ({
@@ -30,7 +31,9 @@ vi.mock('@/lib/csv-export', async () => {
 vi.mock('@/components/ui/Button', () => ({
   Button: (props: Record<string, unknown>) => {
     buttonProps.push(props)
-    const { children, ...rest } = props
+    // `leadingIcon` is the primitive's to draw (#4639); the mock records it and
+    // keeps it off the DOM element.
+    const { children, leadingIcon: _leadingIcon, ...rest } = props
     return <button {...rest}>{children as ReactNode}</button>
   },
 }))
@@ -57,16 +60,14 @@ function Probe(props: ListExportOptions) {
 type ProbeProps = ComponentProps<typeof Probe>
 
 /**
- * The leading `Download` glyph (#4473): decorative (`aria-hidden`, so it adds
- * nothing to the accessible name), at the `sm` label's 14px step, and the
- * button's FIRST child — the glyph reads before the label, not after it.
+ * The leading `Download` glyph (#4473): since #4639 it is the Button
+ * primitive's `leadingIcon`, which draws it decorative (`aria-hidden`), at the
+ * 14px rung and before the label — pinned once in `packages/ui`'s Button test.
+ * Here: the action asks for exactly that glyph, and hand-draws none of its own.
  */
 function expectDownloadGlyph(button: HTMLElement) {
-  const glyph = button.querySelector('svg')
-  expect(glyph, 'the export button draws no glyph').not.toBeNull()
-  expect(glyph).toHaveAttribute('aria-hidden', 'true')
-  expect(glyph).toHaveClass('h-3.5', 'w-3.5')
-  expect(button.firstElementChild).toBe(glyph)
+  expect(buttonProps.at(-1)?.leadingIcon, 'the export button asks for no glyph').toBe(Download)
+  expect(button.querySelector('svg'), 'a hand-drawn glyph beside the leadingIcon').toBeNull()
 }
 
 beforeEach(() => {

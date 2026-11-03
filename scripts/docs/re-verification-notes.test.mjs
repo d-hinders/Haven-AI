@@ -70,9 +70,11 @@ test('#4613: no status: current doc carries a re-verification opener', async () 
   const result = census(await currentDocs())
   assert.equal(result.byStatus.current ?? 0, 0)
   // 25 when #4613 landed; 26 since the 2026-11-02 quality-scan record (#4609)
-  // discusses the pattern in a bullet that opens with "re-verification". A
-  // `record` doc may say the word — it is never refused — so this pin moves
-  // only when a record is added or removed, never to hide a current-doc hit.
+  // discusses the pattern in a bullet whose opening line carries
+  // "re-verification". A `record` doc may say the word — it is never refused —
+  // so this pin moves only when a `record` doc gains or loses an opener (a new
+  // or edited record, or a `current` doc flipped to `record`), never to hide a
+  // current-doc hit.
   assert.equal(result.byStatus.record, 26)
   assert.equal(result.current.size, 0)
 })

@@ -2683,5 +2683,5 @@ by partner pipelines — #4612 via PR #4619 (`850e48023`), #4613 via PR #4620
 promotion checklist. The scan record (#4609, `c9a2eca51`) merged after #4621
 without a re-run against the new base and turned the required docs job red
 on `dev`: #4613's test pins the record-doc census at 25 and the record's own
-bullet about #2938 opens with "re-verification" (26). The pin moves to 26 in
+bullet about #2938 carries "re-verification" on its opening line (26). The pin moves to 26 in
 the PR carrying this entry (#4617), with the reason beside it.

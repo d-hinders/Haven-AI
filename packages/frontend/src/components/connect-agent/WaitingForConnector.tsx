@@ -35,6 +35,7 @@ export function WaitingForConnector({
   expiresAt,
   onCancel,
   nestedCopyBlocks = false,
+  halo = false,
 }: {
   setup: CreateSetupResponse
   runtime: string
@@ -71,6 +72,8 @@ export function WaitingForConnector({
    * blocks stay standalone cards, unchanged.
    */
   nestedCopyBlocks?: boolean
+  /** Dialog-only attention cue; omitted for inline and showcase renderings. */
+  halo?: boolean
 }) {
   // Which rendering of the manual credential is shown — .env by default;
   // selecting the format is pure presentation, so it stays local to this
@@ -245,7 +248,7 @@ export function WaitingForConnector({
 
   return (
     <>
-      <ConnectSteps rows={promptRows} />
+      <ConnectSteps rows={promptRows} halo={halo} />
 
       {/* #3832: the one trust fact a cautious user needs before pasting,
           placed with the steps it is about. Only true on the connector path:

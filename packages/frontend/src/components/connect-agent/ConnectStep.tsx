@@ -36,10 +36,13 @@ function connectedRows(approve: ConnectStepRow, manual: boolean): ConnectStepRow
 export function ConnectStep({
   flow,
   nestedCopyBlocks = false,
+  halo = false,
 }: {
   flow: AgentConnectionSetupFlow
   /** See WaitingForConnector's prop of the same name (#4065). */
   nestedCopyBlocks?: boolean
+  /** Dialog-only attention cue; the inline /agents flow stays still. */
+  halo?: boolean
 }) {
   const { setup, setupStatus, connectView, resumed } = flow
   // #2522: `setup` is the CREATE response, and a session resumed from a
@@ -141,11 +144,13 @@ export function ConnectStep({
           expiresAt={setup.expires_at}
           onCancel={flow.handleCancelSetup}
           nestedCopyBlocks={nestedCopyBlocks}
+          halo={halo}
         />
       )}
 
       {connectView?.kind === 'finalizing_local' && (
         <ConnectSteps
+          halo={halo}
           rows={connectedRows({
             id: 'approve',
             state: 'working',
@@ -172,6 +177,7 @@ export function ConnectStep({
 
       {connectView?.kind === 'delegation_approval' && setupStatus && (
         <ConnectSteps
+          halo={halo}
           rows={connectedRows({
             id: 'approve',
             state: 'active',
@@ -210,6 +216,7 @@ export function ConnectStep({
         // "Approved" used to carry. The grant line below stays the heading of
         // what the user just did (#1394).
         <ConnectSteps
+          halo={halo}
           rows={connectedRows({ id: 'approve', state: 'done', title: 'Budget approved' }, manualPath)}
         />
       )}

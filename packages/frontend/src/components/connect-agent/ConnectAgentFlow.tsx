@@ -189,7 +189,7 @@ export function ConnectAgentFlow({
       <CloseGuardPanel onCancel={flow.cancelClose} onConfirm={flow.confirmClose} />
     ) : flow.step === 'connect' ? (
       <div ref={stepRegionRef} tabIndex={-1} className="outline-none">
-        <ConnectStep flow={flow} nestedCopyBlocks={inline} />
+        <ConnectStep flow={flow} nestedCopyBlocks={inline} halo={!inline} />
       </div>
     ) : (
       <div

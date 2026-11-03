@@ -385,6 +385,15 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  @keyframes v2-step-halo {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--v2-ink-2) 30%, transparent); }
+    50% { box-shadow: 0 0 0 8px transparent; }
+  }
+
+  .v2-step-halo {
+    animation: v2-step-halo 1.8s ease-in-out infinite;
+  }
+
   .v2-animate-step-rise {
     animation: v2-step-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }

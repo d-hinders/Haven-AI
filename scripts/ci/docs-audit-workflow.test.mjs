@@ -8,6 +8,7 @@
 // wrong edit to the real file.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -46,6 +47,29 @@ export function violations(text) {
   if (!/TITLE='Docs staleness audit \(weekly\)'/.test(src)) out.push('the tracking issue title moved')
   if (!/--list-args '[^']*--label documentation[^']*'/.test(src)) out.push('--list-args must carry --label documentation')
   if (!/dated reading/.test(src)) out.push('the issue template must say a moved figure is refreshed or rewritten as a dated reading')
+  // The issue body is built by `printf` from a single-quoted format, so `\n` is
+  // a newline and `\\n` is a literal backslash-n. Render the format the way the
+  // step does and require real newlines and a real fence: with `\\n` the whole
+  // report collapses onto one line outside the code block (#4631's regression).
+  const bodyFormat = src.match(/BODY="\$\(printf '([^']*)'/)?.[1]
+  if (!bodyFormat) {
+    out.push('the issue body must be built by printf from a single-quoted format')
+  } else {
+    const rendered = execFileSync('bash', ['-c', 'printf "$1" "$2"', '_', bodyFormat, 'REPORT-LINE-1\nREPORT-LINE-2'], {
+      encoding: 'utf8',
+    })
+    if (/\\\\n/.test(bodyFormat)) {
+      out.push('the issue body format must use \\n, not \\\\n (a literal backslash-n collapses the body onto one line)')
+    }
+    if (!rendered.includes('```\nREPORT-LINE-1\nREPORT-LINE-2\n```')) {
+      out.push('the report must sit inside a ``` fence in the issue body')
+    }
+  }
+  // Report-only: the doc-figure step must not fail the job before the audit runs.
+  const figureStep = src.slice(src.indexOf('      - name: Re-measure the doc figures'), src.indexOf('      - name: Run the audit'))
+  if (!/continue-on-error:\s*true/.test(figureStep)) {
+    out.push('the doc-figure step must be continue-on-error: true (the job is report-only)')
+  }
   if (!/never \\?`last-verified\\?` alone/.test(src)) out.push('the issue template must say never `last-verified` alone')
   // The `on:` block: indented lines and the blank lines a stripped comment leaves.
   const on = src.match(/^on:[ \t]*\n((?:(?:[ \t].*)?\n)*)/m)?.[1] ?? ''
@@ -80,6 +104,9 @@ const MUTATIONS = [
   ['--list-args', (t) => t.replace("--list-args '--label documentation --state open --json'", "--list-args '--state open --json'"), /--list-args must carry/],
   ['dated reading', (t) => t.replace(/ or rewrite it as a dated reading/, ''), /dated reading/],
   ['last-verified alone', (t) => t.replace(/ — never \\`last-verified\\` alone/, ''), /last-verified/],
+  ['body newlines', (t) => t.replace(/alone\.\\n\\n```\\n%s/, 'alone.\\\\n\\\\n```\\\\n%s'), /literal backslash-n/],
+  ['body fence', (t) => t.replace('```\\n%s\\n```', '\\`\\`\\`\\n%s\\n\\`\\`\\`'), /``` fence/],
+  ['continue-on-error', (t) => t.replace('        continue-on-error: true\n', ''), /continue-on-error/],
   ['pull_request', (t) => t.replace(/^ {2}workflow_dispatch:$/m, '  workflow_dispatch:\n  pull_request:'), /no pull_request trigger/],
   ['commented-out fetch-depth', (t) => t.replace(/fetch-depth: 0/, 'fetch-depth: 1 # fetch-depth: 0'), /fetch-depth: 0/],
 ]

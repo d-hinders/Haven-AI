@@ -208,24 +208,35 @@ describe('IgdrasilConnector.pushTransaction — the error map', () => {
     state[flag] = true
     return new IgdrasilConnector(impl).pushTransaction(USER, feedTransaction(`pay-${flag}`))
   }
+  /**
+   * A mapped refusal must RESOLVE: a throw here would be the sweep's retry,
+   * not a skip. Caught into a value so a thrown push fails the assertion
+   * below, not the test harness.
+   */
+  async function mappedWith(flag: Parameters<typeof pushWith>[0]): Promise<Record<string, unknown>> {
+    return pushWith(flag).then(
+      (r) => r as unknown as Record<string, unknown>,
+      (err: unknown) => ({ thrown: err instanceof Error ? err.message : String(err) }),
+    )
+  }
 
   it('insufficient_scope: skipped before anything was created, connection → scope_missing naming vouchers:write', async () => {
-    const result = await pushWith('refuseScope')
+    const result = await mappedWith('refuseScope')
     expect(result).toMatchObject({ externalRef: null, status: 'skipped', connectionStatus: 'scope_missing', missingScopes: ['vouchers:write'] })
   })
 
   it('company_not_granted: skipped, connection → needs_reauthorisation', async () => {
-    expect(await pushWith('companyNotGranted')).toMatchObject({ status: 'skipped', connectionStatus: 'needs_reauthorisation' })
+    expect(await mappedWith('companyNotGranted')).toMatchObject({ status: 'skipped', connectionStatus: 'needs_reauthorisation' })
   })
 
   it('grant_role_revoked: skipped, connection → needs_reauthorisation', async () => {
-    const result = await pushWith('roleRevoked')
+    const result = await mappedWith('roleRevoked')
     expect(result).toMatchObject({ status: 'skipped', connectionStatus: 'needs_reauthorisation' })
     expect(result.reason).toContain('grant_role_revoked')
   })
 
   it('400: the document itself was refused — skipped, and the connection is NOT flagged', async () => {
-    const result = await pushWith('badFile')
+    const result = await mappedWith('badFile')
     expect(result).toMatchObject({ externalRef: null, status: 'skipped' })
     expect(result.connectionStatus).toBeUndefined()
   })

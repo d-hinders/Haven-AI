@@ -181,8 +181,10 @@ its **address**):
 | `SEED_RESET_MIN` | Budget period length in minutes (default `1440`) |
 
 Both budget names are AllowanceModule-era spellings kept so an existing operator
-env keeps working. `SEED_RPC_URL` is no longer read: the seed sends nothing
-on-chain and opens no RPC connection.
+env keeps working. `SEED_RPC_URL` is no longer read: the seed opens no RPC
+connection and sends no transaction itself. Haven's relayer deploys the account
+at the first grant, and a later plain grant sends nothing on-chain. Replacing a
+live grant also submits an owner-signed Stop of each old grant through Haven.
 
 After it runs, fund the printed **account** address with Base Sepolia test USDC
 ([Circle faucet](https://faucet.circle.com)).

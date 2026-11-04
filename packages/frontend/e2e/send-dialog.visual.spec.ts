@@ -160,6 +160,39 @@ test.describe('send dialog visual regression (#4641)', () => {
       )
     })
 
+    // `send-dialog-details` captures the open list, which covers Amount, so no
+    // baseline showed that field until this one: it stopped 122 px short of the
+    // recipient field unnoticed (found on epic #4637's walkthrough).
+    test(`send-dialog-details-filled renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      const dialog = await openSendDialog(page)
+
+      const to = dialog.getByRole('combobox', { name: 'To' })
+      await to.click()
+      await to.fill(testRecipientAddress)
+      await page.getByRole('option', { name: new RegExp(CONTACT_NAME) }).click()
+      await dialog.getByLabel('Amount').fill(AMOUNT)
+
+      // The state the capture is OF, asserted before the shutter.
+      const chip = dialog.locator('[data-recipient-chip]')
+      await expect(chip).toContainText(CONTACT_NAME)
+      await expect(page.getByRole('listbox')).toHaveCount(0)
+      const chipBox = await chip.boundingBox()
+      const amountBox = await dialog.getByLabel('Amount').boundingBox()
+      expect(amountBox!.x).toBeCloseTo(chipBox!.x, 0)
+      expect(amountBox!.width).toBeCloseTo(chipBox!.width, 0)
+
+      await page.evaluate(() => document.fonts.ready)
+      await expect(dialog).toHaveScreenshot(
+        `send-dialog-details-filled-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
     test(`send-dialog-review renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')

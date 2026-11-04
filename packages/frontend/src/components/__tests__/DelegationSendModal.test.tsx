@@ -243,8 +243,8 @@ describe('DelegationSendModal — Details screen (#4641)', () => {
   it('lets the amount field fill its row, level with the recipient field', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} />)
-    // jsdom has no layout, so this pins the class that makes the row stretch;
-    // the Send visual baselines hold the rendered width.
+    // jsdom has no layout, so this pins the class that makes the row stretch.
+    // `send-dialog-details-filled` in the visual spec measures the rendered width.
     const row = document.querySelector('label[for="send-amount"]')?.nextElementSibling
     expect(row).toHaveClass('flex')
     expect(row?.firstElementChild).toHaveClass('flex-1')

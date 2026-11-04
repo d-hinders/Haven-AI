@@ -117,6 +117,7 @@ export default function DelegationSendModal({
   const amountRef = useRef<HTMLInputElement>(null)
   const presetRef = useRef(initialRecipient)
   const screenRef = useRef<HTMLDivElement>(null)
+  const messageRef = useRef<HTMLDivElement>(null)
   const focusedStepRef = useRef<Step>(step)
   const saveNameRef = useRef<HTMLInputElement>(null)
   const wasWorkingRef = useRef(false)
@@ -168,7 +169,9 @@ export default function DelegationSendModal({
     if (step === 'details') {
       amountRef.current?.focus()
     } else {
-      screenRef.current?.focus()
+      // No scroll: on a short phone the wrapper is taller than the dialog's body,
+      // and focusing it would push the top of the screen under the header.
+      screenRef.current?.focus({ preventScroll: true })
     }
   }, [open, step])
 
@@ -205,8 +208,14 @@ export default function DelegationSendModal({
   useEffect(() => {
     const ended = wasWorkingRef.current && !working
     wasWorkingRef.current = working
-    if (ended && open) screenRef.current?.focus()
+    if (ended && open) screenRef.current?.focus({ preventScroll: true })
   }, [open, working])
+
+  // Why the send did not go through sits below the fold on a short phone, where
+  // the button reading "Try again" would be all the user could see.
+  useEffect(() => {
+    if (message) messageRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [message])
 
   // A save moves no money, and the user may have gone somewhere useful while it
   // ran, such as back into the name field or to View transaction. So focus moves
@@ -221,7 +230,7 @@ export default function DelegationSendModal({
     if (saveState === 'error') {
       saveNameRef.current?.focus()
     } else {
-      screenRef.current?.focus()
+      screenRef.current?.focus({ preventScroll: true })
     }
   }, [open, saveState])
   const explorerUrl = txHash ? getExplorerUrlOrNull(chainId, 'tx', txHash) : null
@@ -453,11 +462,13 @@ export default function DelegationSendModal({
           </p>
 
           {message ? (
-            message.tone === 'danger' ? (
-              <InlineAlert>{message.message}</InlineAlert>
-            ) : (
-              <p className="text-xs text-[var(--v2-ink-2)]">{message.message}</p>
-            )
+            <div ref={messageRef}>
+              {message.tone === 'danger' ? (
+                <InlineAlert>{message.message}</InlineAlert>
+              ) : (
+                <p className="text-xs text-[var(--v2-ink-2)]">{message.message}</p>
+              )}
+            </div>
           ) : null}
 
           {loadError ? (

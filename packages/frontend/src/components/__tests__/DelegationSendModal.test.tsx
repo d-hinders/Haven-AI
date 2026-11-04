@@ -466,6 +466,38 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
       expect(document.activeElement?.tagName).toBe('DIV')
     })
 
+    it('moving focus to a screen never scrolls it', () => {
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} />)
+      const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+      goToReview()
+
+      expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+      focus.mockRestore()
+    })
+
+    it.each([
+      ['a cancelled approval', { ok: false, reason: 'cancelled' }, 'Approval was cancelled.'],
+      ['a failure', { ok: false, reason: 'failed', message: 'It broke.' }, 'It broke.'],
+    ])('%s brings its message into view', async (_name, result, text) => {
+      const scrollIntoView = vi.fn()
+      const original = Element.prototype.scrollIntoView
+      Element.prototype.scrollIntoView = scrollIntoView
+      try {
+        mockUseSend.mockReturnValue(base({ send: vi.fn().mockResolvedValue(result) }))
+        render(<DelegationSendModal {...PROPS} />)
+        goToReview()
+        scrollIntoView.mockClear()
+        fireEvent.click(screen.getByRole('button', { name: /^Send / }))
+
+        await waitFor(() => expect(screen.getByText(text)).toBeTruthy())
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+        expect(scrollIntoView.mock.instances[0]).toHaveTextContent(text)
+      } finally {
+        Element.prototype.scrollIntoView = original
+      }
+    })
+
     it('a save that ends returns focus to the success screen', async () => {
       await sendToNewAddress()
       fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Acme' } })

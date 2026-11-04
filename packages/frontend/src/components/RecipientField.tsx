@@ -308,6 +308,7 @@ export function RecipientField({
     return (
       <div
         data-recipient-chip=""
+        aria-busy={lookingUp || undefined}
         className={`flex items-center gap-3 rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2 ${className}`}
       >
         {lookingUp ? (

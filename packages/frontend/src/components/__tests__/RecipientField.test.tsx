@@ -250,6 +250,7 @@ describe('RecipientField — presetAddress', () => {
     expect(chip.querySelectorAll('svg')).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Change recipient' }).querySelector('svg')).not.toBeNull()
     expect(chip.querySelector('.animate-pulse.rounded-full')).not.toBeNull()
+    expect(chip).toHaveAttribute('aria-busy', 'true')
   })
 
   it('resolves a preset address that is an own account as the account', () => {

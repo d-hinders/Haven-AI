@@ -5780,6 +5780,11 @@ export type components = {
                  * @description #4355: when THIS budget next refills — the end of its current period, from its own start date and period (ISO 8601). `null` when it never refills again: the period boundary falls at or after the budget's end date, so it ends first. With `onchain.remaining` 0 it tells an agent its budget is spent for this period and when it refills, as opposed to never approved. Optional on the schema so an older backend that omits it stays valid.
                  */
                 next_refill_at?: string | null;
+                /**
+                 * Format: date-time
+                 * @description #4666: when THIS budget's validity ends (ISO 8601), after which it never refills and cannot pay. Read-only reporting: the delegation's expiry caveat is what enforces it. `null` when the stored expiry is not a representable timestamp. Optional on the schema so an older backend that omits it stays valid.
+                 */
+                budget_expires_at?: string | null;
                 onchain: {
                     /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;

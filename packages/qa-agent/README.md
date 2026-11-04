@@ -26,7 +26,8 @@ legs below, the delegation-rail suite and the three budget-authority legs. `run.
 order; the canonical per-scenario table lives in
 [`docs/operations/agent-qa.md`](../../docs/operations/agent-qa.md). The
 **balances check** (`npm run qa:balances`, `src/balances-cli.ts`, #3631) reads
-the QA wallets for the daily `qa-balances.yml` workflow. It is read-only except
+the QA wallets, and when the QA budget grant ends (#4666), for the daily
+`qa-balances.yml` workflow. It is read-only except
 for bounded CDP Base Sepolia faucet requests for the demo merchant's settlement
 wallet (below its 0.004 ETH target) and a low dev relayer; it never signs or
 moves Haven or customer funds and receives no wallet secret. See that

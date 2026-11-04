@@ -116,14 +116,18 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     // the dormant "steady" grant a credential rotation writes beside the
     // live "carry" row, and hiding it would blind the allowances read for
     // the whole carry window. The expired assertion above stays inverted.
-    const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600 })
+    const endsSec = Math.floor(Date.now() / 1000) + 90 * 86_400
+    const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600, expiresAt: endsSec })
 
     const result = await handleGetAllowances(agent)
 
     expect(result.statusCode).toBe(200)
-    const body = result.body as { allowances: { configured_amount: string }[] }
+    const body = result.body as { allowances: { configured_amount: string; budget_expires_at: string | null }[] }
     expect(body.allowances).toHaveLength(1)
     expect(body.allowances[0].configured_amount).toBe('1.00')
+    // #4666: its end, not its start. The QA balances check bands a carry/steady
+    // pair on the later end, so a wrong answer here silences or misdates it.
+    expect(body.allowances[0].budget_expires_at).toBe(new Date(endsSec * 1000).toISOString())
   })
 
   it('a LIVE budget keeps being reported (the window must never hide a real one)', async () => {
@@ -156,6 +160,22 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     const dormant = await seedAgentWithDelegation({ startDate: start })
     const dormantBody = (await handleGetAllowances(dormant)).body as { allowances: { next_refill_at: string | null }[] }
     expect(dormantBody.allowances[0].next_refill_at).toBe(new Date(start * 1000).toISOString())
+  })
+
+  it('#4666: each row carries budget_expires_at — the row\'s own expiry — and null when it is not a representable timestamp', async () => {
+    const endsSec = Math.floor(Date.now() / 1000) + 30 * 86_400
+    const live = await seedAgentWithDelegation({ expiresAt: endsSec })
+    const liveBody = (await handleGetAllowances(live)).body as { allowances: { budget_expires_at: string | null }[] }
+    expect(liveBody.allowances[0].budget_expires_at).toBe(new Date(endsSec * 1000).toISOString())
+
+    // BIGINT has no upper bound in the schema, and `toISOString` throws
+    // RangeError past 8.64e15 ms. The read still answers: one bad row must
+    // not take down the spend-authority read behind SDK readiness.
+    const huge = await seedAgentWithDelegation({ expiresAt: Number.MAX_SAFE_INTEGER })
+    const hugeResult = await handleGetAllowances(huge)
+    expect(hugeResult.statusCode).toBe(200)
+    const hugeBody = hugeResult.body as { allowances: { budget_expires_at: string | null }[] }
+    expect(hugeBody.allowances[0].budget_expires_at).toBeNull()
   })
 
   it('#4352: an expired-only budget answers budget_ended_at with the row\'s expiry — and a live budget answers null', async () => {

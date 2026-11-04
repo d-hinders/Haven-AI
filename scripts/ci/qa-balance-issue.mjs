@@ -6,14 +6,19 @@
 // `npm run qa:balances -w packages/qa-agent` once a day; this script turns its
 // report into one standing issue:
 //
-//   - any wallet `warn` or `critical` → rewrite the body, and reopen the issue
-//     or create it once;
-//   - a comment ONLY when a wallet's band changes (ok→warn, warn→critical,
+//   - any wallet, or the QA budget grant, `warn` or `critical` → rewrite the
+//     body, and reopen the issue or create it once;
+//   - a comment ONLY when a band changes (ok→warn, warn→critical,
 //     critical→warn, …) — two runs with the same bands edit the body silently;
-//   - no wallet `warn` or `critical` → if the issue is open, write the final
-//     balances, comment them, and close it;
+//   - nothing `warn` or `critical` → if the issue is open, write the final
+//     state, comment it, and close it;
 //   - `unknown` (config missing or a failed read) never opens the issue and
 //     never blocks a close; it is shown in the body while the issue is open.
+//
+// The QA budget grant (#4666) is not a wallet: it has no balance, burn, runway
+// or top-up, so it rides as `report.budgetGrant` and renders outside the wallet
+// table. It carries `key`, `name`, `band` and `reason` like a row, so the alarm
+// and band-memory logic below read both through `bandRows`.
 //
 // ## Selection: bot author + exact title, over open AND closed issues
 //
@@ -43,9 +48,12 @@ import { scrubFull } from './qa-retry.mjs'
 export const ISSUE_TITLE = 'QA wallet balances low'
 export const LABEL = 'qa-funding'
 const LABEL_COLOR = 'd93f0b'
-const LABEL_DESCRIPTION = 'A QA wallet is within 7 days of running dry (#3631)'
+const LABEL_DESCRIPTION = 'A QA wallet is within 7 days of running dry, or the QA budget within 30 of ending'
 const MARKER = 'qa-balance-bands'
 const WALLETS = ['treasury', 'merchant', 'relayer', 'eval-hermes', 'eval-claude']
+/** The grant's key in the band marker; `BUDGET_GRANT_KEY` in qa-agent's balances.ts. */
+const GRANT_KEY = 'qa-budget'
+const BAND_KEYS = [...WALLETS, GRANT_KEY]
 const ALARM = new Set(['warn', 'critical'])
 
 const DOCS = 'docs/operations/agent-qa.md'
@@ -56,6 +64,16 @@ export const TOP_UP_ANCHOR = {
   relayer: 'top-up-the-dev-relayer',
   'eval-hermes': 'top-up-the-eval-agent-hermes-lane',
   'eval-claude': 'top-up-the-eval-agent-claude-code-lane',
+}
+/** The grant's two headings in agent-qa.md § Troubleshooting. */
+export const GRANT_ANCHOR = {
+  ended: 'the-qa-budget-ended',
+  renew: 'renew-the-qa-budget-before-it-ends',
+}
+
+/** Everything that carries a band: the wallet rows, plus the grant when the report has one. */
+export function bandRows(report) {
+  return [...report.rows, ...(report.budgetGrant ? [report.budgetGrant] : [])]
 }
 
 const defaultGh = (args, { input } = {}) =>
@@ -74,19 +92,20 @@ export function readBands(body) {
 }
 
 /**
- * The bands to remember: today's, except that an `unknown` wallet keeps its
- * last KNOWN band — a failed read carries no information about the wallet.
+ * The bands to remember: today's, except that an `unknown` reading keeps its
+ * last KNOWN band — a failed read carries no information about the wallet or
+ * the grant. A marker written before the grant existed reads as `ok`.
  */
 export function nextBands(previous, rows) {
   const out = {}
-  for (const key of WALLETS) {
+  for (const key of BAND_KEYS) {
     const row = rows.find((r) => r.key === key)
     out[key] = row && row.band !== 'unknown' ? row.band : (previous[key] ?? 'ok')
   }
   return out
 }
 
-/** The wallets whose known band changed since the last run. */
+/** Whatever carries a band (wallets, the grant) whose known band changed since the last run. */
 export function bandChanges(previous, rows) {
   const changes = []
   for (const row of rows) {
@@ -162,15 +181,55 @@ export function topUpSummary(wallet, topUp) {
   return `${head}: ${Number(topUp.claimsMade) || 0} accepted claim(s), ${fmtAmount(topUp.amountReceivedAtomic, unit)} ${unit} received; stop: \`${topUp.stopReason}\`${reason}.`
 }
 
-/** The issue body: one row per wallet, the top-up links, the time and the run. */
+/** `YYYY-MM-DD` (UTC) from an ISO timestamp; the wording the refusals use for an ended budget. */
+const utcDate = (iso) => String(iso ?? '').slice(0, 10)
+
+/** One line for the grant's state, in the body and the close comment. No links. */
+export function grantSummary(grant) {
+  const name = grant?.name ?? 'QA budget grant (USDC)'
+  if (!grant) return `${name}: no reading — this run's report carries no grant.`
+  if (grant.band === 'unknown') return `${name}: unknown — ${grant.reason ? publicReason(grant.reason) : 'no reading'}.`
+  if (grant.noLiveBudget) {
+    const ended = grant.endsAt ? `; the latest ended budget, of any token or pin, ended on ${utcDate(grant.endsAt)} (UTC)` : ''
+    return `${name}: **${grant.band}** — no live open USDC budget${ended}.`
+  }
+  return `${name}: **${grant.band}** — ends on ${utcDate(grant.endsAt)} (UTC), in ${grant.daysLeft} days.`
+}
+
+/** The lead paragraph when the grant is what raised the issue. */
+function grantLead(grant, docBase) {
+  const ended = `[The QA budget ended](${docBase}#${GRANT_ANCHOR.ended})`
+  if (grant.noLiveBudget) {
+    return (
+      `**The QA identity has no live open USDC budget.** Money-flow QA's spending legs that need it fail until a person ` +
+      `with the QA owner key sets a new one: ${ended}.`
+    )
+  }
+  return (
+    `**The QA budget grant ends on ${utcDate(grant.endsAt)} (UTC), in ${grant.daysLeft} days.** When it ends, every ` +
+    `spending leg of money-flow QA goes red at once, and only a person with the QA owner key can renew it: ` +
+    `[renew it before it ends](${docBase}#${GRANT_ANCHOR.renew}), or see ${ended}.`
+  )
+}
+
+/** The issue body: the wallet table, the grant, the top-up links, the time and the run. */
 export function buildBody(report, { runUrl, repo, bands }) {
   const docBase = `https://github.com/${repo}/blob/dev/${DOCS}`
+  const walletAlarm = report.rows.some((r) => ALARM.has(r.band))
+  const grantAlarm = ALARM.has(report.budgetGrant?.band)
   const lines = [
-    `One or more wallets the QA flows depend on has **less than 7 days of runway** (or cannot cover one run). ` +
-      `Money-flow QA fails in preflight once a core wallet (treasury, merchant, relayer) runs dry — top it up before then. ` +
-      `The eval-agent rows are reported here so a low eval balance is found before a failed night, ` +
-      `not by one: an eval run fails long before preflight does.`,
-    '',
+    ...(grantAlarm ? [grantLead(report.budgetGrant, docBase), ''] : []),
+    ...(walletAlarm
+      ? [
+          `One or more wallets the QA flows depend on has **less than 7 days of runway** (or cannot cover one run). ` +
+            `Money-flow QA fails in preflight once a core wallet (treasury, merchant, relayer) runs dry — top it up before then. ` +
+            `The eval-agent rows are reported here so a low eval balance is found before a failed night, ` +
+            `not by one: an eval run fails long before preflight does.`,
+          '',
+        ]
+      : []),
+    // The body is rewritten once more on a close, and neither lead is true then.
+    ...(walletAlarm || grantAlarm ? [] : ['Nothing is known to be `warn` or `critical` as of the last check.', '']),
     '| Wallet | Band | Address | Balance | Burn / day | Runway | Asset | Top up |',
     '|---|---|---|---|---|---|---|---|',
   ]
@@ -183,14 +242,16 @@ export function buildBody(report, { runUrl, repo, bands }) {
       `| ${row.name} | ${band} | ${row.address ? `\`${row.address}\`` : '—'} | ${balance} | ${burn} | ${fmtRunway(row)} | ${asset} | [how](${docBase}#${TOP_UP_ANCHOR[row.key]}) |`,
     )
   }
+  lines.push('', grantSummary(report.budgetGrant))
   const topUps = TOP_UP_WALLETS.map((wallet) => topUpSummary(wallet, report.topUps?.[wallet])).filter(Boolean)
   if (topUps.length > 0) lines.push('', ...topUps)
   lines.push(
     '',
     `Runway is the balance divided by the median observed daily drop over the last 14 daily readings; until 7 ` +
       `readings exist, a fixed fallback floor decides. \`warn\` is under 7 days, \`critical\` under 1 day or below ` +
-      `one run's cost. This issue closes itself when no wallet is \`warn\` or \`critical\`. What it means and how to ` +
-      `clear it: [${DOCS} § QA wallet balances](${docBase}#qa-wallet-balances-standing-issue).`,
+      `one run's cost. The QA budget grant is \`warn\` at 30 days or fewer before it ends, and \`critical\` at 7 days ` +
+      `or fewer or with no live budget. This issue closes itself when nothing is \`warn\` or \`critical\`. What it ` +
+      `means and how to clear it: [${DOCS} § QA wallet balances](${docBase}#qa-wallet-balances-standing-issue).`,
     '',
     `Last checked: ${report.checkedAt} · [run](${runUrl})`,
     '',
@@ -208,11 +269,11 @@ function buildCloseComment(report, runUrl) {
   const items = report.rows.map(
     (r) => `- ${r.name}: ${r.balance !== undefined ? `${r.balance} ${r.unit}` : '—'} (${r.band}${r.band === 'unknown' && r.reason ? ` — ${publicReason(r.reason)}` : ''})`,
   )
-  const unknown = report.rows.some((r) => r.band === 'unknown')
+  const unknown = bandRows(report).some((r) => r.band === 'unknown') || !report.budgetGrant
   const head = unknown
-    ? `No wallet is known to be \`warn\` or \`critical\` ([run](${runUrl})); a wallet that could not be read is listed as unknown. Closing.`
-    : `No wallet is \`warn\` or \`critical\` any more ([run](${runUrl})). Closing.`
-  return [head, '', ...items].join('\n')
+    ? `Nothing is known to be \`warn\` or \`critical\` ([run](${runUrl})); anything that could not be read is listed as unknown. Closing.`
+    : `Nothing is \`warn\` or \`critical\` any more ([run](${runUrl})). Closing.`
+  return [head, '', ...items, `- ${grantSummary(report.budgetGrant)}`].join('\n')
 }
 
 function parseList(json) {
@@ -258,12 +319,13 @@ export function syncIssue({ gh = defaultGh, report, runUrl, repo, log = console.
   )
   const issue = selectStandingIssue(list)
   const previous = readBands(issue?.body)
-  const bands = nextBands(previous, report.rows)
-  const alarm = report.rows.some((r) => ALARM.has(r.band))
+  const rows = bandRows(report)
+  const bands = nextBands(previous, rows)
+  const alarm = rows.some((r) => ALARM.has(r.band))
   const body = buildBody(report, { runUrl, repo, bands })
 
   if (alarm) {
-    const changes = bandChanges(previous, report.rows)
+    const changes = bandChanges(previous, rows)
     if (!issue) {
       const created = gh(['issue', 'create', '--title', ISSUE_TITLE, '--label', LABEL, '--body-file', '-'], { input: body })
       log(`Created the standing balances issue: ${String(created).trim()}`)
@@ -286,7 +348,7 @@ export function syncIssue({ gh = defaultGh, report, runUrl, repo, log = console.
     log(`Closed the standing balances issue #${n}`)
     return { action: 'closed', number: issue.number }
   }
-  log('No wallet is warn or critical; no open standing issue — nothing to do')
+  log('Nothing is warn or critical; no open standing issue — nothing to do')
   return { action: 'none' }
 }
 

@@ -9,6 +9,7 @@ covers:
   - scripts/ci/qa-failure-issue.mjs
   - scripts/ci/dev-push-health.mjs
   - scripts/ci/qa-balance-issue.mjs
+  - packages/backend/src/modules/mpp/allowances.ts
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
   - scripts/ci/guard-freshness.mjs
@@ -869,11 +870,12 @@ and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
 calls `npm run qa:balances -w packages/qa-agent`, which reads five wallets on
-Base Sepolia and may request testnet faucet ETH for the demo merchant's
-settlement wallet and the dev relayer, and testnet faucet USDC for the two
-agent-eval accounts (#3997). Then
+Base Sepolia and when the QA budget grant ends (#4666), and may request testnet
+faucet ETH for the demo merchant's settlement wallet and the dev relayer, and
+testnet faucet USDC for the two agent-eval accounts (#3997). Then
 `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**, `QA wallet
-balances low` (label `qa-funding`):
+balances low` (label `qa-funding`). Its title stays as it is when the grant is
+what raised it, because the script finds its issue by that exact title.
 
 | Wallet | Unit | Where the address comes from |
 |---|---|---|
@@ -902,6 +904,29 @@ readings exist, a fixed fallback floor decides, and the row says so:
 run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, 0.01 ETH
 for the relayer, or below one night's eval budget (3 USDC). `unknown` means a
 missing config value or a failed read.
+
+**The QA budget grant.** Money-flow QA was red from 2026-11-03 to 2026-11-04
+because the grant behind the standing identity's budget ended, and a balance
+reading cannot see that. So the check also reads
+`GET /machine-payments/allowances` with the QA agent key and takes
+`budget_expires_at` from the identity's open USDC budget: USDC with no recipient
+pin. A pinned budget neither satisfies nor raises the check. A re-keyed agent has
+a carry and a steady row, so the later end decides. The grant is reported beside
+the wallet table, not as a row in it, because it has no balance, burn or top-up:
+
+- `warn`: 30 days or fewer before it ends;
+- `critical`: 7 days or fewer, or no live open USDC budget. With no live budget,
+  the issue names the API's `budget_ended_at` when it carries one, which is the
+  latest ended budget of any token or pin, not necessarily this one;
+- `unknown`: an HTTP error, a read failure or timeout, a response with no
+  allowances list, or a live open budget with no usable `budget_expires_at`,
+  which includes a backend from before this field. With no QA API URL or agent
+  key it is `unknown` with the reason `config missing`, as on the treasury row.
+
+To clear it, [renew the QA budget before it ends](#renew-the-qa-budget-before-it-ends);
+with no live budget, follow [The QA budget ended](#the-qa-budget-ended).
+While the grant is `warn`, the standing issue stays open even with every wallet
+healthy, so read its lead paragraph before assuming a wallet is low.
 
 **How the issue behaves.**
 
@@ -948,12 +973,15 @@ missing config value or a failed read.
     the balance falls below the merchant's critical floor (3 days at the old
     0.002 ETH target), and a balance below that floor is `critical` whatever
     the history says.
-- **Any wallet `warn` or `critical`:** the body is rewritten, and the issue is
-  reopened (or created once). Each row carries the full address, balance, burn
-  per day, runway and a link to the matching top-up heading below.
-- **A comment is posted only when a wallet's band changes.**
-- **When no wallet is `warn` or `critical`:** the final balances are commented
-  and the issue closes itself.
+- **Any wallet or the grant `warn` or `critical`:** the body is rewritten, and
+  the issue is reopened (or created once). Each wallet row carries the full
+  address, balance, burn per day, runway and a link to the matching top-up
+  heading below. A grant alarm leads the body with the end date and a link to
+  [renew it](#renew-the-qa-budget-before-it-ends) or, with no live budget, a link
+  to [The QA budget ended](#the-qa-budget-ended).
+- **A comment is posted only when a band changes.**
+- **When nothing is `warn` or `critical`:** the final state is commented and the
+  issue closes itself.
 - **`unknown` never opens the issue and never blocks a close.**
 - **A *missing config* `unknown` turns the run red,** so GitHub notifies the
   owner. A failed read (an RPC or `/healthz` outage) does not.
@@ -1954,9 +1982,10 @@ Its author is mentioned on the episode's first comment only when the run class i
 The budget refills each period, but the grant itself ends. A grant built with no
 `expires_at` lasts 90 days, which is how the standing identity's 2026-08-05 grant
 came to end on 2026-11-03. A seeded grant lasts 364 days, so the current one ends
-about 2027-11-03. No check warns beforehand: the
-[QA wallet balances](#qa-wallet-balances-standing-issue) run reads balances, not
-grant expiry, and stays green.
+about 2027-11-03. The daily
+[QA wallet balances](#qa-wallet-balances-standing-issue) run warns 30 days ahead
+and is critical from 7 days ahead, through its standing issue, so
+[renew it](#renew-the-qa-budget-before-it-ends) before this section applies.
 
 Every spending leg goes red at once. These two wordings are specific to an ended
 grant:
@@ -1997,16 +2026,23 @@ agent and leaves the real one lapsed, and the seed refuses an owner key that is
 not this account's owner. If the owner key is lost, follow
 [Rotate the whole QA identity](#rotate-the-whole-qa-identity).
 
-The seed leaves a live budget of the same amount alone. To renew before it ends,
-set a different amount, which replaces the live grant. Set it after the `source`,
-because the file also sets it:
+### Renew the QA budget before it ends
+
+The seed leaves a live budget of the same amount alone: it prints
+`already granted — skipping`, and the warning stays. To renew before it ends,
+set any amount other than the live one, which replaces the live grant. It needs
+the owner key, as above. Set the amount after the `source`, because the file also sets it:
 
 ```bash
 (set -a; source ~/.haven/qa-delegation.env; SEED_ALLOWANCE_USDC=6; set +a; npm run seed -w packages/qa-agent)
 ```
 
 That also changes the budget amount, and going back to `5` replaces the grant
-again.
+again. The next run of QA wallet balances clears the warning, or dispatch it:
+
+```bash
+gh workflow run qa-balances.yml --repo d-hinders/Haven-AI --ref dev
+```
 
 ### Restore the QA identity file
 

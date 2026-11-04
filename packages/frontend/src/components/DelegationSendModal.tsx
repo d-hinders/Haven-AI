@@ -118,7 +118,9 @@ export default function DelegationSendModal({
   const presetRef = useRef(initialRecipient)
   const screenRef = useRef<HTMLDivElement>(null)
   const focusedStepRef = useRef<Step>(step)
-  const wasBusyRef = useRef(false)
+  const saveNameRef = useRef<HTMLInputElement>(null)
+  const wasWorkingRef = useRef(false)
+  const previousSaveStateRef = useRef<SaveState>(saveState)
 
   // Closing and reopening starts fresh (#4641 lifecycle): Details, no recipient
   // beyond the preset, empty amount, no error or result, empty contact name.
@@ -195,15 +197,33 @@ export default function DelegationSendModal({
   const canSend = ready && !busy && !sending
   const showSaveRow = step === 'done' && recipient?.kind === 'new' && !contactsLoading
 
-  // A send or a save disables the button that started it, which drops focus to
-  // `body` for good, and Tab then leaves the dialog. So when one ends on the same
-  // screen, a cancelled or failed send included, focus returns to that screen.
-  const busyNow = working || saving
+  // A send disables the button that started it, which drops focus to `body` for
+  // good, and Tab then leaves the dialog. So when one ends, a cancelled or failed
+  // send included, focus returns to the screen. This is unconditional on purpose:
+  // where a browser keeps focus on the re-enabled button, a stray Enter would hit
+  // "Try again" and restart the payment.
   useEffect(() => {
-    const ended = wasBusyRef.current && !busyNow
-    wasBusyRef.current = busyNow
+    const ended = wasWorkingRef.current && !working
+    wasWorkingRef.current = working
     if (ended && open) screenRef.current?.focus()
-  }, [busyNow, open])
+  }, [open, working])
+
+  // A save moves no money, and the user may have gone somewhere useful while it
+  // ran, such as back into the name field or to View transaction. So focus moves
+  // only if it was lost: to the name field after a failure, where the error and
+  // the kept name are, and otherwise to the screen.
+  useEffect(() => {
+    const previous = previousSaveStateRef.current
+    previousSaveStateRef.current = saveState
+    if (previous !== 'saving' || saveState === 'saving' || !open) return
+    const active = document.activeElement
+    if (active && active !== document.body) return
+    if (saveState === 'error') {
+      saveNameRef.current?.focus()
+    } else {
+      screenRef.current?.focus()
+    }
+  }, [open, saveState])
   const explorerUrl = txHash ? getExplorerUrlOrNull(chainId, 'tx', txHash) : null
 
   async function handleSend() {
@@ -501,6 +521,7 @@ export default function DelegationSendModal({
                   </label>
                   <Input
                     id="send-contact-name"
+                    ref={saveNameRef}
                     value={saveName}
                     onChange={(e) => setSaveName(e.target.value)}
                     placeholder="Name"

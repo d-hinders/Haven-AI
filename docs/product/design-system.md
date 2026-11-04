@@ -3577,8 +3577,8 @@ pair, where `Recipient` is `{ address, name?, kind: 'account' | 'contact' |
 'new' }`. `presetAddress` is an address to resolve into a chip; it may arrive
 before the data loads, in which case the field shows the short address with
 skeletons in place of the glyph and the kind, then resolves it to a name and kind once
-`accounts` and `contacts` are available, calling `onChange` once. It never says
-"New address" while contacts are still loading. `chainId` limits the own accounts offered to that
+`accounts` and `contacts` are available, calling `onChange` once. A preset never
+says "New address" while contacts are still loading. `chainId` limits the own accounts offered to that
 chain, `excludeAddress` is the sending account and is never offered, and
 `accounts`, `contacts`, `contactsLoading` and `contactsError` come from the
 caller's hooks.

@@ -245,7 +245,11 @@ describe('RecipientField — presetAddress', () => {
 
   it('draws no new-address glyph while the preset is being looked up', () => {
     render(<Harness presetAddress={ACME} contacts={[]} contactsLoading />)
-    expect(document.querySelector('[data-recipient-chip] svg:not([aria-label="Change recipient"] svg)')).toBeNull()
+    const chip = document.querySelector('[data-recipient-chip]') as HTMLElement
+    // The one icon left is the Change recipient ✕; the slot holds a skeleton disc.
+    expect(chip.querySelectorAll('svg')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Change recipient' }).querySelector('svg')).not.toBeNull()
+    expect(chip.querySelector('.animate-pulse.rounded-full')).not.toBeNull()
   })
 
   it('resolves a preset address that is an own account as the account', () => {
@@ -373,6 +377,22 @@ describe('RecipientField — a cleared chip stays cleared (#4660)', () => {
     rerender(<Harness presetAddress={RESEARCH} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
     expect(chip()).toHaveTextContent('Research API')
     neverReportedPreset(onChange)
+  })
+})
+
+describe('RecipientField — Enter picks a pasted address', () => {
+  it.each<[string, Partial<RecipientFieldProps>]>([
+    ['contacts loaded', {}],
+    ['contacts loading', { contacts: [], contactsLoading: true }],
+    ['contacts failed', { contacts: [], contactsError: 'Nope' }],
+  ])('with %s', (_name, props) => {
+    const onChange = vi.fn()
+    render(<Harness {...props} onChange={onChange} />)
+    const input = focusInput()
+    fireEvent.change(input, { target: { value: UNKNOWN } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onChange).toHaveBeenCalledWith({ address: UNKNOWN, kind: 'new' })
   })
 })
 

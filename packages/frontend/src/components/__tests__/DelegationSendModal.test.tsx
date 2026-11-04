@@ -478,6 +478,52 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
       expect(document.activeElement).toHaveTextContent('1.5 USDC sent')
     })
 
+    describe('when a save ends, focus moves only if it was lost', () => {
+      async function startSave(result: Promise<unknown>) {
+        contactsFixture.addContact.mockImplementation(() => result)
+        await sendToNewAddress()
+        fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Acme' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy())
+      }
+
+      it('a failed save with focus lost lands on the name field', async () => {
+        let fail: (reason: Error) => void = () => {}
+        await startSave(new Promise((_, reject) => { fail = reject }))
+        ;(document.activeElement as HTMLElement).blur()
+        expect(document.activeElement).toBe(document.body)
+
+        fail(new Error('nope'))
+
+        await waitFor(() => expect(screen.getByText(/could not save this contact/)).toBeTruthy())
+        expect(document.activeElement).toBe(screen.getByPlaceholderText('Name'))
+      })
+
+      it('a failed save leaves someone already back in the name field where they are', async () => {
+        let fail: (reason: Error) => void = () => {}
+        await startSave(new Promise((_, reject) => { fail = reject }))
+        const name = screen.getByPlaceholderText('Name')
+        name.focus()
+
+        fail(new Error('nope'))
+
+        await waitFor(() => expect(screen.getByText(/could not save this contact/)).toBeTruthy())
+        expect(document.activeElement).toBe(name)
+      })
+
+      it('a successful save does not pull focus off View transaction', async () => {
+        let succeed: (value: unknown) => void = () => {}
+        await startSave(new Promise((resolve) => { succeed = resolve }))
+        const link = screen.getByRole('link', { name: 'View transaction' })
+        link.focus()
+
+        succeed(contact({ id: 'c-Acme', name: 'Acme', address: NEW_ADDRESS }))
+
+        await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
+        expect(document.activeElement).toBe(link)
+      })
+    })
+
     it('the success screen keeps focus inside the dialog', async () => {
       await sendToNewAddress()
 

@@ -188,14 +188,11 @@ describe('Combobox — keyboard', () => {
       expect(onPick).not.toHaveBeenCalled()
     })
 
-    it('is not alone beside a group still loading or failed: that group may hold a match', () => {
+    it.each(['loading', 'error'] as const)('is not alone beside a group in %s: that group may hold a match', (kind) => {
       const onPick = vi.fn()
       render(
         <Harness
-          groups={[
-            ...ONE,
-            { id: 'contacts', label: 'Contacts', options: [], status: { kind: 'loading', text: 'Loading' } },
-          ]}
+          groups={[...ONE, { id: 'contacts', label: 'Contacts', options: [], status: { kind, text: 'Status' } }]}
           onPick={onPick}
         />,
       )

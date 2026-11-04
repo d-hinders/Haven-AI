@@ -3513,7 +3513,7 @@ export default function DesignSystemPage() {
         title="Manual send"
         description="Two screens in one dialog since #4641: Details collects the recipient and the amount, Review is the confirmation the user reads before the passkey prompt. The Review screen is not an approval hold — nothing queues, and the payment still executes, or reverts on-chain, exactly as before. Actions live in the dialog footer through DialogActions."
       >
-        <div className="grid gap-5 lg:grid-cols-2">
+        <div className="grid gap-5 xl:grid-cols-2">
           <Card hover={false} className="p-5">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Details</h3>
             <div className="mt-4 space-y-4">
@@ -3598,7 +3598,7 @@ export default function DesignSystemPage() {
             gate cannot drive. The markup is the dialog's own — `DialogResult`
             plus the "Save as contact" row — so the clip still pins what ships.
           */}
-          <div data-testid="ds-send-sent" className="lg:col-span-2">
+          <div data-testid="ds-send-sent" className="xl:col-span-2">
             <Card hover={false} className="p-5">
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Sent</h3>
             <div className="mt-4 space-y-4">

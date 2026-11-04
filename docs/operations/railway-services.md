@@ -6,7 +6,7 @@ covers:
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
   - packages/backend/src/config.ts
-last-verified: "2026-10-06"
+last-verified: "2026-11-04"
 ---
 
 # Railway Services
@@ -35,7 +35,8 @@ One Railway project, **Haven AI**, with two environments of the same shape:
 | `Demo-merchant` | root `/`, build `npm ci && npm run build -w packages/demo-merchant-mcp` | `node packages/demo-merchant-mcp/dist/index.js` | **on** / **on** | none set (probe `GET /healthz`) |
 | `Postgres` | image `ghcr.io/railwayapp-templates/postgres-ssl:18` | none | off / off | none |
 
-Verified against both environments on 2026-10-06.
+Sleep settings and start commands verified against both environments on
+2026-11-04; builds and healthchecks on 2026-10-06.
 
 ### Start commands run `node`, never `npm run start`
 
@@ -65,11 +66,48 @@ three consecutive failures. Since #4300 the whole refresh run is bounded to
 10 min. A row the run does not reach is not counted as a failure, and is
 probed first next run.
 
+**The dev hosted MCP's setting is on, but it does not sleep in practice.** One
+of our own long-running clients keeps it busy: four small requests every 3
+minutes and a `haven_get_allowances` read every 6. Its billed memory stayed at
+84–144 MB in every 6-hour window from 2026-11-01 to 2026-11-04, close to the
+always-on production copy's 105–112 MB.
+
+### Dev Postgres memory
+
+Dev Postgres runs `shared_buffers = 32MB`, set on 2026-11-04. It is an
+`ALTER SYSTEM` setting, so it lives in `postgresql.auto.conf` on the volume and
+does not appear in the service's variables. Production was not changed.
+
+Shared memory was the largest part of the container: 162 MB of 280 MB, against
+24 MB private to Postgres processes, with 128 MB of it the buffer pool for a
+210 MB database. `max_connections` stays at 500. Lowering it would free only a
+few MB, and the reason it was raised is not recorded.
+
+Container memory also counts the page cache, and pages dropped from the buffer
+pool can move there, so the saving can be smaller than the change in
+`shared_buffers`. Judge it from the billing meter over a full day, not from a
+reading taken soon after a restart, when the caches are empty.
+
+The database has no public URL, so reach it from inside the container. To undo
+the change, run this in `railway ssh --service Postgres --environment dev`:
+
+```bash
+PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER SYSTEM RESET shared_buffers"
+```
+
+Then restart the service, which briefly interrupts everything using dev:
+
+```bash
+railway restart --service Postgres --environment dev --yes
+```
+
 ## Reading cost
 
 Railway bills Hobby usage per resource-minute, and **memory is nearly all of
 it**: $8.20 of the $8.68 on the 2026-09 invoice. The cost of the project is
-roughly how many MB the eight service instances keep resident, around the clock.
+roughly how many MB the eight service instances keep resident, around the clock:
+100 MB held all month costs about $1. The $5 Hobby fee is a usage minimum, so
+savings stop once usage reaches $5.
 
 **Read memory from the billing meter, not the Metrics graph.** For a sleeping
 service the graph holds the last reported value, so a service that slept most

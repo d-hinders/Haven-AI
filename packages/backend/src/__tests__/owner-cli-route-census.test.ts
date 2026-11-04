@@ -369,6 +369,8 @@ describe('owner_cli route census (#2526)', () => {
       // this census, so the assertion below that they are NOT on the
       // allow-list is a real check rather than a vacuous one.
       'GET /user/accounts',
+      // `haven contacts list` needs it; only the writes left the list (2026-11-04).
+      'GET /contacts',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)

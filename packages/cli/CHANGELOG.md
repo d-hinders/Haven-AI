@@ -21,7 +21,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   (exit 4).** Add and remove saved contacts in the dashboard: a contact is a name the
   owner trusts when paying, and an agent drives this CLI. `haven contacts list` still
   works. The backend also refuses these writes from a device-code session, so an older
-  CLI on one gets a 401 (exit 3).
+  CLI on one gets a 401 (exit 3), and logging in again does not change that.
 
 ## 0.13.0-alpha.0 — 2026-10-30
 

@@ -162,7 +162,19 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(dialog.getByText("You're sending")).toHaveCount(1)
       await expect(dialog.getByText(`${AMOUNT} USDC`, { exact: true })).toHaveCount(1)
       await expect(dialog.getByText(CONTACT_NAME)).toHaveCount(1)
-      await expect(dialog.getByTestId('review-recipient-address')).toHaveText(testRecipientAddress)
+      const address = dialog.getByTestId('review-recipient-address')
+      await expect(address).toHaveText(testRecipientAddress)
+      // Two balanced lines at every width: jsdom cannot see this, and it once
+      // wrapped 4, 5, 1 in the desktop column.
+      const perLine = await address.evaluate((el) => {
+        const counts = new Map<number, number>()
+        for (const group of Array.from(el.querySelectorAll('.whitespace-nowrap > span'))) {
+          const top = Math.round(group.getBoundingClientRect().top)
+          counts.set(top, (counts.get(top) ?? 0) + 1)
+        }
+        return Array.from(counts.values())
+      })
+      expect(perLine).toEqual([5, 5])
       await expect(dialog.getByText('Base', { exact: true })).toHaveCount(1)
       await expect(dialog.getByText('None. Haven covers it.')).toHaveCount(1)
       await expect(dialog.getByText("A sent payment can't be reversed. You approve it on the next step.")).toHaveCount(1)

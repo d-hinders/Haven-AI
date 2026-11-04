@@ -989,6 +989,7 @@ describe('management commands (backend-only)', () => {
       expect(err.join('\n')).toContain('Haven dashboard')
       expect(api.calls).toEqual([])
     }
+    expect(helpText()).not.toMatch(/contacts (add|remove)/)
   })
 
   it('surfaces a backend error message', async () => {

@@ -293,7 +293,11 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     render(<DelegationSendModal {...PROPS} />)
     goToReview({ address: ACME, option: /Acme Services/ })
     expect(screen.getByText('Acme Services')).toBeTruthy()
-    expect(screen.getByTestId('review-recipient-address').textContent).toBe(ACME)
+    const address = screen.getByTestId('review-recipient-address')
+    expect(address.textContent).toBe(ACME)
+    // Grouped, not merely full: two lines of five groups.
+    expect(address.querySelectorAll('.whitespace-nowrap')).toHaveLength(2)
+    expect(address.querySelectorAll('.whitespace-nowrap > span')).toHaveLength(10)
     expect(screen.queryByText('0x2c9D…77ab')).toBeNull()
   })
 

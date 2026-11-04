@@ -1,3 +1,4 @@
+import { ethers } from 'ethers'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ensureBudget, findReusableAgent, main } from './seed.js'
 
@@ -68,7 +69,8 @@ describe('ensureBudget', () => {
     periodMin: 1440,
   } as Parameters<typeof ensureBudget>[0]
   const nowSec = () => Math.floor(Date.now() / 1000)
-  const grant = (delegation_hash: string, expires_at: number) => ({
+  const OWNER = new ethers.Wallet(budgetConfig.ownerKey).address
+  const grant = (delegation_hash: string, expires_at: number, overrides: Record<string, unknown> = {}) => ({
     chain_id: 84532,
     token_address: USDC,
     recipient_address: null,
@@ -77,13 +79,17 @@ describe('ensureBudget', () => {
     delegation_hash,
     // node-postgres decodes int8 as a string; the route passes it through.
     expires_at: String(expires_at),
+    ...overrides,
   })
 
-  function installDelegations(delegations: unknown[]) {
+  function installDelegations(delegations: unknown[], ownerAddress: string | null = OWNER.toLowerCase()) {
     const bodies: Record<string, Record<string, unknown>> = {}
     const fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
       const path = String(input).replace(API, '')
       if (path === '/agents/agent-1/delegations') return json({ delegations })
+      if (path === '/agents/agent-1/account-signers') return json({ owner_address: ownerAddress })
+      // Replaced rows get an owner-signed Stop; a failed Stop is logged, not fatal.
+      if (path.endsWith('/revoke')) return json({ error: 'not exercised here' }, 500)
       if (path === '/agents/agent-1/delegations/build') {
         bodies.build = JSON.parse(String(init?.body))
         return json(
@@ -108,9 +114,9 @@ describe('ensureBudget', () => {
     return { fetch, bodies }
   }
 
-  // #2769: an expired grant keeps status='active' (the status CHECK has no
-  // expired value, #3542), so matching on status and amount alone reported the
-  // lapsed budget as "already granted" and the recovery run changed nothing.
+  // The 2026-11-03 lapse: an expired grant keeps status='active' (the status
+  // CHECK has no expired value), so matching on status and amount alone reported
+  // the lapsed budget as "already granted" and the recovery run changed nothing.
   it('grants anew over a lapsed budget of the same amount, without naming it as replaced', async () => {
     const { bodies } = installDelegations([grant('0xlapsed', nowSec() - DAY)])
 
@@ -124,6 +130,52 @@ describe('ensureBudget', () => {
 
   it('leaves a live budget of the same amount alone', async () => {
     const { fetch } = installDelegations([grant('0xlive', nowSec() + DAY)])
+
+    await ensureBudget(budgetConfig, 'token', 'agent-1', FIVE_USDC)
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not count a live pinned budget: the EIP-3009 legs need an open one', async () => {
+    const pinned = grant('0xpinned', nowSec() + DAY, { recipient_address: '0x' + 'cd'.repeat(20) })
+    const { bodies } = installDelegations([pinned])
+
+    await ensureBudget(budgetConfig, 'token', 'agent-1', FIVE_USDC)
+
+    expect(bodies.build).toMatchObject({ recipient_address: null })
+    expect(bodies.build).not.toHaveProperty('replaces')
+  })
+
+  it('replaces every live open row when the amount differs, naming a re-keyed pair', async () => {
+    const other = { budget_atomic: '2000000' }
+    const { bodies } = installDelegations([
+      grant('0xcarry', nowSec() + DAY, other),
+      grant('0xsteady', nowSec() + DAY, other),
+    ])
+
+    await ensureBudget(budgetConfig, 'token', 'agent-1', FIVE_USDC)
+
+    expect(bodies.build?.replaces).toEqual(['0xcarry', '0xsteady'])
+    expect(bodies.activate?.replaces).toEqual(['0xcarry', '0xsteady'])
+  })
+
+  // Activate checks only the signature's shape, so a wrong key would otherwise
+  // leave a live-looking grant that reverts on every payment.
+  it.each([
+    ['another EOA', '0x' + 'ab'.repeat(20)],
+    ['no EOA owner', null],
+  ])('refuses before building or signing when the account has %s', async (_case, ownerAddress) => {
+    const { bodies } = installDelegations([grant('0xlapsed', nowSec() - DAY)], ownerAddress)
+
+    await expect(ensureBudget(budgetConfig, 'token', 'agent-1', FIVE_USDC)).rejects.toThrow(
+      /SEED_OWNER_PRIVATE_KEY.*Nothing was signed/,
+    )
+    expect(bodies.build).toBeUndefined()
+    expect(bodies.activate).toBeUndefined()
+  })
+
+  it('does not ask for the owner when a live budget means there is nothing to sign', async () => {
+    const { fetch } = installDelegations([grant('0xlive', nowSec() + DAY)], '0x' + 'ab'.repeat(20))
 
     await ensureBudget(budgetConfig, 'token', 'agent-1', FIVE_USDC)
 

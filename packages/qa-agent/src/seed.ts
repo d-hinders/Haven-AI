@@ -307,11 +307,38 @@ interface DelegationRow {
 /**
  * How long a seeded grant lasts. The build route defaults to 90 days and caps
  * at 365 on its own clock (#4351), so this stays a day short of the cap. Every
- * spending leg of the money-flow suite stops when the grant ends (#2769), and
- * renewing it takes an owner signature, so a testnet QA identity asks for the
- * longest grant the route allows.
+ * spending leg of the money-flow suite stops when the grant ends, as it did on
+ * 2026-11-03, and renewing it takes an owner signature, so a testnet QA
+ * identity asks for the longest grant the route allows.
  */
 const QA_BUDGET_LIFETIME_SECONDS = 364 * 86_400
+
+/**
+ * Refuse before signing with a key that is not the account's owner. Activate
+ * checks only the signature's shape, because the real validator is EIP-1271 at
+ * redemption. A wrong key's grant would therefore read as granted, revert on
+ * every payment, and make later runs with the right key skip it as live.
+ */
+async function assertKeyOwnsAccount(
+  cfg: SeedConfig,
+  token: string,
+  agentId: string,
+  owner: ethers.Wallet,
+): Promise<void> {
+  const { owner_address } = await api<{ owner_address: string | null }>(
+    cfg,
+    'GET',
+    `/agents/${agentId}/account-signers`,
+    { token },
+  )
+  if (owner_address?.toLowerCase() !== owner.address.toLowerCase()) {
+    throw new Error(
+      `SEED_OWNER_PRIVATE_KEY is for ${owner.address}, but this account's owner is ` +
+        `${owner_address ?? 'not an EOA (the account has only passkey signers)'}. ` +
+        'Nothing was signed. Use the key of the owner that provisioned this account.',
+    )
+  }
+}
 
 export async function ensureBudget(
   cfg: SeedConfig,
@@ -326,8 +353,9 @@ export async function ensureBudget(
     { token },
   )
   // Only a LIVE row counts. An expired grant keeps status='active' (the status
-  // CHECK has no expired value, #3542), so without the expiry test a lapsed
-  // budget reads as "already granted" and a recovery run changes nothing (#2769).
+  // CHECK has no expired value), so without the expiry test a lapsed budget
+  // reads as "already granted" and a recovery run changes nothing, which is what
+  // the 2026-11-03 lapse of the standing QA budget ran into.
   //
   // #3933: a live budget in the same (USDC, open) slot with a different
   // amount is REPLACED through the edit composition — the new grant names
@@ -351,6 +379,9 @@ export async function ensureBudget(
   }
   const replaces = occupying.length > 0 ? occupying.map((d) => d.delegation_hash as string) : undefined
 
+  const owner = new ethers.Wallet(cfg.ownerKey)
+  await assertKeyOwnsAccount(cfg, token, agentId, owner)
+
   const built = await api<{
     delegation_hash?: string
     signing_payload?: TypedDataPayload
@@ -372,7 +403,6 @@ export async function ensureBudget(
     throw new Error('delegations/build did not return a signable payload')
   }
 
-  const owner = new ethers.Wallet(cfg.ownerKey)
   const { domain, types, message } = built.signing_payload
   const signable = Object.fromEntries(
     Object.entries(types).filter(([name]) => name !== 'EIP712Domain'),

@@ -85,6 +85,9 @@ import { formatClockTime, truncate } from '@/lib/format'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import { AgentCard, type AgentCardDashboard } from '@/components/agent-panel/AgentCard'
 import type { Agent } from '@/hooks/useAgents'
+import { Combobox, type ComboboxGroup } from '@/components/ui/Combobox'
+import { RecipientField, type Recipient } from '@/components/RecipientField'
+import type { Contact } from '@/hooks/useContacts'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -1385,6 +1388,137 @@ function LabelledCopyDemo() {
           blocked, so the value is shown instead.
         </p>
       ) : null}
+    </div>
+  )
+}
+
+// ── Combobox and recipient field (#4640) ────────────────────────────────────
+// Fixture data through the props, so every state on the page is deterministic:
+// no hook, no fetch, no clock. The two components own no data by design, which
+// is exactly what makes a specimen this cheap.
+const DS_SENDING_ACCOUNT = '0x1111111111111111111111111111111111111111'
+const DS_SAVINGS = '0x7A58f0D1c9B4e2A6837F5C1d0E9b4a2C6d8191C2'
+const DS_ACME = '0x2c9D0000000000000000000000000000000077ab'
+const DS_RESEARCH = '0x31bc000000000000000000000000000000008d04'
+const DS_UNKNOWN = '0x3b7E00000000000000000000000000000000D09a'
+
+const DS_RECIPIENT_ACCOUNTS: SmartAccount[] = [
+  {
+    id: 'ds-account-1',
+    account_address: DS_SENDING_ACCOUNT,
+    chain_id: 8453,
+    name: 'Operating wallet',
+    is_default: true,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'ds-account-2',
+    account_address: DS_SAVINGS,
+    chain_id: 8453,
+    name: 'Savings',
+    is_default: false,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+]
+
+const DS_RECIPIENT_CONTACTS: Contact[] = [
+  {
+    id: 'ds-contact-1',
+    name: 'Acme Services',
+    address: DS_ACME,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'ds-contact-2',
+    name: 'Research API',
+    address: DS_RESEARCH,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  },
+]
+
+const DS_COMBOBOX_GROUPS: ComboboxGroup[] = [
+  {
+    id: 'accounts',
+    label: 'Your accounts',
+    options: [
+      {
+        id: 'account:savings',
+        title: 'Savings',
+        subtitle: `Your account · ${truncate(DS_SAVINGS)}`,
+        leading: <Monogram name="Savings" size="xs" decorative />,
+      },
+    ],
+  },
+  {
+    id: 'contacts',
+    label: 'Contacts',
+    options: [
+      {
+        id: 'contact:acme',
+        title: 'Acme Services',
+        subtitle: `Saved contact · ${truncate(DS_ACME)}`,
+        leading: <Monogram name="Acme Services" size="xs" decorative />,
+      },
+      {
+        id: 'contact:research',
+        title: 'Research API',
+        subtitle: `Saved contact · ${truncate(DS_RESEARCH)}`,
+        leading: <Monogram name="Research API" size="xs" decorative />,
+      },
+    ],
+  },
+]
+
+/** The Combobox specimen. The list opens from the real trigger — focus — so the
+ * pixel gate drives it rather than photographing a permanently-open copy. */
+function DsComboboxSpecimen({ initialQuery = '' }: { initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery)
+  return (
+    <Combobox
+      label="Recipient"
+      placeholder="Name or address"
+      query={query}
+      onQueryChange={setQuery}
+      groups={DS_COMBOBOX_GROUPS}
+      onPick={() => {}}
+      footer="Or paste a wallet address"
+    />
+  )
+}
+
+/** The RecipientField specimen — controlled, fed fixture data through the props. */
+function DsRecipientSpecimen({
+  caption,
+  initialQuery = '',
+  value = null,
+  contacts = DS_RECIPIENT_CONTACTS,
+  contactsLoading = false,
+  contactsError = null,
+}: {
+  caption: string
+  initialQuery?: string
+  value?: Recipient | null
+  contacts?: Contact[]
+  contactsLoading?: boolean
+  contactsError?: string | null
+}) {
+  const [current, setCurrent] = useState<Recipient | null>(value)
+  return (
+    <div className="space-y-2">
+      <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">{caption}</p>
+      <RecipientField
+        value={current}
+        onChange={setCurrent}
+        initialQuery={initialQuery}
+        chainId={8453}
+        excludeAddress={DS_SENDING_ACCOUNT}
+        accounts={DS_RECIPIENT_ACCOUNTS}
+        contacts={contacts}
+        contactsLoading={contactsLoading}
+        contactsError={contactsError}
+      />
     </div>
   )
 }
@@ -3455,6 +3589,113 @@ export default function DesignSystemPage() {
             </div>
           ))}
         </Card>
+      </Section>
+
+      <Section
+        title="Combobox and recipient field"
+        description="The searchable picker the design system did not have. Combobox is the primitive — an editable combobox over caller-supplied groups, owning no data. RecipientField is the Send dialog's field built on it: your accounts, then your contacts, then a pasted address, with the caller owning the one useContacts() and one useAccounts() so a contact saved in the dialog shows up here. Focus a field to open its list; the pixel gate drives that trigger for the clips below."
+      >
+        <div data-testid="ds-combobox" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Combobox</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Groups named by their visible label, options shaped like Row, the active option on
+              <code className="mx-1 font-mono">--v2-surface-hover</code>. From <code className="font-mono">sm</code> up
+              the list is a portaled popover; below it, inline under the field.
+            </p>
+            <div className="mt-4">
+              <DsComboboxSpecimen />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-field" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recipient field</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Your accounts, then your contacts, then a pasted address. Typing filters by name or
+              address prefix; a pasted address collapses the list to one entry.
+            </p>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Empty focus — every group" />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-paste" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Pasted address</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              A known address collapses to its entry, with the kind it resolved to. Precedence is
+              own account, then contact, then new.
+            </p>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Pasted known address" initialQuery={DS_ACME} />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-status" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Contacts unavailable</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Your accounts and paste keep working. The failure line is the one
+              <code className="mx-1 font-mono">docs/product/screen-recipes.md</code> requires.
+            </p>
+            <div className="mt-4">
+              <DsRecipientSpecimen
+                caption="Contacts failed to load"
+                contacts={[]}
+                contactsError="We could not load your contacts."
+              />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-chips" className="grid gap-4 sm:grid-cols-3">
+          <DsRecipientSpecimen
+            caption="Chosen — your account"
+            value={{ address: DS_SAVINGS, name: 'Savings', kind: 'account' }}
+          />
+          <DsRecipientSpecimen
+            caption="Chosen — saved contact"
+            value={{ address: DS_ACME, name: 'Acme Services', kind: 'contact' }}
+          />
+          <DsRecipientSpecimen
+            caption="Chosen — new address"
+            value={{ address: DS_UNKNOWN, kind: 'new' }}
+          />
+        </div>
+
+        {/* The remaining states, deterministic through the props and covered by
+            the vitest suites rather than by a clip: a filtered Combobox, a
+            pasted new address, no match, and contacts still loading. */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Filtered</h3>
+            <div className="mt-4">
+              <DsComboboxSpecimen initialQuery="ac" />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Pasted new address</h3>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Not saved anywhere" initialQuery={DS_UNKNOWN} />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">No match</h3>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Nothing saved matches" initialQuery="zzz" />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Contacts loading</h3>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="One-line skeleton" contacts={[]} contactsLoading />
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section

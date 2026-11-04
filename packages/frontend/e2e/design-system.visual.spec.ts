@@ -1224,4 +1224,156 @@ test.describe('design-system visual regression', () => {
       `${what} grew past the ${viewportHeight}px viewport (${box.height}px) — the showcase no longer fits the fold; shrink the sample or split this clip`,
     ).toBeLessThanOrEqual(viewportHeight)
   }
+
+  /**
+   * ── The Combobox and RecipientField specimens (#4640) ───────────────────────
+   *
+   * Two widths, and 375 is NOT in `VIEWPORTS` on purpose. Adding a width there
+   * mints a blocking baseline and a PNG of every route in every evidence run,
+   * forever — the reason #1944 declined 320 and #2006 built an opt-in override
+   * instead. These clips are scoped to two specimens, so the phone width is
+   * local to this block: 375 is the width the issue names, and it sits in the
+   * same below-`sm` band as the committed 390.
+   *
+   * ── Why the capture drives the trigger ──────────────────────────────────────
+   *
+   * The list opens on focus, and `/design-system` renders these LIVE rather than
+   * as permanently-open copies (§ *Showcase copies of overlays*). So the clip
+   * focuses the field first — the same shape the Modal specimen already uses
+   * (`getByRole('button', { name: 'Open modal' }).click()`).
+   *
+   * The focus has to happen AFTER `isolateShowcaseSample`, because isolation
+   * hides the content above the sample and moves the field up the page; a
+   * popover positioned before that move would be anchored to a stale rect. That
+   * is why this helper isolates first and does not route through
+   * `expectShowcaseClip` (which isolates again, after the focus).
+   *
+   * ── Why the sample box is taller than its card ──────────────────────────────
+   *
+   * From `sm` up the list is portaled to `document.body`, so it is not a
+   * descendant of the sample. `locator.screenshot()` captures the page region of
+   * the element's box, overlapping elements included — so the sample's box has
+   * to CONTAIN the popover's area. Each specimen wrapper reserves that height
+   * (`min-h-[420px]`), which is what makes the portaled list visible in the clip
+   * instead of cropped out of it.
+   */
+  const SPECIMEN_VIEWPORTS = [
+    { name: 'desktop', width: 1280, height: 800 },
+    { name: 'phone', width: 375, height: 812 },
+  ] as const
+
+  async function expectOpenSpecimenClip(
+    sample: Locator,
+    viewportHeight: number,
+    what: string,
+    baseline: string,
+  ) {
+    await isolateShowcaseSample(sample)
+    await sample.getByRole('combobox').focus()
+    // The list is a descendant of the sample below `sm` and a PORTALED child of
+    // `document.body` from `sm` up, so the assertion is page-wide: the popover
+    // marker is the one handle both layouts share.
+    await expect(sample.page().locator('[data-combobox-popover]')).toBeVisible()
+    await assertFitsViewport(sample, viewportHeight, what)
+    await assertClearOfTabBar(sample, viewportHeight, what)
+    await expect(sample).toHaveScreenshot(baseline, {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+      threshold: PIXEL_THRESHOLD,
+    })
+  }
+
+  for (const vp of SPECIMEN_VIEWPORTS) {
+    test(`/design-system Combobox specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-combobox')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the Combobox specimen',
+        `design-system-combobox-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system RecipientField specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-field')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the RecipientField specimen',
+        `design-system-recipient-field-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system pasted-address specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-paste')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the pasted-address specimen',
+        `design-system-recipient-paste-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system contacts-unavailable specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-status')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the contacts-unavailable specimen',
+        `design-system-recipient-status-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system recipient chips render pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-chips')
+      await expect(sample).toHaveCount(1)
+      await expectShowcaseClip(
+        sample,
+        vp.height,
+        'the recipient chips',
+        `design-system-recipient-chips-${vp.name}${schemeSuffix}.png`,
+        SAMPLE_MAX_DIFF_PIXELS,
+      )
+    })
+  }
 })

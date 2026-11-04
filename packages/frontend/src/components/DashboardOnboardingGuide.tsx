@@ -291,7 +291,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${ACTIVE_STEP_RING_CLASS} text-xs font-semibold text-[var(--v2-ink-2)] v2-tabular`}
+        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${ACTIVE_STEP_RING_CLASS} text-xs font-medium text-[var(--v2-ink-2)] v2-tabular`}
       >
         {number}
       </span>
@@ -300,7 +300,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
   return (
     <span
       aria-hidden="true"
-      className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${PENDING_STEP_DISC_CLASS} text-xs font-semibold v2-tabular`}
+      className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${PENDING_STEP_DISC_CLASS} text-xs font-medium v2-tabular`}
     >
       {number}
     </span>

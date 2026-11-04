@@ -1852,8 +1852,8 @@ nothing, so the button cannot read as a different size beside a 36px or 40px `Bu
 which is what the framed copies did on the contacts row, the account page and the agents
 list. `aria-label` is required: the glyph says nothing, so name what the menu acts on. As
 the last control on a line (a page header, a list row), pass `edge="end"`: it pulls the
-empty part of the target over the edge, so the dots meet the right edge of the content
-below instead of floating inside it. The sidebar's user menu is the one ⋮ that is not this button: it is not a `DropdownMenu`, has
+empty part of the target over the edge, so the icon box sits on the content's right edge
+and the dots about 7px inside it, rather than 21px. The sidebar's user menu is the one ⋮ that is not this button: it is not a `DropdownMenu`, has
 its own upward popover, and was already frameless.
 
 #### Button-shaped controls that are not `Button`

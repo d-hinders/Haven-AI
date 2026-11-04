@@ -2819,7 +2819,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Dropdown menu (kebab)"
-        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is always DropdownMenuIconTrigger: the three dots with no frame, tinted on hover, with a 44px tap target that draws nothing so it never reads as a different size beside a Button. As the last control on a line, pass edge='end' so the dots meet the content's right edge. Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is always DropdownMenuIconTrigger: the three dots with no frame, tinted on hover, with a 44px tap target that draws nothing so it never reads as a different size beside a Button. As the last control on a line, pass edge='end' so the dots line up with the content's right edge. Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6">

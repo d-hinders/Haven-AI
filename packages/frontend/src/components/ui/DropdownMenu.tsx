@@ -135,8 +135,9 @@ const ICON_TRIGGER_CLASS =
  *
  * `edge="end"` is for the last control on a line, such as a page header or a
  * list row. With no frame, the empty part of the target would leave the dots
- * floating inside the line's right edge, so it pulls the target over the edge
- * by the difference and the dots line up with the content below.
+ * floating well inside the line's right edge, so it pulls the target over the
+ * edge until the icon box sits on it. The dots end up about 7px in, which reads
+ * as aligned and keeps the hover tint close to the content.
  */
 export function DropdownMenuIconTrigger({
   'aria-label': ariaLabel,

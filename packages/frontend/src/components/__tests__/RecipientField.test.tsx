@@ -228,6 +228,7 @@ describe('RecipientField — presetAddress', () => {
     const resolved = document.querySelector('[data-recipient-chip]') as HTMLElement
     expect(resolved).toHaveTextContent('Acme Services')
     expect(resolved).toHaveTextContent('Saved contact')
+    expect(resolved).not.toHaveAttribute('aria-busy')
   })
 
   it('resolves a preset that is both an own account and a contact as the account', () => {

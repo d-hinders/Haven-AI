@@ -466,6 +466,25 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
       expect(document.activeElement?.tagName).toBe('DIV')
     })
 
+    it('focus moves when a send ends, not when it starts', async () => {
+      let finish: (value: unknown) => void = () => {}
+      const send = vi.fn(() => new Promise((resolve) => { finish = resolve }))
+      mockUseSend.mockReturnValue(base({ send }))
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+      const sendButton = screen.getByRole('button', { name: /^Send / })
+      sendButton.focus()
+      fireEvent.click(sendButton)
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Sending…' })).toBeTruthy())
+      expect(document.activeElement).toBe(sendButton)
+
+      finish({ ok: false, reason: 'cancelled' })
+
+      await waitFor(() => expect(screen.getByText('Approval was cancelled.')).toBeTruthy())
+      expect(document.activeElement).toHaveTextContent("You're sending")
+      expect(document.activeElement?.tagName).toBe('DIV')
+    })
+
     it('moving focus to a screen never scrolls it', () => {
       mockUseSend.mockReturnValue(base())
       render(<DelegationSendModal {...PROPS} />)
@@ -488,11 +507,17 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
         render(<DelegationSendModal {...PROPS} />)
         goToReview()
         scrollIntoView.mockClear()
+        const focus = vi.spyOn(HTMLElement.prototype, 'focus')
         fireEvent.click(screen.getByRole('button', { name: /^Send / }))
 
         await waitFor(() => expect(screen.getByText(text)).toBeTruthy())
         expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+        // The message itself: the screen around it holds this text too, and
+        // scrolling that would leave the message below the fold.
         expect(scrollIntoView.mock.instances[0]).toHaveTextContent(text)
+        expect(scrollIntoView.mock.instances[0]).not.toHaveTextContent("You're sending")
+        expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+        focus.mockRestore()
       } finally {
         Element.prototype.scrollIntoView = original
       }
@@ -543,18 +568,33 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
         expect(document.activeElement).toBe(name)
       })
 
+      it('a failed save leaves someone on View transaction where they are', async () => {
+        let fail: (reason: Error) => void = () => {}
+        await startSave(new Promise((_, reject) => { fail = reject }))
+        const link = screen.getByRole('link', { name: 'View transaction' })
+        link.focus()
+
+        fail(new Error('nope'))
+
+        await waitFor(() => expect(screen.getByText(/could not save this contact/)).toBeTruthy())
+        expect(document.activeElement).toBe(link)
+      })
+
       it('a save that ends brings back focus that escaped behind the dialog', async () => {
         let succeed: (value: unknown) => void = () => {}
         await startSave(new Promise((resolve) => { succeed = resolve }))
         const behind = document.createElement('button')
         document.body.appendChild(behind)
         behind.focus()
+        const focus = vi.spyOn(HTMLElement.prototype, 'focus')
 
         succeed(contact({ id: 'c-Acme', name: 'Acme', address: NEW_ADDRESS }))
 
         await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
         expect(document.activeElement).toHaveTextContent('1.5 USDC sent')
         expect(document.activeElement).not.toBe(document.body)
+        expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+        focus.mockRestore()
         behind.remove()
       })
 

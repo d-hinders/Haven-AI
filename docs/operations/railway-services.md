@@ -67,10 +67,11 @@ three consecutive failures. Since #4300 the whole refresh run is bounded to
 probed first next run.
 
 **The dev hosted MCP's setting is on, but it does not sleep in practice.** One
-of our own long-running clients keeps it busy: four small requests every 3
-minutes and a `haven_get_allowances` read every 6. Its billed memory stayed at
-84–144 MB in every 6-hour window from 2026-11-01 to 2026-11-04, close to the
-always-on production copy's 105–112 MB.
+of our own long-running clients keeps it busy, seen in its HTTP logs as
+`python-httpx2` (four small requests every 3 minutes) and `Python-urllib` (one
+every 6, matching `haven_get_allowances` in the service log). Its billed memory
+stayed at 84–144 MB in every 6-hour window from 2026-11-01 to 2026-11-04, close
+to the roughly 110 MB of the always-on production copy.
 
 ### Dev Postgres memory
 
@@ -80,19 +81,22 @@ does not appear in the service's variables. Production was not changed.
 
 Shared memory was the largest part of the container: 162 MB of 280 MB, against
 24 MB private to Postgres processes, with 128 MB of it the buffer pool for a
-210 MB database. `max_connections` stays at 500. Lowering it would free only a
-few MB, and the reason it was raised is not recorded.
+210 MB database. `max_connections` stays at 500. Lowering it to 100 would free
+about 14–20 MB (measured on a local idle `postgres:18.6`), and the reason it was
+raised is not recorded.
 
 Container memory also counts the page cache, and pages dropped from the buffer
 pool can move there, so the saving can be smaller than the change in
 `shared_buffers`. Judge it from the billing meter over a full day, not from a
-reading taken soon after a restart, when the caches are empty.
+reading taken soon after a restart, while the caches are still settling. Dev now
+has a much smaller buffer pool than production, so its query timings are
+slightly less representative.
 
 The database has no public URL, so reach it from inside the container. To undo
-the change, run this in `railway ssh --service Postgres --environment dev`:
+the change, run this from your machine:
 
 ```bash
-PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER SYSTEM RESET shared_buffers"
+railway ssh --service Postgres --environment dev -- sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ALTER SYSTEM RESET shared_buffers"'
 ```
 
 Then restart the service, which briefly interrupts everything using dev:

@@ -146,7 +146,9 @@ Railway rather than the repo; they are recorded in
   The service sleeps (Railway serverless): the first call after idle cold-starts.
 - Hosted MCP (Railway): `https://haven-ai-hosted-mcp-dev-25c7.up.railway.app/v1` —
   confirmed by probe 2026-08-06 (`GET /v1` → 405 POST-only MCP, `/healthz` → 200).
-  The service sleeps (Railway serverless): the first call after idle cold-starts.
+  Railway serverless sleep is on, but a steady client keeps it awake
+  ([railway-services.md](railway-services.md#sleep)). If it does sleep, the first
+  call after idle cold-starts.
   Its `HAVEN_API_URL` must be `https://havenbackend-dev-8b95.up.railway.app` —
   it shipped pointing at a NONEXISTENT host (`havenbackend-dev-8a00`, the dev
   prefix with production's hash), which made every relayed call fail like a

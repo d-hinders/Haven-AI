@@ -993,6 +993,24 @@ describe('the QA budget grant through the real entry points (#4666)', () => {
     expect(report.rows.find((r) => r.key === 'treasury')?.balance).toBeDefined()
   })
 
+  it('the grant read starts beside the wallet reads, not after them, so it adds nothing to the job\'s worst case', async () => {
+    const order: string[] = []
+    const fetchImpl = (async (...args: Parameters<typeof fetch>) => {
+      order.push('wallet read')
+      return healthz(...args)
+    }) as typeof fetch
+    const tracking = {
+      getAgent: async () => ({ ok: true, status: 200, data: { account_address: TREASURY } }),
+      getAllowances: async () => {
+        order.push('grant read')
+        return allowancesEnding(inDays(90))()
+      },
+    } as never
+    await runBalances([], { ...FULL }, { ...deps(), fetchImpl, api: tracking })
+    expect(order[0]).toBe('grant read')
+    expect(order).toContain('wallet read')
+  })
+
   it('the run log names the grant in the wallet rows\' shape, and the report always carries one', async () => {
     expect(budgetGrantLogLine(undefined)).toBeNull()
     expect(budgetGrantLogLine({ key: 'qa-budget', name: 'QA budget grant (USDC)', band: 'warn', endsAt: '2027-11-03T10:36:00.000Z', daysLeft: 29 })).toBe(

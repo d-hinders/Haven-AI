@@ -9,6 +9,7 @@ covers:
   - scripts/ci/qa-failure-issue.mjs
   - scripts/ci/dev-push-health.mjs
   - scripts/ci/qa-balance-issue.mjs
+  - packages/backend/src/modules/mpp/allowances.ts
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
   - scripts/ci/guard-freshness.mjs
@@ -914,15 +915,16 @@ a carry and a steady row, so the later end decides. The grant is reported beside
 the wallet table, not as a row in it, because it has no balance, burn or top-up:
 
 - `warn`: 30 days or fewer before it ends;
-- `critical`: 7 days or fewer, or no live open USDC budget. The issue then names
-  the API's `budget_ended_at`, which is the latest ended budget of any token or
-  pin, not necessarily this one;
+- `critical`: 7 days or fewer, or no live open USDC budget. With no live budget,
+  the issue names the API's `budget_ended_at` when it carries one, which is the
+  latest ended budget of any token or pin, not necessarily this one;
 - `unknown`: an HTTP error, a read failure or timeout, a response with no
   allowances list, or a live open budget with no usable `budget_expires_at`,
-  which includes a backend from before this field;
-- `config missing`: no QA API URL or agent key, as on the treasury row.
+  which includes a backend from before this field. With no QA API URL or agent
+  key it is `unknown` with the reason `config missing`, as on the treasury row.
 
-To clear it, [renew the QA budget before it ends](#renew-the-qa-budget-before-it-ends).
+To clear it, [renew the QA budget before it ends](#renew-the-qa-budget-before-it-ends);
+with no live budget, follow [The QA budget ended](#the-qa-budget-ended).
 While the grant is `warn`, the standing issue stays open even with every wallet
 healthy, so read its lead paragraph before assuming a wallet is low.
 
@@ -975,7 +977,8 @@ healthy, so read its lead paragraph before assuming a wallet is low.
   the issue is reopened (or created once). Each wallet row carries the full
   address, balance, burn per day, runway and a link to the matching top-up
   heading below. A grant alarm leads the body with the end date and a link to
-  [The QA budget ended](#the-qa-budget-ended).
+  [renew it](#renew-the-qa-budget-before-it-ends) or, with no live budget, a link
+  to [The QA budget ended](#the-qa-budget-ended).
 - **A comment is posted only when a band changes.**
 - **When nothing is `warn` or `critical`:** the final state is commented and the
   issue closes itself.
@@ -2027,8 +2030,8 @@ not this account's owner. If the owner key is lost, follow
 
 The seed leaves a live budget of the same amount alone: it prints
 `already granted — skipping`, and the warning stays. To renew before it ends,
-set a different amount, which replaces the live grant. It needs the owner key,
-as above. Set the amount after the `source`, because the file also sets it:
+set any amount other than the live one, which replaces the live grant. It needs
+the owner key, as above. Set the amount after the `source`, because the file also sets it:
 
 ```bash
 (set -a; source ~/.haven/qa-delegation.env; SEED_ALLOWANCE_USDC=6; set +a; npm run seed -w packages/qa-agent)

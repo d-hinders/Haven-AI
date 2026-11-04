@@ -13102,7 +13102,7 @@ export const openapiSpec = {
                   type: ['string', 'null'],
                   format: 'date-time',
                   description:
-                    '#4666: when THIS budget\'s validity ends (ISO 8601), after which it never refills and every payment from it reverts. ' +
+                    '#4666: when THIS budget\'s validity ends (ISO 8601), after which it never refills and cannot pay. ' +
                     'Read-only reporting: the delegation\'s expiry caveat is what enforces it. ' +
                     '`null` when the stored expiry is not a representable timestamp. ' +
                     'Optional on the schema so an older backend that omits it stays valid.',

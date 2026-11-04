@@ -463,9 +463,11 @@ describe('the QA budget grant (#4666)', () => {
       noLiveBudget: true,
       endsAt: '2027-09-30T10:36:00.000Z',
     })
-    const bare = await readBudgetGrant(answering([], { budget_ended_at: null }), NOW)
-    expect(bare).toMatchObject({ band: 'critical', noLiveBudget: true })
-    expect(bare.endsAt).toBeUndefined()
+    for (const unusable of [null, 'soon', undefined]) {
+      const bare = await readBudgetGrant(answering([], { budget_ended_at: unusable }), NOW)
+      expect(bare).toMatchObject({ band: 'critical', noLiveBudget: true })
+      expect(bare.endsAt).toBeUndefined()
+    }
   })
 
   it('budget_ended_at beside a live budget is ignored: it can be some other, older row', async () => {

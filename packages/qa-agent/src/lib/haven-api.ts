@@ -180,7 +180,7 @@ export interface CatalogEntry {
   status?: string
 }
 
-/** `GET /machine-payments/allowances` as the over-budget legs need it (#2016). */
+/** `GET /machine-payments/allowances` as the over-budget legs (#2016) and the balances check (#4666) need it. */
 export interface AgentAllowancesResponse {
   /**
    * #4352: the latest ended budget's expiry across EVERY token and pin. It can

@@ -496,8 +496,8 @@ const parseIso = (value: unknown): number | null => {
  * The budget QA actually spends from, via `GET /machine-payments/allowances`
  * (the only budget read the agent's API key can reach): the same open USDC
  * slot the seed's `ensureBudget` manages — USDC by address, no recipient pin.
- * A pinned row cannot pay QA's merchants, so it neither satisfies nor raises
- * this. A re-keyed agent's budget is a carry/steady pair, so the LATEST end in
+ * A pinned row pays only its pin, and the EIP-3009 bridge needs an open budget,
+ * so it neither satisfies nor raises this. A re-keyed agent's budget is a carry/steady pair, so the LATEST end in
  * the slot is when QA loses its budget.
  *
  * - no live open row, from a real list → `critical`;

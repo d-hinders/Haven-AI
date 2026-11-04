@@ -105,7 +105,7 @@ export function nextBands(previous, rows) {
   return out
 }
 
-/** The wallets whose known band changed since the last run. */
+/** Whatever carries a band (wallets, the grant) whose known band changed since the last run. */
 export function bandChanges(previous, rows) {
   const changes = []
   for (const row of rows) {
@@ -201,7 +201,7 @@ function grantLead(grant, docBase) {
   const ended = `[The QA budget ended](${docBase}#${GRANT_ANCHOR.ended})`
   if (grant.noLiveBudget) {
     return (
-      `**The QA identity has no live open USDC budget.** Every spending leg of money-flow QA fails until a person ` +
+      `**The QA identity has no live open USDC budget.** Money-flow QA's spending legs that need it fail until a person ` +
       `with the QA owner key sets a new one: ${ended}.`
     )
   }
@@ -219,7 +219,7 @@ export function buildBody(report, { runUrl, repo, bands }) {
   const grantAlarm = ALARM.has(report.budgetGrant?.band)
   const lines = [
     ...(grantAlarm ? [grantLead(report.budgetGrant, docBase), ''] : []),
-    ...(walletAlarm || !grantAlarm
+    ...(walletAlarm
       ? [
           `One or more wallets the QA flows depend on has **less than 7 days of runway** (or cannot cover one run). ` +
             `Money-flow QA fails in preflight once a core wallet (treasury, merchant, relayer) runs dry — top it up before then. ` +
@@ -228,6 +228,8 @@ export function buildBody(report, { runUrl, repo, bands }) {
           '',
         ]
       : []),
+    // The body is rewritten once more on a close, and neither lead is true then.
+    ...(walletAlarm || grantAlarm ? [] : ['Nothing is known to be `warn` or `critical` as of the last check.', '']),
     '| Wallet | Band | Address | Balance | Burn / day | Runway | Asset | Top up |',
     '|---|---|---|---|---|---|---|---|',
   ]

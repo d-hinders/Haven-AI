@@ -116,14 +116,18 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     // the dormant "steady" grant a credential rotation writes beside the
     // live "carry" row, and hiding it would blind the allowances read for
     // the whole carry window. The expired assertion above stays inverted.
-    const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600 })
+    const endsSec = Math.floor(Date.now() / 1000) + 90 * 86_400
+    const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600, expiresAt: endsSec })
 
     const result = await handleGetAllowances(agent)
 
     expect(result.statusCode).toBe(200)
-    const body = result.body as { allowances: { configured_amount: string }[] }
+    const body = result.body as { allowances: { configured_amount: string; budget_expires_at: string | null }[] }
     expect(body.allowances).toHaveLength(1)
     expect(body.allowances[0].configured_amount).toBe('1.00')
+    // #4666: its end, not its start. The QA balances check bands a carry/steady
+    // pair on the later end, so a wrong answer here silences or misdates it.
+    expect(body.allowances[0].budget_expires_at).toBe(new Date(endsSec * 1000).toISOString())
   })
 
   it('a LIVE budget keeps being reported (the window must never hide a real one)', async () => {

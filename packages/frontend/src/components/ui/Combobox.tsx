@@ -27,10 +27,20 @@
  *   2. list closed, query   → clear the query, dialog stays;
  *   3. list closed, empty   → not handled, so it reaches the dialog.
  *
- * `preventDefault` + `stopPropagation` on the input's own keydown is what makes
- * stages 1 and 2 work: React's synthetic `stopPropagation` calls the native
- * one, so the event never bubbles to `document`. `DropdownMenu`'s window
- * listener runs too late to be a precedent for this.
+ * Consuming the key takes the NATIVE `stopImmediatePropagation`, not only
+ * `stopPropagation`. Next's App Router makes `document` the React root, so
+ * React's listener and `Modal`'s sit on the same node: by the time a React
+ * handler runs, the event is already at `document`, and `stopPropagation` only
+ * keeps it from `window`. React's listener is registered at hydration, before
+ * any `Modal` effect, so stopping the rest of `document`'s listeners reaches
+ * `Modal`'s. A test mounting React in a `div` passes without this, which is why
+ * `Combobox.documentRoot.test.tsx` runs the stages on a `document` root.
+ *
+ * ── A lone match is the active option ───────────────────────────────────────
+ *
+ * Typing or pasting until one option is left makes that option active, so Enter
+ * picks it. An option the user reached with the arrows keeps priority, and an
+ * empty query never activates anything: opening the list must not arm Enter.
  *
  * ── Placement: a portal from `sm` up, inline below it ───────────────────────
  *
@@ -204,6 +214,12 @@ export function Combobox({
 
   const flatOptions = useMemo(() => groups.flatMap((group) => group.options), [groups])
   const hasOptions = flatOptions.length > 0
+  // The arrows' choice while it is still listed, else a lone match for a query.
+  const effectiveActiveId = flatOptions.some((option) => option.id === activeId)
+    ? activeId
+    : query.trim() !== '' && flatOptions.length === 1
+      ? flatOptions[0].id
+      : null
   const anyStatus = groups.some((group) => group.status)
 
   const optionDomId = useCallback((id: string) => `${baseId}-option-${id}`, [baseId])
@@ -284,15 +300,15 @@ export function Combobox({
   // Scroll the active option into view. `scrollIntoView` is absent in jsdom, so
   // the call is guarded rather than assumed.
   useEffect(() => {
-    if (!open || !activeId) return
-    const node = document.getElementById(optionDomId(activeId))
+    if (!open || !effectiveActiveId) return
+    const node = document.getElementById(optionDomId(effectiveActiveId))
     node?.scrollIntoView?.({ block: 'nearest' })
-  }, [activeId, open, optionDomId])
+  }, [effectiveActiveId, open, optionDomId])
 
   const moveActive = useCallback(
     (direction: 1 | -1) => {
       if (flatOptions.length === 0) return
-      const index = flatOptions.findIndex((option) => option.id === activeId)
+      const index = flatOptions.findIndex((option) => option.id === effectiveActiveId)
       const next =
         index < 0
           ? direction === 1
@@ -301,7 +317,7 @@ export function Combobox({
           : Math.min(Math.max(index + direction, 0), flatOptions.length - 1)
       setActiveId(flatOptions[next].id)
     },
-    [activeId, flatOptions],
+    [effectiveActiveId, flatOptions],
   )
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -310,6 +326,7 @@ export function Combobox({
         // Stage 1 — the list closes, the dialog stays.
         event.preventDefault()
         event.stopPropagation()
+        event.nativeEvent.stopImmediatePropagation()
         close()
         return
       }
@@ -317,6 +334,7 @@ export function Combobox({
         // Stage 2 — the query clears, the dialog stays.
         event.preventDefault()
         event.stopPropagation()
+        event.nativeEvent.stopImmediatePropagation()
         onQueryChange('')
         return
       }
@@ -340,8 +358,8 @@ export function Combobox({
     }
 
     if (event.key === 'Enter') {
-      if (!open || !activeId) return
-      const option = flatOptions.find((candidate) => candidate.id === activeId)
+      if (!open || !effectiveActiveId) return
+      const option = flatOptions.find((candidate) => candidate.id === effectiveActiveId)
       if (!option) return
       event.preventDefault()
       pick(option)
@@ -378,7 +396,7 @@ export function Combobox({
             </div>
           ) : (
             group.options.map((option) => {
-              const isActive = option.id === activeId
+              const isActive = option.id === effectiveActiveId
               return (
                 <div
                   key={option.id}
@@ -442,7 +460,7 @@ export function Combobox({
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls={listboxId}
-        aria-activedescendant={open && activeId ? optionDomId(activeId) : undefined}
+        aria-activedescendant={open && effectiveActiveId ? optionDomId(effectiveActiveId) : undefined}
         aria-label={label}
         autoComplete="off"
         autoFocus={autoFocus}

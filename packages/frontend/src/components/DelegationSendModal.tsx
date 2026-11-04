@@ -116,6 +116,8 @@ export default function DelegationSendModal({
 
   const amountRef = useRef<HTMLInputElement>(null)
   const presetRef = useRef(initialRecipient)
+  const screenRef = useRef<HTMLDivElement>(null)
+  const focusedStepRef = useRef<Step>(step)
 
   // Closing and reopening starts fresh (#4641 lifecycle): Details, no recipient
   // beyond the preset, empty amount, no error or result, empty contact name.
@@ -150,6 +152,22 @@ export default function DelegationSendModal({
     setStep('details')
     setMessage(null)
   }, [initialRecipient, open])
+
+  // Moving between screens unmounts the control that had focus, which drops it
+  // to `body` and sends a keyboard user back to the top of the page. `Modal`
+  // only places focus when it opens, so each later screen is placed here. Review
+  // takes focus on its content and never on Send: a stray Enter must not be able
+  // to start a payment. Back returns to Amount, the field most likely to change.
+  useEffect(() => {
+    if (focusedStepRef.current === step) return
+    focusedStepRef.current = step
+    if (!open) return
+    if (step === 'details') {
+      amountRef.current?.focus()
+    } else {
+      screenRef.current?.focus()
+    }
+  }, [open, step])
 
   const sendingAccount = accounts.find((a) => a.account_address.toLowerCase() === accountAddress.toLowerCase())
   const fromName = sendingAccount?.name ?? truncate(accountAddress)
@@ -313,18 +331,22 @@ export default function DelegationSendModal({
               Amount
             </label>
             <div className="flex gap-2">
-              <Input
-                id="send-amount"
-                ref={amountRef}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
-                className="v2-tabular"
-                rightAction={
-                  <span className="text-xs font-medium text-[var(--v2-ink-3)]">{token?.symbol}</span>
-                }
-              />
+              {/* `Input`'s own wrapper does not grow in a flex row, so the field
+                  would stop short of the recipient field above it. */}
+              <div className="min-w-0 flex-1">
+                <Input
+                  id="send-amount"
+                  ref={amountRef}
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                  className="v2-tabular"
+                  rightAction={
+                    <span className="text-xs font-medium text-[var(--v2-ink-3)]">{token?.symbol}</span>
+                  }
+                />
+              </div>
               {/* Both Haven networks list one sendable token (USDC), so the
                   token Select only appears when a chain lists more than one. */}
               {tokens.length > 1 ? (
@@ -351,7 +373,7 @@ export default function DelegationSendModal({
       )}
 
       {step === 'review' && recipient && token && (
-        <div className="space-y-5">
+        <div ref={screenRef} tabIndex={-1} className="space-y-5 outline-none">
           <div className="space-y-1">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">You&apos;re sending</p>
             <p className="v2-tabular text-2xl font-semibold text-[var(--v2-ink)]">
@@ -434,7 +456,7 @@ export default function DelegationSendModal({
       )}
 
       {step === 'done' && recipient && token && (
-        <div className="space-y-4">
+        <div ref={screenRef} tabIndex={-1} className="space-y-4 outline-none">
           <DialogResult
             state="success"
             title={`${amountDisplay} ${token.symbol} sent`}

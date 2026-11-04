@@ -56,7 +56,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-03"
+last-verified: "2026-11-04"
 ---
 
 # Haven Screen Recipes
@@ -369,7 +369,9 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    follows: "A sent payment can't be reversed. You
    approve it on the next step." The passkey hint and the wallet-connect state
    live here, where the ceremony starts. Footer: `Back` | `Send <amount>
-   <token>`, with Back keeping every field.
+   <token>`, with Back keeping every field. Focus lands on the screen's content
+   and never on Send, so a stray Enter cannot start a payment; Back returns it to
+   Amount.
 3. **Working.** While the send is in flight the Send button reads "Sending…"
    and every dismissal path is blocked — the ✕, Escape and a backdrop click.
 4. **Cancelled or failed.** Both land back on Review with their message:

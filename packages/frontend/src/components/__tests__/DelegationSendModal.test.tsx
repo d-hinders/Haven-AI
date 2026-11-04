@@ -240,6 +240,17 @@ describe('DelegationSendModal — Details screen (#4641)', () => {
     expect(screen.getByText('USDC')).toBeTruthy()
   })
 
+  it('lets the amount field fill its row, level with the recipient field', () => {
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    // jsdom has no layout, so this pins the class that makes the row stretch;
+    // the Send visual baselines hold the rendered width.
+    const row = document.querySelector('label[for="send-amount"]')?.nextElementSibling
+    expect(row).toHaveClass('flex')
+    expect(row?.firstElementChild).toHaveClass('flex-1')
+    expect(row?.firstElementChild).toContainElement(screen.getByLabelText('Amount'))
+  })
+
   it('keeps a token Select when a chain lists more than one sendable token', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} chainId={100} />)
@@ -378,6 +389,75 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect((screen.getByLabelText('Amount') as HTMLInputElement).value).toBe('1.5')
     expect(document.querySelector('[data-recipient-chip]')).toHaveTextContent('0xcccc…cccc')
+  })
+
+  describe('a cleared chip survives Review → Back (#4660)', () => {
+    const chip = () => document.querySelector('[data-recipient-chip]')
+    const clear = () => fireEvent.click(screen.getByRole('button', { name: 'Change recipient' }))
+    const amount = () => fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1.5' } })
+    const reviewThenBack = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    }
+
+    it('the resolved preset cleared after Back leaves the picker empty', async () => {
+      contactsFixture.initial = [contact()]
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} initialRecipient={ACME} />)
+      await waitFor(() => expect(chip()).toHaveTextContent('Acme Services'))
+      amount()
+      reviewThenBack()
+      expect(chip()).toHaveTextContent('Acme Services')
+
+      clear()
+
+      expect(chip()).toBeNull()
+      expect(screen.getByRole('combobox', { name: 'To' })).toBeTruthy()
+    })
+
+    it('a recipient picked instead of the preset, cleared after Back, leaves the picker empty', async () => {
+      contactsFixture.initial = [contact(), contact({ id: 'c2', name: 'Research API', address: NEW_ADDRESS })]
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} initialRecipient={ACME} />)
+      await waitFor(() => expect(chip()).toHaveTextContent('Acme Services'))
+      clear()
+      fireEvent.click(screen.getByRole('option', { name: /Research API/ }))
+      amount()
+      reviewThenBack()
+      expect(chip()).toHaveTextContent('Research API')
+
+      clear()
+
+      expect(chip()).toBeNull()
+    })
+  })
+
+  describe('focus moves with the screen', () => {
+    it('Review takes focus on its content, never on Send', () => {
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+
+      expect(document.activeElement).not.toBe(document.body)
+      expect(document.activeElement).toHaveTextContent("You're sending")
+      expect(document.activeElement?.tagName).toBe('DIV')
+    })
+
+    it('Back returns focus to Amount', () => {
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+      expect(document.activeElement).toBe(screen.getByLabelText('Amount'))
+    })
+
+    it('the success screen keeps focus inside the dialog', async () => {
+      await sendToNewAddress()
+
+      expect(document.activeElement).not.toBe(document.body)
+      expect(document.activeElement).toHaveTextContent('1.5 USDC sent')
+    })
   })
 
   it("Send calls send() once with today's arguments", async () => {

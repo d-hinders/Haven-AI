@@ -1279,8 +1279,8 @@ all: a device-code flow the human approves in the browser, minting a token that
 carries `purpose: owner_cli` and reaches only the routes on the allow-list in
 `packages/backend/src/middleware/owner-cli.ts` — agents (including building an
 unsigned budget delegation and preparing a revoke, both handed to the owner to
-sign), connect setups, contacts, feedback and read-only account context, never
-signer changes, re-keying, the user's own credentials, provisioning, transfers, or delegation
+sign), connect setups, feedback and read-only account context, contacts included, never
+signer changes, re-keying, the user's own credentials, provisioning, transfers, writing saved contacts, or delegation
 activation. Both are Bearer tokens sent
 to whatever `baseUrlFor` resolves, so the credential-change reasoning above
 applies unchanged to both; what the narrower one bounds is the blast radius if

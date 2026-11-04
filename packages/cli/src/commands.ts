@@ -1554,10 +1554,8 @@ function refuseContactWrite(): never {
 
 /**
  * `haven feedback submit "<text>"` (#3597). Several unquoted words are
- * JOINED into one text with a single space between them — the same
- * convention `contacts add <name...> <address>` already uses for its own
- * free-text argument — rather than refused, so a bug report does not have to
- * be hand-quoted.
+ * JOINED into one text with a single space between them, rather than refused,
+ * so a bug report does not have to be hand-quoted.
  *
  * `authed` runs FIRST (a command with no session refuses before anything
  * else, same as every other command), then the secret check runs — and it

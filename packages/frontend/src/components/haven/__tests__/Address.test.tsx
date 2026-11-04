@@ -77,8 +77,13 @@ describe('Address (#853)', () => {
   it('grouped shows the whole value in fours, with spacing rather than spaces', () => {
     const value = '0x18a43F6c7D5c84C3a715097C57B9945ce10C5162'
     const { container } = render(<Address value={value} grouped />)
-    const groups = Array.from(container.querySelectorAll('span span')).map((el) => el.textContent)
-    expect(groups).toEqual(['0x18a4', '3F6c', '7D5c', '84C3', 'a715', '097C', '57B9', '945c', 'e10C', '5162'])
+    const lines = Array.from(container.querySelectorAll('.whitespace-nowrap')).map((line) =>
+      Array.from(line.children).map((group) => group.textContent),
+    )
+    expect(lines).toEqual([
+      ['0x18a4', '3F6c', '7D5c', '84C3', 'a715'],
+      ['097C', '57B9', '945c', 'e10C', '5162'],
+    ])
     // The DOM text is the unbroken address, which is what a copy delivers.
     expect(container.textContent).toBe(value)
     expect(container.innerHTML).not.toContain('flex')

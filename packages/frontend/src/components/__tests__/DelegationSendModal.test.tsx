@@ -287,7 +287,7 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     expect(screen.getByText('New address')).toBeTruthy()
   })
 
-  it('a saved contact keeps the full address: an agent-driven CLI session can write contacts', () => {
+  it('a saved contact keeps the full address: a lookalike keeps the characters a short form shows', () => {
     contactsFixture.initial = [contact()]
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} />)
@@ -319,6 +319,7 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pick new address' }))
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
     expect(screen.getByTestId('review-recipient-address').textContent).toBe(SAVINGS)
+    expect(screen.getByText('New address')).toBeTruthy()
   })
 
   it('your own account shows its name and the short address, not the full one', () => {

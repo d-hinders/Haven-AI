@@ -367,7 +367,7 @@ export default function DelegationSendModal({
                   <span className="flex items-start gap-2">
                     <Monogram name={recipient.name ?? recipient.address} size="xs" decorative />
                     <span className="min-w-0">
-                      <span className="block">{recipient.name ?? 'New address'}</span>
+                      <span className="block">{recipient.name || 'New address'}</span>
                       {/* Owner decisions, 2026-11-04. Your own account is checked by
                           its name, so its short address is enough, the full one a
                           hover or tap away. Everything else, a saved contact included,

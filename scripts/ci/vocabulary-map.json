@@ -454,11 +454,6 @@
         "keys": "ok, account_id, name",
         "reason": "Hybrid envelope on the wallet noun \u2014 `account_id`, the post-#2914 spelling, beside a bare `ok`."
       },
-      "cmdContactsRemove": {
-        "convention": "snake",
-        "keys": "ok, contact_id, removed",
-        "reason": "Hybrid envelope on the contact noun: `contact_id` beside a bare `ok` and a bare `removed`."
-      },
       "cmdWhoami": {
         "convention": "snake",
         "keys": "id, email, expires_at, api_url",

@@ -112,7 +112,6 @@ Result commands emit `{ "ok": true, … }` with snake_case identifiers:
 ```json
 { "ok": true, "agent_id": "…", "status": "revoked" }
 { "ok": true, "account_id": "…", "name": "…" }
-{ "ok": true, "contact_id": "…", "removed": true }
 { "ok": true, "signed_out": true }
 ```
 
@@ -251,7 +250,7 @@ entry there that *is* enforced, and the section says so.)
 Three things make that claim hold rather than merely sound right:
 
 - The census keys on the **literal**, not on a `{ "ok": true` prefix. Seven of
-  the eighteen emitters carry no `ok` key at all — `wallets balances`,
+  the seventeen emitters carry no `ok` key at all — `wallets balances`,
   `whoami`, both prepared-action emits, `agents connect --run` and the two
   `activity export` branches — so a prefix-keyed census could not see them, and
   it could not see a literal wrapped across lines either, which is how the

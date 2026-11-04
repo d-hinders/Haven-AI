@@ -30,8 +30,9 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
  *
  * Everything that changes AUTHORITY rather than reading or arranging it:
  * signer changes, re-keying, passkey management, credential/password/email
- * changes, account provisioning, transfers, activation, and writing saved
- * contacts. An owner CLI
+ * changes, account provisioning, transfers, and activation. Writing saved contacts
+ * is absent too, for a different reason given at its entry below: it grants nothing,
+ * but it is a name the owner trusts when paying. An owner CLI
  * session can create an agent and hand it a budget request — it cannot approve
  * that budget, and it cannot move a key. The human keeps every signature,
  * which is this epic's standing owner constraint.

@@ -1028,7 +1028,7 @@ describe('feedback submit (#3597)', () => {
     expect(err.join('\n')).toMatch(/Usage/)
   })
 
-  it('joins several unquoted words into one text, like `contacts add`', async () => {
+  it('joins several unquoted words into one text', async () => {
     const api = fakeApi({ 'POST /feedback': { id: 'f1', created_at: 'now', expires_at: 'later' } })
     const { deps } = harness({ makeApi: () => api })
     expect(await run(['feedback', 'submit', 'The', 'CLI', 'crashed', 'on', 'login.'], deps)).toBe(0)

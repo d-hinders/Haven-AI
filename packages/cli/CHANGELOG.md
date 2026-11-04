@@ -17,10 +17,11 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
-- **`haven contacts add` and `haven contacts remove` now refuse (exit 4).** Saved
-  contacts are added and removed in the dashboard only, because a contact is a name
-  the owner trusts when paying and an agent drives this CLI. `haven contacts list`
-  still works. An older CLI gets a 401 from the backend for these two commands.
+- **`haven contacts add` and `haven contacts remove` now refuse under any session
+  (exit 4).** Add and remove saved contacts in the dashboard: a contact is a name the
+  owner trusts when paying, and an agent drives this CLI. `haven contacts list` still
+  works. The backend also refuses these writes from a device-code session, so an older
+  CLI on one gets a 401 (exit 3).
 
 ## 0.13.0-alpha.0 — 2026-10-30
 

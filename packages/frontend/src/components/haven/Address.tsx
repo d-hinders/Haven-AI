@@ -39,20 +39,28 @@ export function Address({
    * The full value in groups of four, two lines of five: for a person comparing
    * an address before money moves, where a lookalike must not hide in the middle.
    * The groups are spacing, not spaces, so selecting and copying gives the
-   * unbroken value. Takes precedence over `truncate`.
+   * unbroken value. Stands alone: `truncate`, `copy` and `href` do not apply, and it
+   * has no tooltip because the whole value is on screen.
    */
   grouped?: boolean
   className?: string
 }) {
   if (grouped) {
-    // `0x` plus the first four, then fours. Inline-block, not flex or grid: a
-    // block-level child would put a newline in the copied text.
+    // `0x` plus the first four, then fours, five to a line. Each line is one
+    // unbreakable unit, so a narrow column breaks between lines and never leaves a
+    // stray group. Inline-block, not flex or grid: a block-level child would put a
+    // newline in the copied text.
     const groups = [value.slice(0, 6), ...(value.slice(6).match(/.{1,4}/g) ?? [])]
+    const lines = [groups.slice(0, 5), groups.slice(5)]
     return (
-      <span className={`inline-block max-w-[27ch] font-mono v2-tabular ${className}`.trim()}>
-        {groups.map((group, index) => (
-          <span key={index} className="mr-1.5 inline-block">
-            {group}
+      <span className={`font-mono v2-tabular ${className}`.trim()}>
+        {lines.map((line, lineIndex) => (
+          <span key={lineIndex} className="inline-block whitespace-nowrap">
+            {line.map((group, index) => (
+              <span key={index} className="mr-1 inline-block">
+                {group}
+              </span>
+            ))}
           </span>
         ))}
       </span>

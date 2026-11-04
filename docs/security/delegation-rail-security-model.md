@@ -1331,9 +1331,12 @@ list, so the census guards real behaviour rather than a parallel document.
 enumeration: signer changes, re-keying an agent — neither its
 delegate key (`/agents/{id}/rekey/*`) nor its API key
 (`/agents/{id}/rotate-key`) — passkey management, the user's own
-credential/password/email, account provisioning, transfers, and every
-delegation signature step: `activate`, `revoke/submit`, `revoke-all` and
-`revoke-all/submit`. It can create an agent and ask for a budget. It cannot
+credential/password/email, account provisioning, transfers, writing saved
+contacts, and every delegation signature step: `activate`, `revoke/submit`,
+`revoke-all` and `revoke-all/submit`. Contacts are there for a different reason from
+the rest: a contact grants nothing on-chain, but it is a name the owner trusts when
+paying, so an agent that could write one could swap that name onto its own address
+(owner decision, 2026-11-04). The session can still read them. It can create an agent and ask for a budget. It cannot
 approve one. Since #2539 it can also construct a budget change and revoke
 one — `POST /agents/{id}/delegations/build` and
 `POST /agents/{id}/delegations/{hash}/revoke` — both

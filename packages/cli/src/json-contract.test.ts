@@ -239,8 +239,6 @@ describe('--json contract, success paths', () => {
     'POST /agents/a1/revoke': {},
     'PUT /agents/a1': {},
     'PUT /user/accounts/s1': {},
-    'POST /contacts': { id: 'c1', name: 'Alice', address: '0xalice' },
-    'DELETE /contacts/c1': {},
     'POST /feedback': { id: 'f1', created_at: '2026-10-02T00:00:00.000Z', expires_at: '2026-10-09T00:00:00.000Z' },
   }
   function stubApi(): CliApi {

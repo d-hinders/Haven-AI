@@ -230,6 +230,24 @@ describe('RecipientField — presetAddress', () => {
     expect(resolved).toHaveTextContent('Saved contact')
   })
 
+  it('resolves a preset that is both an own account and a contact as the account', () => {
+    const onChange = vi.fn()
+    render(
+      <Harness
+        presetAddress={SAVINGS}
+        contacts={[contact({ id: 'c3', name: 'Savings as a contact', address: SAVINGS })]}
+        onChange={onChange}
+      />,
+    )
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ address: SAVINGS, name: 'Savings', kind: 'account' })
+  })
+
+  it('draws no new-address glyph while the preset is being looked up', () => {
+    render(<Harness presetAddress={ACME} contacts={[]} contactsLoading />)
+    expect(document.querySelector('[data-recipient-chip] svg:not([aria-label="Change recipient"] svg)')).toBeNull()
+  })
+
   it('resolves a preset address that is an own account as the account', () => {
     const onChange = vi.fn()
     render(<Harness presetAddress={SAVINGS} onChange={onChange} />)
@@ -311,6 +329,22 @@ describe('RecipientField — a cleared chip stays cleared (#4660)', () => {
     expect(chip()).toBeNull()
 
     rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
+    expect(chip()).toBeNull()
+    neverReportedPreset(onChange)
+  })
+
+  it('a recipient picked while contacts load, cleared after they settle, is not replaced by the preset', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
+    )
+    clear()
+    fireEvent.click(screen.getByRole('option', { name: /Savings/ }))
+
+    rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
+    expect(chip()).toHaveTextContent('Savings')
+    clear()
+
     expect(chip()).toBeNull()
     neverReportedPreset(onChange)
   })

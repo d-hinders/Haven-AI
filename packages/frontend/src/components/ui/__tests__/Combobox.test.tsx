@@ -188,6 +188,25 @@ describe('Combobox — keyboard', () => {
       expect(onPick).not.toHaveBeenCalled()
     })
 
+    it('is not alone beside a group still loading or failed: that group may hold a match', () => {
+      const onPick = vi.fn()
+      render(
+        <Harness
+          groups={[
+            ...ONE,
+            { id: 'contacts', label: 'Contacts', options: [], status: { kind: 'loading', text: 'Loading' } },
+          ]}
+          onPick={onPick}
+        />,
+      )
+      const input = focusInput()
+      fireEvent.change(input, { target: { value: 'sa' } })
+
+      expect(input).not.toHaveAttribute('aria-activedescendant')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(onPick).not.toHaveBeenCalled()
+    })
+
     it('needs to be alone: with several options a query activates none of them', () => {
       const onPick = vi.fn()
       render(<Harness onPick={onPick} />)

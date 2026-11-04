@@ -244,7 +244,7 @@ describe('DelegationSendModal — Details screen (#4641)', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} />)
     // jsdom has no layout, so this pins the class that makes the row stretch.
-    // `send-dialog-details-filled` in the visual spec measures the rendered width.
+    // The `send-dialog-details-filled` baselines hold the rendered width.
     const row = document.querySelector('label[for="send-amount"]')?.nextElementSibling
     expect(row).toHaveClass('flex')
     expect(row?.firstElementChild).toHaveClass('flex-1')
@@ -450,6 +450,32 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
       expect(document.activeElement).toBe(screen.getByLabelText('Amount'))
+    })
+
+    it('a cancelled approval returns focus to Review, because Send was disabled while it ran', async () => {
+      const send = vi.fn().mockResolvedValue({ ok: false, reason: 'cancelled' })
+      mockUseSend.mockReturnValue(base({ send }))
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+      const sendButton = screen.getByRole('button', { name: /^Send / })
+      sendButton.focus()
+      fireEvent.click(sendButton)
+
+      await waitFor(() => expect(screen.getByText('Approval was cancelled.')).toBeTruthy())
+      expect(document.activeElement).toHaveTextContent("You're sending")
+      expect(document.activeElement?.tagName).toBe('DIV')
+    })
+
+    it('a save that ends returns focus to the success screen', async () => {
+      await sendToNewAddress()
+      fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Acme' } })
+      const save = screen.getByRole('button', { name: 'Save' })
+      save.focus()
+      fireEvent.click(save)
+
+      await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
+      expect(document.activeElement).not.toBe(document.body)
+      expect(document.activeElement).toHaveTextContent('1.5 USDC sent')
     })
 
     it('the success screen keeps focus inside the dialog', async () => {

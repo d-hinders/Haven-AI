@@ -310,7 +310,9 @@ export function RecipientField({
         data-recipient-chip=""
         className={`flex items-center gap-3 rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2 ${className}`}
       >
-        {shown.kind === 'new' ? (
+        {lookingUp ? (
+          <Skeleton variant="circle" className="h-8 w-8 flex-shrink-0" />
+        ) : shown.kind === 'new' ? (
           <span
             aria-hidden="true"
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]"

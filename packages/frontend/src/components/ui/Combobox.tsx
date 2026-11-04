@@ -40,7 +40,9 @@
  *
  * Typing or pasting until one option is left makes that option active, so Enter
  * picks it. An option the user reached with the arrows keeps priority, and an
- * empty query never activates anything: opening the list must not arm Enter.
+ * empty query never activates anything: opening the list must not arm Enter. A
+ * group showing a status (loading, failed) keeps a lone option from counting as
+ * alone, because the group may hold another match the user is typing towards.
  *
  * ── Placement: a portal from `sm` up, inline below it ───────────────────────
  *
@@ -214,13 +216,14 @@ export function Combobox({
 
   const flatOptions = useMemo(() => groups.flatMap((group) => group.options), [groups])
   const hasOptions = flatOptions.length > 0
+  const anyStatus = groups.some((group) => group.status)
   // The arrows' choice while it is still listed, else a lone match for a query.
+  // A group showing a status may still hold matches, so nothing is alone yet.
   const effectiveActiveId = flatOptions.some((option) => option.id === activeId)
     ? activeId
-    : query.trim() !== '' && flatOptions.length === 1
+    : query.trim() !== '' && flatOptions.length === 1 && !anyStatus
       ? flatOptions[0].id
       : null
-  const anyStatus = groups.some((group) => group.status)
 
   const optionDomId = useCallback((id: string) => `${baseId}-option-${id}`, [baseId])
   const groupLabelId = useCallback((id: string) => `${baseId}-group-${id}`, [baseId])

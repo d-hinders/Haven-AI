@@ -370,8 +370,8 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    approve it on the next step." The passkey hint and the wallet-connect state
    live here, where the ceremony starts. Footer: `Back` | `Send <amount>
    <token>`, with Back keeping every field. Focus lands on the screen's content
-   and never on Send, so a stray Enter cannot start a payment; Back returns it to
-   Amount.
+   and never on Send, so a stray Enter cannot start a payment, and returns there
+   after a cancelled or failed send; Back returns it to Amount.
 3. **Working.** While the send is in flight the Send button reads "Sending…"
    and every dismissal path is blocked — the ✕, Escape and a backdrop click.
 4. **Cancelled or failed.** Both land back on Review with their message:

@@ -118,6 +118,7 @@ export default function DelegationSendModal({
   const presetRef = useRef(initialRecipient)
   const screenRef = useRef<HTMLDivElement>(null)
   const focusedStepRef = useRef<Step>(step)
+  const wasBusyRef = useRef(false)
 
   // Closing and reopening starts fresh (#4641 lifecycle): Details, no recipient
   // beyond the preset, empty amount, no error or result, empty contact name.
@@ -193,6 +194,16 @@ export default function DelegationSendModal({
   // flight. Recipient and amount are already settled by the time Review shows.
   const canSend = ready && !busy && !sending
   const showSaveRow = step === 'done' && recipient?.kind === 'new' && !contactsLoading
+
+  // A send or a save disables the button that started it, which drops focus to
+  // `body` for good, and Tab then leaves the dialog. So when one ends on the same
+  // screen, a cancelled or failed send included, focus returns to that screen.
+  const busyNow = working || saving
+  useEffect(() => {
+    const ended = wasBusyRef.current && !busyNow
+    wasBusyRef.current = busyNow
+    if (ended && open) screenRef.current?.focus()
+  }, [busyNow, open])
   const explorerUrl = txHash ? getExplorerUrlOrNull(chainId, 'tx', txHash) : null
 
   async function handleSend() {

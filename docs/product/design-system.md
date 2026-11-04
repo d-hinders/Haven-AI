@@ -3514,7 +3514,8 @@ primitive's render contract for one consumer was the worse trade.
 option, scrolling it into view (`block: 'nearest'`). Enter picks the active
 option. A query that leaves exactly one option makes that option active, so
 pasting an address and pressing Enter picks it; an empty query never activates
-anything, so opening the list cannot arm Enter. Tab closes the list and moves on
+anything, so opening the list cannot arm Enter, and a group still loading or
+failed keeps a lone option from counting as alone. Tab closes the list and moves on
 **without picking**.
 
 **Escape is a three-stage state machine**, and the stages exist because
@@ -3574,10 +3575,10 @@ one `useAccounts()` and passes them in**. `rg -n "useContacts|useAccounts"` on
 **Props.** `value: Recipient | null` and `onChange(next)` are the controlled
 pair, where `Recipient` is `{ address, name?, kind: 'account' | 'contact' |
 'new' }`. `presetAddress` is an address to resolve into a chip; it may arrive
-before the data loads, in which case the field shows the short address and a
-skeleton in place of the kind, then resolves it to a name and kind once
+before the data loads, in which case the field shows the short address with
+skeletons in place of the glyph and the kind, then resolves it to a name and kind once
 `accounts` and `contacts` are available, calling `onChange` once. It never says
-"New address" while the answer may still be a saved contact. `chainId` limits the own accounts offered to that
+"New address" while contacts are still loading. `chainId` limits the own accounts offered to that
 chain, `excludeAddress` is the sending account and is never offered, and
 `accounts`, `contacts`, `contactsLoading` and `contactsError` come from the
 caller's hooks.

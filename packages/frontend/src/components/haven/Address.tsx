@@ -24,6 +24,7 @@ export function Address({
   copy = false,
   href,
   truncate = true,
+  grouped = false,
   className = '',
 }: {
   /** The full address (or hash) — always what the tooltip and copy deliver. */
@@ -34,8 +35,30 @@ export function Address({
   href?: string
   /** `false` renders the full value (e.g. receive-funds surfaces). */
   truncate?: boolean
+  /**
+   * The full value in groups of four, two lines of five: for a person comparing
+   * an address before money moves, where a lookalike must not hide in the middle.
+   * The groups are spacing, not spaces, so selecting and copying gives the
+   * unbroken value. Takes precedence over `truncate`.
+   */
+  grouped?: boolean
   className?: string
 }) {
+  if (grouped) {
+    // `0x` plus the first four, then fours. Inline-block, not flex or grid: a
+    // block-level child would put a newline in the copied text.
+    const groups = [value.slice(0, 6), ...(value.slice(6).match(/.{1,4}/g) ?? [])]
+    return (
+      <span className={`inline-block max-w-[27ch] font-mono v2-tabular ${className}`.trim()}>
+        {groups.map((group, index) => (
+          <span key={index} className="mr-1.5 inline-block">
+            {group}
+          </span>
+        ))}
+      </span>
+    )
+  }
+
   const display = truncate ? truncateAddress(value) : value
 
   const text = href ? (

@@ -2679,7 +2679,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount & Address — the two core display objects"
-        description="Render money through <Amount> and on-chain addresses through <Address> — never hand-roll signs, tone classes, or slice(0, 6) truncation. Amount encodes the calm-money rule structurally: neutral ink by default, success only for incoming, danger only for failed; callers pass facts (direction, failed), never colours. Address applies the one truncation rule (0x1234…abcd), monospace, the full value in a tooltip, and optional copy / explorer-link affordances."
+        description="Render money through <Amount> and on-chain addresses through <Address> — never hand-roll signs, tone classes, or slice(0, 6) truncation. Amount encodes the calm-money rule structurally: neutral ink by default, success only for incoming, danger only for failed; callers pass facts (direction, failed), never colours. Address applies the one truncation rule (0x1234…abcd), monospace, the full value in a tooltip, and optional copy / explorer-link affordances. Where a person must compare the whole address before money moves, use grouped: the full value in two lines of five groups."
       >
         <div className="grid gap-4 lg:grid-cols-2">
           <Card hover={false} className="p-5">
@@ -2704,6 +2704,7 @@ export default function DesignSystemPage() {
               <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
               <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link, opens in a new tab</span></p>
               <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
+              <p className="text-xs"><Address value={sampleAddress} grouped /> <span className="text-[var(--v2-ink-3)]">— grouped, for comparing before money moves; copies unbroken</span></p>
             </div>
           </Card>
         </div>
@@ -3560,8 +3561,8 @@ export default function DesignSystemPage() {
                         <Monogram name="Acme Services" size="xs" decorative />
                         <span className="min-w-0">
                           <span className="block">Acme Services</span>
-                          <span className="mt-0.5 block break-all font-mono text-xs font-normal text-[var(--v2-ink-3)]">
-                            {DS_ACME}
+                          <span className="mt-0.5 block text-xs font-normal text-[var(--v2-ink-3)]">
+                            <Address value={DS_ACME} grouped />
                           </span>
                         </span>
                       </span>

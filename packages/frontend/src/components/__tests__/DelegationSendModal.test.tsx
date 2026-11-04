@@ -283,7 +283,8 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     render(<DelegationSendModal {...PROPS} />)
     goToReview()
     expect(NEW_ADDRESS).toHaveLength(42)
-    expect(screen.getByText(NEW_ADDRESS)).toBeTruthy()
+    expect(screen.getByTestId('review-recipient-address').textContent).toBe(NEW_ADDRESS)
+    expect(screen.getByText('New address')).toBeTruthy()
   })
 
   it('a saved contact keeps the full address: an agent-driven CLI session can write contacts', () => {
@@ -292,7 +293,7 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     render(<DelegationSendModal {...PROPS} />)
     goToReview({ address: ACME, option: /Acme Services/ })
     expect(screen.getByText('Acme Services')).toBeTruthy()
-    expect(screen.getByText(ACME)).toBeTruthy()
+    expect(screen.getByTestId('review-recipient-address').textContent).toBe(ACME)
     expect(screen.queryByText('0x2c9D…77ab')).toBeNull()
   })
 
@@ -306,7 +307,7 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     render(<DelegationSendModal {...PROPS} />)
     goToReview({ address: LOOKALIKE })
     expect(screen.queryByText('Acme Services')).toBeNull()
-    expect(screen.getByText(LOOKALIKE)).toBeTruthy()
+    expect(screen.getByTestId('review-recipient-address').textContent).toBe(LOOKALIKE)
   })
 
   it('a recipient with no name keeps the full address whatever its kind', () => {
@@ -317,7 +318,7 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1.5' } })
     fireEvent.click(screen.getByRole('button', { name: 'Pick new address' }))
     fireEvent.click(screen.getByRole('button', { name: 'Review' }))
-    expect(screen.getByText(SAVINGS)).toBeTruthy()
+    expect(screen.getByTestId('review-recipient-address').textContent).toBe(SAVINGS)
   })
 
   it('your own account shows its name and the short address, not the full one', () => {

@@ -162,7 +162,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(dialog.getByText("You're sending")).toHaveCount(1)
       await expect(dialog.getByText(`${AMOUNT} USDC`, { exact: true })).toHaveCount(1)
       await expect(dialog.getByText(CONTACT_NAME)).toHaveCount(1)
-      await expect(dialog.getByText(testRecipientAddress)).toHaveCount(1)
+      await expect(dialog.getByTestId('review-recipient-address')).toHaveText(testRecipientAddress)
       await expect(dialog.getByText('Base', { exact: true })).toHaveCount(1)
       await expect(dialog.getByText('None. Haven covers it.')).toHaveCount(1)
       await expect(dialog.getByText("A sent payment can't be reversed. You approve it on the next step.")).toHaveCount(1)
@@ -195,8 +195,7 @@ test.describe('send dialog visual regression (#4641)', () => {
 
       // Your own account: the name and the SHORT address, not the full one.
       await expect(dialog.getByText('Imported Safe')).toHaveCount(1)
-      await expect(dialog.getByText(`${ownAccount.slice(0, 6)}…${ownAccount.slice(-4)}`)).toHaveCount(1)
-      await expect(dialog.getByText(ownAccount)).toHaveCount(0)
+      await expect(dialog.getByTestId('review-recipient-address')).toHaveText(`${ownAccount.slice(0, 6)}…${ownAccount.slice(-4)}`)
 
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(

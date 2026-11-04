@@ -15,6 +15,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **`haven contacts add` and `haven contacts remove` now refuse (exit 4).** Saved
+  contacts are added and removed in the dashboard only, because a contact is a name
+  the owner trusts when paying and an agent drives this CLI. `haven contacts list`
+  still works. An older CLI gets a 401 from the backend for these two commands.
+
 ## 0.13.0-alpha.0 — 2026-10-30
 
 ## 0.12.0-alpha.0 — 2026-10-29

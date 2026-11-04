@@ -138,7 +138,6 @@ haven agents revoke <id> [--keep-budget] --yes   # retires the agent in Haven (t
 haven agents rotate-key <id>             # new API key, shown once
 haven agents rename <id> <name>
 haven wallets rename <id> <name>
-haven contacts add <name> <address> | contacts remove <id>
 
 # set an agent up without the dashboard modal (#2527)
 haven agents connect --name <name> --budget <amount> --token USDC --period <minutes>

@@ -80,7 +80,6 @@ function argvFor(command: string): string[] {
     // wallet pick — the refusal rows below run against `refusingApi`, but the
     // argv still has to parse, and `--wait` is a boolean flag, no extras needed.
     'wallets funding': ['--safe', 's1'],
-    'contacts add': ['Alice', '0xalice'], 'contacts remove': ['c1'],
     // #3597: clean text — no secret layer refuses this, so this row (like
     // every other command's) asserts the generic backend-refusal path. The
     // dedicated 'feedback submit, layer 3' describe block below reuses this
@@ -276,8 +275,6 @@ describe('--json contract, success paths', () => {
     ['wallets rename', ['wallets', 'rename', 's1', 'Ops']],
     ['catalog list', ['catalog', 'list']],
     ['contacts list', ['contacts', 'list']],
-    ['contacts add', ['contacts', 'add', 'Alice', '0xalice']],
-    ['contacts remove', ['contacts', 'remove', 'c1']],
     ['feedback submit', ['feedback', 'submit', 'The', 'CLI', 'timed', 'out', 'on', 'wallets', 'funding.']],
   ])('%s: success is one JSON value on stdout', async (_label, argv) => {
     const { deps, out } = harness({ makeApi: () => stubApi() })

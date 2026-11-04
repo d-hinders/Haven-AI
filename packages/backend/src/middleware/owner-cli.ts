@@ -30,7 +30,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
  *
  * Everything that changes AUTHORITY rather than reading or arranging it:
  * signer changes, re-keying, passkey management, credential/password/email
- * changes, account provisioning, transfers, and activation. An owner CLI
+ * changes, account provisioning, transfers, activation, and writing saved
+ * contacts. An owner CLI
  * session can create an agent and hand it a budget request — it cannot approve
  * that budget, and it cannot move a key. The human keeps every signature,
  * which is this epic's standing owner constraint.
@@ -141,9 +142,11 @@ export const OWNER_CLI_ALLOWED_ROUTES: readonly AllowedRoute[] = [
   { method: 'GET', path: '/agent-activity/{id}/stats' },
   { method: 'GET', path: '/transactions' },
   { method: 'GET', path: '/catalog' },
+  // Reading only (owner decision, 2026-11-04). A contact is a name the owner
+  // trusts when paying, and Send's Review shows that name above the address, so
+  // an agent that could add or delete one could swap a saved name onto its own
+  // address. Writes are the owner's, from the dashboard.
   { method: 'GET', path: '/contacts' },
-  { method: 'POST', path: '/contacts' },
-  { method: 'DELETE', path: '/contacts/{id}' },
   { method: 'GET', path: '/auth/me' },
   // #2946 (epic #2944 slice B): read-only owner data, same class as the
   // dashboard and agent-activity reads above — no authority, no write.

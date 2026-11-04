@@ -981,18 +981,14 @@ describe('management commands (backend-only)', () => {
     expect(api.calls).toContain('PUT /user/accounts/s1')
   })
 
-  it('adds and removes contacts', async () => {
-    const api = fakeApi({
-      'POST /contacts': { id: 'c1', name: 'Alice', address: '0xalice' },
-      'DELETE /contacts/c1': {},
-    })
-    const add = harness({ makeApi: () => api })
-    expect(await run(['contacts', 'add', 'Alice', '0xalice'], add.deps)).toBe(0)
-    expect(add.out.join('\n')).toContain('Alice')
-
-    const rm = harness({ makeApi: () => api })
-    expect(await run(['contacts', 'remove', 'c1'], rm.deps)).toBe(0)
-    expect(api.calls).toContain('DELETE /contacts/c1')
+  it('refuses contact writes with a pointer to the dashboard, calling nothing', async () => {
+    for (const argv of [['contacts', 'add', 'Alice', '0xalice'], ['contacts', 'remove', 'c1']]) {
+      const api = fakeApi({})
+      const { deps, err } = harness({ makeApi: () => api })
+      expect(await run(argv, deps)).toBe(4) // EXIT.refused
+      expect(err.join('\n')).toContain('Haven dashboard')
+      expect(api.calls).toEqual([])
+    }
   })
 
   it('surfaces a backend error message', async () => {

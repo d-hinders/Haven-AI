@@ -155,3 +155,41 @@ describe('DashboardActionPickerModal options are Rows (#4601, N5)', () => {
     expect(list!.querySelectorAll('button')).toHaveLength(ACCOUNTS.length)
   })
 })
+
+/**
+ * #4642 — an account with no resolved `chain_id` cannot sign a send.
+ *
+ * The Send dialog's mount guard already skipped it, but the picker listed it as
+ * clickable, so choosing it set `sendOpen` and rendered nothing: a silent dead
+ * end. For the `send` action such an account is now a static `Row` carrying the
+ * reason; Receive is untouched, because an account can receive on a chain it
+ * has not resolved yet.
+ */
+describe('DashboardActionPickerModal — null-chain accounts (#4642)', () => {
+  const NULL_CHAIN: SmartAccount = {
+    ...ACCOUNTS[1],
+    id: 'acc-3',
+    name: 'Fresh account',
+    chain_id: undefined as unknown as number,
+  }
+
+  it('renders a null-chain account as a non-interactive row for send, with its reason', () => {
+    const { onSelect } = renderPicker({ action: 'send', accounts: [ACCOUNTS[0], NULL_CHAIN] })
+
+    expect(screen.getByText("No network yet. You can't send from this account.")).toBeInTheDocument()
+    // No button carries the null-chain account's name: the row is static.
+    expect(screen.queryByRole('button', { name: /Fresh account/ })).toBeNull()
+
+    // The valid account stays selectable.
+    fireEvent.click(screen.getByRole('button', { name: /Main account/ }))
+    expect(onSelect).toHaveBeenCalledWith('acc-1')
+  })
+
+  it('leaves a null-chain account selectable for receive', () => {
+    const { onSelect } = renderPicker({ action: 'receive', accounts: [NULL_CHAIN] })
+
+    expect(screen.queryByText("No network yet. You can't send from this account.")).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Fresh account/ }))
+    expect(onSelect).toHaveBeenCalledWith('acc-3')
+  })
+})

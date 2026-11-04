@@ -3632,31 +3632,60 @@ export default function DesignSystemPage() {
 
       <Section
         title="Contacts and recipients"
-        description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments."
+        description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments. A saved recipient is a Row: Monogram, name, the short address with its networks, then a visible Send and a ⋯ menu holding Copy address, Edit and Delete (#4642)."
       >
-        <Card hover={false} className="max-w-xl overflow-hidden p-0">
+        <Card hover={false} className="max-w-xl p-0">
           <Card.Header
             title="Saved recipients"
             description="Use names for people and services you pay often. Confirm the network in Send."
             actions={
-              <Button size="sm" className="flex-shrink-0 whitespace-nowrap">
+              <Button size="sm" leadingIcon={Plus} className="flex-shrink-0 whitespace-nowrap">
                 Add contact
               </Button>
             }
           />
-          {[
-            ['Acme Services', '0x7a58...91c2'],
-            ['Research API', '0x31bc...8d04'],
-          ].map(([name, address]) => (
-            <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
-              <Monogram name={name} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{name}</p>
-                <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{address}</p>
-              </div>
-              <StatusBadge tone="neutral">Recipient</StatusBadge>
-            </div>
-          ))}
+          <div className="divide-y divide-[var(--v2-border)]">
+            {[
+              ['Acme Services', '0x7a58...91c2'],
+              ['Research API', '0x31bc...8d04'],
+            ].map(([name, address]) => (
+              <Row
+                key={name}
+                leading={<Monogram name={name} />}
+                leadingClassName="h-9 w-9"
+                title={name}
+                subtitle={<span className="font-mono">{address}</span>}
+                trailing={
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={ArrowUp}
+                      aria-label={`Send to ${name}`}
+                    >
+                      Send
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        aria-label={`More actions for ${name}`}
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                      >
+                        <Icon icon={EllipsisVertical} className="h-4 w-4" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent>
+                        <DropdownMenuItem onSelect={() => undefined}>Copy address</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => undefined} tone="danger">
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                }
+              />
+            ))}
+          </div>
         </Card>
       </Section>
 

@@ -110,10 +110,19 @@ describe('every backend viem RPC transport goes through rpcTransport (#3255)', (
     // signing/nonce view) and the fallback that only re-sends signed bytes.
     // The wallet must never bind to the fallback, and only the outbound queue
     // may reach it.
-    // A provider-bound wallet (two arguments); `new Wallet(key)` only signs.
-    const wallets = matchingLines(/new Wallet\([^)]*,/)
+    // A provider-bound wallet is one whose second argument is a provider
+    // getter; `new Wallet(key)` only signs. #4654: the key argument is now
+    // wrapped in `parseEnvPrivateKey(...)`, so the old "a comma before the
+    // first `)`" heuristic no longer identifies the shape — it matched the
+    // receipt signer's nested call instead. Matching the provider getter keeps
+    // the property (one provider-bound wallet, bound to the PRIMARY) and still
+    // catches a wallet bound to the fallback.
+    const wallets = matchingLines(/new Wallet\(.*,\s*(?:getProvider|getFallbackBroadcastProvider)\(/)
     expect(wallets.map((m) => [m.rel, m.line.trim()])).toEqual([
-      [RELAYER, 'relayer = new Wallet(key, getProvider(chainId))'],
+      [
+        RELAYER,
+        'relayer = new Wallet(parseEnvPrivateKey(relayerKeyVariableName(chainId), key), getProvider(chainId))',
+      ],
     ])
     const consumers = files
       .filter(({ rel, text }) => rel !== RELAYER && /getFallbackBroadcastProvider/.test(text))

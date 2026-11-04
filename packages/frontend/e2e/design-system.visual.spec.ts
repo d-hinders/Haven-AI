@@ -635,6 +635,19 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(sample, vp.height, 'the ConnectSteps sample', `design-system-connect-steps-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
     })
 
+    test(`/design-system Address grouped sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-address-grouped')
+      await expect(sample).toHaveCount(1)
+      await expectShowcaseClip(sample, vp.height, 'the Address grouped sample', `design-system-address-grouped-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     test(`/design-system Amount currency sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''
@@ -1080,6 +1093,7 @@ test.describe('design-system visual regression', () => {
     ['StackedBarChart swatch list', (p) => p.getByTestId('ds-stacked-bar-swatch-list')],
     ['StepProgress sample', (p) => p.getByTestId('ds-step-progress')],
     ['ConnectSteps sample', (p) => p.getByTestId('ds-connect-steps')],
+    ['Address grouped sample', (p) => p.getByTestId('ds-address-grouped')],
     ['Amount currency sample', (p) => p.getByTestId('ds-amount-currency')],
     ['AttentionList sample', (p) => p.getByTestId('ds-attention-list')],
     ['NoticeRow sample', (p) => p.getByTestId('ds-notice-row')],

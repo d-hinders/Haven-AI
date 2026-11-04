@@ -238,8 +238,6 @@ export function helpText(): string {
     '  agents rotate-key <id>        Issue a new API key (shown once)',
     '  agents rename <id> <name>',
     '  wallets rename <id> <name>',
-    '  contacts add <name> <address>  Save an address under a name',
-    '  contacts remove <id>          Forget one',
     '',
     'Budgets (construct-and-hand-off — the CLI never signs, #2539):',
     '  budget grant <agentId> --amount <n> --token USDC --period <minutes>',

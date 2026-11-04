@@ -93,6 +93,18 @@ async function openSendDialog(page: Page, path = '/dashboard'): Promise<Locator>
   return dialog
 }
 
+/** How many address groups sit on each rendered line. */
+async function groupsPerLine(address: Locator): Promise<number[]> {
+  return address.evaluate((el) => {
+    const counts = new Map<number, number>()
+    for (const group of Array.from(el.querySelectorAll('.whitespace-nowrap > span'))) {
+      const top = Math.round(group.getBoundingClientRect().top)
+      counts.set(top, (counts.get(top) ?? 0) + 1)
+    }
+    return Array.from(counts.values())
+  })
+}
+
 /** Fill Details and move to Review. */
 async function fillAndReview(page: Page, dialog: Locator): Promise<void> {
   const to = dialog.getByRole('combobox', { name: 'To' })
@@ -162,7 +174,17 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(dialog.getByText("You're sending")).toHaveCount(1)
       await expect(dialog.getByText(`${AMOUNT} USDC`, { exact: true })).toHaveCount(1)
       await expect(dialog.getByText(CONTACT_NAME)).toHaveCount(1)
-      await expect(dialog.getByText(testRecipientAddress)).toHaveCount(1)
+      const address = dialog.getByTestId('review-recipient-address')
+      await expect(address).toHaveText(testRecipientAddress)
+      // Two balanced lines, jsdom cannot see this. It once wrapped 4, 5, 1 in the
+      // desktop column and ran to one line of ten between the two captured widths.
+      expect(await groupsPerLine(address)).toEqual([5, 5])
+      await page.setViewportSize({ width: 500, height: vp!.height })
+      expect(await groupsPerLine(address)).toEqual([5, 5])
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      // A line cannot wrap, so too narrow a column would overflow instead, hiding
+      // the middle of the address, which is where a lookalike differs.
+      expect(await address.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
       await expect(dialog.getByText('Base', { exact: true })).toHaveCount(1)
       await expect(dialog.getByText('None. Haven covers it.')).toHaveCount(1)
       await expect(dialog.getByText("A sent payment can't be reversed. You approve it on the next step.")).toHaveCount(1)
@@ -172,6 +194,35 @@ test.describe('send dialog visual regression (#4641)', () => {
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-review-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    test(`send-dialog-review-new-address renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      const dialog = await openSendDialog(page)
+      // A pasted address that matches nothing saved, the case most exposed to a
+      // lookalike: no name, no avatar, the whole address grouped for comparing.
+      const pasted = '0x18a43f6c7d5c84c3a715097c57b9945ce10c5162'
+      const to = dialog.getByRole('combobox', { name: 'To' })
+      await to.click()
+      await to.fill(pasted)
+      await page.getByRole('option', { name: /Send to/ }).click()
+      await dialog.getByLabel('Amount').fill(AMOUNT)
+      await dialog.getByRole('button', { name: 'Review', exact: true }).click()
+
+      await expect(dialog.getByText('New address')).toHaveCount(1)
+      const address = dialog.getByTestId('review-recipient-address')
+      await expect(address).toHaveText(pasted)
+      expect(await groupsPerLine(address)).toEqual([5, 5])
+
+      await page.evaluate(() => document.fonts.ready)
+      await expect(dialog).toHaveScreenshot(
+        `send-dialog-review-new-address-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
       )
     })
@@ -195,8 +246,7 @@ test.describe('send dialog visual regression (#4641)', () => {
 
       // Your own account: the name and the SHORT address, not the full one.
       await expect(dialog.getByText('Imported Safe')).toHaveCount(1)
-      await expect(dialog.getByText(`${ownAccount.slice(0, 6)}…${ownAccount.slice(-4)}`)).toHaveCount(1)
-      await expect(dialog.getByText(ownAccount)).toHaveCount(0)
+      await expect(dialog.getByTestId('review-recipient-address')).toHaveText(`${ownAccount.slice(0, 6)}…${ownAccount.slice(-4)}`)
 
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(

@@ -359,15 +359,13 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    amount parses.
 2. **Review.** "You're sending", with the amount large. A detail list carries
    **To**, **From**, **Network**, and **Network fee** ("None. Haven
-   covers it."). **To** leads with the name and its Monogram. Below the name, your
-   own account shows the short address through `Address`, with the full one on
-   hover or tap: the name is what you check there, and no agent can create an
-   account. Everything else, a saved contact included, shows the full address in
-   mono, wrapping, because lookalike scam addresses match the characters a short
-   form keeps, and an agent-driven owner CLI session can write contacts. The short
-   form for accounts is an owner decision (2026-11-04, narrowing #4641's "never
-   truncated"). Keeping contacts full comes from that change's code review and
-   awaits the owner's ruling on #4637. A neutral note
+   covers it."). **To** leads with the name and its Monogram, or "New address" when there is no
+   name. Below it, your own account shows the short address through `Address`, with
+   the full one on hover or tap: the name is what you check there, and no agent can
+   create an account. Everything else, a saved contact included, shows the full
+   address through `Address grouped`, because lookalike scam addresses match the
+   characters a short form keeps (owner decisions 2026-11-04, narrowing #4641's
+   "never truncated"). A neutral note
    follows: "A sent payment can't be reversed. You
    approve it on the next step." The passkey hint and the wallet-connect state
    live here, where the ceremony starts. Footer: `Back` | `Send <amount>

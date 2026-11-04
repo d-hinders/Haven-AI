@@ -5748,7 +5748,7 @@ export type components = {
             superseded_by: components["schemas"]["AgentSupersession"];
             /**
              * Format: date-time
-             * @description #4352 (decision 5, additive): when the agent’s only budgets for this chain have ENDED, the latest ended budget’s expiry (ISO 8601) — read by the same narrow expired-row query the refusal answers use. `null` when no expired row exists; the field NEVER reports a live budget. Lets an agent whose `allowances[]` is empty tell “nobody approved yet” from “the budget ended on this date”. Optional on the schema so an older backend that omits it stays valid.
+             * @description #4352 (decision 5, additive): when the agent’s only budgets for this chain have ENDED, the latest ended budget’s expiry (ISO 8601) — read by the same narrow expired-row query the refusal answers use. `null` whenever `allowances[]` has a row for this chain: a live or dormant budget is never reported as ended, even when an older ended row exists beside it. The date is answered only when `allowances[]` is empty and an expired row exists. Lets an agent whose `allowances[]` is empty tell “nobody approved yet” from “the budget ended on this date”. Optional on the schema so an older backend that omits it stays valid.
              */
             budget_ended_at?: string | null;
             allowances: {

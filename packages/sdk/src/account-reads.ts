@@ -463,7 +463,8 @@ export class AccountReads {
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       // #4352: a non-empty parseable date → itself; anything else (absent on
-      // an older backend, null when no budget has ended) → null.
+      // an older backend, null when a live budget exists or no budget has
+      // ended) → null.
       budgetEndedAt:
         typeof raw.budget_ended_at === 'string' && !Number.isNaN(Date.parse(raw.budget_ended_at))
           ? raw.budget_ended_at

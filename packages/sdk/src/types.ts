@@ -827,9 +827,11 @@ export interface HavenAllowanceSummary {
   /**
    * #4352 (additive, decision 5): when the agent's only budgets for this
    * chain have ENDED, the latest ended budget's expiry (ISO 8601) — read by
-   * the same narrow expired-row query the refusal answers use. `null` when no
-   * expired row exists; the field NEVER reports a live budget. `null` on a
-   * backend that predates the field.
+   * the same narrow expired-row query the refusal answers use. `null`
+   * whenever `allowances` has a row for this chain: a live or dormant budget
+   * is never reported as ended, even when an older ended row exists beside
+   * it. The date is answered only when `allowances` is empty and an expired
+   * row exists. `null` on a backend that predates the field.
    */
   budgetEndedAt: string | null
   /** #3772: see {@link HavenAgent.supersededBy}. */

@@ -915,9 +915,11 @@ a carry and a steady row, so the later end decides. The grant is reported beside
 the wallet table, not as a row in it, because it has no balance, burn or top-up:
 
 - `warn`: 30 days or fewer before it ends;
-- `critical`: 7 days or fewer, or no live open USDC budget. With no live budget,
-  the issue names the API's `budget_ended_at` when it carries one, which is the
-  latest ended budget of any token or pin, not necessarily this one;
+- `critical`: 7 days or fewer, or no live open USDC budget. With no live budget
+  at all on the chain, the issue names the API's `budget_ended_at` when it
+  carries one, which is the latest ended budget of any token or pin, not
+  necessarily this one. A live pinned row keeps that field null, so the issue
+  names no date in that state;
 - `unknown`: an HTTP error, a read failure or timeout, a response with no
   allowances list, or a live open budget with no usable `budget_expires_at`,
   which includes a backend from before this field. With no QA API URL or agent

@@ -1,16 +1,22 @@
 import { assertRelayerBudget, recordRelayerSpend, finishRelayerSpend, type RelayerAttribution } from '../infra/relayer-spend-guard.js'
 import { ethers } from 'ethers'
 import {
-  buildSweepAuthorizationMessage,
   sweepUsdcAddress,
   sweepUsdcDomain,
   TRANSFER_WITH_AUTHORIZATION_TYPES,
   type SweepAuthorization,
-  type SweepExpectedAuth,
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from '../infra/chain/relayer-reads.js'
-import { parseEnvPrivateKey } from '../infra/chain/env-private-key.js'
 import { openOutboundRecord, submitRecorded } from '../infra/outbound-queue.js'
+
+/**
+ * #4655 (owner decision 1): the binding wallet is constructed in exactly ONE
+ * place — `infra/chain/x402-binding-signer.ts`. This file broadcasts through the
+ * relayer, so no file-level "message-only" assertion can hold here; the signing
+ * function moved to the file that can be asserted. Re-exported so the sweep call
+ * sites and tests keep their existing import path.
+ */
+export { signSweepExpectedContext } from '../infra/chain/x402-binding-signer.js'
 
 /**
  * Gasless delegate-sweep helpers (EIP-3009 `transferWithAuthorization`).
@@ -66,35 +72,6 @@ export function buildSweepAuthorization(params: {
     nonce: generateSweepNonce(),
     token,
     chainId: params.chainId,
-  }
-}
-
-/**
- * Sign the authorization-context binding so the edge signer can confirm the
- * authorization came from Haven. Uses the same dedicated binding key as the
- * x402 expected-context (never the relayer key), under a distinct message
- * namespace so the two cannot cross-replay.
- */
-export async function signSweepExpectedContext(
-  auth: SweepAuthorization,
-): Promise<SweepExpectedAuth> {
-  const privateKey = process.env.X402_BINDING_PRIVATE_KEY
-  if (!privateKey) {
-    throw new Error(
-      'X402_BINDING_PRIVATE_KEY must be set to authenticate sweep authorizations. ' +
-        'Do not fall back to RELAYER_PRIVATE_KEY — the binding signer must be a dedicated key ' +
-        'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
-    )
-  }
-  // #4654: validate the string first — ethers echoes an unparseable value into
-  // the error it throws, and that error reaches the logs.
-  const wallet = new ethers.Wallet(parseEnvPrivateKey('X402_BINDING_PRIVATE_KEY', privateKey))
-  const message = buildSweepAuthorizationMessage(auth)
-  return {
-    version: 1,
-    message,
-    signature: await wallet.signMessage(message),
-    signer: wallet.address,
   }
 }
 

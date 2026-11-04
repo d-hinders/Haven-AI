@@ -13,7 +13,13 @@
  * stop the address-derivation logic from being defined twice.
  */
 import { ethers } from 'ethers'
-import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
+import {
+  buildSweepAuthorizationMessage,
+  buildX402ExpectedMessage,
+  type SweepAuthorization,
+  type SweepExpectedAuth,
+  type X402ExpectedContext,
+} from '@haven_ai/sdk'
 import { parseBooleanFlag } from '../../config/boolean-flag.js'
 import { parseEnvPrivateKey } from './env-private-key.js'
 
@@ -79,8 +85,8 @@ type X402ExpectedContextV2Plus = Omit<X402ExpectedContext, 'typedDataHash'> & {
  * Sign an x402 "expected context" with the dedicated binding-signer key, so
  * the edge signer can verify it against `HAVEN_X402_BINDING_SIGNER`.
  *
- * Deliberately never falls back to `RELAYER_PRIVATE_KEY` — the binding
- * signer must be a dedicated key, not the relayer's.
+ * Deliberately never falls back to the relayer key — the binding signer must be
+ * a dedicated key, not the relayer's.
  */
 export async function signX402ExpectedContext(context: X402ExpectedContextV2Plus): Promise<{
   version: 2 | 3
@@ -92,7 +98,7 @@ export async function signX402ExpectedContext(context: X402ExpectedContextV2Plus
   if (!privateKey) {
     throw new Error(
       'X402_BINDING_PRIVATE_KEY must be set to authenticate x402 expected context. ' +
-        'Do not fall back to RELAYER_PRIVATE_KEY — the binding signer must be a dedicated key ' +
+        'Do not fall back to the relayer key — the binding signer must be a dedicated key ' +
         'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
     )
   }
@@ -116,6 +122,40 @@ export async function signX402ExpectedContext(context: X402ExpectedContextV2Plus
     // Announcing a version the message does not match is precisely the
     // downgrade the signer rejects.
     version: context.payerDelegate ? 3 : 2,
+    message,
+    signature: await wallet.signMessage(message),
+    signer: wallet.address,
+  }
+}
+
+/**
+ * Sign the sweep authorization-context binding so the edge signer can confirm
+ * the authorization came from Haven (#4655, owner decision 1: moved here from
+ * `rails/sweep.ts`).
+ *
+ * Same dedicated binding key as the x402 expected context — never the relayer
+ * key — under a distinct message namespace so the two cannot cross-replay. This
+ * file is the ONE place the binding wallet is constructed: `rails/sweep.ts`
+ * broadcasts through the relayer and so cannot be asserted message-only at file
+ * level, while this file can.
+ */
+export async function signSweepExpectedContext(
+  auth: SweepAuthorization,
+): Promise<SweepExpectedAuth> {
+  const privateKey = process.env.X402_BINDING_PRIVATE_KEY
+  if (!privateKey) {
+    throw new Error(
+      'X402_BINDING_PRIVATE_KEY must be set to authenticate sweep authorizations. ' +
+        'Do not fall back to the relayer key — the binding signer must be a dedicated key ' +
+        'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
+    )
+  }
+  // #4654: validate the string first — ethers echoes an unparseable value into
+  // the error it throws, and that error reaches the logs.
+  const wallet = new ethers.Wallet(parseEnvPrivateKey('X402_BINDING_PRIVATE_KEY', privateKey))
+  const message = buildSweepAuthorizationMessage(auth)
+  return {
+    version: 1,
     message,
     signature: await wallet.signMessage(message),
     signer: wallet.address,

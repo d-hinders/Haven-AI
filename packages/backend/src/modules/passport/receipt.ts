@@ -51,6 +51,7 @@
 
 import { Wallet, verifyMessage } from 'ethers'
 import { parseEnvPrivateKey } from '../../infra/chain/env-private-key.js'
+import { sameKey } from '../../infra/key-identity.js'
 import type { AnchorState, Standing } from './revocation.js'
 import { AssuranceLevel } from './schema.js'
 
@@ -261,15 +262,12 @@ export function setReceiptSigningKey(
 /**
  * Do two env values denote the SAME private key?
  *
- * Compared on the key's VALUE, not its text. The threat is an operator pasting
- * one key into two variables, and a paste routinely differs in casing or the
- * `0x` prefix while being cryptographically identical — a text comparison would
- * wave exactly the mistake it exists to catch straight through.
+ * The implementation lives in `infra/key-identity.ts` (#4655): the binding-key
+ * boot refusal is in `infra/` and cannot import a module's private file, so the
+ * comparison moved to a neutral home and is re-exported here to keep this
+ * module's public surface unchanged.
  */
-function sameKey(a: string, b: string): boolean {
-  const normalize = (k: string) => k.trim().toLowerCase().replace(/^0x/, '')
-  return normalize(a) === normalize(b)
-}
+export { sameKey }
 
 export function isReceiptSigningConfigured(): boolean {
   return signerKey !== null

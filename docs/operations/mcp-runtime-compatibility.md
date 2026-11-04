@@ -89,6 +89,18 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **No contract change (#4655, 2026-11-04): the binding key's boot refusal.**
+> `packages/backend/src/infra/chain/x402-binding-signer.ts` is on this contract's
+> cover list. The backend now refuses to boot when a set
+> `X402_BINDING_PRIVATE_KEY` equals a relayer key or the receipt key, and the
+> sweep authorization signing moved into that file so the binding wallet is
+> constructed in one place. No tool name, argument, input schema, strict-input
+> list, expected-context version, consent hash, `tools-list.snapshot.json` entry
+> or `next-arguments-corpus.json` row changes: the signed messages
+> (`buildX402ExpectedMessage`, `buildSweepAuthorizationMessage`) and the signer
+> address are byte-identical, so an installed signer sees no difference.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **No contract change (#4638, 2026-11-03): a presentation-only prop on
 > `WaitingForConnector`.** It gains an optional `halo` flag, passed through to
 > the step checklist so the live Connect dialog can show one attention ring on

@@ -15,6 +15,7 @@
 import { ethers } from 'ethers'
 import { buildX402ExpectedMessage, type X402ExpectedContext } from '@haven_ai/sdk'
 import { parseBooleanFlag } from '../../config/boolean-flag.js'
+import { parseEnvPrivateKey } from './env-private-key.js'
 
 /**
  * #3021 (#3015 follow-up): the emit flip used to be `!== '1'` read at every
@@ -105,7 +106,9 @@ export async function signX402ExpectedContext(context: X402ExpectedContextV2Plus
         'accepts only versions 2 and 3, both of which commit to a typed-data digest.',
     )
   }
-  const wallet = new ethers.Wallet(privateKey)
+  // #4654: validate the string first — ethers echoes an unparseable value into
+  // the error it throws, and that error reaches the logs.
+  const wallet = new ethers.Wallet(parseEnvPrivateKey('X402_BINDING_PRIVATE_KEY', privateKey))
   const message = buildX402ExpectedMessage(context)
   return {
     // Derived from the context, never chosen here: a v3 context also carries
@@ -138,7 +141,10 @@ export function resolveX402BindingSignerAddress(): string | null {
   const privateKey = process.env.X402_BINDING_PRIVATE_KEY?.trim()
   if (!privateKey) return null
   try {
-    return new ethers.Wallet(privateKey).address
+    // #4654: the same helper as the signing path, so both accept exactly the
+    // same input. The contract here is unchanged: a bad key returns null with a
+    // value-free warning, never a throw.
+    return new ethers.Wallet(parseEnvPrivateKey('X402_BINDING_PRIVATE_KEY', privateKey)).address
   } catch {
     console.warn('X402_BINDING_PRIVATE_KEY is set but invalid; cannot derive the x402 binding signer.')
     return null

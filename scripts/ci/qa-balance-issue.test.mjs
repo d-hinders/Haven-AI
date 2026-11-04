@@ -383,6 +383,7 @@ test('a low wallet and a healthy grant keep the wallet lead, with no grant lead'
   const body = issueBody(run({ rows: treasuryWarn, budgetGrant: grant('ok') }).calls)
   assert.match(body, /^One or more wallets/)
   assert.doesNotMatch(body, /\*\*The QA budget grant ends/)
+  assert.doesNotMatch(body, /Nothing is known/)
 })
 
 test('a low wallet and a grant alarm lead with both', () => {

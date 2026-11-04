@@ -995,20 +995,29 @@ describe('the QA budget grant through the real entry points (#4666)', () => {
 
   it('the grant read starts beside the wallet reads, not after them, so it adds nothing to the job\'s worst case', async () => {
     const order: string[] = []
+    let walletRead = () => {}
+    const aWalletWasRead = new Promise<void>((resolve) => {
+      walletRead = resolve
+    })
     const fetchImpl = (async (...args: Parameters<typeof fetch>) => {
       order.push('wallet read')
+      walletRead()
       return healthz(...args)
     }) as typeof fetch
+    // The grant answers only once a wallet has been read, so a grant read that
+    // ran BEFORE the wallets would hit its deadline: `unknown`, not `ok`.
     const tracking = {
       getAgent: async () => ({ ok: true, status: 200, data: { account_address: TREASURY } }),
       getAllowances: async () => {
         order.push('grant read')
+        await aWalletWasRead
         return allowancesEnding(inDays(90))()
       },
     } as never
-    await runBalances([], { ...FULL }, { ...deps(), fetchImpl, api: tracking })
+    const { report } = await runBalances([], { ...FULL }, { ...deps(), fetchImpl, api: tracking, deadlineMs: 1_000 })
+    // And it started first, so a grant read AFTER the wallets goes red here.
     expect(order[0]).toBe('grant read')
-    expect(order).toContain('wallet read')
+    expect(report.budgetGrant?.band).toBe('ok')
   })
 
   it('the run log names the grant in the wallet rows\' shape, and the report always carries one', async () => {

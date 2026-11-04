@@ -4,6 +4,7 @@ import { useId, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { ACTIVE_STEP_RING_CLASS } from '@/components/ui/StepProgress'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
@@ -290,7 +291,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border-2 border-[var(--v2-ink-2)] text-xs font-semibold text-[var(--v2-ink-2)] v2-tabular"
+        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${ACTIVE_STEP_RING_CLASS} text-xs font-semibold text-[var(--v2-ink-2)] v2-tabular`}
       >
         {number}
       </span>

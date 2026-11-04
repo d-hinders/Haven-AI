@@ -358,9 +358,14 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    `Cancel` | `Review`, with Review disabled until a recipient is chosen and the
    amount parses.
 2. **Review.** "You're sending", with the amount large. A detail list carries
-   **To** (the name with its Monogram, and the full address in mono, wrapping,
-   never truncated), **From**, **Network**, and **Network fee** ("None. Haven
-   covers it."). A neutral note follows: "A sent payment can't be reversed. You
+   **To**, **From**, **Network**, and **Network fee** ("None. Haven
+   covers it."). **To** leads with the name and its Monogram. Below the name, your
+   own account or a saved contact shows the short address through `Address`, with
+   the full one on hover or tap: the name is what you check there. A pasted
+   address, or anything without a name, shows the full address in mono, wrapping,
+   because lookalike scam addresses match the characters a short form keeps (owner
+   decision 2026-11-04, narrowing #4641's "never truncated"). A neutral note
+   follows: "A sent payment can't be reversed. You
    approve it on the next step." The passkey hint and the wallet-connect state
    live here, where the ceremony starts. Footer: `Back` | `Send <amount>
    <token>`, with Back keeping every field.

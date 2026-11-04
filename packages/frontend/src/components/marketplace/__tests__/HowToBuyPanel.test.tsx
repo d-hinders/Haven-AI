@@ -136,7 +136,7 @@ function stepText(n: number) {
  */
 function openStepIds(container: HTMLElement): string[] {
   return Array.from(
-    container.querySelectorAll('[data-testid^="how-to-buy-step-"] > [aria-hidden="true"].border-2'),
+    container.querySelectorAll('[data-testid^="how-to-buy-step-"] > [aria-hidden="true"][class*="border-[1.5px]"]'),
   ).map((dot) => dot.parentElement!.getAttribute('data-testid')!)
 }
 
@@ -200,8 +200,8 @@ describe('HowToBuyPanel', () => {
   it('uses a static unfilled ink-2 ring for the current hand-rolled step', () => {
     const { container } = render(<HowToBuyPanel {...baseProps} />)
     const active = container.querySelector('[data-testid="how-to-buy-step-1"] [aria-hidden="true"]')!
-    expect(active).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
-    // One border width only: a bare `border` beside `border-2` lets class order decide.
+    expect(active).toHaveClass('border-[1.5px]', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    // One border width only: a bare `border` beside the ring's width lets class order decide.
     expect(active).not.toHaveClass('border')
     expect(active.className).not.toContain('v2-step-halo')
   })

@@ -1,7 +1,5 @@
 'use client'
 
-import { EllipsisVertical } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
@@ -45,7 +43,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -505,13 +503,10 @@ export default function AgentDetailClient({ agentId }: Props) {
               </span>
             ) : null}
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="Agent options"
                 disabled={pendingAction !== null}
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+              />
               <DropdownMenuContent>
                 {canEditDetails ? (
                   <DropdownMenuItem onSelect={openEditAgent}>

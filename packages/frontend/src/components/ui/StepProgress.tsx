@@ -26,6 +26,14 @@ type StepProgressProps = {
 }
 
 /**
+ * The one "your turn" ring (#4638; 1.5px by owner decision, 2026-11-04): between
+ * the 1px rings either side of it and the 2px it started at, which read too
+ * heavy. Every hand-drawn current-step marker takes it from here, so the weight
+ * cannot drift between the band, the checklist, the guide and How to buy.
+ */
+export const ACTIVE_STEP_RING_CLASS = 'border-[1.5px] border-[var(--v2-ink-2)]'
+
+/**
  * Step indicator that spans its container: the connectors stretch between the
  * discs, so the band reads as one track across the content width instead of a
  * cluster at the left. A label wider than its disc widens that column, which
@@ -70,7 +78,7 @@ export function StepProgress({
                 aria-hidden="true"
                 className={`h-7 w-7 shrink-0 rounded-full text-xs font-medium flex items-center justify-center transition-colors duration-300 v2-tabular sm:h-8 sm:w-8 ${
                   isActive
-                    ? `border-2 border-[var(--v2-ink-2)] text-[var(--v2-ink-2)] ${halo ? 'v2-step-halo' : ''}`
+                    ? `${ACTIVE_STEP_RING_CLASS} text-[var(--v2-ink-2)] ${halo ? 'v2-step-halo' : ''}`
                     : isCompleted
                       ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
                       : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'

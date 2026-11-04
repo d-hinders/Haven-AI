@@ -14,8 +14,9 @@
  *   - `send-dialog-details-*` and `send-dialog-review-*` are captured from the
  *     REAL dialog, opened from the dashboard hero. The shared fixture serves
  *     one account ("Operations", Base) and one saved contact ("Research
- *     vendor"), so the Review screen shows a named recipient with its full
- *     address — the state the issue asks the baseline to pin.
+ *     vendor"), so the Review screen shows a named recipient with its short
+ *     address (owner decision 2026-11-04; a pasted address keeps the full one,
+ *     pinned in DelegationSendModal.test.tsx).
  *   - `send-dialog-sent-*` is captured from the `/design-system` "Manual send"
  *     specimen's Sent card. Reaching the sent screen in a browser needs a
  *     completed passkey ceremony: the fixture's account is pure-passkey
@@ -156,12 +157,15 @@ test.describe('send dialog visual regression (#4641)', () => {
       const dialog = await openSendDialog(page)
       await fillAndReview(page, dialog)
 
-      // The Review screen: the amount, the named recipient with its FULL
+      // The Review screen: the amount, the named recipient with its SHORT
       // address, the account, the network and the fee.
       await expect(dialog.getByText("You're sending")).toHaveCount(1)
       await expect(dialog.getByText(`${AMOUNT} USDC`, { exact: true })).toHaveCount(1)
       await expect(dialog.getByText(CONTACT_NAME)).toHaveCount(1)
-      await expect(dialog.getByText(testRecipientAddress)).toHaveCount(1)
+      await expect(dialog.getByText(testRecipientAddress)).toHaveCount(0)
+      await expect(
+        dialog.getByText(`${testRecipientAddress.slice(0, 6)}…${testRecipientAddress.slice(-4)}`),
+      ).toHaveCount(1)
       await expect(dialog.getByText('Base', { exact: true })).toHaveCount(1)
       await expect(dialog.getByText('None. Haven covers it.')).toHaveCount(1)
       await expect(dialog.getByText("A sent payment can't be reversed. You approve it on the next step.")).toHaveCount(1)

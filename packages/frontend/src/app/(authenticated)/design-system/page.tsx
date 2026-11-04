@@ -17,7 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { DialogResult } from '@/components/ui/DialogResult'
@@ -2819,17 +2819,14 @@ export default function DesignSystemPage() {
 
       <Section
         title="Dropdown menu (kebab)"
-        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is always DropdownMenuIconTrigger: the three dots with no frame, tinted on hover, with a 44px tap target that draws nothing so it never reads as a different size beside a Button. Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6">
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+              />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => toast.info('Manage labels')}>Manage labels</DropdownMenuItem>
@@ -3666,12 +3663,9 @@ export default function DesignSystemPage() {
                       Send
                     </Button>
                     <DropdownMenu>
-                      <DropdownMenuTrigger
+                      <DropdownMenuIconTrigger
                         aria-label={`More actions for ${name}`}
-                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-                      >
-                        <Icon icon={EllipsisVertical} className="h-4 w-4" />
-                      </DropdownMenuTrigger>
+                      />
                       <DropdownMenuContent>
                         <DropdownMenuItem onSelect={() => undefined}>Copy address</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
@@ -4092,12 +4086,9 @@ export default function DesignSystemPage() {
                   </div>
                 </div>
                 <DropdownMenu>
-                  <DropdownMenuTrigger
+                  <DropdownMenuIconTrigger
                     aria-label="Budget options 250 USDC per week"
-                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Icon icon={EllipsisVertical} className="h-4 w-4" />
-                  </DropdownMenuTrigger>
+                  />
                   <DropdownMenuContent align="right">
                     <DropdownMenuItem onSelect={() => toast.info('Edit budget')}>Edit budget</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => toast.info('Add budget')}>Add budget</DropdownMenuItem>

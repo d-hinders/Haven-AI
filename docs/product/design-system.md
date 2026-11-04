@@ -1842,6 +1842,17 @@ across four destructive confirmations, and no guard could see it: a per-class-st
 cannot pair a fill in one declaration with a ring in another. Do not consolidate the three
 repeated `ring-brand/80` values back into the base string to deduplicate them.
 
+#### The overflow menu button (`DropdownMenuIconTrigger`, owner decision 2026-11-04)
+
+Every ⋮ menu opens from `DropdownMenuIconTrigger` in `ui/DropdownMenu.tsx`, and the plain
+trigger is no longer exported, so a hand-written one cannot be built. It is the three dots
+in `--v2-ink-3` with **no frame**, tinted on hover. The 44px tap target stays but draws
+nothing, so the button cannot read as a different size beside a 36px or 40px `Button`,
+which is what the framed copies did on the contacts row, the account page and the agents
+list. `aria-label` is required: the glyph says nothing, so name what the menu acts on. The
+sidebar's user menu is the one ⋮ that is not this button: it is not a `DropdownMenu`, has
+its own upward popover, and was already frameless.
+
 #### Button-shaped controls that are not `Button`
 
 **This list is derived from a check, and the check is the artifact — not the list.** The
@@ -2892,7 +2903,7 @@ Showcased on `/design-system` → *DialogResult*.
 
 `ui/StepProgress` is the numbered disc band a multi-step modal carries in its
 header (`Modal`'s `headerAccessory`): one disc per step, the current one an
-unfilled 2px `--v2-ink-2` ring, finished ones success-soft with a tick, the rest
+unfilled 1.5px `--v2-ink-2` ring, finished ones success-soft with a tick, the rest
 a `--v2-border` ring, joined by 1px lines that **stretch to fill the band**, so
 the track spans the same edges as the content below it. Each disc may carry a
 short `labels` entry beneath it (a word or two — "Name", "Budget"), `--v2-ink`
@@ -2904,6 +2915,12 @@ It renders as an `<ol>`: `aria-current="step"` on the active item, an `sr-only`
 same mark, size and stroke as `ConnectSteps`' done disc, so the band and the
 step-3 checklist draw one check when they share a screen (it was a text "✓",
 which rendered visibly different beside it).
+
+**The ring has one definition.** `ACTIVE_STEP_RING_CLASS`, exported by `ui/StepProgress`, is
+the 1.5px width and the colour together (owner decision 2026-11-04: 2px read too heavy
+beside the 1px rings around it). `ConnectSteps`, `HowToBuyPanel` and the first-run guide
+take it from there. A browser rounds a border down to whole device pixels, so a 1x display
+draws it at 1px and the darker colour alone carries the difference; that is accepted.
 
 **`halted`** marks a flow that stopped on `currentStep` — the Connect agent
 modal's expired, cancelled and failed screens. That step renders with the
@@ -2941,7 +2958,7 @@ is a straight edge:
 | State | Disc | Heading |
 |---|---|---|
 | done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
-| active | empty 2px `--v2-ink-2` ring; optional dialog-only halo | `--v2-ink` |
+| active | empty 1.5px `--v2-ink-2` ring; optional dialog-only halo | `--v2-ink` |
 | working | empty `--v2-border` disc, shared `Spinner` in `--v2-ink-2` | `--v2-ink` |
 | pending | empty `--v2-border` ring | `--v2-ink-2` |
 

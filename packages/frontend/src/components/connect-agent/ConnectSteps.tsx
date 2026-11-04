@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Check } from 'lucide-react'
 import { Icon } from '../ui/Icon'
 import { Spinner } from '@haven_ai/ui/Spinner'
+import { ACTIVE_STEP_RING_CLASS } from '@/components/ui/StepProgress'
 
 /**
  * #3832: the connect step's status checklist — copy → paste → approve. Each
@@ -23,7 +24,7 @@ import { Spinner } from '@haven_ai/ui/Spinner'
  *
  * Marker states — one disc size and StepProgress's tokens, no numerals:
  * - `done`    — success-soft disc with a check;
- * - `active`  — 2px ink-2 ring with no fill or dot: the user's move;
+ * - `active`  — the shared ink-2 ring with no fill or dot: the user's move;
  * - `working` — the shared spinner in ink-2 inside a border disc,
  *               for a row whose outcome is in flight and needs nothing from
  *               the user;
@@ -94,7 +95,7 @@ function Marker({ state, halo }: { state: ConnectStepRowState; halo: boolean }) 
     return (
       <span
         aria-hidden="true"
-        className={`${base} border-2 border-[var(--v2-ink-2)] ${halo ? 'v2-step-halo' : ''}`}
+        className={`${base} ${ACTIVE_STEP_RING_CLASS} ${halo ? 'v2-step-halo' : ''}`}
       />
     )
   }

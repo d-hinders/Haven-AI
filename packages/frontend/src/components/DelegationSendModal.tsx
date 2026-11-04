@@ -51,6 +51,7 @@ import { Monogram } from './ui/Monogram'
 import { Input } from './ui/Input'
 import { Select } from './ui/Select'
 import { RecipientField, type Recipient } from './RecipientField'
+import { Address as ShortAddress } from './haven'
 import WalletConnectAction from './WalletConnectAction'
 import PasskeyElsewhereHint from './PasskeyElsewhereHint'
 
@@ -367,10 +368,21 @@ export default function DelegationSendModal({
                     <Monogram name={recipient.name ?? recipient.address} size="xs" decorative />
                     <span className="min-w-0">
                       <span className="block">{recipient.name ?? truncate(recipient.address)}</span>
-                      {/* The FULL address, wrapping — never truncated. */}
-                      <span className="mt-0.5 block break-all font-mono text-xs font-normal text-[var(--v2-ink-3)]">
-                        {recipient.address}
-                      </span>
+                      {/* Owner decision, 2026-11-04. A named account or contact is
+                          checked by its name, so its short address is enough, the
+                          full one a hover or tap away. Anything else, a pasted
+                          address above all, has no name to check: it keeps the
+                          FULL address, because lookalike scam addresses match the
+                          exact characters a short form keeps. */}
+                      {recipient.name && recipient.kind !== 'new' ? (
+                        <span className="mt-0.5 block text-xs font-normal text-[var(--v2-ink-3)]">
+                          <ShortAddress value={recipient.address} />
+                        </span>
+                      ) : (
+                        <span className="mt-0.5 block break-all font-mono text-xs font-normal text-[var(--v2-ink-3)]">
+                          {recipient.address}
+                        </span>
+                      )}
                     </span>
                   </span>
                 ),

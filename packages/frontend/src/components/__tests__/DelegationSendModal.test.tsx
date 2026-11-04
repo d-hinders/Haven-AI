@@ -272,12 +272,38 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('shows the full 42-character address, never truncated', () => {
+  it('a pasted address keeps the full 42 characters: there is no name to check', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} />)
     goToReview()
     expect(NEW_ADDRESS).toHaveLength(42)
     expect(screen.getByText(NEW_ADDRESS)).toBeTruthy()
+  })
+
+  it('a saved contact shows its name and the short address, not the full one', () => {
+    mockUseSend.mockReturnValue(base())
+    contactsFixture.initial = [contact()]
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview({ address: ACME, option: /Acme Services/ })
+    const review = screen.getByText('To').closest('div')!.parentElement!
+    expect(within(review).getByText('Acme Services')).toBeTruthy()
+    expect(within(review).getByText('0x2c9D…77ab')).toBeTruthy()
+    expect(within(review).queryByText(ACME)).toBeNull()
+  })
+
+  it('your own account shows its name and the short address, not the full one', () => {
+    mockUseSend.mockReturnValue(base())
+    mockUseAccounts.mockReturnValue({
+      accounts: [
+        { id: 'a1', account_address: SENDING, chain_id: 84532, name: 'Operating wallet', is_default: true, created_at: '2026-01-01T00:00:00Z' },
+        { id: 'a2', account_address: SAVINGS, chain_id: 84532, name: 'Savings', is_default: false, created_at: '2026-01-01T00:00:00Z' },
+      ],
+      loading: false,
+    })
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview({ address: SAVINGS, option: /Savings/ })
+    expect(screen.getByText(`${SAVINGS.slice(0, 6)}…${SAVINGS.slice(-4)}`)).toBeTruthy()
+    expect(screen.queryByText(SAVINGS)).toBeNull()
   })
 
   it('lists To, From, Network and the network fee', () => {

@@ -39,6 +39,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Icon } from '@/components/ui/Icon'
+import { ACTIVE_STEP_RING_CLASS } from '@/components/ui/StepProgress'
 import {
   anyRecipientRule,
   chainName,
@@ -68,7 +69,7 @@ function StepDot({ state, n }: { state: StepState; n: number }) {
         state === 'done'
           ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
           : state === 'open'
-            ? 'border-2 border-[var(--v2-ink-2)] text-[var(--v2-ink-2)]'
+            ? `${ACTIVE_STEP_RING_CLASS} text-[var(--v2-ink-2)]`
             : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
       }`}
     >

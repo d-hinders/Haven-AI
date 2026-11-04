@@ -1,6 +1,5 @@
 'use client'
 
-import { EllipsisVertical } from 'lucide-react'
 import { useState } from 'react'
 import Link from 'next/link'
 import { ApprovalRequiredBanner } from '@/components/haven/ApprovalRequiredBanner'
@@ -12,9 +11,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
-import { Icon } from '@/components/ui/Icon'
 import { Monogram } from '@/components/ui/Monogram'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
@@ -119,9 +117,6 @@ export function agentCardFooter(
   }
   return dashboard.agent ? 'No payments yet' : null
 }
-
-const MENU_TRIGGER_CLASS =
-  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
 
 const BUSY_LABEL: Record<NonNullable<AgentBusyAction>, string> = {
   pause: 'Pausing…',
@@ -300,12 +295,9 @@ export function AgentCard({
             {/* Never disabled: an item chosen from the keyboard hands focus
                 back to this trigger, and a disabled one would drop it to
                 the body. While an action runs, the ITEMS are disabled. */}
-            <DropdownMenuTrigger
+            <DropdownMenuIconTrigger
               aria-label={`Actions for ${agent.name}`}
-              className={MENU_TRIGGER_CLASS}
-            >
-              <Icon icon={EllipsisVertical} className="h-4 w-4" />
-            </DropdownMenuTrigger>
+            />
             <DropdownMenuContent>
               {menuItems.map((item, index) =>
                 item === 'separator' ? (

@@ -75,7 +75,7 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
     const active = container.querySelector('li[data-status="active"]')!
     expect(active.className).not.toContain('brand')
     const marker = active.querySelector('[aria-hidden="true"]')!
-    expect(marker).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(marker).toHaveClass('border-[1.5px]', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
     expect(container.querySelector('.v2-step-halo')).toBeNull()
   })
 

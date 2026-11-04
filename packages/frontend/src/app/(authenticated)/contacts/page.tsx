@@ -1,7 +1,7 @@
 'use client'
 
 import { Monogram } from '@/components/ui/Monogram'
-import { ArrowUp, EllipsisVertical, Info, Plus, Users } from 'lucide-react'
+import { ArrowUp, Info, Plus, Users } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useId, useState, type FormEvent } from 'react'
 import { useAuth } from '@/context/AuthContext'
@@ -24,7 +24,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
 import { useToast } from '@/components/ui/Toast'
 import { useMoneyActionLauncher } from '@/components/MoneyActionLauncher'
@@ -304,12 +304,9 @@ function ContactRow({
           </Button>
 
           <DropdownMenu>
-            <DropdownMenuTrigger
+            <DropdownMenuIconTrigger
               aria-label={`More actions for ${contact.name}`}
-              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-            >
-              <Icon icon={EllipsisVertical} className="h-4 w-4" />
-            </DropdownMenuTrigger>
+            />
             <DropdownMenuContent>
               <DropdownMenuItem onSelect={() => { void handleCopy() }}>
                 Copy address

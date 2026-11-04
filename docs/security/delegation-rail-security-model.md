@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-10-30"
+last-verified: "2026-11-04"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -519,6 +519,11 @@ further redemption fails. Recorded as a walkthrough with tx links.
   product).
 - The exit path is a **published feature**, referenced from the dashboard
   ("your exit path") — not fine print.
+- The Send dialog's Review screen (#4641) is a **confirmation the user reads
+  before the passkey prompt**, not an approval hold: nothing queues, and the
+  payment still executes, or reverts on-chain, exactly as before. Copy must not
+  imply a second signature or a pending approval — the owner-signed delegation
+  is the approval, and the review step only shows what is about to be signed.
 
 ## 6. Recovery & the signer-set model (shipped, epic #836)
 

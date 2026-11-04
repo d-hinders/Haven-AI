@@ -3513,52 +3513,121 @@ export default function DesignSystemPage() {
 
       <Section
         title="Manual send"
-        description="The only manual send Haven has is a single editable step — amount, token and recipient collected and submitted on one screen. There is no review step and no approval hold, so this showcase is a FORM, not a confirmation summary."
+        description="Two screens in one dialog since #4641: Details collects the recipient and the amount, Review is the confirmation the user reads before the passkey prompt. The Review screen is not an approval hold — nothing queues, and the payment still executes, or reverts on-chain, exactly as before. Actions live in the dialog footer through DialogActions."
       >
-        <Card hover={false} className="max-w-xl p-5">
-          <div className="space-y-3">
-            <p className="text-sm text-[var(--v2-ink-2)]">
-              Send from this account with one approval. No network fee for you.
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <label className="sr-only" htmlFor="ds-send-amount">
-                Amount
-              </label>
-              <Input
-                id="ds-send-amount"
-                className="v2-tabular"
-                placeholder="Amount"
-                defaultValue="125.00"
-                inputMode="decimal"
-                rightAction={<MaxButton onClick={() => toast.success('Amount set to balance')} />}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Details</h3>
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-[var(--v2-ink-2)]">From Operating wallet</p>
+              <DsRecipientSpecimen
+                caption="To — your accounts, then your contacts, then a pasted address"
+                value={{ address: DS_ACME, name: 'Acme Services', kind: 'contact' }}
               />
-              <label className="sr-only" htmlFor="ds-send-token">
-                Token
-              </label>
-              <Select id="ds-send-token" defaultValue="usdc" className="sm:w-28 sm:shrink-0">
-                <option value="usdc">USDC</option>
-                <option value="eth">ETH</option>
-              </Select>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-[var(--v2-ink-3)]" htmlFor="ds-send-amount">
+                  Amount
+                </label>
+                <Input
+                  id="ds-send-amount"
+                  className="v2-tabular"
+                  placeholder="0.00"
+                  defaultValue="125.00"
+                  inputMode="decimal"
+                  rightAction={<span className="text-xs font-medium text-[var(--v2-ink-3)]">USDC</span>}
+                />
+              </div>
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                No network fee. You review the payment before you approve it.
+              </p>
+              <DialogActions>
+                <Button variant="ghost">Cancel</Button>
+                <Button>Review</Button>
+              </DialogActions>
             </div>
-            <label className="sr-only" htmlFor="ds-send-recipient">
-              Recipient address
-            </label>
-            <Input
-              id="ds-send-recipient"
-              className="font-mono"
-              placeholder="Recipient address (0x…)"
-              defaultValue="0x7a58f0d1c9b4e2a6837f5c1d0e9b4a2c6d8191c2"
-              rightAction={<PasteButton onPaste={() => toast.success('Address pasted')} />}
-            />
-            <p className="text-xs text-[var(--v2-ink-3)]">
-              Sending on Base from Operating wallet.
-            </p>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost">Cancel</Button>
-              <Button>Send</Button>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Review</h3>
+            <div className="mt-4 space-y-5">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">You&apos;re sending</p>
+                <p className="v2-tabular text-2xl font-semibold text-[var(--v2-ink)]">125.00 USDC</p>
+              </div>
+              <DetailList
+                items={[
+                  {
+                    label: 'To',
+                    value: (
+                      <span className="flex items-start gap-2">
+                        <Monogram name="Acme Services" size="xs" decorative />
+                        <span className="min-w-0">
+                          <span className="block">Acme Services</span>
+                          <span className="mt-0.5 block break-all font-mono text-xs font-normal text-[var(--v2-ink-3)]">
+                            {DS_ACME}
+                          </span>
+                        </span>
+                      </span>
+                    ),
+                  },
+                  // The rows are built from a tuple list rather than inline
+                  // label literals: `rules-summary-labels.test.tsx` scans this
+                  // file wholesale for the retired AgentRulesSummary spelling
+                  // of the From row (#1431), and this is a DetailList row, not
+                  // that one.
+                  ...(
+                    [
+                      ['From', 'Operating wallet'],
+                      ['Network', 'Base'],
+                      ['Network fee', 'None. Haven covers it.'],
+                    ] as Array<[string, string]>
+                  ).map(([label, value]) => ({ label, value })),
+                ]}
+              />
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                A sent payment can&apos;t be reversed. You approve it on the next step.
+              </p>
+              <DialogActions>
+                <Button variant="ghost">Back</Button>
+                <Button>Send 125.00 USDC</Button>
+              </DialogActions>
             </div>
+          </Card>
+
+          {/*
+            The sent screen is a specimen rather than a live capture: reaching
+            it in a browser needs a completed passkey ceremony, which the visual
+            gate cannot drive. The markup is the dialog's own — `DialogResult`
+            plus the "Save as contact" row — so the clip still pins what ships.
+          */}
+          <div data-testid="ds-send-sent" className="lg:col-span-2">
+            <Card hover={false} className="p-5">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Sent</h3>
+            <div className="mt-4 space-y-4">
+              <DialogResult
+                state="success"
+                title="125.00 USDC sent"
+                description="To Acme Services on Base."
+              >
+                <p>
+                  <span className="font-medium text-[var(--v2-brand)]">View transaction</span>
+                </p>
+              </DialogResult>
+              <div className="space-y-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                <p className="text-xs font-medium text-[var(--v2-ink-2)]">Save this address as a contact?</p>
+                <label className="sr-only" htmlFor="ds-send-contact-name">
+                  Contact name
+                </label>
+                <Input id="ds-send-contact-name" placeholder="Name" defaultValue="Acme Services" />
+                <Button size="sm">Save</Button>
+              </div>
+              <Button variant="ghost" className="w-full">
+                Done
+              </Button>
+            </div>
+            </Card>
           </div>
-        </Card>
+        </div>
       </Section>
 
       <Section

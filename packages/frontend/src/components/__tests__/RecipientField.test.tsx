@@ -213,10 +213,12 @@ describe('RecipientField — presetAddress', () => {
       <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
     )
 
-    // Before the data arrives: the short address, no name.
+    // Before the data arrives: the short address, no name, and no claim about
+    // the kind, because a saved contact is not "New address" (epic #4637).
     const chip = document.querySelector('[data-recipient-chip]') as HTMLElement
     expect(chip).toHaveTextContent('0x2c9D…77ab')
-    expect(chip).toHaveTextContent('New address')
+    expect(chip).not.toHaveTextContent('New address')
+    expect(chip.querySelector('[data-recipient-chip-loading]')).not.toBeNull()
     expect(onChange).not.toHaveBeenCalled()
 
     rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
@@ -226,6 +228,30 @@ describe('RecipientField — presetAddress', () => {
     const resolved = document.querySelector('[data-recipient-chip]') as HTMLElement
     expect(resolved).toHaveTextContent('Acme Services')
     expect(resolved).toHaveTextContent('Saved contact')
+    expect(resolved).not.toHaveAttribute('aria-busy')
+  })
+
+  it('resolves a preset that is both an own account and a contact as the account', () => {
+    const onChange = vi.fn()
+    render(
+      <Harness
+        presetAddress={SAVINGS}
+        contacts={[contact({ id: 'c3', name: 'Savings as a contact', address: SAVINGS })]}
+        onChange={onChange}
+      />,
+    )
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ address: SAVINGS, name: 'Savings', kind: 'account' })
+  })
+
+  it('draws no new-address glyph while the preset is being looked up', () => {
+    render(<Harness presetAddress={ACME} contacts={[]} contactsLoading />)
+    const chip = document.querySelector('[data-recipient-chip]') as HTMLElement
+    // The one icon left is the Change recipient ✕; the slot holds a skeleton disc.
+    expect(chip.querySelectorAll('svg')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Change recipient' }).querySelector('svg')).not.toBeNull()
+    expect(chip.querySelector('.animate-pulse.rounded-full')).not.toBeNull()
+    expect(chip).toHaveAttribute('aria-busy', 'true')
   })
 
   it('resolves a preset address that is an own account as the account', () => {
@@ -244,6 +270,131 @@ describe('RecipientField — presetAddress', () => {
     expect(onChange).toHaveBeenLastCalledWith(null)
     expect(document.querySelector('[data-recipient-chip]')).toBeNull()
     expect(screen.getByRole('combobox', { name: 'Recipient' })).toBeInTheDocument()
+  })
+})
+
+describe('RecipientField — a cleared chip stays cleared (#4660)', () => {
+  const chip = () => document.querySelector('[data-recipient-chip]')
+  const clear = () => fireEvent.click(screen.getByRole('button', { name: 'Change recipient' }))
+  const neverReportedPreset = (onChange: ReturnType<typeof vi.fn>) =>
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ address: ACME }))
+
+  it('does not come back when contacts finish loading after the user cleared it', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
+    )
+    clear()
+    expect(chip()).toBeNull()
+
+    rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
+
+    expect(chip()).toBeNull()
+    neverReportedPreset(onChange)
+  })
+
+  it('does not come back when the contacts fetch fails after the user cleared it', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
+    )
+    clear()
+
+    rerender(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading={false} contactsError="Nope" onChange={onChange} />,
+    )
+
+    expect(chip()).toBeNull()
+    neverReportedPreset(onChange)
+  })
+
+  it('a picked recipient cleared is not replaced by the preset, contacts loaded', () => {
+    const onChange = vi.fn()
+    render(<Harness presetAddress={ACME} onChange={onChange} />)
+    clear()
+    onChange.mockClear()
+
+    fireEvent.click(screen.getByRole('option', { name: /Research API/ }))
+    expect(chip()).toHaveTextContent('Research API')
+    clear()
+
+    expect(chip()).toBeNull()
+    neverReportedPreset(onChange)
+  })
+
+  it('a picked recipient cleared is not replaced by the preset, contacts still loading', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
+    )
+    clear()
+
+    fireEvent.click(screen.getByRole('option', { name: /Savings/ }))
+    expect(chip()).toHaveTextContent('Savings')
+    clear()
+    expect(chip()).toBeNull()
+
+    rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
+    expect(chip()).toBeNull()
+    neverReportedPreset(onChange)
+  })
+
+  it('a recipient picked while contacts load, cleared after they settle, is not replaced by the preset', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
+    )
+    clear()
+    fireEvent.click(screen.getByRole('option', { name: /Savings/ }))
+
+    rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
+    expect(chip()).toHaveTextContent('Savings')
+    clear()
+
+    expect(chip()).toBeNull()
+    neverReportedPreset(onChange)
+  })
+
+  it('a new preset address after a dismissal still shows and resolves, contacts loaded', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<Harness presetAddress={ACME} onChange={onChange} />)
+    clear()
+
+    rerender(<Harness presetAddress={RESEARCH} onChange={onChange} />)
+
+    expect(chip()).toHaveTextContent('Research API')
+    expect(onChange).toHaveBeenLastCalledWith({ address: RESEARCH, name: 'Research API', kind: 'contact' })
+  })
+
+  it('a new preset address after a dismissal shows at once while contacts load, then resolves', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
+    )
+    clear()
+
+    rerender(<Harness presetAddress={RESEARCH} contacts={[]} contactsLoading onChange={onChange} />)
+    expect(chip()).toHaveTextContent('0x31bc…8d04')
+
+    rerender(<Harness presetAddress={RESEARCH} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
+    expect(chip()).toHaveTextContent('Research API')
+    neverReportedPreset(onChange)
+  })
+})
+
+describe('RecipientField — Enter picks a pasted address', () => {
+  it.each<[string, Partial<RecipientFieldProps>]>([
+    ['contacts loaded', {}],
+    ['contacts loading', { contacts: [], contactsLoading: true }],
+    ['contacts failed', { contacts: [], contactsError: 'Nope' }],
+  ])('with %s', (_name, props) => {
+    const onChange = vi.fn()
+    render(<Harness {...props} onChange={onChange} />)
+    const input = focusInput()
+    fireEvent.change(input, { target: { value: UNKNOWN } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onChange).toHaveBeenCalledWith({ address: UNKNOWN, kind: 'new' })
   })
 })
 

@@ -158,6 +158,64 @@ describe('Combobox — keyboard', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
+  describe('a lone match for a query', () => {
+    const ONE: ComboboxGroup[] = [
+      { id: 'new', label: 'New address', options: [{ id: 'new:1', title: 'Send to 0x0000…dEaD' }] },
+    ]
+
+    it('is the active option, so Enter picks a pasted address', () => {
+      const onPick = vi.fn()
+      render(<Harness groups={ONE} onPick={onPick} />)
+      const input = focusInput()
+      fireEvent.change(input, { target: { value: '0x000000000000000000000000000000000000dEaD' } })
+
+      const option = screen.getByRole('option')
+      expect(option).toHaveAttribute('aria-selected', 'true')
+      expect(input).toHaveAttribute('aria-activedescendant', option.id)
+
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(onPick).toHaveBeenCalledTimes(1)
+      expect(onPick.mock.calls[0][0]).toMatchObject({ id: 'new:1' })
+    })
+
+    it('is not armed by an empty query: opening the list must not make Enter pick', () => {
+      const onPick = vi.fn()
+      render(<Harness groups={ONE} onPick={onPick} />)
+      const input = focusInput()
+
+      expect(screen.getByRole('option')).toHaveAttribute('aria-selected', 'false')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(onPick).not.toHaveBeenCalled()
+    })
+
+    it.each(['loading', 'error'] as const)('is not alone beside a group in %s: that group may hold a match', (kind) => {
+      const onPick = vi.fn()
+      render(
+        <Harness
+          groups={[...ONE, { id: 'contacts', label: 'Contacts', options: [], status: { kind, text: 'Status' } }]}
+          onPick={onPick}
+        />,
+      )
+      const input = focusInput()
+      fireEvent.change(input, { target: { value: 'sa' } })
+
+      expect(input).not.toHaveAttribute('aria-activedescendant')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(onPick).not.toHaveBeenCalled()
+    })
+
+    it('needs to be alone: with several options a query activates none of them', () => {
+      const onPick = vi.fn()
+      render(<Harness onPick={onPick} />)
+      const input = focusInput()
+      fireEvent.change(input, { target: { value: 'a' } })
+
+      expect(input).not.toHaveAttribute('aria-activedescendant')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(onPick).not.toHaveBeenCalled()
+    })
+  })
+
   it('closes on Tab without picking', () => {
     const onPick = vi.fn()
     render(<Harness onPick={onPick} />)

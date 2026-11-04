@@ -240,6 +240,17 @@ describe('DelegationSendModal — Details screen (#4641)', () => {
     expect(screen.getByText('USDC')).toBeTruthy()
   })
 
+  it('lets the amount field fill its row, level with the recipient field', () => {
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    // jsdom has no layout, so this pins the class that makes the row stretch.
+    // The `send-dialog-details-filled` baselines hold the rendered width.
+    const row = document.querySelector('label[for="send-amount"]')?.nextElementSibling
+    expect(row).toHaveClass('flex')
+    expect(row?.firstElementChild).toHaveClass('flex-1')
+    expect(row?.firstElementChild).toContainElement(screen.getByLabelText('Amount'))
+  })
+
   it('keeps a token Select when a chain lists more than one sendable token', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} chainId={100} />)
@@ -378,6 +389,248 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect((screen.getByLabelText('Amount') as HTMLInputElement).value).toBe('1.5')
     expect(document.querySelector('[data-recipient-chip]')).toHaveTextContent('0xcccc…cccc')
+  })
+
+  describe('a cleared chip survives Review → Back (#4660)', () => {
+    const chip = () => document.querySelector('[data-recipient-chip]')
+    const clear = () => fireEvent.click(screen.getByRole('button', { name: 'Change recipient' }))
+    const amount = () => fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1.5' } })
+    const reviewThenBack = () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    }
+
+    it('the resolved preset cleared after Back leaves the picker empty', async () => {
+      contactsFixture.initial = [contact()]
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} initialRecipient={ACME} />)
+      await waitFor(() => expect(chip()).toHaveTextContent('Acme Services'))
+      amount()
+      reviewThenBack()
+      expect(chip()).toHaveTextContent('Acme Services')
+
+      clear()
+
+      expect(chip()).toBeNull()
+      expect(screen.getByRole('combobox', { name: 'To' })).toBeTruthy()
+    })
+
+    it('a recipient picked instead of the preset, cleared after Back, leaves the picker empty', async () => {
+      contactsFixture.initial = [contact(), contact({ id: 'c2', name: 'Research API', address: NEW_ADDRESS })]
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} initialRecipient={ACME} />)
+      await waitFor(() => expect(chip()).toHaveTextContent('Acme Services'))
+      clear()
+      fireEvent.click(screen.getByRole('option', { name: /Research API/ }))
+      amount()
+      reviewThenBack()
+      expect(chip()).toHaveTextContent('Research API')
+
+      clear()
+
+      expect(chip()).toBeNull()
+    })
+  })
+
+  describe('focus moves with the screen', () => {
+    // Focus and scroll move in passive effects, which React can run after the
+    // text a `waitFor` saw is already in the DOM. So a move is waited for, and a
+    // "stays where it is" check gives the effect time to run first; without
+    // that it would pass before the effect had any chance to move focus.
+    const focusOnScreen = (text: string) =>
+      waitFor(() => {
+        expect(document.activeElement?.tagName).toBe('DIV')
+        expect(document.activeElement).toHaveTextContent(text)
+      })
+    const effectsSettled = () => new Promise((resolve) => setTimeout(resolve, 50))
+
+    it('Review takes focus on its content, never on Send', () => {
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+
+      expect(document.activeElement).not.toBe(document.body)
+      expect(document.activeElement).toHaveTextContent("You're sending")
+      expect(document.activeElement?.tagName).toBe('DIV')
+    })
+
+    it('Back returns focus to Amount', () => {
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+      expect(document.activeElement).toBe(screen.getByLabelText('Amount'))
+    })
+
+    it('a cancelled approval returns focus to Review, because Send was disabled while it ran', async () => {
+      const send = vi.fn().mockResolvedValue({ ok: false, reason: 'cancelled' })
+      mockUseSend.mockReturnValue(base({ send }))
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+      const sendButton = screen.getByRole('button', { name: /^Send / })
+      sendButton.focus()
+      fireEvent.click(sendButton)
+
+      await waitFor(() => expect(screen.getByText('Approval was cancelled.')).toBeTruthy())
+      await focusOnScreen("You're sending")
+    })
+
+    it('focus moves when a send ends, not when it starts', async () => {
+      let finish: (value: unknown) => void = () => {}
+      const send = vi.fn(() => new Promise((resolve) => { finish = resolve }))
+      mockUseSend.mockReturnValue(base({ send }))
+      render(<DelegationSendModal {...PROPS} />)
+      goToReview()
+      const sendButton = screen.getByRole('button', { name: /^Send / })
+      sendButton.focus()
+      fireEvent.click(sendButton)
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Sending…' })).toBeTruthy())
+      expect(document.activeElement).toBe(sendButton)
+
+      finish({ ok: false, reason: 'cancelled' })
+
+      await waitFor(() => expect(screen.getByText('Approval was cancelled.')).toBeTruthy())
+      await focusOnScreen("You're sending")
+    })
+
+    it('moving focus to a screen never scrolls it', () => {
+      mockUseSend.mockReturnValue(base())
+      render(<DelegationSendModal {...PROPS} />)
+      const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+      goToReview()
+
+      expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+      focus.mockRestore()
+    })
+
+    it.each([
+      ['a cancelled approval', { ok: false, reason: 'cancelled' }, 'Approval was cancelled.'],
+      ['a failure', { ok: false, reason: 'failed', message: 'It broke.' }, 'It broke.'],
+    ])('%s brings its message into view', async (_name, result, text) => {
+      const scrollIntoView = vi.fn()
+      const original = Element.prototype.scrollIntoView
+      Element.prototype.scrollIntoView = scrollIntoView
+      const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+      try {
+        mockUseSend.mockReturnValue(base({ send: vi.fn().mockResolvedValue(result) }))
+        render(<DelegationSendModal {...PROPS} />)
+        goToReview()
+        scrollIntoView.mockClear()
+        focus.mockClear()
+        fireEvent.click(screen.getByRole('button', { name: /^Send / }))
+
+        await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }))
+        // The message itself: the screen around it holds this text too, and
+        // scrolling that would leave the message below the fold.
+        expect(scrollIntoView.mock.instances[0]).toHaveTextContent(text)
+        expect(scrollIntoView.mock.instances[0]).not.toHaveTextContent("You're sending")
+        await waitFor(() => expect(focus).toHaveBeenLastCalledWith({ preventScroll: true }))
+      } finally {
+        focus.mockRestore()
+        Element.prototype.scrollIntoView = original
+      }
+    })
+
+    it('a save that ends returns focus to the success screen', async () => {
+      await sendToNewAddress()
+      await focusOnScreen('1.5 USDC sent')
+      fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Acme' } })
+      const save = screen.getByRole('button', { name: 'Save' })
+      save.focus()
+      fireEvent.click(save)
+
+      await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
+      await focusOnScreen('1.5 USDC sent')
+    })
+
+    describe('when a save ends, focus moves only if it was lost', () => {
+      async function startSave(result: Promise<unknown>) {
+        contactsFixture.addContact.mockImplementation(() => result)
+        await sendToNewAddress()
+        // The send's own focus move lands first, so it cannot undo what a test sets up.
+        await focusOnScreen('1.5 USDC sent')
+        fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Acme' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy())
+      }
+
+      it('a failed save with focus lost lands on the name field', async () => {
+        let fail: (reason: Error) => void = () => {}
+        await startSave(new Promise((_, reject) => { fail = reject }))
+        ;(document.activeElement as HTMLElement).blur()
+        expect(document.activeElement).toBe(document.body)
+
+        fail(new Error('nope'))
+
+        await waitFor(() => expect(screen.getByText(/could not save this contact/)).toBeTruthy())
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByPlaceholderText('Name')))
+      })
+
+      it('a failed save leaves someone already back in the name field where they are', async () => {
+        let fail: (reason: Error) => void = () => {}
+        await startSave(new Promise((_, reject) => { fail = reject }))
+        const name = screen.getByPlaceholderText('Name')
+        name.focus()
+
+        fail(new Error('nope'))
+
+        await waitFor(() => expect(screen.getByText(/could not save this contact/)).toBeTruthy())
+        await effectsSettled()
+        expect(document.activeElement).toBe(name)
+      })
+
+      it('a failed save leaves someone on View transaction where they are', async () => {
+        let fail: (reason: Error) => void = () => {}
+        await startSave(new Promise((_, reject) => { fail = reject }))
+        const link = screen.getByRole('link', { name: 'View transaction' })
+        link.focus()
+
+        fail(new Error('nope'))
+
+        await waitFor(() => expect(screen.getByText(/could not save this contact/)).toBeTruthy())
+        await effectsSettled()
+        expect(document.activeElement).toBe(link)
+      })
+
+      it('a save that ends brings back focus that escaped behind the dialog', async () => {
+        let succeed: (value: unknown) => void = () => {}
+        await startSave(new Promise((resolve) => { succeed = resolve }))
+        const behind = document.createElement('button')
+        document.body.appendChild(behind)
+        behind.focus()
+        const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+        try {
+          succeed(contact({ id: 'c-Acme', name: 'Acme', address: NEW_ADDRESS }))
+
+          await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
+          await focusOnScreen('1.5 USDC sent')
+          expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+        } finally {
+          focus.mockRestore()
+          behind.remove()
+        }
+      })
+
+      it('a successful save does not pull focus off View transaction', async () => {
+        let succeed: (value: unknown) => void = () => {}
+        await startSave(new Promise((resolve) => { succeed = resolve }))
+        const link = screen.getByRole('link', { name: 'View transaction' })
+        link.focus()
+
+        succeed(contact({ id: 'c-Acme', name: 'Acme', address: NEW_ADDRESS }))
+
+        await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
+        await effectsSettled()
+        expect(document.activeElement).toBe(link)
+      })
+    })
+
+    it('the success screen keeps focus inside the dialog', async () => {
+      await sendToNewAddress()
+
+      await focusOnScreen('1.5 USDC sent')
+    })
   })
 
   it("Send calls send() once with today's arguments", async () => {

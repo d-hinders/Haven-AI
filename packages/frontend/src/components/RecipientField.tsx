@@ -112,9 +112,13 @@ export function RecipientField({
   className = '',
 }: RecipientFieldProps) {
   const [query, setQuery] = useState(initialQuery)
-  // A cleared chip must stay cleared: `presetAddress` is still a prop, so the
-  // fallback below would otherwise re-render the chip the user just dismissed.
-  const [presetDismissed, setPresetDismissed] = useState(false)
+  // A cleared chip stays cleared until the preset ADDRESS changes (#4660):
+  // `presetAddress` is still a prop, so without this both the fallback chip and
+  // the resolving effect below would bring back what the user dismissed. It is
+  // keyed by address because a boolean would also swallow a NEW preset, and it
+  // is written on every Change click, not only when the chip is the preset's:
+  // the field remounts on Review → Back, which empties this state.
+  const [dismissedPreset, setDismissedPreset] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const changeButtonRef = useRef<HTMLButtonElement>(null)
   const focusChipRef = useRef(false)
@@ -244,30 +248,33 @@ export function RecipientField({
     return { groups: next, recipients: byOptionId }
   }, [contacts, contactsError, contactsLoading, ownAccounts, pastedAddress, trimmed])
 
+  const presetKey = presetAddress && isAddress(presetAddress) ? presetAddress.toLowerCase() : null
+  const presetDismissed = presetKey !== null && dismissedPreset === presetKey
+
+  // What the preset turns out to be. `null` while a contact match may still be
+  // on its way: answering then would say `new` for an address the user has saved.
+  const resolvedPreset = useMemo<Recipient | null>(() => {
+    if (!presetAddress || !presetKey || contactsLoading) return null
+    const account = ownAccounts.find((candidate) => candidate.account_address.toLowerCase() === presetKey)
+    if (account) return { address: account.account_address, name: account.name, kind: 'account' }
+    const contact = contacts.find((candidate) => candidate.address.toLowerCase() === presetKey)
+    if (contact) return { address: contact.address, name: contact.name, kind: 'contact' }
+    return { address: presetAddress, kind: 'new' }
+  }, [contacts, contactsLoading, ownAccounts, presetAddress, presetKey])
+
   // ── `presetAddress` resolves once, when the data has settled ───────────────
   // The chip renders from `presetAddress` while `value` is null, so the short
   // address is on screen before the data arrives. The resolution then calls
   // `onChange` exactly once — guarded by the ref, because `onChange` is
-  // routinely a fresh closure on every render.
+  // routinely a fresh closure on every render — unless the user has already
+  // cleared that preset.
   useEffect(() => {
-    if (!presetAddress || !isAddress(presetAddress)) return
+    if (!resolvedPreset || !presetKey || presetDismissed) return
     if (value !== null) return
-    const key = presetAddress.toLowerCase()
-    if (resolvedPresetRef.current === key) return
-    // A contact match may still be on its way; resolving now would report
-    // `new` for an address the user has saved.
-    if (contactsLoading) return
-    const account = ownAccounts.find((candidate) => candidate.account_address.toLowerCase() === key)
-    const contact = contacts.find((candidate) => candidate.address.toLowerCase() === key)
-    resolvedPresetRef.current = key
-    if (account) {
-      onChange({ address: account.account_address, name: account.name, kind: 'account' })
-    } else if (contact) {
-      onChange({ address: contact.address, name: contact.name, kind: 'contact' })
-    } else {
-      onChange({ address: presetAddress, kind: 'new' })
-    }
-  }, [contacts, contactsLoading, onChange, ownAccounts, presetAddress, value])
+    if (resolvedPresetRef.current === presetKey) return
+    resolvedPresetRef.current = presetKey
+    onChange(resolvedPreset)
+  }, [onChange, presetDismissed, presetKey, resolvedPreset, value])
 
   // Focus follows the state change: the chip's Change button after a pick, the
   // input after a clear. Both targets mount on the render that follows.
@@ -280,13 +287,18 @@ export function RecipientField({
       focusInputRef.current = false
       inputRef.current?.focus()
     }
-  }, [value])
+    // `dismissedPreset` as well: clearing a chip still resolving leaves `value`
+    // null throughout, so `value` alone would never move focus to the input.
+  }, [dismissedPreset, value])
 
-  const shown: Recipient | null =
-    value ??
-    (!presetDismissed && presetAddress && isAddress(presetAddress)
-      ? { address: presetAddress, kind: 'new' }
-      : null)
+  const presetChip: Recipient | null =
+    presetAddress && presetKey && !presetDismissed
+      ? (resolvedPreset ?? { address: presetAddress, kind: 'new' })
+      : null
+  const shown = value ?? presetChip
+  // A preset still being looked up has no kind to state. "New address" there
+  // would call a saved contact new for as long as the contacts take to load.
+  const lookingUp = value === null && presetChip !== null && resolvedPreset === null
 
   if (shown) {
     const title = shown.name ?? truncate(shown.address)
@@ -296,9 +308,12 @@ export function RecipientField({
     return (
       <div
         data-recipient-chip=""
+        aria-busy={lookingUp || undefined}
         className={`flex items-center gap-3 rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] px-3 py-2 ${className}`}
       >
-        {shown.kind === 'new' ? (
+        {lookingUp ? (
+          <Skeleton variant="circle" className="h-8 w-8 flex-shrink-0" />
+        ) : shown.kind === 'new' ? (
           <span
             aria-hidden="true"
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border)] bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]"
@@ -310,7 +325,13 @@ export function RecipientField({
         )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{title}</p>
-          <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{subtitle}</p>
+          {lookingUp ? (
+            <div className="mt-0.5 flex h-4 items-center" data-recipient-chip-loading="">
+              <Skeleton variant="text" className="h-3 w-24" />
+            </div>
+          ) : (
+            <p className="mt-0.5 truncate text-xs text-[var(--v2-ink-3)]">{subtitle}</p>
+          )}
         </div>
         <button
           ref={changeButtonRef}
@@ -318,7 +339,7 @@ export function RecipientField({
           aria-label="Change recipient"
           onClick={() => {
             focusInputRef.current = true
-            setPresetDismissed(true)
+            setDismissedPreset(presetKey)
             onChange(null)
           }}
           className="-m-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"

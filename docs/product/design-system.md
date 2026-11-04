@@ -124,7 +124,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-03
+last-verified: 2026-11-04
 ---
 
 # Haven Design System
@@ -3512,12 +3512,20 @@ primitive's render contract for one consumer was the worse trade.
 
 **Keyboard.** Arrow down/up opens the list if it is closed and moves the active
 option, scrolling it into view (`block: 'nearest'`). Enter picks the active
-option. Tab closes the list and moves on **without picking**.
+option. A query that leaves exactly one option makes that option active, so
+pasting an address and pressing Enter picks it; an empty query never activates
+anything, so opening the list cannot arm Enter, and a group still loading or
+failed keeps a lone option from counting as alone. Tab closes the list and moves on
+**without picking**.
 
 **Escape is a three-stage state machine**, and the stages exist because
 `ui/Modal.tsx` closes the dialog on any Escape that reaches its `document`
-listener. The input consumes the key (`preventDefault` + `stopPropagation` on
-its own keydown) while it still has something of its own to undo:
+listener. The input consumes the key on its own keydown while it still has
+something of its own to undo. That takes the native
+`stopImmediatePropagation`: Next's App Router makes `document` the React root,
+so React's listener and `Modal`'s share a node and `stopPropagation` cannot
+separate them. A test that mounts React in a `div` passes without it, which is
+why `Combobox.documentRoot.test.tsx` runs the stages on a `document` root.
 
 1. **List open** — Escape closes the list; the dialog stays.
 2. **List closed, query not empty** — Escape clears the query; the dialog stays.
@@ -3567,9 +3575,10 @@ one `useAccounts()` and passes them in**. `rg -n "useContacts|useAccounts"` on
 **Props.** `value: Recipient | null` and `onChange(next)` are the controlled
 pair, where `Recipient` is `{ address, name?, kind: 'account' | 'contact' |
 'new' }`. `presetAddress` is an address to resolve into a chip; it may arrive
-before the data loads, in which case the field shows the short address and
-resolves it to a name and kind once `accounts` and `contacts` are available,
-calling `onChange` once. `chainId` limits the own accounts offered to that
+before the data loads, in which case the field shows the short address with
+skeletons in place of the glyph and the kind, then resolves it to a name and kind once
+`accounts` and `contacts` are available, calling `onChange` once. A preset never
+says "New address" while contacts are still loading. `chainId` limits the own accounts offered to that
 chain, `excludeAddress` is the sending account and is never offered, and
 `accounts`, `contacts`, `contactsLoading` and `contactsError` come from the
 caller's hooks.
@@ -3596,8 +3605,10 @@ address collapses the list to its entry ("Saved contact · 0x2c9D…77ab" or
 
 **The chip.** A chosen recipient renders as Monogram, name, kind and short
 address, with a "Change recipient" icon button that clears it (`onChange(null)`)
-and returns focus to the input. A new address renders with a neutral wallet
-glyph instead of a Monogram.
+and returns focus to the input. A cleared chip stays cleared until the preset
+address changes, including when contacts finish loading afterwards and after
+Review → Back. A new address renders with a neutral wallet glyph instead of a
+Monogram.
 
 **Contacts loading or failing.** While `contactsLoading`, the Contacts group
 shows a one-line skeleton. On `contactsError`, the group shows "Saved

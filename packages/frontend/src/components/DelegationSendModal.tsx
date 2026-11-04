@@ -116,6 +116,12 @@ export default function DelegationSendModal({
 
   const amountRef = useRef<HTMLInputElement>(null)
   const presetRef = useRef(initialRecipient)
+  const screenRef = useRef<HTMLDivElement>(null)
+  const messageRef = useRef<HTMLDivElement>(null)
+  const focusedStepRef = useRef<Step>(step)
+  const saveNameRef = useRef<HTMLInputElement>(null)
+  const wasWorkingRef = useRef(false)
+  const previousSaveStateRef = useRef<SaveState>(saveState)
 
   // Closing and reopening starts fresh (#4641 lifecycle): Details, no recipient
   // beyond the preset, empty amount, no error or result, empty contact name.
@@ -151,6 +157,24 @@ export default function DelegationSendModal({
     setMessage(null)
   }, [initialRecipient, open])
 
+  // Moving between screens unmounts the control that had focus, which drops it
+  // to `body` and sends a keyboard user back to the top of the page. `Modal`
+  // only places focus when it opens, so each later screen is placed here. Review
+  // takes focus on its content and never on Send: a stray Enter must not be able
+  // to start a payment. Back returns to Amount, the field most likely to change.
+  useEffect(() => {
+    if (focusedStepRef.current === step) return
+    focusedStepRef.current = step
+    if (!open) return
+    if (step === 'details') {
+      amountRef.current?.focus()
+    } else {
+      // No scroll: on a short phone the wrapper is taller than the dialog's body,
+      // and focusing it would push the top of the screen under the header.
+      screenRef.current?.focus({ preventScroll: true })
+    }
+  }, [open, step])
+
   const sendingAccount = accounts.find((a) => a.account_address.toLowerCase() === accountAddress.toLowerCase())
   const fromName = sendingAccount?.name ?? truncate(accountAddress)
   const chainName = resolveChainOrNull(chainId)?.name ?? 'this network'
@@ -175,6 +199,40 @@ export default function DelegationSendModal({
   // flight. Recipient and amount are already settled by the time Review shows.
   const canSend = ready && !busy && !sending
   const showSaveRow = step === 'done' && recipient?.kind === 'new' && !contactsLoading
+
+  // A send disables the button that started it, which drops focus to `body` for
+  // good, and Tab then leaves the dialog. So when one ends, a cancelled or failed
+  // send included, focus returns to the screen. This is unconditional on purpose:
+  // where a browser keeps focus on the re-enabled button, a stray Enter would hit
+  // "Try again" and restart the payment.
+  useEffect(() => {
+    const ended = wasWorkingRef.current && !working
+    wasWorkingRef.current = working
+    if (ended && open) screenRef.current?.focus({ preventScroll: true })
+  }, [open, working])
+
+  // Why the send did not go through sits below the fold on a short phone, where
+  // the button reading "Try again" would be all the user could see.
+  useEffect(() => {
+    if (message) messageRef.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [message])
+
+  // A save moves no money, and the user may have gone somewhere useful while it
+  // ran, such as back into the name field or to View transaction. So focus moves
+  // only if it left the screen: to the name field after a failure, where the
+  // error and the kept name are, and otherwise to the screen. Outside the screen
+  // includes behind the dialog, where Tab lands while Save is disabled.
+  useEffect(() => {
+    const previous = previousSaveStateRef.current
+    previousSaveStateRef.current = saveState
+    if (previous !== 'saving' || saveState === 'saving' || !open) return
+    if (screenRef.current?.contains(document.activeElement)) return
+    if (saveState === 'error') {
+      saveNameRef.current?.focus()
+    } else {
+      screenRef.current?.focus({ preventScroll: true })
+    }
+  }, [open, saveState])
   const explorerUrl = txHash ? getExplorerUrlOrNull(chainId, 'tx', txHash) : null
 
   async function handleSend() {
@@ -313,18 +371,22 @@ export default function DelegationSendModal({
               Amount
             </label>
             <div className="flex gap-2">
-              <Input
-                id="send-amount"
-                ref={amountRef}
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                inputMode="decimal"
-                className="v2-tabular"
-                rightAction={
-                  <span className="text-xs font-medium text-[var(--v2-ink-3)]">{token?.symbol}</span>
-                }
-              />
+              {/* `Input`'s own wrapper does not grow in a flex row, so the field
+                  would stop short of the recipient field above it. */}
+              <div className="min-w-0 flex-1">
+                <Input
+                  id="send-amount"
+                  ref={amountRef}
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                  className="v2-tabular"
+                  rightAction={
+                    <span className="text-xs font-medium text-[var(--v2-ink-3)]">{token?.symbol}</span>
+                  }
+                />
+              </div>
               {/* Both Haven networks list one sendable token (USDC), so the
                   token Select only appears when a chain lists more than one. */}
               {tokens.length > 1 ? (
@@ -351,7 +413,7 @@ export default function DelegationSendModal({
       )}
 
       {step === 'review' && recipient && token && (
-        <div className="space-y-5">
+        <div ref={screenRef} tabIndex={-1} className="space-y-5 outline-none">
           <div className="space-y-1">
             <p className="text-xs font-medium text-[var(--v2-ink-3)]">You&apos;re sending</p>
             <p className="v2-tabular text-2xl font-semibold text-[var(--v2-ink)]">
@@ -400,11 +462,13 @@ export default function DelegationSendModal({
           </p>
 
           {message ? (
-            message.tone === 'danger' ? (
-              <InlineAlert>{message.message}</InlineAlert>
-            ) : (
-              <p className="text-xs text-[var(--v2-ink-2)]">{message.message}</p>
-            )
+            <div ref={messageRef} className="scroll-mb-3">
+              {message.tone === 'danger' ? (
+                <InlineAlert>{message.message}</InlineAlert>
+              ) : (
+                <p className="text-xs text-[var(--v2-ink-2)]">{message.message}</p>
+              )}
+            </div>
           ) : null}
 
           {loadError ? (
@@ -434,7 +498,7 @@ export default function DelegationSendModal({
       )}
 
       {step === 'done' && recipient && token && (
-        <div className="space-y-4">
+        <div ref={screenRef} tabIndex={-1} className="space-y-4 outline-none">
           <DialogResult
             state="success"
             title={`${amountDisplay} ${token.symbol} sent`}
@@ -468,6 +532,7 @@ export default function DelegationSendModal({
                   </label>
                   <Input
                     id="send-contact-name"
+                    ref={saveNameRef}
                     value={saveName}
                     onChange={(e) => setSaveName(e.target.value)}
                     placeholder="Name"

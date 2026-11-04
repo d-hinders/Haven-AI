@@ -41,8 +41,8 @@
  * ordinary assertion in a `*.visual.spec.ts` fails (#3441).
  *
  * BASELINES ARE LINUX-RENDERED by the *Update visual baselines* dispatch —
- * none are hand-made here. Dispatch with `expected=` naming the nine clips
- * below; the PR carries a `baseline-change:` line per clip
+ * none are hand-made here. Dispatch with `expected=` naming the clips that
+ * move; the PR carries a `baseline-change:` line per clip
  * (`scripts/ci/baseline-verdict-gate.mjs`).
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
@@ -156,6 +156,35 @@ test.describe('send dialog visual regression (#4641)', () => {
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-details-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    // `send-dialog-details` captures the open list, which covers Amount, so no
+    // baseline showed that field until this one: it stopped 122 px short of the
+    // recipient field unnoticed (found on epic #4637's walkthrough).
+    test(`send-dialog-details-filled renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      const dialog = await openSendDialog(page)
+
+      const to = dialog.getByRole('combobox', { name: 'To' })
+      await to.click()
+      await to.fill(testRecipientAddress)
+      await page.getByRole('option', { name: new RegExp(CONTACT_NAME) }).click()
+      await dialog.getByLabel('Amount').fill(AMOUNT)
+
+      // The state the capture is OF, asserted before the shutter.
+      const chip = dialog.locator('[data-recipient-chip]')
+      await expect(chip).toContainText(CONTACT_NAME)
+      await expect(page.getByRole('listbox')).toHaveCount(0)
+
+      await page.evaluate(() => document.fonts.ready)
+      await expect(dialog).toHaveScreenshot(
+        `send-dialog-details-filled-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
       )
     })

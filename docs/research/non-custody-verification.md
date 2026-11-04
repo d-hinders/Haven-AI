@@ -3,10 +3,12 @@ owner: "@d-hinders"
 status: research
 covers:
   - packages/backend/src/infra/chain/relayer-reads.ts
+  - packages/backend/src/infra/chain/x402-binding-signer.ts
+  - packages/backend/src/infra/binding-key-collision.ts
   - packages/backend/src/infra/relayer.ts
   - packages/backend/src/rails/execution-rail.ts
   - packages/backend/src/__tests__/non-custody.invariants.test.ts
-last-verified: "2026-09-15"
+last-verified: "2026-11-04"
 ---
 
 # Design — make non-custody provable (CI invariants + "verify your control")
@@ -49,17 +51,26 @@ What the codebase shows today:
 
 - **No key storage.** No `private_key` / `seed` / `mnemonic` / `secret_key`
   column exists in any migration. ✅
-- **Two server signers, neither able to spend.** The relayer
+- **Three server signers, none able to spend.** The relayer
   ([`relayer.ts`](../../packages/backend/src/infra/relayer.ts):27) pays gas; it is
   not a Safe owner or an allowance delegate. Since #974 there is a second:
   [`modules/passport/receipt.ts`](../../packages/backend/src/modules/passport/receipt.ts)
   signs L0 passport verification receipts. It is a **message signer only** — no
   provider, no `sendTransaction`, and a dedicated key
   (`PASSPORT_RECEIPT_SIGNING_KEY`) that is never the relayer's, because its
-  address is *published* for merchants to pin. Every other `new Wallet` is in
-  tests. The invariant is unchanged in substance — neither signer can move value
-  — but it is now an explicit two-name allow-list rather than a count, so adding
-  a third is a decision someone has to make on purpose.
+  address is *published* for merchants to pin. Since #4655 there is a third:
+  [`infra/chain/x402-binding-signer.ts`](../../packages/backend/src/infra/chain/x402-binding-signer.ts)
+  signs the x402 expected context and the sweep authorization binding. It is a
+  **message signer only** too — no provider, no `sendTransaction` — on a
+  dedicated key (`X402_BINDING_PRIVATE_KEY`) whose address is published as
+  `HAVEN_X402_BINDING_SIGNER` for installed signers to pin. It is the ONE place
+  that wallet is constructed: `rails/sweep.ts` broadcasts through the relayer, so
+  the sweep signing function lives here rather than leaving a second
+  construction in a file that cannot be asserted message-only. Every other
+  key-to-signer constructor is in tests. The invariant is unchanged in substance
+  — none of the three can move value — but it is now an explicit three-name
+  allow-list rather than a count, so adding a fourth is a decision someone has
+  to make on purpose.
 - **Agent secret is identity, hashed at rest.** `agents.api_key_hash` +
   `api_key_prefix` exist; a legacy plaintext `agents.api_key` column lingers
   (nullable). Per policy, "API auth is identity, signature is authority" — but
@@ -85,7 +96,7 @@ blocks merge and points at the guardrail it would break.
 |---|---|---|---|
 | 1 | No key/seed storage | Scan all migrations + entity types for `private_key\|seed\|mnemonic\|secret_key` column names → must be empty | Red Line #1/#2; "no private key storage table" |
 | 2 | No plaintext key material at rest | Assert agent secrets are stored hashed; fail if a new column matches a secret-value pattern without `_hash` | Red Line #3 |
-| 3 | No server signer capable of spending | Static check: the env-derived `new Wallet(` sites in `src/` (excluding tests) are EXACTLY `infra/relayer.ts` and `modules/passport/receipt.ts` — an exhaustive allow-list, so a third is a deliberate decision. Assert the relayer address is never written as a Safe owner or allowance `delegate`, and that the receipt signer stays message-only (no provider, no `sendTransaction`, never the relayer key) | "no signer capable of spending"; Hard Invariants |
+| 3 | No server signer capable of spending | Static check: the env-derived key-to-signer constructors in `src/` (excluding tests) are EXACTLY `infra/relayer.ts`, `modules/passport/receipt.ts` and `infra/chain/x402-binding-signer.ts` — an exhaustive allow-list, so a fourth is a deliberate decision. The scan matches `new Wallet(`, `new ethers.Wallet(`, `new SigningKey(`, `new BaseWallet(` and `Wallet.fromEncryptedJson`, counts files, and reads raw text including comments. Assert the relayer address is never written as a Safe owner or allowance `delegate`, that the receipt and binding signers stay message-only (no provider, no `sendTransaction`, never the relayer key), and that a set `X402_BINDING_PRIVATE_KEY` is refused at boot when it equals a relayer or receipt key | "no signer capable of spending"; Hard Invariants |
 | 4 | Authn ≠ authz on spend paths | Contract test: payment / relay endpoints reject a request that is authenticated (valid bearer) but carries no delegate/owner signature | Red Line #3; "Separate Authentication From Authorisation" |
 | 5 | On-chain is the final gate | Test that an over-allowance payment is queued for approval, never silently settled — i.e. the DB is not the only limit | Red Line #4 |
 | 6 | No discretionary mutation in relay | Test that the relay path does not alter recipient/amount/token/route after signature | "Treat Relaying As Non-Discretionary" |

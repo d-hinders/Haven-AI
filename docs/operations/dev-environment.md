@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-10-25"
+last-verified: "2026-11-04"
 ---
 
 # Dev environment
@@ -394,6 +394,14 @@ Isolation rules that are non-negotiable for a payments product:
   agent payments are paymaster-sponsored UserOps and never use it (#3264). **Gnosis (chain 100) is intentionally unfunded/dead** — the
   delegation rail is pinned to 8453/84532, so a zero balance there is a
   decision, not a broken relayer.
+- **`X402_BINDING_PRIVATE_KEY` is a dedicated key, and the backend refuses to
+  boot if it is not** (#4655). It authenticates x402 expected context and sweep
+  authorizations, and its address is published as `HAVEN_X402_BINDING_SIGNER`
+  for installed signers to pin. A set value equal to `RELAYER_PRIVATE_KEY`, any
+  `RELAYER_PRIVATE_KEY_<chainId>`, or `PASSPORT_RECEIPT_SIGNING_KEY` refuses the
+  boot, naming the two variables and never the values; unset stays allowed. The
+  comparison is on the key's value, so casing and the `0x` prefix do not hide a
+  paste.
 - **The bundler credential is per chain** (#3416). The delegation rail accepts
   both 8453 and 84532 on every deployment (`DELEGATION_RAIL_CHAIN_IDS` is a
   code constant), but a bundler URL is chain-scoped by its path. So

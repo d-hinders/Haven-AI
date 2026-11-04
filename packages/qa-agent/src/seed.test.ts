@@ -148,7 +148,7 @@ describe('ensureBudget', () => {
 
   it('replaces every live open row when the amount differs, naming a re-keyed pair', async () => {
     const other = { budget_atomic: '2000000' }
-    const { bodies } = installDelegations([
+    const { bodies, fetch } = installDelegations([
       grant('0xcarry', nowSec() + DAY, other),
       grant('0xsteady', nowSec() + DAY, other),
     ])
@@ -157,6 +157,14 @@ describe('ensureBudget', () => {
 
     expect(bodies.build?.replaces).toEqual(['0xcarry', '0xsteady'])
     expect(bodies.activate?.replaces).toEqual(['0xcarry', '0xsteady'])
+    // A replaced row stays enabled on-chain until it is stopped.
+    const stops = fetch.mock.calls
+      .map(([input]) => String(input).replace(API, ''))
+      .filter((path) => path.endsWith('/revoke'))
+    expect(stops).toEqual([
+      '/agents/agent-1/delegations/0xcarry/revoke',
+      '/agents/agent-1/delegations/0xsteady/revoke',
+    ])
   })
 
   // Activate checks only the signature's shape, so a wrong key would otherwise

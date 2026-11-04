@@ -128,7 +128,8 @@ receive or store the owner or delegate private key.
 `SEED_ALLOWANCE_USDC` and `SEED_RESET_MIN` keep their AllowanceModule-era names
 so an existing operator env keeps working; since #2007 they set the **budget
 delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
-— the seed sends nothing on-chain and opens no RPC connection.
+— the seed opens no RPC connection, and a plain grant sends nothing on-chain.
+Replacing a live grant also submits an owner-signed Stop of the old one.
 
 ### 3. Fund the required testnet accounts
 
@@ -461,6 +462,7 @@ way the 2026-07-18 live proof did):
    private key for `QA_DELEGATION_DELEGATE_PRIVATE_KEY`.
 3. Grant an **open** budget delegation (e.g. 2 USDC / 24h, recipient unpinned),
    owner-signed, then activate it — the relayer deploys the treasury, sponsored.
+   Send `expires_at`, or the grant [ends after 90 days](#the-qa-budget-ended).
 4. Fund the treasury with a little Base Sepolia USDC.
 
 The three EIP-3009 scenarios assert more than "the purchase worked". `x402-delegation-3009`
@@ -1982,7 +1984,8 @@ not this account's owner. If the owner key is lost, follow the identity's
 **Rotation** steps to re-provision everything.
 
 The seed leaves a live budget of the same amount alone. To renew before it ends,
-set a different `SEED_ALLOWANCE_USDC`, which replaces the live grant.
+set a different `SEED_ALLOWANCE_USDC`, which replaces the live grant. That also
+changes the budget amount; going back to `5` replaces the grant again.
 
 ### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
 
@@ -2049,8 +2052,9 @@ Check balances by role:
    on its first erc7710 authorize, and submits the gasless EIP-3009 sweep. The
    payment UserOps are paymaster-sponsored and never use it (#3264, the
    funding table above).
-3. Owner: **no ETH needed since #2007.** Reseeding on the delegation rail sends
-   nothing on-chain; the owner only signs.
+3. Owner: **no ETH needed since #2007.** A plain re-grant on the delegation rail
+   sends nothing on-chain; the owner only signs. Replacing a live grant also
+   submits an owner-signed Stop of the old one.
 
 Do not repeatedly rerun a money-moving harness while the cause is unknown; each
 run consumes test allowance and test USDC.

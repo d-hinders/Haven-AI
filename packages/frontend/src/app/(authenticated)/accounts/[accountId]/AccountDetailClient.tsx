@@ -442,6 +442,7 @@ export default function AccountDetailClient() {
             <DropdownMenu>
               <DropdownMenuIconTrigger
                 aria-label="Account options"
+                edge="end"
               />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>

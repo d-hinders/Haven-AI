@@ -39,7 +39,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Icon } from '@/components/ui/Icon'
-import { ACTIVE_STEP_RING_CLASS } from '@/components/ui/StepProgress'
+import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS } from '@/components/ui/StepProgress'
 import {
   anyRecipientRule,
   chainName,
@@ -67,10 +67,10 @@ function StepDot({ state, n }: { state: StepState; n: number }) {
       aria-hidden
       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
         state === 'done'
-          ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+          ? DONE_STEP_DISC_CLASS
           : state === 'open'
             ? `${ACTIVE_STEP_RING_CLASS} text-[var(--v2-ink-2)]`
-            : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
+            : PENDING_STEP_DISC_CLASS
       }`}
     >
       {state === 'done' ? <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} /> : n}

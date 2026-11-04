@@ -4,7 +4,7 @@ import { useId, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { ACTIVE_STEP_RING_CLASS } from '@/components/ui/StepProgress'
+import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS } from '@/components/ui/StepProgress'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
@@ -281,7 +281,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]"
+        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${DONE_STEP_DISC_CLASS}`}
       >
         <CheckIcon />
       </span>
@@ -300,7 +300,7 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
   return (
     <span
       aria-hidden="true"
-      className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-[var(--v2-border-strong)] text-xs font-semibold text-[var(--v2-ink-3)] v2-tabular"
+      className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${PENDING_STEP_DISC_CLASS} text-xs font-semibold v2-tabular`}
     >
       {number}
     </span>
@@ -309,6 +309,6 @@ function StatusCircle({ status, number }: { status: StepStatus; number: number }
 
 function CheckIcon(): ReactNode {
   return (
-    <Icon icon={Check} className="h-4 w-4" />
+    <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} />
   )
 }

@@ -301,6 +301,7 @@ export default function AgentPanel() {
             <DropdownMenu>
               <DropdownMenuIconTrigger
                 aria-label="More agent actions"
+                edge="end"
               />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => panel.setLabelsManagerOpen(true)}>

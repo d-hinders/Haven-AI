@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Check } from 'lucide-react'
 import { Icon } from '../ui/Icon'
 import { Spinner } from '@haven_ai/ui/Spinner'
-import { ACTIVE_STEP_RING_CLASS } from '@/components/ui/StepProgress'
+import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS } from '@/components/ui/StepProgress'
 
 /**
  * #3832: the connect step's status checklist — copy → paste → approve. Each
@@ -79,7 +79,7 @@ function Marker({ state, halo }: { state: ConnectStepRowState; halo: boolean }) 
   const base = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8'
   if (state === 'done') {
     return (
-      <span aria-hidden="true" className={`${base} border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]`}>
+      <span aria-hidden="true" className={`${base} ${DONE_STEP_DISC_CLASS}`}>
         <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} />
       </span>
     )
@@ -99,7 +99,7 @@ function Marker({ state, halo }: { state: ConnectStepRowState; halo: boolean }) 
       />
     )
   }
-  return <span aria-hidden="true" className={`${base} border border-[var(--v2-border)]`} />
+  return <span aria-hidden="true" className={`${base} ${PENDING_STEP_DISC_CLASS}`} />
 }
 
 const TITLE_TONE: Record<ConnectStepRowState, string> = {

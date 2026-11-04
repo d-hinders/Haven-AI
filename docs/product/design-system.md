@@ -1850,8 +1850,10 @@ trigger is no longer exported, so a hand-written one cannot be built. It is the 
 in `--v2-ink-3` with **no frame**, tinted on hover. The 44px tap target stays but draws
 nothing, so the button cannot read as a different size beside a 36px or 40px `Button`,
 which is what the framed copies did on the contacts row, the account page and the agents
-list. `aria-label` is required: the glyph says nothing, so name what the menu acts on. The
-sidebar's user menu is the one ⋮ that is not this button: it is not a `DropdownMenu`, has
+list. `aria-label` is required: the glyph says nothing, so name what the menu acts on. As
+the last control on a line (a page header, a list row), pass `edge="end"`: it pulls the
+empty part of the target over the edge, so the dots meet the right edge of the content
+below instead of floating inside it. The sidebar's user menu is the one ⋮ that is not this button: it is not a `DropdownMenu`, has
 its own upward popover, and was already frameless.
 
 #### Button-shaped controls that are not `Button`
@@ -2917,10 +2919,12 @@ same mark, size and stroke as `ConnectSteps`' done disc, so the band and the
 step-3 checklist draw one check when they share a screen (it was a text "✓",
 which rendered visibly different beside it).
 
-**The ring has one definition.** `ACTIVE_STEP_RING_CLASS`, exported by `ui/StepProgress`, is
-the 1.5px width and the colour together (owner decision 2026-11-04: 2px read too heavy
-beside the 1px rings around it). `ConnectSteps`, `HowToBuyPanel` and the first-run guide
-take it from there. A browser rounds a border down to whole device pixels, so a 1x display
+**The marker states have one definition.** `ui/StepProgress` exports
+`ACTIVE_STEP_RING_CLASS`, `DONE_STEP_DISC_CLASS` and `PENDING_STEP_DISC_CLASS`, and
+`ConnectSteps`, `HowToBuyPanel` and the first-run guide take all three from there, so the
+four read as one stepper family. The ring is 1.5px (owner decision 2026-11-04: 2px read too
+heavy beside the 1px rings around it). The first-run guide's done disc was a solid
+`--v2-success` until the same date, which made a finished step heavier than the current one. A browser rounds a border down to whole device pixels, so a 1x display
 draws it at 1px and the darker colour alone carries the difference; that is accepted.
 
 **`halted`** marks a flow that stopped on `currentStep` — the Connect agent

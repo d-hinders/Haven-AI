@@ -306,6 +306,7 @@ function ContactRow({
           <DropdownMenu>
             <DropdownMenuIconTrigger
               aria-label={`More actions for ${contact.name}`}
+              edge="end"
             />
             <DropdownMenuContent>
               <DropdownMenuItem onSelect={() => { void handleCopy() }}>

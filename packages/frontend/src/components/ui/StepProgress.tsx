@@ -33,6 +33,13 @@ type StepProgressProps = {
  */
 export const ACTIVE_STEP_RING_CLASS = 'border-[1.5px] border-[var(--v2-ink-2)]'
 
+/** A finished step's disc: success-soft with a success tick. One definition, for the same reason. */
+export const DONE_STEP_DISC_CLASS =
+  'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
+
+/** A later step's disc: the quiet 1px ring the active one stands out from. */
+export const PENDING_STEP_DISC_CLASS = 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
+
 /**
  * Step indicator that spans its container: the connectors stretch between the
  * discs, so the band reads as one track across the content width instead of a
@@ -80,8 +87,8 @@ export function StepProgress({
                   isActive
                     ? `${ACTIVE_STEP_RING_CLASS} text-[var(--v2-ink-2)] ${halo ? 'v2-step-halo' : ''}`
                     : isCompleted
-                      ? 'border border-success/30 bg-[var(--v2-success-soft)] text-[var(--v2-success)]'
-                      : 'border border-[var(--v2-border)] text-[var(--v2-ink-3)]'
+                      ? DONE_STEP_DISC_CLASS
+                      : PENDING_STEP_DISC_CLASS
                 }`}
               >
                 {isCompleted ? <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} /> : index + 1}

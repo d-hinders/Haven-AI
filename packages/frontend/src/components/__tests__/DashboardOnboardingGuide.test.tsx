@@ -79,6 +79,13 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
     expect(container.querySelector('.v2-step-halo')).toBeNull()
   })
 
+  it('draws later steps with the stepper family quiet 1px ring', () => {
+    const { container } = renderGuide()
+    const later = container.querySelector('li[data-status="locked"] [aria-hidden="true"]')!
+    expect(later).toHaveClass('border', 'border-[var(--v2-border)]', 'text-[var(--v2-ink-3)]')
+    expect(later.className).not.toContain('border-strong')
+  })
+
   it('suggests the endpoint\'s amount and offers Add funds, which opens the dialog with the faucet', async () => {
     const { props } = renderGuide({ funding: FUNDING })
     expect(document.body.textContent).toContain('We suggest 5 USDC')

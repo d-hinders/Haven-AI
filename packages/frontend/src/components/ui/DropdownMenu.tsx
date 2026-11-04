@@ -132,13 +132,26 @@ const ICON_TRIGGER_CLASS =
  * is what a framed copy did on the contacts row. Build every overflow menu's
  * trigger from this, never from a hand-written class. The name is required
  * because the glyph says nothing: say what the menu acts on.
+ *
+ * `edge="end"` is for the last control on a line, such as a page header or a
+ * list row. With no frame, the empty part of the target would leave the dots
+ * floating inside the line's right edge, so it pulls the target over the edge
+ * by the difference and the dots line up with the content below.
  */
 export function DropdownMenuIconTrigger({
   'aria-label': ariaLabel,
+  edge,
   ...rest
-}: Omit<TriggerProps, 'children' | 'className' | 'aria-label'> & { 'aria-label': string }) {
+}: Omit<TriggerProps, 'children' | 'className' | 'aria-label'> & {
+  'aria-label': string
+  edge?: 'end'
+}) {
   return (
-    <DropdownMenuTrigger aria-label={ariaLabel} className={ICON_TRIGGER_CLASS} {...rest}>
+    <DropdownMenuTrigger
+      aria-label={ariaLabel}
+      className={edge === 'end' ? `${ICON_TRIGGER_CLASS} -mr-3.5` : ICON_TRIGGER_CLASS}
+      {...rest}
+    >
       <Icon icon={EllipsisVertical} className="h-4 w-4" />
     </DropdownMenuTrigger>
   )

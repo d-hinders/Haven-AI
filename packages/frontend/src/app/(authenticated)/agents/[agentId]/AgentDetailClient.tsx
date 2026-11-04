@@ -501,6 +501,7 @@ export default function AgentDetailClient({ agentId }: Props) {
             <DropdownMenu>
               <DropdownMenuIconTrigger
                 aria-label="Agent options"
+                edge="end"
                 disabled={pendingAction !== null}
               />
               <DropdownMenuContent>

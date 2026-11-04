@@ -15,8 +15,8 @@
  *     REAL dialog, opened from the dashboard hero. The shared fixture serves
  *     one account ("Operations", Base) and one saved contact ("Research
  *     vendor"), so the Review screen shows a named recipient with its full
- *     address, the rule for everything but your own account (decided 2026-11-04,
- *     pinned in DelegationSendModal.test.tsx).
+ *     address, the rule for everything but your own account, which
+ *     `send-dialog-review-own-account-*` pins.
  *   - `send-dialog-sent-*` is captured from the `/design-system` "Manual send"
  *     specimen's Sent card. Reaching the sent screen in a browser needs a
  *     completed passkey ceremony: the fixture's account is pure-passkey
@@ -47,7 +47,7 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, testRecipientAddress } from './fixtures/haven-api'
+import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, serveTwoAccounts, testRecipientAddress, testSafe } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
@@ -81,8 +81,8 @@ const CONTACT_NAME = 'Research vendor'
 const AMOUNT = '25'
 
 /** Open the Send dialog from the dashboard hero. */
-async function openSendDialog(page: Page): Promise<Locator> {
-  await page.goto('/dashboard')
+async function openSendDialog(page: Page, path = '/dashboard'): Promise<Locator> {
+  await page.goto(path)
   await dismissMobileSidebar(page)
   const send = page.getByRole('button', { name: 'Send', exact: true }).first()
   await expect(send).toBeVisible({ timeout: ANCHOR_TIMEOUT_MS })
@@ -172,6 +172,35 @@ test.describe('send dialog visual regression (#4641)', () => {
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-review-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    test(`send-dialog-review-own-account renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')
+
+      await serveTwoAccounts(page)
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      // The account page, because the dashboard asks which account first when there are two.
+      const dialog = await openSendDialog(page, `/accounts/${testSafe.id}`)
+      const ownAccount = '0x4444444444444444444444444444444444444444'
+      const to = dialog.getByRole('combobox', { name: 'To' })
+      await to.click()
+      await to.fill(ownAccount)
+      await page.getByRole('option', { name: /Imported Safe/ }).click()
+      await dialog.getByLabel('Amount').fill(AMOUNT)
+      await dialog.getByRole('button', { name: 'Review', exact: true }).click()
+
+      // Your own account: the name and the SHORT address, not the full one.
+      await expect(dialog.getByText('Imported Safe')).toHaveCount(1)
+      await expect(dialog.getByText(`${ownAccount.slice(0, 6)}…${ownAccount.slice(-4)}`)).toHaveCount(1)
+      await expect(dialog.getByText(ownAccount)).toHaveCount(0)
+
+      await page.evaluate(() => document.fonts.ready)
+      await expect(dialog).toHaveScreenshot(
+        `send-dialog-review-own-account-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
       )
     })

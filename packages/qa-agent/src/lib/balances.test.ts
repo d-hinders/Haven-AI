@@ -10,9 +10,13 @@ import {
   buildBalancesReport,
   burnPerDay,
   classify,
+  classifyGrant,
   collectBalances,
+  GRANT_CRITICAL_DAYS,
+  GRANT_WARN_DAYS,
   MERCHANT_TOPUP_TARGET_WEI,
   MIN_READINGS,
+  readBudgetGrant,
   readMerchant,
   readingsFor,
   RELAYER_FALLBACK_FLOOR_WEI,
@@ -385,5 +389,114 @@ describe('merchant top-up target (#3896)', () => {
     // The figures agent-qa.md and the MERCHANT_TOPUP_TARGET_WEI comment state, at this burn.
     expect(noticeDays(MERCHANT_TOPUP_TARGET_WEI)).toBe(7)
     expect(noticeDays(ETH(0.002))).toBe(3)
+  })
+})
+
+describe('the QA budget grant (#4666)', () => {
+  const NOW = new Date('2027-10-01T06:00:00.000Z')
+  const DAY = 86_400_000
+  const inDays = (d: number) => new Date(NOW.getTime() + d * DAY).toISOString()
+  // Checksummed, as the wire sends it; SEPOLIA_USDC is compared case-insensitively.
+  const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+  const PIN = '0x' + 'aa'.repeat(20)
+  const row = (over: Record<string, unknown> = {}) => ({ token_address: USDC_ADDRESS, token_symbol: 'USDC', recipient_address: null, budget_expires_at: inDays(90), ...over })
+  const answering = (allowances: unknown, extra: Record<string, unknown> = {}, ok = true, status = 200) =>
+    ({ api: { getAllowances: async () => ({ ok, status, data: { allowances, ...extra } }) } }) as unknown as BalanceSources
+
+  it('bands on exact milliseconds, inclusive at both edges', () => {
+    const now = NOW.getTime()
+    expect(GRANT_WARN_DAYS).toBe(30)
+    expect(GRANT_CRITICAL_DAYS).toBe(7)
+    expect(classifyGrant(now + 30 * DAY + 1, now)).toBe('ok')
+    expect(classifyGrant(now + 30 * DAY, now)).toBe('warn')
+    expect(classifyGrant(now + 7 * DAY + 1, now)).toBe('warn')
+    expect(classifyGrant(now + 7 * DAY, now)).toBe('critical')
+    expect(classifyGrant(now - 1, now)).toBe('critical')
+  })
+
+  it.each([
+    [90, 'ok', 90],
+    [30, 'warn', 30],
+    [29.5, 'warn', 29.5],
+    [7, 'critical', 7],
+    [6.04, 'critical', 6.1],
+  ])('a grant ending in %s days is %s, reporting its end date and %s days', async (days, band, daysLeft) => {
+    const grant = await readBudgetGrant(answering([row({ budget_expires_at: inDays(days as number) })]), NOW)
+    expect(grant).toMatchObject({ key: 'qa-budget', band, endsAt: inDays(days as number), daysLeft })
+    expect(grant.noLiveBudget).toBeUndefined()
+  })
+
+  it('a pinned row alone is no budget: critical', async () => {
+    const grant = await readBudgetGrant(answering([row({ recipient_address: PIN })]), NOW)
+    expect(grant).toMatchObject({ band: 'critical', noLiveBudget: true })
+  })
+
+  it('a pinned row beside the open one changes nothing, whichever way it ends', async () => {
+    for (const pinEnds of [1, 400]) {
+      const rows = [row({ recipient_address: PIN, budget_expires_at: inDays(pinEnds) }), row({ budget_expires_at: inDays(90) })]
+      expect(await readBudgetGrant(answering(rows), NOW)).toMatchObject({ band: 'ok', endsAt: inDays(90) })
+    }
+  })
+
+  it('a carry/steady pair is banded on the later end, in either order', async () => {
+    const carry = row({ budget_expires_at: inDays(5) })
+    const steady = row({ budget_expires_at: inDays(90) })
+    for (const rows of [[carry, steady], [steady, carry]]) {
+      expect(await readBudgetGrant(answering(rows), NOW)).toMatchObject({ band: 'ok', endsAt: inDays(90) })
+    }
+  })
+
+  it('a non-USDC row is ignored, even when its symbol says USDC', async () => {
+    const other = row({ token_address: '0x' + 'bb'.repeat(20), budget_expires_at: inDays(90) })
+    expect(await readBudgetGrant(answering([other]), NOW)).toMatchObject({ band: 'critical', noLiveBudget: true })
+    expect(await readBudgetGrant(answering([other, row({ budget_expires_at: inDays(5) })]), NOW)).toMatchObject({ band: 'critical', endsAt: inDays(5) })
+  })
+
+  it('the token matches by address whatever its casing', async () => {
+    const lower = row({ token_address: USDC_ADDRESS.toLowerCase() })
+    expect(await readBudgetGrant(answering([lower]), NOW)).toMatchObject({ band: 'ok', endsAt: inDays(90) })
+  })
+
+  it('a real empty list is critical, naming the latest ended budget when there is one', async () => {
+    expect(await readBudgetGrant(answering([], { budget_ended_at: '2027-09-30T10:36:00.000Z' }), NOW)).toMatchObject({
+      band: 'critical',
+      noLiveBudget: true,
+      endsAt: '2027-09-30T10:36:00.000Z',
+    })
+    const bare = await readBudgetGrant(answering([], { budget_ended_at: null }), NOW)
+    expect(bare).toMatchObject({ band: 'critical', noLiveBudget: true })
+    expect(bare.endsAt).toBeUndefined()
+  })
+
+  it('budget_ended_at beside a live budget is ignored: it can be some other, older row', async () => {
+    const grant = await readBudgetGrant(answering([row()], { budget_ended_at: '2026-11-03T10:36:00.000Z' }), NOW)
+    expect(grant).toMatchObject({ band: 'ok', endsAt: inDays(90) })
+  })
+
+  it.each([
+    ['an HTTP error', answering([], {}, false, 503), /HTTP 503/],
+    ['a 200 with no list (a proxy page parses to { raw })', ({ api: { getAllowances: async () => ({ ok: true, status: 200, data: { raw: '<html>' } }) } }) as unknown as BalanceSources, /no allowances list/],
+    ['a backend from before the field', answering([row({ budget_expires_at: undefined })]), /no usable budget_expires_at/],
+    ['a null field', answering([row({ budget_expires_at: null })]), /no usable budget_expires_at/],
+    ['an unparseable field', answering([row({ budget_expires_at: 'soon' })]), /no usable budget_expires_at/],
+    ['a null field beside a good one', answering([row(), row({ budget_expires_at: null })]), /no usable budget_expires_at/],
+  ])('%s is unknown, not config-missing', async (_name, src, reason) => {
+    const grant = await readBudgetGrant(src, NOW)
+    expect(grant.band).toBe('unknown')
+    expect(grant.reason).toMatch(reason)
+    expect(grant.configMissing).toBeUndefined()
+  })
+
+  it('a thrown read is unknown, with the keyed URL scrubbed', async () => {
+    const src = { api: { getAllowances: async () => { throw new Error('fetch failed https://api.example/v2/SUPERSECRETKEY1234567') } } } as unknown as BalanceSources
+    const grant = await readBudgetGrant(src, NOW)
+    expect(grant.band).toBe('unknown')
+    expect(grant.reason).toMatch(/^read failed/)
+    expect(grant.reason).not.toContain('SUPERSECRETKEY')
+  })
+
+  it('no API is config-missing, like the treasury row', async () => {
+    const grant = await readBudgetGrant({ api: null } as unknown as BalanceSources, NOW)
+    expect(grant).toMatchObject({ band: 'unknown', configMissing: true })
   })
 })

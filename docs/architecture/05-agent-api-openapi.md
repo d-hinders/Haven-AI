@@ -615,7 +615,10 @@ rail, each row also carries an additive `next_refill_at` beside its
 `onchain` block (#4355: when that budget next refills — the end of its current
 period, null when its end date comes first), which the SDK uses to tell a
 budget spent for the period from no budget at all without adding a readiness
-value; and each `onchain` block an additive, optional
+value; an additive `budget_expires_at` (#4666: when that budget's validity ends,
+null when the stored expiry is not a representable timestamp), reporting only,
+which the SDK does not surface and the daily QA balances check reads; and each
+`onchain` block an additive, optional
 `remaining_is_from_chain` boolean (#1319): true when `remaining` came from a
 live on-chain enforcer read, false when that read failed and `remaining` is
 the #1145 fallback (the full configured budget) — reporting only. The spec used

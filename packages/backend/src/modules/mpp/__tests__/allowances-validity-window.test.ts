@@ -158,6 +158,22 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     expect(dormantBody.allowances[0].next_refill_at).toBe(new Date(start * 1000).toISOString())
   })
 
+  it('#4666: each row carries budget_expires_at — the row\'s own expiry — and null when it is not a representable timestamp', async () => {
+    const endsSec = Math.floor(Date.now() / 1000) + 30 * 86_400
+    const live = await seedAgentWithDelegation({ expiresAt: endsSec })
+    const liveBody = (await handleGetAllowances(live)).body as { allowances: { budget_expires_at: string | null }[] }
+    expect(liveBody.allowances[0].budget_expires_at).toBe(new Date(endsSec * 1000).toISOString())
+
+    // BIGINT has no upper bound in the schema, and `toISOString` throws
+    // RangeError past 8.64e15 ms. The read still answers: one bad row must
+    // not take down the spend-authority read behind SDK readiness.
+    const huge = await seedAgentWithDelegation({ expiresAt: Number.MAX_SAFE_INTEGER })
+    const hugeResult = await handleGetAllowances(huge)
+    expect(hugeResult.statusCode).toBe(200)
+    const hugeBody = hugeResult.body as { allowances: { budget_expires_at: string | null }[] }
+    expect(hugeBody.allowances[0].budget_expires_at).toBeNull()
+  })
+
   it('#4352: an expired-only budget answers budget_ended_at with the row\'s expiry — and a live budget answers null', async () => {
     // The ended case: allowances[] stays empty (#3802) and the additive field
     // carries the ended row's expires_at — the same narrow query the refusal

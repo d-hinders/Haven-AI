@@ -238,6 +238,15 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             refillSec !== null && Number.isFinite(refillSec) && refillSec < expiresSec && refillSec * 1000 <= 8.64e15
               ? new Date(refillSec * 1000).toISOString()
               : null
+          // #4666: when THIS budget ends. The caller of this read holds only
+          // the agent's API key, so the owner-side delegation list cannot
+          // answer it. null when the stored expiry is not a representable
+          // timestamp: `toISOString` throws RangeError past 8.64e15 ms, and
+          // this map has no try, so one bad row must not fail the whole read.
+          const budgetExpiresAt =
+            Number.isFinite(expiresSec) && expiresSec > 0 && expiresSec * 1000 <= 8.64e15
+              ? new Date(expiresSec * 1000).toISOString()
+              : null
           return {
             id: b.id,
             // #3319: checksummed at the response boundary like the
@@ -283,6 +292,8 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
             // #4355: additive — ISO time of the next period refill, or null
             // when the budget ends before it would refill (see above).
             next_refill_at: nextRefillAt,
+            // #4666: additive — ISO time this budget's validity ends (see above).
+            budget_expires_at: budgetExpiresAt,
             onchain: {
               amount: b.budget_atomic,
               spent: spentAtomic,

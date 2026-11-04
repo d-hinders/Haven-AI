@@ -13098,6 +13098,15 @@ export const openapiSpec = {
                     'With `onchain.remaining` 0 it tells an agent its budget is spent for this period and when it refills, as opposed to never approved. ' +
                     'Optional on the schema so an older backend that omits it stays valid.',
                 },
+                budget_expires_at: {
+                  type: ['string', 'null'],
+                  format: 'date-time',
+                  description:
+                    '#4666: when THIS budget\'s validity ends (ISO 8601), after which it never refills and every payment from it reverts. ' +
+                    'Read-only reporting: the delegation\'s expiry caveat is what enforces it. ' +
+                    '`null` when the stored expiry is not a representable timestamp. ' +
+                    'Optional on the schema so an older backend that omits it stays valid.',
+                },
                 onchain: {
                   type: 'object',
                   required: ['amount', 'spent', 'remaining', 'effective_spent', 'reset_time_min', 'last_reset_min', 'nonce', 'is_reset_pending'],

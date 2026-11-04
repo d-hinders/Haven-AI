@@ -633,6 +633,8 @@ describe('machine payment routes', () => {
           // (expires_at is far beyond it). Derived here rather than frozen,
           // since the route reads the real clock.
           next_refill_at: new Date((Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000).toISOString(),
+          // #4666: the seed row's expires_at ('99999999999'), as ISO 8601.
+          budget_expires_at: '5138-11-16T09:46:39.000Z',
           onchain: {
             amount: '10000000',
             spent: '0',
@@ -686,6 +688,29 @@ describe('machine payment routes', () => {
       expect(degraded.statusCode).toBe(200)
       expectMatchesSpec('GET', '/machine-payments/allowances', degraded.json())
       expect(degraded.json().superseded_by).toBeNull()
+    })
+
+    it('delegation rail: budget_expires_at is null for an unrepresentable expiry, and the spec allows it (#4666)', async () => {
+      primeDb(
+        authAs(DELEGATION_AGENT),
+        delegationRows([{
+          id: '55555555-5555-4555-8555-555555555555',
+          agent_id: AGENT.id,
+          chain_id: 84532,
+          token_address: SEPOLIA_USDC,
+          budget_atomic: '1234567',
+          period_seconds: 86_400,
+          expires_at: '9007199254740991',
+        }]),
+      )
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().allowances[0].budget_expires_at).toBeNull()
+      expectMatchesSpec('GET', '/machine-payments/allowances', response.json())
     })
 
     // #2328: the AllowanceSummary round trip. `GET /agents` and

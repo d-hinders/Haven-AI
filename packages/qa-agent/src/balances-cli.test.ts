@@ -18,6 +18,7 @@ import {
   deterministicClaimId,
   EVAL_TOPUP_MAX_CLAIMS,
   RELAYER_TOPUP_MAX_CLAIMS,
+  budgetGrantLogLine,
   runBalances,
   runTopUps,
   topUpEvalAccount,
@@ -65,7 +66,17 @@ const healthz = (async () => ({
   }),
 })) as unknown as typeof fetch
 
-const api = { getAgent: async () => ({ ok: true, status: 200, data: { account_address: TREASURY } }) } as never
+const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+/** The agent's budget read, ending at `budgetExpiresAt`. */
+const allowancesEnding = (budgetExpiresAt: string) => async () => ({
+  ok: true,
+  status: 200,
+  data: { budget_ended_at: null, allowances: [{ token_address: USDC_ADDRESS, recipient_address: null, budget_expires_at: budgetExpiresAt }] },
+})
+const api = {
+  getAgent: async () => ({ ok: true, status: 200, data: { account_address: TREASURY } }),
+  getAllowances: allowancesEnding('2027-11-03T10:36:00.000Z'),
+} as never
 
 const FULL = {
   QA_HAVEN_API_URL: 'https://api.test',
@@ -910,5 +921,85 @@ describe('the USDC loops run before the relayer under one deadline (#3997)', () 
     expect(order[0]).toBe(`usdc:${EVAL_HERMES}`)
     expect(result['eval-hermes']).toMatchObject({ claimsMade: 1, unit: 'USDC' })
     expect(result.relayer).toMatchObject({ claimsMade: 0, stopReason: 'run-budget-exhausted' })
+  })
+})
+
+describe('the QA budget grant through the real entry points (#4666)', () => {
+  const NOW = new Date('2026-10-05T06:00:00Z')
+  const inDays = (d: number) => new Date(NOW.getTime() + d * 86_400_000).toISOString()
+  const withGrantEnding = (iso: string) => ({
+    ...deps(),
+    api: { getAgent: async () => ({ ok: true, status: 200, data: { account_address: TREASURY } }), getAllowances: allowancesEnding(iso) } as never,
+  })
+
+  /** A real report through the real issue sync, with `gh` recorded. Nothing is written to GitHub. */
+  async function sync(report: BalancesReport) {
+    const script = new URL('../../../scripts/ci/qa-balance-issue.mjs', import.meta.url).href
+    const { syncIssue } = await import(script)
+    const calls: { args: string[]; input?: string }[] = []
+    const gh = (args: string[], opts: { input?: string } = {}) => {
+      calls.push({ args, input: opts.input })
+      return args[0] === 'issue' && args[1] === 'list' ? '[]' : ''
+    }
+    const result = syncIssue({ gh, report, runUrl: 'https://run.test', repo: 'd-hinders/Haven-AI', log: () => {} })
+    return { result, created: calls.find((c) => c.args[0] === 'issue' && c.args[1] === 'create') }
+  }
+  // Healthy wallets, so the grant is all that can raise the issue.
+  const healthyWallets = (report: BalancesReport): BalancesReport => ({
+    ...report,
+    rows: report.rows.map((r) => ({ ...r, band: 'ok' as const })),
+  })
+
+  it('a grant inside the warn window reaches the report, and raises the issue with its end date', async () => {
+    const { report, exitCode } = await runBalances([], { ...FULL }, withGrantEnding(inDays(29)))
+    expect(exitCode).toBe(0)
+    expect(report.rows).toHaveLength(5)
+    expect(report.budgetGrant).toMatchObject({ key: 'qa-budget', band: 'warn', endsAt: inDays(29), daysLeft: 29 })
+    const { result, created } = await sync(healthyWallets(report))
+    expect(result.action).toBe('created')
+    expect(created?.input).toContain(`ends on ${inDays(29).slice(0, 10)} (UTC)`)
+    expect(created?.input).toContain('agent-qa.md#the-qa-budget-ended')
+  })
+
+  it('a grant inside the critical window does the same, as critical', async () => {
+    const { report } = await runBalances([], { ...FULL }, withGrantEnding(inDays(6)))
+    expect(report.budgetGrant?.band).toBe('critical')
+    const { result, created } = await sync(healthyWallets(report))
+    expect(result.action).toBe('created')
+    expect(created?.input).toContain('**critical**')
+  })
+
+  it('a healthy grant raises nothing', async () => {
+    const { report } = await runBalances([], { ...FULL }, withGrantEnding(inDays(31)))
+    expect(report.budgetGrant?.band).toBe('ok')
+    const { result, created } = await sync(healthyWallets(report))
+    expect(result.action).toBe('none')
+    expect(created).toBeUndefined()
+  })
+
+  it('a missing key names the exact variable on the grant itself', async () => {
+    const env: NodeJS.ProcessEnv = { ...FULL }
+    delete env.QA_HAVEN_API_URL
+    const { report, exitCode } = await runBalances([], env, { ...deps(), api: undefined })
+    expect(exitCode).toBe(1)
+    expect(report.budgetGrant).toMatchObject({ band: 'unknown', configMissing: true, reason: 'config missing: QA_HAVEN_API_URL' })
+  })
+
+  it('a read that hangs becomes unknown at the deadline, and the wallets are still read', async () => {
+    const hanging = { getAgent: async () => ({ ok: true, status: 200, data: { account_address: TREASURY } }), getAllowances: () => new Promise(() => {}) } as never
+    const { report, exitCode } = await runBalances([], { ...FULL }, { ...deps(), api: hanging, deadlineMs: 20 })
+    expect(exitCode).toBe(0)
+    expect(report.budgetGrant).toMatchObject({ band: 'unknown', reason: expect.stringContaining('read timed out') })
+    expect(report.rows.find((r) => r.key === 'treasury')?.balance).toBeDefined()
+  })
+
+  it('the run log names the grant in the wallet rows\' shape, and the report always carries one', async () => {
+    expect(budgetGrantLogLine(undefined)).toBeNull()
+    expect(budgetGrantLogLine({ key: 'qa-budget', name: 'QA budget grant (USDC)', band: 'warn', endsAt: '2027-11-03T10:36:00.000Z', daysLeft: 29 })).toBe(
+      'warn     QA budget grant (USDC): ends 2027-11-03T10:36:00.000Z (29 d)',
+    )
+    expect(budgetGrantLogLine({ key: 'qa-budget', name: 'QA budget grant (USDC)', band: 'critical', noLiveBudget: true, endsAt: '2026-11-03T10:36:00.000Z', reason: 'no live open USDC budget' })).toBe(
+      'critical QA budget grant (USDC): latest ended budget 2026-11-03T10:36:00.000Z — no live open USDC budget',
+    )
   })
 })

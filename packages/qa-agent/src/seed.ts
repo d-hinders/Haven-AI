@@ -304,7 +304,16 @@ interface DelegationRow {
   expires_at?: string | number | null
 }
 
-async function ensureBudget(
+/**
+ * How long a seeded grant lasts. The build route defaults to 90 days and caps
+ * at 365 on its own clock (#4351), so this stays a day short of the cap. Every
+ * spending leg of the money-flow suite stops when the grant ends (#2769), and
+ * renewing it takes an owner signature, so a testnet QA identity asks for the
+ * longest grant the route allows.
+ */
+const QA_BUDGET_LIFETIME_SECONDS = 364 * 86_400
+
+export async function ensureBudget(
   cfg: SeedConfig,
   token: string,
   agentId: string,
@@ -316,23 +325,16 @@ async function ensureBudget(
     `/agents/${agentId}/delegations`,
     { token },
   )
-  const active = delegations.find(
-    (d) =>
-      d.status === 'active' &&
-      d.chain_id === CHAIN_ID &&
-      d.token_address?.toLowerCase() === ADDR.usdc.toLowerCase() &&
-      d.budget_atomic === budgetAtomic,
-  )
-  if (active) {
-    console.log('  ✓ active USDC budget delegation already granted — skipping')
-    return
-  }
+  // Only a LIVE row counts. An expired grant keeps status='active' (the status
+  // CHECK has no expired value, #3542), so without the expiry test a lapsed
+  // budget reads as "already granted" and a recovery run changes nothing (#2769).
+  //
   // #3933: a live budget in the same (USDC, open) slot with a different
   // amount is REPLACED through the edit composition — the new grant names
   // EVERY live row of the slot as `replaces` (a re-keyed agent's budget is a
   // carry/steady pair), then each is stopped on-chain. A plain grant into an
   // occupied slot, or one naming only part of it, is refused by build and
-  // activate.
+  // activate. An expired row occupies nothing, so it is not named.
   const nowSec = Math.floor(Date.now() / 1000)
   const occupying = delegations.filter(
     (d) =>
@@ -343,6 +345,10 @@ async function ensureBudget(
       Number(d.expires_at ?? 0) > nowSec &&
       typeof d.delegation_hash === 'string',
   )
+  if (occupying.some((d) => d.budget_atomic === budgetAtomic)) {
+    console.log('  ✓ active USDC budget delegation already granted — skipping')
+    return
+  }
   const replaces = occupying.length > 0 ? occupying.map((d) => d.delegation_hash as string) : undefined
 
   const built = await api<{
@@ -358,6 +364,7 @@ async function ensureBudget(
       recipient_address: null,
       budget_atomic: budgetAtomic,
       period_seconds: cfg.periodMin * 60,
+      expires_at: nowSec + QA_BUDGET_LIFETIME_SECONDS,
       ...(replaces ? { replaces } : {}),
     },
   })

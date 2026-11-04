@@ -31,7 +31,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-04"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -47,7 +47,7 @@ production credentials, a mainnet RPC, or real funds.
 
 | Operation | Local terminal | GitHub Actions | When to use it |
 |---|---:|---:|---|
-| Seed the QA user, Hybrid account, agent, and budget delegation | Yes | No | First-time setup or identity replacement |
+| Seed the QA user, Hybrid account, agent, and budget delegation | Yes | No | First-time setup, identity replacement, or a [lapsed budget](#the-qa-budget-ended) |
 | Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
 | Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a deployed frontend (the `dev` host or an opt-in `preview/*` deployment) against the dev backend |
 | Exploratory agent/merchant QA (Layer 2b, `/qa-dev`) | Yes | No | Payment / MCP coverage that needs LLM judgment |
@@ -330,7 +330,10 @@ agent with the configured delegate address:
 2. Provision or reuse the Base Sepolia **Hybrid DeleGator** account
    (`POST /accounts/hybrid`).
 3. Create or reuse the QA agent.
-4. Build, owner-sign and activate the USDC **budget delegation**.
+4. Build, owner-sign and activate the USDC **budget delegation**. A live budget
+   of the same amount is left alone; an expired one counts as no budget, so the
+   seed grants a new one (#2769). A seeded grant lasts 364 days, a day short of
+   the build route's cap.
 
 If that delegate address instead belongs to a paused, revoked, or unknown-status
 agent, the seed stops before it creates or reuses an agent, or grants a budget
@@ -796,6 +799,40 @@ names each leg's share); most legs spend 0.001 USDC each.
   identity (signup → hybrid account → agent → open-budget grant → activate →
   fund), update the secrets, and update the env file. Never reuse
   `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
+
+##### The QA budget ended
+
+The budget refills each period but the grant itself ends: a grant built with no
+`expires_at` lasts 90 days, which is how the 2026-08-05 grant came to end on
+2026-11-03 (#2769). No check warns beforehand; the
+[QA wallet balances](#qa-wallet-balances-standing-issue) run reads balances, not
+grant expiry, and stays green. Every spending leg goes red at once, in a few
+wordings that all mean the same thing:
+
+- `precondition: the agent has no USDC budget — nothing to be over`
+- `this budget ended on <date>; ask the owner to set a new one`
+- `DELEGATION_EXPIRED`
+- `Agent has no active budget delegation for USDC to this recipient`
+
+`task-budget-lifecycle` still passes, because it funds nothing. The failure
+issue may class the run `mixed` and call a leg `haven`; the wording above decides
+it, not the class.
+
+**Recovery needs the owner key.** Run [the seed](#4-run-the-seed-locally) with
+this identity's values from `~/.haven/qa-delegation.env`: its owner key, QA user
+email and password, and `SEED_DELEGATE_ADDRESS` set to its delegate address. The
+owner signs locally and the seed activates the grant. The agent, API key,
+delegate key, treasury and repo secrets all stay as they are. Then start a fresh
+run:
+
+```bash
+gh workflow run qa-dev.yml --repo d-hinders/Haven-AI --ref dev
+```
+
+Use this identity's own values: a different `SEED_QA_EMAIL` provisions a separate
+identity with an empty treasury, and a different owner key can't sign for this
+account. If the owner key is lost, follow **Rotation** above to re-provision
+everything.
 
 If the dotenv file contains exactly those five required entries, upload them
 with:

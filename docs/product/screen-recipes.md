@@ -7,6 +7,7 @@ covers:
   - docs/product/copy-guidelines.md
   - docs/regulatory/casp-risk-guardrails.md
   - packages/frontend/src/components/ReceiveDialog.tsx
+  - packages/frontend/src/components/RecipientField.tsx
   - packages/frontend/src/components/ui/Select.tsx
   - packages/frontend/src/components/ui/LinkChip.tsx
   - packages/frontend/src/lib/agent-budget.ts
@@ -345,37 +346,57 @@ Money and risk clarity:
 
 Use when the user manually sends funds from a Haven wallet.
 
-Structure:
-1. Single form step for token, amount, and recipient — there is no
-   separate review step. `DelegationSendModal` is titled `Send` and submits from
-   the same step it collects on. The account is chosen before it opens: the
-   dashboard's account picker when the user has several accounts, or the
-   account page's own account. The recipient is a pasted address, or one of
-   the user's other Haven accounts ("Or send to another Haven account").
-2. Shared `Input` fields with inline validation. `MaxButton` and `PasteButton`
-   exist in `packages/ui` but the send modal does not use them today.
-3. Lead with the amount and token as the dominant information.
-4. Compact context for network.
-5. Primary action: `Send`; secondary action: `Cancel`.
+Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
+1. **Details.** The account is chosen before the dialog opens: the dashboard's
+   account picker when the user has several accounts, or the account page's own
+   account. The screen names it once — "From <account name>" — and shows no
+   balance. **To** is `RecipientField`: your other Haven accounts on this chain,
+   then your saved contacts, then a pasted address. **Amount** is an `Input`
+   with the token symbol as its suffix; a token `Select` appears only when the
+   chain lists more than one sendable token. The line "No network fee. You
+   review the payment before you approve it." closes the screen. Footer:
+   `Cancel` | `Review`, with Review disabled until a recipient is chosen and the
+   amount parses.
+2. **Review.** "You're sending", with the amount large. A detail list carries
+   **To** (the name with its Monogram, and the full address in mono, wrapping,
+   never truncated), **From**, **Network**, and **Network fee** ("None. Haven
+   covers it."). A neutral note follows: "A sent payment can't be reversed. You
+   approve it on the next step." The passkey hint and the wallet-connect state
+   live here, where the ceremony starts. Footer: `Back` | `Send <amount>
+   <token>`, with Back keeping every field.
+3. **Working.** While the send is in flight the Send button reads "Sending…"
+   and every dismissal path is blocked — the ✕, Escape and a backdrop click.
+4. **Cancelled or failed.** Both land back on Review with their message:
+   "Approval was cancelled." for a dismissed approval, the server's message (or
+   "Haven could not send this payment. Try again.") for a failure, with the Send
+   button reading `Try again`.
+5. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
+   address> on <chain>", and **View transaction** linking to the chain explorer
+   when the send returned a transaction hash. After a send to a **new address**
+   the screen offers "Save this address as a contact?" — a name field and Save,
+   with the name trimmed and a blank name refused inline. A 409 shows "Already
+   saved"; any other failure is an inline, retryable error with the name kept.
+   While the save is in flight, Save reads "Saving…" and Done and every close
+   path are blocked. Done closes.
+6. Every screen puts its actions in the dialog's footer through the shared
+   action pair — the equal-halves shape, stacking primary-first below `sm`.
 
-Money and risk clarity (today the modal names neither the account nor its
-network, so the first bullet and structure item 4 are not met yet):
+Money and risk clarity:
 - Show the selected Haven wallet before money moves.
 - Show the recipient as a contact name when available; keep raw addresses subordinate.
 - Say that the send takes one approval and costs the user no network fee.
-- Result toasts: `Sent.` on success, `Approval was cancelled.` when the
-  approval is cancelled, and "Haven could not send this payment. Try again."
-  (or the server's message) on failure.
-- Use toasts for short success/copy feedback, but keep blocking validation next to the field.
+- Keep blocking validation next to the field, and use toasts only for short
+  copy feedback.
 
-> **Why there is no review step or approval hold here (#2265).** Both were the
-> retired Safe rail's shape: a second confirm screen, and a multi-signature
-> account that could hold a payment until the remaining owners signed. The
-> delegation rail has neither — the owner-signed budget delegation is the
-> approval, and a payment outside it reverts on-chain rather than waiting for
-> anyone (epic #1440). A recipe that still prescribed `Approve and send` /
-> `Back` was telling a contributor to rebuild a deleted screen; its
-> `/design-system` twin ("Manual send") was rebased in the same change.
+> **The Review screen is a confirmation, not an approval hold (#4641).** The
+> owner approved a Review screen before every send on the mockup canvas
+> ("Send 1" to "Send 4"). It is the screen the user reads before the passkey
+> prompt: nothing queues, and the payment still executes, or reverts on-chain,
+> exactly as before. This reverses the earlier rationale (#2265) that a second
+> confirm screen was the retired Safe rail's shape — that was a Safe-retirement
+> documentation clean-up rather than an owner ruling against review. The
+> retired Safe rail's *approval hold* is still gone, and the delegation rail
+> still has no second signature to wait for (epic #1440).
 
 ## Receive Funds
 
@@ -458,12 +479,13 @@ Structure:
 3. Add/edit modal with contact name and recipient address labels.
 4. Delete confirmation that says past payments are not affected.
 5. Send flow selector that lets users choose a saved recipient or paste an
-   address directly. Not built: `DelegationSendModal` offers the user's other
-   Haven accounts and a pasted address, and no saved-contact picker
-   (`grep -ci contact` on it prints 0).
+   address directly. Built in #4641: `DelegationSendModal`'s Details screen
+   renders `RecipientField`, which offers your other Haven accounts, then your
+   saved contacts, then a pasted address. The dialog owns the one `useContacts()`
+   instance, so a contact saved on its success screen is in the picker at once.
 
 Money and risk clarity:
-- In Send (once the selector exists), show the contact name as the primary recipient label and keep the raw address subordinate.
+- In Send, show the contact name as the primary recipient label and keep the raw address subordinate.
 - If contacts cannot load, say saved recipients are unavailable and that the user can still paste an address.
 - If no contacts are saved, offer a clear path to add contacts without blocking manual address entry.
 - Prevent duplicate saved recipient addresses; do not imply duplicate contacts can be created.

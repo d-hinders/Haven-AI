@@ -2784,8 +2784,9 @@ equal and still submits nothing.
 walking through several screens — uses `DialogActions`. A *single-screen* dialog
 — one screen, one decision — uses **right-aligned, content-width buttons** in
 `Modal`'s `footer`: secondary then primary, each sized to its label, the pair
-flush with the footer's right edge. Send and New account already ship that
-shape, and it is the rule here.
+flush with the footer's right edge. New account ships that shape, and it is the
+rule here. Send used to as well; since #4641 it is a two-screen dialog
+(Details → Review) and takes `DialogActions`.
 
 The reason the two differ is what the footer is doing. On a multi-screen dialog
 the pair is the screen's whole forward motion, so it earns the full body width

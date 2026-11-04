@@ -219,14 +219,14 @@ export default function DelegationSendModal({
 
   // A save moves no money, and the user may have gone somewhere useful while it
   // ran, such as back into the name field or to View transaction. So focus moves
-  // only if it was lost: to the name field after a failure, where the error and
-  // the kept name are, and otherwise to the screen.
+  // only if it left the screen: to the name field after a failure, where the
+  // error and the kept name are, and otherwise to the screen. Outside the screen
+  // includes behind the dialog, where Tab lands while Save is disabled.
   useEffect(() => {
     const previous = previousSaveStateRef.current
     previousSaveStateRef.current = saveState
     if (previous !== 'saving' || saveState === 'saving' || !open) return
-    const active = document.activeElement
-    if (active && active !== document.body) return
+    if (screenRef.current?.contains(document.activeElement)) return
     if (saveState === 'error') {
       saveNameRef.current?.focus()
     } else {
@@ -462,7 +462,7 @@ export default function DelegationSendModal({
           </p>
 
           {message ? (
-            <div ref={messageRef}>
+            <div ref={messageRef} className="scroll-mb-3">
               {message.tone === 'danger' ? (
                 <InlineAlert>{message.message}</InlineAlert>
               ) : (

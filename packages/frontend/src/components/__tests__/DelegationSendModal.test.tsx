@@ -543,6 +543,21 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
         expect(document.activeElement).toBe(name)
       })
 
+      it('a save that ends brings back focus that escaped behind the dialog', async () => {
+        let succeed: (value: unknown) => void = () => {}
+        await startSave(new Promise((resolve) => { succeed = resolve }))
+        const behind = document.createElement('button')
+        document.body.appendChild(behind)
+        behind.focus()
+
+        succeed(contact({ id: 'c-Acme', name: 'Acme', address: NEW_ADDRESS }))
+
+        await waitFor(() => expect(screen.getByText('Saved as Acme')).toBeTruthy())
+        expect(document.activeElement).toHaveTextContent('1.5 USDC sent')
+        expect(document.activeElement).not.toBe(document.body)
+        behind.remove()
+      })
+
       it('a successful save does not pull focus off View transaction', async () => {
         let succeed: (value: unknown) => void = () => {}
         await startSave(new Promise((resolve) => { succeed = resolve }))

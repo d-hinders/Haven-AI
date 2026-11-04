@@ -9,6 +9,7 @@ import {
   type SweepExpectedAuth,
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from '../infra/chain/relayer-reads.js'
+import { parseEnvPrivateKey } from '../infra/chain/env-private-key.js'
 import { openOutboundRecord, submitRecorded } from '../infra/outbound-queue.js'
 
 /**
@@ -85,7 +86,9 @@ export async function signSweepExpectedContext(
         'so that the edge signer can verify it against HAVEN_X402_BINDING_SIGNER.',
     )
   }
-  const wallet = new ethers.Wallet(privateKey)
+  // #4654: validate the string first — ethers echoes an unparseable value into
+  // the error it throws, and that error reaches the logs.
+  const wallet = new ethers.Wallet(parseEnvPrivateKey('X402_BINDING_PRIVATE_KEY', privateKey))
   const message = buildSweepAuthorizationMessage(auth)
   return {
     version: 1,

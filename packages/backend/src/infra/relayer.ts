@@ -10,6 +10,7 @@ import {
 } from 'ethers'
 import { relayerPrivateKeyForChain } from '../config.js'
 import { rpcUrlForChain } from '../domain/chains.js'
+import { parseEnvPrivateKey } from './chain/env-private-key.js'
 import { secondaryRpcUrl, secretSegments } from './chain/rpc-transport.js'
 
 const providers = new Map<number, JsonRpcProvider>()
@@ -246,6 +247,22 @@ export function getFallbackBroadcastProvider(chainId: number): JsonRpcProvider |
 }
 
 /**
+ * The env variable `relayerPrivateKeyForChain` actually selected for this chain
+ * (#4654), so a refusal names the variable the operator set rather than the one
+ * that merely exists.
+ *
+ * `config.ts:576` selects the per-chain override with `||`, so a whitespace-only
+ * `RELAYER_PRIVATE_KEY_<chainId>` is truthy and WINS over the global key. That
+ * is deliberate and unchanged: falling back would collapse the per-chain
+ * relayer isolation (#640) silently. The refusal below therefore has to name the
+ * per-chain variable, not the global one.
+ */
+function relayerKeyVariableName(chainId: number): string {
+  const perChain = `RELAYER_PRIVATE_KEY_${chainId}`
+  return process.env[perChain] ? perChain : 'RELAYER_PRIVATE_KEY'
+}
+
+/**
  * Returns a signer connected to the given chain's RPC, funded by the relayer key
  * for that chain — `RELAYER_PRIVATE_KEY_<chainId>` with a global
  * `RELAYER_PRIVATE_KEY` fallback (#640). This is the signer that submits
@@ -256,6 +273,10 @@ export function getFallbackBroadcastProvider(chainId: number): JsonRpcProvider |
  * chains would submit on every chain with the same key. Agent payments are
  * NOT among them: those are paymaster-sponsored UserOps (`rails/delegation-rail.ts`).
  * Cached per chainId.
+ *
+ * #4654: the key is validated as a string before the constructor sees it, so a
+ * malformed value is refused with an error naming the variable instead of
+ * ethers echoing the value into the logs.
  */
 export function getRelayer(chainId: number): Wallet {
   let relayer = relayers.get(chainId)
@@ -266,7 +287,7 @@ export function getRelayer(chainId: number): Wallet {
         `No relayer key for chain ${chainId} — set RELAYER_PRIVATE_KEY_${chainId} or RELAYER_PRIVATE_KEY`,
       )
     }
-    relayer = new Wallet(key, getProvider(chainId))
+    relayer = new Wallet(parseEnvPrivateKey(relayerKeyVariableName(chainId), key), getProvider(chainId))
     relayers.set(chainId, relayer)
   }
   return relayer

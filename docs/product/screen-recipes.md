@@ -476,6 +476,10 @@ Use when the user saves payment recipients or chooses who receives a manual paym
 Structure:
 1. Header that frames contacts as saved recipients, not a technical address book.
 2. Searchable list with contact name first and recipient address subordinate.
+   Each row is a `Row` (Monogram, name, the short address with its "Used on"
+   networks) carrying a visible **Send** and a ⋯ menu — Copy address, Edit,
+   then Delete in the danger tone (#4642). Copy announces through the app toast
+   and, on a failed write, prints the full address to copy by hand.
 3. Add/edit modal with contact name and recipient address labels.
 4. Delete confirmation that says past payments are not affected.
 5. Send flow selector that lets users choose a saved recipient or paste an
@@ -483,6 +487,11 @@ Structure:
    renders `RecipientField`, which offers your other Haven accounts, then your
    saved contacts, then a pasted address. The dialog owns the one `useContacts()`
    instance, so a contact saved on its success screen is in the picker at once.
+   A row's Send opens that same dialog with the contact preset (#4642): with
+   more than one account the account picker asks first, and an account with no
+   resolved network cannot send — the picker marks it non-interactive, and with
+   no sendable account the row's Send is disabled with its reason in visible
+   text.
 
 Money and risk clarity:
 - In Send, show the contact name as the primary recipient label and keep the raw address subordinate.

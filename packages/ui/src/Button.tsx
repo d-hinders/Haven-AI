@@ -164,6 +164,14 @@ type ButtonProps = IconProps & {
    */
   'aria-expanded'?: boolean
   'aria-controls'?: string
+  /**
+   * The id of the element that explains this button (#4642). A disabled
+   * control is not focusable, so a reason that lives only in a neighbouring
+   * paragraph is never announced; `aria-describedby` is what ties the two
+   * together for a screen reader that reaches the button by other means.
+   * `button` branch only — an anchor has no disabled state to explain.
+   */
+  'aria-describedby'?: string
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
@@ -198,6 +206,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   'aria-busy': ariaBusy,
   'aria-expanded': ariaExpanded,
   'aria-controls': ariaControls,
+  'aria-describedby': ariaDescribedBy,
   disabled,
   onClick,
   variant = 'primary',
@@ -233,6 +242,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         aria-busy={ariaBusy}
         aria-expanded={ariaExpanded}
         aria-controls={ariaControls}
+        aria-describedby={ariaDescribedBy}
         disabled={disabled}
         onClick={onClick}
         className={classes}

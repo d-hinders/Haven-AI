@@ -32,6 +32,14 @@ interface Props {
  * ring-brand/80`, and its `title` slot takes the Default `StatusBadge`. `Row`
  * has no border of its own, so the divided container below supplies the
  * separation the per-button borders used to.
+ *
+ * #4642: an account with no resolved `chain_id` cannot sign a send, and the
+ * Send dialog's mount guard skips it — so listing it as clickable was a silent
+ * dead end (the row set `sendOpen` and nothing rendered). For the `send` action
+ * such an account is a NON-interactive `Row` (no `onClick`) carrying the reason
+ * as its subtitle. `Row` has no disabled state, so a static row is the existing
+ * pattern. Receive is unaffected: an account can receive on a chain it has not
+ * resolved yet, and the Receive dialog names the network itself.
  */
 export default function DashboardActionPickerModal({
   open,
@@ -60,20 +68,36 @@ export default function DashboardActionPickerModal({
       width="md"
     >
       <div className="divide-y divide-[var(--v2-border)] overflow-hidden rounded-lg border border-[var(--v2-border)]">
-        {accounts.map((account) => (
-          <Row
-            key={account.id}
-            onClick={() => onSelect(account.id)}
-            title={
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="truncate">{account.name}</span>
-                {account.is_default ? <StatusBadge tone="brand">Default</StatusBadge> : null}
-              </span>
-            }
-            subtitle={resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
-            trailing={<Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />}
-          />
-        ))}
+        {accounts.map((account) => {
+          const titleSlot = (
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{account.name}</span>
+              {account.is_default ? <StatusBadge tone="brand">Default</StatusBadge> : null}
+            </span>
+          )
+
+          // #4642: no resolved chain, no send. A static row says why instead of
+          // accepting a click that renders nothing.
+          if (action === 'send' && account.chain_id == null) {
+            return (
+              <Row
+                key={account.id}
+                title={titleSlot}
+                subtitle="No network yet. You can't send from this account."
+              />
+            )
+          }
+
+          return (
+            <Row
+              key={account.id}
+              onClick={() => onSelect(account.id)}
+              title={titleSlot}
+              subtitle={resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
+              trailing={<Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />}
+            />
+          )
+        })}
       </div>
     </Modal>
   )

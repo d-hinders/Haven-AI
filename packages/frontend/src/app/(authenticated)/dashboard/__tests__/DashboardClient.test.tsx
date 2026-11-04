@@ -99,8 +99,10 @@ vi.mock('@/components/ConnectAgentModal', () => ({
 }))
 
 // #4094: the picker mock prints its action and account count and offers a
-// one-click pick, so the dashboard's ASK-FIRST wiring (multi-account) is
-// assertable here without importing the real picker.
+// one-click pick per account, so the dashboard's ASK-FIRST wiring
+// (multi-account) is assertable here without importing the real picker.
+// #4642: one button per account, so a mixed valid/null-chain set can pick the
+// account that can actually sign.
 vi.mock('@/components/DashboardActionPickerModal', () => ({
   default: ({
     open,
@@ -116,7 +118,11 @@ vi.mock('@/components/DashboardActionPickerModal', () => ({
     open ? (
       <div data-testid="action-picker">
         <span>{`picker-${action}-${accounts.length}`}</span>
-        <button onClick={() => onSelect(accounts[0].id)}>Pick {accounts[0].name}</button>
+        {accounts.map((account) => (
+          <button key={account.id} onClick={() => onSelect(account.id)}>
+            Pick {account.name}
+          </button>
+        ))}
       </div>
     ) : null,
 }))
@@ -1079,6 +1085,41 @@ describe('DashboardClient', () => {
       // never applied here: nothing dead-ends, the account is simply not
       // signable until its chain resolves.
       expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    })
+
+    it('with a mixed account set, the picker no longer dead-ends: the valid account opens Send (#4642)', () => {
+      // #4642: the picker used to list a null-chain account as clickable, so
+      // choosing it set `sendOpen` and rendered nothing. The picker now marks
+      // that row non-interactive, and the valid account still reaches the rail.
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      const NULL_CHAIN = {
+        ...SAFE,
+        id: 'safe-2',
+        name: 'Fresh account',
+        chain_id: undefined as unknown as number,
+        is_default: false,
+      }
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          accounts: [NULL_CHAIN, SAFE],
+        },
+      })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      const picker = screen.getByTestId('action-picker')
+      expect(picker).toHaveTextContent('picker-send-2')
+      expect(screen.queryByTestId('delegation-send-modal')).not.toBeInTheDocument()
+
+      fireEvent.click(within(picker).getByRole('button', { name: 'Pick Main account' }))
+
+      const send = screen.getByTestId('delegation-send-modal')
+      expect(send).toHaveTextContent(`${SAFE.account_address}|${SAFE.chain_id}`)
     })
   })
 

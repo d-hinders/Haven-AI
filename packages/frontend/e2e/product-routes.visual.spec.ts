@@ -548,8 +548,13 @@ const ROUTES: ProductRoute[] = [
    * screen shows. The shared fixture serves one contact ("Research vendor",
    * `testRecipientAddress`), whose only activity is on 8453, so the Network
    * facet has one option and photographs hidden — the toolbar with search and
-   * the count is what the baseline pins. MOBILE-only by decision, per the
-   * #2733/#2817 reasoning above.
+   * the count is what the baseline pins.
+   *
+   * #4642 adds the DESKTOP axis: the row gained a visible Send and a ⋯ menu,
+   * and the row's trailing slot is the part that has to fit beside the name at
+   * both widths. Mobile stays (it is the width the owner's artboard measured);
+   * desktop is the composition the new trailing slot has never been photographed
+   * at.
    *
    * No `frozenTimestamp` by measurement: a contact row renders its name,
    * its address and the "Used on" badges — no relative timestamp anywhere,
@@ -559,7 +564,7 @@ const ROUTES: ProductRoute[] = [
   {
     path: '/contacts',
     slug: 'contacts',
-    viewports: ['mobile'],
+    viewports: ['mobile', 'desktop'],
     /** Measured at 390 on this harness: 192 characters. */
     minChars: 150,
     anchor: (page: Page) => page.getByRole('heading', { name: 'Contacts', exact: true }),

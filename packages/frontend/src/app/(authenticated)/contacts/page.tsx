@@ -1,9 +1,10 @@
 'use client'
 
 import { Monogram } from '@/components/ui/Monogram'
-import { Info, Pencil, Trash2, Users } from 'lucide-react'
+import { ArrowUp, EllipsisVertical, Info, Plus, Users } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect, useId, useState, type FormEvent } from 'react'
+import { useAuth } from '@/context/AuthContext'
 import { useContacts, type Contact } from '@/hooks/useContacts'
 import { useContactChains } from '@/hooks/useContactChains'
 import { resolveChainOrNull } from '@/lib/chains'
@@ -12,13 +13,23 @@ import { isValidAddress } from '@/lib/format'
 import { Address } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ConfirmDialog'
-import { CopyButton } from '@/components/ui/CopyButton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { ListNoMatch, ListToolbar } from '@/components/ui/ListToolbar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/DropdownMenu'
+import { useToast } from '@/components/ui/Toast'
+import { useMoneyActionLauncher } from '@/components/MoneyActionLauncher'
+import { Row } from '@haven_ai/ui/Row'
+import { useCopyToClipboard } from '@haven_ai/ui/hooks/useCopyToClipboard'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListNoun } from '@/components/ui/list-controls-copy'
 import { clearedListState, type ListState, type ListUrlSchema } from '@/components/ui/list-url-codec'
@@ -204,62 +215,115 @@ function ContactModal({ mode, initial, existingContacts = [], onSave, onClose }:
 interface ContactRowProps {
   contact: Contact
   chains: number[]
+  /** False when no account can sign a send — the Send button is disabled. */
+  canSend: boolean
+  /** The id of the visible reason a disabled Send points at (#4642). */
+  sendDisabledReasonId: string
+  onSend: (contact: Contact) => void
   onEdit: (contact: Contact) => void
   onDelete: (contact: Contact) => void
 }
 
-function ContactRow({ contact, chains, onEdit, onDelete }: ContactRowProps) {
+/**
+ * One saved recipient (#4642).
+ *
+ * The row is the shared `Row` primitive, not a hand-built flex box: the old
+ * markup tinted its own hover with `--v2-surface`, a surface the design system
+ * reserves for callouts and headers. `Row` brings the standard rhythm, the
+ * 36px `Monogram` leading slot and the title/subtitle pair; the address and its
+ * "Used on" networks share the subtitle line.
+ *
+ * The three icon buttons became the two affordances the owner approved: a
+ * visible Send, and a ⋯ menu holding Copy address, Edit and Delete. Copy keeps
+ * its feedback through the app toast — the menu item has no room for a copied
+ * state, and `useCopyToClipboard` reports whether the write actually happened,
+ * so a failed write says so and prints the address to copy by hand.
+ */
+function ContactRow({
+  contact,
+  chains,
+  canSend,
+  sendDisabledReasonId,
+  onSend,
+  onEdit,
+  onDelete,
+}: ContactRowProps) {
+  const copyToClipboard = useCopyToClipboard()
+  const { toast } = useToast()
+
+  const handleCopy = async () => {
+    const copied = await copyToClipboard(contact.address)
+    if (copied) {
+      toast.success('Address copied.')
+      return
+    }
+    toast.error(`We could not copy the address. Copy it by hand: ${contact.address}`)
+  }
+
   return (
-    <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-[var(--v2-surface)]">
-      <Monogram name={contact.name} />
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{contact.name}</p>
-        <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">
+    <Row
+      leading={<Monogram name={contact.name} />}
+      // The toneless leading box is 16px; the Monogram is 36px.
+      leadingClassName="h-9 w-9"
+      title={contact.name}
+      subtitle={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <Address value={contact.address} />
-        </p>
-        {chains.length > 0 && (
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Used on</span>
-            {chains.map((id) => (
-              <span key={id} className="inline-flex items-center gap-1 text-xs text-[var(--v2-ink-2)]">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: chainDotColor(id) }}
-                />
-                {chainName(id)}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
+          {chains.length > 0 && (
+            <>
+              <span className="uppercase tracking-wide">Used on</span>
+              {chains.map((id) => (
+                <span key={id} className="inline-flex items-center gap-1 text-[var(--v2-ink-2)]">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: chainDotColor(id) }}
+                  />
+                  {chainName(id)}
+                </span>
+              ))}
+            </>
+          )}
+        </span>
+      }
+      // The subtitle wraps: the address and its networks are one line of
+      // metadata, not a single truncated string.
+      subtitleClassName="whitespace-normal"
+      trailing={
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            leadingIcon={ArrowUp}
+            aria-label={`Send to ${contact.name}`}
+            aria-describedby={canSend ? undefined : sendDisabledReasonId}
+            disabled={!canSend}
+            onClick={() => onSend(contact)}
+          >
+            Send
+          </Button>
 
-      <div className="flex flex-shrink-0 items-center gap-1">
-        {/* #4573: the shared copy primitive — one timer, one 44px target. */}
-        <CopyButton value={contact.address} label="address" />
-
-        <button
-          type="button"
-          onClick={() => onEdit(contact)}
-          aria-label={`Edit ${contact.name}`}
-          title="Edit contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 sm:h-9 sm:w-9"
-        >
-          <Icon icon={Pencil} className="h-4 w-4" />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onDelete(contact)}
-          aria-label={`Delete ${contact.name}`}
-          title="Delete contact"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-danger-soft)] hover:text-[var(--v2-danger)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/80 sm:h-9 sm:w-9"
-        >
-          <Icon icon={Trash2} className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={`More actions for ${contact.name}`}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+            >
+              <Icon icon={EllipsisVertical} className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onSelect={() => { void handleCopy() }}>
+                Copy address
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onEdit(contact)}>Edit</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => onDelete(contact)} tone="danger">
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      }
+    />
   )
 }
 
@@ -338,6 +402,12 @@ const contactsUrlSchema: ListUrlSchema = {
 export default function ContactsPage() {
   const { contacts, loading, error, refetch, addContact, updateContact, deleteContact } = useContacts()
   const { chainsByAddress } = useContactChains()
+  const { user } = useAuth()
+  const accounts = user?.accounts ?? []
+  // #4642: Send from a contact row runs through the SAME launcher the
+  // dashboard uses — the account question, the null-chain guard and the three
+  // dialog mounts are one implementation, not a second copy here.
+  const launcher = useMoneyActionLauncher({ accounts })
   // #4115: the controls ride the list-controls pattern, and their state is
   // the URL — a shared link (or a refresh) lands on the same filtered list
   // the sender saw, and back/forward re-seeds it. Filtering runs in the
@@ -402,17 +472,40 @@ export default function ContactsPage() {
   // "No saved recipients yet" empty state below.
   const showNoMatch = !loading && !error && contacts.length > 0 && filtered.length === 0
 
+  // #4642: an account with no resolved chain cannot sign a send. With one
+  // account the row's Send is disabled and this visible reason is what its
+  // `aria-describedby` points at; with several, the picker marks the
+  // null-chain rows instead, and this notice only appears when NONE of them
+  // can send.
+  const sendDisabledReasonId = 'contacts-send-unavailable'
+  const sendDisabledReason =
+    !launcher.canSend && accounts.length > 0
+      ? accounts.length === 1
+        ? "No network yet. You can't send from this account."
+        : "None of your accounts has a network yet. You can't send from them."
+      : null
+
   return (
     <div className="max-w-5xl">
       <PageHeader
         title="Contacts"
-        subtitle="Save recipients you pay often so payment reviews show names instead of only wallet addresses."
+        subtitle="Save the wallet addresses you pay often. Haven shows their names in Send, on the review screen and in your transactions."
         actions={
-          <Button onClick={() => setShowAdd(true)}>
+          <Button leadingIcon={Plus} onClick={() => setShowAdd(true)}>
             Add contact
           </Button>
         }
       />
+
+      {sendDisabledReason && (
+        <p
+          id={sendDisabledReasonId}
+          className="mb-4 flex items-start gap-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-sm leading-relaxed text-[var(--v2-ink-2)]"
+        >
+          <Icon icon={Info} className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--v2-ink-3)]" />
+          <span>{sendDisabledReason}</span>
+        </p>
+      )}
 
       {contacts.length > 0 && (
         <div className="mb-4">
@@ -457,14 +550,23 @@ export default function ContactsPage() {
         />
       )}
 
+      {/*
+        #4642: no `overflow-hidden` on the list card. The ⋯ menu is not
+        portalled, so a clipping ancestor would cut its panel off (see
+        `DropdownMenu`'s own note); the rows are static, so nothing needs the
+        clip.
+      */}
       {!loading && !error && filtered.length > 0 && (
-        <div className="overflow-hidden rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card">
+        <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card">
           <div className="divide-y divide-[var(--v2-border)]">
             {filtered.map((contact) => (
               <ContactRow
                 key={contact.id}
                 contact={contact}
                 chains={chainsFor(contact.address)}
+                canSend={launcher.canSend}
+                sendDisabledReasonId={sendDisabledReasonId}
+                onSend={(target) => launcher.openAction('send', { recipient: target.address })}
                 onEdit={setEditTarget}
                 onDelete={setDeleteTarget}
               />
@@ -483,8 +585,12 @@ export default function ContactsPage() {
         <EmptyState
           icon={<ContactIcon />}
           title="No saved recipients yet"
-          body="Add a contact for any wallet address you pay often. Haven will show the name in Send and transaction history. You confirm the network when sending."
-          action={<Button onClick={() => setShowAdd(true)}>Add your first contact</Button>}
+          body="Add a contact for any wallet address you pay often. Haven shows the name in Send, on the review screen and in your transactions."
+          action={
+            <Button leadingIcon={Plus} onClick={() => setShowAdd(true)}>
+              Add your first contact
+            </Button>
+          }
         />
       )}
 
@@ -513,6 +619,10 @@ export default function ContactsPage() {
           onClose={() => setDeleteTarget(null)}
         />
       )}
+
+      {/* #4642: the picker, Receive and Send mounts — the same three the
+          dashboard renders, from the one shared launcher. */}
+      {launcher.dialogs}
     </div>
   )
 }

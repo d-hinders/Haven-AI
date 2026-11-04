@@ -128,8 +128,10 @@ receive or store the owner or delegate private key.
 `SEED_ALLOWANCE_USDC` and `SEED_RESET_MIN` keep their AllowanceModule-era names
 so an existing operator env keeps working; since #2007 they set the **budget
 delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
-— the seed opens no RPC connection, and a plain grant sends nothing on-chain.
-Replacing a live grant also submits an owner-signed Stop of the old one.
+— the seed opens no RPC connection and sends no transaction itself. Haven's
+relayer deploys the account at the first grant, and a later plain grant sends
+nothing on-chain. Replacing a live grant also submits an owner-signed Stop of
+each old grant through Haven.
 
 ### 3. Fund the required testnet accounts
 
@@ -2054,7 +2056,7 @@ Check balances by role:
    funding table above).
 3. Owner: **no ETH needed since #2007.** A plain re-grant on the delegation rail
    sends nothing on-chain; the owner only signs. Replacing a live grant also
-   submits an owner-signed Stop of the old one.
+   submits an owner-signed Stop of each old grant through Haven.
 
 Do not repeatedly rerun a money-moving harness while the cause is unknown; each
 run consumes test allowance and test USDC.

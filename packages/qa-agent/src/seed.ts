@@ -46,8 +46,11 @@
  *   - The dev **relayer** sponsors the UserOps, including the counterfactual
  *     account's first deployment.
  *   - **SEED_OWNER needs no ETH.** Provisioning is counterfactual and the grant
- *     is a signature, not a transaction — this seed sends nothing on-chain and
- *     opens no RPC connection.
+ *     is a signature, not a transaction. This seed opens no RPC connection and
+ *     sends no transaction itself. Haven's relayer deploys the account at the
+ *     first grant, and a later plain grant sends nothing on-chain. Replacing a
+ *     live grant also submits an owner-signed Stop of each old grant through
+ *     Haven.
  *
  * Everything is testnet/dev-only — never a production credential.
  *
@@ -469,7 +472,7 @@ export async function main(): Promise<void> {
   const budgetAtomic = ethers.parseUnits(cfg.budgetUsdc, USDC_DECIMALS).toString()
 
   console.log(`Seeding QA identity on Base Sepolia → ${cfg.apiUrl}`)
-  console.log(`  owner ${owner.address}  (no ETH needed — nothing here is sent on-chain)`)
+  console.log(`  owner ${owner.address}  (no ETH needed — the owner only signs)`)
 
   console.log('\n[1/4] QA user')
   const token = await ensureUser(cfg)

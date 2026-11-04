@@ -2135,7 +2135,7 @@ password. Then, in this order:
    does not stop the budget, which is why step 1 comes first.
 
 Without the old owner key, you can't do steps 1 or 2: the grant keeps its authority
-until it ends, and you can't move its USDC.
+until it ends, and you can't move its USDC with an owner signature.
 
 ### Rotate only the delegate key
 
@@ -2154,12 +2154,13 @@ with a new budget. Run these from an up-to-date `dev` checkout with
 2. [Update the Railway copy](#update-the-railway-copy).
 3. Follow steps 4 and 6 of [Rotate the whole QA identity](#rotate-the-whole-qa-identity):
    run the seed, then replace both repo secrets. The seed creates the new agent,
-   grants its budget and prints its API key once.
+   grants its budget and prints its API key once. If a key has to be rotated here,
+   rotate the new agent's.
 4. Stop the old agent's budget, then revoke that agent, using steps 1 and 3 of
    [Retire the old identity](#retire-the-old-identity) with the current file's login.
    Skip step 2, because the treasury hasn't changed. Both agents have the same name,
    so find the old one in `GET /agents` by its `delegate_address`, the old address
-   from step 1. **Check this carefully:** stopping the wrong agent ends the new
+   from step 1, ignoring upper and lower case. **Check this carefully:** stopping the wrong agent ends the new
    budget and leaves the old key live. Revoking an agent alone doesn't stop its
    budget.
 5. Start a run and confirm it is green, then update the grant's end date in this

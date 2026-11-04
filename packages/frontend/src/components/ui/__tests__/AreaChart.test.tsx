@@ -515,6 +515,9 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     // Nothing may hold the clip after the reveal: `both` or `forwards` would
     // leave the line's full length resting on the last keyframe.
     expect(rule![1]).toMatch(/\banimation:[^;]*\bbackwards\b/)
+    // Nor a clip in the rule itself, or a longhand that overrides that fill:
+    // either would leave the line cut with the animation long finished.
+    expect(rule![1]).not.toMatch(/clip-path|animation-fill-mode/)
     const keyframes = /@keyframes v2-chart-draw-stroke\s*\{([\s\S]*?)\n\}/.exec(css)
     expect(keyframes).not.toBeNull()
     expect(keyframes![1]).toMatch(/clip-path:/)

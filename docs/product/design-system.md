@@ -1103,7 +1103,7 @@ shape everywhere.
   inside it. That is a **class**, not a list of exceptions (owner decision
   2026-11-02, on #4608): Accounting's "Available as an add-on" and "Sent
   transactions", the dashboard money card's two "Agent spending" labels,
-  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:325`'s "How
+  `NeedsYou.tsx:199`, `ComingSoon.tsx:53` and `HowToBuyPanel.tsx:351`'s "How
   to buy" are instances of it, and none of them moves onto `SectionHeading`.
 - **An optional trailing link on the heading's line** (#4475; owner-approved
   2026-10-27 as a new design-system pattern). A section whose content has a

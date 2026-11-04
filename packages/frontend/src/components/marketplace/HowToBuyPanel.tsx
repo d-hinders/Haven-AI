@@ -14,6 +14,13 @@
  * is a retryable "couldn't check", and while anything is loading the steps
  * are skeletons that claim nothing.
  *
+ * One current step, never two (#4646): the open ring marks the FIRST step
+ * that is not done, and every step after it is `later`. A blocked step 2 is
+ * therefore the one to act on — it is what stands between the user and
+ * buying — and step 3 is open only once steps 1 and 2 are both done. Loading
+ * claims nothing for every step, so a pending budget leaves no ring at all
+ * until the budgets settle.
+ *
  * One unpadded Card: the title is a `Card.Header` band (#4015 — the house
  * title row, as on the dashboard's list cards), and one `Card.Section
  * divided` holds the three rows, each owning its padding — the shared
@@ -50,7 +57,8 @@ type StepState = 'done' | 'open' | 'later'
 /**
  * The numbered dot, in StepProgress's colours: a success-tinted lucide check
  * for a claimed step, an ink-2 ring for the step to act on now, and a muted
- * number for a later step that claims nothing.
+ * number for a later step that claims nothing. At most one dot wears the
+ * ring — the first step that is not done (#4646).
  */
 function StepDot({ state, n }: { state: StepState; n: number }) {
   return (
@@ -182,8 +190,11 @@ export function HowToBuyPanel({
   // ── Step 1 — Connect an agent ─────────────────────────────────────────────
   // Done when the user has at least one ACTIVE agent — paused, pending,
   // revoked and archived ones do not claim the step. A failed read says so
-  // instead of ever reading as "connect an agent".
-  const step1State: StepState = agentsLoading ? 'later' : agentsError != null ? 'later' : activeCount > 0 ? 'done' : 'open'
+  // instead of ever reading as "connect an agent". While either wire is
+  // loading the step claims nothing (#4646): loading is not something the
+  // user can act on, and the panel shows at most one open ring.
+  const step1State: StepState =
+    agentsLoading || agentsError != null || budgetsPending ? 'later' : activeCount > 0 ? 'done' : 'open'
   const step1Body = agentsLoading ? (
     <StepSkeleton />
   ) : agentsError != null ? (
@@ -225,6 +236,9 @@ export function HowToBuyPanel({
   let step2State: StepState = 'open'
   let step2Body: ReactNode
   if (budgetsPending) {
+    // #4646: a pending budget claims nothing — the ring appears on step 2 or 3
+    // only once the budgets settle, never on a skeleton.
+    step2State = 'later'
     step2Body = <StepSkeleton />
   } else if (budgetsError != null) {
     step2Body = (
@@ -236,7 +250,9 @@ export function HowToBuyPanel({
       </p>
     )
   } else if (activeCount === 0) {
-    // No active agent: step 1 owns the fix, this step claims nothing.
+    // No active agent: step 1 owns the fix, this step claims nothing. The
+    // clamp below makes that true of every step-1-not-done case, including a
+    // failed agents read with stale agents still in `agents`.
     step2State = 'later'
     step2Body = <p>Once an agent is connected, it needs a budget it can spend here.</p>
   } else if (answer?.kind === 'done') {
@@ -317,6 +333,16 @@ export function HowToBuyPanel({
     step2Body = <p>Haven couldn't confirm what your agent can spend here just now.</p>
   }
 
+  // #4646: the current step is the FIRST step that is not done — every step
+  // after it is `later`. Step 2 is open only when step 1 is done: while step 1
+  // is loading, failed or open, step 2 claims nothing whatever its body says
+  // (a budgets error's retry button is the action only once step 1 is done).
+  if (step1State !== 'done' && step2State !== 'done') step2State = 'later'
+  // Step 3 is open only when steps 1 and 2 are both done — never on its own
+  // reading of `activeCount`, which is stale while the agents read is loading
+  // or failed.
+  const step3State: StepState = step1State === 'done' && step2State === 'done' ? 'open' : 'later'
+
   return (
     <div data-testid="how-to-buy-panel">
       <Card hover={false} className="overflow-hidden">
@@ -332,7 +358,7 @@ export function HowToBuyPanel({
           <StepRow n={2} state={step2State} title="Give it a budget it can spend here">
             {step2Body}
           </StepRow>
-          <StepRow n={3} state={activeCount > 0 ? 'open' : 'later'} title="Ask your agent to buy">
+          <StepRow n={3} state={step3State} title="Ask your agent to buy">
             <p>
               Copy an offer's prompt below and paste it into {pasteTargetName ? `${pasteTargetName}'s` : "your agent's"} chat. It
               pays from its budget and brings back the result. The payment shows up in{' '}

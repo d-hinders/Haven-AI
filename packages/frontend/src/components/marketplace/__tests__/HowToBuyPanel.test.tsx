@@ -130,6 +130,16 @@ function stepText(n: number) {
   return screen.getByTestId(`how-to-buy-step-${n}`).textContent
 }
 
+/**
+ * The step ids whose dot wears the open ring — the panel's "your turn"
+ * marker. At most one, and only the first step that is not done (#4646).
+ */
+function openStepIds(container: HTMLElement): string[] {
+  return Array.from(
+    container.querySelectorAll('[data-testid^="how-to-buy-step-"] > [aria-hidden="true"].border-2'),
+  ).map((dot) => dot.parentElement!.getAttribute('data-testid')!)
+}
+
 describe('HowToBuyPanel', () => {
   it('no active agents: step 1 is open with the /agents link; steps 2 and 3 are later steps claiming nothing', () => {
     render(<HowToBuyPanel {...baseProps} />)
@@ -148,15 +158,17 @@ describe('HowToBuyPanel', () => {
   })
 
   it('while agents load the steps are skeletons that claim nothing', () => {
-    render(<HowToBuyPanel {...baseProps} agentsLoading />)
+    const { container } = render(<HowToBuyPanel {...baseProps} agentsLoading />)
     expect(document.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
     expect(step(1).queryByText(/Connect an agent to buy from/)).toBeNull()
+    expect(openStepIds(container)).toEqual([])
   })
 
   it('while the budget wires load, step 2 is a skeleton and claims nothing', () => {
-    render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgetsPending />)
+    const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgetsPending />)
     expect(document.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0)
     expect(screen.queryByText(/left of/)).toBeNull()
+    expect(openStepIds(container)).toEqual([])
   })
 
   it('a failed budget read is a retryable line, and retrying refetches both wires', () => {
@@ -338,8 +350,8 @@ describe('HowToBuyPanel', () => {
     expect(step(1).getByText('Atlas is connected on Base Sepolia, along with 1 more agent.')).toBeDefined()
   })
 
-  it('unknown answers claim nothing — the panel never guesses', () => {
-    render(
+  it('an unknown answer: step 2 says it could not confirm, offers no fix, and is the one open step (#4646)', () => {
+    const { container } = render(
       <HowToBuyPanel
         {...baseProps}
         agents={[{ ...atlas, allowances: [], receivedSubBudgets: [{ parent_agent_id: 'p', parent_agent_name: 'P', open: true }] }]}
@@ -348,6 +360,58 @@ describe('HowToBuyPanel', () => {
     )
     expect(step(2).getByText(/Haven couldn't confirm what your agent can spend here just now\./)).toBeDefined()
     expect(step(2).queryByRole('button')).toBeNull()
+    expect(openStepIds(container)).toEqual(['how-to-buy-step-2'])
+  })
+
+  // #4646: the current step is the FIRST step that is not done — every step
+  // after it is `later`, and loading claims nothing for any step. Each case
+  // asserts the exact owning ids, so a second ring fails here.
+  describe('one open step at a time (#4646)', () => {
+    it('wrong network: step 2 is the only open step — step 3 is later', () => {
+      const { container } = render(
+        <HowToBuyPanel
+          {...baseProps}
+          agents={[{ ...atlas, account_chain_id: 8453, allowances: [] }]}
+          offers={[offer()]}
+        />,
+      )
+      expect(openStepIds(container)).toEqual(['how-to-buy-step-2'])
+    })
+
+    it('a budget fix: step 2 is the only open step', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgets={[]} />)
+      expect(openStepIds(container)).toEqual(['how-to-buy-step-2'])
+    })
+
+    it('a failed budget read with an active agent: step 2 is the only open step — its retry is the action', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgetsError="boom" />)
+      expect(openStepIds(container)).toEqual(['how-to-buy-step-2'])
+    })
+
+    it('no active agent and budgets still loading: no ring at all — loading claims nothing', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} budgetsPending />)
+      expect(openStepIds(container)).toEqual([])
+    })
+
+    it('an active agent and budgets still loading: no ring at all', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgetsPending />)
+      expect(openStepIds(container)).toEqual([])
+    })
+
+    it('agents loading with budgets pending: no ring at all', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} agentsLoading budgetsPending />)
+      expect(openStepIds(container)).toEqual([])
+    })
+
+    it('a failed agents read with stale agents still present: no ring at all', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} agentsError="boom" />)
+      expect(openStepIds(container)).toEqual([])
+    })
+
+    it('steps 1 and 2 done: step 3 is the only open step', () => {
+      const { container } = render(<HowToBuyPanel {...baseProps} agents={[atlas]} budgets={[budgetRow()]} />)
+      expect(openStepIds(container)).toEqual(['how-to-buy-step-3'])
+    })
   })
 
   it('the title is a Card.Header band, with the h2 kept, and the rows section drops its own top border (#4015)', () => {

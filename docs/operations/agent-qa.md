@@ -123,7 +123,9 @@ SEED_RESET_MIN=1440
 ```
 
 The seed accepts the delegate **address**, not its private key. Haven must never
-receive or store the owner or delegate private key.
+receive or store the owner or delegate private key. The Railway copy described in
+[Restore the QA identity file](#restore-the-qa-identity-file) is operator storage
+that no Haven service should read.
 
 `SEED_ALLOWANCE_USDC` and `SEED_RESET_MIN` keep their AllowanceModule-era names
 so an existing operator env keeps working; since #2007 they set the **budget
@@ -780,35 +782,39 @@ or the leg skips and the Coverage completeness step turns that red:
 - `QA_HOSTED_MCP_URL`
 - `QA_X402_BINDING_SIGNER`
 
-**The delegation-rail QA identity (#1063).** Provisioned 2026-08-05 on the
-dev backend: a dedicated QA user owning a Hybrid DeleGator treasury on Base
-Sepolia with an **open (unpinned) 5 USDC/day budget delegation**. Open rather
+**The delegation-rail QA identity (#1063).** Provisioned on the dev backend on
+2026-11-04, replacing the identity from 2026-08-05, whose grant ended and whose
+owner key could not be found: a dedicated QA user owning a Hybrid DeleGator
+treasury (`0xE86524a9b1c7E0fC1710b1DAa6141239b433e0B7`) on Base Sepolia with an
+**open (unpinned) 5 USDC/day budget delegation**. Open rather
 than pinned is structural, not preference: 3009-mode funds the delegate EOA
 from the budget, and a recipient-pinned delegation cannot pay the EOA — a
 pinned identity would make both legs skip for a third reason. The treasury
-holds testnet USDC (~0.9 at provisioning). A full run spends ~0.034 USDC
+holds testnet USDC (20 at provisioning). A full run spends ~0.034 USDC
 (`TREASURY_RUN_COST_ATOMIC` in `packages/qa-agent/src/lib/preflight.ts`, which
-names each leg's share); most legs spend 0.001 USDC each.
+names each leg's share); most legs spend 0.001 USDC each. The grant ends about
+2027-11-03: see [The QA budget ended](#the-qa-budget-ended).
 
 - **Top-up:** send Base Sepolia USDC
-  (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address in
-  the operator's `~/.haven/qa-delegation.env` (`QA_DELEGATION_TREASURY`) —
-  any source works; the budget refills itself daily. The daily
+  (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address above,
+  which every run's preflight also prints — any source works; the budget refills
+  itself daily. The daily
   [QA wallet balances](#qa-wallet-balances-standing-issue) check warns about
   7 days before it runs dry.
-- **Rotation:** the full identity (user credentials, owner key, delegate key,
-  API key, treasury address) lives in the operator's
-  `~/.haven/qa-delegation.env`. To rotate the delegate key: create a fresh
-  agent for the same account (new delegate + API key), update both repo
-  secrets, revoke the old agent. To rotate everything: re-provision a fresh
-  identity (signup → hybrid account → agent → open-budget grant → activate →
-  fund), update the secrets, and update the env file. Never reuse
-  `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
+- **Where the credentials are:** the owner key, QA user email and password,
+  delegate address and delegate key are in `~/.haven/qa-delegation.env`, with a
+  copy in Railway: see [Restore the QA identity file](#restore-the-qa-identity-file).
+  The API key and delegate key that GitHub runs use are repo secrets. GitHub
+  secrets can't be read back, so a lost API key can only be rotated.
+- **Rotate the delegate key:** see [Rotate only the delegate key](#rotate-only-the-delegate-key).
+- **Rotate everything:** see [Rotate the whole QA identity](#rotate-the-whole-qa-identity).
+- Never reuse `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
   A grant built by hand needs `expires_at` too, or it ends after 90 days: see
   [The QA budget ended](#the-qa-budget-ended). The seed sets it for you.
 
-If the dotenv file contains exactly those five required entries, upload them
-with:
+If `/secure/path/qa-run.env` contains exactly the five required entries listed
+above, upload them with the command below. Never upload the identity file, which
+holds the owner key:
 
 ```bash
 gh secret set -f "/secure/path/qa-run.env" --repo d-hinders/Haven-AI
@@ -964,10 +970,9 @@ delegate private key nor a CDP Wallet Secret.
 ### Top up the delegation treasury
 
 Send Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the
-treasury address the issue names, from any source. It is the same address as
-`QA_DELEGATION_TREASURY` in the operator's `~/.haven/qa-delegation.env`, and the
-**Top-up** bullet under the delegation-rail QA identity above. A full run spends
-~0.034 USDC.
+treasury address the issue names, from any source. It is the same address as in
+the **Top-up** bullet under the delegation-rail QA identity above. A full run
+spends ~0.034 USDC.
 
 ### Top up the demo-merchant settlement wallet
 
@@ -1948,7 +1953,8 @@ Its author is mentioned on the episode's first comment only when the run class i
 
 The budget refills each period, but the grant itself ends. A grant built with no
 `expires_at` lasts 90 days, which is how the standing identity's 2026-08-05 grant
-came to end on 2026-11-03. No check warns beforehand: the
+came to end on 2026-11-03. A seeded grant lasts 364 days, so the current one ends
+about 2027-11-03. No check warns beforehand: the
 [QA wallet balances](#qa-wallet-balances-standing-issue) run reads balances, not
 grant expiry, and stays green.
 
@@ -1967,13 +1973,19 @@ when they appear alone:
 `task-budget-lifecycle` still passes, because it funds nothing. The failure issue
 may class the run `mixed` and call a leg `haven`.
 
-**Recovery needs the owner key.** Run [the seed](#4-run-the-seed-locally) with
-the [seed env file](#2-create-the-seed-environment-file) filled in for this
-identity. From `~/.haven/qa-delegation.env` take its owner key and its QA user
-email and password. Set `SEED_DELEGATE_ADDRESS` to the address of its delegate
-key. The owner signs locally and the seed activates the grant. The agent, API
-key, delegate key, treasury and repo secrets all stay as they are, so no secret
-needs uploading. Then start a fresh run:
+**Recovery needs the owner key.** It is in `~/.haven/qa-delegation.env`, along
+with every other value the seed needs. If that file is not on your machine,
+[restore it](#restore-the-qa-identity-file) first. Then, from an up-to-date `dev`
+checkout with [dependencies installed](#1-prepare-a-clean-dev-checkout), run the
+seed:
+
+```bash
+(set -a; source ~/.haven/qa-delegation.env; set +a; npm run seed -w packages/qa-agent)
+```
+
+Look for `✓ budget granted`. The owner signs locally and the seed activates the
+grant. The agent, API key, delegate key, treasury and repo secrets all stay as
+they are, so no secret needs uploading. Then start a fresh run:
 
 ```bash
 gh workflow run qa-dev.yml --repo d-hinders/Haven-AI --ref dev
@@ -1982,12 +1994,176 @@ gh workflow run qa-dev.yml --repo d-hinders/Haven-AI --ref dev
 Use this identity's own values. A different `SEED_QA_EMAIL` provisions a separate
 identity with an empty treasury, a different `SEED_DELEGATE_ADDRESS` creates a new
 agent and leaves the real one lapsed, and the seed refuses an owner key that is
-not this account's owner. If the owner key is lost, follow the identity's
-**Rotation** steps to re-provision everything.
+not this account's owner. If the owner key is lost, follow
+[Rotate the whole QA identity](#rotate-the-whole-qa-identity).
 
 The seed leaves a live budget of the same amount alone. To renew before it ends,
-set a different `SEED_ALLOWANCE_USDC`, which replaces the live grant. That also
-changes the budget amount; going back to `5` replaces the grant again.
+set a different amount, which replaces the live grant. Set it after the `source`,
+because the file also sets it:
+
+```bash
+(set -a; source ~/.haven/qa-delegation.env; SEED_ALLOWANCE_USDC=6; set +a; npm run seed -w packages/qa-agent)
+```
+
+That also changes the budget amount, and going back to `5` replaces the grant
+again.
+
+### Restore the QA identity file
+
+GitHub QA runs don't need `~/.haven/qa-delegation.env`. Renewing the budget and
+rotating the identity do. A local QA run needs the delegate key from this file
+plus the API key, which is only in the repo secrets and can't be read back. Rotating
+the API key for a local run stops the old one working at once, so replace the repo
+secret in the same sitting or every GitHub run loses its spending legs.
+
+A copy of the file is in Railway as `QA_DELEGATION_ENV_B64`, a shared variable in
+the **dev** environment that no service should reference. The value looks like one
+long unreadable string because it is base64. That is an encoding, not encryption,
+so treat it as a secret. To turn it back into the readable file on macOS:
+
+1. In Railway, copy the value of `QA_DELEGATION_ENV_B64`.
+2. Decode it into place:
+
+   ```bash
+   test -e ~/.haven/qa-delegation.env && echo "already there, nothing changed" || (umask 077; mkdir -p ~/.haven; t=~/.haven/qa-delegation.env.restore; pbpaste | base64 -d > "$t"; if grep -Eq '^SEED_OWNER_PRIVATE_KEY=0x[0-9a-fA-F]{64}$' "$t" && grep -Eq '^QA_DELEGATION_DELEGATE_PRIVATE_KEY=0x[0-9a-fA-F]{64}$' "$t"; then mv "$t" ~/.haven/qa-delegation.env; cut -d= -f1 ~/.haven/qa-delegation.env; else rm -f "$t"; echo "not restored: the clipboard did not hold the backup"; fi)
+   ```
+
+   On success it prints the variable names, never their values: they include
+   `SEED_OWNER_PRIVATE_KEY` and `QA_DELEGATION_DELEGATE_PRIVATE_KEY`. It refuses a
+   clipboard that is empty, cut off or something else. The file is readable only by
+   you, and the command never overwrites an existing file.
+3. Clear your clipboard:
+
+   ```bash
+   pbcopy < /dev/null
+   ```
+
+The result is a plain text file of `NAME=value` lines. Keep its contents out of
+chats and issues.
+
+To check that the Railway copy matches a file you already have, copy the value
+from Railway and run this, then clear your clipboard again:
+
+```bash
+pbpaste | base64 -d | cmp - ~/.haven/qa-delegation.env && echo "backup matches"
+```
+
+#### Update the Railway copy
+
+After changing the file, run this to put the new value on your clipboard. Paste it
+over the old value in the variable's value field, not Railway's Raw Editor, then
+clear your clipboard:
+
+```bash
+base64 -i ~/.haven/qa-delegation.env | tr -d '\n' | pbcopy
+```
+
+### Rotate the whole QA identity
+
+Use this when the owner key is lost or a key may have been exposed. It creates a
+new user, account, agent and treasury. Run these from an up-to-date `dev` checkout
+with [dependencies installed](#1-prepare-a-clean-dev-checkout).
+
+1. If `~/.haven/qa-delegation.env` exists, rename it, because
+   [retiring the old identity](#retire-the-old-identity) needs its values. If a key
+   may have been exposed, stop the old budget now.
+2. Generate new keys and a new login. This writes the file with private
+   permissions, refuses to overwrite one, and prints only the two addresses.
+   `SEED_PAYMENT_TO` is required, but the seed only prints it back, so this sets it
+   to the owner's address.
+
+   ```bash
+   node -e 'const {ethers}=require("ethers"),fs=require("fs"),os=require("os"),c=require("crypto");fs.mkdirSync(os.homedir()+"/.haven",{recursive:true,mode:0o700});const p=os.homedir()+"/.haven/qa-delegation.env";if(fs.existsSync(p))throw new Error("already exists: "+p);const o=ethers.Wallet.createRandom(),d=ethers.Wallet.createRandom();fs.writeFileSync(p,["SEED_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app","SEED_OWNER_PRIVATE_KEY="+o.privateKey,"SEED_DELEGATE_ADDRESS="+d.address,"SEED_PAYMENT_TO="+o.address,"SEED_QA_EMAIL=qa-delegation-"+c.randomBytes(4).toString("hex")+"@haven.test","SEED_QA_PASSWORD=Qa-"+c.randomBytes(18).toString("hex"),"SEED_ALLOWANCE_USDC=5","SEED_RESET_MIN=1440","QA_DELEGATION_DELEGATE_PRIVATE_KEY="+d.privateKey,""].join("\n"),{mode:0o600});console.log("owner",o.address,"\ndelegate",d.address)'
+   ```
+
+3. [Update the Railway copy](#update-the-railway-copy) now, so the new owner key is
+   backed up before any funds arrive.
+4. Run the seed, keeping its output in a private log, because it prints the new API
+   key once:
+
+   ```bash
+   (umask 077; set -a; source ~/.haven/qa-delegation.env; set +a; npm run seed -w packages/qa-agent 2>&1 | tee -a ~/.haven/qa-delegation-seed.log)
+   ```
+
+   Look for `✓ budget granted` and note the `Account` address on the last lines.
+   Keep the log out of chats and issues.
+5. Send at least 2 test USDC on Base Sepolia to that account. Less than that soon
+   raises the daily balance warning.
+6. Replace the two repo secrets. The first command sets nothing unless the log holds
+   a real API key. If it says the key is missing, the seed never showed one, so
+   rotate it with `POST /agents/:id/rotate-key`.
+
+   ```bash
+   if grep -q '^QA_DELEGATION_AGENT_API_KEY=sk_agent_' ~/.haven/qa-delegation-seed.log; then grep '^QA_DELEGATION_AGENT_API_KEY=sk_agent_' ~/.haven/qa-delegation-seed.log | tail -1 | cut -d= -f2- | tr -d '\n' | gh secret set QA_DELEGATION_AGENT_API_KEY --repo d-hinders/Haven-AI; else echo "API key missing from the log, nothing set"; fi
+   ```
+
+   ```bash
+   grep -m1 '^QA_DELEGATION_DELEGATE_PRIVATE_KEY=' ~/.haven/qa-delegation.env | cut -d= -f2- | tr -d '\n' | gh secret set QA_DELEGATION_DELEGATE_PRIVATE_KEY --repo d-hinders/Haven-AI
+   ```
+
+   Once both have succeeded, delete the log:
+
+   ```bash
+   rm ~/.haven/qa-delegation-seed.log
+   ```
+
+7. [Retire the old identity](#retire-the-old-identity).
+8. Start a run and confirm it is green:
+
+   ```bash
+   gh workflow run qa-dev.yml --repo d-hinders/Haven-AI --ref dev
+   ```
+
+9. In a PR, update the provisioning date, treasury address, starting balance and the
+   grant's end date in this runbook. They appear under
+   [the delegation-rail QA identity](#configure-github-actions) and in
+   [The QA budget ended](#the-qa-budget-ended).
+
+#### Retire the old identity
+
+Log in as the old user with `POST /auth/login`, using the old file's email and
+password. Then, in this order:
+
+1. **Stop the budget** with the old owner key: `POST /agents/:id/delegations/revoke-all`
+   and `.../revoke-all/submit`, or per grant with
+   `/agents/:id/delegations/:hash/revoke` and `.../revoke/submit`.
+   `stopReplacedBudget` in `packages/qa-agent/src/seed.ts` shows the signing.
+2. **Move the remaining USDC** to the new treasury once it exists:
+   `POST /accounts/hybrid/:address/transfers/prepare?chain_id=84532`, then
+   `/submit?chain_id=84532`.
+3. **Revoke the agent:** `POST /agents/:id/revoke`. This needs only the login, and it
+   does not stop the budget, which is why step 1 comes first.
+
+Without the old owner key, you can't do steps 1 or 2: the grant keeps its authority
+until it ends, and you can't move its USDC.
+
+### Rotate only the delegate key
+
+Use this when only the delegate or API key may have been exposed and you still have
+the owner key. The account, treasury and login stay the same, and you get a new agent
+with a new budget. Run these from an up-to-date `dev` checkout with
+[dependencies installed](#1-prepare-a-clean-dev-checkout).
+
+1. Put a new delegate key in the identity file. This prints the old and new delegate
+   addresses, never the keys. Note the old one for step 4:
+
+   ```bash
+   node -e 'const {ethers}=require("ethers"),fs=require("fs"),os=require("os");const p=os.homedir()+"/.haven/qa-delegation.env",d=ethers.Wallet.createRandom();let s=fs.readFileSync(p,"utf8");const old=s.match(/^SEED_DELEGATE_ADDRESS=(.*)$/m)[1];s=s.replace(/^SEED_DELEGATE_ADDRESS=.*$/m,"SEED_DELEGATE_ADDRESS="+d.address).replace(/^QA_DELEGATION_DELEGATE_PRIVATE_KEY=.*$/m,"QA_DELEGATION_DELEGATE_PRIVATE_KEY="+d.privateKey);fs.writeFileSync(p,s,{mode:0o600});console.log("old delegate",old,"\nnew delegate",d.address)'
+   ```
+
+2. [Update the Railway copy](#update-the-railway-copy).
+3. Follow steps 4 and 6 of [Rotate the whole QA identity](#rotate-the-whole-qa-identity):
+   run the seed, then replace both repo secrets. The seed creates the new agent,
+   grants its budget and prints its API key once.
+4. Stop the old agent's budget, then revoke that agent, using steps 1 and 3 of
+   [Retire the old identity](#retire-the-old-identity) with the current file's login.
+   Skip step 2, because the treasury hasn't changed. Both agents have the same name,
+   so find the old one in `GET /agents` by its `delegate_address`, the old address
+   from step 1. **Check this carefully:** stopping the wrong agent ends the new
+   budget and leaves the old key live. Revoking an agent alone doesn't stop its
+   budget.
+5. Start a run and confirm it is green, then update the grant's end date in this
+   runbook in a PR, because the new grant has a new one.
 
 ### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
 

@@ -182,6 +182,9 @@ test.describe('send dialog visual regression (#4641)', () => {
       await page.setViewportSize({ width: 500, height: vp!.height })
       expect(await groupsPerLine(address)).toEqual([5, 5])
       await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      // A line cannot wrap, so too narrow a column would overflow instead, hiding
+      // the middle of the address, which is where a lookalike differs.
+      expect(await address.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
       await expect(dialog.getByText('Base', { exact: true })).toHaveCount(1)
       await expect(dialog.getByText('None. Haven covers it.')).toHaveCount(1)
       await expect(dialog.getByText("A sent payment can't be reversed. You approve it on the next step.")).toHaveCount(1)

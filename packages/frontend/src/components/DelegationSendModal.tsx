@@ -438,7 +438,7 @@ export default function DelegationSendModal({
           <DialogResult
             state="success"
             title={`${amountDisplay} ${token.symbol} sent`}
-            description={`To ${recipient.name ?? truncate(recipient.address)} on ${chainName}.`}
+            description={`To ${recipient.name || truncate(recipient.address)} on ${chainName}.`}
           >
             {explorerUrl ? (
               <p>

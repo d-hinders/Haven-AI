@@ -42,6 +42,7 @@ covers:
   - packages/frontend/src/app/(authenticated)/design-system/**
   - packages/frontend/src/app/(authenticated)/accounts/[accountId]/AccountDetailClient.tsx
   - packages/frontend/src/components/marketing/**
+  - packages/frontend/src/components/marketplace/HowToBuyPanel.tsx
   - packages/frontend/src/components/sidebar/**
   - packages/frontend/src/components/haven/TransactionActivityRow.tsx
   - packages/frontend/src/components/accounting/ConnectionRow.tsx

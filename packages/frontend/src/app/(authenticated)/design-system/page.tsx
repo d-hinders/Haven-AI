@@ -5370,12 +5370,13 @@ export default function DesignSystemPage() {
             meta="My account · Base · Created 2 months ago · Last activity 3 minutes ago"
             actions={
               <>
-                <Button variant="tertiary" size="sm">
-                  Pause payments
-                </Button>
-                <Button variant="ghost" size="sm" aria-label="More actions">
-                  ⋮
-                </Button>
+                <Button variant="ghost">Pause payments</Button>
+                <DropdownMenu>
+                  <DropdownMenuIconTrigger aria-label="More actions" />
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             }
           />
@@ -5395,9 +5396,12 @@ export default function DesignSystemPage() {
             meta="My account · Created 3 weeks ago · Active 2h ago"
             inlineActions
             actions={
-              <Button variant="ghost" size="sm" aria-label="More actions">
-                ⋮
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuIconTrigger aria-label="More actions" />
+                <DropdownMenuContent>
+                  <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             }
           />
         </div>
@@ -5414,9 +5418,12 @@ export default function DesignSystemPage() {
             meta="My account · Created 3 weeks ago · Active 2h ago"
             inlineActions
             actions={
-              <Button variant="ghost" size="sm" aria-label="More actions">
-                ⋮
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuIconTrigger aria-label="More actions" />
+                <DropdownMenuContent>
+                  <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             }
           />
           <div>

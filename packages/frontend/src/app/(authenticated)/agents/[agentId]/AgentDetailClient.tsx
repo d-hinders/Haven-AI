@@ -471,9 +471,6 @@ export default function AgentDetailClient({ agentId }: Props) {
                 onClick={() => void handlePause()}
                 disabled={pendingAction !== null}
                 variant="ghost"
-                // `lg` (44px) so the pair matches the kebab beside it; `sm`
-                // painted 36px next to a 44px square (#3694 design review).
-                size="lg"
               >
                 {pendingAction === 'pause' ? 'Pausing…' : 'Pause payments'}
               </Button>
@@ -482,7 +479,6 @@ export default function AgentDetailClient({ agentId }: Props) {
               <Button
                 onClick={() => void handleResume()}
                 disabled={pendingAction !== null}
-                size="lg"
               >
                 {pendingAction === 'resume' ? 'Resuming…' : 'Resume agent'}
               </Button>

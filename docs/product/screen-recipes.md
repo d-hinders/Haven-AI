@@ -360,11 +360,12 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
 2. **Review.** "You're sending", with the amount large. A detail list carries
    **To**, **From**, **Network**, and **Network fee** ("None. Haven
    covers it."). **To** leads with the name and its Monogram. Below the name, your
-   own account or a saved contact shows the short address through `Address`, with
-   the full one on hover or tap: the name is what you check there. A pasted
-   address, or anything without a name, shows the full address in mono, wrapping,
-   because lookalike scam addresses match the characters a short form keeps (owner
-   decision 2026-11-04, narrowing #4641's "never truncated"). A neutral note
+   own account shows the short address through `Address`, with the full one on
+   hover or tap: the name is what you check there, and no agent can create an
+   account. Everything else, a saved contact included, shows the full address in
+   mono, wrapping, because lookalike scam addresses match the characters a short
+   form keeps, and an agent-driven owner CLI session can write contacts (decided
+   2026-11-04, narrowing #4641's "never truncated"). A neutral note
    follows: "A sent payment can't be reversed. You
    approve it on the next step." The passkey hint and the wallet-connect state
    live here, where the ceremony starts. Footer: `Back` | `Send <amount>
@@ -635,7 +636,7 @@ Use for `/agents`: every managed agent as a card, with the list controls above i
 Structure:
 1. `PageHeader`, as on Accounts (#4209): the title and subtitle, **Connect
    agent** as the primary action level with the title, and a ⋯ menu
-   (`EllipsisVertical`, the agent page's overflow icon) holding **Labels** and
+   (`DropdownMenuIconTrigger`, every overflow menu's button) holding **Labels** and
    **Organizations**. No count chip — the list summary line owns the count. The
    header renders inside `AgentPanel`, beside the state it reads. With no Haven
    account the page shows the title and the "Create a Haven account" empty

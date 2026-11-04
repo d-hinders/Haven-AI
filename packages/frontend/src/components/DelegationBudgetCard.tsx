@@ -1025,8 +1025,6 @@ function ReplacedBudgetNotice({
   )
 }
 
-// The ⋯ trigger class — the same quiet icon button the page header's menu
-// uses, sized to the 44px tap-target overlay.
 function BudgetRow({
   budget,
   tokens,

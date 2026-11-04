@@ -122,6 +122,9 @@ function DropdownMenuTrigger({ children, onClick, className = '', ...rest }: Tri
   )
 }
 
+const ICON_TRIGGER_CLASS =
+  'inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
+
 /**
  * The one ⋮ button (owner decision, 2026-11-04): the three dots with no frame,
  * tinted on hover. The 44px tap target stays but draws nothing, so the button
@@ -130,9 +133,6 @@ function DropdownMenuTrigger({ children, onClick, className = '', ...rest }: Tri
  * trigger from this, never from a hand-written class. The name is required
  * because the glyph says nothing: say what the menu acts on.
  */
-const ICON_TRIGGER_CLASS =
-  'inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
-
 export function DropdownMenuIconTrigger({
   'aria-label': ariaLabel,
   ...rest

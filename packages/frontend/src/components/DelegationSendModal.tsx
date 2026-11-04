@@ -368,13 +368,16 @@ export default function DelegationSendModal({
                     <Monogram name={recipient.name ?? recipient.address} size="xs" decorative />
                     <span className="min-w-0">
                       <span className="block">{recipient.name ?? truncate(recipient.address)}</span>
-                      {/* Owner decision, 2026-11-04. A named account or contact is
-                          checked by its name, so its short address is enough, the
-                          full one a hover or tap away. Anything else, a pasted
-                          address above all, has no name to check: it keeps the
-                          FULL address, because lookalike scam addresses match the
-                          exact characters a short form keeps. */}
-                      {recipient.name && recipient.kind !== 'new' ? (
+                      {/* Owner decision, 2026-11-04. Your own account is checked by
+                          its name, so its short address is enough, the full one a
+                          hover or tap away. Everything else keeps the FULL address,
+                          because lookalike scam addresses match the exact characters
+                          a short form keeps. That includes saved contacts: an
+                          agent-driven owner CLI session can write them (POST and
+                          DELETE /contacts in owner-cli.ts), so a contact's name
+                          proves less than an account's. No agent can create an
+                          account. */}
+                      {recipient.name && recipient.kind === 'account' ? (
                         <span className="mt-0.5 block text-xs font-normal text-[var(--v2-ink-3)]">
                           <ShortAddress value={recipient.address} />
                         </span>

@@ -37,9 +37,9 @@
  *   re-truncating long placeholder unnoticed... the scrollWidth comparison is
  *   the real instrument; the text pin only names the field.
  * - **≥44px targets:** the header's Pause button and the kebab trigger, via
- *   `getBoundingClientRect` — these controls have no vertical `::after`
- *   overlay to inherit (the kebab does, via `min-h-11 min-w-11`), so the
- *   painted box IS the target and must clear the floor outright.
+ *   walking outward from each control's centre, so the Pause button's `::after`
+ *   overlay counts. The kebab's element box is the target (`min-h-11 min-w-11`,
+ *   drawn with no frame) and must clear the floor outright.
  * - **No horizontal overflow:** `expectNoHorizontalOverflow` (#1771), the
  *   two-metric union over the document and `#main-content`.
  * - **Spending hero's Last 30 days at 375px (#4260):** a separate test at
@@ -264,12 +264,12 @@ test.describe('agent detail at 390px (#2733)', () => {
 
     // ── 4. Actions row and kebab clear the 44px floor ──────────────────────
     // The header's Pause action (#3694 moved it out of the old rules footer,
-    // deleted Update budget and put Remove in the kebab) is an `lg` Button,
-    // 44px painted. It is still measured the `accounts-card-tap-target` way
-    // (walk outward from the centre until elementFromPoint leaves the
-    // control), so a later drop to `sm` must keep #1726's overlay to pass.
-    // The kebab is an icon square on the both-axes variant
-    // (`min-h-11 min-w-11`) — its PAINTED box must clear 44 outright.
+    // deleted Update budget and put Remove in the kebab) is a default `md`
+    // Button, 40px painted beside the frameless kebab. It is measured the
+    // `accounts-card-tap-target` way (walk outward from the centre until
+    // elementFromPoint leaves the control), so #1726's overlay carries it to
+    // 44. The kebab draws no frame, but its element box (`min-h-11 min-w-11`)
+    // must clear 44 outright.
     const hitHeight = async (name: string) =>
       page.evaluate((label) => {
         const el = Array.from(document.querySelectorAll('button')).find(

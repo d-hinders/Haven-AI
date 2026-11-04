@@ -62,7 +62,10 @@ describe('DropdownMenuIconTrigger', () => {
     )
     const trigger = screen.getByRole('button', { name: 'Contact options' })
     expect(trigger).toHaveClass('min-h-11', 'min-w-11')
-    expect(trigger.className).not.toMatch(/(^|\s)border(\s|-)/)
+    // No frame in any form: a border, a ring at rest, or a filled ground.
+    expect(trigger.className).not.toMatch(/(^|[\s:])border(\s|-)/)
+    expect(trigger.className).not.toMatch(/(^|\s)ring-/)
+    expect(trigger.className).not.toMatch(/(^|\s)bg-/)
     expect(trigger.querySelector('svg')).not.toBeNull()
   })
 })

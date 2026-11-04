@@ -365,7 +365,8 @@ export default function DelegationSendModal({
                 label: 'To',
                 value: (
                   <span className="flex items-start gap-2">
-                    <Monogram name={recipient.name ?? recipient.address} size="xs" decorative />
+                    {/* No name, no avatar: initials of "0x" would mean nothing. */}
+                    {recipient.name ? <Monogram name={recipient.name} size="xs" decorative /> : null}
                     <span className="min-w-0">
                       <span className="block">{recipient.name || 'New address'}</span>
                       {/* Owner decisions, 2026-11-04. Your own account is checked by

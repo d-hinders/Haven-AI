@@ -2704,7 +2704,7 @@ export default function DesignSystemPage() {
               <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
               <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link, opens in a new tab</span></p>
               <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
-              <p className="text-xs"><Address value={sampleAddress} grouped /> <span className="text-[var(--v2-ink-3)]">— grouped, for comparing before money moves; copies unbroken</span></p>
+              <div className="text-xs" data-testid="ds-address-grouped"><Address value={sampleAddress} grouped /><span className="mt-1 block text-[var(--v2-ink-3)]">— grouped, for comparing before money moves; copies unbroken</span></div>
             </div>
           </Card>
         </div>

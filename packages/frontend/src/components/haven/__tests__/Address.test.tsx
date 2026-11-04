@@ -86,7 +86,16 @@ describe('Address (#853)', () => {
     ])
     // The DOM text is the unbroken address, which is what a copy delivers.
     expect(container.textContent).toBe(value)
+    expect(container.firstElementChild).toHaveClass('w-min')
     expect(container.innerHTML).not.toContain('flex')
     expect(container.innerHTML).not.toContain('grid')
+  })
+
+  it('grouped keeps five to a line for a longer value', () => {
+    const hash = '0x' + 'ab'.repeat(32)
+    const { container } = render(<Address value={hash} grouped />)
+    const lines = Array.from(container.querySelectorAll('.whitespace-nowrap'))
+    expect(lines.map((line) => line.children.length)).toEqual([5, 5, 5, 1])
+    expect(container.textContent).toBe(hash)
   })
 })

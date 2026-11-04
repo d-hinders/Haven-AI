@@ -285,6 +285,8 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     expect(NEW_ADDRESS).toHaveLength(42)
     expect(screen.getByTestId('review-recipient-address').textContent).toBe(NEW_ADDRESS)
     expect(screen.getByText('New address')).toBeTruthy()
+    // No initials of "0x" beside a recipient with no name.
+    expect(screen.queryByText('0X')).toBeNull()
   })
 
   it('a saved contact keeps the full address: a lookalike keeps the characters a short form shows', () => {

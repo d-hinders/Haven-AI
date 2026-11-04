@@ -36,7 +36,8 @@ export function Address({
   /** `false` renders the full value (e.g. receive-funds surfaces). */
   truncate?: boolean
   /**
-   * The full value in groups of four, two lines of five: for a person comparing
+   * The full value in groups of four, five to a line, so an address is always two
+   * lines. A line needs about 180px of column. For a person comparing
    * an address before money moves, where a lookalike must not hide in the middle.
    * The groups are spacing, not spaces, so selecting and copying gives the
    * unbroken value. Stands alone: `truncate`, `copy` and `href` do not apply, and it
@@ -51,9 +52,12 @@ export function Address({
     // stray group. Inline-block, not flex or grid: a block-level child would put a
     // newline in the copied text.
     const groups = [value.slice(0, 6), ...(value.slice(6).match(/.{1,4}/g) ?? [])]
-    const lines = [groups.slice(0, 5), groups.slice(5)]
+    const lines: string[][] = []
+    for (let i = 0; i < groups.length; i += 5) lines.push(groups.slice(i, i + 5))
     return (
-      <span className={`font-mono v2-tabular ${className}`.trim()}>
+      // `w-min` holds the lines apart however wide the column is: two inline-blocks
+      // would otherwise share a line as soon as both fit.
+      <span className={`inline-block w-min align-top font-mono v2-tabular ${className}`.trim()}>
         {lines.map((line, lineIndex) => (
           <span key={lineIndex} className="inline-block whitespace-nowrap">
             {line.map((group, index) => (

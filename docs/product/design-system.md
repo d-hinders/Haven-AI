@@ -3579,10 +3579,11 @@ caller's hooks.
 case-insensitively.
 
 **Comparing an address before money moves.** `Address grouped` shows the full value in
-two lines of five groups of four (`0x18a4 3F6c 7D5c 84C3 a715`). The groups are spacing, not
-spaces, so a copy gives the unbroken address. Send's Review uses it for every recipient
-except your own account, because a lookalike keeps the first and last characters and
-differs in the middle (owner decision 2026-11-04).
+groups of four, five to a line, so an address is always two lines
+(`0x18a4 3F6c 7D5c 84C3 a715`, then the rest). The groups are spacing, not spaces, so a copy
+gives the unbroken address (checked in Chromium). A line needs about 180px of column. Send's
+Review uses it for every recipient except a named account of your own, because a lookalike
+keeps the first and last characters and differs in the middle (owner decision 2026-11-04).
 
 **Pasting.** A valid address (viem `isAddress`) is matched case-insensitively.
 **Precedence when an address matches more than one source: own account, then

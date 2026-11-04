@@ -75,8 +75,15 @@ describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
     const active = container.querySelector('li[data-status="active"]')!
     expect(active.className).not.toContain('brand')
     const marker = active.querySelector('[aria-hidden="true"]')!
-    expect(marker).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(marker).toHaveClass('border-[1.5px]', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
     expect(container.querySelector('.v2-step-halo')).toBeNull()
+  })
+
+  it('draws later steps with the stepper family quiet 1px ring', () => {
+    const { container } = renderGuide()
+    const later = container.querySelector('li[data-status="locked"] [aria-hidden="true"]')!
+    expect(later).toHaveClass('border', 'border-[var(--v2-border)]', 'text-[var(--v2-ink-3)]')
+    expect(later.className).not.toContain('border-strong')
   })
 
   it('suggests the endpoint\'s amount and offers Add funds, which opens the dialog with the faucet', async () => {

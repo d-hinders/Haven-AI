@@ -12,7 +12,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useRef, useState } from 'react'
 import { describe, expect, it } from 'vitest'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../DropdownMenu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuIconTrigger } from '../DropdownMenu'
 import { Modal } from '../Modal'
 
 /** Lets the item's restore tick (and anything queued behind it) run. */
@@ -28,7 +28,7 @@ function Harness() {
   return (
     <>
       <DropdownMenu>
-        <DropdownMenuTrigger aria-label="Row options">⋯</DropdownMenuTrigger>
+        <DropdownMenuIconTrigger aria-label="Row options" />
         <DropdownMenuContent>
           <DropdownMenuItem onSelect={() => setSelected('noop')}>Do nothing to focus</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => fieldRef.current?.focus()}>Focus the field</DropdownMenuItem>
@@ -49,6 +49,26 @@ function openMenu() {
   fireEvent.click(trigger)
   return trigger
 }
+
+describe('DropdownMenuIconTrigger', () => {
+  it('is the unframed dots with a 44px target and the name it was given', () => {
+    render(
+      <DropdownMenu>
+        <DropdownMenuIconTrigger aria-label="Contact options" />
+        <DropdownMenuContent>
+          <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    )
+    const trigger = screen.getByRole('button', { name: 'Contact options' })
+    expect(trigger).toHaveClass('min-h-11', 'min-w-11')
+    // No frame in any form: a border, a ring at rest, or a filled ground.
+    expect(trigger.className).not.toMatch(/(^|[\s:])border(\s|-|$)/)
+    expect(trigger.className).not.toMatch(/(^|\s)ring(\s|-|$)/)
+    expect(trigger.className).not.toMatch(/(^|\s)bg-/)
+    expect(trigger.querySelector('svg')).not.toBeNull()
+  })
+})
 
 describe('DropdownMenuItem focus restore (#4259)', () => {
   it('an action that does not move focus returns it to the trigger', async () => {

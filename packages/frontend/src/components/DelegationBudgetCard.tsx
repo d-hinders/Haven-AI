@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from 'react'
-import { EllipsisVertical, OctagonAlert } from 'lucide-react'
+import { OctagonAlert } from 'lucide-react'
 import { Icon } from './ui/Icon'
 import { formatUnits } from 'viem'
 import { useDelegationBudget, type DelegationBudget, type GrantInput, type GrantResult } from '@/hooks/useDelegationBudget'
@@ -40,7 +40,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from './ui/DropdownMenu'
 import { useToast } from './ui/Toast'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
@@ -1025,11 +1025,6 @@ function ReplacedBudgetNotice({
   )
 }
 
-// The ⋯ trigger class — the same quiet icon button the page header's menu
-// uses, sized to the 44px tap-target overlay.
-const MENU_TRIGGER_CLASS =
-  'inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
-
 function BudgetRow({
   budget,
   tokens,
@@ -1149,14 +1144,11 @@ function BudgetRow({
           without a second ref on the React-19 trigger. */}
       <div className="flex shrink-0 items-center gap-1">
         <DropdownMenu>
-          <DropdownMenuTrigger
+          <DropdownMenuIconTrigger
             aria-label={`Budget options ${amount} ${t?.symbol ?? ''} ${periodLabel}`.replace(/\s+/g, ' ')}
             data-budget-trigger={budget.delegation_hash}
             disabled={busy}
-            className={MENU_TRIGGER_CLASS}
-          >
-            <Icon icon={EllipsisVertical} className="h-4 w-4" />
-          </DropdownMenuTrigger>
+          />
           <DropdownMenuContent align="right">
             {onEdit ? (
               <DropdownMenuItem onSelect={() => onEdit(budget)}>Edit budget</DropdownMenuItem>

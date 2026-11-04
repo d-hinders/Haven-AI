@@ -1,6 +1,6 @@
 'use client'
 
-import { Archive, CircleAlert, Clock, EllipsisVertical, Plus } from 'lucide-react'
+import { Archive, CircleAlert, Clock, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Spinner } from '@haven_ai/ui/Spinner'
 import { useCallback, useMemo, useState } from 'react'
@@ -36,7 +36,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from './ui/DropdownMenu'
 import { PageHeader } from './ui/PageHeader'
 import { BotIcon } from './agent-panel/agent-display'
@@ -280,7 +280,7 @@ export default function AgentPanel() {
           it reads stays in `useAgentPanelState`. Like Accounts: the primary
           action level with the title, and the occasional management tasks
           (Labels, Organizations) in a ⋯ menu beside it — the same
-          `EllipsisVertical` trigger the agent page uses. No count chip: the
+          `DropdownMenuIconTrigger` every overflow menu uses. No count chip: the
           list summary line owns the count.
 
           #4065 (owner decision 2026-10-19): no Connect agent while the inline
@@ -299,12 +299,10 @@ export default function AgentPanel() {
               </Button>
             )}
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="More agent actions"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+                edge="end"
+              />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => panel.setLabelsManagerOpen(true)}>
                   Manage labels

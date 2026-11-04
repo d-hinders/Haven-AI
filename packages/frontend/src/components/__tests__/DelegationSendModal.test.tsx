@@ -68,7 +68,12 @@ vi.mock('@/hooks/useContacts', async () => {
  * exists only for the "one data owner" checks, where what matters is the list
  * the dialog passes in, not the picker's own rendering.
  */
-const fieldStub = vi.hoisted(() => ({ enabled: false, mounts: 0, contacts: [] as string[] }))
+const fieldStub = vi.hoisted(() => ({
+  enabled: false,
+  mounts: 0,
+  contacts: [] as string[],
+  next: null as { address: string; name?: string; kind: 'account' | 'contact' | 'new' } | null,
+}))
 
 vi.mock('@/components/RecipientField', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/RecipientField')>()
@@ -83,7 +88,7 @@ vi.mock('@/components/RecipientField', async (importOriginal) => {
       <div data-testid="recipient-field-stub" data-contacts={fieldStub.contacts.join(',')}>
         <button
           type="button"
-          onClick={() => props.onChange({ address: '0x' + 'cc'.repeat(20), kind: 'new' })}
+          onClick={() => props.onChange(fieldStub.next ?? { address: '0x' + 'cc'.repeat(20), kind: 'new' })}
         >
           Pick new address
         </button>
@@ -181,6 +186,7 @@ beforeEach(() => {
   )
   contactsFixture.instances = 0
   fieldStub.enabled = false
+  fieldStub.next = null
   fieldStub.mounts = 0
   fieldStub.contacts = []
 })
@@ -272,12 +278,64 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('shows the full 42-character address, never truncated', () => {
+  it('a pasted address keeps the full 42 characters: there is no name to check', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} />)
     goToReview()
     expect(NEW_ADDRESS).toHaveLength(42)
     expect(screen.getByText(NEW_ADDRESS)).toBeTruthy()
+  })
+
+  it('a saved contact keeps the full address: an agent-driven CLI session can write contacts', () => {
+    contactsFixture.initial = [contact()]
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview({ address: ACME, option: /Acme Services/ })
+    expect(screen.getByText('Acme Services')).toBeTruthy()
+    expect(screen.getByText(ACME)).toBeTruthy()
+    expect(screen.queryByText('0x2c9D…77ab')).toBeNull()
+  })
+
+  it('a paste that only looks like a saved contact stays nameless with the full address', () => {
+    // Same first six and last four characters as ACME, the part a short form
+    // keeps. All lowercase, so it is a valid address with no checksum to fail.
+    const LOOKALIKE = '0x2c9d' + 'f'.repeat(32) + '77ab'
+    expect(LOOKALIKE).toHaveLength(42)
+    contactsFixture.initial = [contact()]
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview({ address: LOOKALIKE })
+    expect(screen.queryByText('Acme Services')).toBeNull()
+    expect(screen.getByText(LOOKALIKE)).toBeTruthy()
+  })
+
+  it('a recipient with no name keeps the full address whatever its kind', () => {
+    fieldStub.enabled = true
+    fieldStub.next = { address: SAVINGS, name: '', kind: 'account' }
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1.5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Pick new address' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(screen.getByText(SAVINGS)).toBeTruthy()
+  })
+
+  it('your own account shows its name and the short address, not the full one', () => {
+    mockUseSend.mockReturnValue(base())
+    mockUseAccounts.mockReturnValue({
+      accounts: [
+        { id: 'a1', account_address: SENDING, chain_id: 84532, name: 'Operating wallet', is_default: true, created_at: '2026-01-01T00:00:00Z' },
+        { id: 'a2', account_address: SAVINGS, chain_id: 84532, name: 'Savings', is_default: false, created_at: '2026-01-01T00:00:00Z' },
+      ],
+      loading: false,
+    })
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview({ address: SAVINGS, option: /Savings/ })
+    const short = screen.getByText(`${SAVINGS.slice(0, 6)}…${SAVINGS.slice(-4)}`)
+    expect(screen.queryByText(SAVINGS)).toBeNull()
+    // The full address stays one hover away, through Address's tooltip.
+    fireEvent.mouseEnter(short)
+    expect(screen.getByText(SAVINGS)).toBeTruthy()
   })
 
   it('lists To, From, Network and the network fee', () => {

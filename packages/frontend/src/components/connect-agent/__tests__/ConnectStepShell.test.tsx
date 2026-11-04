@@ -603,7 +603,7 @@ describe('the status checklist on the waiting screen (#3832)', () => {
     expect(rows[2].querySelector('[aria-hidden="true"]')!.className).toContain('border-[var(--v2-border)]')
     expect(rows[2].querySelector('[aria-hidden="true"]')!.className).toContain('text-[var(--v2-ink-2)]')
     expect(rows[1].querySelector('[aria-hidden="true"]')).toHaveClass(
-      'border-2',
+      'border-[1.5px]',
       'border-[var(--v2-ink-2)]',
     )
     // The row text is still the accessible content, state prefix included.

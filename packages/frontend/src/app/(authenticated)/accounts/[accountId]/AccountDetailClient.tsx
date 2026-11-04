@@ -62,8 +62,7 @@
  * so the mapping and the URL write live here.
  */
 
-import { ArrowDown, ArrowUp, EllipsisVertical } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useRef, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -94,7 +93,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SectionHeading } from '@/components/ui/SectionHeading'
@@ -441,12 +440,10 @@ export default function AccountDetailClient() {
               appears when this isn't already the default account.
             */}
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="Account options"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+                edge="end"
+              />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                   Rename

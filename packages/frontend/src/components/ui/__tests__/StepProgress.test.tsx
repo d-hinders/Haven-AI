@@ -25,7 +25,7 @@ describe('StepProgress', () => {
   it('draws the active step as an unfilled ink-2 ring and only halos on explicit dialog opt-in', () => {
     const { container, rerender } = render(<StepProgress totalSteps={2} currentStep={0} />)
     const active = container.querySelector('li[aria-current="step"] [aria-hidden="true"]')!
-    expect(active).toHaveClass('border-2', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(active).toHaveClass('border-[1.5px]', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
     expect(active.className).not.toContain('bg-[var(--v2-brand')
     expect(active).not.toHaveClass('v2-step-halo')
 

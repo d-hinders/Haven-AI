@@ -183,8 +183,9 @@ export interface CatalogEntry {
 /** `GET /machine-payments/allowances` as the over-budget legs (#2016) and the balances check (#4666) need it. */
 export interface AgentAllowancesResponse {
   /**
-   * #4352: the latest ended budget's expiry across EVERY token and pin. It can
-   * be set beside a live budget, so it is never "this budget's end".
+   * #4352: the latest ended budget's expiry across EVERY token and pin, set
+   * only when `allowances` is empty — a live budget keeps it null, so it is
+   * never "this budget's end".
    */
   budget_ended_at?: string | null
   allowances?: {

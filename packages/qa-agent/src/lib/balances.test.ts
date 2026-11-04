@@ -470,9 +470,22 @@ describe('the QA budget grant (#4666)', () => {
     }
   })
 
-  it('budget_ended_at beside a live budget is ignored: it can be some other, older row', async () => {
+  it('budget_ended_at beside a live budget is ignored: an older backend could still set it there', async () => {
+    // #4668: the API now answers null whenever `allowances[]` has a row, so
+    // this shape only comes from a backend from before the fix. The live open
+    // row decides either way — the field is never "this budget's end".
     const grant = await readBudgetGrant(answering([row()], { budget_ended_at: '2026-11-03T10:36:00.000Z' }), NOW)
     expect(grant).toMatchObject({ band: 'ok', endsAt: inDays(90) })
+  })
+
+  it('a pinned row with budget_ended_at null is critical with no date: the backend no longer dates a live budget', async () => {
+    // #4668: a live PINNED row does not satisfy the open-USDC slot, so the
+    // check is `critical`/`noLiveBudget` — and the API now answers null for
+    // `budget_ended_at` because `allowances[]` is not empty. The QA report
+    // loses the date in that state; the verdict stays critical.
+    const grant = await readBudgetGrant(answering([row({ recipient_address: PIN })], { budget_ended_at: null }), NOW)
+    expect(grant).toMatchObject({ band: 'critical', noLiveBudget: true })
+    expect(grant.endsAt).toBeUndefined()
   })
 
   it.each([

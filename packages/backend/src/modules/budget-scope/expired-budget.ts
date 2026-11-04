@@ -41,8 +41,8 @@ const MAX_MS = 8.64e15
  * Best-effort by construction: a FAILED read answers `null`, so the additive
  * field and the expired-budget refusal can never take their callers down —
  * the refusal sites degrade to their existing generic refusals (decision
- * unchanged) and the allowances read omits the field, the same posture the
- * #3518 reservation sum applies to its own side read.
+ * unchanged) and the allowances read answers `null` for the field, the same
+ * posture the #3518 reservation sum applies to its own side read.
  */
 export async function findExpiredBudgetForToken(
   agentId: string,

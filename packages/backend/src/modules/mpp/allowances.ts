@@ -142,12 +142,25 @@ export async function handleGetAllowances(agent: AgentContext): Promise<MppHandl
         // ended budget's expiry rides here — the same narrow expired-row
         // query the refusal answers use — so the SDK's `budgetEndedAt` (and
         // every copy of the `needs_approval` guidance) can say "your budget
-        // ended on <date>; ask the owner to set a new one". null when no
-        // expired row exists: the field NEVER reports a live budget, and a
-        // live row for any token keeps this null (the readiness above is
-        // 'ready' then anyway). Optional on the schema so an older backend
-        // that omits it stays valid.
-        budget_ended_at: (await findExpiredBudgetForToken(agent.id, agent.chain_id, null))?.endedAtIso ?? null,
+        // ended on <date>; ask the owner to set a new one".
+        //
+        // #4668: the predicate is `budgets` — this chain's live rows — not
+        // "no expired row exists". An ended grant stays `status = 'active'`
+        // (the status CHECK has no expired value) and no sweep is
+        // time-based, so a re-key carry, a different pin or a different
+        // token leaves an ended row BESIDE a live one; the unconditional
+        // query answered a date for it, telling an agent that can still pay
+        // that its budget ended. `budgets` is exactly the list `allowances[]`
+        // is built from, so a row there means this field is null, and the
+        // date is answered only when `allowances[]` is empty. The guard is
+        // HERE, at the call site: the shared query also serves the refusal
+        // sites, which must keep answering the ended row on an
+        // already-refusing payment. Optional on the schema so an older
+        // backend that omits it stays valid.
+        budget_ended_at:
+          budgets.length > 0
+            ? null
+            : ((await findExpiredBudgetForToken(agent.id, agent.chain_id, null))?.endedAtIso ?? null),
         allowances: await Promise.all(budgets.map(async (b) => {
           const { remainingAtomic, fromChain } = remainingById.get(b.id) ?? {
             remainingAtomic: b.budget_atomic,

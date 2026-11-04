@@ -231,21 +231,23 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     expect(liveBody.budget_ended_at).toBeNull()
   })
 
-  // ── #4668 characterization (written on the pre-#4668 base) ────────────────
+  // ── #4668: `budget_ended_at` beside a live budget ─────────────────────────
   //
   // The spec says `budget_ended_at` is for "when the agent's only budgets for
   // this chain have ENDED", and the handler's comment says a live row for any
-  // token keeps it null. The code calls the expired-row query unconditionally,
-  // so an ended row BESIDE a live one answers a date. Each case below is ONE
-  // agent holding both rows; the #4668 fix flips every `budget_ended_at`
-  // assertion in this block to null and leaves the cross-chain case alone.
+  // token keeps it null. The code called the expired-row query
+  // unconditionally, so an ended row BESIDE a live one answered a date. Each
+  // case below is ONE agent holding both rows; the characterization commit
+  // pinned the date, and the #4668 fix flips every assertion in this block to
+  // null. The cross-chain case is the exception: it answers the date before
+  // AND after, because the guard reads `budgets` (chain-scoped), never `all`.
   //
   // The states are ordinary, not contrived: an ended grant stays
   // `status = 'active'` (the status CHECK has no expired value), and no sweep
   // is time-based, so a re-key carry, a different pin and a different token
   // each leave an ended row beside a live one.
 
-  it('#4668: an ended PINNED row beside a live OPEN row answers the ended date (pre-fix)', async () => {
+  it('#4668: an ended PINNED row beside a live OPEN row answers null', async () => {
     const nowSec = Math.floor(Date.now() / 1000)
     const endedSec = nowSec - 60
     const agent = await seedAgent()
@@ -257,10 +259,10 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
       budget_ended_at: string | null
     }
     expect(body.allowances).toHaveLength(1)
-    expect(body.budget_ended_at).toBe(new Date(endedSec * 1000).toISOString())
+    expect(body.budget_ended_at).toBeNull()
   })
 
-  it('#4668: an ended OPEN row beside a live PINNED row answers the ended date (pre-fix)', async () => {
+  it('#4668: an ended OPEN row beside a live PINNED row answers null', async () => {
     const nowSec = Math.floor(Date.now() / 1000)
     const endedSec = nowSec - 60
     const agent = await seedAgent()
@@ -272,10 +274,10 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
       budget_ended_at: string | null
     }
     expect(body.allowances).toHaveLength(1)
-    expect(body.budget_ended_at).toBe(new Date(endedSec * 1000).toISOString())
+    expect(body.budget_ended_at).toBeNull()
   })
 
-  it('#4668: an ended row on token A beside a live row on token B answers the ended date (pre-fix)', async () => {
+  it('#4668: an ended row on token A beside a live row on token B answers null', async () => {
     const nowSec = Math.floor(Date.now() / 1000)
     const endedSec = nowSec - 60
     const agent = await seedAgent()
@@ -287,10 +289,10 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
       budget_ended_at: string | null
     }
     expect(body.allowances).toHaveLength(1)
-    expect(body.budget_ended_at).toBe(new Date(endedSec * 1000).toISOString())
+    expect(body.budget_ended_at).toBeNull()
   })
 
-  it('#4668: an ended CARRY beside the live STEADY row in the same slot answers the ended date (pre-fix)', async () => {
+  it('#4668: an ended CARRY beside the live STEADY row in the same slot answers null', async () => {
     // The re-key shape: the carry's expiry is the steady's start, and
     // ACTIVATE_REKEY_DELEGATION_SQL sweeps nothing, so from the boundary
     // onward both rows are `active` in the same (token, open) slot.
@@ -305,10 +307,10 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
       budget_ended_at: string | null
     }
     expect(body.allowances).toHaveLength(1)
-    expect(body.budget_ended_at).toBe(new Date(boundary * 1000).toISOString())
+    expect(body.budget_ended_at).toBeNull()
   })
 
-  it('#4668: an ended row beside a DORMANT row answers the ended date (pre-fix)', async () => {
+  it('#4668: an ended row beside a DORMANT row answers null', async () => {
     // A dormant row has not ended and arms by itself, so "ask the owner" is
     // wrong advice while it is there.
     const nowSec = Math.floor(Date.now() / 1000)
@@ -322,7 +324,7 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
       budget_ended_at: string | null
     }
     expect(body.allowances).toHaveLength(1)
-    expect(body.budget_ended_at).toBe(new Date(endedSec * 1000).toISOString())
+    expect(body.budget_ended_at).toBeNull()
   })
 
   it('#4668: an ended row on THIS chain beside a live row only on ANOTHER chain still answers the date', async () => {

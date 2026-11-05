@@ -17,6 +17,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
+- **`haven guide`'s runbook says signup is passkey-only (#4675).** Its copy of
+  the agent runbook drops "or a wallet" from the account step and the signup
+  hand-off script, regenerated from the SDK runbook: signup offers a passkey,
+  and a wallet joins an existing account's signer set later. Wording only; no
+  update needed.
+
 - **`haven contacts add` and `haven contacts remove` now refuse under any session
   (exit 4).** Add and remove saved contacts in the dashboard: a contact is a name the
   owner trusts when paying, and an agent drives this CLI. `haven contacts list` still

@@ -49,6 +49,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   Additive and optional on a type that is only returned, so existing
   consumers keep compiling. No update needed.
 
+### Changed
+
+- **The agent runbook says signup is passkey-only (#4675).** The account step
+  and the signup hand-off script said "a passkey or a wallet"; signup offers a
+  passkey, and a wallet joins an existing account's signer set later. The
+  later-signer wording ("signs with their passkey or wallet") is unchanged.
+  Wording only; no update needed.
+
 ## 0.13.0-alpha.0 — 2026-10-30
 
 ### Added

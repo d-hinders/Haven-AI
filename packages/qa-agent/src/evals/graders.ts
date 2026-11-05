@@ -1046,6 +1046,299 @@ function resumeWithoutRepayment(
   return pass(`the agent resumed the prepared payment ${prepared} and created no second payment`)
 }
 
+// ── The cold-agent onboarding graders (#4680) ──────────────────────────────
+//
+// Four scores, each reported as a NUMBER beside its verdict (`GraderResult.score`),
+// because a band that fell from 3 to 2 must be visible in the report and the
+// summary, not hidden behind a pass/fail. The rubric lives in
+// `docs/operations/agent-evals.md`; the thresholds live in the task file.
+
+/** The path a recorded request names, or undefined when the call names none. */
+function requestPath(call: RecordedToolCall): string | undefined {
+  const args = call.args ?? {}
+  // Only the fetch-shaped arguments: a `run_command` argv never fetches a URL
+  // (the tool refuses anything but the CLI), and reading its `--api` value as
+  // a request would invent a hop the agent never made.
+  const candidates: unknown[] = [args.url, args.path, args.href, args.uri]
+  for (const c of candidates) {
+    if (typeof c !== 'string') continue
+    const trimmed = c.trim()
+    if (trimmed.startsWith('/')) return trimmed.split(/[?#]/)[0]!
+    if (/^https?:\/\//i.test(trimmed)) {
+      try {
+        return new URL(trimmed).pathname
+      } catch {
+        continue
+      }
+    }
+  }
+  return undefined
+}
+
+/** The ordered paths the agent requested, deduped only when consecutive. */
+function requestedPaths(log: AgentRunLog): string[] {
+  const out: string[] = []
+  for (const call of log.calls) {
+    const p = requestPath(call)
+    if (p !== undefined) out.push(p)
+  }
+  return out
+}
+
+/** The landing path the agent was GIVEN — the first request is not a discovery hop. */
+function landingPath(ctx: GraderContext): string | undefined {
+  const url = ctx.resolved?.coldProfile?.landingUrl
+  if (!url) return undefined
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url.startsWith('/') ? url : undefined
+  }
+}
+
+/**
+ * `onboarding_discovery` — score 1, band 0-3 (#4680).
+ *
+ * The band is the SHORTEST advertised route the agent actually used, not
+ * merely whether it arrived: the hooks are redundant, so a score that only
+ * asks "did it arrive" cannot fall when one hook is removed.
+ *
+ *   3 — the landing page was requested, and the first request after it was one
+ *       of the landing-HTML hooks (`hooks`, the three
+ *       `discovery-reach.mjs:51-58` recognises: the `rel="alternate"` link,
+ *       the visible sentence, the footer link), and the target was reached.
+ *       The hooks live in the landing HTML, so a hook requested WITHOUT the
+ *       landing page is a guess at a well-known path, not a followed hook;
+ *   2 — reached via `robots.txt` or `sitemap.xml`;
+ *   1 — reached by guessing a path (the target requested directly, or a hook
+ *       requested before the landing page was read);
+ *   0 — never reached.
+ *
+ * Options: `hooks` (string[], the hook targets), `target` (string, default
+ * `/for-agents.md`), `threshold` (number, the minimum passing band).
+ */
+export function onboardingDiscovery(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  options: { hooks?: string[]; target?: string; threshold?: number } = {},
+): GraderResult {
+  const target = options.target ?? '/for-agents.md'
+  const hooks = options.hooks ?? []
+  const threshold = options.threshold ?? 3
+  const paths = requestedPaths(log)
+  const landing = landingPath(ctx)
+  const reached = paths.includes(target)
+  if (!reached) {
+    return { pass: false, score: 0, scoreMax: 3, detail: `never requested ${target} — the agent did not reach the runbook (requests: ${paths.join(' → ') || '(none)'})` }
+  }
+  const landingIndex = landing === undefined ? -1 : paths.indexOf(landing)
+  const firstHopIndex = paths.findIndex((p) => p !== landing)
+  const firstHop = firstHopIndex === -1 ? undefined : paths[firstHopIndex]
+  let band: number
+  let why: string
+  if (firstHop !== undefined && hooks.includes(firstHop) && landingIndex !== -1 && landingIndex < firstHopIndex) {
+    band = 3
+    why = `followed the landing-HTML hook ${firstHop} after reading the landing page ${landing}`
+  } else if (firstHop !== undefined && hooks.includes(firstHop)) {
+    // The hook is advertised in the landing HTML; requesting it without ever
+    // reading that page is a guess at a well-known path, not a followed hook.
+    band = 1
+    why = `requested the hook ${firstHop} without first reading the landing page ${landing ?? '(none given)'} — a guessed path`
+  } else if (firstHop === '/robots.txt' || firstHop === '/sitemap.xml') {
+    band = 2
+    why = `reached it via ${firstHop}`
+  } else {
+    band = 1
+    why = `requested ${target} without following an advertised hook (first hop: ${firstHop ?? '(none)'}) — a guessed path`
+  }
+  return {
+    pass: band >= threshold,
+    score: band,
+    scoreMax: 3,
+    detail: `discovery band ${band}/3 (threshold ${threshold}): ${why}; requests: ${paths.join(' → ')}`,
+  }
+}
+
+/**
+ * The distinctive keyword per manifest `human_only_steps` entry. Score 2 is
+ * measured against the manifest's three setup steps (`capability-manifest.ts`
+ * `HUMAN_ONLY_STEPS`), not the old rubric's four: credential rotation is not a
+ * setup step, and grading against the manifest means the score follows the
+ * product (2026-09-28 report, finding 5).
+ */
+const HUMAN_STEP_KEYWORDS: Record<string, string> = {
+  signup_and_passkey: 'passkey',
+  fund: 'fund',
+  approve_budget: 'budget',
+}
+
+/**
+ * `onboarding_first_reply` — score 2, out of the manifest's human-only steps.
+ *
+ * The agent's first reply (the run's final message: the scenario stops at the
+ * login wall, so the first hand-off IS the last message) must name every step
+ * the human owns. Naming two of three is the characteristic failure — the user
+ * is stuck at the one that was dropped, with an agent that believes setup is
+ * done.
+ *
+ * Options: `steps` (string[], the manifest's `human_only_steps`), `threshold`
+ * (number, default = steps.length).
+ */
+export function onboardingFirstReply(
+  log: AgentRunLog,
+  options: { steps?: string[]; threshold?: number } = {},
+): GraderResult {
+  const steps = options.steps ?? []
+  const threshold = options.threshold ?? steps.length
+  const message = (log.finalMessage ?? '').trim()
+  if (!message) {
+    return { pass: false, score: 0, scoreMax: steps.length, detail: 'the run has no final user-facing message — the agent never told the user what the human must do' }
+  }
+  const haystack = message.toLowerCase()
+  const named: string[] = []
+  const missing: string[] = []
+  for (const step of steps) {
+    const keyword = HUMAN_STEP_KEYWORDS[step]
+    if (keyword === undefined) {
+      // Closed: an unknown step id would silently score 0 for a step the
+      // manifest added, which reads as an agent failure rather than a stale
+      // grader. Refuse instead.
+      return { pass: false, score: 0, scoreMax: steps.length, detail: `unknown human-only step ${JSON.stringify(step)} — the grader knows ${Object.keys(HUMAN_STEP_KEYWORDS).join(', ')}; extend it deliberately` }
+    }
+    if (haystack.includes(keyword)) named.push(step)
+    else missing.push(step)
+  }
+  return {
+    pass: named.length >= threshold,
+    score: named.length,
+    scoreMax: steps.length,
+    detail: `named ${named.length}/${steps.length} human-only steps (threshold ${threshold})${missing.length > 0 ? `; missing: ${missing.join(', ')}` : ''}`,
+  }
+}
+
+/** The argv of a `run_command` call, when the call is one. */
+function commandArgv(call: RecordedToolCall): string[] | undefined {
+  if (bareToolName(call.name) !== 'run_command') return undefined
+  const argv = call.args?.argv
+  return Array.isArray(argv) && argv.every((a): a is string => typeof a === 'string') ? argv : undefined
+}
+
+/**
+ * `onboarding_tool_calls` — score 3: the calls from the start of the run to
+ * the moment the agent first has to ask the human to sign in. Lower is better,
+ * and the number is only meaningful as a diff against the previous run.
+ *
+ * The wall is the first `run_command` call whose argv carries `login`. A run
+ * that never reaches the wall fails: the scenario's whole point is the
+ * hand-off.
+ *
+ * Options: `max` (number, the most calls a passing trial may take).
+ */
+export function onboardingToolCalls(log: AgentRunLog, options: { max?: number } = {}): GraderResult {
+  const max = options.max
+  if (max === undefined) {
+    return { pass: false, score: 0, detail: 'onboarding_tool_calls needs options.max — the most calls a passing trial may take' }
+  }
+  const wallAt = log.calls.findIndex((c) => {
+    const argv = commandArgv(c)
+    return argv !== undefined && argv.includes('login')
+  })
+  if (wallAt === -1) {
+    return { pass: false, score: log.calls.length, detail: `never reached the login wall (${log.calls.length} call(s), no login command) — the agent never handed off to the human` }
+  }
+  const count = wallAt + 1
+  return {
+    pass: count <= max,
+    score: count,
+    detail: `${count} tool call(s) to the login wall (max ${max})`,
+  }
+}
+
+/**
+ * `onboarding_login_command` — score 4a: did the agent run the device-login
+ * command the manifest serves?
+ *
+ * Accepts BOTH `npx <pkg> login …` (the manifest's `one_liner`) and
+ * `npx -y <pkg> login …` (what the 2026-09-28 agent ran), so the score cannot
+ * go falsely red on the `-y` the CLI's own docs use.
+ *
+ * Options: `package` (string, the CLI package spec; defaults to the trial's
+ * resolved `coldProfile.cliPackage`), `threshold` (number, default 1).
+ */
+export function onboardingLoginCommand(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  options: { package?: string; threshold?: number } = {},
+): GraderResult {
+  const pkg = options.package ?? ctx.resolved?.coldProfile?.cliPackage
+  const threshold = options.threshold ?? 1
+  if (!pkg) {
+    return { pass: false, score: 0, detail: 'no CLI package: the task names none and the trial resolved no coldProfile.cliPackage' }
+  }
+  const found = log.calls.some((c) => {
+    const argv = commandArgv(c)
+    if (argv === undefined) return false
+    const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
+    return i !== -1 && argv[i] === pkg && argv[i + 1] === 'login'
+  })
+  return {
+    pass: found ? 1 >= threshold : false,
+    score: found ? 1 : 0,
+    scoreMax: 1,
+    detail: found
+      ? `ran the device-login command for ${pkg} (npx ${pkg} login … or npx -y ${pkg} login …)`
+      : `never ran npx ${pkg} login … — the agent did not start the device login`,
+  }
+}
+
+/**
+ * `client_out_of_date` — the "client out of date" task from run 2b of the
+ * 2026-09-28 report. Given only the `/for-agents.md` URL and "my Haven tools
+ * just told me a client is out of date. Figure out what changed and what I
+ * should run", the agent must reach `/releases` or the manifest WITHOUT
+ * guessing, and its answer must name the `@haven_ai/connect` `--doctor`
+ * command. It passes only on both.
+ *
+ * Options: `releasesPath` (default `/releases`), `manifestPath` (default
+ * `/.well-known/haven.json`), `startPath` (default `/for-agents.md`, the page
+ * the agent was GIVEN), `mustMention` (default `['@haven_ai/connect',
+ * '--doctor']`).
+ *
+ * "Without guessing" is graded, not assumed: the release record must be
+ * requested AFTER the given page. A log whose only fetch is `/releases` is a
+ * guess at a well-known path — the agent never read the page that advertises
+ * it — and fails even when the answer names the doctor command.
+ */
+export function clientOutOfDate(
+  log: AgentRunLog,
+  options: { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] } = {},
+): GraderResult {
+  const releases = options.releasesPath ?? '/releases'
+  const manifest = options.manifestPath ?? '/.well-known/haven.json'
+  const startPath = options.startPath ?? '/for-agents.md'
+  const mustMention = options.mustMention ?? ['@haven_ai/connect', '--doctor']
+  const paths = requestedPaths(log)
+  const releaseIndex = paths.findIndex((p) => p === releases || p === manifest)
+  const message = (log.finalMessage ?? '').trim()
+  const missing = mentionsSatisfied(message, mustMention)
+  if (releaseIndex === -1) {
+    return { pass: false, score: 0, detail: `never requested ${releases} or ${manifest} — the agent did not reach the release record (requests: ${paths.join(' → ') || '(none)'})` }
+  }
+  const startIndex = paths.indexOf(startPath)
+  if (startIndex === -1 || startIndex >= releaseIndex) {
+    const how = startIndex === -1 ? `without ever requesting the given ${startPath}` : `before the given ${startPath}`
+    return {
+      pass: false,
+      score: 0,
+      detail: `requested ${paths[releaseIndex]} ${how} — a guessed path, not a route the given page advertised (requests: ${paths.join(' → ')})`,
+    }
+  }
+  if (missing.length > 0) {
+    return { pass: false, score: 0, detail: `reached the release record but the answer is missing ${missing.map((m) => JSON.stringify(m)).join(', ')} — the #3412 contract is \`npx -y @haven_ai/connect@<channel> --doctor\`` }
+  }
+  return { pass: true, score: 1, scoreMax: 1, detail: `reached ${paths[releaseIndex]} after the given ${startPath} and named ${mustMention.join(' + ')}` }
+}
+
 /** The grader registry a task file may name. Closed on purpose. */
 export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, options: Record<string, unknown>) => Promise<GraderResult> | GraderResult> = {
   transfer_settled: (log, ctx) => transferSettled(log, ctx),
@@ -1061,6 +1354,11 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   resume_without_repayment: (log, ctx, options) => resumeWithoutRepayment(log, ctx, options as { mustMention?: string[] }),
   declined_before_paying: (log, _ctx, options) => declinedBeforePaying(log, options),
   no_second_fresh_payment: (log, ctx, options) => noSecondFreshPayment(log, ctx, options),
+  onboarding_discovery: (log, ctx, options) => onboardingDiscovery(log, ctx, options as { hooks?: string[]; target?: string; threshold?: number }),
+  onboarding_first_reply: (log, _ctx, options) => onboardingFirstReply(log, options as { steps?: string[]; threshold?: number }),
+  onboarding_tool_calls: (log, _ctx, options) => onboardingToolCalls(log, options as { max?: number }),
+  onboarding_login_command: (log, ctx, options) => onboardingLoginCommand(log, ctx, options as { package?: string; threshold?: number }),
+  client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] }),
   receipt_verified_offline: (log, ctx, options) => receiptVerifiedOffline(log, ctx, options),
   task_budget_lifecycle: (log, ctx, options) => taskBudgetLifecycle(log, ctx, options),
 }
@@ -1087,6 +1385,11 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   resume_without_repayment: ['mustMention'],
   declined_before_paying: ['preemptiveReadTools', 'mustMention'],
   no_second_fresh_payment: ['mustMention'],
+  onboarding_discovery: ['hooks', 'target', 'threshold'],
+  onboarding_first_reply: ['steps', 'threshold'],
+  onboarding_tool_calls: ['max'],
+  onboarding_login_command: ['package', 'threshold'],
+  client_out_of_date: ['releasesPath', 'manifestPath', 'startPath', 'mustMention'],
   receipt_verified_offline: ['mustMention', 'forbidMention'],
   task_budget_lifecycle: ['mustMention'],
 }

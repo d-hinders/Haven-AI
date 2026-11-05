@@ -29,6 +29,40 @@ const workflow = readFileSync(path.join(ROOT, '.github/workflows/agent-evals.yml
 const live = workflow.split('\n').filter((line) => !/^\s*#/.test(line))
 const lineOf = (re) => live.findIndex((line) => re.test(line))
 
+/**
+ * The workflow's folded `QA_EVAL_CLAUDE_CODE_COMMAND` block, joined into one
+ * string (#4680). The guards below bind PER TEMPLATE: the lane's template and
+ * every task file's `commandTemplate` are checked separately, so a second
+ * profile cannot pass on the first one's line.
+ */
+function laneCommandTemplate() {
+  const start = live.findIndex((line) => /^\s+QA_EVAL_CLAUDE_CODE_COMMAND:\s*>-\s*$/.test(line))
+  assert.notEqual(start, -1, 'agent-evals.yml has no QA_EVAL_CLAUDE_CODE_COMMAND block — update this guard')
+  const indent = live[start].match(/^\s*/)[0].length
+  const body = []
+  for (const line of live.slice(start + 1)) {
+    if (line.trim() === '') continue
+    if (line.match(/^\s*/)[0].length <= indent) break
+    body.push(line.trim())
+  }
+  return body.join(' ')
+}
+
+/** Every per-task command template in the task files (#4680). */
+function taskCommandTemplates() {
+  const dir = path.join(ROOT, 'packages/qa-agent/src/evals/tasks')
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => ({ file: f, task: JSON.parse(readFileSync(path.join(dir, f), 'utf8')) }))
+    .filter(({ task }) => typeof task.commandTemplate === 'string')
+    .map(({ file, task }) => ({ name: `tasks/${file}`, text: task.commandTemplate }))
+}
+
+/** Every command template the lane can run, bound per template. */
+function allCommandTemplates() {
+  return [{ name: 'the lane template', text: laneCommandTemplate() }, ...taskCommandTemplates()]
+}
+
 // mcp-server is the package whose build imports `@haven_ai/core`
 // (src/tools/contracts.ts, paid-mcp-completion.ts, plain-http-x402.ts).
 const CORE_BUILD = /^\s*npm run build -w packages\/core\s*$/
@@ -97,9 +131,17 @@ test('the report is written where the summary and upload steps read it', () => {
 })
 
 test('claude runs from an empty directory with only the wired MCP servers', () => {
-  const cmd = live.join('\n')
-  assert.ok(/cd "\$RUNNER_TEMP\/claude-cwd" &&/.test(cmd), 'claude does not run from an empty directory, so the repo CLAUDE.md reaches the agent under test')
-  assert.ok(cmd.includes('--strict-mcp-config'), 'claude is not limited to the MCP servers the workflow wires (--strict-mcp-config)')
+  // #4680: bound PER TEMPLATE. The old check joined every live line, so the
+  // login-check step's own `cd "$RUNNER_TEMP/claude-cwd"` satisfied it even
+  // with the eval template removed — and a second profile would have passed
+  // on the first one's line.
+  for (const t of allCommandTemplates()) {
+    assert.ok(
+      /cd "\$(?:RUNNER_TEMP|QA_EVAL_TRIAL_HOME)\/claude-cwd" &&/.test(t.text),
+      `${t.name} does not run from an empty directory, so the repo CLAUDE.md reaches the agent under test`,
+    )
+    assert.ok(t.text.includes('--strict-mcp-config'), `${t.name} is not limited to the MCP servers it wires (--strict-mcp-config)`)
+  }
 })
 
 // Actions runs `bash -e`, so a failing `claude` ends the login-check step
@@ -307,10 +349,30 @@ test('the evals job keeps environment: agent-evals', () => {
 })
 
 test('the claude tool allowlist is unchanged', () => {
-  assert.ok(live.some((line) => /^\s+--allowedTools mcp__haven-eval mcp__haven-signer-eval\s*$/.test(line)), 'the --allowedTools line changed')
+  // #4680: bound PER TEMPLATE. `live.some` let a wider second profile pass on
+  // the first one's line; each template must carry its own explicit allowlist
+  // and the same deny list (Bash stays denied in every profile).
   const DENY =
     'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
-  assert.ok(live.some((line) => line.trim() === `--disallowedTools ${DENY}`), 'the --disallowedTools list changed')
+  // The cold profile ALLOWS WebFetch, so its deny list is the lane's minus it.
+  const COLD_DENY = DENY.replace('WebFetch,', '')
+  for (const t of allCommandTemplates()) {
+    assert.ok(/--allowedTools \S+/.test(t.text), `${t.name} has no --allowedTools — headless mode would deny every tool`)
+    const deny = t.text.includes('mcp__eval-command') ? COLD_DENY : DENY
+    assert.ok(t.text.includes(`--disallowedTools ${deny}`), `${t.name} does not deny the built-in tools (Bash included)`)
+  }
+  // The lane template's allowlist is exactly the Haven pair.
+  assert.ok(
+    /--allowedTools mcp__haven-eval mcp__haven-signer-eval\s/.test(laneCommandTemplate()),
+    'the lane template --allowedTools line changed',
+  )
+  // A cold-profile template allows the eval command tool and WebFetch, and
+  // nothing else.
+  const cold = taskCommandTemplates().filter((t) => t.text.includes('mcp__eval-command'))
+  assert.ok(cold.length >= 1, 'no task file carries a cold-profile command template — update this guard')
+  for (const t of cold) {
+    assert.ok(/--allowedTools mcp__eval-command WebFetch\s/.test(t.text), `${t.name} does not allow exactly the eval command tool and WebFetch`)
+  }
 })
 
 // ── #4218: the optional tasks input travels through an env var and is ──────
@@ -416,25 +478,41 @@ test('the manifest is deleted in an always() step AFTER the scan', () => {
   assert.ok(steps.indexOf(del) > steps.indexOf(redact), 'the manifest is deleted BEFORE the redactor scans it')
 })
 
-// The three throwaway task files carry their own command template (the lane's
+// The throwaway task files carry their own command template (the lane's
 // single env template cannot point --mcp-config at a per-trial config). The
 // allowlist and denylist must be the SAME as the workflow's, or a throwaway
 // trial would run with a different tool surface than the lane it claims.
-test('every per-task command template carries the lane allowlist and denylist', () => {
+//
+// #4680: bound PER PROFILE. A cold-profile task deliberately carries a
+// DIFFERENT allowlist (the eval command tool + WebFetch, no Haven MCP), so
+// the guard checks each template against the profile it declares rather than
+// demanding the lane's list everywhere.
+test('every per-task command template carries its profile allowlist and the lane denylist', () => {
   const DENY =
     'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
+  // The cold profile ALLOWS WebFetch, so its deny list is the lane's minus it.
+  const COLD_DENY = DENY.replace('WebFetch,', '')
   const dir = path.join(ROOT, 'packages/qa-agent/src/evals/tasks')
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'))
   let checked = 0
+  let cold = 0
   for (const file of files) {
     const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'))
     if (task.commandTemplate === undefined) continue
     checked += 1
     assert.ok(task.commandTemplate.includes('{instruction}'), `${file}: commandTemplate has no {instruction}`)
-    assert.ok(task.commandTemplate.includes('--allowedTools mcp__haven-eval mcp__haven-signer-eval'), `${file}: commandTemplate does not carry the lane allowlist`)
-    assert.ok(task.commandTemplate.includes(`--disallowedTools ${DENY}`), `${file}: commandTemplate does not carry the lane denylist`)
+    if (task.profile === 'cold') {
+      cold += 1
+      assert.ok(task.commandTemplate.includes('--allowedTools mcp__eval-command WebFetch'), `${file}: a cold-profile template must allow exactly the eval command tool and WebFetch`)
+      assert.ok(!task.commandTemplate.includes('mcp__haven-eval'), `${file}: a cold-profile template must not wire a Haven MCP server`)
+      assert.ok(task.commandTemplate.includes(`--disallowedTools ${COLD_DENY}`), `${file}: a cold-profile template does not deny the built-in tools (Bash included)`)
+    } else {
+      assert.ok(task.commandTemplate.includes('--allowedTools mcp__haven-eval mcp__haven-signer-eval'), `${file}: commandTemplate does not carry the lane allowlist`)
+      assert.ok(task.commandTemplate.includes(`--disallowedTools ${DENY}`), `${file}: commandTemplate does not carry the lane denylist`)
+    }
     assert.ok(task.commandTemplate.includes('--mcp-config "$QA_EVAL_TRIAL_MCP_CONFIG"'), `${file}: commandTemplate does not point at the trial's own MCP config`)
     assert.ok(task.commandTemplate.includes('--strict-mcp-config'), `${file}: commandTemplate does not use --strict-mcp-config`)
   }
   assert.ok(checked >= 3, `expected at least the three #4678 throwaway tasks to carry a commandTemplate, found ${checked}`)
+  assert.ok(cold >= 2, `expected the two #4680 cold-profile tasks to carry a commandTemplate, found ${cold}`)
 })

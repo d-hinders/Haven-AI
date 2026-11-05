@@ -117,7 +117,26 @@ export interface TaskSource {
 }
 
 /** The instruction placeholders the runner renders before launch. */
-export type InstructionPlaceholder = 'amount' | 'recipient' | 'target' | 'payment_id'
+export type InstructionPlaceholder = 'amount' | 'recipient' | 'target' | 'payment_id' | 'landing_url'
+
+/**
+ * The cold-agent profile (#4680): a fresh agent with no Haven MCP servers, no
+ * repository knowledge and no Haven credentials, given only the dev landing
+ * URL. The harness builds a per-trial `HOME` and an MCP config holding ONE
+ * eval-only command tool, so the agent can run the CLI the manifest serves
+ * without a shell.
+ *
+ * `landingUrl` comes from the workflow (`QA_EVAL_DEV_LANDING_URL`), never from
+ * the task file: the same task must run against a preview or a local target.
+ * `cliPackage` is read from the deployment's manifest at trial start, so the
+ * task follows the product rather than pinning a dist-tag.
+ */
+export interface ColdProfile {
+  /** The dev landing URL the agent is given. */
+  landingUrl: string
+  /** The CLI package spec the manifest serves (`packages.cli.one_liner`). */
+  cliPackage: string
+}
 
 /**
  * The adapter lanes a task may run on (#4678).
@@ -195,6 +214,7 @@ export interface EvalTask {
     | 'budget-ended'
     | 'agent-revoked'
     | 'task-budget'
+    | 'onboarding'
   instruction: string
   /** What the run needs provisioned before launch (documented in the runbook). */
   requires: string[]
@@ -202,7 +222,8 @@ export interface EvalTask {
    * The amount rule. REQUIRED for a task with no `setup`; a task with a
    * `setup` may omit it, because its money is the setup's `fundingAtomic` —
    * the eval agent's period budget is touched by exactly that amount and by
-   * nothing the resolver invents (#4678).
+   * nothing the resolver invents (#4678). An `onboarding` task may omit it
+   * too: it spends nothing and is exempt from the budget read (#4680).
    */
   amount?: AmountRule
   /** Graders to apply, in order. All must pass for the trial to pass. */
@@ -221,6 +242,14 @@ export interface EvalTask {
    * no setup, no teardown — the eleven starter tasks are unchanged.
    */
   setup?: TaskSetup
+  /**
+   * The cold-agent profile (#4680). `'cold'` means the harness builds a
+   * per-trial `HOME` and an MCP config holding ONE eval-only command tool —
+   * no Haven MCP servers, no Haven credentials — and the instruction renders
+   * `{landing_url}` from the workflow's dev landing URL. Absent = the lane's
+   * normal profile.
+   */
+  profile?: 'cold'
   /**
    * A per-task command template for the Claude lane (#4678). Absent = the
    * lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. The template may read the trial's
@@ -307,6 +336,13 @@ export interface ResolvedTask {
   preparedPaymentId?: string
   /** The throwaway account address this trial runs against (#4678). */
   trialAccountAddress?: string
+  /**
+   * The cold profile's resolved facts (#4680): the landing URL the agent was
+   * given and the CLI package the manifest served at trial start. The graders
+   * read them, so a score is measured against what the deployment actually
+   * advertised rather than a value baked into the task file.
+   */
+  coldProfile?: ColdProfile
 }
 
 /**
@@ -326,6 +362,16 @@ export interface GraderResult {
   pass: boolean
   detail: string
   settledSpendAtomic?: string
+  /**
+   * The NUMERIC reading a scoring grader reports (#4680): discovery band 0-3,
+   * first-reply steps named 0-3, tool calls to the wall, login command 0/1.
+   * Present only on a grader that scores rather than merely passes/fails, so
+   * the report and the summary can show the number beside the verdict — a
+   * bare pass/fail would hide a band that fell from 3 to 2.
+   */
+  score?: number
+  /** The maximum the {@link score} is out of, when the grader has one. */
+  scoreMax?: number
 }
 
 /**
@@ -404,5 +450,10 @@ export type GraderName =
   | 'resume_without_repayment'
   | 'declined_before_paying'
   | 'no_second_fresh_payment'
+  | 'onboarding_discovery'
+  | 'onboarding_first_reply'
+  | 'onboarding_tool_calls'
+  | 'onboarding_login_command'
+  | 'client_out_of_date'
   | 'receipt_verified_offline'
   | 'task_budget_lifecycle'

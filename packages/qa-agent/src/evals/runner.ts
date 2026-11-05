@@ -67,6 +67,15 @@ export interface TrialRecord {
    * `unreturnedAtomic` names USDC the teardown could not return.
    */
   teardown?: TrialTeardown
+  /**
+   * The NUMERIC readings the trial's scoring graders reported (#4680), keyed
+   * by grader name: `{ onboarding_discovery: 3, onboarding_first_reply: 3,
+   * onboarding_tool_calls: 8, onboarding_login_command: 1 }`. Present only
+   * when a grader reported a `score`, so a band that fell from 3 to 2 is
+   * visible in the report and the summary rather than hidden behind a
+   * pass/fail.
+   */
+  scores?: Record<string, number>
 }
 
 /** Calls beyond this many are summarised, so one runaway session cannot flood the report. */
@@ -379,6 +388,11 @@ export async function runTaskTrials(
     // a change to the verdict.
     const trialTeardown = teardown ? await teardown() : undefined
     const firstFail = graderResults.find((g) => !g.pass)
+    // #4680: the numeric readings, keyed by grader name. A scoring grader
+    // reports `score`; a pass/fail grader reports none, so the map is empty
+    // for every task that is not an onboarding one.
+    const scores: Record<string, number> = {}
+    for (const g of graderResults) if (g.score !== undefined) scores[g.name] = g.score
     const record: TrialRecord = {
       trial,
       pass: !firstFail,
@@ -388,6 +402,7 @@ export async function runTaskTrials(
       resolvedAmountAtomic: trialResolved.amountAtomic.toString(),
       startBlock: trialResolved.startedAtBlock,
       trace: toolTrace(log),
+      ...(Object.keys(scores).length > 0 ? { scores } : {}),
       ...(trialTeardown ? { teardown: trialTeardown } : {}),
     }
     records.push(record)
@@ -486,6 +501,11 @@ export function renderSummary(report: EvalReport): string {
       `${t.passAll ? 'PASS^k' : 'fail  '}  ${t.id}  (${t.category})  pass ${rate}${drain}  median session ${t.medianSessionMs}ms  slowest ${t.slowestSessionMs}ms  [${t.source.kind}: ${t.source.ref}]`,
     )
     for (const trial of t.trials) {
+      // #4680: the numeric readings, per trial — a band that fell from 3 to 2
+      // must be visible beside the verdict, not hidden behind it.
+      if (trial.scores !== undefined) {
+        lines.push(`        trial ${trial.trial} scores: ${Object.entries(trial.scores).map(([k, v]) => `${k}=${v}`).join(', ')}`)
+      }
       if (!trial.pass) {
         lines.push(`        trial ${trial.trial} (${trial.wallMs}ms): ${trial.detail}`)
         if (trial.trace) lines.push(`          tools: ${trial.trace.length ? trial.trace.join(' → ') : '(no tool calls)'}`)

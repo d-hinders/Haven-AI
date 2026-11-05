@@ -175,6 +175,48 @@ export function buildChildEnv(base: NodeJS.ProcessEnv, trialEnv?: Record<string,
 }
 
 /**
+ * The env names the cold profile strips even when the allowlist would keep
+ * them (#4680). `HAVEN_*` and `AGENT_EVALS_*` are stripped by prefix; these
+ * are the harness's own `QA_EVAL_*` credential values, which the cold agent
+ * must never see. The trial's WIRING (`QA_EVAL_TRIAL_HOME`,
+ * `QA_EVAL_TRIAL_MCP_CONFIG`, `QA_EVAL_CLI_PACKAGE`, `QA_EVAL_COMMAND_TOOL`)
+ * stays: the command template and the MCP config need it, and none of it is a
+ * credential.
+ */
+export const COLD_ENV_DENYLIST = [
+  'QA_EVAL_AGENT_API_KEY',
+  'QA_EVAL_AGENT_ACCOUNT',
+  'QA_EVAL_RECIPIENT',
+  'QA_EVAL_X402_TARGET',
+  'QA_EVAL_SECRET_MANIFEST',
+  'QA_EVAL_SIGNER_CLI',
+  'QA_EVAL_HOSTED_MCP_URL',
+  'QA_EVAL_TRIAL_CREDENTIALS',
+  'QA_EVAL_TRIAL_API_KEY',
+  'QA_X402_BINDING_SIGNER',
+] as const
+
+/**
+ * The cold profile's child env (#4680): the allowlist, then every Haven and
+ * harness credential stripped, whatever the allowlist says. The cold agent
+ * holds no Haven credentials — proved on the environment, not only on the
+ * tool lists — and its `HOME` is the trial's own directory, so `haven login`
+ * writes a session that cannot warm a later trial.
+ *
+ * `CLAUDE_CODE_OAUTH_TOKEN` stays: it authenticates `claude` itself, not
+ * Haven.
+ */
+export function buildColdChildEnv(base: NodeJS.ProcessEnv, trialEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  const env = buildChildEnv(base, trialEnv)
+  for (const key of Object.keys(env)) {
+    if (/^(HAVEN_|AGENT_EVALS_)/.test(key) || (COLD_ENV_DENYLIST as readonly string[]).includes(key)) delete env[key]
+  }
+  const home = trialEnv?.HOME
+  if (home !== undefined) env.HOME = home
+  return env
+}
+
+/**
  * Launch one task through `claude -p` and collect its tool-call log.
  * The stream-JSON session is captured to a log file and parsed; the
  * session's `total_cost_usd` is recorded on the adapter for the report.
@@ -193,7 +235,7 @@ export class ClaudeCodeAdapter {
     // The trial's own env (#4678): its MCP config, its credential file, its
     // API key. Merged OVER the inherited env, so a throwaway trial's agent
     // never sees the eval agent's wiring.
-    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial, resolved.trialEnv)
+    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial, resolved.trialEnv, resolved.coldProfile !== undefined)
     const raw = await readFile(logPath, 'utf8')
     const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
     // A non-zero exit after the agent worked (the turn limit, for one) still
@@ -226,6 +268,7 @@ export class ClaudeCodeAdapter {
     taskId: string,
     trial: number,
     trialEnv?: Record<string, string>,
+    cold = false,
   ): Promise<{ code: number | null; stderrTail: string }> {
     return new Promise((resolve, reject) => {
       let settled = false
@@ -247,7 +290,10 @@ export class ClaudeCodeAdapter {
       const child = spawn(command, {
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: buildChildEnv(process.env, trialEnv),
+        // #4680: a cold-profile trial gets the scrubbed env — no Haven
+        // credentials at all, and its own HOME. Every other trial keeps the
+        // allowlist + its own wiring.
+        env: cold ? buildColdChildEnv(process.env, trialEnv) : buildChildEnv(process.env, trialEnv),
       })
       const timer = setTimeout(() => {
         child.kill('SIGKILL')

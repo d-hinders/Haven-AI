@@ -4,7 +4,7 @@ status: current
 covers:
   - .claude/commands/qa-explore-ui.md
   - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-09-06"
+last-verified: "2026-11-05"
 ---
 
 # qa-explore-ui cadence — the UX-discovery heartbeat
@@ -138,13 +138,17 @@ most useful content, because they are what the user would actually have received
 
 ### Who runs it
 
-The same way `qa-explore-ui` runs: **the owner arms a Routine.** There is no CI job, for
-the reason in § Cadence above and for one specific to this scenario — **a cold agent
-cannot be cold inside this repository's own runner.** Score 1 is only valid if the agent
-does not know the path, and a job in Haven-AI's Actions has the checkout and a token in
-its environment. You can skip the checkout; you cannot make the measurement robust,
-because a later edit to the workflow could hand the agent repo knowledge and the score
-would keep reporting a number that no longer means what it says.
+The same way `qa-explore-ui` runs: **the owner arms a Routine**, or runs the
+`onboarding-cold-setup` / `onboarding-client-out-of-date` eval tasks in the manual
+`agent-evals` workflow. There is no required CI check, for the reason in § Cadence above
+and for one specific to this scenario — **a cold agent must not know the path.** The eval
+lane satisfies that on the environment rather than by convention: `claude` runs from an
+empty directory with `--strict-mcp-config`, a scrubbed env (no `HAVEN_CREDENTIALS`, no
+`QA_EVAL_AGENT_API_KEY`, no `AGENT_EVALS_DELEGATE_KEY`) and a per-trial `HOME`, and the
+only Haven-shaped tool it gets is an eval-only command runner that accepts `npx <the
+manifest's CLI package> <allowed subcommand>` and nothing else (#4680). The workflow is
+manual-only and the job sits behind the owner-approved `agent-evals` environment, so it
+still cannot block a promotion or a PR.
 
 ## Guardrails (non-negotiable)
 

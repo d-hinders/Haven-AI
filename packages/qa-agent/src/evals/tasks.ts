@@ -28,7 +28,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { GRADER_OPTION_KEYS, GRADERS } from './graders.js'
-import { ALL_TOOL_NAMES, HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
+import { HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS, isKnownToolName } from './tools.js'
 import type { EvalLane, EvalTask, GraderName, ResolvedTask } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
@@ -96,8 +96,14 @@ function validateGraderOptions(grader: { name: GraderName; options?: unknown }, 
   // `probePaymentTools: "true"` is not `=== true`, so the signer check never
   // runs; a non-array `mustMention` crashes or matches nothing.
   const nonEmptyString = (v: unknown): boolean => typeof v === 'string' && v.length > 0
-  const isToolName = (v: unknown): boolean => typeof v === 'string' && ALL_TOOL_NAMES.includes(v)
-  for (const key of ['errorCode', 'name', 'after'] as const) {
+  // #4680: the cold profile's eval-only tool (`run_command`) is a known bare
+  // name but NOT a product tool, so the check accepts both lists without
+  // widening `HOSTED_TOOLS`/`SIGNER_TOOLS` (tools.test.ts holds those equal to
+  // their upstream sources).
+  const isToolName = (v: unknown): boolean => isKnownToolName(v)
+  const isNonNegativeInteger = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= 0
+  const isStringArray = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every(nonEmptyString)
+  for (const key of ['errorCode', 'name', 'after', 'target', 'package', 'releasesPath', 'manifestPath', 'startPath'] as const) {
     if (key in o && !nonEmptyString(o[key])) {
       return `${file}: ${name} options.${key} must be a non-empty string, got ${JSON.stringify(o[key])}`
     }
@@ -107,8 +113,15 @@ function validateGraderOptions(grader: { name: GraderName; options?: unknown }, 
       return `${file}: ${name} options.${key} must be a boolean, got ${JSON.stringify(o[key])} — any other value silently does not apply the option`
     }
   }
-  if ('mustMention' in o && (!Array.isArray(o.mustMention) || !o.mustMention.every(nonEmptyString))) {
-    return `${file}: ${name} options.mustMention must be an array of non-empty strings, got ${JSON.stringify(o.mustMention)}`
+  for (const key of ['threshold', 'max'] as const) {
+    if (key in o && !isNonNegativeInteger(o[key])) {
+      return `${file}: ${name} options.${key} must be a non-negative integer, got ${JSON.stringify(o[key])}`
+    }
+  }
+  for (const key of ['mustMention', 'hooks', 'steps'] as const) {
+    if (key in o && !isStringArray(o[key])) {
+      return `${file}: ${name} options.${key} must be a non-empty array of non-empty strings, got ${JSON.stringify(o[key])}`
+    }
   }
   if ('forbidMention' in o && (!Array.isArray(o.forbidMention) || !o.forbidMention.every(nonEmptyString))) {
     return `${file}: ${name} options.forbidMention must be an array of non-empty strings, got ${JSON.stringify(o.forbidMention)}`
@@ -198,8 +211,24 @@ export function validateTask(raw: unknown, file: string): string | null {
   }
   if (typeof t.id !== 'string' || !/^[a-z0-9-]+$/.test(t.id)) return `${file}: id must be kebab-case`
   if (typeof t.instruction !== 'string' || t.instruction.trim().length === 0) return `${file}: instruction is empty`
-  if (!['direct-payment', 'x402-paywall', 'over-budget', 'interrupted-purchase', 'budget-ended', 'agent-revoked', 'task-budget'].includes(t.category as string)) {
-    return `${file}: category must be direct-payment | x402-paywall | over-budget | interrupted-purchase | budget-ended | agent-revoked | task-budget`
+  if (!['direct-payment', 'x402-paywall', 'over-budget', 'interrupted-purchase', 'budget-ended', 'agent-revoked', 'task-budget', 'onboarding'].includes(t.category as string)) {
+    return `${file}: category must be direct-payment | x402-paywall | over-budget | interrupted-purchase | budget-ended | agent-revoked | task-budget | onboarding`
+  }
+  // #4680: the cold profile. `'cold'` is the only profile the harness
+  // implements, and it is Claude-lane only (Hermes' template takes only
+  // `{instruction}` and its MCP wiring lives in its profile, so it cannot
+  // hold a per-trial command tool). The instruction must render
+  // `{landing_url}` — the URL comes from the workflow, never the task file.
+  if (t.profile !== undefined) {
+    if (t.profile !== 'cold') {
+      return `${file}: profile must be "cold" — the harness implements no other profile`
+    }
+    if (typeof t.instruction !== 'string' || !t.instruction.includes('{landing_url}')) {
+      return `${file}: a cold-profile task must render {landing_url} — the dev landing URL comes from the workflow (QA_EVAL_DEV_LANDING_URL), never from the task file`
+    }
+    if (!Array.isArray(t.lanes) || t.lanes.length !== 1 || t.lanes[0] !== 'claude-code') {
+      return `${file}: a cold-profile task must name lanes ["claude-code"] — the Hermes lane has no cold profile and reports it skipped`
+    }
   }
   // #4678: the per-trial prepared state. A task with a `setup` owns its own
   // money (`fundingAtomic`), so `amount` is optional for it; every other task
@@ -226,8 +255,10 @@ export function validateTask(raw: unknown, file: string): string | null {
   }
   const amount = t.amount as Record<string, unknown> | undefined
   if (amount === undefined) {
-    if (t.setup === undefined) {
-      return `${file}: missing required key "amount" — only a task with a per-trial setup may omit it (its money is the setup's fundingAtomic)`
+    // #4680: an onboarding task spends nothing and is exempt from the budget
+    // read, so it needs no amount rule. Every other task without a setup does.
+    if (t.setup === undefined && t.category !== 'onboarding') {
+      return `${file}: missing required key "amount" — only a task with a per-trial setup or an onboarding task may omit it (neither spends the eval budget)`
     }
   } else if (amount?.rule === 'remaining_period_budget') {
     if (typeof amount.delta_atomic !== 'string' || !/^\d+$/.test(amount.delta_atomic)) {
@@ -379,12 +410,18 @@ export function renderInstruction(
   recipient?: string,
   target?: string,
   paymentId?: string,
+  landingUrl?: string,
 ): string {
   const human = (Number(amountAtomic) / 1_000_000).toString()
   const rendered = task.instruction
     .replaceAll('{amount}', human)
     .replaceAll('{recipient}', recipient ?? '(recipient not configured)')
     .replaceAll('{target}', target ?? '(x402 target not configured)')
+    // #4680: the cold profile's landing URL comes from the workflow, never
+    // the task file — the same task must run against a preview or a local
+    // target. A cold task that renders it without one is refused at load
+    // time, so a raw placeholder can never reach an agent.
+    .replaceAll('{landing_url}', landingUrl ?? '(landing URL not configured)')
     // A key unique to this render (= this trial): two trials of the same
     // purchase inside Haven's 5-minute idempotency bucket would otherwise
     // replay one payment instead of buying twice (2026-10-23).
@@ -492,7 +529,9 @@ export function selectTaskSequence(
     selected = canonical.filter((t) => wanted.has(t.id))
   }
   const limited =
-    opts.limit !== undefined ? selected.filter((t) => t.setup === undefined).slice(0, opts.limit) : selected
+    opts.limit !== undefined
+      ? selected.filter((t) => t.setup === undefined && t.profile === undefined).slice(0, opts.limit)
+      : selected
   return opts.shuffleSeed !== undefined ? shuffleWithinTiers(limited, opts.shuffleSeed) : limited
 }
 
@@ -517,8 +556,11 @@ export const taskNeedsDelegateSnapshot = (task: EvalTask): boolean =>
  * task with `fundingAtomic: "0"` (the revoked-agent task, which never pays)
  * needs no eval-budget funds at all and must not be stopped by that exit.
  */
-export const taskNeedsEvalBudgetFunds = (task: Pick<EvalTask, 'tier' | 'setup'>): boolean => {
+export const taskNeedsEvalBudgetFunds = (task: Pick<EvalTask, 'tier' | 'setup' | 'category'>): boolean => {
   if ((task.tier ?? 1) === 3) return false
+  // #4680: an onboarding task spends nothing — it is exempt from the exit-3
+  // preflight and from the budget read.
+  if (task.category === 'onboarding') return false
   if (task.setup === undefined) return true
   return BigInt(task.setup.fundingAtomic) > 0n
 }
@@ -556,6 +598,8 @@ export async function resolveTask(
     startedAtBlock?: number
     delegateEoa?: string
     delegateEoaBalanceBeforeAtomic?: string
+    /** The cold profile's resolved facts (#4680): landing URL + manifest CLI package. */
+    coldProfile?: { landingUrl: string; cliPackage: string }
   },
 ): Promise<{ resolved: ResolvedTask } | { error: string }> {
   if (task.setup) {
@@ -574,6 +618,26 @@ export async function resolveTask(
         recipient: opts.recipient,
         agentAccount: opts.agentAccount,
         startedAtBlock: opts.startedAtBlock,
+      },
+    }
+  }
+  // #4680: an onboarding task spends nothing, so it resolves WITHOUT a budget
+  // read — the same discipline as a throwaway setup, for the same reason: a
+  // read would invent a spend the trial never makes, and an exhausted eval
+  // budget must not stop a task that cannot pay.
+  if (task.category === 'onboarding') {
+    if (opts.coldProfile === undefined) {
+      return { error: `task ${task.id} is an onboarding task but no cold profile was resolved — QA_EVAL_DEV_LANDING_URL and the manifest's CLI package are required` }
+    }
+    return {
+      resolved: {
+        task,
+        amountAtomic: 0n,
+        instruction: renderInstruction(task, 0n, opts.recipient, opts.x402Target, undefined, opts.coldProfile.landingUrl),
+        recipient: opts.recipient,
+        agentAccount: opts.agentAccount,
+        startedAtBlock: opts.startedAtBlock,
+        coldProfile: opts.coldProfile,
       },
     }
   }

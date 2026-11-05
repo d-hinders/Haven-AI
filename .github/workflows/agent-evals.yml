@@ -58,6 +58,10 @@ on:
         description: 'Trials per task (cost pilot: 1)'
         type: string
         default: '1'
+      dev_landing_url:
+        description: 'Dev landing URL the cold-agent tasks give the agent (e.g. https://haven-ai-frontend-git-dev-....vercel.app); empty = the cold tasks cannot run'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -90,6 +94,7 @@ jobs:
           INPUT_SUITE: ${{ github.event.inputs.suite || 'subset' }}
           INPUT_TRIALS: ${{ github.event.inputs.trials || '1' }}
           INPUT_TASKS: ${{ github.event.inputs.tasks || '' }}
+          INPUT_DEV_LANDING_URL: ${{ github.event.inputs.dev_landing_url || '' }}
         run: |
           set -euo pipefail
           MODE="$INPUT_SUITE"
@@ -121,6 +126,7 @@ jobs:
           echo "trials=$TRIALS" >> "$GITHUB_OUTPUT"
           echo "limit_arg=$LIMIT_ARG" >> "$GITHUB_OUTPUT"
           echo "task_filter=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "dev_landing_url=$INPUT_DEV_LANDING_URL" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HOSTED_COMMIT" >> "$GITHUB_OUTPUT"
           echo "::notice::agent-evals mode=$MODE trials=$TRIALS $FILTER_NOTE; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
 
@@ -151,6 +157,9 @@ jobs:
           npm run build -w packages/sdk
           npm run build -w packages/signer
           npm run build -w packages/mcp-server
+          # #4680: the cold profile's eval-only command tool is a stdio MCP
+          # server `claude` spawns, so it must exist as a JS file.
+          npm run build -w packages/qa-agent
 
       # Subset only: boot the hosted MCP FROM THIS CHECKOUT (source enum stays
       # `pr-checkout` internally), relaying to
@@ -270,6 +279,11 @@ jobs:
           QA_EVAL_SECRET_MANIFEST: ${{ runner.temp }}/eval-secret-manifest/manifest.json
           QA_EVAL_TRIAL_DIR: ${{ runner.temp }}/eval-trials
           QA_EVAL_SIGNER_CLI: ${{ github.workspace }}/packages/signer/dist/cli.js
+          # #4680: the cold profile. The landing URL is a workflow input (none
+          # existed before); the command tool is the built eval-only MCP server
+          # the cold tasks' per-trial config points at.
+          QA_EVAL_DEV_LANDING_URL: ${{ steps.slice.outputs.dev_landing_url }}
+          QA_EVAL_COMMAND_TOOL: ${{ github.workspace }}/packages/qa-agent/dist/evals/command-tool.js
           AGENT_EVALS_DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}
           QA_X402_BINDING_SIGNER: ${{ vars.QA_X402_BINDING_SIGNER }}
           MODE: ${{ steps.slice.outputs.mode }}

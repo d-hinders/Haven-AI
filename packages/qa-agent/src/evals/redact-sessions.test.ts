@@ -120,6 +120,16 @@ const CANARIES: Record<RedactionClass, Canary> = {
       merchant_body: 'MERCHANT-PAID-CANARY-body',
     },
   },
+  // #4680: the device-login code and the code-bearing verification URL.
+  'device-code': {
+    needles: ['DEVICE-CODE-CANARY-0123456789', 'ABCD-2345', 'VERIFY-CODE-CANARY'],
+    obj: {
+      device_code: 'DEVICE-CODE-CANARY-0123456789',
+      user_code: 'ABCD-2345',
+      verification_uri_complete: 'https://dev.example/device?code=VERIFY-CODE-CANARY',
+      note: 'open https://dev.example/device?code=VERIFY-CODE-CANARY and approve ABCD-2345',
+    },
+  },
 }
 
 const POSITIONS = ['top', 'nested-text', 'bare-string', 'unparseable'] as const
@@ -679,5 +689,73 @@ describe('round 2: escapes in parseable lines, unbounded whitespace, first unmar
     expect(paid.map(([n]) => n)).toEqual(['haven_complete_mcp_tool', 'haven_settle_mcp_tool'])
     const firstOther = Math.min(...handlers.filter(([n]) => !paid.some(([p]) => p === n)).map(([, i]) => i))
     for (const [i, l] of lines.entries()) if (RESULT_FIELD.test(l)) expect(i, `result field at paid-mcp-completion.ts:${i + 1}`).toBeLessThan(firstOther)
+  })
+})
+
+// ── #4680: the device code, in all four places ─────────────────────────────
+
+describe('device-code: tool arguments, tool results, assistant text and the result line', () => {
+  const DEVICE = 'DEVICE-CODE-CANARY-0123456789'
+  const USER = 'ABCD-2345'
+  const URL = 'https://dev.example/device?code=VERIFY-CODE-CANARY'
+
+  it('redacts the code after --poll in a run_command argv (tool arguments)', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      message: {
+        model: 'claude-sonnet-5-5',
+        content: [{ type: 'tool_use', id: 'tu_1', name: 'mcp__eval-command__run_command', input: { argv: ['npx', '@haven_ai/cli@dev', 'login', '--poll', DEVICE] } }],
+      },
+    })
+    const { text, counts } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain(DEVICE)
+    expect(text).toContain('--poll')
+    expect(counts['device-code']).toBeGreaterThan(0)
+  })
+
+  it('redacts device_code / user_code / verification_uri_complete in a tool result', () => {
+    const raw = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu_1',
+            content: [{ type: 'text', text: JSON.stringify({ device_code: DEVICE, user_code: USER, verification_uri_complete: URL }) }],
+          },
+        ],
+      },
+    })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain(DEVICE)
+    expect(text).not.toContain(USER)
+    expect(text).not.toContain('VERIFY-CODE-CANARY')
+  })
+
+  it('redacts the code and the URL in assistant text', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: `Open ${URL} and approve the code ${USER}.` }] },
+    })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain('VERIFY-CODE-CANARY')
+    expect(text).not.toContain(USER)
+  })
+
+  it('redacts the code and the URL on the result line (which is kept on purpose)', () => {
+    const raw = JSON.stringify({ type: 'result', subtype: 'success', result: `device_code: ${DEVICE}; open ${URL} and approve ${USER}` })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain(DEVICE)
+    expect(text).not.toContain('VERIFY-CODE-CANARY')
+    expect(text).not.toContain(USER)
+  })
+
+  it('the independent scan catches a broken device-code rule (fail-closed)', () => {
+    const raw = JSON.stringify({ type: 'result', result: `device_code: ${DEVICE}` })
+    const broken = { ...secrets(), needles: [] }
+    const { text } = redactSessionText(raw, { secrets: broken, disabled: new Set(['device-code']) })
+    expect(text).toContain(DEVICE)
+    // The scan is a separate detector: it must still see the code.
+    expect(scanSessionText(text, broken)['device-code']).toBeGreaterThan(0)
   })
 })

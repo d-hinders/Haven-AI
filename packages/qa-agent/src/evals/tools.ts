@@ -107,10 +107,31 @@ export const SIGNER_TOOLS = [
 
 export const ALL_TOOL_NAMES: readonly string[] = [...HOSTED_TOOLS, ...SIGNER_TOOLS]
 
+/**
+ * The eval-only MCP tools (#4680). They are NOT part of the product's tool
+ * surface — `tools.test.ts` holds `HOSTED_TOOLS`/`SIGNER_TOOLS` equal to their
+ * upstream sources, and these must never enter either list. They exist only
+ * inside a cold-profile trial, so a grader that names one (`tool_called`,
+ * `onboarding_tool_calls`) needs a name check that accepts them without
+ * widening the product lists.
+ *
+ * `run_command` is the cold profile's one tool: it runs an argv array with no
+ * shell, and only `npx <the manifest's CLI package> <allowed subcommand>`.
+ */
+export const EVAL_ONLY_TOOL_NAMES = ['run_command'] as const
+
+/** Every bare tool name a grader option may name: product tools + eval-only tools. */
+export const KNOWN_TOOL_NAMES: readonly string[] = [...ALL_TOOL_NAMES, ...EVAL_ONLY_TOOL_NAMES]
+
+/** True when `name` is a known bare tool name (product or eval-only). */
+export function isKnownToolName(name: unknown): boolean {
+  return typeof name === 'string' && KNOWN_TOOL_NAMES.includes(name)
+}
+
 export type HostedToolName = (typeof HOSTED_TOOLS)[number]
 export type SignerToolName = (typeof SIGNER_TOOLS)[number]
 
-const TOOL_NAME_SET = new Set<string>(ALL_TOOL_NAMES)
+const TOOL_NAME_SET = new Set<string>(KNOWN_TOOL_NAMES)
 const PAYMENT_TOOL_SET = new Set<string>(PAYMENT_TOOLS)
 
 /**
@@ -134,7 +155,7 @@ export function bareToolName(recorded: string): string {
   if (TOOL_NAME_SET.has(lastSegment)) return lastSegment
   // Single-underscore joiners: the longest known name the string ENDS with
   // wins, so `x_haven_pay_mcp_tool` is not read as `x_haven_pay`.
-  const candidates = ALL_TOOL_NAMES.filter((t) => recorded.endsWith(`_${t}`))
+  const candidates = KNOWN_TOOL_NAMES.filter((t) => recorded.endsWith(`_${t}`))
   if (candidates.length > 0) {
     return candidates.reduce((a, b) => (b.length > a.length ? b : a))
   }

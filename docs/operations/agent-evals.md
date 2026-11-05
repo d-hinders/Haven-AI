@@ -12,6 +12,7 @@ covers:
   - packages/qa-agent/src/evals/summary.ts
   - .github/workflows/agent-evals.yml
   - scripts/ci/agent-evals-workspace-deps.test.mjs
+  - scripts/qa/discovery-reach.mjs
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/boot.ts
   - packages/sdk/src/skill-content.ts
@@ -25,7 +26,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-05"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -314,6 +315,90 @@ or uploaded.
 `qa-<label>-<rand>@haven.test` and `QA <label> (throwaway)`. Neither may
 drift, or the purge would miss the rows this slice creates.
 
+## The cold-agent onboarding tasks (#4680)
+
+Two `onboarding` tasks move the cold-agent scenario into the suite, up to the
+login wall. They are the CI half of the scenario the
+[`qa-explore-ui-cadence`](qa-explore-ui-cadence.md) § *Second scenario* used to
+run only as an owner-armed Routine.
+
+| Task | What it measures |
+|---|---|
+| `onboarding-cold-setup` | A fresh agent gets the dev landing URL and "Set it all up so my agent can pay for things", with **no path named**. Four scores, below. |
+| `onboarding-client-out-of-date` | Run 2b of the 2026-09-28 report: given only the `/for-agents.md` URL and "my Haven tools just told me a client is out of date", the agent must reach `/releases` or the manifest **without guessing**, and its answer must name the `@haven_ai/connect` `--doctor` command. It passes only on both. |
+
+### The cold profile
+
+`profile: "cold"` is Claude-lane only (`lanes: ["claude-code"]`; the Hermes
+lane reports the task `skipped`, and a skipped task never counts as passed).
+For each trial the harness:
+
+- builds a **per-trial `HOME`** (`QA_EVAL_TRIAL_HOME`), because `haven login`
+  writes a session that would otherwise end coldness for later trials;
+- writes an MCP config holding **one** server, the eval-only `run_command`
+  tool — no Haven MCP, no signer, no credential file;
+- spawns `claude` with a **scrubbed env**: `HAVEN_*` and `AGENT_EVALS_*` are
+  stripped by prefix, and the harness's own `QA_EVAL_*` credential values are
+  stripped by name. `CLAUDE_CODE_OAUTH_TOKEN` stays (it authenticates
+  `claude`, not Haven). A test asserts the env passed to spawn and to the
+  command tool;
+- renders `{landing_url}` from the workflow input `dev_landing_url`
+  (`QA_EVAL_DEV_LANDING_URL`), never from the task file, so the same task runs
+  against a preview or a local target.
+
+`run_command` runs an **argv array with no shell**. It accepts only
+`npx [-y] <the CLI package the manifest serves> <allowed subcommand>`, where
+the package is read from the deployment's manifest at trial start
+(`packages.cli.one_liner`) and the subcommands are the ones that make sense
+before the wall: `--help`, `--version`, `login`, `logout`, `whoami`, `guide`,
+and the read-only `wallets` / `activity` / `catalog` / `contacts`
+subcommands. `Bash` stays denied — a shell-prefix allowlist is too easy to get
+wrong — and `agents connect` is deliberately absent (it is #4682's slice).
+Adversarial tests prove `&& env`, command substitution, an alternate package,
+a file read and an arbitrary subcommand are all refused, and that the
+manifest's CLI command works.
+
+### The four scores
+
+Each score is reported as a **number** beside its verdict (`GraderResult.score`),
+in the JSON report and in both summaries. A band that fell from 3 to 2 must be
+visible, not hidden behind a pass/fail. The threshold is stated in the task
+file.
+
+| Score | Grader | Reading | Passes at |
+|---|---|---|---|
+| 1. Discovery | `onboarding_discovery` | Band 0–3: the **shortest advertised route** the agent actually used. **Band 3 credits any of the three hooks** `scripts/qa/discovery-reach.mjs:51-58` recognises — the `rel="alternate"` link, the visible sentence, the footer link (all three point at `/llms.txt` today). Band 2 = via `robots.txt`/`sitemap.xml`; band 1 = a guessed path; 0 = never reached. | 3 |
+| 2. First reply | `onboarding_first_reply` | How many of the manifest's `human_only_steps` the first reply names: `signup_and_passkey`, `fund`, `approve_budget` (`capability-manifest.ts` `HUMAN_ONLY_STEPS`). **Out of three**, not the old rubric's four: credential rotation is not a setup step, and grading against the manifest means the score follows the product (2026-09-28 report, finding 5). | 3 of 3 |
+| 3. Tool calls to the wall | `onboarding_tool_calls` | Calls from the start of the run to the first `login` command. Lower is better; the number is only meaningful as a diff against the previous run. | ≤ 12 |
+| 4a. `haven login` | `onboarding_login_command` | Did the agent run the device-login command? Accepts **both** `npx <pkg> login …` (the manifest's `one_liner`) and `npx -y <pkg> login …` (what the 2026-09-28 agent ran), so it cannot go falsely red. | 1 |
+
+Score 4 grades **only 4a**, the login command, because this slice stops at the
+login wall. 4b, `agents connect`, moves to #4682.
+
+### Baseline and artifacts
+
+**Owner decision 2026-11-05: scores from this setup start a new baseline.** A0
+([`agent-first-cold-test-2026-09-04.md`](../bug-reports/agent-first-cold-test-2026-09-04.md))
+stays as history and is **not directly compared**, as #2538 requires for any CI
+replacement. `scripts/qa/discovery-reach.mjs` stays as the deterministic
+ceiling.
+
+Scores are **committed records**, not artifacts: the JSON report and both
+summaries carry them per trial, and the run id in the PR is the pointer. That
+keeps run-to-run comparison simple — the same report shape the rest of the
+suite already uses — and avoids a second artifact channel to reconcile.
+
+**Model:** the workflow pins `--model sonnet`; the 2026-09-28 run used
+sub-agents of the orchestrator's model. The rubric is stated for the pinned
+model, and the report records the model the stream actually reported.
+
+**The live red:** the acceptance asks for a live red with all three hooks
+removed on a preview or local target (they all point at `/llms.txt`,
+`discovery-surfaces.test.ts`). That run needs the owner-approved `agent-evals`
+environment and a spend, so this slice ships the **recorded-log red** instead:
+`graders.test.ts` proves discovery falls to band 1 on a log that requested
+`/for-agents.md` first, and band 0 when it never arrived. The live red is
+owner-armed with the rest of the lane.
 ## Receipts and task budgets (#4677)
 
 Two tasks cover the agent flows that retiring the exploratory `/qa-dev`

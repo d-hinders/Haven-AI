@@ -1,0 +1,111 @@
+name: QA — purge throwaway identities (dev)
+
+# #4679 (epic #4674). Five deterministic money-flow scenarios provision a
+# throwaway identity on every run and only revoke its agent, so users, accounts,
+# agents, budgets and payment rows accumulate in the dev database. No route
+# deletes a user and `DELETE /user/accounts/:id` only unlinks, so the clean-up
+# is this manual workflow rather than an ops-console action: `/ops` stays
+# read-only (epic #3507) and no delete route ships in the backend, which
+# production shares (owner decision 2026-11-05).
+#
+# ## Guards, in the order they fire
+#
+#   1. `workflow_dispatch` only, and the job refuses any ref but `dev`.
+#   2. The job runs inside the protected `qa-purge-dev` environment. That
+#      environment holds the dev-only database credential and the allowlisted
+#      target tuple; it is NOT committed, because the repo is public. Required
+#      reviewers on the environment are what make "any of the three maintainers
+#      can approve" true — that is a repository setting, not workflow code.
+#   3. The credential is the primary guard. The secondary guard identifies the
+#      DATABASE, not only its endpoint: the script compares the URL's exact
+#      host, port and database name with the allowlisted tuple, then — after
+#      connecting and before any query, dry run included — verifies the
+#      server's own identity (`current_database()` and
+#      `pg_control_system().system_identifier`). The system identifier is there
+#      because Railway's default database is called `railway` in both the dev
+#      and the production project, so the name alone proves nothing.
+#   4. Dry run is the default. Deleting needs `dry_run: false` explicitly.
+#   5. Retention is validated as an integer from 1 to 365 before connecting.
+#      `0`, negative and malformed values are refused; there is no zero-day
+#      override.
+#
+# ## What it deletes, and what it keeps
+#
+# Only rows that meet BOTH conditions: the email is `qa-%@haven.test` AND the
+# name is `QA <label> (throwaway)`. The standing QA identity's email
+# (`qa-delegation-<hex>@haven.test`) fits the email pattern but its name is
+# `QA Bot`, so it survives at any age — deleting it would remove the user,
+# agent and budget that `qa-dev.yml` and the release gate depend on.
+#
+# `machine_payment_receipts` and `accounting_webhook_deliveries` survive via
+# `ON DELETE SET NULL`, and the gas ledgers (`relayer_gas_events`,
+# `sponsored_userop_gas_events`) have no foreign key. Dev's gas accounting
+# stays true. On-chain state and any stranded test USDC stay too: the ephemeral
+# owner key is gone, so nothing here can move them.
+#
+# One transaction per user. A failure leaves that user whole, the run continues
+# so the summary is complete, and the job exits nonzero — a partly failed
+# destructive run must never look green.
+#
+# Operator steps (create the environment, set the credential and the tuple, one
+# dry run then one real run) are in docs/operations/agent-qa.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: report what would be deleted and delete nothing'
+        type: boolean
+        default: true
+      retention_days:
+        description: 'Delete throwaway identities older than this many days (1-365)'
+        type: string
+        default: '7'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-purge-throwaways
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    name: Purge throwaway QA identities
+    if: github.repository == 'd-hinders/Haven-AI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: qa-purge-dev
+
+    steps:
+      - name: Refuse anything but dev
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/dev" ]; then
+            echo "::error::This workflow only runs from dev (got $GITHUB_REF)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Purge throwaway QA identities
+        env:
+          # The credential is the primary guard; the tuple is the secondary one.
+          # Both live in the protected environment, never in the repository.
+          QA_PURGE_DATABASE_URL: ${{ secrets.QA_PURGE_DATABASE_URL }}
+          QA_PURGE_ALLOWED_HOST: ${{ vars.QA_PURGE_ALLOWED_HOST }}
+          QA_PURGE_ALLOWED_PORT: ${{ vars.QA_PURGE_ALLOWED_PORT }}
+          QA_PURGE_ALLOWED_DATABASE: ${{ vars.QA_PURGE_ALLOWED_DATABASE }}
+          QA_PURGE_ALLOWED_SYSTEM_IDENTIFIER: ${{ vars.QA_PURGE_ALLOWED_SYSTEM_IDENTIFIER }}
+        run: |
+          args=(--retention-days "${{ inputs.retention_days }}")
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            args+=(--apply)
+          fi
+          npm run -s qa:purge-throwaways -w packages/backend -- "${args[@]}"

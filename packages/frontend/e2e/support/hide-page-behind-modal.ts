@@ -58,8 +58,9 @@ import type { Locator } from '@playwright/test'
  * shape: an overlay that is a direct child of `<body>` would hide nothing and leave
  * the leak in place, and a `role="dialog"` panel with no backdrop beside it in a fixed
  * parent has no overlay to keep. `MoreSheet` is that case: its scrim sits directly in
- * the app frame, and taking that as the overlay would keep the whole page painted. An assertion failing here aborts `update-visual-baselines.yml`
- * before its commit step (#3441), which is the point.
+ * the app frame, and taking that as the overlay would keep the whole page painted.
+ * An assertion failing here aborts `update-visual-baselines.yml` before its commit
+ * step (#3441), which is the point.
  *
  * Call it last, right before the shutter: it edits the page.
  *

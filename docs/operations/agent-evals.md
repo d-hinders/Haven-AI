@@ -445,7 +445,7 @@ should treat 3 as "not run" and skip any comparison).
   the EIP-3009 bridge the settle answers `settled: true` for the merchant's
   zero hash, so the agent is never told funds are stranded. Cost per trial:
   0 on erc7710, 500 atomic (0.0005 USDC) on the EIP-3009 funding leg,
-  which a sweep would not restore. When the one purchase reads back
+  spent from the period budget for good: a sweep returns the USDC to the account but not the budget. When the one purchase reads back
   settled with an amount, the grader reports that spend
   (`settledSpendAtomic`), and the runner treats any passing grader that
   reports a spend like a settlement grader, so the next trial's budget read

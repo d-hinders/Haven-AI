@@ -14,11 +14,11 @@ import type { Locator } from '@playwright/test'
  *     clip rounds out to whole pixel rows, and the clip's first and last rows are
  *     then not panel paint either.
  *
- * Measured on `agents-issue-sub-budget-empty-desktop` (714.75 px, a 448x716 clip):
- * the leaked bottom row carried the agent page's "Confirming" status badge, so a
- * change to that page's table (#3811's counterparty rules) re-rendered the MODAL
- * baseline with the modal itself byte-identical: 23–78 antialiased pixels at
- * y 703–715, none inside the modal.
+ * When #3872 was measured, `agents-issue-sub-budget-empty-desktop` was a 714.75 px
+ * panel in a 448x716 clip: the leaked bottom row carried the agent page's
+ * "Confirming" status badge, so a change to that page's table (#3811's counterparty
+ * rules) re-rendered the MODAL baseline with the modal itself byte-identical: 23–78
+ * antialiased pixels at y 703–715, none inside the modal.
  *
  * ── What this does ────────────────────────────────────────────────────────────
  *
@@ -38,6 +38,9 @@ import type { Locator } from '@playwright/test'
  * What still reaches the edge pixels is the ancestors' own background (the page's
  * base surface token) and the backdrop's own colour. Both are a change to every
  * modal, not to the page behind one.
+ *
+ * It is a snapshot of the DOM at the call. A node added to an on-path level after it,
+ * or a descendant with an explicit `visibility: visible`, would still paint.
  *
  * It throws rather than hiding nothing, or the wrong thing, on a dialog of another
  * shape: a wrapper that is a direct child of `<body>` would hide nothing and leave

@@ -34,9 +34,10 @@
  * the specimen card. A panel clip is not all panel: the 14 px corners (168 px
  * outside the arc), and the edge rows where the clip rounds out to whole rows, show
  * the backdrop (#3872). So the page behind the dialog is hidden before every panel
- * capture (`hidePageBehindModal`): a change to the dashboard cannot move these
- * baselines, and only the dialog, or the base surface and backdrop every modal
- * shares, can. The specimen card has no dialog around it, so nothing is hidden there.
+ * capture (`hidePageBehindModal`): while the capture's own DOM is static, the page
+ * behind cannot move these baselines, and only the dialog, or the base surface and
+ * backdrop every modal shares, can. The specimen card has no dialog around it, so
+ * nothing is hidden there.
  *
  * The dialog carries no wall-clock text, but the page behind renders relative
  * timestamps until it is hidden, so the clock is frozen anyway. Kept to

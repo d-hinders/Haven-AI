@@ -221,6 +221,7 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['onboarding_login_command', 'threshold', 1],
     ['client_out_of_date', 'releasesPath', '/releases'],
     ['client_out_of_date', 'manifestPath', '/.well-known/haven.json'],
+    ['client_out_of_date', 'startPath', '/for-agents.md'],
     ['client_out_of_date', 'mustMention', ['@haven_ai/connect', '--doctor']],
   ]
 

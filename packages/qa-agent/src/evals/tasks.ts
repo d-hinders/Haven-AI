@@ -103,7 +103,7 @@ function validateGraderOptions(grader: { name: GraderName; options?: unknown }, 
   const isToolName = (v: unknown): boolean => isKnownToolName(v)
   const isNonNegativeInteger = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v) && v >= 0
   const isStringArray = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every(nonEmptyString)
-  for (const key of ['errorCode', 'name', 'after', 'target', 'package', 'releasesPath', 'manifestPath'] as const) {
+  for (const key of ['errorCode', 'name', 'after', 'target', 'package', 'releasesPath', 'manifestPath', 'startPath'] as const) {
     if (key in o && !nonEmptyString(o[key])) {
       return `${file}: ${name} options.${key} must be a non-empty string, got ${JSON.stringify(o[key])}`
     }

@@ -1072,6 +1072,30 @@ describe('onboarding_discovery — band 3 credits any landing-HTML hook', () => 
     expect(r.detail).toContain('guessed path')
   })
 
+  it('band 1: a hook requested WITHOUT reading the landing page is a guess, not a followed hook', () => {
+    // The hooks live in the landing HTML. An agent that fetches /llms.txt
+    // first guessed a well-known path; it did not follow an advertised hook.
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
+  it('band 1: a hook requested BEFORE the landing page is still a guess', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
   it('band 0: never reached', () => {
     const r = onboardingDiscovery(log([fetchCall('https://dev.example/')]), coldCtx(), opts)
     expect(r.score).toBe(0)
@@ -1186,8 +1210,31 @@ describe('client_out_of_date — reach the release record AND name --doctor', ()
     expect(r.detail).toContain('never requested')
   })
 
+  it('fails when the release record was reached by GUESSING — /releases with no /for-agents.md', () => {
+    // The exact false pass the round-1 review proved: the only fetch is
+    // /releases, the given page was never read, and the answer names the
+    // doctor command. A guessed path is not a route the page advertised.
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/releases')], 'Run npx -y @haven_ai/connect@dev --doctor, then any repair line it prints.'),
+    )
+    expect(r.pass).toBe(false)
+    expect(r.score).toBe(0)
+    expect(r.detail).toContain('guessed path')
+    expect(r.detail).toContain('/for-agents.md')
+  })
+
+  it('fails when the release record was requested BEFORE the given page', () => {
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/releases'), fetchCall('https://dev.example/for-agents.md')], 'Run npx -y @haven_ai/connect@dev --doctor.'),
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
   it('fails when the answer does not name the doctor command', () => {
-    const r = clientOutOfDate(log([fetchCall('https://dev.example/releases')], 'Something changed; update your packages.'))
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/for-agents.md'), fetchCall('https://dev.example/releases')], 'Something changed; update your packages.'),
+    )
     expect(r.pass).toBe(false)
     expect(r.detail).toContain('--doctor')
   })

@@ -831,12 +831,15 @@ function landingPath(ctx: GraderContext): string | undefined {
  * merely whether it arrived: the hooks are redundant, so a score that only
  * asks "did it arrive" cannot fall when one hook is removed.
  *
- *   3 — the first request after the landing URL was one of the landing-HTML
- *       hooks (`hooks`, the three `discovery-reach.mjs:51-58` recognises: the
- *       `rel="alternate"` link, the visible sentence, the footer link), and
- *       the target was reached;
+ *   3 — the landing page was requested, and the first request after it was one
+ *       of the landing-HTML hooks (`hooks`, the three
+ *       `discovery-reach.mjs:51-58` recognises: the `rel="alternate"` link,
+ *       the visible sentence, the footer link), and the target was reached.
+ *       The hooks live in the landing HTML, so a hook requested WITHOUT the
+ *       landing page is a guess at a well-known path, not a followed hook;
  *   2 — reached via `robots.txt` or `sitemap.xml`;
- *   1 — reached by guessing a path (the target requested directly);
+ *   1 — reached by guessing a path (the target requested directly, or a hook
+ *       requested before the landing page was read);
  *   0 — never reached.
  *
  * Options: `hooks` (string[], the hook targets), `target` (string, default
@@ -856,12 +859,19 @@ export function onboardingDiscovery(
   if (!reached) {
     return { pass: false, score: 0, scoreMax: 3, detail: `never requested ${target} — the agent did not reach the runbook (requests: ${paths.join(' → ') || '(none)'})` }
   }
-  const firstHop = paths.find((p) => p !== landing)
+  const landingIndex = landing === undefined ? -1 : paths.indexOf(landing)
+  const firstHopIndex = paths.findIndex((p) => p !== landing)
+  const firstHop = firstHopIndex === -1 ? undefined : paths[firstHopIndex]
   let band: number
   let why: string
-  if (firstHop !== undefined && hooks.includes(firstHop)) {
+  if (firstHop !== undefined && hooks.includes(firstHop) && landingIndex !== -1 && landingIndex < firstHopIndex) {
     band = 3
-    why = `followed the landing-HTML hook ${firstHop}`
+    why = `followed the landing-HTML hook ${firstHop} after reading the landing page ${landing}`
+  } else if (firstHop !== undefined && hooks.includes(firstHop)) {
+    // The hook is advertised in the landing HTML; requesting it without ever
+    // reading that page is a guess at a well-known path, not a followed hook.
+    band = 1
+    why = `requested the hook ${firstHop} without first reading the landing page ${landing ?? '(none given)'} — a guessed path`
   } else if (firstHop === '/robots.txt' || firstHop === '/sitemap.xml') {
     band = 2
     why = `reached it via ${firstHop}`
@@ -1018,27 +1028,43 @@ export function onboardingLoginCommand(
  * command. It passes only on both.
  *
  * Options: `releasesPath` (default `/releases`), `manifestPath` (default
- * `/.well-known/haven.json`), `mustMention` (default `['@haven_ai/connect',
+ * `/.well-known/haven.json`), `startPath` (default `/for-agents.md`, the page
+ * the agent was GIVEN), `mustMention` (default `['@haven_ai/connect',
  * '--doctor']`).
+ *
+ * "Without guessing" is graded, not assumed: the release record must be
+ * requested AFTER the given page. A log whose only fetch is `/releases` is a
+ * guess at a well-known path — the agent never read the page that advertises
+ * it — and fails even when the answer names the doctor command.
  */
 export function clientOutOfDate(
   log: AgentRunLog,
-  options: { releasesPath?: string; manifestPath?: string; mustMention?: string[] } = {},
+  options: { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] } = {},
 ): GraderResult {
   const releases = options.releasesPath ?? '/releases'
   const manifest = options.manifestPath ?? '/.well-known/haven.json'
+  const startPath = options.startPath ?? '/for-agents.md'
   const mustMention = options.mustMention ?? ['@haven_ai/connect', '--doctor']
   const paths = requestedPaths(log)
-  const reached = paths.includes(releases) || paths.includes(manifest)
+  const releaseIndex = paths.findIndex((p) => p === releases || p === manifest)
   const message = (log.finalMessage ?? '').trim()
   const missing = mentionsSatisfied(message, mustMention)
-  if (!reached) {
+  if (releaseIndex === -1) {
     return { pass: false, score: 0, detail: `never requested ${releases} or ${manifest} — the agent did not reach the release record (requests: ${paths.join(' → ') || '(none)'})` }
+  }
+  const startIndex = paths.indexOf(startPath)
+  if (startIndex === -1 || startIndex >= releaseIndex) {
+    const how = startIndex === -1 ? `without ever requesting the given ${startPath}` : `before the given ${startPath}`
+    return {
+      pass: false,
+      score: 0,
+      detail: `requested ${paths[releaseIndex]} ${how} — a guessed path, not a route the given page advertised (requests: ${paths.join(' → ')})`,
+    }
   }
   if (missing.length > 0) {
     return { pass: false, score: 0, detail: `reached the release record but the answer is missing ${missing.map((m) => JSON.stringify(m)).join(', ')} — the #3412 contract is \`npx -y @haven_ai/connect@<channel> --doctor\`` }
   }
-  return { pass: true, score: 1, scoreMax: 1, detail: `reached ${paths.includes(releases) ? releases : manifest} and named ${mustMention.join(' + ')}` }
+  return { pass: true, score: 1, scoreMax: 1, detail: `reached ${paths[releaseIndex]} after the given ${startPath} and named ${mustMention.join(' + ')}` }
 }
 
 /** The grader registry a task file may name. Closed on purpose. */
@@ -1060,7 +1086,7 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   onboarding_first_reply: (log, _ctx, options) => onboardingFirstReply(log, options as { steps?: string[]; threshold?: number }),
   onboarding_tool_calls: (log, _ctx, options) => onboardingToolCalls(log, options as { max?: number }),
   onboarding_login_command: (log, ctx, options) => onboardingLoginCommand(log, ctx, options as { package?: string; threshold?: number }),
-  client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; mustMention?: string[] }),
+  client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] }),
 }
 
 /**
@@ -1089,7 +1115,7 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   onboarding_first_reply: ['steps', 'threshold'],
   onboarding_tool_calls: ['max'],
   onboarding_login_command: ['package', 'threshold'],
-  client_out_of_date: ['releasesPath', 'manifestPath', 'mustMention'],
+  client_out_of_date: ['releasesPath', 'manifestPath', 'startPath', 'mustMention'],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

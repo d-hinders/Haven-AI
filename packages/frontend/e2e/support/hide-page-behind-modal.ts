@@ -49,7 +49,9 @@ import type { Locator } from '@playwright/test'
  * not to the page behind one.
  *
  * It is a snapshot of the DOM at the call. A node added to an on-path level after it,
- * or a descendant with an explicit `visibility: visible`, would still paint.
+ * or a descendant with an explicit `visibility: visible`, would still paint. So would
+ * a sibling that is not an `HTMLElement` (an SVG, a bare text node), and an on-path
+ * ancestor's pseudo-elements or outline. No modal clipped today has one of these.
  *
  * It throws rather than hiding nothing, or the wrong thing, on a dialog of another
  * shape: an overlay that is a direct child of `<body>` would hide nothing and leave

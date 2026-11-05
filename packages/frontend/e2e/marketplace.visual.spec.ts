@@ -389,7 +389,8 @@ test.describe('marketplace visual regression', () => {
    * Accounting backfill dialog (`settings-accounting.visual.spec.ts`), not a
    * full-page SCENARIOS entry: the dialog is the same size regardless of the
    * page behind it, and that page is hidden before each clip, since the rounded
-   * corners would otherwise show it (`hidePageBehindModal`, #3872).
+   * corners and any rounded-out edge row would otherwise show it
+   * (`hidePageBehindModal`, #3872).
    * `havenDemoStore`'s one offer already advertises ERC-7710
    * (`fixtures/marketplace.ts`), so only its `funding` and an eligible agent
    * on its chain (84532) need overriding here — `testAgent` is chain 8453,

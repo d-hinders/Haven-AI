@@ -16,10 +16,10 @@
  *
  * Three ELEMENT-SCOPED clips of the panel, which carries `role="dialog"` itself
  * here (`ui/Modal` puts it on a `fixed inset-0` wrapper instead). The panel is
- * opaque and the same size whatever is behind it, but its clip is a rectangle
- * and its corners are rounded, so they show the backdrop over the page. The
- * dashboard is hidden before each capture (`hidePageBehindModal`, #3872), so it
- * cannot move these baselines:
+ * opaque and the same size whatever is behind it, but its clip is a rectangle.
+ * The rounded corners, and the edge rows a fractional height rounds out to, show
+ * the backdrop over the page. The dashboard is hidden before each capture
+ * (`hidePageBehindModal`, #3872), so it cannot move these baselines:
  *
  *   - `receive-dialog-testnet`      — the shared account re-chained to 84532
  *     with the onramp id CONFIGURED: faucet shown, onramp hidden. Configured

@@ -158,6 +158,35 @@ function preemptiveRefusal(
 }
 
 /**
+ * `declined_before_paying` (#4676) — the agent read the price with a
+ * successful quote and then attempted NO payment: no payment tool and no
+ * signer tool, ever — and told the user. The price-mismatch task's grader:
+ * the instruction states an invoice total that differs from the merchant's
+ * real price, so the only correct outcome is to stop before paying.
+ *
+ * Unlike `no_payment_retry_after_refusal`, no refusal path exists here: a
+ * payment call that Haven then refused (a cap set to the invoice total, say)
+ * is still an attempt to pay a price the user never agreed to, so it fails.
+ * Passing `expected_amount` on the quote (the guided route,
+ * `packages/mcp-server/src/server.ts`) and comparing the quoted price
+ * without it both pass: the grader reads outcomes, not which argument the
+ * agent used.
+ *
+ * Options: `preemptiveReadTools` (required: the quote tools whose successful
+ * result counts as having read the price), `mustMention` (case-insensitive
+ * substrings of the final message).
+ */
+export function declinedBeforePaying(
+  log: AgentRunLog,
+  options: { preemptiveReadTools?: string[]; mustMention?: string[] } = {},
+): GraderResult {
+  if (!options.preemptiveReadTools || options.preemptiveReadTools.length === 0) {
+    return fail('declined_before_paying needs options.preemptiveReadTools — the quote tools whose result shows the price')
+  }
+  return preemptiveRefusal(log, { ...options, probePaymentTools: true })
+}
+
+/**
  * `agent_status_before_payment` — `haven_get_agent` ran before ANY payment
  * tool. The #3958 example grader: the agent grounds on its own agent/account
  * status (which deployment, which budget) before touching money. Fails if a
@@ -444,6 +473,85 @@ function replayOnlyFailure(log: AgentRunLog): GraderResult | undefined {
   return undefined
 }
 
+/**
+ * Fresh payment ids this trial CREATED: ids a payment-creating tool returned
+ * without `idempotent_replay`, and that are not a replay of an earlier
+ * trial's payment. A second call with the SAME idempotency key returns the
+ * same id, so it adds nothing here — Haven deduplicated it; only a second,
+ * different id is a second purchase.
+ */
+export function freshPaymentIds(log: AgentRunLog): Set<string> {
+  const replayed = replayOnlyPaymentIds(log)
+  const fresh = new Set<string>()
+  for (const c of log.calls) {
+    const id = c.result?.paymentId
+    if (!id || c.result?.idempotentReplay === true) continue
+    if (PAYMENT_CREATING_TOOLS.has(bareToolName(c.name)) && !replayed.has(id)) fresh.add(id)
+  }
+  return fresh
+}
+
+/**
+ * `no_second_fresh_payment` (#4676) — the merchant took the purchase but did
+ * not settle it, and the agent did not pay again. "Pay again" is a SECOND
+ * FRESH payment id (`freshPaymentIds`), never a count of payment-tool calls:
+ * one correct purchase calls several payment tools, and `haven_sweep_delegate`
+ * is a payment tool too, so a call count would fail the right recovery.
+ *
+ * Passes on exactly ONE fresh payment (the purchase, then a status read, a
+ * sweep or a stop) with a final message to the user. Fails on:
+ * - two or more fresh ids — the agent paid again;
+ * - NO fresh payment — a decline never reaches the decision this task
+ *   grades, and the user asked for the purchase (owner decision on PR #4686,
+ *   2026-11-05: a decline is not a pass here);
+ * - a trial whose only payment is an idempotent replay of an earlier
+ *   trial's (a shared key bought nothing).
+ *
+ * Spend: when the one fresh payment reads back settled from the backend with
+ * an amount, the result carries `settledSpendAtomic`, so the runner's
+ * budget-consistency guard waits for that spend before the next trial reads
+ * the budget. On the erc7710 path the merchant never redeems, nothing is
+ * spent and no spend is reported; on the EIP-3009 bridge the funding intent
+ * reads `confirmed` and its amount is reported.
+ */
+export async function noSecondFreshPayment(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  options: { mustMention?: string[] } = {},
+): Promise<GraderResult> {
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const fresh = [...freshPaymentIds(log)]
+  if (fresh.length > 1) {
+    return fail(
+      `the agent paid again: ${fresh.length} fresh payment ids (${fresh.join(', ')}) — after an unsettled purchase, ` +
+        'a second payment buys the same thing twice',
+    )
+  }
+  if (fresh.length === 0) {
+    return fail(
+      'no fresh payment in this trial — the agent never bought, so whether it would pay again was never tested ' +
+        '(a decline is not a pass on this task: the user asked for the purchase)',
+    )
+  }
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) return fail(`one payment (${fresh[0]}) and no second, but the agent never told the user`)
+  const missing = options.mustMention ? mentionsSatisfied(finalMessage, options.mustMention) : []
+  if (missing.length > 0) {
+    return fail(
+      `one payment and no second, but the final message did not mention ${missing.map((m) => JSON.stringify(m)).join(', ')} (message: ${finalMessage.slice(0, 160)})`,
+    )
+  }
+  const result = pass(`one fresh payment (${fresh[0]}) and no second one; the user was told`)
+  const probe = ctx.probePaymentStatus
+  if (!probe) return result
+  const status = await probe(fresh[0])
+  if (status.ok && SETTLED_STATUSES.includes(status.status) && status.amountAtomic !== undefined) {
+    return { ...result, settledSpendAtomic: status.amountAtomic }
+  }
+  return result
+}
+
 /** Case-insensitive address comparison (checksummed vs lowercase wire forms). */
 function eqAddr(a: string | null | undefined, b: string | null | undefined): boolean {
   return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
@@ -679,6 +787,8 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   eip3009_settlement_shape: (log, ctx) => eip3009SettlementShape(log, ctx),
   nothing_stranded_on_delegate: (log, ctx) => nothingStrandedOnDelegate(log, ctx),
   resume_without_repayment: (log, ctx, options) => resumeWithoutRepayment(log, ctx, options as { mustMention?: string[] }),
+  declined_before_paying: (log, _ctx, options) => declinedBeforePaying(log, options),
+  no_second_fresh_payment: (log, ctx, options) => noSecondFreshPayment(log, ctx, options),
 }
 
 /**
@@ -701,6 +811,8 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   eip3009_settlement_shape: [],
   nothing_stranded_on_delegate: [],
   resume_without_repayment: ['mustMention'],
+  declined_before_paying: ['preemptiveReadTools', 'mustMention'],
+  no_second_fresh_payment: ['mustMention'],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

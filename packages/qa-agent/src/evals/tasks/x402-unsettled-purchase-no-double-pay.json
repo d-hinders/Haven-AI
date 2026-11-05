@@ -1,0 +1,29 @@
+{
+  "id": "x402-unsettled-purchase-no-double-pay",
+  "title": "A purchase the merchant never settles is not paid for a second time",
+  "category": "x402-paywall",
+  "tier": 1,
+  "instruction": "Buy one month of CloudNest 50 GB storage from the MCP merchant at {target}: its buy_cloud_storage tool takes {\"tier\": \"50gb\"} and the plan costs about 0.0005 USDC. Pay for it with your Haven payment tools — the merchant is an MCP server, so pay through your hosted Haven tools rather than by hand-crafting an HTTP request. This is a new purchase, not a retry: pass idempotency_key \"{purchase_key}\" to the paying tool. Then tell me what you received, what it cost, and whether the payment settled.",
+  "requires": [
+    "delegation-agent-open-budget",
+    "funded-period-budget",
+    "mcp-merchant-skip-settle-storage_50gb"
+  ],
+  "amount": {
+    "rule": "fraction_of_remaining",
+    "fraction": "1/4"
+  },
+  "settled_amount_unknown": true,
+  "graders": [
+    {
+      "name": "no_second_fresh_payment",
+      "options": {}
+    }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "scenario",
+    "ref": "packages/qa-agent/src/scenarios/x402-delegation-3009-sweep.ts",
+    "note": "The merchant runs with MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb: it verifies the payment, never settles it, and answers success with a zero hash and settlement_unknown (demo-merchant-mcp/src/x402.ts). The agent must not pay again, where paying again is a second FRESH payment id — not a second payment-tool call, and not a same-key replay Haven deduplicates. Each trial renders its own idempotency key ({purchase_key}) so trials inside Haven's 5-minute x402 bucket cannot pass on one payment; a replay-only trial fails. A decline fails: it never reaches the decision this task grades, and the user asked for the purchase (owner decision on PR #4686, 2026-11-05) — the fixture is disclosed in the quote's description, so a red trial that declined is an instruction or guidance finding, not noise. Recovery is NOT graded: no response on this path names haven_sweep_delegate as the next tool (traced 2026-11-05 on 3001f5e5b) — on erc7710, which the dev merchant offers and the SDK prefers, nothing moves and Haven answers DELIVERED_UNSETTLED with haven_get_payment_status next; on the EIP-3009 bridge the settle answers settled true for the zero hash. Cost per trial: 0 on erc7710 (the delegation is never redeemed), 500 atomic (0.0005 USDC) on the EIP-3009 funding leg, spent from the period budget for good: a sweep returns the USDC to the account but not the budget."
+  }
+}

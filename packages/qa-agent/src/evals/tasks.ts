@@ -75,7 +75,9 @@ export function fractionOfRemaining(remaining: bigint, fraction: string): bigint
 function validateGraderOptions(grader: { name: GraderName; options?: unknown }, file: string): string | null {
   const { name, options } = grader
   if (options === undefined) {
-    return name === 'tool_called' ? `${file}: tool_called needs options.name — the tool it grades` : null
+    if (name === 'tool_called') return `${file}: tool_called needs options.name — the tool it grades`
+    if (name === 'declined_before_paying') return `${file}: declined_before_paying needs options.preemptiveReadTools — the quote tools whose successful result shows the price`
+    return null
   }
   if (typeof options !== 'object' || options === null || Array.isArray(options)) {
     return `${file}: ${name} options must be an object`
@@ -110,6 +112,9 @@ function validateGraderOptions(grader: { name: GraderName; options?: unknown }, 
   }
   if ('preemptiveReadTools' in o && (!Array.isArray(o.preemptiveReadTools) || o.preemptiveReadTools.length === 0 || !o.preemptiveReadTools.every(isToolName))) {
     return `${file}: ${name} options.preemptiveReadTools must be a non-empty array of known bare tool names (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.preemptiveReadTools)}`
+  }
+  if (name === 'declined_before_paying' && !('preemptiveReadTools' in o)) {
+    return `${file}: declined_before_paying needs options.preemptiveReadTools — the quote tools whose successful result shows the price`
   }
   if (name !== 'tool_called') return null
   if (!isToolName(o.name)) {
@@ -284,6 +289,12 @@ export function validateTask(raw: unknown, file: string): string | null {
   }
   // Coherence: a transfer-expecting task must carry a transfer grader, and a
   // task that never expects a transfer must not carry one.
+  // Two spend reporters on one task would make the consistency guard deduct
+  // the same purchase twice (#4676; cli.ts sums every reported spend).
+  const spendReporters = (graders as Array<{ name: string }>).filter((g) => g.name === 'payment_status_settled' || g.name === 'no_second_fresh_payment')
+  if (spendReporters.length > 1) {
+    return `${file}: ${spendReporters.map((g) => g.name).join(' + ')} both report a trial's spend — the budget-consistency guard would deduct one purchase twice; keep one`
+  }
   const hasTransferGrader = (graders as Array<{ name: string }>).some((g) => g.name === 'transfer_settled')
   if (t.expectTransfer && !hasTransferGrader) {
     return `${file}: expectTransfer=true without a transfer_settled grader — the transfer would never be proven`

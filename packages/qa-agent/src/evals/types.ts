@@ -290,8 +290,12 @@ export interface ResolvedTask {
 /**
  * One grader's verdict. Same shape spirit as `scenarios/types.ts`.
  *
- * `settledSpendAtomic` is present ONLY on a passing `payment_status_settled`
- * whose probe could read every confirmed payment's amount (#4091): the sum
+ * `settledSpendAtomic` is present ONLY on a passing spend reporter:
+ * `payment_status_settled` whose probe could read every confirmed payment's
+ * amount (#4091), or `no_second_fresh_payment` for its one settled purchase
+ * (#4676). The runner treats ANY passing grader carrying it as a settlement
+ * (`runner.ts` recordSettled), and the loader refuses two reporters on one
+ * task (`tasks.ts`) — a new reporter joins that list. It is the sum
  * the prior trial actually deducted from the budget — the merchant's real
  * price, not the task's resolved `amountAtomic`. The consistency guard uses
  * it to deduct what actually left the budget instead of an invented slice.
@@ -369,3 +373,5 @@ export type GraderName =
   | 'eip3009_settlement_shape'
   | 'nothing_stranded_on_delegate'
   | 'resume_without_repayment'
+  | 'declined_before_paying'
+  | 'no_second_fresh_payment'

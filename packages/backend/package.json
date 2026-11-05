@@ -30,6 +30,7 @@
     "ops:cancel-stuck-attest:built": "node dist/ops/cancel-stuck-lane.js",
     "ops:cancel-stuck-lane:built": "node dist/ops/cancel-stuck-lane.js",
     "db:reap-test-schemas": "node scripts/reap-test-schemas.mjs",
+    "qa:purge-throwaways": "tsx scripts/purge-qa-throwaways.ts",
     "generate:route-modules": "tsx scripts/generate-route-modules.ts",
     "check:route-modules": "tsx scripts/generate-route-modules.ts --check"
   },

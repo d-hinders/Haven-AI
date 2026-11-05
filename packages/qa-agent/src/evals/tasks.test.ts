@@ -57,8 +57,22 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment|declined_before_paying|no_second_fresh_payment)$/)
     }
+  })
+
+  it('the 5-task subset (the workflow\'s --limit=5) is the same five tasks after #4676 added two', async () => {
+    // agent-evals.yml's subset takes the first five tasks of the canonical
+    // order; a new task whose file sorts among them would silently swap one
+    // out (epic #4674 § Bar).
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(selectTaskSequence(tasks, { limit: 5 }).map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+    ])
   })
 
   it('the tier field is present on the real set: exactly one drainer (tier 2) and one exhausted-budget task (tier 3)', async () => {
@@ -193,10 +207,16 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['tool_called', 'name', 'haven_get_allowances'],
     ['tool_called', 'after', 'haven_submit'],
     ['resume_without_repayment', 'mustMention', ['resumed']],
+    ['declined_before_paying', 'preemptiveReadTools', ['haven_quote_x402']],
+    ['declined_before_paying', 'mustMention', ['0.001']],
+    ['no_second_fresh_payment', 'mustMention', ['settle']],
   ]
 
   it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
-    const options: Record<string, unknown> = grader === 'tool_called' ? { name: 'haven_get_allowances' } : {}
+    // declined_before_paying requires preemptiveReadTools, so its other key is
+    // checked alongside it.
+    const options: Record<string, unknown> =
+      grader === 'tool_called' ? { name: 'haven_get_allowances' } : grader === 'declined_before_paying' ? { preemptiveReadTools: ['haven_quote_x402'] } : {}
     options[key] = value
     expect(validateTask(withGraders([{ name: grader, options }]), 'x.json')).toBeNull()
   })
@@ -518,6 +538,8 @@ describe('the tiered run order (#3992 A3)', () => {
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
+      'x402-price-mismatch-invoice',
+      'x402-unsettled-purchase-no-double-pay',
       'direct-send-full-remaining',
       'over-budget-x402-refused',
     ])
@@ -640,13 +662,15 @@ describe('anyTaskUsesTarget — the single-invocation target config (#3958 AC: o
     expect(anyTaskUsesTarget(tasks)).toBe(false)
   })
 
-  it('the real task dir: exactly the three x402 URL tasks use {target}, and the loader validates them', async () => {
+  it('the real task dir: exactly the five x402 URL tasks use {target}, and the loader validates them', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     expect(tasks.filter((t) => t.instruction.includes('{target}')).map((t) => t.id).sort()).toEqual([
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
+      'x402-price-mismatch-invoice',
+      'x402-unsettled-purchase-no-double-pay',
     ])
     // And the direct sends still render {recipient} — the two placeholder kinds
     // cannot be one env var.
@@ -711,5 +735,31 @@ describe('{purchase_key} renders a fresh key per trial', () => {
     expect(key(a)).toMatch(/^eval-x402-eip3009-bridge-vpn-legacy-/)
     expect(key(a)).not.toBe(key(b))
     expect(a).not.toContain('{purchase_key}')
+  })
+})
+
+describe('validateTask — #4676 rules', () => {
+  const base = {
+    id: 'test-task',
+    title: 'T',
+    category: 'x402-paywall',
+    instruction: 'Pay {target}.',
+    requires: [],
+    amount: { rule: 'fraction_of_remaining', fraction: '1/4' },
+    graders: [{ name: 'declined_before_paying', options: { preemptiveReadTools: ['haven_quote_x402'] } }],
+    expectTransfer: false,
+    source: { kind: 'issue', ref: '4676', note: 'n' },
+  }
+
+  it('declined_before_paying is valid with preemptiveReadTools and refused without them', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+    expect(validateTask({ ...structuredClone(base), graders: [{ name: 'declined_before_paying' }] }, 'x.json')).toContain('preemptiveReadTools')
+    expect(validateTask({ ...structuredClone(base), graders: [{ name: 'declined_before_paying', options: { mustMention: ['x'] } }] }, 'x.json')).toContain('preemptiveReadTools')
+  })
+
+  it('refuses two spend reporters on one task (the guard would deduct one purchase twice)', () => {
+    const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }, { name: 'no_second_fresh_payment', options: {} }] }
+    expect(validateTask(t, 'x.json')).toContain('deduct one purchase twice')
+    expect(validateTask({ ...structuredClone(base), graders: [{ name: 'no_second_fresh_payment', options: {} }] }, 'x.json')).toBeNull()
   })
 })

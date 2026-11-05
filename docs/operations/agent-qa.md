@@ -6,6 +6,9 @@ covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-balances.yml
+  - .github/workflows/qa-purge-throwaways.yml
+  - packages/backend/scripts/purge-qa-throwaways.ts
+  - packages/backend/src/infra/repositories/qa-throwaway-purge.ts
   - scripts/ci/qa-failure-issue.mjs
   - scripts/ci/dev-push-health.mjs
   - scripts/ci/qa-balance-issue.mjs
@@ -1105,6 +1108,113 @@ has no environment and cannot read that variable). Until it is set, the row is
    line with accepted USDC claims, a post-top-up balance reflecting them, and
    the on-chain USDC transfer landing in the Hybrid DeleGator eval account —
    record the tx hash on #3997 before closing it.
+
+## Purging throwaway QA identities (dev only)
+
+Five deterministic money-flow scenarios provision a throwaway identity on every
+run (`packages/qa-agent/src/lib/throwaway-identity.ts`) and only revoke its
+agent when they end. The user, account, agent, budget and payment rows stay, so
+they accumulate — and #4678 adds more scenarios. No route deletes a user, and
+`DELETE /user/accounts/:id` only unlinks, so the clean-up is a manual workflow
+against the **dev** database: `/ops` stays read-only (epic #3507) and no delete
+route ships in the backend, which production shares (owner decision
+2026-11-05).
+
+The workflow is `.github/workflows/qa-purge-throwaways.yml`; the script is
+`packages/backend/scripts/purge-qa-throwaways.ts` (logic in
+`packages/backend/src/infra/repositories/qa-throwaway-purge.ts`, tested against
+real Postgres in `src/infra/__tests__/qa-throwaway-purge.test.ts`).
+
+### What it deletes, and what it must never touch
+
+A row matches only when **both** conditions hold:
+
+- the email is `qa-%@haven.test`, and
+- the name is `QA <label> (throwaway)`.
+
+The email pattern alone is not enough. The recipe in
+[Rotate the whole QA identity](#rotate-the-whole-qa-identity) writes
+`SEED_QA_EMAIL=qa-delegation-<hex>@haven.test`, which fits `qa-%@haven.test` and
+has the same shape as the harness's `qa-<label>-<rand>@haven.test`. Deleting it
+would remove the user, agent and budget that `qa-dev.yml` and the release gate
+depend on. The seed's user is named `QA Bot`, so the name condition excludes it
+at any age. Eval accounts are created from the dashboard, not by the harness,
+and do not match either.
+
+Deletion order, measured from a migrated database (`pg_constraint`): payment
+intents, then delegations, then rekeys, then organizations (leaves first), then
+agents, then the user. Everything else cascades. The restricting references
+that force that order are `payment_intents.user_id` and `.agent_id`,
+`agent_rekeys.initiated_by_user_id`, `agent_delegations.rekey_id`,
+`payment_intents.task_budget_id` and `.sub_budget_id`, and
+`agent_organizations.parent_organization_id`. The test reads `pg_constraint`,
+so a future restricting reference to `users` or `agents` turns it red.
+
+**What stays, on purpose:**
+
+- `machine_payment_receipts` and `accounting_webhook_deliveries` survive via
+  `ON DELETE SET NULL` — the receipt keeps its tx hash and amount, it just
+  loses the link to the deleted intent or user.
+- The gas ledgers (`relayer_gas_events`, `sponsored_userop_gas_events`) have no
+  foreign key and are never touched, so dev's gas accounting stays true.
+- On-chain state stays. The throwaway's owner key was ephemeral and is gone, so
+  any test USDC left on its account is stranded; the purge cannot and does not
+  move it.
+
+### Guards
+
+1. `workflow_dispatch` only, and the job refuses any ref but `dev`.
+2. The job runs inside the protected **`qa-purge-dev`** environment. That
+   environment holds the dev-only database credential and the allowlisted
+   target tuple; neither is committed, because the repo is public. Required
+   reviewers on the environment are what let any of the three maintainers
+   approve a run.
+3. The credential is the primary guard. The secondary guard identifies the
+   **database, not only its endpoint**: the script compares the URL's exact
+   host, port and database name with the allowlisted tuple (exact equality, not
+   a shared proxy suffix), then — after connecting and before any query, dry
+   run included — verifies the server's own identity: `current_database()` and
+   `pg_control_system().system_identifier`. The system identifier is there
+   because Railway's default database is called `railway` in both the dev and
+   the production project, so the name alone proves nothing.
+4. **Dry run is the default.** Deleting needs `dry_run: false` explicitly.
+5. Retention is validated as an integer from 1 to 365 before connecting. `0`,
+   negative and malformed values are refused; there is no zero-day override.
+
+### Operator steps (once, then per run)
+
+1. Create the GitHub environment `qa-purge-dev` (Settings → Environments) and
+   add the three maintainers as required reviewers.
+2. Add the environment **secret** `QA_PURGE_DATABASE_URL`: the dev database
+   connection string, using the post-rotation credential from epic #4484.
+3. Add the environment **variables** for the allowlisted tuple:
+   `QA_PURGE_ALLOWED_HOST`, `QA_PURGE_ALLOWED_PORT`,
+   `QA_PURGE_ALLOWED_DATABASE`, and `QA_PURGE_ALLOWED_SYSTEM_IDENTIFIER`.
+   Read the last one from the dev database itself:
+
+   ```sql
+   SELECT current_database(), (SELECT system_identifier FROM pg_control_system());
+   ```
+
+   `pg_control_system()` is restricted to superusers by default; Railway's
+   default Postgres user is one. If the credential is not, grant it
+   `EXECUTE` on the function rather than weakening the guard.
+4. Dispatch **QA — purge throwaway identities (dev)** from `dev` with
+   `dry_run: true` (the default) and the retention you want (default 7 days).
+   Read the summary: candidates, and rows per table. Nothing is deleted.
+5. Re-dispatch with `dry_run: false` only when the dry-run counts look right.
+   The summary then reports users deleted and users failed.
+
+### Reading the result
+
+The job summary reports counts per table in both modes, and never prints an
+email, API key or address — the repo is public. Each user is deleted in its own
+transaction: a failure leaves that user whole, the run continues so the summary
+is complete, and **the job exits nonzero if any user failed**. A partly failed
+destructive run cannot look green. A user that keeps failing is usually one
+whose organization is the parent of another user's organization
+(`agent_organizations.parent_organization_id` is `ON DELETE RESTRICT`); that
+reference is not a throwaway's to break, so the run reports it and leaves it.
 
 ## Automation & gating
 

@@ -603,3 +603,37 @@ describe('the per-trial setup hook and its teardown (#4678)', () => {
     expect(used).toEqual(['hook'])
   })
 })
+
+// #4676: no_second_fresh_payment reports the spend of the one purchase it
+// allows; the next trial must wait for it. A decline (a red trial) reports nothing, so the
+// next trial must NOT wait (it would time out on a decrease that never comes).
+describe('a passing grader that reports spend marks the trial settled (#4676)', () => {
+  const STRANDED: EvalTask = { ...TASK, category: 'x402-paywall', graders: [{ name: 'no_second_fresh_payment', options: {} }], settled_amount_unknown: true }
+  const purchase = [
+    { name: 'haven_quote_mcp_tool', result: { ok: true } },
+    { name: 'haven_pay_mcp_tool', result: { ok: true, paymentId: 'pay-1' } },
+  ]
+  const runTwo = async (calls: AgentRunLog['calls'], status: { ok: true; status: string; amountAtomic?: string }) => {
+    const seen: Array<boolean | undefined> = []
+    await runSuite({
+      tasks: [STRANDED],
+      resolveForTrial: async (_task, _trial, prior) => {
+        seen.push(prior?.settled)
+        return resolved()
+      },
+      adapter: fakeAdapter('fake', async () => ({ ...logWith(calls), finalMessage: 'bought it; not settled' })),
+      trials: 2,
+      graderContext: { probePaymentStatus: async () => status },
+    })
+    return seen[1]
+  }
+
+  it('one settled purchase with a known amount: the next trial waits for it', async () => {
+    expect(await runTwo(purchase, { ok: true, status: 'confirmed', amountAtomic: '500' })).toBe(true)
+  })
+
+  it('an unredeemed (submitted) purchase or a failed decline: the next trial does not wait', async () => {
+    expect(await runTwo(purchase, { ok: true, status: 'submitted', amountAtomic: '500' })).toBe(false)
+    expect(await runTwo([{ name: 'haven_quote_mcp_tool', result: { ok: true } }], { ok: true, status: 'confirmed', amountAtomic: '500' })).toBe(false)
+  })
+})

@@ -32,7 +32,8 @@
  * `delegation-send-modal`, the bordered box — not the `role="dialog"` wrapper,
  * which is `fixed inset-0` and would photograph the page behind it, #2903) and
  * the specimen card. The panel is opaque and the same size regardless of the
- * page behind it, so the dashboard's own state cannot leak into a clip.
+ * page behind it, so the dashboard's own state reaches a clip only through the
+ * panel's rounded corners: a few pixels, inside `maxDiffPixels`.
  *
  * The dialog carries no wall-clock text, but the page behind renders relative
  * timestamps, so the clock is frozen anyway — a moving backdrop must never be
@@ -159,6 +160,31 @@ test.describe('send dialog visual regression (#4641)', () => {
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-details-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    // The list inside the real dialog, which the `/design-system` specimens cannot
+    // show: below `sm` it renders inline and makes the panel taller, and from `sm`
+    // up it is portaled over the panel. A click opens it, never the dialog's focus.
+    test(`send-dialog-details-list renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      const dialog = await openSendDialog(page)
+
+      const to = dialog.getByRole('combobox', { name: 'To' })
+      await to.click()
+
+      // The state the capture is OF, asserted before the shutter.
+      await expect(to).toHaveAttribute('aria-expanded', 'true')
+      await expect(page.getByRole('option', { name: new RegExp(CONTACT_NAME) })).toBeVisible()
+
+      await page.evaluate(() => document.fonts.ready)
+      await expect(dialog).toHaveScreenshot(
+        `send-dialog-details-list-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
       )
     })

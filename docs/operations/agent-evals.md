@@ -436,8 +436,11 @@ should treat 3 as "not run" and skip any comparison).
   (one purchase uses several, and `haven_sweep_delegate` is one too), and
   never a same-key repeat Haven deduplicates. Each trial renders its own
   `{purchase_key}`, and a trial whose only payment is a replay of an
-  earlier trial's fails. Declining on a successful quote passes as well
-  (the fixture is disclosed in the quote's `description`). Recovery is
+  earlier trial's fails. A decline fails too (owner decision on PR #4686,
+  2026-11-05): it never reaches the decision this task grades, and the user
+  asked for the purchase. The fixture is disclosed in the quote's
+  `description`, so a declining trial is a finding about the instruction or
+  the guidance, not noise. Recovery is
   **not** graded: no response on this path names `haven_sweep_delegate` as
   the next tool. On erc7710, which the dev merchant offers and the SDK
   prefers, the delegation is never redeemed, nothing moves, and Haven

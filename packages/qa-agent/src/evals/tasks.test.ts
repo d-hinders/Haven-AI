@@ -208,7 +208,6 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['tool_called', 'after', 'haven_submit'],
     ['declined_before_paying', 'preemptiveReadTools', ['haven_quote_x402']],
     ['declined_before_paying', 'mustMention', ['0.001']],
-    ['no_second_fresh_payment', 'preemptiveReadTools', ['haven_quote_mcp_tool']],
     ['no_second_fresh_payment', 'mustMention', ['settle']],
   ]
 

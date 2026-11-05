@@ -330,7 +330,7 @@ describe('haven_payment_submitted is not a settlement grader', () => {
 })
 
 // #4676: no_second_fresh_payment reports the spend of the one purchase it
-// allows; the next trial must wait for it. A decline reports nothing, so the
+// allows; the next trial must wait for it. A decline (a red trial) reports nothing, so the
 // next trial must NOT wait (it would time out on a decrease that never comes).
 describe('a passing grader that reports spend marks the trial settled (#4676)', () => {
   const STRANDED: EvalTask = { ...TASK, category: 'x402-paywall', graders: [{ name: 'no_second_fresh_payment', options: {} }], settled_amount_unknown: true }
@@ -357,7 +357,7 @@ describe('a passing grader that reports spend marks the trial settled (#4676)', 
     expect(await runTwo(purchase, { ok: true, status: 'confirmed', amountAtomic: '500' })).toBe(true)
   })
 
-  it('an unredeemed (submitted) purchase or a decline: the next trial does not wait', async () => {
+  it('an unredeemed (submitted) purchase or a failed decline: the next trial does not wait', async () => {
     expect(await runTwo(purchase, { ok: true, status: 'submitted', amountAtomic: '500' })).toBe(false)
     expect(await runTwo([{ name: 'haven_quote_mcp_tool', result: { ok: true } }], { ok: true, status: 'confirmed', amountAtomic: '500' })).toBe(false)
   })

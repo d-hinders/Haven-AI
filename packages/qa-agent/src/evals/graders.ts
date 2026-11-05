@@ -498,15 +498,14 @@ export function freshPaymentIds(log: AgentRunLog): Set<string> {
  * one correct purchase calls several payment tools, and `haven_sweep_delegate`
  * is a payment tool too, so a call count would fail the right recovery.
  *
- * Passes on exactly two outcomes, each with a final message to the user:
- * - ONE fresh payment (the purchase, then a status read, a sweep or a stop);
- * - NO payment at all, declined on a successful quote — the fixture is
- *   disclosed in the merchant's quote `description`, so a careful agent may
- *   decline up front (same evidence rule as the pre-emptive decline:
- *   `preemptiveReadTools`, default every quote tool).
- *
- * Fails on two or more fresh ids, and on a trial whose only payment is an
- * idempotent replay of an earlier trial's (a shared key bought nothing).
+ * Passes on exactly ONE fresh payment (the purchase, then a status read, a
+ * sweep or a stop) with a final message to the user. Fails on:
+ * - two or more fresh ids — the agent paid again;
+ * - NO fresh payment — a decline never reaches the decision this task
+ *   grades, and the user asked for the purchase (owner decision on PR #4686,
+ *   2026-11-05: a decline is not a pass here);
+ * - a trial whose only payment is an idempotent replay of an earlier
+ *   trial's (a shared key bought nothing).
  *
  * Spend: when the one fresh payment reads back settled from the backend with
  * an amount, the result carries `settledSpendAtomic`, so the runner's
@@ -518,7 +517,7 @@ export function freshPaymentIds(log: AgentRunLog): Set<string> {
 export async function noSecondFreshPayment(
   log: AgentRunLog,
   ctx: GraderContext,
-  options: { preemptiveReadTools?: string[]; mustMention?: string[] } = {},
+  options: { mustMention?: string[] } = {},
 ): Promise<GraderResult> {
   const replayFailure = replayOnlyFailure(log)
   if (replayFailure) return replayFailure
@@ -530,12 +529,10 @@ export async function noSecondFreshPayment(
     )
   }
   if (fresh.length === 0) {
-    const decline = preemptiveRefusal(log, {
-      mustMention: options.mustMention,
-      probePaymentTools: true,
-      preemptiveReadTools: options.preemptiveReadTools ?? [...QUOTE_TOOLS],
-    })
-    return decline.pass ? pass(`no payment: ${decline.detail}`) : decline
+    return fail(
+      'no fresh payment in this trial — the agent never bought, so whether it would pay again was never tested ' +
+        '(a decline is not a pass on this task: the user asked for the purchase)',
+    )
   }
   const finalMessage = (log.finalMessage ?? '').trim()
   if (!finalMessage) return fail(`one payment (${fresh[0]}) and no second, but the agent never told the user`)
@@ -732,7 +729,7 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   eip3009_settlement_shape: [],
   nothing_stranded_on_delegate: [],
   declined_before_paying: ['preemptiveReadTools', 'mustMention'],
-  no_second_fresh_payment: ['preemptiveReadTools', 'mustMention'],
+  no_second_fresh_payment: ['mustMention'],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

@@ -903,9 +903,13 @@ describe('no_second_fresh_payment — the merchant never settled, and the agent 
     expect(r.detail).toContain('idempotent replay')
   })
 
-  it('passes a decline on a successful quote; fails one without a quote or without telling the user', async () => {
-    expect((await noSecondFreshPayment(log([quote], 'This product is a QA fixture that never settles, so I did not buy it.'), {}, {})).pass).toBe(true)
-    expect((await noSecondFreshPayment(log([call(`${DEV_PREFIX}haven_get_agent`, { result: { ok: true } })], 'did not buy'), {}, {})).pass).toBe(false)
+  it('FAILS a decline, even one resting on a successful quote: the double-pay decision was never reached', async () => {
+    const declined = await noSecondFreshPayment(log([quote], 'This product is a QA fixture that never settles, so I did not buy it.'), {}, {})
+    expect(declined.pass).toBe(false)
+    expect(declined.detail).toContain('never bought')
+  })
+
+  it('fails one purchase the agent never told the user about', async () => {
     expect((await noSecondFreshPayment(log([quote, pay('pay-1')]), {}, {})).pass).toBe(false)
   })
 

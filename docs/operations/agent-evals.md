@@ -449,9 +449,13 @@ The resume message is written by the loop, never by the stand-in, and
 `assertNoStandInValues` refuses to send one that carries an inventory value —
 a runtime guard, not only a test.
 
-`run_command` gains `agents connect` behind `QA_EVAL_COMMAND_ALLOW_CONNECT=1`,
-set by the loop on the post-login turns only. The cold profile's default
-allowlist still refuses it, and every other `agents` action stays refused.
+`run_command` gains `agents connect` behind `QA_EVAL_COMMAND_ALLOW_CONNECT=1`.
+The loop passes a per-turn `trialEnv` to `runTurn` and adds the flag to it only
+**after** a device-login hand-off has been performed, so the tool profile
+changes partway through the run: the cold profile's default allowlist still
+refuses `agents connect`, every other `agents` action stays refused, and the
+flag is never set before the login wall. `handoff-loop.test.ts` pins both
+halves — absent on the turn before the hand-off, present on the turn after.
 
 ### The recorded runs
 
@@ -465,6 +469,17 @@ The connector is the "agent" here because it IS the `agents connect` step: it
 resolves the setup, mints the delegate key, signs the challenge, registers the
 agent and writes the runtime config. What the runner does **not** do is drive
 an LLM through the hand-offs — see *What could not be run* below.
+
+Every attempt is bounded and every attempt tears down. The connector spawn,
+each backend request and the whole attempt (from the moment the stand-in
+exists) have timers, so a hung step resolves instead of skipping the teardown.
+The stand-in registers the hybrid account in
+#4678's cleanup registry **as soon as it exists** — before the setup request —
+so a failure at setup creation still returns the account's USDC and reports the
+abandoned account as a cleanup warning. The connector child gets an allowlist
+env (`PATH`, `HOME`, proxy and TLS names), never `{...process.env}`: the agent
+under test must not inherit `QA_EVAL_AGENT_API_KEY`, `QA_EVAL_DELEGATE_KEY`,
+`QA_EVAL_AGENT_ACCOUNT` or `QA_EVAL_RECIPIENT`.
 
 Run it with:
 
@@ -483,12 +498,12 @@ for was 0.1 USDC per 1440 minutes.
 
 | # | settled | attribution | failed step | spent (atomic) | returned | swept | revoke | cleanup warning |
 |---|---|---|---|---|---|---|---|---|
-| 1 | no | script | setup creation | 0 | 0 | 0 | ok | — |
+| 1 | no | script | stand-in provisioning (setup creation: allowance omitted `token_address`) | 0 | 0 | 0 | not-attempted | — |
 | 2 | no | script | `agents connect` (no `--api`) | 0 | 0 | 0 | ok | — |
 | 3 | no | script | connector outcome misread | 0 | 0 | 0 | ok | — |
 | 4 | no | script | budget approval (atomic vs human) | 0 | 0 | 0 | ok | — |
 | 5 | no | haven | funding (eval agent's period budget exhausted) | 0 | 0 | 0 | ok | — |
-| 6 | no | script | settlement status misread (`confirmed`) | 100000 | 0 | 0 | ok | — |
+| 6 | yes (chain) | script | settlement status misread (`confirmed`) | 100000 | 0 | 0 | ok | — |
 | 7 | yes | — | — | 100000 | 0 | 0 | ok | — |
 | 8 | yes | — | — | 100000 | 0 | 0 | ok | — |
 | 9 | yes | — | — | 100000 | 0 | 0 | ok | — |
@@ -496,7 +511,24 @@ for was 0.1 USDC per 1440 minutes.
 | 11 | yes | — | — | 100000 | 0 | 0 | ok | — |
 
 Attempts 1–6 are the first recorded runs; each exposed a real defect, and the
-attribution says whose it was. Attempts 7–11 are five clean runs, all settled:
+attribution says whose it was. Attempts 7–11 are five clean runs, all settled.
+
+Two rows need reading against the artifact (`spike-evidence-4682.json`), which
+is left as recorded:
+
+- **Attempt 1** created the hybrid account and then failed at setup creation
+  (`400`, the allowance omitted `token_address`). The runner at the time did not
+  tear that account down, so the artifact says `revoke: not-attempted` and
+  carries no cleanup warning. That is the defect this round fixes: the stand-in
+  now registers the account as soon as it exists and runs the registry's
+  teardown on the provisioning error path, reporting the abandoned account as a
+  cleanup warning. The table shows what the run recorded, not what the fixed
+  code would record.
+- **Attempt 6**'s payment (`f88417ec-fc11-4ab9-bcf6-86fde0d91fc5`) is
+  `confirmed` on chain, but the runner treated only `settled` as success and
+  wrote `settled: false`. The chain is the authority, so the table says
+  `yes (chain)`; the attribution stays `script` because the misread was the
+  runner's.
 
 | # | payment id | tx |
 |---|---|---|
@@ -514,8 +546,9 @@ All five receipts read `status: 0x1` on Base Sepolia (blocks 54920697,
 period budget (the funding payment) and 0.1 USDC from the throwaway account to
 the recipient. The throwaway account ends at zero, so `returned` is 0 — there
 was nothing left to return. Nothing was stranded on a delegate EOA, so `swept`
-is 0. Every attempt revoked its agent (`revoke: ok`) and produced no cleanup
-warning.
+is 0. Attempts 2–11 revoked their agent (`revoke: ok`) and produced no cleanup
+warning; attempt 1 never reached an agent, so there was nothing to revoke — see
+the note above.
 
 **Plan usage.** The runs used no Claude Code subscription: the connector is a
 CLI, not a model. Plan usage was **0**. The cost is testnet USDC only: 0.5 USDC
@@ -534,12 +567,16 @@ hand-offs.
 What that leaves unproven, and what the full-onboarding eval would have to
 prove:
 
+- the **device-login hand-off itself**: no recorded run calls
+  `approveDeviceLogin`. The connector resolves the setup token directly, so
+  `POST /auth/device/approve` was never exercised against a live pending device
+  code — the stand-in's approval is unit-tested against a fake backend only;
 - an LLM actually **detecting** the hand-off in its own tool stream and
   **resuming** after the human acts — the loop and the `--resume` plumbing are
   unit-tested against recorded stream fixtures, but no live model ran them;
-- the **tool-profile change partway through the run**: `agents connect` is
-  enabled per turn by `QA_EVAL_COMMAND_ALLOW_CONNECT`, and no live turn
-  exercised the switch;
+- the **tool-profile change partway through the run**: the loop now sets
+  `QA_EVAL_COMMAND_ALLOW_CONNECT=1` after the device hand-off (pinned by
+  `handoff-loop.test.ts`), but no live turn exercised the switch;
 - `--strict-mcp-config` on resume: the connector writes the runtime's MCP
   config, and a resumed `claude -p` with `--strict-mcp-config` would ignore
   servers it did not load at start. The spike's answer is to pass the trial's
@@ -548,6 +585,17 @@ prove:
 
 The first recorded run of the claude lane is therefore still owed, and it needs
 the owner-approved `agent-evals` environment.
+
+### Why the hermetic tests stay in the default suite
+
+The issue says none of the spike runs in the default suite. The **live runner**
+is a CLI (`npm run evals:spike`) and never runs in CI: it needs dev, testnet
+funds and the eval agent's keys. The `*.test.ts` files beside it are hermetic —
+they drive the stand-in, the hand-off loop and the runner against fake backends
+and fake children, with no network and no spend. They are the leak proof the
+acceptance asks for (prompt, child environment, tool stream, final result) and
+the regression proof for the teardown, the bounds and the connector env, so they
+stay in the default suite; the spike's live path does not.
 
 ## Receipts and task budgets (#4677)
 

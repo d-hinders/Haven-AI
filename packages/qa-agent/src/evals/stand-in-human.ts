@@ -40,7 +40,11 @@
  *
  * Every attempt tears down through #4678's registry, in its fixed order:
  * sweep delegate-EOA leftovers, return the account's USDC to the eval account,
- * close any task budget left open, then revoke. The stand-in cannot sweep the
+ * close any task budget left open, then revoke. The registry is created as
+ * soon as the hybrid ACCOUNT exists — before the setup request — so a
+ * provisioning failure still returns the account's USDC instead of abandoning
+ * it: the owner key is discarded when this function returns, and #4679's purge
+ * leaves on-chain funds behind. The stand-in cannot sweep the
  * delegate EOA itself — that key belongs to the agent's connector, by design —
  * so the sweep step reads the EOA's on-chain balance and reports a warning
  * naming the amount when anything is stranded. A failed step is a warning,
@@ -82,7 +86,16 @@ export interface StandInHumanOptions {
   fetchImpl?: typeof fetch
   /** Injectable USDC balance read (tests). */
   readUsdcBalance?: (address: string) => Promise<bigint>
+  /**
+   * Bound on ONE backend request, ms. A hung request must not outlive the
+   * attempt: the attempt-level timeout in the runner tears down whatever
+   * exists, and this keeps a single fetch from holding the process open.
+   */
+  fetchTimeoutMs?: number
 }
+
+/** The default bound on one backend request: 30 s. */
+export const DEFAULT_STAND_IN_FETCH_TIMEOUT_MS = 30_000
 
 /** What the stand-in did, for the run's evidence table. */
 export interface StandInEvidence {
@@ -121,6 +134,16 @@ export interface StandInHuman {
 /** A stand-in that could not be provisioned; `cleanupWarning` when a half-built one could not be undone. */
 export interface StandInError {
   error: string
+  /**
+   * The teardown that ran over whatever existed when provisioning failed.
+   * Absent only when nothing was created (a failed signup).
+   */
+  cleanup?: TrialTeardown
+  /**
+   * One line naming the abandoned account and what the teardown did. The
+   * runner puts it on the evidence row, so a failed attempt shows that it was
+   * torn down rather than silently leaving an account behind.
+   */
   cleanupWarning?: string
 }
 
@@ -148,6 +171,7 @@ export async function createStandInHuman(
   options: StandInHumanOptions,
 ): Promise<StandInHuman | StandInError> {
   const doFetch = options.fetchImpl ?? fetch
+  const fetchTimeoutMs = options.fetchTimeoutMs ?? DEFAULT_STAND_IN_FETCH_TIMEOUT_MS
   const owner = ethers.Wallet.createRandom()
   const password = 'Qa-' + ethers.Wallet.createRandom().privateKey.slice(2, 26)
   const email = `qa-${options.label}-${Math.random().toString(36).slice(2, 10)}@haven.test`
@@ -176,6 +200,7 @@ export async function createStandInHuman(
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(fetchTimeoutMs),
     })
     return { status: res.status, json: (await res.json().catch(() => ({}))) as T }
   }
@@ -207,6 +232,50 @@ export async function createStandInHuman(
   const account = me.json.accounts?.find((a) => a.account_type === 'delegator_hybrid')
   if (!account) return { error: 'the stand-in account is missing from /auth/me' }
 
+  // ── Teardown (#4678's registry, its fixed order) ──────────────────────────
+  //
+  // The registry is created as soon as the ACCOUNT exists, not after the setup
+  // does (#4682 round 2). The owner key is discarded when this function
+  // returns, and #4679's purge deliberately leaves on-chain funds behind, so
+  // an account that is not registered before the next request is
+  // unrecoverable. A failure in setup creation therefore still returns the
+  // account's USDC to the eval account.
+  const evidence: StandInEvidence = {
+    ownerAddress: owner.address,
+    accountAddress: account.account_address,
+    accountId: account.id,
+    setupId: '',
+    approvalUrl: '',
+    connectorCommand: '',
+    deviceApprovals: [],
+  }
+  const cleanup = createCleanupRegistry(
+    standInCleanupSteps(options, {
+      token,
+      owner,
+      accountAddress: account.account_address,
+      doFetch,
+      evidence,
+    }),
+  )
+  cleanup.register('account', account.account_address)
+
+  /**
+   * Tear down a half-built stand-in and describe it for the evidence row.
+   * Never throws: the registry turns a failed step into a warning.
+   */
+  const abandon = async (error: string): Promise<StandInError> => {
+    const teardown = await cleanup.run()
+    const detail = teardown.warnings.length > 0 ? teardown.warnings.join('; ') : 'no warnings'
+    return {
+      error,
+      cleanup: teardown,
+      cleanupWarning:
+        `the abandoned stand-in account ${account.account_address} was torn down after provisioning failed ` +
+        `(${detail}); no agent existed to revoke`,
+    }
+  }
+
   const periodMinutes = Math.round(options.periodSeconds / 60)
   const setup = await call<{
     setup_id?: string
@@ -227,31 +296,12 @@ export async function createStandInHuman(
     ],
   })
   if (setup.status !== 201 || !setup.json.setup_id) {
-    return { error: `stand-in setup creation failed (${setup.status}): ${setup.json.error ?? ''}` }
+    return abandon(`stand-in setup creation failed (${setup.status}): ${setup.json.error ?? ''}`)
   }
 
-  const evidence: StandInEvidence = {
-    ownerAddress: owner.address,
-    accountAddress: account.account_address,
-    accountId: account.id,
-    setupId: setup.json.setup_id,
-    approvalUrl: setup.json.approval_url ?? '',
-    connectorCommand: setup.json.connector_command ?? '',
-    deviceApprovals: [],
-  }
-
-  // ── Teardown (#4678's registry, its fixed order) ──────────────────────────
-  const cleanup = createCleanupRegistry(
-    standInCleanupSteps(options, {
-      token,
-      owner,
-      accountAddress: account.account_address,
-      setupId: evidence.setupId,
-      doFetch,
-      evidence,
-    }),
-  )
-  cleanup.register('account', account.account_address)
+  evidence.setupId = setup.json.setup_id
+  evidence.approvalUrl = setup.json.approval_url ?? ''
+  evidence.connectorCommand = setup.json.connector_command ?? ''
   // The agent and its delegate EOA do not exist until the CONNECTOR registers
   // them, so the stand-in registers the SETUP as their marker: the teardown
   // steps resolve the agent id and delegate address from the setup row at
@@ -378,7 +428,6 @@ export function standInCleanupSteps(
     token: string
     owner: ethers.Wallet | ethers.HDNodeWallet
     accountAddress: string
-    setupId: string
     doFetch: typeof fetch
     /** Mutated with what the teardown actually returned / left stranded. */
     evidence: StandInEvidence
@@ -388,8 +437,11 @@ export function standInCleanupSteps(
   return {
     async sweepDelegateEoa() {
       // The delegate address is only known once the connector registered; the
-      // setup row carries it. A setup with no delegate has nothing stranded.
-      const res = await ctx.doFetch(`${options.apiUrl}/agent-connection-setups/${ctx.setupId}`, {
+      // setup row carries it. A setup with no delegate has nothing stranded,
+      // and no setup at all means the connector never ran.
+      const setupId = ctx.evidence.setupId
+      if (!setupId) return null
+      const res = await ctx.doFetch(`${options.apiUrl}/agent-connection-setups/${setupId}`, {
         headers: { authorization: `Bearer ${ctx.token}` },
       })
       if (!res.ok) return `could not read the setup to find the delegate EOA (HTTP ${res.status})`
@@ -474,7 +526,9 @@ export function standInCleanupSteps(
     },
 
     async revokeAgent() {
-      const res = await ctx.doFetch(`${options.apiUrl}/agent-connection-setups/${ctx.setupId}`, {
+      const setupId = ctx.evidence.setupId
+      if (!setupId) return null
+      const res = await ctx.doFetch(`${options.apiUrl}/agent-connection-setups/${setupId}`, {
         headers: { authorization: `Bearer ${ctx.token}` },
       })
       if (!res.ok) return `could not read the setup to find the agent (HTTP ${res.status})`

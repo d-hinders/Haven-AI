@@ -16,6 +16,14 @@
  * exercises the same guard against the prompt, the child environment, the tool
  * stream and the final result.
  *
+ * ## The tool profile changes partway through
+ *
+ * `agents connect` is refused by the cold profile's allowlist until the human
+ * has approved the device login. The loop therefore passes a per-turn
+ * `trialEnv` to `runTurn` and adds `QA_EVAL_COMMAND_ALLOW_CONNECT=1` to it only
+ * AFTER a device-login hand-off has been performed — the flag is set by the
+ * loop, never by the caller, and never before the wall.
+ *
  * ## What counts as a hand-off
  *
  * The agent hands over a URL or a code, in its final text or in a tool result
@@ -28,6 +36,7 @@
  */
 
 import type { AgentRunLog } from './types.js'
+import { CONNECT_ALLOW_ENV } from './command-tool.js'
 
 export type HandoffKind = 'device-login' | 'budget-approval'
 
@@ -121,12 +130,21 @@ export interface HandoffTurn {
 }
 
 export interface HandoffLoopOptions {
-  /** Run one turn; `resumeSessionId` continues the same session. */
+  /**
+   * Run one turn; `resumeSessionId` continues the same session, and
+   * `trialEnv` is the per-turn env the adapter merges over its allowlist.
+   */
   runTurn: (
     instruction: string,
-    opts: { resumeSessionId?: string },
+    opts: { resumeSessionId?: string; trialEnv?: Record<string, string> },
   ) => Promise<{ log: AgentRunLog; session: { sessionId?: string }; raw?: string }>
   instruction: string
+  /**
+   * The trial's own env, passed on EVERY turn. The loop adds
+   * `QA_EVAL_COMMAND_ALLOW_CONNECT=1` to it after the device hand-off, which
+   * is what enables `agents connect` on the post-login turns (#4682).
+   */
+  trialEnv?: Record<string, string>
   /** The stand-in's two actions. */
   standIn: {
     approveDeviceLogin(userCode: string): Promise<{ status: string }>
@@ -169,11 +187,16 @@ export async function runWithHandoffs(options: HandoffLoopOptions): Promise<Hand
   const performed = new Set<HandoffKind>()
   let sessionId: string | undefined
   let instruction = options.instruction
+  // The per-turn env. `agents connect` stays refused until the device hand-off
+  // has actually been performed, so the tool profile changes partway through
+  // the run rather than being enabled from the start (#4682).
+  let trialEnv: Record<string, string> = { ...options.trialEnv }
   let stoppedBecause: string | undefined
 
   for (let turn = 1; ; turn += 1) {
     const { log, session, raw } = await options.runTurn(instruction, {
       ...(sessionId !== undefined ? { resumeSessionId: sessionId } : {}),
+      ...(Object.keys(trialEnv).length > 0 ? { trialEnv } : {}),
     })
     if (session.sessionId) sessionId = session.sessionId
     const record: HandoffTurn = {
@@ -206,6 +229,8 @@ export async function runWithHandoffs(options: HandoffLoopOptions): Promise<Hand
       }
       const result = await options.standIn.approveDeviceLogin(handoff.userCode)
       record.performed = `approved the device login (${result.status})`
+      // The login wall is behind us: the NEXT turn may run `agents connect`.
+      trialEnv = { ...trialEnv, [CONNECT_ALLOW_ENV]: '1' }
     } else {
       const grant = await options.standIn.approveBudget()
       record.performed =

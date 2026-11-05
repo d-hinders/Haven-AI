@@ -242,6 +242,53 @@ describe('createStandInHuman — the order the code requires', () => {
   })
 })
 
+describe('provisioning failure — the account is torn down (#4682 round 2)', () => {
+  it('returns the account USDC and names the abandoned account when setup creation fails', async () => {
+    const dir = await scratch()
+    const backend = fakeBackend()
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.endsWith('/agent-connection-setups') && (init?.method ?? 'GET') === 'POST') {
+        return json({ error: 'Request does not match the API spec' }, 400)
+      }
+      return backend.fetchImpl(input as never, init)
+    }) as unknown as typeof fetch
+    const manifest = await manifestAt(dir)
+    const balances: string[] = []
+    const standIn = await createStandInHuman(
+      options(dir, fetchImpl, {
+        manifest,
+        readUsdcBalance: async (address: string) => {
+          balances.push(address)
+          return 0n
+        },
+      }),
+    )
+
+    expect('error' in standIn).toBe(true)
+    if (!('error' in standIn)) return
+    expect(standIn.error).toContain('stand-in setup creation failed (400)')
+    // The registry was created as soon as the account existed, so the teardown
+    // ran over it even though the setup never did.
+    expect(balances).toContain(ACCOUNT)
+    expect(standIn.cleanup?.ok).toBe(true)
+    expect(standIn.cleanupWarning).toContain(`the abandoned stand-in account ${ACCOUNT} was torn down`)
+    // No agent existed, so nothing was revoked — and the row must not claim it was.
+    expect(backend.calls.some((c) => c.path.endsWith('/revoke'))).toBe(false)
+  })
+
+  it('does not claim a teardown when nothing was created (signup failed)', async () => {
+    const dir = await scratch()
+    const manifest = await manifestAt(dir)
+    const fetchImpl = (async () => json({ error: 'email taken' }, 409)) as unknown as typeof fetch
+    const standIn = await createStandInHuman(options(dir, fetchImpl, { manifest }))
+    expect('error' in standIn).toBe(true)
+    if (!('error' in standIn)) return
+    expect(standIn.cleanup).toBeUndefined()
+    expect(standIn.cleanupWarning).toBeUndefined()
+  })
+})
+
 describe('approveDeviceLogin', () => {
   it('posts the user code with the signup token', async () => {
     const dir = await scratch()

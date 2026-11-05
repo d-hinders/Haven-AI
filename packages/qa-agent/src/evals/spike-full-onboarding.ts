@@ -22,8 +22,11 @@
  * ## Spike discipline
  *
  * Every attempt tears down, including a failed or timed-out one, and the
- * teardown's warnings ride on the evidence row. Nothing here runs in the
- * default suite: the file is a CLI, not a test.
+ * teardown's warnings ride on the evidence row. Every step is BOUNDED — the
+ * connector spawn, each backend request and the whole attempt have timers — so
+ * a hung step resolves instead of skipping the teardown. The connector child
+ * gets an allowlist env, never the harness's own credentials. Nothing here
+ * runs in the default suite: the file is a CLI, not a test.
  */
 
 import { spawn } from 'node:child_process'
@@ -33,6 +36,7 @@ import { join } from 'node:path'
 import { ethers } from 'ethers'
 import { payViaDelegation } from '../lib/throwaway-identity.js'
 import { SecretManifest } from './secret-manifest.js'
+import { COMMAND_ENV_ALLOWLIST } from './command-tool.js'
 import { createStandInHuman, type StandInHuman } from './stand-in-human.js'
 
 /** One attempt's row in the evidence table. */
@@ -80,9 +84,24 @@ export interface SpikeOptions {
   workDir: string
   /** Bound on the settlement poll, ms. */
   settleTimeoutMs?: number
+  /** Bound on the connector spawn, ms. A hung connector is killed. */
+  connectorTimeoutMs?: number
+  /** Bound on ONE backend request, ms. */
+  fetchTimeoutMs?: number
+  /** Bound on the WHOLE attempt, ms — the teardown runs when it expires. */
+  attemptTimeoutMs?: number
+  /** Injectable USDC balance read (tests). */
+  readUsdcBalance?: (address: string) => Promise<bigint>
   /** Injectable spawn (tests). */
   spawnImpl?: typeof spawn
 }
+
+/** The default bound on the connector spawn: 3 minutes. */
+export const DEFAULT_CONNECTOR_TIMEOUT_MS = 180_000
+/** The default bound on one backend request: 30 s. */
+export const DEFAULT_SPIKE_FETCH_TIMEOUT_MS = 30_000
+/** The default bound on one whole attempt: 10 minutes. */
+export const DEFAULT_ATTEMPT_TIMEOUT_MS = 600_000
 
 /** The connector's JSON output, as far as the runner reads it. */
 interface ConnectorOutput {
@@ -100,13 +119,43 @@ interface ConnectorOutput {
   error?: { code?: string; message?: string }
 }
 
+/**
+ * The connector child's env: an ALLOWLIST, never `{...process.env}` (#4682
+ * round 2).
+ *
+ * The connector is the harness's own CLI, but it is spawned from the process
+ * that holds the eval agent's credentials — `QA_EVAL_AGENT_API_KEY`,
+ * `QA_EVAL_DELEGATE_KEY`, `QA_EVAL_AGENT_ACCOUNT`, `QA_EVAL_RECIPIENT` — and
+ * the agent under test must never inherit them. `HOME` is kept because node
+ * and the connector's own config lookup need it; nothing else is.
+ */
+export function buildConnectorEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const name of COMMAND_ENV_ALLOWLIST) {
+    const value = base[name]
+    if (value !== undefined) env[name] = value
+  }
+  if (base.HOME !== undefined) env.HOME = base.HOME
+  return env
+}
+
 function runConnector(
   opts: SpikeOptions,
   setupToken: string,
   credentialsDir: string,
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): Promise<{ code: number | null; stdout: string; stderr: string; timedOut?: boolean }> {
   const spawnImpl = opts.spawnImpl ?? spawn
+  const timeoutMs = opts.connectorTimeoutMs ?? DEFAULT_CONNECTOR_TIMEOUT_MS
   return new Promise((resolve) => {
+    let settled = false
+    let stdout = ''
+    let stderr = ''
+    const done = (result: { code: number | null; stdout: string; stderr: string; timedOut?: boolean }) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
     const child = spawnImpl(
       process.execPath,
       [
@@ -124,18 +173,30 @@ function runConnector(
         '--credentials-dir',
         credentialsDir,
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
+      { stdio: ['ignore', 'pipe', 'pipe'], env: buildConnectorEnv(process.env) },
     )
-    let stdout = ''
-    let stderr = ''
+    // A connector that never exits must not hold the attempt open: kill it and
+    // resolve, so the runner's `finally` still tears the attempt down.
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      done({
+        code: null,
+        stdout,
+        stderr: `${stderr}\nthe connector did not exit within ${timeoutMs}ms and was killed`,
+        timedOut: true,
+      })
+    }, timeoutMs)
+    // The attempt-level bound may reject first; an unref'd timer must not keep
+    // the process alive after the attempt has already been torn down.
+    timer.unref?.()
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout = `${stdout}${chunk}`.slice(-40_000)
     })
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr = `${stderr}${chunk}`.slice(-8_000)
     })
-    child.on('error', (err) => resolve({ code: null, stdout, stderr: `${stderr}${err.message}` }))
-    child.on('close', (code) => resolve({ code, stdout, stderr }))
+    child.on('error', (err) => done({ code: null, stdout, stderr: `${stderr}${err.message}` }))
+    child.on('close', (code) => done({ code, stdout, stderr }))
   })
 }
 
@@ -179,9 +240,11 @@ async function payAsAgent(
   delegateKey: string,
   to: string,
   human: string,
+  fetchTimeoutMs: number,
 ): Promise<{ ok: true; paymentId?: string; tx?: string } | { ok: false; status: number; error: string }> {
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }
   const auth = await fetch(`${apiUrl}/payments`, {
+    signal: AbortSignal.timeout(fetchTimeoutMs),
     method: 'POST',
     headers,
     body: JSON.stringify({ token: 'USDC', amount: human, to }),
@@ -197,6 +260,7 @@ async function payAsAgent(
   const { signUserOpTypedDataForDelegation } = await import('@haven_ai/sdk')
   const signature = await signUserOpTypedDataForDelegation(delegateKey, intent.sign_data.typed_data as never)
   const submit = await fetch(`${apiUrl}/payments/${intent.payment_id}/sign`, {
+    signal: AbortSignal.timeout(fetchTimeoutMs),
     method: 'POST',
     headers,
     body: JSON.stringify({ signature }),
@@ -245,11 +309,13 @@ async function waitForSettlement(
   apiKey: string,
   paymentId: string,
   timeoutMs: number,
+  fetchTimeoutMs: number,
 ): Promise<{ settled: boolean; status: string }> {
   const deadline = Date.now() + timeoutMs
   let status = 'unknown'
   for (;;) {
     const res = await fetch(`${apiUrl}/payments/${paymentId}`, {
+      signal: AbortSignal.timeout(fetchTimeoutMs),
       headers: { authorization: `Bearer ${apiKey}` },
     })
     if (res.ok) {
@@ -287,7 +353,31 @@ export async function runAttempt(opts: SpikeOptions, attempt: number): Promise<S
   const manifest = await SecretManifest.create(join(dir, 'secrets.jsonl'), { setupTasks: 1 })
 
   let standIn: StandInHuman | undefined
-  try {
+  const attemptTimeoutMs = opts.attemptTimeoutMs ?? DEFAULT_ATTEMPT_TIMEOUT_MS
+  let deadlineTimer: NodeJS.Timeout | undefined
+  let rejectDeadline: ((err: Error) => void) | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    rejectDeadline = reject
+  })
+  /**
+   * Start the attempt-level bound. It is armed once the stand-in EXISTS: the
+   * stand-in owns its own teardown while it is being provisioned (each request
+   * is bounded, and a provisioning failure tears the account down), so the
+   * bound covers the connector, the budget, the funding and the payment.
+   */
+  const armDeadline = (): void => {
+    deadlineTimer = setTimeout(
+      () => rejectDeadline?.(new Error(`attempt ${attempt} timed out after ${attemptTimeoutMs}ms`)),
+      attemptTimeoutMs,
+    )
+    deadlineTimer.unref?.()
+  }
+  /**
+   * The attempt's steps. Kept as a function so the attempt-level bound can
+   * race it: a hung connector or a fetch that never answers must not skip the
+   * teardown (#4682 round 2).
+   */
+  const runSteps = async (): Promise<SpikeAttempt> => {
     // ── 1. the stand-in ────────────────────────────────────────────────────
     const created = await createStandInHuman({
       apiUrl: opts.apiUrl,
@@ -299,14 +389,21 @@ export async function runAttempt(opts: SpikeOptions, attempt: number): Promise<S
       manifest,
       budgetAtomic: opts.budgetAtomic,
       periodSeconds: opts.periodSeconds,
+      fetchTimeoutMs: opts.fetchTimeoutMs ?? DEFAULT_SPIKE_FETCH_TIMEOUT_MS,
+      ...(opts.readUsdcBalance !== undefined ? { readUsdcBalance: opts.readUsdcBalance } : {}),
     })
     if ('error' in created) {
       row.attribution = 'haven'
       row.failedStep = 'stand-in provisioning'
       row.notes.push(created.error)
+      // The stand-in tears down whatever it created before returning the
+      // error; the row carries that teardown so a failed attempt cannot look
+      // like it left an account behind (#4682 round 2).
+      if (created.cleanupWarning) row.cleanupWarning = created.cleanupWarning
       return row
     }
     standIn = created
+    armDeadline()
     row.setupId = standIn.evidence.setupId
 
     // ── 2. the connector registers the agent ───────────────────────────────
@@ -315,6 +412,14 @@ export async function runAttempt(opts: SpikeOptions, attempt: number): Promise<S
     await writeFile(join(dir, 'connector.stdout.txt'), connector.stdout)
     await writeFile(join(dir, 'connector.stderr.txt'), connector.stderr)
     row.connectorExit = connector.code ?? undefined
+    if (connector.timedOut) {
+      row.attribution = 'script'
+      row.failedStep = 'agents connect (timeout)'
+      row.notes.push(
+        `the connector did not exit within ${opts.connectorTimeoutMs ?? DEFAULT_CONNECTOR_TIMEOUT_MS}ms and was killed`,
+      )
+      return row
+    }
     const output = parseConnectorOutput(connector.stdout)
     if (connector.code !== 0 || !connectorSucceeded(output)) {
       row.attribution = 'agent'
@@ -371,6 +476,7 @@ export async function runAttempt(opts: SpikeOptions, attempt: number): Promise<S
       signer.delegate_key,
       opts.recipient,
       ethers.formatUnits(BigInt(opts.fundingAtomic), 6),
+      opts.fetchTimeoutMs ?? DEFAULT_SPIKE_FETCH_TIMEOUT_MS,
     )
     if (!paid.ok) {
       row.attribution = 'agent'
@@ -381,7 +487,13 @@ export async function runAttempt(opts: SpikeOptions, attempt: number): Promise<S
     row.txHash = paid.tx
     if (paid.paymentId) {
       row.paymentId = paid.paymentId
-      const settlement = await waitForSettlement(opts.apiUrl, identity.api_key, paid.paymentId, opts.settleTimeoutMs ?? 120_000)
+      const settlement = await waitForSettlement(
+        opts.apiUrl,
+        identity.api_key,
+        paid.paymentId,
+        opts.settleTimeoutMs ?? 120_000,
+        opts.fetchTimeoutMs ?? DEFAULT_SPIKE_FETCH_TIMEOUT_MS,
+      )
       row.settled = settlement.settled
       row.notes.push(`payment ${paid.paymentId} status ${settlement.status}`)
       if (!settlement.settled) {
@@ -395,12 +507,16 @@ export async function runAttempt(opts: SpikeOptions, attempt: number): Promise<S
       row.notes.push('the payment route returned a tx hash and no payment id')
     }
     return row
+  }
+  try {
+    return await Promise.race([runSteps(), deadline])
   } catch (err) {
     row.attribution = 'script'
     row.failedStep = row.failedStep ?? 'runner'
     row.notes.push((err as Error)?.message ?? String(err))
     return row
   } finally {
+    if (deadlineTimer) clearTimeout(deadlineTimer)
     // ── 5. teardown, ALWAYS ────────────────────────────────────────────────
     if (standIn) {
       const teardown = await standIn.teardown()

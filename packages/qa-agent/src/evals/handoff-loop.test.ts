@@ -22,6 +22,7 @@ import {
 } from './handoff-loop.js'
 import type { AgentRunLog } from './types.js'
 import { buildChildEnv, buildColdChildEnv, parseClaudeCodeStreamLog } from './claude-code.js'
+import { CONNECT_ALLOW_ENV } from './command-tool.js'
 
 const INVENTORY = [
   { name: 'stand_in_owner_key', value: '0xownerkeydeadbeef' },
@@ -195,6 +196,70 @@ describe('runWithHandoffs', () => {
         expect(prompt).not.toContain(entry.value)
       }
     }
+  })
+})
+
+// ── The per-turn tool profile (#4682 round 2) ───────────────────────────────
+//
+// The docs claimed the loop sets `QA_EVAL_COMMAND_ALLOW_CONNECT=1` on the
+// post-login turns, but nothing did. These pin the wiring: the flag is absent
+// on the turn BEFORE the device hand-off and present on the turn after it.
+
+describe('the per-turn tool profile', () => {
+  it('sets QA_EVAL_COMMAND_ALLOW_CONNECT only AFTER the device hand-off', async () => {
+    const envs: Array<Record<string, string> | undefined> = []
+    const turns = [
+      log({ finalMessage: 'Open https://app.example/device?code=ABCD-1234 and approve it.' }),
+      log({ finalMessage: 'Signed in. Now run the connector.' }),
+    ]
+    let index = 0
+    await runWithHandoffs({
+      instruction: 'Set it all up so my agent can pay for things.',
+      inventory: INVENTORY,
+      trialEnv: { QA_EVAL_TRIAL_HOME: '/tmp/trial' },
+      standIn: {
+        async approveDeviceLogin() {
+          return { status: 'approved' }
+        },
+        async approveBudget() {
+          return { delegationHash: '0xdeadbeef', budgetAtomic: '2500000', periodSeconds: 86_400 }
+        },
+      },
+      async runTurn(_instruction: string, opts: { resumeSessionId?: string; trialEnv?: Record<string, string> }) {
+        envs.push(opts.trialEnv)
+        const next = turns[index++]
+        if (!next) throw new Error('the loop ran more turns than the fixture provides')
+        return { log: next, session: { sessionId: 'session-1' } }
+      },
+    })
+
+    expect(envs).toHaveLength(2)
+    // Turn 1 is BEFORE the wall: the trial env rides along, the flag does not.
+    expect(envs[0]).toEqual({ QA_EVAL_TRIAL_HOME: '/tmp/trial' })
+    expect(envs[0]?.[CONNECT_ALLOW_ENV]).toBeUndefined()
+    // Turn 2 is after the device hand-off: `agents connect` is now allowed.
+    expect(envs[1]).toEqual({ QA_EVAL_TRIAL_HOME: '/tmp/trial', [CONNECT_ALLOW_ENV]: '1' })
+  })
+
+  it('does not set the flag when the run never reaches a device hand-off', async () => {
+    const envs: Array<Record<string, string> | undefined> = []
+    await runWithHandoffs({
+      instruction: 'Set it all up.',
+      inventory: INVENTORY,
+      standIn: {
+        async approveDeviceLogin() {
+          return { status: 'approved' }
+        },
+        async approveBudget() {
+          return { delegationHash: '0xdeadbeef', budgetAtomic: '2500000', periodSeconds: 86_400 }
+        },
+      },
+      async runTurn(_instruction: string, opts: { resumeSessionId?: string; trialEnv?: Record<string, string> }) {
+        envs.push(opts.trialEnv)
+        return { log: log({ finalMessage: 'I could not find a way in.' }), session: { sessionId: 'session-1' } }
+      },
+    })
+    expect(envs).toEqual([undefined])
   })
 })
 

@@ -3518,8 +3518,8 @@ a field that already has focus, so the list comes back after Escape.
 **Keyboard.** Arrow down/up opens the list if it is closed and moves the active
 option, scrolling it into view (`block: 'nearest'`). Enter picks the active
 option. A query that leaves exactly one option makes that option active, so
-pasting an address and pressing Enter picks it; an empty query never activates
-anything, so opening the list cannot arm Enter, and a group still loading or
+pasting an address and pressing Enter picks it; an empty query activates nothing
+by itself, so a click or typing cannot arm Enter, and a group still loading or
 failed keeps a lone option from counting as alone. Enter only picks from an open
 list: returning to a field that holds a query leaves the list closed, and a click
 or an arrow key opens it again. Tab closes the list and moves on **without

@@ -71,9 +71,9 @@ describe('warnPublicBaseMainnetRpc (#2615)', () => {
     expect(message).toMatch(/RPC_URL_BASE is not set/)
     expect(message).toMatch(/https:\/\/mainnet\.base\.org/)
     expect(message).toMatch(/Set RPC_URL_BASE/)
-    // The consequence is the money one, not a copy of the qa-dev sentence.
+    // The consequence is the money one, not a copy of the Sepolia sentence.
     expect(message).toMatch(/MAINNET/)
-    expect(message).not.toMatch(/qa-dev/)
+    expect(message).not.toMatch(/shared endpoint has an outage/)
     warn.mockRestore()
   })
 

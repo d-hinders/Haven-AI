@@ -14,6 +14,6 @@
   "source": {
     "kind": "issue",
     "ref": "4677",
-    "note": "The /qa-dev step 9 receipt goal, made deterministic: a payment pinned to the DIRECT path always answers not_verifiable_offline (a direct bundle carries authorization.signatureScheme eip712_userop and the signed user operation is not in the bundle), while an erc7710 bundle verifies. The agent must fetch the bundle only after settlement and report the offline verdict as 'cannot be verified offline', never as tampering or success."
+    "note": "The retired exploratory command's step 9 receipt goal, made deterministic: a payment pinned to the DIRECT path always answers not_verifiable_offline (a direct bundle carries authorization.signatureScheme eip712_userop and the signed user operation is not in the bundle), while an erc7710 bundle verifies. The agent must fetch the bundle only after settlement and report the offline verdict as 'cannot be verified offline', never as tampering or success."
   }
 }

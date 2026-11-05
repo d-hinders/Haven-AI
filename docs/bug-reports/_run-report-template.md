@@ -20,9 +20,7 @@ covers:
   - .github/workflows/ci.yml
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
-  - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-  - .claude/commands/qa-explore-agent-onboarding.md
 last-verified: "2026-11-02"
 ---
 

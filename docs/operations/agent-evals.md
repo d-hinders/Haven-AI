@@ -318,9 +318,8 @@ drift, or the purge would miss the rows this slice creates.
 ## The cold-agent onboarding tasks (#4680)
 
 Two `onboarding` tasks move the cold-agent scenario into the suite, up to the
-login wall. They are the CI half of the scenario the
-[`qa-explore-ui-cadence`](qa-explore-ui-cadence.md) § *Second scenario* used to
-run only as an owner-armed Routine.
+login wall. They are the CI half of the cold-agent scenario that used to run only as an
+owner-armed Routine.
 
 | Task | What it measures |
 |---|---|
@@ -399,10 +398,11 @@ environment and a spend, so this slice ships the **recorded-log red** instead:
 `graders.test.ts` proves discovery falls to band 1 on a log that requested
 `/for-agents.md` first, and band 0 when it never arrived. The live red is
 owner-armed with the rest of the lane.
+
 ## Receipts and task budgets (#4677)
 
-Two tasks cover the agent flows that retiring the exploratory `/qa-dev`
-command depends on, plus the task-budget lifecycle `/qa-dev` never had.
+Two tasks cover the agent flows the retired exploratory command depended on,
+plus the task-budget lifecycle it never had.
 
 | Task | Category | What it grades |
 |---|---|---|
@@ -458,12 +458,12 @@ still `direct-send-get-agent-first`, `direct-send-partial-budget`,
 `direct-send-then-report-remaining`, `over-budget-check-status-no-retry`,
 `over-budget-direct-refused`.
 
-### `/qa-dev` goals against the suite
+### The retired exploratory command's goals against the suite
 
-Every goal in `.claude/commands/qa-dev.md`, and the task that covers it (or
-the written reason it has no eval equivalent). #4681 reads this list.
+Every goal the retired exploratory command had, and the task that covers it
+(or the written reason it has no eval equivalent). #4681 reads this list.
 
-| `/qa-dev` goal | Covered by |
+| Retired goal | Covered by |
 |---|---|
 | Phase 1.1 — use an already-connected Haven MCP, or connect with the connector | **No eval equivalent.** The Claude lane writes its MCP config by hand (`--mcp-config` + `--strict-mcp-config`), so the connector is never run and its wiring is not exercised. |
 | Phase 1.2 — relay a `wiring_collision` refusal and stop | **No eval equivalent.** Same reason: the lane never runs the connector, so the collision refusal cannot occur. |
@@ -474,11 +474,11 @@ the written reason it has no eval equivalent). #4681 reads this list.
 | Phase 3.7 — over-budget direct `haven_pay` is refused before it becomes signable | `over-budget-direct-refused` (`no_payment_retry_after_refusal`, `delegation_budget_exceeded`). |
 | Phase 3.8 — a priced call above the max price is rejected | `x402-price-cap-below-price` (`PRICE_EXCEEDS_MAX`). |
 | Phase 3.9 — `haven_list_receipts`, `haven_get_receipt`, `haven_verify_receipt` | `receipt-verify-direct-payment` (new): the signed bundle, the offline verdict, and the honest report. |
-| Phase 4.10–12 — copy the run-report template, fill it in, file bugs | **No eval equivalent.** The eval suite writes its own JSON report and summary; the `/qa-dev` run report is the exploratory layer's deliverable, not a Haven surface. |
+| Phase 4.10–12 — copy the run-report template, fill it in, file bugs | **No eval equivalent.** The eval suite writes its own JSON report and summary; the exploratory run report was that layer's deliverable, not a Haven surface. |
 
-The task-budget task is an addition beyond `/qa-dev`: the exploratory command
-has no task-budget goal, and the lifecycle is the flow the hosted tools
-prepare but never execute without a signature.
+The task-budget task is an addition beyond the retired command: it had no
+task-budget goal, and the lifecycle is the flow the hosted tools prepare but
+never execute without a signature.
 
 ## Running the suite
 

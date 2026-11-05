@@ -309,3 +309,68 @@ describe('buildColdChildEnv — no Haven credentials, the trial HOME', () => {
     }
   })
 })
+
+// ── #4682: the session id, and resuming it ─────────────────────────────────
+//
+// The hand-off loop cannot exist without these two: the stream's `system/init`
+// line carries the id, and `claude -p --resume <id>` continues the SAME
+// conversation after the human performs a step.
+
+describe('the session id (#4682)', () => {
+  it('reads session_id from the system/init line', () => {
+    const raw = [
+      '{"type":"system","subtype":"init","session_id":"9f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f","tools":[]}',
+      '{"type":"result","subtype":"success","total_cost_usd":0.01,"result":"done"}',
+    ].join('\n')
+    const { session } = parseClaudeCodeStreamLog(raw, { taskId: 't', trial: 1 })
+    expect(session.sessionId).toBe('9f1c2d3e-4a5b-6c7d-8e9f-0a1b2c3d4e5f')
+  })
+
+  it('leaves sessionId absent when the stream carried no init line', () => {
+    const { session } = parseClaudeCodeStreamLog('{"type":"result","result":"done"}', { taskId: 't', trial: 1 })
+    expect(session.sessionId).toBeUndefined()
+  })
+
+  it('runTurn appends --resume with the session id and returns the new one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fake-claude-resume-'))
+    const script = join(dir, 'fake-claude.mjs')
+    // Echo the argv the adapter built, so the test can prove `--resume` was
+    // passed — and print an init line so the next turn has an id.
+    await writeFile(
+      script,
+      `const argv = process.argv.slice(2).join(' ');\n` +
+        `process.stdout.write(JSON.stringify({type:'system',subtype:'init',session_id:'session-2'}) + '\\n');\n` +
+        `process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:argv}) + '\\n');\n`,
+    )
+    const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-resume-log-')), 's')
+    const adapter = new ClaudeCodeAdapter({
+      commandTemplate: `node ${shellQuote(script)} {instruction}`,
+      logPath: logBase,
+      timeoutMs: 30_000,
+    })
+    const first = await adapter.runTurn('first turn')
+    expect(first.session.sessionId).toBe('session-2')
+    expect(first.log.finalMessage).not.toContain('--resume')
+
+    const second = await adapter.runTurn('second turn', { resumeSessionId: 'session-2' })
+    expect(second.log.finalMessage).toContain('--resume session-2')
+    expect(second.session.sessionId).toBe('session-2')
+    expect(adapter.sessions).toHaveLength(2)
+  })
+
+  it('runTurn does not throw on a non-zero exit — the loop needs the log', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fake-claude-exit-'))
+    const script = join(dir, 'fake-claude.mjs')
+    await writeFile(script, `process.stdout.write(JSON.stringify({type:'result',result:'usage limit'}) + '\\n', () => process.exit(1));\n`)
+    const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-exit-log-')), 's')
+    const adapter = new ClaudeCodeAdapter({
+      commandTemplate: `node ${shellQuote(script)} {instruction}`,
+      logPath: logBase,
+      timeoutMs: 30_000,
+    })
+    const turn = await adapter.runTurn('x')
+    expect(turn.exitCode).toBe(1)
+    expect(turn.log.finalMessage).toContain('usage limit')
+    expect(turn.log.finalMessage).toContain('claude exited 1')
+  })
+})

@@ -81,6 +81,21 @@ const ALLOWED_SUBCOMMANDS: Record<string, readonly string[] | 'any'> = {
   contacts: ['list'],
 }
 
+/**
+ * The subcommand #4682 adds, and the reason it is NOT in the base map.
+ *
+ * `agents connect` is the step AFTER the login wall: it registers the agent,
+ * writes the runtime's MCP config and waits for the human's budget approval.
+ * A cold agent must not reach it before the human has approved the device
+ * login, so it is enabled per TURN by the hand-off loop, never by the cold
+ * profile's default allowlist.
+ */
+export const CONNECT_SUBCOMMAND = 'agents'
+export const CONNECT_ACTION = 'connect'
+
+/** The env var the hand-off loop sets on the post-login turns. */
+export const CONNECT_ALLOW_ENV = 'QA_EVAL_COMMAND_ALLOW_CONNECT'
+
 /** The env names the command child inherits — an allowlist, never `{...process.env}`. */
 export const COMMAND_ENV_ALLOWLIST = [
   'PATH', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ',
@@ -106,7 +121,11 @@ export type CommandValidation =
  * `cliPackage` is the spec the manifest served at trial start. An empty one
  * refuses every request: the tool cannot guess which package to run.
  */
-export function validateCommandRequest(request: unknown, cliPackage: string): CommandValidation {
+export function validateCommandRequest(
+  request: unknown,
+  cliPackage: string,
+  opts: { allowConnect?: boolean } = {},
+): CommandValidation {
   if (typeof request !== 'object' || request === null || Array.isArray(request)) {
     return { ok: false, reason: 'the request must be an object with an argv array' }
   }
@@ -142,6 +161,19 @@ export function validateCommandRequest(request: unknown, cliPackage: string): Co
   }
   const allowed = ALLOWED_SUBCOMMANDS[subcommand]
   if (allowed === undefined) {
+    // #4682: `agents connect` is the ONE subcommand the hand-off loop may
+    // enable after the login wall. It is refused by default, and the refusal
+    // names the rule rather than the value.
+    if (subcommand === CONNECT_SUBCOMMAND) {
+      if (opts.allowConnect !== true) {
+        return { ok: false, reason: 'that subcommand is not allowed before the login wall' }
+      }
+      const action = argv[i + 1]
+      if (action !== CONNECT_ACTION) {
+        return { ok: false, reason: `that ${CONNECT_SUBCOMMAND} subcommand is not allowed — allowed: ${CONNECT_ACTION}` }
+      }
+      return { ok: true, argv: [...argv] }
+    }
     return { ok: false, reason: 'that subcommand is not allowed before the login wall' }
   }
   if (allowed !== 'any') {
@@ -257,7 +289,15 @@ const TOOL_SCHEMA = {
 /** One JSON-RPC response for one request, or undefined for a notification. */
 export async function handleRpc(
   request: JsonRpcRequest,
-  deps: { cliPackage: string; trialHome: string; env: NodeJS.ProcessEnv; timeoutMs?: number; spawn?: SpawnFn },
+  deps: {
+    cliPackage: string
+    trialHome: string
+    env: NodeJS.ProcessEnv
+    timeoutMs?: number
+    spawn?: SpawnFn
+    /** #4682: the hand-off loop enables `agents connect` on the post-login turns. */
+    allowConnect?: boolean
+  },
 ): Promise<Record<string, unknown> | undefined> {
   const id = request.id
   const reply = (result: unknown) => ({ jsonrpc: '2.0', id: id ?? null, result })
@@ -278,7 +318,9 @@ export async function handleRpc(
       if (params?.name !== COMMAND_TOOL_NAME) {
         return error(-32602, `unknown tool ${JSON.stringify(params?.name)}`)
       }
-      const validated = validateCommandRequest(params.arguments, deps.cliPackage)
+      const validated = validateCommandRequest(params.arguments, deps.cliPackage, {
+        allowConnect: deps.allowConnect === true,
+      })
       if (!validated.ok) {
         // A refusal is a tool RESULT with isError, not a protocol error: the
         // agent must see the refusal and adapt, exactly as a denied Bash call
@@ -313,6 +355,9 @@ export function serveCommandTool(env: NodeJS.ProcessEnv = process.env): void {
   const timeoutRaw = Number(env[COMMAND_TIMEOUT_ENV] ?? '')
   const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : DEFAULT_COMMAND_TIMEOUT_MS
   const childEnv = buildCommandEnv(env, trialHome)
+  // #4682: the hand-off loop sets this on the post-login turns only. Absent or
+  // any value but `1` keeps `agents connect` refused.
+  const allowConnect = env[CONNECT_ALLOW_ENV]?.trim() === '1'
   const rl = createInterface({ input: process.stdin })
   rl.on('line', (line) => {
     const trimmed = line.trim()
@@ -324,7 +369,7 @@ export function serveCommandTool(env: NodeJS.ProcessEnv = process.env): void {
       process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } })}\n`)
       return
     }
-    void handleRpc(request, { cliPackage, trialHome, env: childEnv, timeoutMs }).then((response) => {
+    void handleRpc(request, { cliPackage, trialHome, env: childEnv, timeoutMs, allowConnect }).then((response) => {
       if (response !== undefined) process.stdout.write(`${JSON.stringify(response)}\n`)
     })
   })

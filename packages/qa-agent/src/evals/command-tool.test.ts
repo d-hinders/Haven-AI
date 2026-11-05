@@ -216,3 +216,58 @@ describe('handleRpc — the MCP surface', () => {
     expect(res.error.code).toBe(-32601)
   })
 })
+
+// ── #4682: `agents connect` is enabled per TURN, never by default ──────────
+//
+// The cold profile must not reach the connector before the human approved the
+// device login. The hand-off loop turns it on for the post-login turns only.
+
+describe('agents connect — the post-login subcommand (#4682)', () => {
+  const connect = { argv: ['npx', PKG, 'agents', 'connect', '--name', 'qa', '--budget', '25', '--token', 'USDC', '--period', '1440', '--run', '--json'] }
+
+  it('is refused by default, with the pre-login reason', () => {
+    const result = validateCommandRequest(connect, PKG)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('that subcommand is not allowed before the login wall')
+  })
+
+  it('is allowed when the hand-off loop enables it', () => {
+    const result = validateCommandRequest(connect, PKG, { allowConnect: true })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.argv).toEqual(connect.argv)
+  })
+
+  it('still refuses any other `agents` action, even when enabled', () => {
+    const result = validateCommandRequest({ argv: ['npx', PKG, 'agents', 'revoke'] }, PKG, { allowConnect: true })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toContain('allowed: connect')
+  })
+
+  it('still refuses a shell metacharacter in the connect argv', () => {
+    const result = validateCommandRequest(
+      { argv: ['npx', PKG, 'agents', 'connect', '&&', 'env'] },
+      PKG,
+      { allowConnect: true },
+    )
+    expect(result.ok).toBe(false)
+  })
+
+  it('handleRpc passes the flag through to the validator', async () => {
+    const deps = { cliPackage: PKG, trialHome: '/tmp/trial-home', env: { HOME: '/tmp/trial-home' } }
+    const refused = (await handleRpc(
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: COMMAND_TOOL_NAME, arguments: connect } },
+      deps,
+    )) as { result: { isError: boolean; content: Array<{ text: string }> } }
+    expect(refused.result.isError).toBe(true)
+    expect(refused.result.content[0]!.text).toContain('not allowed before the login wall')
+
+    const allowed = (await handleRpc(
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: COMMAND_TOOL_NAME, arguments: connect } },
+      { ...deps, allowConnect: true, spawn: fakeSpawn({ argv: [] }, 'ok\n') },
+    )) as { result: { isError: boolean } }
+    expect(allowed.result.isError).toBe(false)
+  })
+})

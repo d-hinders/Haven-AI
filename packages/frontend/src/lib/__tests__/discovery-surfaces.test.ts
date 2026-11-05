@@ -232,8 +232,8 @@ describe('the hooks are actually wired into the app', () => {
    * the runbook without falling back to `robots.txt` or guessing.
    *
    * That is the regression the cold-agent scenario scores as band 3 -> 2
-   * (`docs/operations/qa-explore-ui-cadence.md` § Second scenario). Scoring it
-   * weekly in a report is worth having; catching it here is better.
+   * (`docs/operations/agent-evals.md` § *The cold-agent onboarding tasks*).
+   * Scoring it in a run is worth having; catching it here is better.
    */
   it('a landing-HTML hook actually REACHES the agent runbook, not just some file', async () => {
     const layout = read('src/app/layout.tsx')

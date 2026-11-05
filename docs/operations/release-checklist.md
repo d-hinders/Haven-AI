@@ -9,7 +9,9 @@ last-verified: "2026-10-29"
 
 One page, for a human: every step below can be done by **any of the three
 maintainers** (@d-hinders, @AntonioSaaranen, @PhilipEriksson — owner decision
-2026-10-09, #3798). The canonical detail lives in
+2026-10-09, #3798) — except starting the optional eval step's approval, which
+only the owner can give and which never holds a release. The canonical detail
+lives in
 [`promoting-dev-to-main.md`](promoting-dev-to-main.md),
 [`branch-and-release-flow.md`](../contributing/branch-and-release-flow.md) §
 *Promotion to production* and the `release` skill — read those when a step is
@@ -45,7 +47,20 @@ unclear; this page is the order, not the reasoning.
    that risk. Run any data precondition a migration states (for example a
    duplicate check before a new unique index) against prod before merging.
    See `promoting-dev-to-main.md` § *Migrations*.
-6. **Click Merge.** Any of the three maintainers: the ordinary **Merge pull
+6. **Optional, non-blocking: run the agent evals.** Start a run from the
+   Actions tab or with
+   `gh workflow run agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full`
+   (`-f suite=subset`, or `-f tasks=<ids>` for an exact list). The job sits
+   behind the owner-approved `agent-evals` environment, so **only the owner can
+   approve it** — that approval is the one step here a maintainer cannot do for
+   another. It **never blocks a release**: the workflow is manual-only, is not a
+   required check and is not wired into `dev-gate.yml`, so a red, skipped or
+   unapproved run holds nothing. A **second full run in one budget period exits
+   3** and reports "not run" — a full run drains the eval agent's period budget
+   on purpose, so wait for the refill (or start a new period on the dev
+   dashboard) before running again. Details:
+   [`agent-evals.md`](agent-evals.md) § *Running the suite*.
+7. **Click Merge.** Any of the three maintainers: the ordinary **Merge pull
    request** button, **merge commit** form, in the web UI (`gh pr merge
    --merge` from a terminal works too). The PR showing as BEHIND `main` is
    expected — merge it anyway; there is no sync-back to undo it. A promotion
@@ -57,7 +72,7 @@ unclear; this page is the order, not the reasoning.
    a promotion. `qa-override` is a maintainer decision, not owner-only: decide
    before opening and apply the label at open (a later label needs a
    close/reopen to be re-read) — it is never an agent's call.
-7. **Check the npm dist-tags** — all five packages on **both** `alpha` and
+8. **Check the npm dist-tags** — all five packages on **both** `alpha` and
    `latest`, polled for several minutes (the registry lags; a single early
    read looks exactly like a stranded tag):
 
@@ -67,7 +82,7 @@ unclear; this page is the order, not the reasoning.
 
    A green publish with `latest` unmoved is a red `promote-tags` job — re-run
    that one job, never cut another version.
-8. **Run the closeout log check** and paste its block onto the promotion PR.
+9. **Run the closeout log check** and paste its block onto the promotion PR.
    It binds the evidence to the promotion's merge SHA: the deployment's
    identity must equal that SHA, both boot markers (`Database migrations
    complete`, `Haven backend running on port`) must be present in that
@@ -76,10 +91,10 @@ unclear; this page is the order, not the reasoning.
    statements — do not restart hoping it clears. If the script cannot run for
    you, the manual check in `promoting-dev-to-main.md` § *Merge, deploy, and
    verify prod* reaches the same verdict in the Railway web UI.
-9. **Real-payment canary.** The prod smoke's canary is a real payment through
+10. **Real-payment canary.** The prod smoke's canary is a real payment through
    the funded prod wallet — an operator step, never reported done while
    outstanding.
-10. **Work the owed issues.** Every issue the promotion PR lists under *Owed at
+11. **Work the owed issues.** Every issue the promotion PR lists under *Owed at
     this release* is worked now: record the result on the issue, remove
     `operator-verify` and close it. An issue whose prerequisite did not reach
     prod is carried to the next promotion, with the reason recorded on the

@@ -149,9 +149,8 @@ const GUARDED_FILES = [
   // Slash commands and installed skill files. NOT reachable by the docs
   // coupling gate at all: no `covers:` glob names them, and `docs:check`'s
   // skill validator checks structure, not claims. This is the class #2103
-  // fixed after `qa-dev.md` spent weeks telling a QA agent that a correct
+  // fixed after a QA command spent weeks telling a QA agent that a correct
   // on-chain refusal was a FAILURE — in a run that feeds `qa-freshness`.
-  '.claude/commands/qa-dev.md',
   '.claude/commands/qa-explore-ui.md',
   '.agents/skills/haven-agent-workflow/references/backend-worker.md',
   '.agents/skills/haven-agent-workflow/references/workflow-coordinator.md',

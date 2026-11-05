@@ -363,7 +363,10 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
         let known = false
         let total = 0n
         for (const g of prior.record.graders) {
-          if (g.name === 'payment_status_settled' && g.pass && g.settledSpendAtomic !== undefined) {
+          // Any passing grader's reported spend (#4676): today
+          // payment_status_settled and no_second_fresh_payment, never both
+          // on one task (the loader refuses that, tasks.ts).
+          if (g.pass && g.settledSpendAtomic !== undefined) {
             total += BigInt(g.settledSpendAtomic)
             known = true
           }

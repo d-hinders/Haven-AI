@@ -741,7 +741,7 @@ describe('#4218: a tier-3-only selection does not route around the tier-3 precon
 // ── A3: ordering tiers, the once-only drainer ──────────────────────────────
 
 describe('A3: the drainer runs after every tier-1 task, before the exhausted-budget task, exactly once', () => {
-  it('the real 11-task set: tier order, drainer k=1, tier-3 k=3, "k=1 (drains budget)" in the report', async () => {
+  it('the real 13-task set: tier order, drainer k=1, tier-3 k=3, "k=1 (drains budget)" in the report', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     const calls: string[] = []
@@ -770,6 +770,8 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
+      'x402-price-mismatch-invoice',
+      'x402-unsettled-purchase-no-double-pay',
       'direct-send-full-remaining',
       'over-budget-x402-refused',
     ])
@@ -778,7 +780,7 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
     const drainerCalls = calls.filter((c) => c.startsWith('direct-send-full-remaining#'))
     expect(drainerCalls).toEqual(['direct-send-full-remaining#1'])
     const drainerPos = order.indexOf('direct-send-full-remaining')
-    expect(drainerPos).toBeGreaterThan(order.indexOf('x402-price-cap-below-price'))
+    expect(drainerPos).toBeGreaterThan(order.indexOf('x402-unsettled-purchase-no-double-pay'))
     expect(drainerPos).toBeLessThan(order.indexOf('over-budget-x402-refused'))
     expect(calls.filter((c) => c.startsWith('over-budget-x402-refused#'))).toHaveLength(3)
 
@@ -904,6 +906,26 @@ describe('consistency guard: a timeout fails one trial, not the rest', () => {
     await expect(resolver.resolve(t, 2, prior as never)).rejects.toThrow()
     await resolver.resolve(t, 3, prior as never)
     expect(resolver.guardEvents).toEqual([expect.objectContaining({ kind: 'consistency_wait_skipped', beforeTrial: 3, priorKey: 'x402-catalog-guided-purchase#1' })])
+  })
+
+  it('#4676: deducts the spend no_second_fresh_payment reported — a smaller drop is not enough', async () => {
+    // The read drops by 100 while the prior reported 500. Waiting for "any
+    // decrease" would accept it; deducting the reported spend must not.
+    let reads = 0
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining: reads++ === 0 ? 221_255n : 221_155n }),
+      blockNumber: async () => 1,
+      recipient: '0x' + '22'.repeat(20),
+      x402Target: 'https://merchant.example/mcp',
+      agentAccount: '0x' + '11'.repeat(20),
+      consistencyTimeoutMs: 5,
+      consistencyPollMs: 1,
+      sleep: async () => {},
+    } as never)
+    const t = await task('direct-send-partial-budget')
+    await resolver.resolve(t, 1)
+    const prior = settledPrior('x402-unsettled-purchase-no-double-pay', [{ name: 'no_second_fresh_payment', pass: true, settledSpendAtomic: '500' }])
+    await expect(resolver.resolve(t, 2, prior as never)).rejects.toThrow(/settled spend of 500/)
   })
 
   it('still waits (and can time out) after an erc7710 settlement, where the merchant redeems later', async () => {

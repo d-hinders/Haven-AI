@@ -218,9 +218,15 @@ export interface RunSuiteOptions {
 
 const SETTLEMENT_GRADERS = new Set(['transfer_settled', 'payment_status_settled'])
 
-/** A trial settled when one of its settlement graders PASSED. */
+/**
+ * A trial settled when one of its settlement graders PASSED, or when any
+ * passing grader reported the spend it saw (`settledSpendAtomic`, #4676:
+ * `no_second_fresh_payment` reports the one purchase it allowed when that
+ * purchase reads back settled — a grader that passes on NO payment reports
+ * nothing, so a decline never makes the next trial wait for a decrease).
+ */
 const recordSettled = (record: TrialRecord): boolean =>
-  record.graders.some((g) => SETTLEMENT_GRADERS.has(g.name) && g.pass)
+  record.graders.some((g) => g.pass && (SETTLEMENT_GRADERS.has(g.name) || g.settledSpendAtomic !== undefined))
 
 /**
  * Run one task's trials. Each trial resolves, runs, grades — and its record

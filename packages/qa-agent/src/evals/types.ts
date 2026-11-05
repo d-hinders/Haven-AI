@@ -269,3 +269,5 @@ export type GraderName =
   | 'merchant_settlement_recorded'
   | 'eip3009_settlement_shape'
   | 'nothing_stranded_on_delegate'
+  | 'declined_before_paying'
+  | 'no_second_fresh_payment'

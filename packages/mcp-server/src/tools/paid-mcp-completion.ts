@@ -299,6 +299,27 @@ const EIP3009_UNVERIFIED_TEXT = {
 } as const
 
 /**
+ * #4688: the next step for an unverified EIP-3009 settlement. The report-tool
+ * handoff survives where it names a tool (a retryable report, or the #4061
+ * missing-proof-header refusal); a plain refusal names none, and the status
+ * poll is then the only step that leads anywhere. Named `…Step` so the
+ * `lint:next-steps` ratchet reads the emission as named at its top level.
+ */
+function unverifiedSettlementStep(
+  outcome: EvidenceReportOutcome | undefined,
+  paymentId: string,
+  heldSettlementTxHash: string | null,
+  paymentHeader: string | undefined,
+): HostedHandoff {
+  const handoff = outcome
+    ? settlementEvidenceHandoff(outcome, paymentId, heldSettlementTxHash, paymentHeader)
+    : null
+  return handoff && handoff.nextTool
+    ? handoff
+    : { nextTool: 'haven_get_payment_status', nextArguments: { payment_id: paymentId } }
+}
+
+/**
  * #4688: the EIP-3009 settle/complete answer for a merchant 2xx whose
  * settlement evidence is NOT `confirmed`. `settled` is true only on a
  * `confirmed` evidence outcome — never on the merchant's 2xx alone, which is
@@ -328,21 +349,6 @@ function eip3009UnverifiedSettlementAnswer(input: {
   // says — that would contradict `settled: false` in the same response.
   const status =
     input.paymentStatus && input.paymentStatus !== 'settled' ? input.paymentStatus : fallbackStatus
-  // The report-tool handoff survives where it names a tool (a retryable report,
-  // or the #4061 missing-proof-header refusal); a plain refusal names none, and
-  // the status poll is then the only step that leads anywhere.
-  const handoff = input.outcome
-    ? settlementEvidenceHandoff(
-        input.outcome,
-        input.paymentId,
-        input.heldSettlementTxHash,
-        input.paymentHeader,
-      )
-    : null
-  const nextStep =
-    handoff && handoff.nextTool
-      ? handoff
-      : { nextTool: 'haven_get_payment_status' as const, nextArguments: { payment_id: input.paymentId } }
   const reason = pending
     ? EIP3009_UNVERIFIED_TEXT.pending
     : input.outcome && isMissingProofHeaderRefusal(input.outcome)
@@ -360,7 +366,12 @@ function eip3009UnverifiedSettlementAnswer(input: {
     settlement_tx_hash: null,
     ...buildAgentGuidance({
       nextAction: AgentPaymentNextAction.CheckStatusLater,
-      ...nextStep,
+      ...unverifiedSettlementStep(
+        input.outcome,
+        input.paymentId,
+        input.heldSettlementTxHash,
+        input.paymentHeader,
+      ),
       safeToContinue: true,
       reason,
       summary: { payment_id: input.paymentId, status },

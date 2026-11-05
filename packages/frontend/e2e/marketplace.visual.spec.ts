@@ -46,6 +46,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, serveAddFundsAccount, testAgent } from './fixtures/haven-api'
 import { ampersendDemoApi, bergetAi, havenDemoStore, havenDemoStoreOffers } from './fixtures/marketplace'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -387,7 +388,9 @@ test.describe('marketplace visual regression', () => {
    * "Set a budget for this merchant" (#3331, #4003 wording) — element-scoped, like the Settings →
    * Accounting backfill dialog (`settings-accounting.visual.spec.ts`), not a
    * full-page SCENARIOS entry: the dialog is the same size regardless of the
-   * page behind it. `havenDemoStore`'s one offer already advertises ERC-7710
+   * page behind it, and that page is hidden before each clip, since the rounded
+   * corners would otherwise show it (`hidePageBehindModal`, #3872).
+   * `havenDemoStore`'s one offer already advertises ERC-7710
    * (`fixtures/marketplace.ts`), so only its `funding` and an eligible agent
    * on its chain (84532) need overriding here — `testAgent` is chain 8453,
    * i.e. ineligible, which is deliberate: this override adds a SECOND agent
@@ -602,6 +605,7 @@ test.describe('marketplace visual regression', () => {
     await expect(dialog.getByText(new RegExp(`^Pays only ${havenDemoStore.name} \\(`))).toHaveCount(1)
 
     await page.evaluate(() => document.fonts.ready)
+    await hidePageBehindModal(dialog)
     await expect(dialog).toHaveScreenshot(`merchant-page-fund-merchant-modal-desktop${schemeSuffix}.png`, {
       animations: 'disabled',
       caret: 'hide',
@@ -649,6 +653,7 @@ test.describe('marketplace visual regression', () => {
     await expect(dialog.getByText(new RegExp(`^Pays only ${havenDemoStore.name}`))).toHaveCount(1)
 
     await page.evaluate(() => document.fonts.ready)
+    await hidePageBehindModal(dialog)
     await expect(dialog).toHaveScreenshot(`merchant-page-fund-merchant-modal-mobile.png`, {
       animations: 'disabled',
       caret: 'hide',
@@ -684,6 +689,7 @@ test.describe('marketplace visual regression', () => {
     await expect(dialog.getByText(/replaces this agent's current budget to the same address/)).toHaveCount(1)
 
     await page.evaluate(() => document.fonts.ready)
+    await hidePageBehindModal(dialog)
     await expect(dialog).toHaveScreenshot(
       `merchant-page-fund-merchant-modal-review-warning-desktop${schemeSuffix}.png`,
       {

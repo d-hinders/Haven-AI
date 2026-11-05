@@ -30,6 +30,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import {
   dismissMobileSidebar,
   mockHavenApi,
@@ -115,7 +116,9 @@ test.describe('edit budget modal visual regression (#3398)', () => {
     // #4564: the modal is built on `ui/Modal`, whose `role="dialog"` is the
     // `fixed inset-0` WRAPPER — a clip of it is a screenshot of the page
     // behind the dialog. The panel is the honest handle (`panelTestId`).
-    await expect(page.getByTestId('edit-budget-modal')).toHaveScreenshot('agents-edit-budget-modal-mobile.png', {
+    const panel = page.getByTestId('edit-budget-modal')
+    await hidePageBehindModal(panel)
+    await expect(panel).toHaveScreenshot('agents-edit-budget-modal-mobile.png', {
       animations: 'disabled',
       caret: 'hide',
       maxDiffPixels: 50,

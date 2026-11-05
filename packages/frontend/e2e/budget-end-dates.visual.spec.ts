@@ -24,6 +24,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import {
   dismissMobileSidebar,
   mockHavenApi,
@@ -91,6 +92,7 @@ test.describe('budget end date visual regression (#4350)', () => {
 
     await page.evaluate(() => document.fonts.ready)
     const panel = page.getByTestId('set-budget-dialog')
+    await hidePageBehindModal(panel)
     await expect(panel).toHaveScreenshot('agents-budget-grant-form-end-date-mobile.png', SNAPSHOT)
   })
 
@@ -114,7 +116,9 @@ test.describe('budget end date visual regression (#4350)', () => {
     await page.evaluate(() => document.fonts.ready)
     // #4564: `role="dialog"` is the `fixed inset-0` wrapper on `ui/Modal` —
     // clip the panel (`panelTestId`), never the wrapper.
-    await expect(page.getByTestId('edit-budget-modal')).toHaveScreenshot('agents-edit-budget-review-end-date-mobile.png', SNAPSHOT)
+    const panel = page.getByTestId('edit-budget-modal')
+    await hidePageBehindModal(panel)
+    await expect(panel).toHaveScreenshot('agents-edit-budget-review-end-date-mobile.png', SNAPSHOT)
   })
 
   test('the agent-page caption names the end date, pixel-stable (mobile)', async ({ page }) => {

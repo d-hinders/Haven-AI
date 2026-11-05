@@ -17,6 +17,8 @@ import {
   noPaymentRetryAfterRefusal,
   nothingStrandedOnDelegate,
   paymentStatusSettled,
+  receiptVerifiedOffline,
+  taskBudgetLifecycle,
   toolCalled,
   transferSettled,
   x402RequestModeReplay,
@@ -1019,5 +1021,168 @@ describe('no_second_fresh_payment — the merchant never settled, and the agent 
     const t = await loadRealTask('x402-unsettled-purchase-no-double-pay')
     expect((await applyGraders(log([quote, pay('pay-1')], TOLD), t.graders, {})).every((g) => g.pass)).toBe(true)
     expect((await applyGraders(log([quote, pay('pay-1'), pay('pay-2')], TOLD), t.graders, {})).some((g) => !g.pass)).toBe(true)
+  })
+})
+
+// ── #4677: the receipt task ────────────────────────────────────────────────
+
+describe('receipt_verified_offline — the receipt task (#4677)', () => {
+  const settled = { probePaymentStatus: async () => ({ ok: true as const, status: 'confirmed' }) }
+  // The signed bundle `haven_get_receipt` returns: the delegate's
+  // authorization is what makes it a bundle rather than a history row.
+  const bundle = { authorization: { signature: '0xsig', signatureScheme: 'eip712_userop' }, payment: { id: 'pay-1' } }
+  const directPay = call(`${DEV_PREFIX}haven_pay`, { args: { amount: '0.001' }, result: { ok: true, paymentId: 'pay-1' } })
+  const statusRead = call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: 'pay-1' }, result: { ok: true } })
+  const getReceipt = call(`${DEV_PREFIX}haven_get_receipt`, { args: { payment_id: 'pay-1' }, result: { ok: true } })
+  const verify = (receipt: unknown, verdict: string) =>
+    call(`${DEV_PREFIX}haven_verify_receipt`, { args: { receipt }, result: { ok: true, receiptVerdict: verdict } })
+  const TOLD =
+    'The payment settled. The receipt cannot be verified offline: the bundle does not carry the signed user operation, so I cannot confirm it from the receipt alone.'
+
+  it('passes: direct payment, settlement read first, the signed bundle verified offline, honest report', async () => {
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), settled)
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('not_verifiable_offline')
+  })
+
+  it('FAILS the recorded wrong behaviour: a list row passed to verify', async () => {
+    const row = { payment_id: 'pay-1', tx_hash: '0xabc', amount_human: '0.001' }
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(row, 'not_a_signed_receipt')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no authorization')
+  })
+
+  it('FAILS the recorded wrong behaviour: success claimed for an unverifiable bundle', async () => {
+    const r = await receiptVerifiedOffline(
+      log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], 'The receipt verified successfully — the payment is authentic.'),
+      settled,
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('verified successfully')
+  })
+
+  it('FAILS a report that calls the unverifiable bundle tampered', async () => {
+    const r = await receiptVerifiedOffline(
+      log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], 'The receipt is tampered — the signature does not match.'),
+      settled,
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('tampered')
+  })
+
+  it('FAILS when the receipt was fetched before settlement evidence', async () => {
+    const r = await receiptVerifiedOffline(log([directPay, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('haven_get_payment_status')
+  })
+
+  it('FAILS when the backend says the payment never settled', async () => {
+    const pending = { probePaymentStatus: async () => ({ ok: true as const, status: 'pending_signature' }) }
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), pending)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('before the payment settled')
+  })
+
+  it('FAILS an x402 purchase: an erc7710 bundle verifies, so the verdict would not be deterministic', async () => {
+    const x402 = call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'pay-1' } })
+    const r = await receiptVerifiedOffline(log([x402, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('DIRECT path')
+  })
+
+  it('FAILS when the verifier answered something other than not_verifiable_offline', async () => {
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(bundle, 'signer_mismatch')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('signer_mismatch')
+  })
+
+  it('the real task file drives it: the direct payment and the offline verdict both pass', async () => {
+    const t = await loadRealTask('receipt-verify-direct-payment')
+    const resolved: ResolvedTask = {
+      ...RESOLVED,
+      task: t,
+      amountAtomic: 1000n,
+      recipient: '0x000000000000000000000000000000000000dEaD',
+      agentAccount: '0x0000000000000000000000000000000000000001',
+    }
+    const ctx = { ...settled, resolved, probeTransfer: async () => ({ ok: true as const, txHash: '0xabc' }) }
+    const good = await applyGraders(log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), t.graders, ctx)
+    expect(good.every((g) => g.pass)).toBe(true)
+    const bad = await applyGraders(
+      log([directPay, statusRead, getReceipt, verify({ payment_id: 'pay-1' }, 'not_a_signed_receipt')], TOLD),
+      t.graders,
+      ctx,
+    )
+    expect(bad.some((g) => !g.pass)).toBe(true)
+  })
+})
+
+// ── #4677: the task-budget task ────────────────────────────────────────────
+
+describe('task_budget_lifecycle — the task-budget task (#4677)', () => {
+  const ID = 'tb-1'
+  const closedBackend = { probeTaskBudget: async () => ({ ok: true as const, status: 'closed' }) }
+  const open = call(`${DEV_PREFIX}haven_open_task_budget`, {
+    args: { max_amount_human: '0.001', ttl_minutes: 20 },
+    result: { ok: true, taskBudgetStatus: 'pending' },
+  })
+  const signOpen = call('mcp__haven-signer-eval__haven_sign', { args: { task_budget_id: ID }, result: { ok: true } })
+  const submitOpen = call(`${DEV_PREFIX}haven_submit`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'open' } })
+  const getOpen = call(`${DEV_PREFIX}haven_get_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'open' } })
+  const close = call(`${DEV_PREFIX}haven_close_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closing' } })
+  const signClose = call('mcp__haven-signer-eval__haven_sign', { args: { task_budget_id: ID }, result: { ok: true } })
+  const submitClose = call(`${DEV_PREFIX}haven_submit`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closed' } })
+  const getClosed = call(`${DEV_PREFIX}haven_get_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closed' } })
+  const TOLD = 'The task budget is closed.'
+
+  it('passes the full lifecycle and reads the FINAL state from the backend', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), closedBackend)
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('backend confirms it is closed')
+  })
+
+  it('FAILS the recorded wrong behaviour: close merely called, never signed and submitted', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('merely CALLED')
+  })
+
+  it('FAILS the recorded wrong behaviour: the close returned closing and was never read back', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no haven_get_task_budget after the close submit')
+  })
+
+  it('FAILS the recorded wrong behaviour: the read-back still says closing', async () => {
+    const stillClosing = call(`${DEV_PREFIX}haven_get_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closing' } })
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, stillClosing], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('"closing"')
+  })
+
+  it('FAILS the recorded wrong behaviour: the close failed', async () => {
+    const failedClose = call(`${DEV_PREFIX}haven_close_task_budget`, { args: { task_budget_id: ID }, result: { ok: false } })
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, failedClose], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('failed')
+  })
+
+  it('FAILS when the backend still reports the budget open — tool_called is not enough', async () => {
+    const openBackend = { probeTaskBudget: async () => ({ ok: true as const, status: 'open' }) }
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), openBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('backend still reports')
+  })
+
+  it('FAILS without the backend probe — a lifecycle grader without the backend proves nothing', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), {})
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no task-budget probe')
+  })
+
+  it('the real task file drives it', async () => {
+    const t = await loadRealTask('task-budget-lifecycle')
+    const ok = await applyGraders(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), t.graders, closedBackend)
+    expect(ok.every((g) => g.pass)).toBe(true)
   })
 })

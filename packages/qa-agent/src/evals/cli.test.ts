@@ -164,6 +164,7 @@ const paying = new Set([
   'direct-send-partial-budget',
   'direct-send-then-report-remaining',
   'direct-send-full-remaining',
+  'receipt-verify-direct-payment',
   'x402-catalog-guided-purchase',
   'x402-plain-http-request-mode',
   'x402-eip3009-bridge-vpn-legacy',
@@ -769,6 +770,8 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
       'interrupted-purchase-resume',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
+      'receipt-verify-direct-payment',
+      'task-budget-lifecycle',
       'x402-catalog-guided-purchase',
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
@@ -1044,5 +1047,68 @@ describe('the per-trial resolver — a setup task never reads the eval budget (#
     expect(reads).toEqual([])
     expect(resolved.amountAtomic).toBe(0n)
     expect(resolved.startedAtBlock).toBe(42)
+  })
+
+  // #4677: a setup task that ALSO carries an amount rule (the task-budget
+  // task) resolves the cap from the throwaway agent's own grant — still
+  // without reading the eval budget.
+  it('resolves a setup task WITH an amount rule from setup.budgetAtomic, not the eval budget', async () => {
+    const { createPerTrialResolver } = await import('./cli.js')
+    const reads: BudgetUse[] = []
+    const resolver = createPerTrialResolver({
+      readBudget: async (use) => {
+        reads.push(use)
+        return { remaining: 9_000_000n }
+      },
+      blockNumber: async () => 7,
+    })
+    const budgetTask = {
+      id: 'task-budget-lifecycle',
+      title: 'x',
+      category: 'task-budget',
+      instruction: 'Open a task budget with a cap of {amount} USDC.',
+      requires: ['THROWAWAY-identity'],
+      amount: { rule: 'fraction_of_remaining', fraction: '1/2' },
+      graders: [{ name: 'task_budget_lifecycle' }],
+      expectTransfer: false,
+      source: { kind: 'issue', ref: '4677', note: 'n' },
+      lanes: ['claude-code'],
+      setup: { kind: 'throwaway-identity', label: 'task-budget', budgetAtomic: '2000', fundingAtomic: '0' },
+    } as EvalTask
+
+    const resolved = await resolver.resolve(budgetTask, 1)
+    expect(reads).toEqual([])
+    expect(resolved.amountAtomic).toBe(1000n)
+    expect(resolved.instruction).toContain('0.001')
+  })
+})
+
+describe('#4677: buildGraderContext wires probeTaskBudget into task_budget_lifecycle', () => {
+  const provider: BlockNumberSource = { getBlockNumber: async () => 99 }
+
+  it('reads GET /task-budgets/:id and returns its status', async () => {
+    const api = {
+      getTaskBudget: vi.fn(async () => ({ ok: true, status: 200, data: { task_budget: { id: 'tb-1', status: 'closed' } } })),
+    } as unknown as HavenApi & { getTaskBudget: ReturnType<typeof vi.fn> }
+    const ctx = buildGraderContext({ api, provider })
+    expect(await ctx.probeTaskBudget!('tb-1')).toEqual({ ok: true, status: 'closed' })
+    expect(api.getTaskBudget).toHaveBeenCalledWith('tb-1')
+  })
+
+  it('a backend read failure is an error, never a guessed status', async () => {
+    const api = {
+      getTaskBudget: vi.fn(async () => ({ ok: false, status: 404, data: { error: 'Task budget not found' } })),
+    } as unknown as HavenApi
+    const ctx = buildGraderContext({ api, provider })
+    const r = await ctx.probeTaskBudget!('tb-1')
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.error).toContain('HTTP 404')
+  })
+
+  it('a row with no status is an error, not a pass', async () => {
+    const api = { getTaskBudget: vi.fn(async () => ({ ok: true, status: 200, data: {} })) } as unknown as HavenApi
+    const ctx = buildGraderContext({ api, provider })
+    const r = await ctx.probeTaskBudget!('tb-1')
+    expect(r.ok).toBe(false)
   })
 })

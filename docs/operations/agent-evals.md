@@ -48,7 +48,7 @@ backend**. No payment code is changed by this suite; the graders only READ.
 | Task format | `packages/qa-agent/src/evals/types.ts` | One JSON file per task: the instruction, the setup it needs, the budget-aware amount rule, and the graders to apply. JSON, never Markdown. |
 | Graders | `packages/qa-agent/src/evals/graders.ts` | Read the recorded tool-call log + injected chain/backend probes. No model, no live agent. |
 | Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, split into the explicit 9-tool payment list and the 20 non-payment tools, and the 5 signer tools. `tools.test.ts` holds them equal to their upstream sources (#4121): the keys of the hosted tools/list snapshot (`tools-list.snapshot.json` in the mcp-server package) and of the signer's `toolSchemas`. A hosted tool in neither half fails as unclassified. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
-| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 13 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
+| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 18 tasks across direct-payment / x402-paywall / over-budget / interrupted-purchase / budget-ended / agent-revoked / task-budget, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
 | Compare | `packages/qa-agent/src/evals/compare.ts` | The regression-only compare (#3992 D): the new report vs earlier comparable reports, alerting only after two consecutive pass^k failures on a 5-of-7 baseline. |
@@ -314,6 +314,87 @@ or uploaded.
 `qa-<label>-<rand>@haven.test` and `QA <label> (throwaway)`. Neither may
 drift, or the purge would miss the rows this slice creates.
 
+## Receipts and task budgets (#4677)
+
+Two tasks cover the agent flows that retiring the exploratory `/qa-dev`
+command depends on, plus the task-budget lifecycle `/qa-dev` never had.
+
+| Task | Category | What it grades |
+|---|---|---|
+| `receipt-verify-direct-payment` | `direct-payment` | A payment **pinned to the direct path** (`haven_pay`, never an x402 tool), a successful `haven_get_payment_status` **before** `haven_get_receipt`, the signed bundle passed to `haven_verify_receipt` (not a `haven_list_receipts` row), the verifier's `not_verifiable_offline` verdict, and a final message that says the receipt **cannot be verified offline** — never tampering, never success. |
+| `task-budget-lifecycle` | `task-budget` | The full lifecycle `open → sign → submit → get (open) → close → sign → submit → get (closed)`, with the **final state read from the backend** (`GET /task-budgets/:id`). |
+
+**Why the receipt task pins the direct path.** "After a payment" alone is not
+deterministic: an erc7710 bundle verifies (`verifiedOver: delegation_digest`),
+while a direct or EIP-3009 bundle answers `not_verifiable_offline` because the
+signed user operation is not in the bundle. The task therefore names
+`haven_pay` and the grader fails an x402 payment tool in the log. The
+settlement read is required **before** the receipt fetch because
+`haven_get_receipt` answers only for settled payments, and the grader probes
+the backend to confirm the payment actually settled.
+
+**Why the task-budget grader reads the backend.** `haven_open_task_budget` and
+a live `haven_close_task_budget` only PREPARE: they return a `haven_sign`
+handoff, and state does not change until the signature is submitted
+(`mcp-server/src/tools/task-budgets.ts:120-166`). `tool_called` would pass a
+close that merely returned `closing`, so the grader reads the two explicit
+`haven_get_task_budget` reads from the log AND the final state from
+`GET /task-budgets/:id`. It fails a close merely called, a close that never
+reached `closed`, a failed close, and a backend that still reports the budget
+open.
+
+**The `task-budget` category and its amount rule.** A task-budget task must
+carry an `amount` rule even though it also has a per-trial `setup`, and the
+rule must be `fraction_of_remaining`: the cap it opens is a SLICE of the
+budget the throwaway agent holds (`setup.budgetAtomic`), never the whole
+remainder. Opening the whole remainder would reserve everything and make
+later opens and payments refuse. The resolver resolves that rule against the
+throwaway grant, still without reading the eval agent's budget.
+
+**A failed trial cannot poison the next one.** Open task budgets reserve the
+parent's remainder (`routes/task-budgets.ts:213-235`), so a child left open
+makes later opens refuse. The #4678 teardown discovers and closes every open
+budget with the trial's own key before the revoke, and the task's
+`ttl_minutes: 20` is the backstop if the teardown itself fails. The teardown
+test `a trial that FAILED between opening a budget and closing it still
+closes it` (`trial-setup.test.ts`) covers the failure between open and close.
+
+**Per-trial cost.** `receipt-verify-direct-payment` runs on the shared eval
+agent and spends one `fraction_of_remaining` slice (1/4) per trial — the same
+rule as the other direct-payment tasks. `task-budget-lifecycle` provisions a
+throwaway identity with `fundingAtomic: "0"` (opening a task budget reserves
+the parent delegation's remainder; it moves no USDC), so its per-trial cost is
+**0** and it is exempt from the run-start exit-3 budget preflight.
+
+**The `--limit=5` subset is unchanged.** Both new task files sort after the
+first five shared-agent tasks in the canonical order, and the task-budget task
+also carries a `setup` (excluded from the slice), so the workflow's subset is
+still `direct-send-get-agent-first`, `direct-send-partial-budget`,
+`direct-send-then-report-remaining`, `over-budget-check-status-no-retry`,
+`over-budget-direct-refused`.
+
+### `/qa-dev` goals against the suite
+
+Every goal in `.claude/commands/qa-dev.md`, and the task that covers it (or
+the written reason it has no eval equivalent). #4681 reads this list.
+
+| `/qa-dev` goal | Covered by |
+|---|---|
+| Phase 1.1 — use an already-connected Haven MCP, or connect with the connector | **No eval equivalent.** The Claude lane writes its MCP config by hand (`--mcp-config` + `--strict-mcp-config`), so the connector is never run and its wiring is not exercised. |
+| Phase 1.2 — relay a `wiring_collision` refusal and stop | **No eval equivalent.** Same reason: the lane never runs the connector, so the collision refusal cannot occur. |
+| Phase 1.3 — `/haven-reset` for a clean slate | **No eval equivalent.** The eval lane provisions a throwaway identity per trial instead of resetting a shared one; `/haven-reset` is a Claude-session convenience, not a Haven surface. |
+| Phase 2.4 — `haven_get_agent` confirms the dev QA agent | `direct-send-get-agent-first` (`agent_status_before_payment`). |
+| Phase 2.5 — `haven_get_allowances` shows the budget and live remaining | `direct-send-then-report-remaining` (`tool_called` after `haven_submit`); the over-budget tasks' pre-emptive decline also rests on a successful budget read. |
+| Phase 3.6 — within-budget x402 payment settles and produces a receipt | `x402-catalog-guided-purchase` (`payment_status_settled`) and `x402-plain-http-request-mode` (`haven_payment_submitted`). |
+| Phase 3.7 — over-budget direct `haven_pay` is refused before it becomes signable | `over-budget-direct-refused` (`no_payment_retry_after_refusal`, `delegation_budget_exceeded`). |
+| Phase 3.8 — a priced call above the max price is rejected | `x402-price-cap-below-price` (`PRICE_EXCEEDS_MAX`). |
+| Phase 3.9 — `haven_list_receipts`, `haven_get_receipt`, `haven_verify_receipt` | `receipt-verify-direct-payment` (new): the signed bundle, the offline verdict, and the honest report. |
+| Phase 4.10–12 — copy the run-report template, fill it in, file bugs | **No eval equivalent.** The eval suite writes its own JSON report and summary; the `/qa-dev` run report is the exploratory layer's deliverable, not a Haven surface. |
+
+The task-budget task is an addition beyond `/qa-dev`: the exploratory command
+has no task-budget goal, and the lifecycle is the flow the hosted tools
+prepare but never execute without a signature.
+
 ## Running the suite
 
 ```
@@ -339,7 +420,7 @@ Env the run needs (all dev/testnet):
   `x402-unsettled-purchase-no-double-pay`); required
   only when the loaded task set renders `{target}`, and checked before the
   first agent session. With `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set,
-  ONE suite invocation covers all 13 tasks — no per-task config needed (a
+  ONE suite invocation covers all 18 tasks — no per-task config needed (a
   task-by-id filter, `--task`, is a deliberate slice rather than per-task
   config; see Other flags). On dev it is the demo merchant's MCP endpoint
   (`…/mcp`),

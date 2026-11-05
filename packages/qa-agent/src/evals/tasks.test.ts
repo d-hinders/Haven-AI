@@ -57,7 +57,7 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment|declined_before_paying|no_second_fresh_payment)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment|declined_before_paying|no_second_fresh_payment|receipt_verified_offline|task_budget_lifecycle)$/)
     }
   })
 
@@ -210,6 +210,9 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['declined_before_paying', 'preemptiveReadTools', ['haven_quote_x402']],
     ['declined_before_paying', 'mustMention', ['0.001']],
     ['no_second_fresh_payment', 'mustMention', ['settle']],
+    ['receipt_verified_offline', 'mustMention', ['offline']],
+    ['receipt_verified_offline', 'forbidMention', ['tampered']],
+    ['task_budget_lifecycle', 'mustMention', ['closed']],
   ]
 
   it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
@@ -534,6 +537,8 @@ describe('the tiered run order (#3992 A3)', () => {
       'interrupted-purchase-resume',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
+      'receipt-verify-direct-payment',
+      'task-budget-lifecycle',
       'x402-catalog-guided-purchase',
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
@@ -761,5 +766,87 @@ describe('validateTask — #4676 rules', () => {
     const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }, { name: 'no_second_fresh_payment', options: {} }] }
     expect(validateTask(t, 'x.json')).toContain('deduct one purchase twice')
     expect(validateTask({ ...structuredClone(base), graders: [{ name: 'no_second_fresh_payment', options: {} }] }, 'x.json')).toBeNull()
+  })
+})
+
+// ── #4677: the task-budget category and the two new tasks ──────────────────
+
+describe('validateTask — the task-budget category (#4677)', () => {
+  const base = {
+    id: 'tb-task',
+    title: 'T',
+    category: 'task-budget',
+    instruction: 'Open a task budget with a cap of {amount} USDC.',
+    requires: ['THROWAWAY-identity'],
+    amount: { rule: 'fraction_of_remaining', fraction: '1/2' },
+    graders: [{ name: 'task_budget_lifecycle', options: { mustMention: ['closed'] } }],
+    expectTransfer: false,
+    source: { kind: 'issue', ref: '4677', note: 'n' },
+    setup: { kind: 'throwaway-identity', label: 'task-budget', budgetAtomic: '2000', fundingAtomic: '0' },
+  }
+
+  it('accepts the well-formed task-budget task', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('requires an amount rule even though the task carries a setup — the cap is a slice, never the whole grant', () => {
+    const noAmount = structuredClone(base) as Record<string, unknown>
+    delete noAmount.amount
+    expect(validateTask(noAmount, 'x.json')).toContain('must carry an amount rule')
+  })
+
+  it('refuses remaining_period_budget: the cap must be a fraction of the remaining budget', () => {
+    const whole = { ...structuredClone(base), amount: { rule: 'remaining_period_budget', delta_atomic: '0' } }
+    expect(validateTask(whole, 'x.json')).toContain('fraction_of_remaining')
+  })
+
+  it('refuses a forbidMention that is not an array of non-empty strings', () => {
+    const bad = { ...structuredClone(base), graders: [{ name: 'receipt_verified_offline', options: { forbidMention: 'tampered' } }] }
+    expect(validateTask(bad, 'x.json')).toContain('forbidMention')
+  })
+})
+
+describe('the two #4677 task files (read from disk)', () => {
+  it('both load, and the task-budget task resolves its cap from the throwaway grant', async () => {
+    const { tasks, invalid } = await loadTasks(TASKS_DIR)
+    expect(invalid).toEqual([])
+    const receipt = tasks.find((t) => t.id === 'receipt-verify-direct-payment')
+    const budget = tasks.find((t) => t.id === 'task-budget-lifecycle')
+    expect(receipt).toBeDefined()
+    expect(budget).toBeDefined()
+    expect(receipt?.category).toBe('direct-payment')
+    expect(budget?.category).toBe('task-budget')
+    // The cap is a slice of the throwaway agent's own grant (2000 × 1/2).
+    const resolved = await resolveTask(budget!, { budget: async () => ({ remaining: 0n }) })
+    expect('resolved' in resolved && resolved.resolved.amountAtomic).toBe(1000n)
+    expect('resolved' in resolved && resolved.resolved.instruction).toContain('0.001')
+  })
+
+  it('the task-budget task pins a short ttl_minutes as the backstop for a failed trial', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const budget = tasks.find((t) => t.id === 'task-budget-lifecycle')!
+    const ttl = /ttl_minutes of (\d+)/.exec(budget.instruction)?.[1]
+    expect(ttl).toBeDefined()
+    // Short enough that a budget a failed trial left open releases the
+    // parent's remainder on its own; long enough that the trial's own
+    // open→close lifecycle finishes before it expires.
+    expect(Number(ttl)).toBeGreaterThanOrEqual(5)
+    expect(Number(ttl)).toBeLessThanOrEqual(30)
+  })
+
+  it('the receipt task requires settlement evidence before the receipt fetch', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const receipt = tasks.find((t) => t.id === 'receipt-verify-direct-payment')!
+    expect(receipt.instruction).toContain('haven_get_payment_status')
+    expect(receipt.instruction).toContain('haven_get_receipt')
+    expect(receipt.instruction).toContain('haven_verify_receipt')
+    expect(receipt.instruction).toContain('DIRECT')
+  })
+
+  it('neither new task enters the --limit=5 subset', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const subset = selectTaskSequence(tasks, { limit: 5 }).map((t) => t.id)
+    expect(subset).not.toContain('receipt-verify-direct-payment')
+    expect(subset).not.toContain('task-budget-lifecycle')
   })
 })

@@ -1283,9 +1283,7 @@ test.describe('design-system visual regression', () => {
     baseline: string,
   ) {
     await isolateShowcaseSample(sample)
-    // At the field's start: a click in the middle puts the caret inside a long
-    // pasted address, which scrolls its text sideways at the phone width.
-    await sample.getByRole('combobox').click({ position: { x: 12, y: 12 } })
+    await sample.getByRole('combobox').click()
     // The list is a descendant of the sample below `sm` and a PORTALED child of
     // `document.body` from `sm` up, so the assertion is page-wide: the popover
     // marker is the one handle both layouts share.

@@ -56,7 +56,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-04"
+last-verified: "2026-11-05"
 ---
 
 # Haven Screen Recipes
@@ -351,7 +351,9 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    account picker when the user has several accounts, or the account page's own
    account. The screen names it once — "From <account name>" — and shows no
    balance. **To** is `RecipientField`: your other Haven accounts on this chain,
-   then your saved contacts, then a pasted address. **Amount** is an `Input`
+   then your saved contacts, then a pasted address. Without a preset recipient,
+   focus starts here with the list closed, so the whole form shows; a click,
+   typing or an arrow key opens it. **Amount** is an `Input`
    with the token symbol as its suffix; a token `Select` appears only when the
    chain lists more than one sendable token. The line "No network fee. You
    review the payment before you approve it." closes the screen. Footer:

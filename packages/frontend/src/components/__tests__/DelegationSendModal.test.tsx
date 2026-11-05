@@ -153,7 +153,7 @@ function fillDetails({
 } = {}) {
   fireEvent.change(screen.getByLabelText('Amount'), { target: { value: amount } })
   const input = screen.getByRole('combobox', { name: 'To' })
-  fireEvent.focus(input)
+  fireEvent.click(input)
   fireEvent.change(input, { target: { value: address } })
   fireEvent.click(screen.getByRole('option', { name: option }))
 }
@@ -192,6 +192,20 @@ beforeEach(() => {
 })
 
 describe('DelegationSendModal — Details screen (#4641)', () => {
+  it('opens with focus on To and the list closed, and a click opens the list', async () => {
+    mockUseSend.mockReturnValue(base())
+    render(<DelegationSendModal {...PROPS} />)
+    const to = screen.getByRole('combobox', { name: 'To' })
+    await waitFor(() => expect(to).toHaveFocus())
+    // Past the effects that could still open it: the Amount field must stay in view.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(to).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('listbox')).toBeNull()
+
+    fireEvent.click(to)
+    expect(screen.getByRole('listbox')).toBeTruthy()
+  })
+
   it('renders the recipient field and drops the toggle row and the raw address input', () => {
     mockUseSend.mockReturnValue(base())
     render(<DelegationSendModal {...PROPS} />)
@@ -225,7 +239,7 @@ describe('DelegationSendModal — Details screen (#4641)', () => {
     fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1.5' } })
     expect(review.disabled).toBe(true) // recipient still missing
     const input = screen.getByRole('combobox', { name: 'To' })
-    fireEvent.focus(input)
+    fireEvent.click(input)
     fireEvent.change(input, { target: { value: NEW_ADDRESS } })
     fireEvent.click(screen.getByRole('option', { name: /Send to/ }))
     expect(review.disabled).toBe(false)
@@ -268,7 +282,7 @@ describe('DelegationSendModal — Details screen (#4641)', () => {
       loading: false,
     })
     render(<DelegationSendModal {...PROPS} />)
-    fireEvent.focus(screen.getByRole('combobox', { name: 'To' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'To' }))
     const accounts = screen.getByRole('group', { name: 'Your accounts' })
     expect(within(accounts).getAllByRole('option').map((o) => o.textContent)).toEqual([
       expect.stringContaining('Savings'),
@@ -421,6 +435,7 @@ describe('DelegationSendModal — Review screen (#4641)', () => {
       render(<DelegationSendModal {...PROPS} initialRecipient={ACME} />)
       await waitFor(() => expect(chip()).toHaveTextContent('Acme Services'))
       clear()
+      fireEvent.click(screen.getByRole('combobox', { name: 'To' }))
       fireEvent.click(screen.getByRole('option', { name: /Research API/ }))
       amount()
       reviewThenBack()
@@ -942,7 +957,7 @@ describe('DelegationSendModal — one data owner (#4641)', () => {
     // The dialog component never unmounted, so this is the SAME hook instance —
     // a second one would never see the contact.
     expect(contactsFixture.instances).toBe(1)
-    fireEvent.focus(screen.getByRole('combobox', { name: 'To' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'To' }))
     const contacts = screen.getByRole('group', { name: 'Contacts' })
     expect(within(contacts).getAllByRole('option').map((o) => o.textContent)).toEqual([
       expect.stringContaining('Acme Services'),

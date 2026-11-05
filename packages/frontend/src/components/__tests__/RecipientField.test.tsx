@@ -65,16 +65,16 @@ function Harness({
   )
 }
 
-function focusInput() {
+function openList() {
   const input = screen.getByRole('combobox', { name: 'Recipient' })
-  fireEvent.focus(input)
+  fireEvent.click(input)
   return input
 }
 
 describe('RecipientField — grouping and filtering', () => {
   it('offers your accounts on this chain, then your contacts, and never the sending account', () => {
     render(<Harness />)
-    focusInput()
+    openList()
 
     const accounts = screen.getByRole('group', { name: 'Your accounts' })
     const contacts = screen.getByRole('group', { name: 'Contacts' })
@@ -90,7 +90,7 @@ describe('RecipientField — grouping and filtering', () => {
 
   it('filters by name or address prefix, case-insensitively', () => {
     render(<Harness />)
-    const input = focusInput()
+    const input = openList()
 
     fireEvent.change(input, { target: { value: 'acme' } })
     expect(screen.getAllByRole('option')).toHaveLength(1)
@@ -103,7 +103,7 @@ describe('RecipientField — grouping and filtering', () => {
 
   it('shows the footer line', () => {
     render(<Harness />)
-    focusInput()
+    openList()
     expect(screen.getByText('Or paste a wallet address')).toBeInTheDocument()
   })
 })
@@ -111,7 +111,7 @@ describe('RecipientField — grouping and filtering', () => {
 describe('RecipientField — pasting', () => {
   it('collapses to a saved contact for a known address in mixed case', () => {
     render(<Harness />)
-    const input = focusInput()
+    const input = openList()
 
     // The EIP-55 checksummed form — mixed case, and `isAddress` accepts it.
     fireEvent.change(input, { target: { value: ACME } })
@@ -128,7 +128,7 @@ describe('RecipientField — pasting', () => {
 
   it('offers a new address as one option', () => {
     render(<Harness />)
-    const input = focusInput()
+    const input = openList()
 
     fireEvent.change(input, { target: { value: UNKNOWN } })
     const options = screen.getAllByRole('option')
@@ -140,7 +140,7 @@ describe('RecipientField — pasting', () => {
   it('resolves an address that is both an own account and a contact as the account', () => {
     const contacts = [...CONTACTS, contact({ id: 'c3', name: 'Savings (saved)', address: SAVINGS })]
     render(<Harness contacts={contacts} />)
-    const input = focusInput()
+    const input = openList()
 
     fireEvent.change(input, { target: { value: SAVINGS.toLowerCase() } })
     const options = screen.getAllByRole('option')
@@ -155,7 +155,7 @@ describe('RecipientField — the reported value', () => {
   it('reports { address, name, kind } for a picked account', () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
-    focusInput()
+    openList()
 
     fireEvent.click(screen.getByRole('option', { name: /Savings/ }))
     expect(onChange).toHaveBeenCalledTimes(1)
@@ -165,7 +165,7 @@ describe('RecipientField — the reported value', () => {
   it('reports a pasted new address with kind "new" and no name', () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
-    const input = focusInput()
+    const input = openList()
 
     fireEvent.change(input, { target: { value: UNKNOWN } })
     fireEvent.click(screen.getByRole('option', { name: /Send to/ }))
@@ -175,7 +175,7 @@ describe('RecipientField — the reported value', () => {
   it('renders the chosen recipient as a chip and clears it with Change recipient', () => {
     const onChange = vi.fn()
     render(<Harness onChange={onChange} />)
-    focusInput()
+    openList()
 
     fireEvent.click(screen.getByRole('option', { name: /Acme Services/ }))
     const chip = document.querySelector('[data-recipient-chip]') as HTMLElement
@@ -189,11 +189,13 @@ describe('RecipientField — the reported value', () => {
     expect(onChange).toHaveBeenLastCalledWith(null)
     expect(document.querySelector('[data-recipient-chip]')).toBeNull()
     expect(screen.getByRole('combobox', { name: 'Recipient' })).toHaveFocus()
+    // Focus alone never opens the list, this focus move included.
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
   it('renders a new address with a neutral wallet glyph', () => {
     render(<Harness />)
-    const input = focusInput()
+    const input = openList()
     fireEvent.change(input, { target: { value: UNKNOWN } })
     fireEvent.click(screen.getByRole('option', { name: /Send to/ }))
 
@@ -314,6 +316,7 @@ describe('RecipientField — a cleared chip stays cleared (#4660)', () => {
     clear()
     onChange.mockClear()
 
+    openList()
     fireEvent.click(screen.getByRole('option', { name: /Research API/ }))
     expect(chip()).toHaveTextContent('Research API')
     clear()
@@ -329,6 +332,7 @@ describe('RecipientField — a cleared chip stays cleared (#4660)', () => {
     )
     clear()
 
+    openList()
     fireEvent.click(screen.getByRole('option', { name: /Savings/ }))
     expect(chip()).toHaveTextContent('Savings')
     clear()
@@ -345,6 +349,7 @@ describe('RecipientField — a cleared chip stays cleared (#4660)', () => {
       <Harness presetAddress={ACME} contacts={[]} contactsLoading onChange={onChange} />,
     )
     clear()
+    openList()
     fireEvent.click(screen.getByRole('option', { name: /Savings/ }))
 
     rerender(<Harness presetAddress={ACME} contacts={CONTACTS} contactsLoading={false} onChange={onChange} />)
@@ -390,7 +395,7 @@ describe('RecipientField — Enter picks a pasted address', () => {
   ])('with %s', (_name, props) => {
     const onChange = vi.fn()
     render(<Harness {...props} onChange={onChange} />)
-    const input = focusInput()
+    const input = openList()
     fireEvent.change(input, { target: { value: UNKNOWN } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -401,7 +406,7 @@ describe('RecipientField — Enter picks a pasted address', () => {
 describe('RecipientField — contacts loading and failing', () => {
   it('shows a one-line skeleton while contacts load, and keeps your accounts working', () => {
     render(<Harness contacts={[]} contactsLoading />)
-    focusInput()
+    openList()
 
     expect(document.querySelector('[data-combobox-status="loading"]')).not.toBeNull()
     expect(screen.getByRole('group', { name: 'Your accounts' })).toBeInTheDocument()
@@ -410,7 +415,7 @@ describe('RecipientField — contacts loading and failing', () => {
 
   it('shows the failure line and still lets an address be pasted', () => {
     render(<Harness contacts={[]} contactsError="We could not load your contacts." />)
-    const input = focusInput()
+    const input = openList()
 
     expect(
       screen.getByText('Saved recipients are unavailable. You can still paste an address.'),
@@ -425,7 +430,7 @@ describe('RecipientField — contacts loading and failing', () => {
 describe('RecipientField — the contacts prop is live', () => {
   it('shows a contact added to the prop after mount without remounting', () => {
     const { rerender } = render(<Harness contacts={[]} />)
-    focusInput()
+    openList()
     expect(screen.queryByRole('option', { name: /Acme Services/ })).not.toBeInTheDocument()
 
     rerender(<Harness contacts={CONTACTS} />)

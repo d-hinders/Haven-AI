@@ -1471,7 +1471,7 @@ const DS_COMBOBOX_GROUPS: ComboboxGroup[] = [
   },
 ]
 
-/** The Combobox specimen. The list opens from the real trigger — focus — so the
+/** The Combobox specimen. The list opens from the real trigger — a click — so the
  * pixel gate drives it rather than photographing a permanently-open copy. */
 function DsComboboxSpecimen({ initialQuery = '' }: { initialQuery?: string }) {
   const [query, setQuery] = useState(initialQuery)
@@ -3686,7 +3686,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Combobox and recipient field"
-        description="The searchable picker the design system did not have. Combobox is the primitive — an editable combobox over caller-supplied groups, owning no data. RecipientField is the Send dialog's field built on it: your accounts, then your contacts, then a pasted address, with the caller owning the one useContacts() and one useAccounts() so a contact saved in the dialog shows up here. Focus a field to open its list; the pixel gate drives that trigger for the clips below."
+        description="The searchable picker the design system did not have. Combobox is the primitive — an editable combobox over caller-supplied groups, owning no data. RecipientField is the Send dialog's field built on it: your accounts, then your contacts, then a pasted address, with the caller owning the one useContacts() and one useAccounts() so a contact saved in the dialog shows up here. Click a field to open its list; the pixel gate drives that trigger for the clips below."
       >
         <div data-testid="ds-combobox" className="min-h-[560px]">
           <Card hover={false} className="h-full p-5">

@@ -144,7 +144,10 @@ test.describe('send dialog visual regression (#4641)', () => {
 
       // The state the capture is OF, asserted before the shutter.
       await expect(dialog.getByText('From Operations')).toHaveCount(1)
-      await expect(dialog.getByRole('combobox', { name: 'To' })).toHaveCount(1)
+      // Focus lands on To and the list stays shut until the user asks for it,
+      // so the whole form is in view when the dialog opens.
+      await expect(dialog.getByRole('combobox', { name: 'To' })).toBeFocused()
+      await expect(page.getByRole('listbox')).toHaveCount(0)
       await expect(dialog.getByLabel('Amount')).toHaveCount(1)
       await expect(dialog.getByText('No network fee. You review the payment before you approve it.')).toHaveCount(1)
       await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(1)
@@ -160,9 +163,9 @@ test.describe('send dialog visual regression (#4641)', () => {
       )
     })
 
-    // `send-dialog-details` captures the open list, which covers Amount, so no
-    // baseline showed that field until this one: it stopped 122 px short of the
-    // recipient field unnoticed (found on epic #4637's walkthrough).
+    // The filled form. Amount once stopped 122 px short of the recipient field,
+    // unnoticed while the dialog opened with the list covering it (found on epic
+    // #4637's walkthrough).
     test(`send-dialog-details-filled renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')

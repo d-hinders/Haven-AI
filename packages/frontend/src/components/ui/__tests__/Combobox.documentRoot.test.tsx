@@ -69,7 +69,7 @@ describe('Combobox — Escape when document is the React root, as under the App 
 
   it('walks the three stages: list, then query, then the dialog', () => {
     const input = page().getByRole('combobox', { name: 'Recipient' })
-    fireEvent.focus(input)
+    fireEvent.click(input)
     fireEvent.change(input, { target: { value: 'ac' } })
     expect(page().getByRole('listbox')).toBeInTheDocument()
 

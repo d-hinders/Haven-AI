@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { Combobox, type ComboboxGroup, type ComboboxOption } from '../Combobox'
@@ -58,9 +58,9 @@ function setDesktop(isDesktop: boolean) {
   })) as unknown as typeof window.matchMedia
 }
 
-function focusInput() {
+function openList() {
   const input = screen.getByRole('combobox', { name: 'Recipient' })
-  fireEvent.focus(input)
+  fireEvent.click(input)
   return input
 }
 
@@ -72,7 +72,7 @@ describe('Combobox — ARIA', () => {
     expect(input).toHaveAttribute('aria-expanded', 'false')
     expect(input).not.toHaveAttribute('aria-activedescendant')
 
-    fireEvent.focus(input)
+    fireEvent.click(input)
     expect(input).toHaveAttribute('aria-expanded', 'true')
 
     const listbox = screen.getByRole('listbox')
@@ -82,7 +82,7 @@ describe('Combobox — ARIA', () => {
 
   it('names every group by its visible label', () => {
     render(<Harness />)
-    focusInput()
+    openList()
 
     const accounts = screen.getByRole('group', { name: 'Your accounts' })
     const contacts = screen.getByRole('group', { name: 'Contacts' })
@@ -98,7 +98,7 @@ describe('Combobox — ARIA', () => {
 
   it('gives every option an id and marks only the active one aria-selected', () => {
     render(<Harness />)
-    const input = focusInput()
+    const input = openList()
 
     const options = screen.getAllByRole('option')
     expect(options).toHaveLength(3)
@@ -111,6 +111,51 @@ describe('Combobox — ARIA', () => {
     const active = screen.getAllByRole('option').filter((o) => o.getAttribute('aria-selected') === 'true')
     expect(active).toHaveLength(1)
     expect(input).toHaveAttribute('aria-activedescendant', active[0].id)
+  })
+})
+
+// A dialog focuses its first field when it opens, so focus says nothing about
+// what the user wants: the list stayed open over the rest of the form (owner,
+// on the Send dialog, 2026-11-05). These use a real `.focus()`, which fires the
+// handler `fireEvent.focus` would, and no click arrives with it.
+describe('Combobox — what opens the list', () => {
+  const field = () => screen.getByRole('combobox', { name: 'Recipient' })
+  // In `act`, or React has not applied what the focus did when the test looks.
+  const focusField = () => act(() => field().focus())
+
+  it('stays closed when the field is focused without a click', () => {
+    render(<Harness />)
+    focusField()
+    expect(field()).toHaveFocus()
+    expect(field()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('opens on a click on the field that already has focus', () => {
+    render(<Harness />)
+    focusField()
+    fireEvent.click(field())
+    expect(field()).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+  })
+
+  it('opens when the user types', () => {
+    render(<Harness />)
+    focusField()
+    fireEvent.change(field(), { target: { value: 'ac' } })
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+  })
+
+  it('reopens on a click after Escape closed it, with focus never having left', () => {
+    render(<Harness />)
+    focusField()
+    fireEvent.click(field())
+    fireEvent.keyDown(field(), { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(field()).toHaveFocus()
+
+    fireEvent.click(field())
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
   })
 })
 
@@ -166,7 +211,7 @@ describe('Combobox — keyboard', () => {
     it('is the active option, so Enter picks a pasted address', () => {
       const onPick = vi.fn()
       render(<Harness groups={ONE} onPick={onPick} />)
-      const input = focusInput()
+      const input = openList()
       fireEvent.change(input, { target: { value: '0x000000000000000000000000000000000000dEaD' } })
 
       const option = screen.getByRole('option')
@@ -181,7 +226,7 @@ describe('Combobox — keyboard', () => {
     it('is not armed by an empty query: opening the list must not make Enter pick', () => {
       const onPick = vi.fn()
       render(<Harness groups={ONE} onPick={onPick} />)
-      const input = focusInput()
+      const input = openList()
 
       expect(screen.getByRole('option')).toHaveAttribute('aria-selected', 'false')
       fireEvent.keyDown(input, { key: 'Enter' })
@@ -196,7 +241,7 @@ describe('Combobox — keyboard', () => {
           onPick={onPick}
         />,
       )
-      const input = focusInput()
+      const input = openList()
       fireEvent.change(input, { target: { value: 'sa' } })
 
       expect(input).not.toHaveAttribute('aria-activedescendant')
@@ -207,7 +252,7 @@ describe('Combobox — keyboard', () => {
     it('needs to be alone: with several options a query activates none of them', () => {
       const onPick = vi.fn()
       render(<Harness onPick={onPick} />)
-      const input = focusInput()
+      const input = openList()
       fireEvent.change(input, { target: { value: 'a' } })
 
       expect(input).not.toHaveAttribute('aria-activedescendant')
@@ -234,7 +279,7 @@ describe('Combobox — pointer', () => {
   it('picks on click', () => {
     const onPick = vi.fn()
     render(<Harness onPick={onPick} />)
-    focusInput()
+    openList()
 
     fireEvent.click(screen.getByRole('option', { name: /Acme Services/ }))
     expect(onPick).toHaveBeenCalledTimes(1)
@@ -244,7 +289,7 @@ describe('Combobox — pointer', () => {
 
   it('does not blur the input on mousedown over the list', () => {
     render(<Harness />)
-    focusInput()
+    openList()
     const listbox = screen.getByRole('listbox')
 
     const event = createEvent.mouseDown(listbox)
@@ -255,7 +300,7 @@ describe('Combobox — pointer', () => {
   it('closes without picking on an outside click', () => {
     const onPick = vi.fn()
     render(<Harness onPick={onPick} />)
-    focusInput()
+    openList()
     expect(screen.getByRole('listbox')).toBeInTheDocument()
 
     fireEvent.mouseDown(document.body)
@@ -271,7 +316,7 @@ describe('Combobox — pointer', () => {
         <button type="button">Elsewhere</button>
       </>,
     )
-    const input = focusInput()
+    const input = openList()
     expect(screen.getByRole('listbox')).toBeInTheDocument()
 
     fireEvent.blur(input, { relatedTarget: screen.getByRole('button', { name: 'Elsewhere' }) })
@@ -289,7 +334,7 @@ describe('Combobox — placement', () => {
       </Modal>,
     )
     const input = screen.getByRole('combobox', { name: 'Recipient' })
-    fireEvent.focus(input)
+    fireEvent.click(input)
 
     const popover = document.body.querySelector('[data-combobox-popover]')
     expect(popover).not.toBeNull()
@@ -302,7 +347,7 @@ describe('Combobox — placement', () => {
   it('renders inline below `sm`, so the on-screen keyboard cannot cover it', () => {
     setDesktop(false)
     render(<Harness />)
-    focusInput()
+    openList()
 
     const popover = document.body.querySelector('[data-combobox-popover]')
     expect(popover).not.toBeNull()
@@ -331,7 +376,7 @@ describe('Combobox — Escape state machine inside a real Modal', () => {
   it('stage 1: closes the list and leaves the dialog open', () => {
     render(<ModalHarness />)
     const input = screen.getByRole('combobox', { name: 'Recipient' })
-    fireEvent.focus(input)
+    fireEvent.click(input)
     expect(screen.getByRole('listbox')).toBeInTheDocument()
 
     fireEvent.keyDown(input, { key: 'Escape' })
@@ -342,7 +387,7 @@ describe('Combobox — Escape state machine inside a real Modal', () => {
   it('stage 2: clears the query and leaves the dialog open', () => {
     render(<ModalHarness />)
     const input = screen.getByRole('combobox', { name: 'Recipient' })
-    fireEvent.focus(input)
+    fireEvent.click(input)
     fireEvent.change(input, { target: { value: 'ac' } })
     expect(input).toHaveValue('ac')
 
@@ -360,7 +405,7 @@ describe('Combobox — Escape state machine inside a real Modal', () => {
   it('stage 3: with the list closed and the query empty, the dialog gets the Escape', () => {
     render(<ModalHarness />)
     const input = screen.getByRole('combobox', { name: 'Recipient' })
-    fireEvent.focus(input)
+    fireEvent.click(input)
     fireEvent.change(input, { target: { value: 'ac' } })
 
     fireEvent.keyDown(input, { key: 'Escape' }) // list closes
@@ -375,7 +420,7 @@ describe('Combobox — Escape state machine inside a real Modal', () => {
 describe('Combobox — empty and status states', () => {
   it('shows the empty message when no group has an option', () => {
     render(<Harness groups={[{ id: 'accounts', label: 'Your accounts', options: [] }]} />)
-    focusInput()
+    openList()
     expect(screen.getByText('No matches.')).toBeInTheDocument()
   })
 
@@ -392,14 +437,14 @@ describe('Combobox — empty and status states', () => {
         ]}
       />,
     )
-    focusInput()
+    openList()
     expect(screen.getByText('Saved recipients are unavailable.')).toBeInTheDocument()
     expect(screen.queryByRole('option')).not.toBeInTheDocument()
   })
 
   it('renders the footer line under the list', () => {
     render(<Harness footer="Or paste a wallet address" />)
-    focusInput()
+    openList()
     expect(screen.getByText('Or paste a wallet address')).toBeInTheDocument()
   })
 })

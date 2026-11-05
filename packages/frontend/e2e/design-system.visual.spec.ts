@@ -1251,16 +1251,16 @@ test.describe('design-system visual regression', () => {
    *
    * ── Why the capture drives the trigger ──────────────────────────────────────
    *
-   * The list opens on focus, and `/design-system` renders these LIVE rather than
-   * as permanently-open copies (§ *Showcase copies of overlays*). So the clip
-   * focuses the field first — the same shape the Modal specimen already uses
+   * The list opens on a click, and `/design-system` renders these LIVE rather
+   * than as permanently-open copies (§ *Showcase copies of overlays*). So the
+   * clip clicks the field first — the same shape the Modal specimen already uses
    * (`getByRole('button', { name: 'Open modal' }).click()`).
    *
-   * The focus has to happen AFTER `isolateShowcaseSample`, because isolation
+   * The click has to happen AFTER `isolateShowcaseSample`, because isolation
    * hides the content above the sample and moves the field up the page; a
    * popover positioned before that move would be anchored to a stale rect. That
    * is why this helper isolates first and does not route through
-   * `expectShowcaseClip` (which isolates again, after the focus).
+   * `expectShowcaseClip` (which isolates again, after the click).
    *
    * ── Why the sample box is taller than its card ──────────────────────────────
    *
@@ -1283,7 +1283,7 @@ test.describe('design-system visual regression', () => {
     baseline: string,
   ) {
     await isolateShowcaseSample(sample)
-    await sample.getByRole('combobox').focus()
+    await sample.getByRole('combobox').click()
     // The list is a descendant of the sample below `sm` and a PORTALED child of
     // `document.body` from `sm` up, so the assertion is page-wide: the popover
     // marker is the one handle both layouts share.

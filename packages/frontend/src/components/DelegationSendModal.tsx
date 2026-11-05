@@ -345,7 +345,7 @@ export default function DelegationSendModal({
       closeOnBackdrop={!working && !saving}
       // With a preset recipient the To field already holds a chip, so focus
       // belongs on Amount; without one it lands on the To field (the body's
-      // first focusable).
+      // first focusable), with its list closed until the user asks for it.
       initialFocusRef={initialRecipient ? amountRef : undefined}
       panelTestId="delegation-send-modal"
     >

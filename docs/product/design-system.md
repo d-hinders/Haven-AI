@@ -124,7 +124,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-04
+last-verified: 2026-11-05
 ---
 
 # Haven Design System
@@ -3510,6 +3510,11 @@ fills with `--v2-surface-hover`. The markup is the Combobox's own rather than
 `id` or `aria-selected`, and an option cannot be a button. Widening a shared
 primitive's render contract for one consumer was the worse trade.
 
+**Opening.** A click, typing or an arrow key opens the list. Focus alone does
+not: a dialog focuses its first field when it opens, and a list opened by that
+covers the rest of the form before anyone has touched it. A click also works on
+a field that already has focus, so the list comes back after Escape.
+
 **Keyboard.** Arrow down/up opens the list if it is closed and moves the active
 option, scrolling it into view (`block: 'nearest'`). Enter picks the active
 option. A query that leaves exactly one option makes that option active, so
@@ -3605,7 +3610,7 @@ address collapses the list to its entry ("Saved contact · 0x2c9D…77ab" or
 
 **The chip.** A chosen recipient renders as Monogram, name, kind and short
 address, with a "Change recipient" icon button that clears it (`onChange(null)`)
-and returns focus to the input. A cleared chip stays cleared until the preset
+and returns focus to the input, with the list closed. A cleared chip stays cleared until the preset
 address changes, including when contacts finish loading afterwards and after
 Review → Back. A new address renders with a neutral wallet glyph instead of a
 Monogram.

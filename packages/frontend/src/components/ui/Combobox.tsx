@@ -17,6 +17,14 @@
  * state — whether the list is open, and which option is active — because both
  * are presentation, not data.
  *
+ * ── A click, typing or an arrow opens the list, focus does not ──────────────
+ *
+ * A dialog focuses its first field when it opens, and a window handing focus
+ * back does the same, so focus says nothing about what the user wants. Opening
+ * on it put the list over the rest of the form before anyone had touched it. A
+ * click also works on a field that already has focus, which a focus handler
+ * never sees, so the list comes back after Escape closed it.
+ *
  * ── Escape is a three-stage state machine ───────────────────────────────────
  *
  * `ui/Modal.tsx` closes the dialog on ANY Escape that reaches its `document`
@@ -474,7 +482,7 @@ export function Combobox({
           onQueryChange(event.target.value)
           setOpen(true)
         }}
-        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
         onBlur={(event) => {
           // Focus moving INTO the list is not a dismissal. A mousedown on the
           // list is prevented, so this only fires for a real move away.

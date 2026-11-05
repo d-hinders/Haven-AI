@@ -31,17 +31,18 @@
  * Every clip is ELEMENT-SCOPED: the dialog panel (`data-testid`
  * `delegation-send-modal`, the bordered box — not the `role="dialog"` wrapper,
  * which is `fixed inset-0` and would photograph the page behind it, #2903) and
- * the specimen card. The panel is opaque and the same size regardless of the
- * page behind it, but its clip is not all panel: the 14 px corners (168 px outside
- * the arc) always show the backdrop over the dashboard, and where the clip rounds
- * out to whole rows, so do its edge rows (#3872). So a change to the dashboard can
- * move these baselines, by more than `maxDiffPixels` absorbs.
+ * the specimen card. A panel clip is not all panel: the 14 px corners (168 px
+ * outside the arc), and the edge rows where the clip rounds out to whole rows, show
+ * the backdrop (#3872). So the page behind the dialog is hidden before every panel
+ * capture (`hidePageBehindModal`): a change to the dashboard cannot move these
+ * baselines, and only the dialog, or the base surface and backdrop every modal
+ * shares, can. The specimen card has no dialog around it, so nothing is hidden there.
  *
  * The dialog carries no wall-clock text, but the page behind renders relative
- * timestamps, so the clock is frozen anyway — a moving backdrop must never be
- * able to race a capture. Kept to `toHaveScreenshot` plus structural waits on
- * purpose: `update-visual-baselines.yml` aborts before its commit step if any
- * ordinary assertion in a `*.visual.spec.ts` fails (#3441).
+ * timestamps until it is hidden, so the clock is frozen anyway. Kept to
+ * `toHaveScreenshot` plus structural waits on purpose: `update-visual-baselines.yml`
+ * aborts before its commit step if any ordinary assertion in a `*.visual.spec.ts`
+ * fails (#3441).
  *
  * BASELINES ARE LINUX-RENDERED by the *Update visual baselines* dispatch —
  * none are hand-made here. Dispatch with `expected=` naming the clips that
@@ -49,6 +50,7 @@
  * (`scripts/ci/baseline-verdict-gate.mjs`).
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
 import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession, serveTwoAccounts, testRecipientAddress, testSafe } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -159,6 +161,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(dialog.getByText(/Or send to another Haven account/)).toHaveCount(0)
       await expect(dialog.getByPlaceholder(/Recipient address/)).toHaveCount(0)
 
+      await hidePageBehindModal(dialog)
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-details-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -185,6 +188,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(page.getByRole('option', { name: new RegExp(CONTACT_NAME) })).toBeVisible()
       await expect(page.locator('[data-combobox-inline]')).toHaveCount(vp!.name === 'mobile' ? 1 : 0)
 
+      await hidePageBehindModal(dialog)
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-details-list-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -214,6 +218,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(chip).toContainText(CONTACT_NAME)
       await expect(page.getByRole('listbox')).toHaveCount(0)
 
+      await hidePageBehindModal(dialog)
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-details-filled-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -252,6 +257,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toHaveCount(1)
       await expect(dialog.getByRole('button', { name: `Send ${AMOUNT} USDC`, exact: true })).toHaveCount(1)
 
+      await hidePageBehindModal(dialog)
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-review-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -281,6 +287,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(address).toHaveText(pasted)
       expect(await groupsPerLine(address)).toEqual([5, 5])
 
+      await hidePageBehindModal(dialog)
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-review-new-address-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -309,6 +316,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       await expect(dialog.getByText('Imported Safe')).toHaveCount(1)
       await expect(dialog.getByTestId('review-recipient-address')).toHaveText(`${ownAccount.slice(0, 6)}…${ownAccount.slice(-4)}`)
 
+      await hidePageBehindModal(dialog)
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-review-own-account-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,

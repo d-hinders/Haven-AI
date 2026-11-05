@@ -19,7 +19,6 @@ covers:
   - .github/workflows/docs-audit.yml
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml
-  - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - packages/qa-agent/**
   - packages/frontend/package.json
@@ -54,7 +53,6 @@ production credentials, a mainnet RPC, or real funds.
 | Seed the QA user, Hybrid account, agent, and budget delegation | Yes | No | First-time setup, identity replacement, or a [lapsed budget](#the-qa-budget-ended) |
 | Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
 | Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a deployed frontend (the `dev` host or an opt-in `preview/*` deployment) against the dev backend |
-| Exploratory agent/merchant QA (Layer 2b, `/qa-dev`) | Yes | No | Payment / MCP coverage that needs LLM judgment |
 | Browser UI exploration (Layer 3, `/qa-explore-ui`) | Yes | No | Dashboard UX / visual coverage that needs LLM judgment |
 
 Use **GitHub Actions** for the normal shared money-flow run after the identity,
@@ -1787,8 +1785,8 @@ history **within `QA_FRESHNESS_HOURS`** (default **30h** — covers one missed
 nightly), and covered the money-path code being promoted (#1030, #2404 — the
 rules are in *Automation & gating* above). No recent green run → the gate fails
 with instructions to dispatch one. Only the
-deterministic money-flow harness gates; the LLM-agent layer (2b, #577) and browser
-exploration (Layer 3, #579) stay **non-gating**.
+deterministic money-flow harness gates; browser exploration (Layer 3, #579) and the eval
+suite stay **non-gating**.
 
 Both `qa-freshness` and the branch-source `gate` have been **required status
 checks on `main` since 2026-07-27** (`dev-environment.md`). They need the `QA_*`
@@ -1865,37 +1863,19 @@ npm run test:e2e:live -w packages/frontend
 GitHub uploads the Playwright report, screenshots, video, and trace as a
 seven-day artifact when the run completes.
 
-## Layer 2b — exploratory agent QA (`/qa-dev`, #577)
+## The retired exploratory agent QA command (#4681)
 
-An LLM agent drives **natural-language payment goals** through the **real Haven
-MCP** with the dev QA credentials, using the agent session's own model (no
-`ANTHROPIC_API_KEY` in CI), and files a run report under
-[`bug-reports/`](../bug-reports/). It exercises the live tool surface + runtime
-wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
-**never a deploy gate** — #575/#576 are repeatable checks, while 2b is
-exploratory.
+The exploratory agent-driven QA command was retired on 2026-11-05. The eval
+suite covers its goals deterministically, and the deterministic money-flow
+harness (`qa-dev.yml`) is unchanged — this section is a pointer, not a
+procedure.
 
-- **When to run:** before a promotion, or after a risky change to the payment / MCP surface.
-- **How findings feed back:** the report's *Friction* and *Notes for the coding agent* sections (and any issues it files) are the loop #419/#420 call for.
-- **Claude Code:** run `/qa-dev` ([`.claude/commands/qa-dev.md`](../../.claude/commands/qa-dev.md)).
-
-**Codex / generic runtime (pasteable prompt):**
-
-> You are running exploratory QA against Haven's **dev** environment (testnet / Base
-> Sepolia, capped QA delegate — never prod). Using the already-connected Haven MCP
-> (or connect with `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`, where `<connector_package>` is the `connector_package` value the dev backend's own setup response returns (the same package is named inside its `connector_command`, which is the whole `npx -y … --setup … --api …` string — do not paste that in here) — NOT necessarily `@alpha` since #2422; the token and URL are owner-provisioned, see "QA identity, funding & secrets" below). A default connect names its own pair from the agent's display name (#3737) and installs alongside anything already wired, so it does not refuse; if it DOES refuse with `wiring_collision` (#2551 — the run targeted the bare `haven` / `haven-signer` pair, via `--bare`/`--replace`, on a machine that already holds a spend-capable Haven agent), relay the refusal to the owner and stop; do not add `--replace` or `--name` on your own — on the dedicated QA runner the owner's usual answer is `--replace`, on a developer machine `--name`:
-> 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
-> 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402` on the local `@haven_ai/mcp` server; the hosted server the connector installs has no tool by that name — there, `haven_quote_mcp_tool` then `haven_pay_mcp_tool`) → expect settlement + a receipt.
-> 3. Use direct `haven_pay` for an amount **over** the remaining budget → expect it to be
-> **refused before it becomes signable**. Assert all three: no settlement, nothing
-> queued or pending approval, and nothing silently spent. The refusal IS the pass —
-> the delegation rail has no approval queue, so do not record the decline as a failure.
-> 4. Make a priced call **above the max price** → expect a `PRICE_EXCEEDS_MAX` rejection.
-> 5. `haven_list_receipts`, then `haven_get_receipt { payment_id }` + `haven_verify_receipt` on the step-2 payment. `haven_get_receipt` returns the signed bundle (`{ receipt }`, settled payments only); `haven_verify_receipt` accepts the `GET /payments/:id/receipt` response (`HavenClient.getReceipt`) as-is, not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies; a direct or eip3009 bundle returns `not_verifiable_offline` (the signed user operation is not in the bundle).
-> Stop at the first failed step. Then write a run report from
-> `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction; set
-> `status: record` in the copy's front-matter) and file
-> concrete bugs as issues. This is non-gating exploratory coverage.
+Every goal the command had, and the eval task that covers it — or the written
+reason it has none — is
+[`agent-evals.md` § *The retired exploratory command's goals*](agent-evals.md#the-retired-exploratory-commands-goals-against-the-suite).
+The cold-agent onboarding scenario that ran beside it is now the
+`onboarding-cold-setup` and `onboarding-client-out-of-date` eval tasks
+([`agent-evals.md`](agent-evals.md) § *The cold-agent onboarding tasks*).
 
 ## Layer 3 — AI-driven browser exploration (`/qa-explore-ui`, #579)
 
@@ -1903,12 +1883,12 @@ An LLM agent drives a **real browser** (via **Playwright MCP**, reusing the
 existing Chromium/Playwright setup) over the **dev dashboard**, using the agent
 session's own model (no `ANTHROPIC_API_KEY` in CI). It adds agentic coverage of
 the **UI itself** — layout breakage, horizontal overflow, confusing states, dead
-ends, console errors, and secret leakage that fixed-selector specs miss. Like
-Layer 2b it is **never a deploy gate**; it is **read-oriented** exploration (no
+ends, console errors, and secret leakage that fixed-selector specs miss. It is
+**never a deploy gate**; it is **read-oriented** exploration (no
 money movement beyond what the existing testnet flows already cover) that files a
 findings report under [`bug-reports/`](../bug-reports/).
 
-- **When to run:** before a promotion, or after a risky change to the dashboard UI — **and on a recurring weekly cadence** as the design system's UX-discovery heartbeat, where each material finding becomes a deduped `/new-task` backlog issue for `/ship-next`. That cadence and its finding→backlog→ship-next loop are specified in [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) (#903).
+- **When to run:** on demand — before a promotion, or after a risky change to the dashboard UI. There is no recurring schedule and no CI job: the pass is a discovery tool, never a deploy gate, and the finding→backlog loop below is what turns its report into work (#903).
 - **Target:** a **non-production** Vercel deployment (`NEXT_PUBLIC_HAVEN_ENV=dev`)
   re-pointed at the shared dev backend with `?apiBaseUrl=` — same convention as the
   [live UI smoke](#live-deployed-ui-smoke). A production build ignores the override
@@ -1946,36 +1926,35 @@ findings report under [`bug-reports/`](../bug-reports/).
 > front-matter), run the secret review before committing, and file
 > concrete UI bugs as issues. This is non-gating exploratory coverage.
 
-## Layer 3b — the cold-agent onboarding scenario (`/qa-explore-agent-onboarding`, #2538)
+### Finding → backlog → ship-next loop
 
-The same cadence, pointed the other way. Layer 3 explores Haven **signed in**; this
-scenario measures whether an agent that has **never seen Haven** can get its user set
-up — the path epic [#2519](https://github.com/d-hinders/Haven-AI/issues/2519) exists to
-make work, and the one whose only measurement is the
-[A0 cold test of 2026-09-04](../bug-reports/agent-first-cold-test-2026-09-04.md).
+The pass is on demand, but what happens to its findings is fixed (#903):
 
-A fresh agent is given a dev URL and "set it all up so my agent can pay for things",
-and nothing else — **the prompt names no path**, because score 1 asks whether it found
-`/for-agents.md` by following the hooks the HTML advertises rather than by guessing the
-convention, which is what A0 had to do. It scores four things (discovery, the human
-steps its first reply names, tool calls to the login wall, and whether it produced the
-`haven login` and `haven agents connect` commands correctly) and writes
-`docs/bug-reports/qa-explore-agent-onboarding-<date>.md` with each score beside the
-previous run's and A0's.
-
-- **When to run:** weekly on the cadence, owner-armed as a Routine, **or** as the
-  `onboarding-cold-setup` and `onboarding-client-out-of-date` eval tasks in the manual
-  `agent-evals` workflow (owner-approved protected environment). It is still never a
-  required check: the eval lane is manual-only and non-gating. The eval tasks run
-  `claude` from an empty directory with `--strict-mcp-config`, a scrubbed env and a
-  per-trial `HOME`, so the agent has no repository knowledge and no Haven credentials —
-  the coldness the Routine existed to protect (#4680).
-- **Guardrails:** never a password, a passkey, an approval or a payment. It stops at each
-  human step and writes the hand-off message it would have sent; those messages are the
-  report's most useful content.
-- **Scenario, rubric and scoring bands:** [`agent-evals.md`](agent-evals.md) § *The
-  cold-agent onboarding tasks*. Cadence and how to read a moved score:
-  [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) § *Second scenario*.
+1. **Report first.** `/qa-explore-ui` writes a run report under
+   [`bug-reports/`](../bug-reports/) from `_run-report-template.md`. That report
+   is the raw output; it is not itself the backlog.
+2. **Triage each finding for materiality.** A *material* finding is a real
+   UX/layout/console/dead-end/clarity problem a user could hit — not a
+   subjective taste call, not a duplicate of a known issue, not a transient
+   dev-data artifact. Drop the rest; note in the report that they were
+   considered and dropped.
+3. **Dedupe against open issues before filing.** Search open issues
+   (`gh issue list --search "<surface/keywords>"`) for a materially equivalent
+   report. If one exists, add a comment linking the new evidence instead of
+   opening a duplicate.
+4. **File genuinely-new findings with [`/new-task`](../../.agents/skills/new-task/SKILL.md)**
+   — backlog-only (no `code-quality`), labeled `area:frontend` (add
+   `money-path` only if the finding is on a money-movement surface, which routes
+   it through `money.md` and its characterization-test bar). Let `new-task` write
+   the Scope / Acceptance / Files / Surface fields; seed it from the report row
+   (surface, expected vs actual, evidence).
+5. **Link back.** Every filed issue is linked from the run report's findings
+   table, so the report is the audit trail of what became an issue and what was
+   dropped.
+6. **Burn down separately.** The backlog issues are now ordinary `/ship-next`
+   candidates — `ship-next` picks them up when they're queued (add
+   `code-quality` or make them epic sub-issues). The pass never ships its own
+   findings; discovery and delivery stay decoupled.
 
 ## Reading results and filing bugs
 

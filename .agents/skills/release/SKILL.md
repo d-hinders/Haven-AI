@@ -589,7 +589,8 @@ sequence, why a promotion merges with a merge commit rather than a squash, and
 why it merges BEHIND with no sync-back (owner decision, 2026-09-26; since
 2026-10-09 any of the three maintainers merges it — #3798). Do not restate it;
 read it. The one-page operator checklist — every step doable by any of the
-three maintainers — is
+three maintainers, except starting the optional eval step's approval, which
+only the owner can give and which never holds a release — is
 [`docs/operations/release-checklist.md`](../../../docs/operations/release-checklist.md).
 
 **Promotion preflight** — run before opening the promotion PR; each line cost
@@ -617,6 +618,15 @@ three maintainers — is
       a re-run replays the old payload; a label added later takes a
       close/reopen, which is a maintainer decision — any of the three
       (#3798, 2026-10-09) — never an agent's.
+- [ ] **Optional, non-blocking: run the agent evals.** `gh workflow run
+      agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full` (or
+      `-f suite=subset`, or `-f tasks=<ids>` for an exact list). Only the owner
+      can approve the `agent-evals` environment, and the run never holds the
+      release: it is manual-only, not a required check and not wired into
+      `dev-gate.yml`. A second full run in one budget period exits 3 ("not
+      run") because a full run drains the eval agent's period budget on
+      purpose — wait for the refill before running again. Details:
+      `docs/operations/agent-evals.md` § *Running the suite*.
 - [ ] **Any of the three maintainers merges from the web UI** — the ordinary
       **Merge pull request** button with the merge-commit form; the PR showing
       BEHIND is expected. `gh pr merge --merge` from a terminal works too.
@@ -657,6 +667,7 @@ promotion is not listed here; its reason is recorded on the issue.>
 - [ ] Migrations in range: <list, or "none"> → prod DB snapshot taken before deploy, or "not taken" with any data precondition a migration states run against prod (recommended, not a gate)
 - [ ] Code-owner approval (someone other than the PR author) — migrations in range
 - [ ] Money-flow QA green at this head, or `qa-override` applied at open
+- [ ] Agent evals run (optional, non-blocking) — <run id, or "not run">
 - [ ] Docs staleness audit dispositions recorded on this PR
 
 ## After merge

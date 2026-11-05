@@ -121,6 +121,32 @@ describe('resultFieldsFromText', () => {
     expect(resultFieldsFromText('{"success":false,"error":"no"}').ok).toBe(false)
     expect(resultFieldsFromText('{"success":true}').ok).toBe(true)
   })
+
+  // #4677: the two evidence fields the new graders read.
+  it('reads the offline receipt verdict from a verify result', () => {
+    const f = resultFieldsFromText('{"success":true,"data":{"verified":false,"reason":"not_verifiable_offline"}}')
+    expect(f.receiptVerdict).toBe('not_verifiable_offline')
+    expect(resultFieldsFromText('{"success":true,"data":{"verified":false,"reason":"not_a_signed_receipt"}}').receiptVerdict).toBe(
+      'not_a_signed_receipt',
+    )
+  })
+
+  it('does not read a bare `reason` as a verdict — the boolean `verified` must be there too', () => {
+    expect(resultFieldsFromText('{"success":true,"reason":"some_other_reason"}').receiptVerdict).toBeUndefined()
+  })
+
+  it('reads the task_budget status from a task-budget tool result', () => {
+    expect(resultFieldsFromText('{"success":true,"data":{"task_budget":{"id":"tb-1","status":"open"}}}').taskBudgetStatus).toBe('open')
+    expect(resultFieldsFromText('{"success":true,"data":{"task_budget":{"id":"tb-1","status":"closed"}}}').taskBudgetStatus).toBe('closed')
+    expect(resultFieldsFromText('{"success":true,"data":{"task_budget":{"id":"tb-1","status":"closing"}}}').taskBudgetStatus).toBe('closing')
+  })
+
+  it('falls back to a regex for a prose-wrapped verdict and task-budget status', () => {
+    expect(resultFieldsFromText('verify: {"verified": false, "reason": "not_verifiable_offline"} done').receiptVerdict).toBe(
+      'not_verifiable_offline',
+    )
+    expect(resultFieldsFromText('read: {"task_budget": {"id": "tb-1", "status": "closed"}} done').taskBudgetStatus).toBe('closed')
+  })
 })
 
 describe('the config contract refuses to guess (the runbook names the verified wrapper)', () => {

@@ -391,6 +391,22 @@ function buildTrialGraderContext(
       const amountAtomic = parseHumanAmountToAtomic(body.amount)
       return { ok: true, status: body.status ?? 'unknown', ...(amountAtomic !== undefined ? { amountAtomic } : {}) }
     },
+    // #4677: the task-budget lifecycle's FINAL state, read with the TRIAL's
+    // key — the eval key cannot see a budget the throwaway agent opened.
+    probeTaskBudget: async (taskBudgetId) => {
+      const res = await fetch(`${deps.apiUrl}/task-budgets/${taskBudgetId}`, {
+        headers: { authorization: `Bearer ${identity.agentApiKey}` },
+      })
+      if (!res.ok) {
+        return { ok: false, error: `HTTP ${res.status} reading task budget ${taskBudgetId} with the trial's key` }
+      }
+      const body = (await res.json().catch(() => ({}))) as { task_budget?: { status?: unknown } }
+      const status = body.task_budget?.status
+      if (typeof status !== 'string') {
+        return { ok: false, error: `task budget ${taskBudgetId} carried no status` }
+      }
+      return { ok: true, status }
+    },
   }
 }
 

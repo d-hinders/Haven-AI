@@ -350,6 +350,20 @@ export function buildGraderContext(deps: {
         return { ok: false, error: `balanceOf(${address}) failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
       }
     },
+    // #4677: the task-budget lifecycle's FINAL state, read from the backend.
+    // `tool_called` only proves a call occurred; a close that returned
+    // `closing` is not a closed budget.
+    probeTaskBudget: async (taskBudgetId) => {
+      const res = await deps.api.getTaskBudget(taskBudgetId)
+      if (!res.ok) {
+        return { ok: false, error: `HTTP ${res.status} reading task budget ${taskBudgetId}: backend rejected the read` }
+      }
+      const status = res.data.task_budget?.status
+      if (typeof status !== 'string') {
+        return { ok: false, error: `task budget ${taskBudgetId} carried no status` }
+      }
+      return { ok: true, status }
+    },
   }
 }
 

@@ -557,6 +557,278 @@ function eqAddr(a: string | null | undefined, b: string | null | undefined): boo
   return typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase()
 }
 
+/** The direct-path payment tools the receipt task pins (#4677). */
+const DIRECT_PAYMENT_TOOLS = new Set(['haven_pay', 'haven_send'])
+
+/**
+ * The x402 payment tools (#4677). A bundle from one of these can VERIFY
+ * (erc7710), so the receipt task forbids them: "after a payment" alone is not
+ * deterministic, while a payment pinned to the direct path always answers
+ * `not_verifiable_offline`.
+ */
+const X402_PAYMENT_TOOLS = new Set([
+  'haven_pay_x402_quote',
+  'haven_pay_mcp_tool',
+  'haven_prepare_catalog_purchase',
+  'haven_settle_mcp_tool',
+  'haven_complete_mcp_tool',
+])
+
+/**
+ * True when a `haven_verify_receipt` argument is a SIGNED bundle rather than
+ * a `haven_list_receipts` history row (#4677). The bundle carries an
+ * `authorization` object (the delegate's signature); a row carries none, and
+ * the verifier answers `not_a_signed_receipt` for it. Both accepted forms are
+ * checked: the inner receipt, and the whole `{ receipt }` response.
+ */
+function isSignedBundle(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const hasAuthorization = (v: unknown): boolean =>
+    typeof v === 'object' && v !== null && typeof (v as Record<string, unknown>).authorization === 'object'
+  const rec = value as Record<string, unknown>
+  return hasAuthorization(rec) || hasAuthorization(rec.receipt)
+}
+
+/**
+ * `receipt_verified_offline` — the receipt task (#4677).
+ *
+ * The task pins the DIRECT path, so the expected verdict is deterministic:
+ * a direct bundle carries `authorization.signatureScheme: eip712_userop` and
+ * the signed user operation is not in the bundle, so `haven_verify_receipt`
+ * answers `not_verifiable_offline`. An erc7710 bundle verifies instead, which
+ * is why "after a payment" alone would not be deterministic and why an x402
+ * payment tool in the log fails this grader.
+ *
+ * Passes when, in order:
+ *  1. a direct payment tool (`haven_pay` / `haven_send`) ran and no x402
+ *     payment tool did;
+ *  2. a successful `haven_get_payment_status` preceded `haven_get_receipt`,
+ *     and the backend confirms the payment settled — settlement evidence
+ *     before the receipt fetch;
+ *  3. `haven_verify_receipt` was given the SIGNED bundle (an object with an
+ *     `authorization`), not a list row, and its result carried
+ *     `not_verifiable_offline`;
+ *  4. the final message says the receipt cannot be verified offline, and does
+ *     not claim tampering or success.
+ *
+ * Options: `mustMention` (default `["offline"]`), `forbidMention` (default
+ * the success/tampering claims a wrong report makes).
+ */
+export async function receiptVerifiedOffline(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  options: { mustMention?: string[]; forbidMention?: string[] } = {},
+): Promise<GraderResult> {
+  // The x402 check comes FIRST: an x402 purchase is the specific wrong
+  // behaviour this task pins, and it is also a payment, so a log with only
+  // an x402 call must fail for the path it took, not for a missing direct one.
+  const x402 = log.calls.find((c) => X402_PAYMENT_TOOLS.has(bareToolName(c.name)))
+  if (x402) {
+    return fail(
+      `the agent used the x402 payment tool ${bareToolName(x402.name)} — the task pins the DIRECT path; an erc7710 bundle verifies, ` +
+        'so the offline verdict would not be deterministic',
+    )
+  }
+  const direct = log.calls.find((c) => DIRECT_PAYMENT_TOOLS.has(bareToolName(c.name)) && c.result?.ok !== false)
+  if (!direct) {
+    return fail(
+      'no direct payment (haven_pay / haven_send) in the log — the task pins the direct path, whose bundle is the one that cannot be verified offline',
+    )
+  }
+  const replayFailure = replayOnlyFailure(log)
+  if (replayFailure) return replayFailure
+  const ids = paymentIdsIn(log)
+  if (ids.length === 0) {
+    return fail('no payment_id anywhere in the log — the receipt cannot be tied to a payment this trial made')
+  }
+
+  // Settlement evidence BEFORE the receipt fetch.
+  const receiptIdx = callsTo(log, 'haven_get_receipt')[0]
+  if (receiptIdx === undefined) return fail('haven_get_receipt was never called — the signed bundle was never fetched')
+  const statusIdx = callsTo(log, 'haven_get_payment_status').find((i) => i < receiptIdx && log.calls[i].result?.ok !== false)
+  if (statusIdx === undefined) {
+    return fail(
+      'no successful haven_get_payment_status before haven_get_receipt — the receipt must be fetched only after the payment reads settled',
+    )
+  }
+  const probe = ctx.probePaymentStatus
+  if (!probe) return fail('no backend probe injected — a receipt grader without a backend cannot prove the payment settled')
+  const receiptCall = log.calls[receiptIdx]
+  const named = typeof receiptCall.args?.payment_id === 'string' ? (receiptCall.args.payment_id as string) : undefined
+  const toProbe = named !== undefined ? [named] : ids
+  const statuses = await Promise.all(toProbe.map(async (id) => ({ id, ...(await probe(id)) })))
+  const unsettled = statuses.filter((s) => !s.ok || !SETTLED_STATUSES.includes(s.status))
+  if (unsettled.length > 0) {
+    return fail(
+      'the receipt was fetched before the payment settled: ' +
+        unsettled.map((s) => (s.ok ? `${s.id} is ${s.status}` : `${s.id}: ${s.error}`)).join('; '),
+    )
+  }
+
+  // The verify call: the signed bundle, not a list row.
+  const verifyIdx = callsTo(log, 'haven_verify_receipt').find((i) => i > receiptIdx)
+  if (verifyIdx === undefined) {
+    return fail('haven_verify_receipt was never called after the receipt fetch — the bundle was never verified')
+  }
+  const verifyCall = log.calls[verifyIdx]
+  if (!isSignedBundle(verifyCall.args?.receipt)) {
+    return fail(
+      'haven_verify_receipt was given an object with no authorization — a haven_list_receipts history row carries no signature ' +
+        '(it answers not_a_signed_receipt); the signed bundle from haven_get_receipt is the input',
+    )
+  }
+  const verdict = verifyCall.result?.receiptVerdict
+  if (verdict === undefined) {
+    return fail('the haven_verify_receipt result carried no offline verdict — the grader cannot prove what the verifier answered')
+  }
+  if (verdict !== 'not_verifiable_offline') {
+    return fail(
+      `haven_verify_receipt answered ${JSON.stringify(verdict)}, not "not_verifiable_offline" — ` +
+        (verdict === 'not_a_signed_receipt'
+          ? 'the input was a list row, not the signed bundle'
+          : 'the task pins the direct path, whose bundle cannot be verified offline'),
+    )
+  }
+
+  // The report: "cannot be verified offline", never tampering or success.
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) {
+    return fail('the bundle answered not_verifiable_offline, but the agent never told the user what that means')
+  }
+  const missing = mentionsSatisfied(finalMessage, options.mustMention ?? ['offline'])
+  if (missing.length > 0) {
+    return fail(
+      `the final message did not mention ${missing.map((m) => JSON.stringify(m)).join(', ')} — ` +
+        `not_verifiable_offline means the receipt CANNOT be verified offline, and the user has to be told that (message: ${finalMessage.slice(0, 160)})`,
+    )
+  }
+  const forbidden = (
+    options.forbidMention ?? ['tampered', 'forged', 'authentic', 'verified successfully', 'signature is valid']
+  ).filter((m) => finalMessage.toLowerCase().includes(m.toLowerCase()))
+  if (forbidden.length > 0) {
+    return fail(
+      `the final message claimed ${forbidden.map((m) => JSON.stringify(m)).join(', ')} — not_verifiable_offline is neither tampering nor success; ` +
+        `the bundle simply does not carry what offline verification needs (message: ${finalMessage.slice(0, 160)})`,
+    )
+  }
+  return pass(
+    `direct payment ${toProbe.join(', ')} settled, the signed bundle answered not_verifiable_offline, and the user was told it cannot be verified offline`,
+  )
+}
+
+/** The task-budget id a log names — the agent must pass it to get/close/sign/submit. */
+function taskBudgetIdIn(log: AgentRunLog): string | undefined {
+  for (const call of log.calls) {
+    const id = call.args?.task_budget_id
+    if (typeof id === 'string' && id.length > 0) return id
+  }
+  return undefined
+}
+
+/** The first call index AFTER `from` whose bare name is `name`. */
+function nextCall(log: AgentRunLog, name: string, from: number): number | undefined {
+  const idx = log.calls.findIndex((c, i) => i > from && bareToolName(c.name) === name)
+  return idx === -1 ? undefined : idx
+}
+
+/**
+ * `task_budget_lifecycle` — the task-budget task (#4677).
+ *
+ * `haven_open_task_budget` and a live `haven_close_task_budget` only PREPARE:
+ * they return a `haven_sign` handoff, and state does not change until the
+ * signature is submitted (`mcp-server/src/tools/task-budgets.ts:120-166`).
+ * The full lifecycle is
+ * `open → sign → submit → get (open) → close → sign → submit → get (closed)`.
+ *
+ * The FINAL state is read from the BACKEND (`probeTaskBudget`), never from
+ * the log: `tool_called` only proves a call occurred, and a close that
+ * returned `closing` is not a closed budget. Fails on a close merely called,
+ * a close that never reached `closed`, a failed close, and a backend that
+ * still reports the budget open.
+ *
+ * Options: `mustMention` (case-insensitive substrings of the final message).
+ */
+export async function taskBudgetLifecycle(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  options: { mustMention?: string[] } = {},
+): Promise<GraderResult> {
+  const id = taskBudgetIdIn(log)
+  if (id === undefined) {
+    return fail('no task_budget_id anywhere in the log — the agent never named the budget it opened, so the lifecycle cannot be tied to one')
+  }
+  const openIdx = callsTo(log, 'haven_open_task_budget')[0]
+  if (openIdx === undefined) return fail('haven_open_task_budget was never called — no task budget was opened')
+  if (log.calls[openIdx].result?.ok === false) return fail('haven_open_task_budget failed — the budget was never opened')
+
+  const sign1 = nextCall(log, 'haven_sign', openIdx)
+  if (sign1 === undefined) {
+    return fail(
+      'the open was never signed — haven_open_task_budget only PREPARES a haven_sign handoff; the budget stays pending until the signature is submitted',
+    )
+  }
+  const submit1 = nextCall(log, 'haven_submit', sign1)
+  if (submit1 === undefined) return fail('the open signature was never submitted — haven_submit is what opens the budget')
+
+  const getOpen = nextCall(log, 'haven_get_task_budget', submit1)
+  if (getOpen === undefined) {
+    return fail('no haven_get_task_budget after the open submit — the lifecycle never read the budget back as open')
+  }
+  const openStatus = log.calls[getOpen].result?.taskBudgetStatus
+  if (openStatus !== 'open') {
+    return fail(
+      `the haven_get_task_budget read after the open submit reported ${JSON.stringify(openStatus ?? 'no status')}, not "open" — the budget never opened`,
+    )
+  }
+
+  const closeIdx = nextCall(log, 'haven_close_task_budget', getOpen)
+  if (closeIdx === undefined) return fail('haven_close_task_budget was never called after the open read — the budget was left open')
+  if (log.calls[closeIdx].result?.ok === false) return fail('haven_close_task_budget failed — the budget was never closed')
+
+  const sign2 = nextCall(log, 'haven_sign', closeIdx)
+  if (sign2 === undefined) {
+    return fail(
+      'the close was merely CALLED — haven_close_task_budget only PREPARES a haven_sign handoff; without the signature the budget stays "closing"',
+    )
+  }
+  const submit2 = nextCall(log, 'haven_submit', sign2)
+  if (submit2 === undefined) {
+    return fail('the close signature was never submitted — the budget stays "closing" until haven_submit lands')
+  }
+
+  const getClosed = nextCall(log, 'haven_get_task_budget', submit2)
+  if (getClosed === undefined) {
+    return fail('no haven_get_task_budget after the close submit — the lifecycle never read the budget back as closed')
+  }
+  const closedStatus = log.calls[getClosed].result?.taskBudgetStatus
+  if (closedStatus !== 'closed') {
+    return fail(
+      `the haven_get_task_budget read after the close submit reported ${JSON.stringify(closedStatus ?? 'no status')}, not "closed" — the close did not land`,
+    )
+  }
+
+  // The FINAL state comes from the backend, not from the log.
+  const probe = ctx.probeTaskBudget
+  if (!probe) return fail('no task-budget probe injected — a lifecycle grader without the backend proves nothing')
+  const final = await probe(id)
+  if (!final.ok) return fail(`could not read task budget ${id} from the backend: ${final.error}`)
+  if (final.status !== 'closed') {
+    return fail(`the backend still reports task budget ${id} as ${JSON.stringify(final.status)}, not "closed" — the close never landed`)
+  }
+
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) {
+    return fail('the full lifecycle landed and the backend confirms the budget is closed, but the agent never told the user')
+  }
+  const missing = mentionsSatisfied(finalMessage, options.mustMention ?? [])
+  if (missing.length > 0) {
+    return fail(`the final message did not mention ${missing.map((m) => JSON.stringify(m)).join(', ')} (message: ${finalMessage.slice(0, 160)})`)
+  }
+  return pass(
+    `task budget ${id}: open → sign → submit → get (open) → close → sign → submit → get (closed), and the backend confirms it is closed`,
+  )
+}
+
 /**
  * `merchant_settlement_recorded` — the MERCHANT was paid, read from the
  * backend's `GET /machine-payments/:id/status` projection (#4119), not from
@@ -1087,6 +1359,8 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   onboarding_tool_calls: (log, _ctx, options) => onboardingToolCalls(log, options as { max?: number }),
   onboarding_login_command: (log, ctx, options) => onboardingLoginCommand(log, ctx, options as { package?: string; threshold?: number }),
   client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] }),
+  receipt_verified_offline: (log, ctx, options) => receiptVerifiedOffline(log, ctx, options),
+  task_budget_lifecycle: (log, ctx, options) => taskBudgetLifecycle(log, ctx, options),
 }
 
 /**
@@ -1116,6 +1390,8 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   onboarding_tool_calls: ['max'],
   onboarding_login_command: ['package', 'threshold'],
   client_out_of_date: ['releasesPath', 'manifestPath', 'startPath', 'mustMention'],
+  receipt_verified_offline: ['mustMention', 'forbidMention'],
+  task_budget_lifecycle: ['mustMention'],
 }
 
 /** Apply a task's graders in order; first failure does NOT mask the rest. */

@@ -275,6 +275,16 @@ export class HavenApi {
   }
 
   /**
+   * ONE task budget by id (#4677) — the state the lifecycle grader reads
+   * from the backend. `GET /task-budgets/:id` answers any status and is
+   * scoped to this agent (`findForAgent`), so a 404 is the backend's own
+   * message rather than another agent's row.
+   */
+  getTaskBudget(id: string): Promise<ApiResponse<{ task_budget?: { id?: string; status?: string } }>> {
+    return this.call('GET', `/task-budgets/${id}`)
+  }
+
+  /**
    * The agent's chain-scoped merchant catalog (#1299). Read-only; used by the
    * guided-catalog-purchase scenario to RESOLVE a catalog_id by matching
    * resource_url/tool_name/tool_arguments, rather than hardcoding a UUID that

@@ -39,6 +39,21 @@ export interface RecordedToolResult {
    * (2026-10-23: bridge trial 2 replayed trial 1's payment and graded green).
    */
   idempotentReplay?: boolean
+  /**
+   * The offline verdict a `haven_verify_receipt` result carried (#4677): the
+   * `reason` beside a boolean `verified` — `not_verifiable_offline` for a
+   * direct or eip3009 bundle, `not_a_signed_receipt` for a list row, or a
+   * signer-mismatch reason. Absent on every other tool's result.
+   */
+  receiptVerdict?: string
+  /**
+   * The `task_budget.status` a task-budget tool result carried (#4677):
+   * `pending` after open, `open` after the open signature is submitted,
+   * `closing` after close, `closed` after the close signature is submitted.
+   * The grader reads the two explicit `haven_get_task_budget` reads from it,
+   * and the FINAL state from the backend probe — a call alone proves nothing.
+   */
+  taskBudgetStatus?: string
 }
 
 /**
@@ -191,7 +206,15 @@ export type TaskSetup = ThrowawaySetup
 export interface EvalTask {
   id: string
   title: string
-  category: 'direct-payment' | 'x402-paywall' | 'over-budget' | 'interrupted-purchase' | 'budget-ended' | 'agent-revoked' | 'onboarding'
+  category:
+    | 'direct-payment'
+    | 'x402-paywall'
+    | 'over-budget'
+    | 'interrupted-purchase'
+    | 'budget-ended'
+    | 'agent-revoked'
+    | 'task-budget'
+    | 'onboarding'
   instruction: string
   /** What the run needs provisioned before launch (documented in the runbook). */
   requires: string[]
@@ -403,6 +426,13 @@ export interface GraderContext {
    * resolved task, never a historical balance.
    */
   probeDelegateBalance?: (address: string) => Promise<{ ok: true; atomic: string } | { ok: false; error: string }>
+  /**
+   * Task-budget state probe (#4677): `GET /task-budgets/:id` read with the
+   * trial's own agent key. The task-budget grader reads the FINAL state from
+   * here — `tool_called` only proves a call occurred, and a close that
+   * returned `closing` is not a closed budget.
+   */
+  probeTaskBudget?: (taskBudgetId: string) => Promise<{ ok: true; status: string } | { ok: false; error: string }>
 }
 
 /** The graders a task file may name. The registry is closed on purpose. */
@@ -425,3 +455,5 @@ export type GraderName =
   | 'onboarding_tool_calls'
   | 'onboarding_login_command'
   | 'client_out_of_date'
+  | 'receipt_verified_offline'
+  | 'task_budget_lifecycle'

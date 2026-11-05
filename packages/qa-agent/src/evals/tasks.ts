@@ -123,6 +123,9 @@ function validateGraderOptions(grader: { name: GraderName; options?: unknown }, 
       return `${file}: ${name} options.${key} must be a non-empty array of non-empty strings, got ${JSON.stringify(o[key])}`
     }
   }
+  if ('forbidMention' in o && (!Array.isArray(o.forbidMention) || !o.forbidMention.every(nonEmptyString))) {
+    return `${file}: ${name} options.forbidMention must be an array of non-empty strings, got ${JSON.stringify(o.forbidMention)}`
+  }
   if ('preemptiveReadTools' in o && (!Array.isArray(o.preemptiveReadTools) || o.preemptiveReadTools.length === 0 || !o.preemptiveReadTools.every(isToolName))) {
     return `${file}: ${name} options.preemptiveReadTools must be a non-empty array of known bare tool names (tools.ts ALL_TOOL_NAMES), got ${JSON.stringify(o.preemptiveReadTools)}`
   }
@@ -208,8 +211,8 @@ export function validateTask(raw: unknown, file: string): string | null {
   }
   if (typeof t.id !== 'string' || !/^[a-z0-9-]+$/.test(t.id)) return `${file}: id must be kebab-case`
   if (typeof t.instruction !== 'string' || t.instruction.trim().length === 0) return `${file}: instruction is empty`
-  if (!['direct-payment', 'x402-paywall', 'over-budget', 'interrupted-purchase', 'budget-ended', 'agent-revoked', 'onboarding'].includes(t.category as string)) {
-    return `${file}: category must be direct-payment | x402-paywall | over-budget | interrupted-purchase | budget-ended | agent-revoked | onboarding`
+  if (!['direct-payment', 'x402-paywall', 'over-budget', 'interrupted-purchase', 'budget-ended', 'agent-revoked', 'task-budget', 'onboarding'].includes(t.category as string)) {
+    return `${file}: category must be direct-payment | x402-paywall | over-budget | interrupted-purchase | budget-ended | agent-revoked | task-budget | onboarding`
   }
   // #4680: the cold profile. `'cold'` is the only profile the harness
   // implements, and it is Claude-lane only (Hermes' template takes only
@@ -266,6 +269,18 @@ export function validateTask(raw: unknown, file: string): string | null {
     if (fractionError) return fractionError
   } else {
     return `${file}: amount.rule must be "remaining_period_budget" (delta_atomic) or "fraction_of_remaining" (fraction) — the suite has no other budget-aware rule (#3958 § 4)`
+  }
+  // #4677: a task-budget task's cap is a SLICE of the budget it holds. The
+  // amount rule stays required for this category even though the task also
+  // carries a per-trial setup: the cap must never be the whole remainder, or
+  // opening it would reserve everything and later opens/payments would refuse.
+  if (t.category === 'task-budget') {
+    if (amount === undefined) {
+      return `${file}: a task-budget task must carry an amount rule — the cap it opens is a fraction_of_remaining slice of the budget it holds`
+    }
+    if (amount.rule !== 'fraction_of_remaining') {
+      return `${file}: a task-budget task's amount must be fraction_of_remaining — the cap is a slice of the remaining budget, never the whole of it`
+    }
   }
   const graders = t.graders as Array<{ name?: unknown }> | undefined
   if (!Array.isArray(graders) || graders.length === 0) return `${file}: graders must be a non-empty array`
@@ -566,6 +581,12 @@ export const taskRunsOnLane = (task: Pick<EvalTask, 'lanes'>, lane: string): boo
  * money is the setup's `fundingAtomic`, which is the only amount it takes
  * from the eval agent's period budget. Reading the eval budget for it would
  * invent a spend the trial never makes.
+ *
+ * The one exception is a setup task that ALSO carries an `amount` rule
+ * (#4677, the task-budget task): the rule resolves against the throwaway
+ * agent's own grant (`setup.budgetAtomic`), because the cap it opens is a
+ * slice of the budget THAT agent holds — never the eval agent's remainder,
+ * and never the whole grant.
  */
 export async function resolveTask(
   task: EvalTask,
@@ -582,7 +603,13 @@ export async function resolveTask(
   },
 ): Promise<{ resolved: ResolvedTask } | { error: string }> {
   if (task.setup) {
-    const amountAtomic = BigInt(task.setup.fundingAtomic)
+    const grant = BigInt(task.setup.budgetAtomic)
+    const amountAtomic =
+      task.amount === undefined
+        ? BigInt(task.setup.fundingAtomic)
+        : task.amount.rule === 'fraction_of_remaining'
+          ? fractionOfRemaining(grant, task.amount.fraction)
+          : grant + BigInt(task.amount.delta_atomic)
     return {
       resolved: {
         task,

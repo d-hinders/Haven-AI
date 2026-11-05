@@ -181,6 +181,21 @@ function unwrapErrorShell(parsed: unknown): unknown {
 }
 
 /**
+ * Deep-search a parsed payload for one field's OBJECT value (#4677). The
+ * shared `deepFind` returns strings and booleans only, and the task-budget
+ * status lives inside the `task_budget` object a tool result carries.
+ */
+function deepFindObject(obj: unknown, key: string): Record<string, unknown> | undefined {
+  if (typeof obj !== 'object' || obj === null) return undefined
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (k === key && typeof v === 'object' && v !== null && !Array.isArray(v)) return v as Record<string, unknown>
+    const hit = deepFindObject(v, key)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+/**
  * Extract the refusal envelope fields a hosted MCP tool result carries.
  *
  * Reads the backend's `error_code` and, on a failure envelope that predates
@@ -190,8 +205,23 @@ function unwrapErrorShell(parsed: unknown): unknown {
  * of the same code on the wire). A `code` on a SUCCESS envelope is not a
  * refusal and is never promoted. The `{"error": "<json>"}` shell an MCP
  * client wraps around a failed result is unwrapped first.
+ *
+ * #4677 adds two evidence fields the new graders read: `receiptVerdict` (the
+ * `reason` beside a boolean `verified` — `haven_verify_receipt`'s offline
+ * verdict) and `taskBudgetStatus` (the `task_budget.status` a task-budget
+ * tool result carried). Both are read from the parsed envelope, with a
+ * conservative regex fallback for prose-wrapped results.
  */
-export function resultFieldsFromText(text: string): { errorCode?: string; nextTool?: string; nextToolServerRole?: ServerRole; ok?: boolean; paymentId?: string; idempotentReplay?: boolean } {
+export function resultFieldsFromText(text: string): {
+  errorCode?: string
+  nextTool?: string
+  nextToolServerRole?: ServerRole
+  ok?: boolean
+  paymentId?: string
+  idempotentReplay?: boolean
+  receiptVerdict?: string
+  taskBudgetStatus?: string
+} {
   const parsed = parseMaybeJson(text)
   if (parsed !== undefined) {
     const envelope = unwrapErrorShell(parsed)
@@ -205,6 +235,14 @@ export function resultFieldsFromText(text: string): { errorCode?: string; nextTo
       const role = deepFind(envelope, 'next_tool_server_role')
       const paymentId = deepFind(envelope, 'payment_id')
       const replay = deepFind(envelope, 'idempotent_replay')
+      // #4677: the offline receipt verdict is `{ verified: <bool>, reason }`.
+      // Requiring BOTH keys keeps an unrelated `reason` on another tool's
+      // result from being read as a verdict.
+      const verified = deepFind(envelope, 'verified')
+      const reason = deepFind(envelope, 'reason')
+      const receiptVerdict = typeof verified === 'boolean' && typeof reason === 'string' ? reason : undefined
+      const taskBudget = deepFindObject(envelope, 'task_budget')
+      const taskBudgetStatus = typeof taskBudget?.status === 'string' ? taskBudget.status : undefined
       return {
         ...(replay === true ? { idempotentReplay: true } : {}),
         ...(typeof errorCode === 'string' ? { errorCode } : {}),
@@ -215,6 +253,8 @@ export function resultFieldsFromText(text: string): { errorCode?: string; nextTo
         // call's own response, not the next call's arguments) still reaches
         // `payment_status_settled`.
         ...(typeof paymentId === 'string' ? { paymentId } : {}),
+        ...(receiptVerdict !== undefined ? { receiptVerdict } : {}),
+        ...(taskBudgetStatus !== undefined ? { taskBudgetStatus } : {}),
       }
     }
   }
@@ -227,11 +267,19 @@ export function resultFieldsFromText(text: string): { errorCode?: string; nextTo
   const nextTool = /"next_tool_name"\s*:\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
   const paymentId = /"payment_id"\s*:\s*"([^"]+)"/.exec(text)?.[1]
   const replay = /"idempotent_replay"\s*:\s*true/.test(text)
+  // #4677: the verdict only when the payload also carries a boolean
+  // `verified`; the status only from a `task_budget` object's own `status`.
+  const receiptVerdict = /"verified"\s*:\s*(?:true|false)/.test(text)
+    ? /"reason"\s*:\s*"([a-z0-9_]+)"/.exec(text)?.[1]
+    : undefined
+  const taskBudgetStatus = /"task_budget"\s*:\s*\{[^{}]*?"status"\s*:\s*"(pending|open|closing|closed)"/.exec(text)?.[1]
   return {
     ...(replay ? { idempotentReplay: true } : {}),
     ...(errorCode !== undefined ? { errorCode: canonicalErrorCode(errorCode) } : {}),
     ...(nextTool !== undefined ? { nextTool: bareToolName(nextTool) } : {}),
     ...(paymentId !== undefined ? { paymentId } : {}),
+    ...(receiptVerdict !== undefined ? { receiptVerdict } : {}),
+    ...(taskBudgetStatus !== undefined ? { taskBudgetStatus } : {}),
   }
 }
 

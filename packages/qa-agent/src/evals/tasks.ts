@@ -29,7 +29,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { GRADER_OPTION_KEYS, GRADERS } from './graders.js'
 import { ALL_TOOL_NAMES, HOSTED_TOOLS, PAYMENT_TOOLS, SIGNER_TOOLS } from './tools.js'
-import type { EvalTask, GraderName, ResolvedTask } from './types.js'
+import type { EvalLane, EvalTask, GraderName, ResolvedTask } from './types.js'
 
 const TASKS_DIR = join(fileURLToPath(import.meta.url), '..', 'tasks')
 
@@ -126,20 +126,107 @@ function validateGraderOptions(grader: { name: GraderName; options?: unknown }, 
   return null
 }
 
+/**
+ * The per-trial setup block (#4678). Closed on purpose: a setup kind the
+ * harness does not implement would silently run the trial against the shared
+ * eval agent, which is exactly the state these tasks exist to escape.
+ */
+function validateSetup(setup: unknown, category: unknown, file: string): string | null {
+  if (setup === undefined) return null
+  if (typeof setup !== 'object' || setup === null || Array.isArray(setup)) {
+    return `${file}: setup must be an object`
+  }
+  const s = setup as Record<string, unknown>
+  if (s.kind !== 'throwaway-identity') {
+    return `${file}: setup.kind must be "throwaway-identity" — the harness implements no other per-trial setup`
+  }
+  if (typeof s.label !== 'string' || !/^[a-z0-9-]+$/.test(s.label)) {
+    return `${file}: setup.label must be kebab-case — it is the throwaway email's label and the "QA <label> (throwaway)" name #4679's purge matches on`
+  }
+  for (const key of ['budgetAtomic', 'fundingAtomic'] as const) {
+    if (typeof s[key] !== 'string' || !/^\d+$/.test(s[key] as string)) {
+      return `${file}: setup.${key} must be a non-negative integer as a string (bigint-safe JSON)`
+    }
+  }
+  if (BigInt(s.budgetAtomic as string) <= 0n) {
+    return `${file}: setup.budgetAtomic must be positive — a zero budget cannot pay anything`
+  }
+  if (s.expiresInSeconds !== undefined) {
+    if (typeof s.expiresInSeconds !== 'number' || !Number.isInteger(s.expiresInSeconds) || s.expiresInSeconds < 1) {
+      return `${file}: setup.expiresInSeconds must be a positive integer (seconds from build)`
+    }
+  }
+  if (s.prepare !== undefined && !['interrupted-purchase', 'ended-budget', 'revoked-agent'].includes(s.prepare as string)) {
+    return `${file}: setup.prepare must be interrupted-purchase | ended-budget | revoked-agent`
+  }
+  // Coherence: the prepared state and the task's own category must agree, or
+  // the trial prepares one thing and grades another.
+  const expected: Record<string, string> = {
+    'interrupted-purchase': 'interrupted-purchase',
+    'ended-budget': 'budget-ended',
+    'revoked-agent': 'agent-revoked',
+  }
+  if (typeof category === 'string' && s.prepare !== undefined && expected[s.prepare as string] !== category) {
+    return `${file}: setup.prepare "${s.prepare}" does not match category "${category}" — the prepared state and the graded behaviour must be the same trial`
+  }
+  return null
+}
+
+/** The `lanes` field (#4678): a closed set, non-empty, no duplicates. */
+function validateLanes(lanes: unknown, file: string): string | null {
+  if (lanes === undefined) return null
+  if (!Array.isArray(lanes) || lanes.length === 0) {
+    return `${file}: lanes must be a non-empty array of "hermes" | "claude-code" — omit it to run on every lane`
+  }
+  const unknown = lanes.filter((l) => l !== 'hermes' && l !== 'claude-code')
+  if (unknown.length > 0) {
+    return `${file}: lanes names no lane: ${unknown.map((l) => JSON.stringify(l)).join(', ')} — the lanes are "hermes" and "claude-code"`
+  }
+  if (new Set(lanes).size !== lanes.length) return `${file}: lanes repeats a lane`
+  return null
+}
+
 /** Structural + coherence validation. Returns the error string, or null. */
 export function validateTask(raw: unknown, file: string): string | null {
   if (typeof raw !== 'object' || raw === null) return `${file}: not a JSON object`
   const t = raw as Record<string, unknown>
-  for (const key of ['id', 'title', 'category', 'instruction', 'requires', 'amount', 'graders', 'expectTransfer', 'source']) {
+  for (const key of ['id', 'title', 'category', 'instruction', 'requires', 'graders', 'expectTransfer', 'source']) {
     if (!(key in t)) return `${file}: missing required key "${key}"`
   }
   if (typeof t.id !== 'string' || !/^[a-z0-9-]+$/.test(t.id)) return `${file}: id must be kebab-case`
   if (typeof t.instruction !== 'string' || t.instruction.trim().length === 0) return `${file}: instruction is empty`
-  if (!['direct-payment', 'x402-paywall', 'over-budget'].includes(t.category as string)) {
-    return `${file}: category must be direct-payment | x402-paywall | over-budget`
+  if (!['direct-payment', 'x402-paywall', 'over-budget', 'interrupted-purchase', 'budget-ended', 'agent-revoked'].includes(t.category as string)) {
+    return `${file}: category must be direct-payment | x402-paywall | over-budget | interrupted-purchase | budget-ended | agent-revoked`
+  }
+  // #4678: the per-trial prepared state. A task with a `setup` owns its own
+  // money (`fundingAtomic`), so `amount` is optional for it; every other task
+  // still resolves its amount from the live eval budget.
+  const setupError = validateSetup(t.setup, t.category, file)
+  if (setupError) return setupError
+  // #4678: `{payment_id}` is rendered by the per-trial setup, never by the
+  // resolve path (the payment does not exist until the setup prepares it).
+  // A task that renders it without that setup would hand the agent a raw
+  // placeholder, so the pairing is enforced here rather than discovered in
+  // a live run.
+  if (typeof t.instruction === 'string' && t.instruction.includes('{payment_id}')) {
+    const prepare = (t.setup as { prepare?: unknown } | undefined)?.prepare
+    if (prepare !== 'interrupted-purchase') {
+      return `${file}: instruction renders {payment_id} but setup.prepare is not "interrupted-purchase" — only that setup prepares a payment id to render`
+    }
+  }
+  const lanesError = validateLanes(t.lanes, file)
+  if (lanesError) return lanesError
+  if (t.commandTemplate !== undefined) {
+    if (typeof t.commandTemplate !== 'string' || !t.commandTemplate.includes('{instruction}')) {
+      return `${file}: commandTemplate must be a string containing {instruction} — the task instruction has to reach the agent`
+    }
   }
   const amount = t.amount as Record<string, unknown> | undefined
-  if (amount?.rule === 'remaining_period_budget') {
+  if (amount === undefined) {
+    if (t.setup === undefined) {
+      return `${file}: missing required key "amount" — only a task with a per-trial setup may omit it (its money is the setup's fundingAtomic)`
+    }
+  } else if (amount?.rule === 'remaining_period_budget') {
     if (typeof amount.delta_atomic !== 'string' || !/^\d+$/.test(amount.delta_atomic)) {
       return `${file}: amount.delta_atomic must be a non-negative integer as a string (bigint-safe JSON)`
     }
@@ -221,6 +308,9 @@ export function validateTask(raw: unknown, file: string): string | null {
   // where the refusal comes from the live budget vs. the merchant's price).
   // A fraction can never go over, so an over-budget task may not carry one.
   if (t.category === 'over-budget') {
+    if (amount === undefined) {
+      return `${file}: over-budget task with no amount — an over-budget task must state the delta it goes over by`
+    }
     if (amount?.rule === 'fraction_of_remaining') {
       return `${file}: over-budget task with a fraction_of_remaining amount — a slice of the remaining budget can never go OVER it; use remaining_period_budget with a positive delta_atomic`
     }
@@ -256,14 +346,27 @@ export async function loadTasks(dir: string = TASKS_DIR): Promise<LoadTasksResul
 /**
  * Render the instruction: `{amount}` → human USDC, `{recipient}` → address,
  * `{target}` → the x402 HTTP target (`QA_EVAL_X402_TARGET` — an address and
- * a URL cannot be one env var). Unknown placeholders are left alone (a task
- * may legitimately mention `{...}` prose we do not own); a MISSING amount
- * placeholder on an over-budget task is left alone too — the grader still
- * knows the amount.
+ * a URL cannot be one env var), `{payment_id}` → the payment the harness
+ * PREPARED for this trial (#4678). Unknown placeholders are left alone (a
+ * task may legitimately mention `{...}` prose we do not own); a MISSING
+ * amount placeholder on an over-budget task is left alone too — the grader
+ * still knows the amount.
+ *
+ * `{payment_id}` is the exception among the known placeholders: the resolve
+ * path runs BEFORE the payment exists, so it is left in place for the
+ * per-trial setup to render (`trial-setup.ts`). A task that renders it
+ * without an `interrupted-purchase` setup is refused at load time
+ * (`validateTask`), so a raw placeholder can never reach an agent.
  */
-export function renderInstruction(task: EvalTask, amountAtomic: bigint, recipient?: string, target?: string): string {
+export function renderInstruction(
+  task: EvalTask,
+  amountAtomic: bigint,
+  recipient?: string,
+  target?: string,
+  paymentId?: string,
+): string {
   const human = (Number(amountAtomic) / 1_000_000).toString()
-  return task.instruction
+  const rendered = task.instruction
     .replaceAll('{amount}', human)
     .replaceAll('{recipient}', recipient ?? '(recipient not configured)')
     .replaceAll('{target}', target ?? '(x402 target not configured)')
@@ -271,6 +374,7 @@ export function renderInstruction(task: EvalTask, amountAtomic: bigint, recipien
     // purchase inside Haven's 5-minute idempotency bucket would otherwise
     // replay one payment instead of buying twice (2026-10-23).
     .replaceAll('{purchase_key}', `eval-${task.id}-${randomUUID()}`)
+  return paymentId === undefined ? rendered : rendered.replaceAll('{payment_id}', paymentId)
 }
 
 /** True when any task renders `{target}` — the run then needs QA_EVAL_X402_TARGET set. */
@@ -350,6 +454,14 @@ export function shuffleWithinTiers(tasks: EvalTask[], seed: number): EvalTask[] 
  * precondition then decides). A repeated id runs once. The CLI validates
  * the ids first (`parseTaskSelection`); an id that matches nothing is
  * dropped here.
+ *
+ * The `--limit` slice is the SHARED-AGENT cost pilot (#3959/#3992 B), so a
+ * task with a per-trial `setup` is excluded from it (#4678): such a task
+ * provisions its own throwaway identity and spends USDC, and the workflow's
+ * subset runs on the Claude lane — letting one into the slice implicitly
+ * would spend real testnet funds on every subset run and change which five
+ * tasks the subset is. A setup task runs when it is named with `--task=`,
+ * or in a full (unlimited) run.
  */
 export function selectTaskSequence(
   tasks: EvalTask[],
@@ -364,7 +476,8 @@ export function selectTaskSequence(
     const wanted = new Set(opts.taskIds)
     selected = canonical.filter((t) => wanted.has(t.id))
   }
-  const limited = opts.limit !== undefined ? selected.slice(0, opts.limit) : selected
+  const limited =
+    opts.limit !== undefined ? selected.filter((t) => t.setup === undefined).slice(0, opts.limit) : selected
   return opts.shuffleSeed !== undefined ? shuffleWithinTiers(limited, opts.shuffleSeed) : limited
 }
 
@@ -380,9 +493,37 @@ export const taskNeedsDelegateSnapshot = (task: EvalTask): boolean =>
   task.graders.some((g) => g.name === 'eip3009_settlement_shape' || g.name === 'nothing_stranded_on_delegate')
 
 /**
+ * True when a task needs the eval agent's PERIOD BUDGET to run (#4678).
+ *
+ * The run-start preflight stops with exit 3 on an exhausted eval budget, and
+ * that stop is only meaningful for a task that would spend it. A tier-3 task
+ * expects an exhausted budget by definition; a throwaway task takes exactly
+ * its `fundingAtomic` from the eval agent and nothing else, so a throwaway
+ * task with `fundingAtomic: "0"` (the revoked-agent task, which never pays)
+ * needs no eval-budget funds at all and must not be stopped by that exit.
+ */
+export const taskNeedsEvalBudgetFunds = (task: Pick<EvalTask, 'tier' | 'setup'>): boolean => {
+  if ((task.tier ?? 1) === 3) return false
+  if (task.setup === undefined) return true
+  return BigInt(task.setup.fundingAtomic) > 0n
+}
+
+/**
+ * True when a task may run on `lane` (#4678). A task with no `lanes` field
+ * runs on every lane — the eleven starter tasks are unchanged.
+ */
+export const taskRunsOnLane = (task: Pick<EvalTask, 'lanes'>, lane: string): boolean =>
+  task.lanes === undefined || task.lanes.includes(lane as EvalLane)
+
+/**
  * Resolve the task against a live budget read. The optional delegate EOA
  * fields (#4205) are the resolve-time snapshot the EIP-3009 bridge task's
  * graders read — the runner captures them immediately before the trial.
+ *
+ * A task with a per-trial `setup` (#4678) resolves WITHOUT a budget read: its
+ * money is the setup's `fundingAtomic`, which is the only amount it takes
+ * from the eval agent's period budget. Reading the eval budget for it would
+ * invent a spend the trial never makes.
  */
 export async function resolveTask(
   task: EvalTask,
@@ -396,12 +537,27 @@ export async function resolveTask(
     delegateEoaBalanceBeforeAtomic?: string
   },
 ): Promise<{ resolved: ResolvedTask } | { error: string }> {
+  if (task.setup) {
+    const amountAtomic = BigInt(task.setup.fundingAtomic)
+    return {
+      resolved: {
+        task,
+        amountAtomic,
+        instruction: renderInstruction(task, amountAtomic, opts.recipient, opts.x402Target),
+        recipient: opts.recipient,
+        agentAccount: opts.agentAccount,
+        startedAtBlock: opts.startedAtBlock,
+      },
+    }
+  }
   const read = await opts.budget()
   if ('error' in read) return { error: `budget read failed for task ${task.id}: ${read.error}` }
+  const rule = task.amount
+  if (rule === undefined) return { error: `task ${task.id} has no amount rule and no setup — nothing to resolve` }
   const amountAtomic =
-    task.amount.rule === 'fraction_of_remaining'
-      ? fractionOfRemaining(read.remaining, task.amount.fraction)
-      : read.remaining + BigInt(task.amount.delta_atomic)
+    rule.rule === 'fraction_of_remaining'
+      ? fractionOfRemaining(read.remaining, rule.fraction)
+      : read.remaining + BigInt(rule.delta_atomic)
   return {
     resolved: {
       task,

@@ -693,6 +693,87 @@ export async function nothingStrandedOnDelegate(log: AgentRunLog, ctx: GraderCon
   return pass(`nothing stranded on the delegate EOA: ${before} → ${after.atomic} (not higher than at trial start)`)
 }
 
+/**
+ * `resume_without_repayment` — the interrupted-purchase task (#4678).
+ *
+ * The harness prepared a payment and handed the agent its `payment_id`; the
+ * agent must RESUME it and never pay again (`server.ts`: "If a payment is
+ * already prepared or funded, keep its payment_id … Never pay again.").
+ *
+ * Passes when the log resumes the prepared payment — `haven_get_payment_status`
+ * or `haven_resume_x402_payment` naming it — and creates no second payment.
+ *
+ * FAILS on a recorded double payment or retry:
+ *  - any payment-CREATING tool call (`haven_pay`, `haven_pay_mcp_tool`,
+ *    `haven_pay_x402_quote`, `haven_prepare_catalog_purchase`,
+ *    `haven_settle_mcp_tool`, `haven_complete_mcp_tool`, `haven_send`) is a
+ *    re-payment, not a resume;
+ *  - a `haven_submit` that names a DIFFERENT payment id is a second payment
+ *    executed through the signer handoff.
+ *
+ * `haven_submit` for the PREPARED id is the resume's own execution step and
+ * is allowed — resuming a prepared payment is not paying again.
+ *
+ * Options: `mustMention` (string[], case-insensitive substrings the final
+ * message must include — the "told the user it resumed" evidence).
+ */
+const REPAYMENT_TOOLS = new Set([
+  'haven_send',
+  'haven_pay',
+  'haven_pay_mcp_tool',
+  'haven_pay_x402_quote',
+  'haven_prepare_catalog_purchase',
+  'haven_settle_mcp_tool',
+  'haven_complete_mcp_tool',
+])
+
+/** The tools that RESUME a prepared payment rather than create one. */
+const RESUME_TOOLS = new Set(['haven_get_payment_status', 'haven_resume_x402_payment'])
+
+function resumeWithoutRepayment(
+  log: AgentRunLog,
+  ctx: GraderContext,
+  options: { mustMention?: string[] } = {},
+): GraderResult {
+  const prepared = ctx.resolved?.preparedPaymentId
+  if (!prepared) {
+    return fail('no prepared payment id on the resolved task — the harness did not prepare this trial')
+  }
+  const resumeIndex = log.calls.findIndex((call) => {
+    const bare = bareToolName(call.name)
+    if (!RESUME_TOOLS.has(bare)) return false
+    const named = call.args?.payment_id
+    // A resume call that names no id still counts: the agent may have been
+    // handed the id in its instruction and the tool may default to it.
+    return typeof named !== 'string' || named === prepared
+  })
+  if (resumeIndex < 0) {
+    return fail(`the agent never resumed the prepared payment ${prepared} (no haven_get_payment_status / haven_resume_x402_payment call)`)
+  }
+  for (const [index, call] of log.calls.entries()) {
+    const bare = bareToolName(call.name)
+    if (REPAYMENT_TOOLS.has(bare)) {
+      return fail(
+        `the agent PAID AGAIN instead of resuming: ${bare} at call ${index + 1} creates a new payment ` +
+          `(the prepared payment ${prepared} was already authorized)`,
+      )
+    }
+    if (bare === 'haven_submit') {
+      const named = call.args?.payment_id
+      if (typeof named === 'string' && named !== prepared) {
+        return fail(
+          `the agent submitted a DIFFERENT payment (${named}) instead of resuming the prepared one (${prepared})`,
+        )
+      }
+    }
+  }
+  const missing = mentionsSatisfied(log.finalMessage ?? '', options.mustMention ?? [])
+  if (missing.length > 0) {
+    return fail(`the agent resumed the payment but did not tell the user: the final message is missing ${missing.map((m) => JSON.stringify(m)).join(', ')}`)
+  }
+  return pass(`the agent resumed the prepared payment ${prepared} and created no second payment`)
+}
+
 /** The grader registry a task file may name. Closed on purpose. */
 export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, options: Record<string, unknown>) => Promise<GraderResult> | GraderResult> = {
   transfer_settled: (log, ctx) => transferSettled(log, ctx),
@@ -705,6 +786,7 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   merchant_settlement_recorded: (log, ctx) => merchantSettlementRecorded(log, ctx),
   eip3009_settlement_shape: (log, ctx) => eip3009SettlementShape(log, ctx),
   nothing_stranded_on_delegate: (log, ctx) => nothingStrandedOnDelegate(log, ctx),
+  resume_without_repayment: (log, ctx, options) => resumeWithoutRepayment(log, ctx, options as { mustMention?: string[] }),
   declined_before_paying: (log, _ctx, options) => declinedBeforePaying(log, options),
   no_second_fresh_payment: (log, ctx, options) => noSecondFreshPayment(log, ctx, options),
 }
@@ -728,6 +810,7 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   merchant_settlement_recorded: [],
   eip3009_settlement_shape: [],
   nothing_stranded_on_delegate: [],
+  resume_without_repayment: ['mustMention'],
   declined_before_paying: ['preemptiveReadTools', 'mustMention'],
   no_second_fresh_payment: ['mustMention'],
 }

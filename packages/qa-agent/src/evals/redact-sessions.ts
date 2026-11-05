@@ -51,6 +51,7 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile, appendFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { parseMaybeJson } from './json-reading.js'
+import { readSecretManifest } from './secret-manifest.js'
 
 // ── Rule classes ───────────────────────────────────────────────────────────
 
@@ -251,20 +252,31 @@ function needlesFor(value: string, required: boolean): Needle[] {
 /**
  * Load the named secrets from `env`. Fail-closed: an empty (or
  * whitespace-only) REQUIRED name refuses the whole run.
+ *
+ * `manifest` (#4678) is the per-trial exact-value inventory: every secret a
+ * throwaway trial generated, which no env var names. They are treated as
+ * REQUIRED — a manifest entry that is not redacted is a secret in a public
+ * artifact.
  */
 export function loadSecrets(
   env: Record<string, string | undefined>,
   required: readonly string[],
   optional: readonly string[],
+  manifest: readonly RawSecret[] = [],
 ): LoadSecretsResult {
   const valueOf = (name: string) => (env[name] ?? '').trim()
   const missing = required.filter((name) => valueOf(name) === '')
-  if (required.length === 0) return { ok: false, missing: ['(no required secret names were given)'] }
+  // A manifest with entries is a complete inventory on its own; the refusal
+  // is for a run that would redact NOTHING.
+  if (required.length === 0 && manifest.length === 0) {
+    return { ok: false, missing: ['(no required secret names were given)'] }
+  }
   if (missing.length > 0) return { ok: false, missing }
   const optionalSet = optional.filter((name) => valueOf(name) !== '')
   const raw: RawSecret[] = [
     ...required.map((name) => ({ name, value: valueOf(name), required: true })),
     ...optionalSet.map((name) => ({ name, value: valueOf(name), required: false })),
+    ...manifest.map((s) => ({ name: s.name, value: s.value, required: true })),
   ]
   // Longest first, so a secret that contains another is removed whole.
   const ordered = [...raw].sort((a, b) => b.value.length - a.value.length)
@@ -749,6 +761,14 @@ export interface RedactRunOptions {
   required: readonly string[]
   optional: readonly string[]
   env: Record<string, string | undefined>
+  /**
+   * The per-trial exact-value manifest (#4678). When set, it is consumed
+   * FAIL-CLOSED: a missing, unreadable, empty or malformed manifest refuses
+   * the whole redaction and writes nothing. Its entries join the required
+   * secrets, so every throwaway secret is redacted even though no env var
+   * names it.
+   */
+  manifestPath?: string
   /** `$GITHUB_OUTPUT`, when set: receives `clean=true` or `clean=false`. */
   githubOutput?: string
   log?: (line: string) => void
@@ -794,7 +814,21 @@ export async function runRedaction(opts: RedactRunOptions): Promise<RedactRunRes
     return result
   }
 
-  const loaded = loadSecrets(opts.env, opts.required, opts.optional)
+  // The per-trial exact-value manifest (#4678), consumed FAIL-CLOSED: a
+  // manifest that cannot be read refuses the whole redaction. An empty list
+  // would redact nothing and still report clean.
+  let manifestSecrets: RawSecret[] = []
+  if (opts.manifestPath !== undefined) {
+    const manifest = await readSecretManifest(opts.manifestPath)
+    if (!manifest.ok) {
+      log(`::error::redact-sessions refused, nothing written: ${manifest.error}`)
+      return finish({ clean: false, refused: [opts.manifestPath], files: [], rawCounts, scanCounts })
+    }
+    manifestSecrets = manifest.secrets
+    log(`redact-sessions: ${manifestSecrets.length} per-trial secret(s) from the manifest`)
+  }
+
+  const loaded = loadSecrets(opts.env, opts.required, opts.optional, manifestSecrets)
   if (!loaded.ok) {
     log(`::error::redact-sessions refused, nothing written: required secret(s) empty: ${loaded.missing.join(', ')}`)
     return finish({ clean: false, refused: loaded.missing, files: [], rawCounts, scanCounts })

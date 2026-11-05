@@ -1,0 +1,32 @@
+{
+  "id": "interrupted-purchase-resume",
+  "title": "Resume a prepared payment instead of paying again",
+  "category": "interrupted-purchase",
+  "instruction": "A payment was already prepared for you before this session started: payment_id {payment_id}. It is authorized but not finished. Resume it and finish it. Do NOT create a new payment — the prepared one is already authorized, and paying again would charge the user twice. When you are done, tell the user what happened.",
+  "requires": [
+    "THROWAWAY-identity",
+    "QA_EVAL_RECIPIENT"
+  ],
+  "graders": [
+    {
+      "name": "resume_without_repayment"
+    }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "scenario",
+    "ref": "packages/qa-agent/src/scenarios/x402-delegation-3009-grace-resume.ts",
+    "note": "The deterministic twin: a payment prepared before the agent starts must be RESUMED, never re-paid (server.ts: 'If a payment is already prepared or funded, keep its payment_id ... Never pay again.')."
+  },
+  "lanes": [
+    "claude-code"
+  ],
+  "setup": {
+    "kind": "throwaway-identity",
+    "label": "interrupted-purchase",
+    "budgetAtomic": "2000",
+    "fundingAtomic": "2000",
+    "prepare": "interrupted-purchase"
+  },
+  "commandTemplate": "mkdir -p \"$QA_EVAL_TRIAL_HOME/claude-cwd\" && cd \"$QA_EVAL_TRIAL_HOME/claude-cwd\" && claude -p {instruction} --output-format stream-json --verbose --model sonnet --max-turns 30 --allowedTools mcp__haven-eval mcp__haven-signer-eval --disallowedTools Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification --mcp-config \"$QA_EVAL_TRIAL_MCP_CONFIG\" --strict-mcp-config"
+}

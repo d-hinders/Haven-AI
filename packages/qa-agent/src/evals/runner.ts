@@ -21,6 +21,7 @@
 import { applyGraders } from './graders.js'
 import { ALL_TOOL_NAMES, bareToolName } from './tools.js'
 import { redactUrls } from '../lib/chain.js'
+import { TrialSetupFailure, type TrialSetupHook, type TrialTeardown } from './trial-setup.js'
 import type { AgentRunLog, EvalTask, GraderContext, GraderResult, ResolvedTask } from './types.js'
 
 /** One adapter lane. Hermes today; #3959 adds Claude Code. */
@@ -60,6 +61,12 @@ export interface TrialRecord {
    * full tool results. Absent when the adapter produced no log.
    */
   trace?: string[]
+  /**
+   * What the trial's teardown did (#4678), when the trial had a per-trial
+   * setup. `ok: false` is a WARNING — it never changes `pass` — and
+   * `unreturnedAtomic` names USDC the teardown could not return.
+   */
+  teardown?: TrialTeardown
 }
 
 /** Calls beyond this many are summarised, so one runaway session cannot flood the report. */
@@ -117,6 +124,14 @@ export interface TaskReport {
   slowestSessionMs: number
   /** Median wall time across the task's sessions, ms (#3959's summary metric). */
   medianSessionMs: number
+  /**
+   * True when the task's `lanes` field excludes the running lane (#4678).
+   * A skipped task ran nothing, so it NEVER counts as passed: `passAll` is
+   * false, `passRate` is 0, and `tasksPassingAll` excludes it.
+   */
+  skipped?: boolean
+  /** Why the task was skipped, when it was. */
+  skipReason?: string
 }
 
 /**
@@ -212,6 +227,26 @@ export interface RunSuiteOptions {
   hostedMcp?: HostedMcpInfo
   /** Grader probes live here (chain/backend), injected per suite. */
   graderContext?: Omit<GraderContext, 'resolved'>
+  /**
+   * The per-TRIAL grader context (#4678). It is the DEFAULT for every trial:
+   * a throwaway trial's graders must read with that trial's key, never the
+   * eval agent's. A setup hook that hands back its own `graderContext` wins
+   * over it (the hook knows the identity it just created).
+   */
+  graderContextFor?: (resolved: ResolvedTask) => Omit<GraderContext, 'resolved'>
+  /**
+   * The per-trial setup hook (#4678). Absent = the shared eval agent, no
+   * setup, no teardown — the eleven starter tasks are unchanged. When
+   * present it is called ONLY for a task that carries a `setup` block: a
+   * run may mix throwaway tasks with shared-agent ones, and the hook's
+   * contract is "prepare THIS task's state".
+   */
+  setup?: TrialSetupHook
+  /**
+   * The lane the suite is running on (#4678). A task whose `lanes` field
+   * excludes it is reported `skipped` and never counted as passed.
+   */
+  lane?: string
   /** Hook for the tests: observe each trial as it lands. */
   onTrial?: (resolved: ResolvedTask, record: TrialRecord) => void
 }
@@ -229,10 +264,15 @@ const recordSettled = (record: TrialRecord): boolean =>
   record.graders.some((g) => g.pass && (SETTLEMENT_GRADERS.has(g.name) || g.settledSpendAtomic !== undefined))
 
 /**
- * Run one task's trials. Each trial resolves, runs, grades — and its record
- * (with its own resolved amount + start block) becomes the next resolve's
- * `prior` across task boundaries, because the drainer-before-tier-3 budget
- * sequence spans tasks.
+ * Run one task's trials. Each trial resolves, prepares (when the task asks
+ * for per-trial state), runs, grades, and tears down — and its record (with
+ * its own resolved amount + start block) becomes the next resolve's `prior`
+ * across task boundaries, because the drainer-before-tier-3 budget sequence
+ * spans tasks.
+ *
+ * A setup failure is a RED TRIAL, and the teardown still runs over whatever
+ * the setup registered before it failed (#4678): "teardown after every trial"
+ * includes setup that fails partway.
  */
 export async function runTaskTrials(
   task: EvalTask,
@@ -241,6 +281,8 @@ export async function runTaskTrials(
     resolveForTrial: RunSuiteOptions['resolveForTrial']
     trials: number
     graderContext?: Omit<GraderContext, 'resolved'>
+    graderContextFor?: RunSuiteOptions['graderContextFor']
+    setup?: TrialSetupHook
     onTrial?: RunSuiteOptions['onTrial']
   },
   state: { prior?: PriorTrialOutcome },
@@ -265,30 +307,77 @@ export async function runTaskTrials(
       records.push(record)
       continue
     }
+
+    // The per-trial setup (#4678). The hook is called ONLY for a task that
+    // asks for it: a run may mix throwaway tasks with the shared-agent ones,
+    // and the hook's contract is "prepare THIS task's state" — calling it for
+    // a task with no `setup` would turn every other task in the run red.
+    // The hook owns its cleanup registry and hands back a teardown; a setup
+    // that fails partway throws a `TrialSetupFailure` carrying the teardown
+    // for what it already created.
+    let trialResolved = resolved
+    let hookGraderContext: Omit<GraderContext, 'resolved'> | undefined
+    let teardown: (() => Promise<TrialTeardown>) | undefined
+    if (opts.setup && task.setup !== undefined) {
+      try {
+        const prepared = await opts.setup.prepare({ task, trial, resolved })
+        trialResolved = { ...resolved, ...(prepared.resolved ?? {}) }
+        hookGraderContext = prepared.graderContext
+        teardown = prepared.teardown
+      } catch (err) {
+        const failedTeardown = err instanceof TrialSetupFailure ? await err.teardown() : undefined
+        const record: TrialRecord = {
+          trial,
+          pass: false,
+          graders: [],
+          wallMs: Date.now() - startedAt,
+          detail: `setup failure: ${redactUrls(String((err as Error)?.message ?? err)).slice(0, 300)}`,
+          resolvedAmountAtomic: resolved.amountAtomic.toString(),
+          startBlock: resolved.startedAtBlock,
+          ...(failedTeardown ? { teardown: failedTeardown } : {}),
+        }
+        records.push(record)
+        state.prior = { taskId: task.id, trial, resolved, record, settled: false }
+        opts.onTrial?.(resolved, record)
+        continue
+      }
+    }
+    // The per-trial grader context (#4678): the hook's own when it supplied
+    // one, otherwise the injected per-trial builder, otherwise the suite's
+    // single context. Built AFTER the setup merge so it sees the trial's key.
+    const trialGraderContext =
+      hookGraderContext ?? (opts.graderContextFor ? opts.graderContextFor(trialResolved) : opts.graderContext)
+
     let log: AgentRunLog
     try {
-      log = await opts.adapter.runTask(resolved, trial)
+      log = await opts.adapter.runTask(trialResolved, trial)
     } catch (err) {
       // An adapter failure is a RED TRIAL, not an exception up the stack:
       // a nightly run must finish and report, naming the cause.
+      const failedTeardown = teardown ? await teardown() : undefined
       const record: TrialRecord = {
         trial,
         pass: false,
         graders: [],
         wallMs: Date.now() - startedAt,
         detail: `adapter failure: ${redactUrls(String((err as Error)?.message ?? err)).slice(0, 300)}`,
-        resolvedAmountAtomic: resolved.amountAtomic.toString(),
-        startBlock: resolved.startedAtBlock,
+        resolvedAmountAtomic: trialResolved.amountAtomic.toString(),
+        startBlock: trialResolved.startedAtBlock,
+        ...(failedTeardown ? { teardown: failedTeardown } : {}),
       }
       records.push(record)
-      state.prior = { taskId: task.id, trial, resolved, record, settled: false }
-      opts.onTrial?.(resolved, record)
+      state.prior = { taskId: task.id, trial, resolved: trialResolved, record, settled: false }
+      opts.onTrial?.(trialResolved, record)
       continue
     }
     const graderResults = await applyGraders(log, task.graders, {
-      resolved,
-      ...(opts.graderContext ?? {}),
+      resolved: trialResolved,
+      ...(trialGraderContext ?? {}),
     })
+    // The teardown runs AFTER grading and BEFORE the owner key is discarded,
+    // and its result rides the record. A failed teardown is a warning, never
+    // a change to the verdict.
+    const trialTeardown = teardown ? await teardown() : undefined
     const firstFail = graderResults.find((g) => !g.pass)
     const record: TrialRecord = {
       trial,
@@ -296,13 +385,14 @@ export async function runTaskTrials(
       graders: graderResults,
       wallMs: Date.now() - startedAt,
       detail: firstFail?.detail ?? '',
-      resolvedAmountAtomic: resolved.amountAtomic.toString(),
-      startBlock: resolved.startedAtBlock,
+      resolvedAmountAtomic: trialResolved.amountAtomic.toString(),
+      startBlock: trialResolved.startedAtBlock,
       trace: toolTrace(log),
+      ...(trialTeardown ? { teardown: trialTeardown } : {}),
     }
     records.push(record)
-    state.prior = { taskId: task.id, trial, resolved, record, settled: recordSettled(record) }
-    opts.onTrial?.(resolved, record)
+    state.prior = { taskId: task.id, trial, resolved: trialResolved, record, settled: recordSettled(record) }
+    opts.onTrial?.(trialResolved, record)
   }
   const passed = records.filter((r) => r.pass).length
   return {
@@ -333,9 +423,29 @@ export async function runSuite(opts: RunSuiteOptions): Promise<EvalReport> {
   // resolve against was spent by the tier-2 drainer of a DIFFERENT task.
   const state: { prior?: PriorTrialOutcome } = {}
   for (const task of opts.tasks) {
+    // The `lanes` field (#4678): a task that cannot run on this lane is
+    // reported `skipped` and NEVER counted as passed — it ran nothing.
+    if (opts.lane !== undefined && task.lanes !== undefined && !task.lanes.includes(opts.lane as never)) {
+      tasks.push({
+        id: task.id,
+        title: task.title,
+        category: task.category,
+        source: task.source,
+        drainsBudget: task.tier === 2,
+        trials: [],
+        passRate: 0,
+        passAll: false,
+        slowestSessionMs: 0,
+        medianSessionMs: 0,
+        skipped: true,
+        skipReason: `lanes ${task.lanes.join(', ')} exclude the running lane "${opts.lane}"`,
+      })
+      continue
+    }
     const trials = opts.trialCountFor?.(task) ?? opts.trials
     tasks.push(await runTaskTrials(task, { ...opts, trials }, state))
   }
+  const ran = tasks.filter((t) => !t.skipped)
   return {
     generatedAt: new Date().toISOString(),
     adapter: opts.adapter.name,
@@ -344,8 +454,8 @@ export async function runSuite(opts: RunSuiteOptions): Promise<EvalReport> {
     ...(opts.shuffleSeed !== undefined ? { shuffleSeed: opts.shuffleSeed } : {}),
     ...(opts.taskFilter !== undefined ? { taskFilter: [...opts.taskFilter] } : {}),
     tasks,
-    tasksRun: tasks.length,
-    tasksPassingAll: tasks.filter((t) => t.passAll).length,
+    tasksRun: ran.length,
+    tasksPassingAll: ran.filter((t) => t.passAll).length,
     ...(opts.hostedMcp ? { hostedMcp: opts.hostedMcp } : {}),
   }
 }
@@ -364,6 +474,12 @@ export function renderSummary(report: EvalReport): string {
   )
   lines.push('')
   for (const t of report.tasks) {
+    if (t.skipped) {
+      // A skipped task ran nothing, so it is never a pass — say so, and say
+      // why, instead of printing a 0% that reads as a failure.
+      lines.push(`SKIPPED  ${t.id}  (${t.category})  ${t.skipReason ?? 'not run on this lane'} — a skipped task never counts as passed`)
+      continue
+    }
     const rate = `${Math.round(t.passRate * 100)}%`
     const drain = t.drainsBudget ? '  k=1 (drains budget)' : ''
     lines.push(
@@ -373,6 +489,14 @@ export function renderSummary(report: EvalReport): string {
       if (!trial.pass) {
         lines.push(`        trial ${trial.trial} (${trial.wallMs}ms): ${trial.detail}`)
         if (trial.trace) lines.push(`          tools: ${trial.trace.length ? trial.trace.join(' → ') : '(no tool calls)'}`)
+      }
+      // The teardown's result is in the report PER TRIAL (#4678), including
+      // any USDC it could not return — a warning, never a verdict change.
+      if (trial.teardown && !trial.teardown.ok) {
+        lines.push(`        trial ${trial.trial} teardown warning: ${trial.teardown.warnings.join('; ')}`)
+        if (trial.teardown.unreturnedAtomic !== undefined) {
+          lines.push(`        trial ${trial.trial} teardown could not return ${trial.teardown.unreturnedAtomic} atomic USDC to the eval account`)
+        }
       }
     }
   }

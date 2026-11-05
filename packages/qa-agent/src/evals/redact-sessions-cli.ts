@@ -8,10 +8,14 @@
  *   --out=<dir>          upload directory (must be empty or absent)
  *   --required=A,B,…     secret env names that must be set, or nothing is written
  *   --optional=C,D,…     secret env names redacted only when set
+ *   --manifest=<path>    the per-trial exact-value manifest (#4678): every
+ *                        secret a throwaway trial generated. Consumed
+ *                        FAIL-CLOSED — a missing, unreadable, empty or
+ *                        malformed manifest refuses the whole redaction.
  *
- * Secret VALUES come from the environment only, never from an argument.
- * Exit 0 only when every file was redacted, scanned clean and moved; `clean`
- * goes to $GITHUB_OUTPUT either way.
+ * Secret VALUES come from the environment and the manifest only, never from
+ * an argument. Exit 0 only when every file was redacted, scanned clean and
+ * moved; `clean` goes to $GITHUB_OUTPUT either way.
  */
 
 import { runRedaction } from './redact-sessions.js'
@@ -42,6 +46,7 @@ async function main(): Promise<number> {
     required: names(flag('required')),
     optional: names(flag('optional')),
     env: process.env,
+    ...(flag('manifest') ? { manifestPath: flag('manifest')! } : {}),
     githubOutput: process.env.GITHUB_OUTPUT || undefined,
   })
   return result.clean ? 0 : 1

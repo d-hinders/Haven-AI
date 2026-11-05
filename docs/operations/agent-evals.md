@@ -11,6 +11,7 @@ covers:
   - packages/qa-agent/src/evals/claude-code.ts
   - packages/qa-agent/src/evals/summary.ts
   - .github/workflows/agent-evals.yml
+  - scripts/ci/agent-evals-workspace-deps.test.mjs
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/boot.ts
   - packages/sdk/src/skill-content.ts
@@ -85,7 +86,9 @@ WITHIN tiers only (deterministic per seed, recorded in the report);
 `--limit` slices the canonical order BEFORE any shuffle, so the workflow's
 5-task subset is stable, and `--task=<id>[,…]` selects tasks BY ID from the
 same canonical set — tier order and any `--shuffle` are preserved (#4218,
-see Other flags).
+see Other flags). A task with a per-trial `setup` is EXCLUDED from the
+`--limit` slice (#4678): it provisions its own throwaway identity and spends
+USDC, so it runs only when named with `--task=` or in a full (unlimited) run.
 
 **Two lessons from 2026-10-23 (run 39914610364).** A wait that times out
 makes ONE trial red: later trials do not wait on the same expectation again,
@@ -227,6 +230,90 @@ unattended start.
   amount is available; the agent, its delegate key and its API key stay the
   same.
 
+## Per-trial prepared state and teardown (#4678)
+
+One fixed agent serves every trial by default. A task may instead ask for
+state prepared FOR THAT TRIAL — a throwaway delegation-rail identity, funded
+from the eval account, with the trial's own agent key — and the runner tears
+it down afterwards, including when setup fails partway.
+
+**The task fields.** A task file may carry:
+
+| Field | Meaning |
+|---|---|
+| `lanes` | `["hermes"]`, `["claude-code"]`, or absent for every lane. A task whose lanes exclude the running lane is reported `skipped`, and **a skipped task never counts as passed** — it is out of the pass^k denominator and the summaries say so. |
+| `setup` | `{ kind: "throwaway-identity", label, budgetAtomic, fundingAtomic, expiresInSeconds?, prepare? }`. Absent = the shared eval agent, no setup, no teardown — the eleven starter tasks are unchanged. |
+| `commandTemplate` | A per-task Claude-lane command template. Absent = the lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. The template may read the trial's own env (`QA_EVAL_TRIAL_MCP_CONFIG`, `QA_EVAL_TRIAL_CREDENTIALS`, `QA_EVAL_TRIAL_API_KEY`, `QA_EVAL_TRIAL_HOME`), which is how a throwaway trial gets its own MCP config. |
+
+`amount` is optional for a task with a `setup`: its money is the setup's
+`fundingAtomic`, and the resolver never reads the eval agent's budget for it.
+
+**The three tasks this slice adds** (all Claude-lane only — Hermes' template
+takes only `{instruction}` and `{log}`, and its MCP wiring lives in its
+profile, so it cannot take a per-trial config):
+
+| Task | Prepared state | What it grades |
+|---|---|---|
+| `interrupted-purchase-resume` | A payment intent authorized as the throwaway agent, left unsigned; the agent is handed its `payment_id`. | `resume_without_repayment`: the agent resumed the prepared payment and created no second one. Fails on a recorded double payment or retry. |
+| `budget-ended-no-retry` | A grant with a short `expires_at`, then a **bounded poll of the authoritative allowance signal** (`GET /machine-payments/allowances` → `budget_ended_at`) until the budget reads as ended. A fixed sleep races wall-clock and block time. | `no_payment_retry_after_refusal` with `errorCode: delegation_expired` and `mustMention: ["owner"]`. |
+| `agent-revoked-no-retry` | The agent's key is revoked before launch. | `no_payment_retry_after_refusal` with `errorCode: agent_identity_unverified` and `mustMention: ["owner"]`. **This task may go red for a product reason** — the backend answers one identical 401 body whose hint is "Run `npx @haven_ai/connect@alpha` to provision one". If it does, the slice records the result and files the guidance question; it does not change the auth response. |
+
+**Per-trial cost.** The funding payment is made BY the eval agent, so it is
+the only amount a throwaway trial takes from the eval agent's period budget:
+`fundingAtomic` per trial. Returned USDC does **not** restore period budget.
+At the task files' `fundingAtomic: "2000"` (0.002 USDC) that is 0.002 USDC per
+trial — 0.006 USDC for k=3 — against the 3 USDC Daily budget, and the
+revoked-agent task funds nothing at all (`fundingAtomic: "0"`), which is what
+exempts it from the run-start exit-3 preflight.
+
+**Teardown, in this order, after every trial including setup that fails
+partway:**
+
+1. sweep delegate-EOA leftovers (gasless, while the agent key is still valid);
+2. return the throwaway account's USDC to the **eval account, never
+   `QA_DELEGATION_*`** — a revoked key gets a 401, so this uses the
+   owner-signed `POST /accounts/hybrid/:address/transfers/prepare` then
+   `/submit`;
+3. close any task budget left open — the trial's agent opens budgets through
+   the hosted MCP tools, so nothing registers them: the teardown **reads the
+   agent's own open-budget list** (`GET /task-budgets?status=open`, with the
+   trial's key) and closes every id it returns (`POST /task-budgets/:id/close`).
+   Before the revoke, because both routes are agent-authenticated;
+4. revoke the agent.
+
+Cleanup registers incrementally as each resource is created, so a crash after
+any phase still undoes what exists. The task budget is the one resource the
+teardown cannot register — the agent opens it, not the harness — so step 3
+discovers it instead. A failed teardown is a **warning**, never
+a change to the trial's verdict — the same rule as `withThrowawayIdentity`'s
+`cleanupWarning`. The teardown's result rides the report per trial
+(`TrialRecord.teardown`), including any USDC it could not return
+(`unreturnedAtomic`).
+
+**The per-trial secret manifest.** The throwaway identity creates five
+secrets, and the redactor's env-var list names none of them: the owner key,
+the delegate key, the signup password, the signup bearer token and the agent
+API key. A 32-byte key has the shape of a transaction hash, which the
+transcripts must keep, so no generic rule catches it. Every generated secret
+is therefore appended to a **mode-`0600` manifest** (`QA_EVAL_SECRET_MANIFEST`,
+under `$RUNNER_TEMP`, outside every report and upload path) and flushed
+before the agent launches. The CLI creates the manifest for **every** run —
+the workflow passes `--manifest=` unconditionally — and its first line is a
+header recording how many selected tasks asked for a per-trial setup. The
+redactor consumes it with `--manifest=` and **fail-closed**: a missing,
+unreadable or malformed manifest refuses the whole redaction and writes
+nothing, and so does a manifest that declares setup tasks but records no
+secrets. A header of `setupTasks: 0` with no secrets is the honest, empty
+inventory of a run that prepared nothing, so a `tasks=` run of a shared-agent
+task redacts cleanly. The manifest is deleted in an `always()` step after the
+scan, and the workflow guard
+(`scripts/ci/agent-evals-workspace-deps.test.mjs`) proves it cannot be printed
+or uploaded.
+
+**Throwaway identities keep the email and the name #4679's purge matches on:**
+`qa-<label>-<rand>@haven.test` and `QA <label> (throwaway)`. Neither may
+drift, or the purge would miss the rows this slice creates.
+
 ## Running the suite
 
 ```
@@ -313,7 +400,10 @@ Other flags:
 - `--shuffle=<seed>` — deterministic shuffle WITHIN tiers; the seed and the
   executed order are recorded in the report. `--limit` is applied to the
   canonical order BEFORE the shuffle, so the 5-task subset is the same
-  with or without a shuffle.
+  with or without a shuffle. A task with a per-trial `setup` is excluded
+  from the `--limit` slice (#4678): it provisions its own throwaway
+  identity and spends USDC, so it runs only when named with `--task=` or in
+  a full (unlimited) run.
 - `--task=<id>[,<id>…]` — run EXACTLY the named task ids (#4218), filtered
   from the canonical (tiered) set: tier order and any `--shuffle=<seed>`
   still apply, a repeated id runs once, and NO prerequisite is added
@@ -527,6 +617,13 @@ the stream, which is what the no-retry graders need.
 **Isolation of the agent under test.** `claude` runs from an empty directory
 (`$RUNNER_TEMP/claude-cwd`), so no `CLAUDE.md` or project config from this
 repo reaches it, and `--strict-mcp-config` loads only the two wired servers.
+Its process env is an explicit ALLOWLIST (`claude-code.ts`
+`CHILD_ENV_ALLOWLIST`), not the eval step's whole environment: the eval
+harness's own secrets — `AGENT_EVALS_DELEGATE_KEY` above all, plus
+`HAVEN_CREDENTIALS` (the eval agent's credential file path) and
+`QA_EVAL_AGENT_API_KEY` — never reach the agent or any stdio MCP server it
+spawns. A throwaway trial's own wiring arrives through the per-trial env the
+setup hook returns, merged over the allowlist.
 Because of that, the signer server is launched by absolute path
 (`$GITHUB_WORKSPACE/packages/signer/dist/cli.js`) with
 `HAVEN_X402_BINDING_SIGNER` from `vars.QA_X402_BINDING_SIGNER` (without it
@@ -557,6 +654,16 @@ packages/qa-agent`) and uploads the result as
   `QA_HOSTED_MCP_URL` and `AGENT_EVALS_HAVEN_API_URL`, the `vars.X || secrets.X`
   fallbacks, redacted only when set as secrets (today they are variables,
   which are kept). The step prints how many secrets it loaded, by name.
+- It also consumes the **per-trial secret manifest** (`--manifest=`,
+  `QA_EVAL_SECRET_MANIFEST`) — the five secrets a throwaway trial generates,
+  which no env var names. That read is fail-closed too: a missing, unreadable
+  or malformed manifest refuses the whole redaction, and so does a manifest
+  whose header declares setup tasks but records no secrets. The CLI creates
+  the manifest for every run, so a run with no setup task carries
+  `setupTasks: 0` and an empty inventory, which is legitimate. The manifest is
+  mode `0600`, sits outside every report and upload path, and is deleted in an
+  `always()` step after the scan; the workflow guard proves it cannot be
+  printed or uploaded.
 - It redacts into a staging directory, prints a per-class count of what it
   found in the raw input (numbers only, the positive control), then rescans
   the staged copy with a separate detector for every class (separate
@@ -703,7 +810,9 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   `packages/mcp-server/src/boot.ts`) pointed at the dev backend, and launches
   the signer and skill from the workspace, not npm. The report names the
   hosted MCP commit it ran against and states that backend error bodies stay
-  dev-deployed.
+  dev-deployed. The five are the shared-agent tasks: a task with a per-trial
+  `setup` is excluded from the `--limit` slice (#4678), so the subset never
+  provisions throwaway identities or spends USDC implicitly.
 - **full**: every task, against the deployed dev stack.
 - **tasks** (optional input): a comma-separated list of task ids, e.g.
   `x402-eip3009-bridge-vpn-legacy` — runs EXACTLY those tasks with no

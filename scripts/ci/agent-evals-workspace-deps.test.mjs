@@ -18,7 +18,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -352,4 +352,89 @@ test('the run step passes --task=$TASKS quoted and NO --limit when tasks is set'
   assert.ok(body.includes('FILTER_ARGS+=("--task=$TASKS")'), 'the run step does not pass "--task=$TASKS" quoted when tasks is set')
   assert.ok(body.includes('"${FILTER_ARGS[@]}"'), 'the run step does not expand the filter args array')
   assert.ok(!/\$LIMIT_ARG(?!\})/.test(body) || body.includes('elif [ -n "$LIMIT_ARG" ]'), 'the LIMIT_ARG handling changed — a task filter must emit no --limit')
+})
+
+// ── #4678: the per-trial exact-value secret manifest ──────────────────────
+//
+// The throwaway identity creates five secrets no env var names (owner key,
+// delegate key, signup password, signup bearer token, agent API key). They
+// enter a mode-0600 manifest the redactor consumes fail-closed. These guards
+// prove the manifest cannot be PRINTED or UPLOADED, and that it is deleted
+// after the scan.
+
+const MANIFEST_ENV = 'QA_EVAL_SECRET_MANIFEST'
+const manifestLine = live.find((line) => new RegExp(`^\\s+${MANIFEST_ENV}:`).test(line))
+const manifestPath = manifestLine?.replace(new RegExp(`^\\s+${MANIFEST_ENV}:\\s*`), '').trim() ?? ''
+const manifestDir = manifestPath.replace(/\/[^/]+$/, '')
+
+test('the eval step sets QA_EVAL_SECRET_MANIFEST, and the redactor consumes it with --manifest=', () => {
+  assert.ok(manifestLine, `agent-evals.yml does not set ${MANIFEST_ENV} — the throwaway secrets would never reach the redactor`)
+  assert.match(manifestPath, /^\$\{\{ runner\.temp \}\}\/[A-Za-z0-9._/-]+$/, 'the manifest path is not under ${{ runner.temp }}')
+  assert.ok(redact, 'no redact step — update this guard')
+  assert.ok(
+    redact.some((line) => /^\s+--manifest="\$RUNNER_TEMP\/[^"]+"\s*$/.test(line)),
+    'the redact step does not pass --manifest="$RUNNER_TEMP/..." — the manifest would be ignored',
+  )
+})
+
+test('the manifest lives OUTSIDE every report and upload path', () => {
+  assert.ok(manifestDir, 'no manifest directory — update this guard')
+  // Reports are written into the workspace; the manifest must not be there.
+  assert.ok(!manifestPath.includes('GITHUB_WORKSPACE'), 'the manifest is written into the workspace, where the report upload reads')
+  for (const step of uploadSteps) {
+    for (const p of uploadPaths(step)) {
+      assert.ok(!p.includes(manifestDir.replace('${{ runner.temp }}', '')), `an upload path includes the manifest directory: ${p}`)
+      assert.ok(!p.includes('eval-secret-manifest'), `an upload path names the manifest: ${p}`)
+    }
+  }
+  // And it is not inside the redactor's upload directory either.
+  assert.ok(REDACT_OUT && !manifestPath.includes(REDACT_OUT), 'the manifest sits inside the redactor upload directory')
+})
+
+test('no step prints the manifest — it is never cat/echo/head/tail/grep-ed', () => {
+  const printers = /\b(cat|echo|printf|head|tail|less|more|grep|rg|awk|sed|tee|cp|mv|scp|curl)\b/
+  for (const step of steps) {
+    const text = step.join('\n')
+    if (!text.includes('eval-secret-manifest') && !text.includes(MANIFEST_ENV)) continue
+    // The only steps allowed to name it are the eval step (sets the env), the
+    // redactor (reads it by flag) and the delete step (removes it).
+    const isEval = step === stepNamed(/Run the eval slice/)
+    const isRedact = step === redact
+    const isDelete = step === stepNamed(/Delete the per-trial secret manifest/)
+    assert.ok(isEval || isRedact || isDelete, `a step other than the eval/redact/delete steps names the manifest: ${step[0].trim()}`)
+    if (isDelete) {
+      assert.ok(!printers.test(text.replace(/rm -rf/g, '')), 'the delete step prints the manifest instead of deleting it')
+    }
+  }
+})
+
+test('the manifest is deleted in an always() step AFTER the scan', () => {
+  const del = stepNamed(/Delete the per-trial secret manifest/)
+  assert.ok(del, 'agent-evals.yml has no "Delete the per-trial secret manifest" step — the throwaway secrets would stay on the runner')
+  assert.equal(fieldOf(del, 'if'), 'always()', 'the manifest delete step must run even when the eval or redact step failed')
+  assert.ok(del.some((line) => /rm -rf .*eval-secret-manifest/.test(line)), 'the delete step does not remove the manifest directory')
+  assert.ok(steps.indexOf(del) > steps.indexOf(redact), 'the manifest is deleted BEFORE the redactor scans it')
+})
+
+// The three throwaway task files carry their own command template (the lane's
+// single env template cannot point --mcp-config at a per-trial config). The
+// allowlist and denylist must be the SAME as the workflow's, or a throwaway
+// trial would run with a different tool surface than the lane it claims.
+test('every per-task command template carries the lane allowlist and denylist', () => {
+  const DENY =
+    'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
+  const dir = path.join(ROOT, 'packages/qa-agent/src/evals/tasks')
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json'))
+  let checked = 0
+  for (const file of files) {
+    const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'))
+    if (task.commandTemplate === undefined) continue
+    checked += 1
+    assert.ok(task.commandTemplate.includes('{instruction}'), `${file}: commandTemplate has no {instruction}`)
+    assert.ok(task.commandTemplate.includes('--allowedTools mcp__haven-eval mcp__haven-signer-eval'), `${file}: commandTemplate does not carry the lane allowlist`)
+    assert.ok(task.commandTemplate.includes(`--disallowedTools ${DENY}`), `${file}: commandTemplate does not carry the lane denylist`)
+    assert.ok(task.commandTemplate.includes('--mcp-config "$QA_EVAL_TRIAL_MCP_CONFIG"'), `${file}: commandTemplate does not point at the trial's own MCP config`)
+    assert.ok(task.commandTemplate.includes('--strict-mcp-config'), `${file}: commandTemplate does not use --strict-mcp-config`)
+  }
+  assert.ok(checked >= 3, `expected at least the three #4678 throwaway tasks to carry a commandTemplate, found ${checked}`)
 })

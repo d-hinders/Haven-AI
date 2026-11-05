@@ -89,6 +89,17 @@ covers:
 last-verified: "2026-10-30"
 ---
 
+> **No contract change (#4675, 2026-11-05): the agent runbook says signup is
+> passkey-only.** `packages/sdk/src/agent-guidance.ts` is on this contract's
+> cover list. Its account step and signup hand-off script said signup offers
+> "a passkey or a wallet"; both now say "a passkey", because signup is
+> passkey-only and a wallet joins an existing account's signer set later. No
+> tool name, argument, input schema, strict-input list, expected-context
+> version, consent hash, `tools-list.snapshot.json` entry or
+> `next-arguments-corpus.json` row changes: the runbook is prose, and no
+> command, flag, runtime-detection rule or upgrade hint moves.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **No contract change (#4655, 2026-11-04): the binding key's boot refusal.**
 > `packages/backend/src/infra/chain/x402-binding-signer.ts` is on this contract's
 > cover list. The backend now refuses to boot when a set

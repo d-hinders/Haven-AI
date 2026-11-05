@@ -124,8 +124,13 @@ describe('haven guide text (#2525)', () => {
     // bullet names its three causes (allowances[] empty with budgetEndedAt
     // set vs empty without vs rows spent for the period) and both additive
     // fields, instead of "nobody approved yet" for both. Lands at 12264/12161.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(12264)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(12161)
+    // #4675: −24 bytes / −24 units — the account step and the signup hand-off
+    // script drop " or a wallet" (12 ASCII characters each), because signup is
+    // passkey-only: a wallet joins an existing account's signer set later, and
+    // the runbook's later-signer wording ("signs with their passkey or wallet")
+    // stays. Lands at 12240/12137.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(12240)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(12137)
   })
 
   it('names the command that actually prints the revoke hash (#3892)', () => {

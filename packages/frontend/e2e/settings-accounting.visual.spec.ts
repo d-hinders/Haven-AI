@@ -20,6 +20,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import {
   accountingConnection,
   accountingFeedComingSoon,
@@ -161,6 +162,7 @@ test.describe('settings accounting connection states', () => {
     await expect(dialog.getByRole('heading', { name: 'Include earlier payments?' })).toHaveCount(1)
     await expect(dialog.getByRole('radio', { name: /Feed from now/ })).toBeChecked()
     await expect(dialog.getByRole('button', { name: 'Not now', exact: true })).toHaveCount(1)
+    await hidePageBehindModal(dialog)
     await expect(dialog).toHaveScreenshot('settings-accounting-backfill-dialog-desktop.png', SNAPSHOT_OPTIONS)
   })
 

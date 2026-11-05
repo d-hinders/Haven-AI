@@ -28,6 +28,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import { mockHavenApi, seedAuthenticatedSession, serveAgentDetailResponses } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
@@ -111,6 +112,7 @@ test.describe('no-budget Set budget flow visual regression (#4602)', () => {
     await page.mouse.move(0, 0)
 
     await page.evaluate(() => document.fonts.ready)
+    await hidePageBehindModal(panel)
     await expect(panel).toHaveScreenshot('agents-set-budget-first-dialog-desktop.png', SNAPSHOT)
   })
 })

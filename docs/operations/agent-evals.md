@@ -47,7 +47,7 @@ backend**. No payment code is changed by this suite; the graders only READ.
 | Task format | `packages/qa-agent/src/evals/types.ts` | One JSON file per task: the instruction, the setup it needs, the budget-aware amount rule, and the graders to apply. JSON, never Markdown. |
 | Graders | `packages/qa-agent/src/evals/graders.ts` | Read the recorded tool-call log + injected chain/backend probes. No model, no live agent. |
 | Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, split into the explicit 9-tool payment list and the 20 non-payment tools, and the 5 signer tools. `tools.test.ts` holds them equal to their upstream sources (#4121): the keys of the hosted tools/list snapshot (`tools-list.snapshot.json` in the mcp-server package) and of the signer's `toolSchemas`. A hosted tool in neither half fails as unclassified. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
-| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 11 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
+| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 13 tasks across direct-payment / x402-paywall / over-budget, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
 | Compare | `packages/qa-agent/src/evals/compare.ts` | The regression-only compare (#3992 D): the new report vs earlier comparable reports, alerting only after two consecutive pass^k failures on a 5-of-7 baseline. |
@@ -200,7 +200,7 @@ unattended start.
   form offers a day, a week or 30 days),
   sized so the tiered run fits inside one refill: the tier-1 slices shrink
   geometrically, the drainer takes the rest once, and the tier-3 refusal
-  tasks spend nothing — the full 11-task run moves a bounded fraction over
+  tasks spend nothing — the full 13-task run moves a bounded fraction over
   the initial remaining budget.
 - **There is no "reset period budget" action.** Editing a budget builds a
   NEW delegation and needs the owner's passkey signatures, so it cannot run
@@ -245,17 +245,19 @@ Env the run needs (all dev/testnet):
   graders expect the money to reach (rendered into `{recipient}`). Address
   tasks only — the x402 URL tasks read `QA_EVAL_X402_TARGET`, because one
   env var cannot be both an address and an HTTP target.
-- `QA_EVAL_X402_TARGET` — the HTTP URL rendered into `{target}` by the three
+- `QA_EVAL_X402_TARGET` — the HTTP URL rendered into `{target}` by the five
   x402 URL tasks (`x402-plain-http-request-mode`,
-  `x402-price-cap-below-price`, `x402-eip3009-bridge-vpn-legacy`); required
+  `x402-price-cap-below-price`, `x402-price-mismatch-invoice`,
+  `x402-eip3009-bridge-vpn-legacy`,
+  `x402-unsettled-purchase-no-double-pay`); required
   only when the loaded task set renders `{target}`, and checked before the
   first agent session. With `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set,
-  ONE suite invocation covers all 11 tasks — no per-task config needed (a
+  ONE suite invocation covers all 13 tasks — no per-task config needed (a
   task-by-id filter, `--task`, is a deliberate slice rather than per-task
   config; see Other flags). On dev it is the demo merchant's MCP endpoint
   (`…/mcp`),
   which answers **405 to a GET** and **402 only to a POSTed JSON-RPC
-  `tools/call`**, so the two plain-HTTP task instructions spell out that
+  `tools/call`**, so the three plain-HTTP task instructions spell out that
   POST request (`buy_vpn`, basic plan, 0.001 USDC). The bridge task uses the
   same endpoint as an MCP MERCHANT: `{target}` must also serve the
   EIP-3009-only `legacy` VPN plan (`buy_vpn` `{"plan":"legacy"}`, 0.001
@@ -268,7 +270,12 @@ Env the run needs (all dev/testnet):
   a pinned-budget run reds the task without spending. The eval is the
   SECOND buyer of `vpn_legacy` (after `packages/qa-agent/src/scenarios/
   x402-hosted-mcp-signer.ts`, which proves the same hosted path without an
-  agent in it).
+  agent in it). The unsettled-purchase task uses it as an MCP merchant too:
+  `{target}` must run with `MERCHANT_SKIP_SETTLE_PRODUCT=storage_50gb`
+  (`agent-qa.md`), which its `requires` label
+  `mcp-merchant-skip-settle-storage_50gb` stands for; it buys
+  `buy_cloud_storage` `{"tier":"50gb"}` (0.0005 USDC), whose catalog row is
+  delisted, so the instruction names merchant and tool.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
@@ -409,6 +416,49 @@ should treat 3 as "not run" and skip any comparison).
   decomposed tools (`haven_x402_sign_header` / `haven_submit` /
   `haven_complete_mcp_tool`) and the `MERCHANT_REJECTED_AFTER_FUNDING`
   sweep guidance.
+- The price-mismatch task (`x402-price-mismatch-invoice`, #4676) states an
+  invoice total (0.0005 USDC) below the merchant's real price (0.001 USDC)
+  and grades `declined_before_paying`: a successful quote
+  (`haven_quote_x402` or `haven_quote_mcp_tool`), then NO payment or signer
+  call at all, and a final message naming the real price. Passing the
+  invoice total as `expected_amount` on the quote is the guided route (the
+  quote answers `stop_and_tell_user` with no next tool); comparing the
+  quoted price without it passes too. A payment call Haven then refuses
+  (a cap set to the invoice total) still fails: it is an attempt to pay a
+  price the user did not agree to. It spends nothing. A live red with the
+  guidance line removed is not attempted: `expected_amount` is also
+  described on the quote tool itself and an agent can compare prices
+  unaided, so removing one line is unlikely to redden it.
+- The unsettled-purchase task (`x402-unsettled-purchase-no-double-pay`,
+  #4676) buys the skip-settle `storage_50gb` fixture and grades
+  `no_second_fresh_payment`: the agent must not pay again, where paying
+  again is a second FRESH payment id — never a count of payment-tool calls
+  (one purchase uses several, and `haven_sweep_delegate` is one too), and
+  never a same-key repeat Haven deduplicates. Each trial renders its own
+  `{purchase_key}`, and a trial whose only payment is a replay of an
+  earlier trial's fails. A decline fails too (owner decision on PR #4686,
+  2026-11-05): it never reaches the decision this task grades, and the user
+  asked for the purchase. The fixture is disclosed in the quote's
+  `description`, so a declining trial is a finding about the instruction or
+  the guidance, not noise. Recovery is
+  **not** graded: no response on this path names `haven_sweep_delegate` as
+  the next tool. On erc7710, which the dev merchant offers and the SDK
+  prefers, the delegation is never redeemed, nothing moves, and Haven
+  answers `DELIVERED_UNSETTLED` with `haven_get_payment_status` next; on
+  the EIP-3009 bridge the settle answers `settled: true` for the merchant's
+  zero hash, so the agent is never told funds are stranded. Cost per trial:
+  0 on erc7710, 500 atomic (0.0005 USDC) on the EIP-3009 funding leg,
+  spent from the period budget for good: a sweep returns the USDC to the account but not the budget. When the one purchase reads back
+  settled with an amount, the grader reports that spend
+  (`settledSpendAtomic`), and the runner treats any passing grader that
+  reports a spend like a settlement grader, so the next trial's budget read
+  waits for it; a decline or an unredeemed purchase reports none, so the
+  next trial does not wait. Anything left on the delegate EOA stays there:
+  the bridge task grades the EOA as a delta against its own resolve-time
+  snapshot, so earlier leftovers never count against it, and the #3888 sweeper records only
+  settlements it can see on-chain and moves no funds. A task may not carry
+  both this grader and `payment_status_settled` (the loader refuses it: the
+  guard would deduct one purchase twice).
 - Every grader's option keys are closed (`GRADER_OPTION_KEYS` in
   `graders.ts`), and the loader refuses any other key (#4136). A grader
   ignores a key it does not read, so a misspelt key is a check that

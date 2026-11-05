@@ -165,6 +165,9 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
       body: soundsideBody(),
       settlementTxHash: '0x' + 'ab'.repeat(32),
       evidenceOutcome: { outcome: 'confirmed' },
+      // #4688: `settled: true` requires a CONFIRMED merchant-settlement
+      // evidence outcome, not merely the merchant's 2xx.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
     vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
       allowance: null,
@@ -207,6 +210,9 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
       body: soundsideBody(),
       settlementTxHash: '0x' + 'ab'.repeat(32),
       evidenceOutcome: { outcome: 'confirmed' },
+      // #4688: `settled: true` requires a CONFIRMED merchant-settlement
+      // evidence outcome, not merely the merchant's 2xx.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
     vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
       allowance: null,

@@ -350,6 +350,33 @@ last-verified: "2026-10-30"
 > - **Hosted delivery is unchanged and picks nothing up**; no hosted deploy
 >   is implicated.
 
+> **#4688 (2026-11-05, `settled: true` on the EIP-3009 bridge now requires a
+> verified merchant settlement):** `haven_settle_mcp_tool` used to answer
+> `settled: true`, `next_action: none` and "Funding and merchant settlement
+> both succeeded." for every non-error merchant 2xx, whatever the settlement
+> evidence report said. A merchant that verified the payment but never settled
+> it left the funded USDC on the delegate EOA while the agent was told the
+> purchase settled. `settled` is now
+> `settlement_evidence_outcome?.outcome === 'confirmed'` — the rule the tool's
+> own contract already stated.
+> - **The unverified arms** (`retryable` → `SETTLEMENT_PENDING`; `refused`, or
+>   nothing posted because the merchant gave no hash or a zero one →
+>   `DELIVERED_UNSETTLED`) carry `settled: false`, `delivered: true`, a
+>   `SETTLEMENT_UNCONFIRMED` warning, `settlement_tx_hash: null`, the allowance
+>   block, and NO `purchase_summary` (its published `status` is `'settled'`
+>   only). The next step polls `haven_get_payment_status` after about 3 minutes
+>   — the #3888 sweeper's window — and names `haven_sweep_delegate` only if
+>   `merchant_settlement_recorded` is still not true then.
+> - **`haven_complete_mcp_tool`** answers the same unverified shape instead of
+>   the bare delivery result, and its confirmed arm now carries `settled: true`
+>   (additive; no consumer read its absence).
+> - **No installed client breaks:** connect, signer and cli do not read the
+>   tool's `settled`; the eval graders read backend status; the local SDK
+>   completion path emits no `settled` field.
+> - **Hosted delivery picks this up on deploy**; no local-MCP or connect
+>   release is implicated (the local flow emits no `settled`). `last-verified`
+>   is not re-stamped: this block is the scope.
+
 # MCP Runtime Compatibility
 
 > **Scope:** This covers the **local stdio MCP runtime** installed during agent

@@ -1205,6 +1205,9 @@ describe('MUTATION (b): relaying before merchant-context validation fails', () =
     )
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+      // #4688: `settled: true` requires a CONFIRMED settlement-evidence
+      // outcome — the merchant's 2xx alone is delivery, not money.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
     const h = createToolHandlers(haven)
 

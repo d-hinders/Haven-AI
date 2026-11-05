@@ -1743,4 +1743,22 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > (0 posts with the mechanism, ≥1 without it) and the committed
 > `scripts/record-kit-analytics-connections.mjs` net over the backend suite.
 
+> **#4688 (2026-11-05).** This diff touches `packages/mcp-server/src/tools/**`
+> and `packages/sdk/src/client.ts` (a comment only) in this document's coverage
+> list. `haven_settle_mcp_tool`'s EIP-3009 arm now reports `settled: true` only
+> when the merchant-settlement evidence report came back `confirmed`; a
+> `retryable`, `refused`, or never-posted report answers `settled: false` with
+> `SETTLEMENT_PENDING` / `DELIVERED_UNSETTLED`, a `SETTLEMENT_UNCONFIRMED`
+> warning, a null settlement hash, and no `purchase_summary`. Nothing about
+> signing, authority, custody or the on-chain redemption path moves: the
+> funding signature, the X-PAYMENT header, the delegate allowance and the
+> merchant's single-use authorization are byte-identical, and the change only
+> stops the tool from CLAIMING a settlement Haven did not verify — it narrows
+> what the agent is told, never what it may do. The unverified reason sends the
+> agent to `haven_get_payment_status` after the #3888 sweeper's window and
+> names `haven_sweep_delegate` only if `merchant_settlement_recorded` is still
+> not true then, which is the verify-then-sweep rule this document's §8 already
+> states. The rest of this document was not re-read for it, and `last-verified`
+> is not bumped.
+
 Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

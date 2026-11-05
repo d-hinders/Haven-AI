@@ -806,11 +806,30 @@ export const x402CatalogGuidedPurchase: Scenario = {
       throw err
     }
 
+    // #4688: `settled: false` is no longer only a funding failure — the
+    // EIP-3009 arm now reports an unverified merchant settlement this way.
+    // Branch on `code`: SETTLEMENT_PENDING means the merchant leg RAN and
+    // Haven could not verify it on-chain yet (a just-mined settlement), which
+    // is not a funding or #1307-rehydration failure. The hash the settle held
+    // is prefilled in next_arguments, and the report-tool handoff below
+    // verifies it — so this leg still asserts both on-chain legs.
+    let merchantHash = settle.settlement_tx_hash
     if (!settle.settled) {
-      return fail(
-        `hosted settle did not settle: funding_status=${settle.funding_status ?? 'unknown'}, funding_tx=` +
-          `${settle.funding_tx_hash ?? 'none'} — #1307 rehydration may not have found the stored MCP call context`,
-      )
+      if (settle.code !== 'SETTLEMENT_PENDING') {
+        return fail(
+          `hosted settle did not settle: code=${settle.code ?? 'none'}, ` +
+            `funding_status=${settle.funding_status ?? 'unknown'}, funding_tx=` +
+            `${settle.funding_tx_hash ?? 'none'} — #1307 rehydration may not have found the stored MCP call context`,
+        )
+      }
+      const held = settle.next_arguments?.settlement_tx_hash
+      if (typeof held !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(held)) {
+        return fail(
+          `hosted settle reported SETTLEMENT_PENDING for payment ${prep.payment_id} with no ` +
+            'well-formed settlement hash in next_arguments — the merchant leg cannot be verified on-chain',
+        )
+      }
+      merchantHash = held
     }
 
     // ── 7a. The two legs' hashes, then Haven's record of the merchant one ───
@@ -819,11 +838,10 @@ export const x402CatalogGuidedPurchase: Scenario = {
     //      The hash checks are pure and come first because the record is
     //      matched against the merchant hash; step 9 proves both on-chain.
     const fundingHash = settle.funding_tx_hash
-    const merchantHash = settle.settlement_tx_hash
-    if (!fundingHash) return fail('settle reported settled:true with no funding_tx_hash — the funding leg is unevidenced')
+    if (!fundingHash) return fail('settle reported no funding_tx_hash — the funding leg is unevidenced')
     if (!merchantHash) {
       return fail(
-        'settle reported settled:true with no settlement_tx_hash — the merchant leg cannot be verified on-chain',
+        'settle reported no settlement_tx_hash — the merchant leg cannot be verified on-chain',
       )
     }
     if (fundingHash.toLowerCase() === merchantHash.toLowerCase()) {

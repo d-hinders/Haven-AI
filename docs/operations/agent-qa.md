@@ -35,7 +35,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-05"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1963,15 +1963,18 @@ steps its first reply names, tool calls to the login wall, and whether it produc
 `docs/bug-reports/qa-explore-agent-onboarding-<date>.md` with each score beside the
 previous run's and A0's.
 
-- **When to run:** weekly on the cadence, owner-armed as a Routine — never as a CI job.
-  Beyond the cadence's own non-gating rule, **a cold agent cannot be cold inside this
-  repository's runner**: score 1 is only valid if the agent does not know the path.
+- **When to run:** weekly on the cadence, owner-armed as a Routine, **or** as the
+  `onboarding-cold-setup` and `onboarding-client-out-of-date` eval tasks in the manual
+  `agent-evals` workflow (owner-approved protected environment). It is still never a
+  required check: the eval lane is manual-only and non-gating. The eval tasks run
+  `claude` from an empty directory with `--strict-mcp-config`, a scrubbed env and a
+  per-trial `HOME`, so the agent has no repository knowledge and no Haven credentials —
+  the coldness the Routine existed to protect (#4680).
 - **Guardrails:** never a password, a passkey, an approval or a payment. It stops at each
   human step and writes the hand-off message it would have sent; those messages are the
   report's most useful content.
-- **Scenario, rubric and scoring bands:**
-  [`qa-explore-agent-onboarding`](../../.claude/commands/qa-explore-agent-onboarding.md).
-  Cadence and how to read a moved score:
+- **Scenario, rubric and scoring bands:** [`agent-evals.md`](agent-evals.md) § *The
+  cold-agent onboarding tasks*. Cadence and how to read a moved score:
   [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) § *Second scenario*.
 
 ## Reading results and filing bugs

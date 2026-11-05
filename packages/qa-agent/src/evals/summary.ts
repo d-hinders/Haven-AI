@@ -52,6 +52,20 @@ export function renderMarkdownSummary(report: EvalReport): string {
       `**Skipped (${skipped.length}):** ${skipped.map((t) => `\`${t.id}\` — ${t.skipReason ?? 'not run on this lane'}`).join('; ')}. A skipped task never counts as passed.`,
     )
   }
+  // #4680: the numeric readings, per trial. A scoring task's pass/fail alone
+  // hides a band that fell from 3 to 2, so the numbers are printed beside it.
+  const scored = report.tasks.filter((t) => t.trials.some((r) => r.scores !== undefined))
+  if (scored.length > 0) {
+    lines.push('')
+    lines.push('**Scores** (each trial\'s numeric reading)')
+    lines.push('')
+    for (const t of scored) {
+      const perTrial = t.trials.map((r) =>
+        r.scores === undefined ? '—' : Object.entries(r.scores).map(([k, v]) => `${k}=${v}`).join(', '),
+      )
+      lines.push(`- \`${t.id}\`: ${perTrial.join(' | ')}`)
+    }
+  }
   // Failed trials, with the public-safe tool trace (names + error codes
   // only), so a failure can be diagnosed from the run page itself.
   const failed = report.tasks.flatMap((t) => t.trials.filter((r) => !r.pass).map((r) => ({ t, r })))

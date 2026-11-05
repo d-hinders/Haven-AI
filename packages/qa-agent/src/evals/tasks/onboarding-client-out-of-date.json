@@ -1,0 +1,34 @@
+{
+  "id": "onboarding-client-out-of-date",
+  "title": "Cold agent: a client is out of date \u2014 find what changed and what to run",
+  "category": "onboarding",
+  "instruction": "My Haven tools just told me a client is out of date. Figure out what changed and what I should run. Start here: {landing_url}/for-agents.md",
+  "requires": [
+    "QA_EVAL_DEV_LANDING_URL",
+    "COLD-profile"
+  ],
+  "graders": [
+    {
+      "name": "client_out_of_date",
+      "options": {
+        "releasesPath": "/releases",
+        "manifestPath": "/.well-known/haven.json",
+        "mustMention": [
+          "@haven_ai/connect",
+          "--doctor"
+        ]
+      }
+    }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "bug-report",
+    "ref": "docs/bug-reports/qa-explore-agent-onboarding-2026-09-28.md",
+    "note": "Run 2b (epic #3302 box 4): given only the /for-agents.md URL and the out-of-date prompt, the agent reached /releases in one hop with no guessing and answered with `npx -y @haven_ai/connect@dev --doctor` \u2014 the #3412 contract. It passes only on both."
+  },
+  "lanes": [
+    "claude-code"
+  ],
+  "profile": "cold",
+  "commandTemplate": "mkdir -p \"$QA_EVAL_TRIAL_HOME/claude-cwd\" && cd \"$QA_EVAL_TRIAL_HOME/claude-cwd\" && claude -p {instruction} --output-format stream-json --verbose --model sonnet --max-turns 30 --allowedTools mcp__eval-command WebFetch --disallowedTools Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification --mcp-config \"$QA_EVAL_TRIAL_MCP_CONFIG\" --strict-mcp-config"
+}

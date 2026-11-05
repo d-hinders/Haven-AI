@@ -66,6 +66,10 @@ export const REDACTION_CLASSES = [
   'signature',
   'b64-json',
   'merchant-body',
+  // #4680: the device-login code and the code-bearing verification URL. A
+  // device code finishes the login, so it is a short-lived secret; `haven
+  // login --poll --json` echoes `device_code` (2026-09-28 report, finding 6).
+  'device-code',
 ] as const
 export type RedactionClass = (typeof REDACTION_CLASSES)[number]
 export type ClassCounts = Record<RedactionClass, number>
@@ -305,6 +309,8 @@ const normKey = (key: string) => key.toLowerCase().replace(/[_-]/g, '')
 const PAYMENT_KEYS = new Set(['paymentheader', 'paymentsignature', 'xpayment'])
 const SIWX_KEYS = new Set(['signinwithx', 'signinwithxheader'])
 const AUTH_KEYS = new Set(['authorization', 'proxyauthorization'])
+/** #4680: the device-login code and the code-bearing verification URL. */
+const DEVICE_CODE_KEYS = new Set(['devicecode', 'usercode', 'verificationuricomplete', 'verificationurl'])
 
 /** MCP content-block discriminators kept inside a stripped merchant body. */
 const MCP_CONTENT_TYPES = new Set(['text', 'image', 'audio', 'resource', 'resource_link'])
@@ -318,6 +324,7 @@ function keyClass(key: string, value: unknown): RedactionClass | undefined {
   if (PAYMENT_KEYS.has(k)) return 'payment-header'
   if (SIWX_KEYS.has(k)) return 'siwx-header'
   if (AUTH_KEYS.has(k)) return 'auth-header'
+  if (DEVICE_CODE_KEYS.has(k)) return 'device-code'
   if (k.endsWith('signature')) return 'signature'
   return undefined
 }
@@ -336,6 +343,8 @@ const TEXT_KEY_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   textKeyRule('payment-header', '\\b(?:payment[_-]?header|payment[_-]?signature|x[_-]?payment)'),
   textKeyRule('siwx-header', '\\bsign[_-]?in[_-]?with[_-]?x(?:[_-]?header)?'),
   textKeyRule('auth-header', '\\b(?:proxy[_-]?)?authorization', '(?![A-Za-z]{1,32}\\s+\\[REDACTED:)(?:[A-Za-z][A-Za-z0-9-]{0,31}\\s+)?'),
+  // #4680: the device-login code and the code-bearing verification URL.
+  textKeyRule('device-code', '\\b(?:device[_-]?code|user[_-]?code|verification[_-]?uri[_-]?complete|verification[_-]?url)'),
   // No prefix before `signature`: any key that ENDS in it, matched linearly.
   textKeyRule('signature', 'signature', '(?!null\\b)'),
 ]
@@ -351,6 +360,23 @@ const PATTERN_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   { cls: 'b64-json', re: /eyJ[A-Za-z0-9+/_=-]{20,}(?:\.[A-Za-z0-9+/_=-]+){0,2}/g },
   // A 65-byte signature (`0x` + 130 hex) or anything longer.
   { cls: 'signature', re: /0x[0-9a-fA-F]{130,}/g },
+  // #4680: a code-bearing verification URL — the whole URL goes, because the
+  // code in it finishes the login. `?code=` / `&code=` / `?user_code=` /
+  // `?device_code=`.
+  { cls: 'device-code', re: /\bhttps?:\/\/[^\s"'\\<>]*[?&](?:code|user_code|device_code)=[A-Za-z0-9._~-]+/gi },
+  // #4680: a bare user code in prose — `XXXX-XXXX` from the backend's
+  // alphabet (`device-authorizations.ts` USER_CODE_ALPHABET: no 0/1/I/L/O/U),
+  // so a date or an ordinary word cannot match it.
+  { cls: 'device-code', re: /(?<![A-Z0-9])[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}(?![A-Z0-9])/g },
+]
+
+/**
+ * Pattern rules that KEEP their first group (the flag) and replace the rest.
+ * #4680: `login --poll <device_code>` — the code after the flag is the
+ * short-lived secret that finishes the login, and it has no prefix to match.
+ */
+const PATTERN_RULES_KEEP_KEY: Array<{ cls: RedactionClass; re: RegExp }> = [
+  { cls: 'device-code', re: /(--poll\s+)([A-Za-z0-9._~-]{4,})/g },
 ]
 
 /** A merchant body echoed in a refusal message (`paid-mcp-completion.ts`, MERCHANT_REJECTED_AFTER_FUNDING). */
@@ -398,6 +424,7 @@ class Redactor {
     out = this.merchantBodyText(out, resultLine)
     for (const rule of TEXT_KEY_RULES) out = this.replace(out, rule.cls, rule.re, true)
     for (const rule of PATTERN_RULES.slice(1)) out = this.replace(out, rule.cls, rule.re)
+    for (const rule of PATTERN_RULES_KEEP_KEY) out = this.replace(out, rule.cls, rule.re, true)
     return out
   }
 
@@ -468,7 +495,18 @@ class Redactor {
    */
   value(value: unknown, paid = false): unknown {
     if (typeof value === 'string') return this.stringValue(value, paid)
-    if (Array.isArray(value)) return value.map((v) => this.value(v, paid))
+    if (Array.isArray(value)) {
+      // #4680: in an argv array, the element AFTER `--poll` is a device code.
+      // The flag and the code are separate elements, so the text rule cannot
+      // see them together; the structural walk can.
+      return value.map((v, i) => {
+        if (i > 0 && value[i - 1] === '--poll' && typeof v === 'string' && this.on('device-code')) {
+          this.counts['device-code'] += 1
+          return marker('device-code')
+        }
+        return this.value(v, paid)
+      })
+    }
     if (value === null || typeof value !== 'object') return value
     const obj = value as Record<string, unknown>
     // Outside the tool keying: a `result` beside `payment_id` or
@@ -563,6 +601,11 @@ const DETECT_TEXT: Array<{ cls: RedactionClass; re: RegExp }> = [
   { cls: 'b64-json', re: /eyJ[A-Za-z0-9_-]{20,}/g },
   { cls: 'merchant-body', re: /merchant[_-]?body\\{0,8}"\s*:(?!\s*\\{0,8}"\[REDACTED:)(?!\s*null\b)/gi },
   { cls: 'merchant-body', re: /Merchant response:(?!\s*\[REDACTED:merchant-body\])\s*\S/gi },
+  // #4680: the device-login code and the code-bearing verification URL.
+  detectKey('device-code', '\\b(?:device[_-]?code|user[_-]?code|verification[_-]?uri[_-]?complete|verification[_-]?url)'),
+  { cls: 'device-code', re: /\bhttps?:\/\/[^\s"'\\<>]*[?&](?:code|user_code|device_code)=[A-Za-z0-9]/gi },
+  { cls: 'device-code', re: /--poll\s+(?!\[REDACTED:)[A-Za-z0-9._~-]{4,}/g },
+  { cls: 'device-code', re: /(?<![A-Z0-9])[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}(?![A-Z0-9])/g },
 ]
 
 /** The scanner's own exact-value probe, built from the raw values. */

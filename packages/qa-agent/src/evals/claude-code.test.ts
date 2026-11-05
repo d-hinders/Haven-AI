@@ -12,6 +12,7 @@ import type { ResolvedTask } from './types.js'
 import {
   buildChildEnv,
   buildClaudeCodeCommand,
+  buildColdChildEnv,
   ClaudeCodeAdapter,
   claudeCodeConfigFromEnv,
   CLAUDE_CODE_COMMAND_ENV,
@@ -225,6 +226,86 @@ describe('the child env is an explicit allowlist (#4678)', () => {
     } finally {
       if (previous === undefined) delete process.env.AGENT_EVALS_DELEGATE_KEY
       else process.env.AGENT_EVALS_DELEGATE_KEY = previous
+    }
+  })
+})
+
+// ── #4680: the cold profile's env ──────────────────────────────────────────
+
+describe('buildColdChildEnv — no Haven credentials, the trial HOME', () => {
+  it('strips every Haven and harness credential class', () => {
+    const env = buildColdChildEnv(
+      {
+        PATH: '/usr/bin',
+        HOME: '/home/runner',
+        CLAUDE_CODE_OAUTH_TOKEN: 'oauth-token',
+        HAVEN_CREDENTIALS: '/tmp/agent.json',
+        HAVEN_API_URL: 'https://api.test',
+        QA_EVAL_AGENT_API_KEY: 'sk_agent_secret',
+        QA_EVAL_AGENT_ACCOUNT: '0xabc',
+        QA_EVAL_RECIPIENT: '0xdef',
+        QA_EVAL_SECRET_MANIFEST: '/tmp/manifest.json',
+        QA_EVAL_SIGNER_CLI: '/tmp/signer.js',
+        QA_EVAL_HOSTED_MCP_URL: 'https://mcp.test/v1',
+        QA_EVAL_TRIAL_CREDENTIALS: '/tmp/trial/agent.json',
+        QA_EVAL_TRIAL_API_KEY: 'sk_agent_trial',
+        AGENT_EVALS_DELEGATE_KEY: '0xdeadbeef',
+        AGENT_EVALS_API_KEY: 'sk_agent_eval',
+        QA_X402_BINDING_SIGNER: '0x123',
+      },
+      { HOME: '/tmp/trial-home', QA_EVAL_TRIAL_HOME: '/tmp/trial-home', QA_EVAL_TRIAL_MCP_CONFIG: '/tmp/trial-home/mcp.json' },
+    )
+    expect(env.PATH).toBe('/usr/bin')
+    expect(env.HOME).toBe('/tmp/trial-home')
+    // claude's own auth stays: it authenticates claude, not Haven.
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('oauth-token')
+    // The trial's wiring stays: the command template and MCP config need it.
+    expect(env.QA_EVAL_TRIAL_MCP_CONFIG).toBe('/tmp/trial-home/mcp.json')
+    for (const name of [
+      'HAVEN_CREDENTIALS',
+      'HAVEN_API_URL',
+      'QA_EVAL_AGENT_API_KEY',
+      'QA_EVAL_AGENT_ACCOUNT',
+      'QA_EVAL_RECIPIENT',
+      'QA_EVAL_SECRET_MANIFEST',
+      'QA_EVAL_SIGNER_CLI',
+      'QA_EVAL_HOSTED_MCP_URL',
+      'QA_EVAL_TRIAL_CREDENTIALS',
+      'QA_EVAL_TRIAL_API_KEY',
+      'AGENT_EVALS_DELEGATE_KEY',
+      'AGENT_EVALS_API_KEY',
+      'QA_X402_BINDING_SIGNER',
+    ]) {
+      expect(env[name], name).toBeUndefined()
+    }
+  })
+
+  it('the adapter passes the cold env to spawn (proved on the environment)', async () => {
+    const previous = process.env.HAVEN_CREDENTIALS
+    process.env.HAVEN_CREDENTIALS = '/tmp/agent.json'
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'fake-claude-cold-'))
+      const script = join(dir, 'fake-claude.mjs')
+      await writeFile(
+        script,
+        `const line = JSON.stringify({ type: 'result', subtype: 'success', result: 'haven=' + (process.env.HAVEN_CREDENTIALS ?? 'absent') + ' home=' + (process.env.HOME ?? 'absent') });\n` +
+          `process.stdout.write(line + '\\n');\n`,
+      )
+      const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-cold-log-')), 's')
+      const adapter = new ClaudeCodeAdapter({ commandTemplate: `node ${shellQuote(script)} {instruction}`, logPath: logBase, timeoutMs: 30_000 })
+      const log = await adapter.runTask(
+        {
+          task: { id: 'cold-task' },
+          instruction: 'x',
+          coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+          trialEnv: { HOME: '/tmp/trial-home' },
+        } as unknown as ResolvedTask,
+        1,
+      )
+      expect(log.finalMessage).toBe('haven=absent home=/tmp/trial-home')
+    } finally {
+      if (previous === undefined) delete process.env.HAVEN_CREDENTIALS
+      else process.env.HAVEN_CREDENTIALS = previous
     }
   })
 })

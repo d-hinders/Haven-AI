@@ -10,12 +10,17 @@ import { describe, expect, it } from 'vitest'
 import {
   agentStatusBeforePayment,
   applyGraders,
+  clientOutOfDate,
   declinedBeforePaying,
   noSecondFreshPayment,
   eip3009SettlementShape,
   merchantSettlementRecorded,
   noPaymentRetryAfterRefusal,
   nothingStrandedOnDelegate,
+  onboardingDiscovery,
+  onboardingFirstReply,
+  onboardingLoginCommand,
+  onboardingToolCalls,
   paymentStatusSettled,
   toolCalled,
   transferSettled,
@@ -1019,5 +1024,171 @@ describe('no_second_fresh_payment — the merchant never settled, and the agent 
     const t = await loadRealTask('x402-unsettled-purchase-no-double-pay')
     expect((await applyGraders(log([quote, pay('pay-1')], TOLD), t.graders, {})).every((g) => g.pass)).toBe(true)
     expect((await applyGraders(log([quote, pay('pay-1'), pay('pay-2')], TOLD), t.graders, {})).some((g) => !g.pass)).toBe(true)
+  })
+})
+
+// ── The cold-agent onboarding graders (#4680) ──────────────────────────────
+
+describe('onboarding_discovery — band 3 credits any landing-HTML hook', () => {
+  const coldCtx = (landingUrl = 'https://dev.example/'): GraderContext => ({
+    resolved: {
+      task: { id: 'onboarding-cold-setup', title: 't', category: 'onboarding', instruction: 'x', requires: [], graders: [], expectTransfer: false, source: { kind: 'issue', ref: '4680', note: 'n' } },
+      amountAtomic: 0n,
+      instruction: 'x',
+      coldProfile: { landingUrl, cliPackage: '@haven_ai/cli@dev' },
+    },
+  })
+  const fetchCall = (url: string): RecordedToolCall => call('WebFetch', { args: { url } })
+  const opts = { hooks: ['/llms.txt'], target: '/for-agents.md', threshold: 3 }
+
+  it('band 3: landing → /llms.txt (the hook) → /for-agents.md', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(3)
+    expect(r.pass).toBe(true)
+  })
+
+  it('band 2: reached via robots.txt', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/robots.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(2)
+    expect(r.pass).toBe(false)
+  })
+
+  it('band 1: a GUESSED path falls — the recorded log requested /for-agents.md first', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
+  it('band 0: never reached', () => {
+    const r = onboardingDiscovery(log([fetchCall('https://dev.example/')]), coldCtx(), opts)
+    expect(r.score).toBe(0)
+    expect(r.pass).toBe(false)
+  })
+
+  it('credits the visible-sentence and footer hooks too (all three point at /llms.txt)', () => {
+    // The three hooks `discovery-reach.mjs:51-58` recognises all resolve to
+    // /llms.txt today; the grader takes the hook targets as options so a
+    // future hook that points elsewhere is credited without a code change.
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      { hooks: ['/llms.txt', '/llms.txt', '/llms.txt'], target: '/for-agents.md', threshold: 3 },
+    )
+    expect(r.score).toBe(3)
+  })
+})
+
+describe('onboarding_first_reply — score 2 is out of the manifest three', () => {
+  const steps = ['signup_and_passkey', 'fund', 'approve_budget']
+
+  it('scores 3/3 when the reply names the passkey, funding and the budget', () => {
+    const r = onboardingFirstReply(
+      log([], 'Create your account with a passkey, fund it with USDC, then approve the budget with your passkey.'),
+      { steps, threshold: 3 },
+    )
+    expect(r.score).toBe(3)
+    expect(r.scoreMax).toBe(3)
+    expect(r.pass).toBe(true)
+  })
+
+  it('scores 2/3 and fails when the reply drops the budget', () => {
+    const r = onboardingFirstReply(log([], 'Create your account with a passkey and fund it with USDC.'), { steps, threshold: 3 })
+    expect(r.score).toBe(2)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('approve_budget')
+  })
+
+  it('refuses an unknown step id rather than scoring it 0 silently', () => {
+    const r = onboardingFirstReply(log([], 'passkey fund budget'), { steps: ['rotate_credential'], threshold: 1 })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('unknown human-only step')
+  })
+})
+
+describe('onboarding_tool_calls — the count to the login wall', () => {
+  const run = (argv: string[]): RecordedToolCall => call('run_command', { args: { argv } })
+
+  it('counts up to and including the first login command', () => {
+    const r = onboardingToolCalls(
+      log([
+        call('WebFetch', { args: { url: 'https://dev.example/' } }),
+        call('WebFetch', { args: { url: 'https://dev.example/llms.txt' } }),
+        run(['npx', '@haven_ai/cli@dev', '--help']),
+        run(['npx', '@haven_ai/cli@dev', 'login', '--json', '--no-wait']),
+        run(['npx', '@haven_ai/cli@dev', 'login', '--poll', 'abc']),
+      ]),
+      { max: 4 },
+    )
+    expect(r.score).toBe(4)
+    expect(r.pass).toBe(true)
+  })
+
+  it('fails when the wall is never reached', () => {
+    const r = onboardingToolCalls(log([call('WebFetch', { args: { url: 'https://dev.example/' } })]), { max: 12 })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('never reached the login wall')
+  })
+})
+
+describe('onboarding_login_command — accepts npx <pkg> and npx -y <pkg>', () => {
+  const ctx: GraderContext = {
+    resolved: {
+      task: { id: 'onboarding-cold-setup', title: 't', category: 'onboarding', instruction: 'x', requires: [], graders: [], expectTransfer: false, source: { kind: 'issue', ref: '4680', note: 'n' } },
+      amountAtomic: 0n,
+      instruction: 'x',
+      coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+    },
+  }
+  const run = (argv: string[]): RecordedToolCall => call('mcp__eval-command__run_command', { args: { argv } })
+
+  it('accepts the manifest one_liner form', () => {
+    expect(onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', 'login', '--json', '--no-wait'])]), ctx).score).toBe(1)
+  })
+
+  it('accepts the -y form the 2026-09-28 agent ran', () => {
+    expect(onboardingLoginCommand(log([run(['npx', '-y', '@haven_ai/cli@dev', 'login', '--json', '--no-wait'])]), ctx).score).toBe(1)
+  })
+
+  it('fails when the agent never ran login', () => {
+    const r = onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', '--help'])]), ctx)
+    expect(r.score).toBe(0)
+    expect(r.pass).toBe(false)
+  })
+})
+
+describe('client_out_of_date — reach the release record AND name --doctor', () => {
+  const fetchCall = (url: string): RecordedToolCall => call('WebFetch', { args: { url } })
+
+  it('passes on both', () => {
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/for-agents.md'), fetchCall('https://dev.example/releases')], 'Run npx -y @haven_ai/connect@dev --doctor, then any repair line it prints.'),
+    )
+    expect(r.pass).toBe(true)
+    expect(r.score).toBe(1)
+  })
+
+  it('fails when the release record was never reached', () => {
+    const r = clientOutOfDate(log([fetchCall('https://dev.example/for-agents.md')], 'Run npx -y @haven_ai/connect@dev --doctor.'))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('never requested')
+  })
+
+  it('fails when the answer does not name the doctor command', () => {
+    const r = clientOutOfDate(log([fetchCall('https://dev.example/releases')], 'Something changed; update your packages.'))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('--doctor')
   })
 })

@@ -47,8 +47,8 @@
  * Missing config fails BEFORE the first agent session, not mid-night.
  */
 
-import { readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import {
   ClaudeCodeAdapter,
   claudeCodeConfigFromEnv,
@@ -145,7 +145,7 @@ function parseHumanAmountToAtomic(amount: unknown): bigint | undefined {
  * Returns undefined when the run may go ahead.
  */
 export function budgetPreflightMessage(
-  tasks: Array<Pick<EvalTask, 'tier' | 'setup'>>,
+  tasks: Array<Pick<EvalTask, 'tier' | 'setup' | 'category'>>,
   read: { remaining: bigint } | { error: string },
 ): string | undefined {
   const needsFunds = tasks.some(taskNeedsEvalBudgetFunds)
@@ -157,6 +157,89 @@ export function budgetPreflightMessage(
     'Wait for the next period refill, or edit the eval agent\'s budget on the dev dashboard to start a new period now (the dashboard needs a real change, e.g. the amount by 0.01 USDC, and two passkey approvals), then run again. ' +
     `Budget read: ${read.error}`
   )
+}
+
+/** The env var carrying the dev landing URL the cold agent is given (#4680). */
+export const DEV_LANDING_URL_ENV = 'QA_EVAL_DEV_LANDING_URL'
+
+/** The env var carrying the built eval-only command tool (#4680). */
+export const COMMAND_TOOL_ENV = 'QA_EVAL_COMMAND_TOOL'
+
+/**
+ * Read the cold profile's facts from the deployment itself (#4680): the
+ * landing URL from the workflow, the CLI package from the manifest the
+ * deployment serves. Reading the manifest at trial start means the task
+ * follows the product — a dist-tag bump needs no task-file edit.
+ *
+ * `packages.cli.one_liner` is `npx <spec>` (`capability-manifest.ts`); the
+ * `npx ` prefix is stripped so the command tool compares the package alone.
+ * `packages.cli.channel` is the fallback for a manifest that carries only the
+ * channel.
+ */
+export async function readColdProfile(
+  landingUrl: string,
+): Promise<{ landingUrl: string; cliPackage: string } | { error: string }> {
+  const base = landingUrl.replace(/\/+$/, '')
+  const url = `${base}/.well-known/haven.json`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return { error: `HTTP ${res.status} reading ${url}` }
+    const body = (await res.json()) as { packages?: { cli?: { one_liner?: unknown; channel?: unknown } } }
+    const oneLiner = body.packages?.cli?.one_liner
+    const channel = body.packages?.cli?.channel
+    const spec =
+      typeof oneLiner === 'string' && oneLiner.startsWith('npx ')
+        ? oneLiner.slice(4).trim()
+        : typeof channel === 'string' && channel.length > 0
+          ? channel
+          : undefined
+    if (!spec) return { error: `${url} carries no packages.cli.one_liner or packages.cli.channel — the cold profile cannot guess the CLI package` }
+    return { landingUrl: base, cliPackage: spec }
+  } catch (err) {
+    return { error: `could not read ${url}: ${(err as Error).message}` }
+  }
+}
+
+/**
+ * Write one cold trial's MCP config (#4680): ONE stdio server, the eval-only
+ * command tool, with the manifest's CLI package and the trial's own HOME in
+ * its env. No Haven MCP server, no signer, no credential file — the cold
+ * profile holds no Haven credentials at all.
+ *
+ * Returns the env the adapter's child process gets: its own `HOME` (so
+ * `haven login` cannot warm a later trial) and the config path the task's
+ * command template reads.
+ */
+export async function writeColdTrialConfig(opts: {
+  trialDir: string
+  taskId: string
+  trial: number
+  cliPackage: string
+  commandToolPath: string
+}): Promise<Record<string, string>> {
+  const dir = join(opts.trialDir, `${opts.taskId}-trial${opts.trial}`)
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  const mcpConfig = join(dir, 'mcp.json')
+  const config = {
+    mcpServers: {
+      'eval-command': {
+        type: 'stdio',
+        command: 'node',
+        args: [opts.commandToolPath],
+        env: {
+          QA_EVAL_CLI_PACKAGE: opts.cliPackage,
+          QA_EVAL_TRIAL_HOME: dir,
+        },
+      },
+    },
+  }
+  await writeFile(mcpConfig, JSON.stringify(config, null, 2), { mode: 0o600 })
+  return {
+    HOME: dir,
+    QA_EVAL_TRIAL_HOME: dir,
+    QA_EVAL_TRIAL_MCP_CONFIG: mcpConfig,
+    QA_EVAL_CLI_PACKAGE: opts.cliPackage,
+  }
 }
 
 /**
@@ -309,6 +392,18 @@ export interface PerTrialResolverDeps {
   recipient?: string
   x402Target?: string
   agentAccount?: string
+  /**
+   * The cold profile's resolved facts (#4680): the dev landing URL and the
+   * CLI package the manifest served. Required only when a selected task has
+   * `profile: 'cold'`; an onboarding task resolves WITHOUT a budget read.
+   */
+  coldProfile?: { landingUrl: string; cliPackage: string }
+  /**
+   * The cold profile's per-trial wiring (#4680): a fresh `HOME` and an MCP
+   * config holding the one eval-only command tool. Called once per cold
+   * trial, immediately before it resolves.
+   */
+  coldTrialEnv?: (task: EvalTask, trial: number) => Promise<Record<string, string>>
   /** How long the consistency guard waits for the backend to reflect a settled spend. */
   consistencyTimeoutMs?: number
   consistencyPollMs?: number
@@ -374,6 +469,23 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
   }
 
   const resolve = async (task: EvalTask, trial: number, prior?: PriorTrialOutcome): Promise<ResolvedTask> => {
+    // #4680: an onboarding task spends nothing and is exempt from the budget
+    // read AND the consistency guard — there is no spend to wait for. It gets
+    // its own HOME and MCP config (one eval-only command tool) per trial.
+    if (task.category === 'onboarding') {
+      const startedAtBlock = await deps.blockNumber()
+      const trialEnv = deps.coldTrialEnv ? await deps.coldTrialEnv(task, trial) : undefined
+      const r = await resolveTask(task, {
+        budget: async () => ({ remaining: 0n }),
+        recipient: deps.recipient,
+        x402Target: deps.x402Target,
+        agentAccount: deps.agentAccount,
+        startedAtBlock,
+        ...(deps.coldProfile !== undefined ? { coldProfile: deps.coldProfile } : {}),
+      })
+      if ('error' in r) throw new Error(r.error)
+      return trialEnv === undefined ? r.resolved : { ...r.resolved, trialEnv }
+    }
     // A task with a per-trial setup (#4678) resolves WITHOUT touching the
     // eval agent's budget: its money is the setup's `fundingAtomic`, and a
     // throwaway task with `fundingAtomic: "0"` must run even on an exhausted
@@ -613,6 +725,34 @@ async function main() {
     process.exit(2)
   }
 
+  // #4680: the cold profile. The landing URL comes from the workflow
+  // (`QA_EVAL_DEV_LANDING_URL`); the CLI package from the deployment's
+  // manifest, read at trial start. Both are checked BEFORE the first agent
+  // session — a missing one must not surface as five identical red trials.
+  const coldTasks = selected.filter((t) => t.profile === 'cold')
+  let coldProfile: { landingUrl: string; cliPackage: string } | undefined
+  let coldTrialEnv: ((task: EvalTask, trial: number) => Promise<Record<string, string>>) | undefined
+  if (coldTasks.length > 0) {
+    const landingUrl = process.env[DEV_LANDING_URL_ENV]?.trim()
+    if (!landingUrl) {
+      console.error(`Missing ${DEV_LANDING_URL_ENV} — a cold-profile task needs the dev landing URL it gives the agent; see docs/operations/agent-evals.md.`)
+      process.exit(2)
+    }
+    const read = await readColdProfile(landingUrl)
+    if ('error' in read) throw new Error(`Could not resolve the cold profile: ${read.error}`)
+    coldProfile = read
+    const trialDir = process.env.QA_EVAL_TRIAL_DIR?.trim()
+    const commandToolPath = process.env[COMMAND_TOOL_ENV]?.trim()
+    if (!trialDir || !commandToolPath) {
+      console.error(
+        `Missing ${!trialDir ? 'QA_EVAL_TRIAL_DIR' : COMMAND_TOOL_ENV} — a cold-profile task needs a per-trial HOME and the built eval-only command tool.`,
+      )
+      process.exit(2)
+    }
+    coldTrialEnv = (task, trial) =>
+      writeColdTrialConfig({ trialDir, taskId: task.id, trial, cliPackage: read.cliPackage, commandToolPath })
+  }
+
   // The per-trial secret manifest (#4678). Created for EVERY run, not only a
   // run with setup tasks: the workflow passes `--manifest=` to the redactor
   // unconditionally, and the redactor is fail-closed on a missing file — so
@@ -647,7 +787,12 @@ async function main() {
 
   // Run-start budget check: stop with one clear message instead of a run of
   // identical resolve failures when the period budget is already spent.
-  const preflight = budgetPreflightMessage(selected, await budgetSource('floor'))
+  // #4680: the READ itself is skipped when no selected task needs eval-budget
+  // funds (an onboarding-only run, or a throwaway task with fundingAtomic 0):
+  // a task that cannot pay must not be stopped by — or even read against — an
+  // exhausted budget.
+  const needsFunds = selected.some(taskNeedsEvalBudgetFunds)
+  const preflight = needsFunds ? budgetPreflightMessage(selected, await budgetSource('floor')) : undefined
   if (preflight) {
     console.log(`::error::${preflight}`)
     await writeFile(resolve(`${outPath}.summary.md`), `## Agent evals: not run\n\n${preflight}\n`)
@@ -687,6 +832,8 @@ async function main() {
     x402Target,
     agentAccount,
     delegateSnapshot,
+    ...(coldProfile !== undefined ? { coldProfile } : {}),
+    ...(coldTrialEnv !== undefined ? { coldTrialEnv } : {}),
   })
 
   // The lane switch (#3959): `claude-code` runs the SAME task files and

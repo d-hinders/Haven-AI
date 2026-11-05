@@ -271,6 +271,9 @@ describe('A2 false failures: runSuite with the CLI resolver over a simulated bud
       adapter,
       trials: 3,
       trialCountFor: (t) => (t.tier === 2 ? 1 : 3),
+      // #4680: the cold-profile tasks are Claude-lane only; on the Hermes
+      // lane they are reported `skipped` and never resolved.
+      lane: 'hermes',
       graderContext: {
         probeTransfer: async () => ({ ok: true as const, txHash: '0xdead' }),
         probePaymentStatus: async () => ({ ok: true as const, status: 'settled' }),
@@ -757,6 +760,9 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
       },
       trials: 3,
       trialCountFor: (t) => (t.tier === 2 ? 1 : 3),
+      // #4680: the cold-profile tasks are Claude-lane only; on the Hermes
+      // lane they are reported `skipped` and never run.
+      lane: 'hermes',
     })
 
     const order = report.order
@@ -767,6 +773,8 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
       'direct-send-partial-budget',
       'direct-send-then-report-remaining',
       'interrupted-purchase-resume',
+      'onboarding-client-out-of-date',
+      'onboarding-cold-setup',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
       'x402-catalog-guided-purchase',
@@ -824,20 +832,20 @@ describe('budgetPreflightMessage — stop at run start on a spent budget', () =>
 
   it('stops when paying tasks are selected and the budget is exhausted, saying what to do', async () => {
     const { budgetPreflightMessage } = await import('./cli.js')
-    const msg = budgetPreflightMessage([{ tier: 1 }, { tier: 3 }], exhausted)
+    const msg = budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }, { tier: 3, category: 'over-budget' }], exhausted)
     expect(msg).toMatch(/period budget is already spent/)
     expect(msg).toMatch(/edit the eval agent's budget/)
   })
 
   it('lets a run go ahead with budget left, or when only tier-3 tasks are selected', async () => {
     const { budgetPreflightMessage } = await import('./cli.js')
-    expect(budgetPreflightMessage([{ tier: 1 }], { remaining: 1_000_000n })).toBeUndefined()
-    expect(budgetPreflightMessage([{ tier: 3 }], exhausted)).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }], { remaining: 1_000_000n })).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 3, category: 'over-budget' }], exhausted)).toBeUndefined()
   })
 
   it('does not stop on other read errors (they surface per trial with their own cause)', async () => {
     const { budgetPreflightMessage } = await import('./cli.js')
-    expect(budgetPreflightMessage([{ tier: 1 }], { error: 'could not read the agent\'s budget (HTTP 502)' })).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }], { error: 'could not read the agent\'s budget (HTTP 502)' })).toBeUndefined()
   })
 
   // #4678: a task that needs NO eval-budget funds is exempt. The revoked-agent
@@ -847,12 +855,14 @@ describe('budgetPreflightMessage — stop at run start on a spent budget', () =>
     const { budgetPreflightMessage } = await import('./cli.js')
     const noFunds = {
       tier: 1 as const,
+      category: 'agent-revoked' as const,
       setup: { kind: 'throwaway-identity' as const, label: 'agent-revoked', budgetAtomic: '2000', fundingAtomic: '0' },
     }
     expect(budgetPreflightMessage([noFunds], exhausted)).toBeUndefined()
     // A throwaway task that DOES fund from the eval agent is not exempt.
     const funded = {
       tier: 1 as const,
+      category: 'interrupted-purchase' as const,
       setup: { kind: 'throwaway-identity' as const, label: 'interrupted-purchase', budgetAtomic: '2000', fundingAtomic: '2000' },
     }
     expect(budgetPreflightMessage([funded], exhausted)).toMatch(/period budget is already spent/)
@@ -872,7 +882,7 @@ describe('budgetPreflightMessage — with the real budget reader', () => {
       }),
     } as never
     const read = await readOnchainBudget(api, 'USDC', 'floor')
-    expect(budgetPreflightMessage([{ tier: 1 }], read)).toMatch(/period budget is already spent/)
+    expect(budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }], read)).toMatch(/period budget is already spent/)
   })
 })
 

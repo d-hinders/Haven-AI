@@ -57,7 +57,7 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment|declined_before_paying|no_second_fresh_payment)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment|declined_before_paying|no_second_fresh_payment|onboarding_discovery|onboarding_first_reply|onboarding_tool_calls|onboarding_login_command|client_out_of_date)$/)
     }
   })
 
@@ -210,6 +210,18 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['declined_before_paying', 'preemptiveReadTools', ['haven_quote_x402']],
     ['declined_before_paying', 'mustMention', ['0.001']],
     ['no_second_fresh_payment', 'mustMention', ['settle']],
+    // #4680: the cold-agent onboarding graders.
+    ['onboarding_discovery', 'hooks', ['/llms.txt']],
+    ['onboarding_discovery', 'target', '/for-agents.md'],
+    ['onboarding_discovery', 'threshold', 3],
+    ['onboarding_first_reply', 'steps', ['signup_and_passkey', 'fund', 'approve_budget']],
+    ['onboarding_first_reply', 'threshold', 3],
+    ['onboarding_tool_calls', 'max', 12],
+    ['onboarding_login_command', 'package', '@haven_ai/cli@dev'],
+    ['onboarding_login_command', 'threshold', 1],
+    ['client_out_of_date', 'releasesPath', '/releases'],
+    ['client_out_of_date', 'manifestPath', '/.well-known/haven.json'],
+    ['client_out_of_date', 'mustMention', ['@haven_ai/connect', '--doctor']],
   ]
 
   it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
@@ -239,10 +251,10 @@ describe('validateTask — grader options are closed (#4136)', () => {
     }
   })
 
-  it('rejects a mustMention that is not an array of non-empty strings', () => {
-    for (const value of ['budget', [1], [''], null]) {
+  it('rejects a mustMention that is not a non-empty array of non-empty strings', () => {
+    for (const value of ['budget', [1], [''], null, []]) {
       expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { mustMention: value } }]), 'x.json'))
-        .toContain('options.mustMention must be an array of non-empty strings')
+        .toContain('options.mustMention must be a non-empty array of non-empty strings')
     }
   })
 
@@ -532,6 +544,8 @@ describe('the tiered run order (#3992 A3)', () => {
       'direct-send-partial-budget',
       'direct-send-then-report-remaining',
       'interrupted-purchase-resume',
+      'onboarding-client-out-of-date',
+      'onboarding-cold-setup',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
       'x402-catalog-guided-purchase',
@@ -761,5 +775,136 @@ describe('validateTask — #4676 rules', () => {
     const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }, { name: 'no_second_fresh_payment', options: {} }] }
     expect(validateTask(t, 'x.json')).toContain('deduct one purchase twice')
     expect(validateTask({ ...structuredClone(base), graders: [{ name: 'no_second_fresh_payment', options: {} }] }, 'x.json')).toBeNull()
+  })
+})
+
+describe('the cold-agent onboarding tasks (#4680)', () => {
+  it('the cold setup prompt names NO path — the score measures the product, not the prompt', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const task = tasks.find((t) => t.id === 'onboarding-cold-setup')!
+    expect(task).toBeDefined()
+    // The landing URL is a placeholder the workflow fills; every path the
+    // scenario exists to measure must be absent from the prompt.
+    for (const path of ['/for-agents.md', '/llms.txt', '/robots.txt', '/sitemap.xml', '/.well-known', '/releases', '/device', '/signup', '/login']) {
+      expect(task.instruction).not.toContain(path)
+    }
+    expect(task.instruction).toContain('{landing_url}')
+  })
+
+  it('both onboarding tasks are cold-profile, Claude-lane only, and spend nothing', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const onboarding = tasks.filter((t) => t.category === 'onboarding')
+    expect(onboarding.map((t) => t.id).sort()).toEqual(['onboarding-client-out-of-date', 'onboarding-cold-setup'])
+    for (const t of onboarding) {
+      expect(t.profile).toBe('cold')
+      expect(t.lanes).toEqual(['claude-code'])
+      expect(t.amount).toBeUndefined()
+      expect(t.expectTransfer).toBe(false)
+    }
+  })
+
+  it('the tier pins still hold: the onboarding tasks are tier 1 and the subset keeps the same five', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(tasks.filter((t) => t.tier === 2).map((t) => t.id)).toEqual(['direct-send-full-remaining'])
+    expect(tasks.filter((t) => t.tier === 3).map((t) => t.id)).toEqual(['over-budget-x402-refused'])
+    expect(tasks.filter((t) => (t.tier ?? 1) === 1)).toHaveLength(tasks.length - 2)
+    // A cold-profile task is excluded from the --limit slice, like a setup
+    // task: it provisions its own HOME and spends a model session, so letting
+    // one into the slice would change which five tasks the subset is.
+    expect(selectTaskSequence(tasks, { limit: 5 }).map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+    ])
+  })
+
+  it('an onboarding task resolves WITHOUT a budget read and renders the landing URL', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const task = tasks.find((t) => t.id === 'onboarding-cold-setup')!
+    let read = false
+    const r = await resolveTask(task, {
+      budget: async () => {
+        read = true
+        return { remaining: 1n }
+      },
+      coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+    })
+    expect(read).toBe(false)
+    expect('resolved' in r).toBe(true)
+    if ('resolved' in r) {
+      expect(r.resolved.amountAtomic).toBe(0n)
+      expect(r.resolved.instruction).toContain('https://dev.example')
+      expect(r.resolved.instruction).not.toContain('{landing_url}')
+      expect(r.resolved.coldProfile?.cliPackage).toBe('@haven_ai/cli@dev')
+    }
+  })
+
+  it('an onboarding task with no cold profile is an error, not a guessed URL', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const task = tasks.find((t) => t.id === 'onboarding-cold-setup')!
+    const r = await resolveTask(task, { budget: async () => ({ remaining: 1n }) })
+    expect('error' in r).toBe(true)
+  })
+
+  it('taskNeedsEvalBudgetFunds is false for an onboarding task', async () => {
+    const { taskNeedsEvalBudgetFunds } = await import('./tasks.js')
+    expect(taskNeedsEvalBudgetFunds({ tier: 1, setup: undefined, category: 'onboarding' })).toBe(false)
+    expect(taskNeedsEvalBudgetFunds({ tier: 1, setup: undefined, category: 'direct-payment' })).toBe(true)
+  })
+})
+
+describe('validateTask — the cold profile (#4680)', () => {
+  const base = {
+    id: 'cold-task',
+    title: 'T',
+    category: 'onboarding',
+    instruction: 'Start here: {landing_url}',
+    requires: [],
+    graders: [{ name: 'onboarding_discovery', options: { hooks: ['/llms.txt'], target: '/for-agents.md', threshold: 3 } }],
+    expectTransfer: false,
+    source: { kind: 'issue', ref: '4680', note: 'n' },
+    lanes: ['claude-code'],
+    profile: 'cold',
+  }
+
+  it('accepts the well-formed cold task', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('refuses an unknown profile', () => {
+    expect(validateTask({ ...structuredClone(base), profile: 'warm' }, 'x.json')).toContain('profile must be "cold"')
+  })
+
+  it('refuses a cold task that does not render {landing_url}', () => {
+    expect(validateTask({ ...structuredClone(base), instruction: 'Set it all up.' }, 'x.json')).toContain('{landing_url}')
+  })
+
+  it('refuses a cold task on any lane but claude-code', () => {
+    expect(validateTask({ ...structuredClone(base), lanes: ['hermes'] }, 'x.json')).toContain('lanes ["claude-code"]')
+    expect(validateTask({ ...structuredClone(base), lanes: undefined }, 'x.json')).toContain('lanes ["claude-code"]')
+  })
+
+  it('refuses an onboarding task with an amount rule it would never use', () => {
+    // An amount is not forbidden, but the loader must not require one.
+    const { amount, ...noAmount } = { ...structuredClone(base), amount: { rule: 'remaining_period_budget', delta_atomic: '0' } }
+    expect(validateTask(noAmount, 'x.json')).toBeNull()
+    expect(validateTask({ ...structuredClone(base), amount }, 'x.json')).toBeNull()
+  })
+
+  it('learns the eval-only tool name in grader options', () => {
+    const t = {
+      ...structuredClone(base),
+      graders: [{ name: 'tool_called', options: { name: 'run_command' } }],
+    }
+    expect(validateTask(t, 'x.json')).toBeNull()
+    const bad = { ...structuredClone(base), graders: [{ name: 'tool_called', options: { name: 'not_a_tool' } }] }
+    expect(validateTask(bad, 'x.json')).toContain('known bare tool name')
+  })
+
+  it('refuses a wrongly typed scoring option', () => {
+    const t = { ...structuredClone(base), graders: [{ name: 'onboarding_discovery', options: { threshold: '3' } }] }
+    expect(validateTask(t, 'x.json')).toContain('threshold must be a non-negative integer')
   })
 })

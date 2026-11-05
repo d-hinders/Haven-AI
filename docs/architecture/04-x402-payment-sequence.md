@@ -1127,7 +1127,9 @@ derivation.
 
 ## Post-Purchase Allowance Summary (#1310)
 
-`haven_settle_mcp_tool`'s `settled: true` branch, and `haven_get_payment_status`
+`haven_settle_mcp_tool`'s `settled: true` branch — and its unverified arms,
+which keep the block while reporting `settled: false` (#4688) — and
+`haven_get_payment_status`
 for a genuinely settled x402 payment (`rail: 'x402'`, `phase:
 'payment_confirmed'` — `funded_but_unsettled` is deliberately excluded, since
 that phase means the merchant did NOT accept the paid retry), carry an

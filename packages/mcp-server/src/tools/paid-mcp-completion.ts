@@ -65,6 +65,7 @@ import {
   isZeroSettlementTxHash,
   validateStandardX402PaymentHeader,
   type EvidenceReportOutcome,
+  type AgentPaymentWarning,
   type X402McpTransport,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
@@ -142,6 +143,11 @@ function heldHashHandoff(canReport: boolean, paymentId: string, heldHash: string
  * if it is reached, Haven already forwarded the header it sent (or withheld
  * it deliberately) and the report was refused, so prefilling the same value
  * invites the loop `settlementProofHeaderFor` exists to avoid.
+ *
+ * #4688: `undefined` no longer reaches this function from either hosted arm —
+ * a settlement report that was never posted is an UNVERIFIED answer
+ * (`eip3009UnverifiedSettlementAnswer`), not a settled one. The `!outcome`
+ * arm stays as the defensive default for any future caller.
  */
 function settlementEvidenceHandoff(
   outcome: EvidenceReportOutcome | undefined,
@@ -202,6 +208,11 @@ function settlementEvidenceHandoff(
  * `next_arguments` where the arm holds it (`settlementEvidenceHandoff`); the
  * prose stays because it is still the instruction a client holding a stale
  * tool list needs.
+ *
+ * #4688: only a CONFIRMED outcome reaches this function now — the unverified
+ * arms carry `EIP3009_UNVERIFIED_TEXT` instead, which says the goods were
+ * delivered and the settlement is not verified. The `!outcome` arm stays as
+ * the defensive default.
  */
 function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): string {
   if (!outcome || outcome.outcome === 'confirmed') {
@@ -234,6 +245,140 @@ function settlementEvidenceReason(outcome: EvidenceReportOutcome | undefined): s
     'agent_summary.purchase_summary. The merchant settlement hash was refused: it does not match ' +
     'this payment on-chain — do not re-report the same hash.'
   )
+}
+
+/**
+ * #4688: the reason line for an EIP-3009 merchant 2xx whose settlement
+ * evidence is NOT `confirmed`. It says the three things the agent must not
+ * conflate: the goods were delivered, the merchant settlement is not verified,
+ * and the sweep is a LAST resort after the status read — never a blind one.
+ *
+ * The status poll is the step that leads somewhere: after the hosted settle,
+ * the funding-evidence row makes `merchant_leg_reported` true, so
+ * `haven_get_payment_status` answers `delivered: true` / `next_action: none`
+ * and never names `sweep_stranded_funds`. The only signal left is an absent
+ * `merchant_settlement_recorded`, which the #3888 sweeper fills in for a
+ * merchant that settled without sending a hash — inside its 60 s minimum age
+ * plus a scan, hence "about 3 minutes". Sweeping before that window would race
+ * a settlement that is already on-chain (#4062 item 3's verify-then-sweep).
+ */
+const EIP3009_UNVERIFIED_TEXT = {
+  pending:
+    'The merchant delivered the result, but Haven could not yet verify its settlement on-chain ' +
+    '(Haven did not answer, the RPC was unreachable, or the transaction is not mined). The goods ' +
+    'were delivered; the merchant settlement is not verified. Call next_tool ' +
+    '(haven_report_settlement_evidence) shortly with next_arguments, adding payment_header: the ' +
+    'exact payment_header you passed to this call. If it still does not confirm, poll ' +
+    'haven_get_payment_status after about 3 minutes — the settlement sweep runs on that window. ' +
+    'Use haven_sweep_delegate only if merchant_settlement_recorded is still not true at that ' +
+    'point: a merchant that settled without sending a hash is recorded by the sweep and must not ' +
+    'be swept.',
+  missingHeader:
+    'The merchant delivered the result, but Haven could not judge its settlement hash: the report ' +
+    'carried no payment header. The goods were delivered; the merchant settlement is not verified. ' +
+    'Call next_tool (haven_report_settlement_evidence) with next_arguments, adding payment_header: ' +
+    'the exact payment_header you passed to this call. If it still does not confirm, poll ' +
+    'haven_get_payment_status after about 3 minutes — the settlement sweep runs on that window. ' +
+    'Use haven_sweep_delegate only if merchant_settlement_recorded is still not true at that ' +
+    'point: a merchant that settled without sending a hash is recorded by the sweep and must not ' +
+    'be swept.',
+  unsettled:
+    'The merchant delivered the result, but Haven holds no verified on-chain settlement evidence ' +
+    'for this payment — the merchant reported no settlement hash or a zero hash. The goods were ' +
+    'delivered; the merchant settlement is not verified. Poll haven_get_payment_status after ' +
+    'about 3 minutes — the settlement sweep runs on that window. Use haven_sweep_delegate only if ' +
+    'merchant_settlement_recorded is still not true at that point: a merchant that settled ' +
+    'without sending a hash is recorded by the sweep and must not be swept.',
+  refused:
+    'The merchant delivered the result, but Haven refused its settlement hash: it does not match ' +
+    'this payment on-chain. The goods were delivered; the merchant settlement is not verified. Do ' +
+    'not re-report the same hash. Poll haven_get_payment_status after about 3 minutes — the ' +
+    'settlement sweep runs on that window. Use haven_sweep_delegate only if ' +
+    'merchant_settlement_recorded is still not true at that point: a merchant that settled ' +
+    'without sending a hash is recorded by the sweep and must not be swept.',
+} as const
+
+/**
+ * #4688: the EIP-3009 settle/complete answer for a merchant 2xx whose
+ * settlement evidence is NOT `confirmed`. `settled` is true only on a
+ * `confirmed` evidence outcome — never on the merchant's 2xx alone, which is
+ * what `SETTLE_MCP_TOOL_DESCRIPTION` has promised since #1308 and what the
+ * erc7710 arm has done since #2970. Mirrors that arm: a
+ * SETTLEMENT_UNCONFIRMED warning, `settlement_tx_hash: null`, the allowance
+ * block kept by the caller, and NO `purchase_summary` — its published
+ * `status` is `'settled'` only, and #4688 does not widen
+ * `AgentPurchaseSummary`.
+ *
+ * `heldSettlementTxHash` is the merchant's own hash when this call holds one.
+ * It is prefilled into the report handoff and NEVER emitted as a settlement:
+ * an unverified hash is not a transaction Haven proved.
+ */
+function eip3009UnverifiedSettlementAnswer(input: {
+  paymentId: string
+  outcome: EvidenceReportOutcome | undefined
+  heldSettlementTxHash: string | null
+  paymentHeader: string | undefined
+  /** The payment row's status, when the caller read one; absent on the complete arm. */
+  paymentStatus: string | undefined
+  warnings: AgentPaymentWarning[]
+}): Record<string, unknown> {
+  const pending = input.outcome?.outcome === 'retryable'
+  const fallbackStatus = pending ? 'settlement_pending' : 'delivered_unsettled'
+  // #4688: an unverified arm never reports `settled`, whatever the payment row
+  // says — that would contradict `settled: false` in the same response.
+  const status =
+    input.paymentStatus && input.paymentStatus !== 'settled' ? input.paymentStatus : fallbackStatus
+  // The report-tool handoff survives where it names a tool (a retryable report,
+  // or the #4061 missing-proof-header refusal); a plain refusal names none, and
+  // the status poll is then the only step that leads anywhere.
+  const handoff = input.outcome
+    ? settlementEvidenceHandoff(
+        input.outcome,
+        input.paymentId,
+        input.heldSettlementTxHash,
+        input.paymentHeader,
+      )
+    : null
+  const nextStep =
+    handoff && handoff.nextTool
+      ? handoff
+      : { nextTool: 'haven_get_payment_status' as const, nextArguments: { payment_id: input.paymentId } }
+  const reason = pending
+    ? EIP3009_UNVERIFIED_TEXT.pending
+    : input.outcome && isMissingProofHeaderRefusal(input.outcome)
+      ? EIP3009_UNVERIFIED_TEXT.missingHeader
+      : input.outcome?.outcome === 'refused'
+        ? EIP3009_UNVERIFIED_TEXT.refused
+        : EIP3009_UNVERIFIED_TEXT.unsettled
+  return {
+    settled: false,
+    code: pending ? 'SETTLEMENT_PENDING' : 'DELIVERED_UNSETTLED',
+    // The merchant answered 2xx and handed over the goods — that half is real
+    // even when the money is not proven (the erc7710 arm's vocabulary).
+    delivered: true,
+    ...(pending ? { retryable: true } : {}),
+    settlement_tx_hash: null,
+    ...buildAgentGuidance({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      ...nextStep,
+      safeToContinue: true,
+      reason,
+      summary: { payment_id: input.paymentId, status },
+      warnings: [
+        ...input.warnings,
+        {
+          code: AgentPaymentWarningCode.SettlementUnconfirmed,
+          message:
+            `No on-chain confirmation for payment ${input.paymentId}: the merchant delivered, ` +
+            'but Haven holds no verified settlement evidence. Report the delivered goods to the ' +
+            'user, but do not report the payment as settled. Check haven_get_payment_status again ' +
+            'after about 3 minutes (the settlement sweep runs on that window); use ' +
+            'haven_sweep_delegate only if merchant_settlement_recorded is still not true at that ' +
+            'point.',
+        },
+      ],
+    }),
+  }
 }
 
 /**
@@ -1341,30 +1486,31 @@ export function createPaidMcpCompletionHandlers(
         // #3764 (D1): the funding outcome above is still dropped, but the
         // merchant SETTLEMENT report's outcome IS mapped — the same three
         // arms #3727's `evidenceHandoff` gives the plain-HTTP outcome report.
-        // On erc7710 (no funding leg) `settlement_evidence_outcome` is always
-        // undefined, so the recorded arm is a no-op and this stays byte-for-
-        // byte the pre-#3764 answer; on eip3009 a retryable report names the
-        // report tool with the hash prefilled, and a refused one names no
-        // tool with the reason.
-        if (delivered.settlement_evidence_outcome && delivered.settlement_evidence_outcome.outcome !== 'confirmed') {
+        // #4688: `settled` is true only on a CONFIRMED settlement-evidence
+        // outcome, never on the merchant's 2xx alone. An unverified merchant
+        // settlement — retryable, refused, or nothing posted because the
+        // merchant gave no hash or a zero one — answers the same shape the
+        // erc7710 arm does (settled:false, code, SETTLEMENT_UNCONFIRMED
+        // warning, a next step) instead of the bare delivery result. On
+        // erc7710 (no funding leg) `settlement_evidence_outcome` is always
+        // undefined, but a `submitted` erc7710 intent 409s in
+        // `deliverMerchantPayment` before this point, so this arm is eip3009's.
+        if (delivered.settlement_evidence_outcome?.outcome !== 'confirmed') {
           return {
             status: delivered.status,
             ok: delivered.ok,
             result: delivered.result,
-            settlement_tx_hash: delivered.settlement_tx_hash,
-            ...buildAgentGuidance({
-              nextAction: AgentPaymentNextAction.None,
-              ...settlementEvidenceHandoff(
-                delivered.settlement_evidence_outcome,
-                args.payment_id,
-                delivered.settlement_tx_hash,
-                // #4530: the header this call forwarded to the merchant — the
-                // #3925 nonce proof the report needs, prefilled for the agent.
-                args.payment_header,
-              ),
-              safeToContinue: true,
-              reason: settlementEvidenceReason(delivered.settlement_evidence_outcome),
-              summary: { payment_id: args.payment_id, status: 'settled' },
+            ...eip3009UnverifiedSettlementAnswer({
+              paymentId: args.payment_id,
+              outcome: delivered.settlement_evidence_outcome,
+              heldSettlementTxHash: delivered.settlement_tx_hash,
+              // #4530: the header this call forwarded to the merchant — the
+              // #3925 nonce proof the report needs, prefilled for the agent.
+              paymentHeader: args.payment_header,
+              // This arm reads no payment row; the summary falls back to the
+              // unverified status name rather than claiming `settled`.
+              paymentStatus: undefined,
+              warnings: [],
             }),
           }
         }
@@ -1373,6 +1519,9 @@ export function createPaidMcpCompletionHandlers(
           ok: delivered.ok,
           result: delivered.result,
           settlement_tx_hash: delivered.settlement_tx_hash,
+          // #4688: additive — the confirmed arm now says so explicitly, the
+          // same field the settle arm has always carried.
+          settled: true,
         }
       }),
 
@@ -1668,6 +1817,32 @@ export function createPaidMcpCompletionHandlers(
         // Reuse the payment-status read the allowance helper already performs;
         // reporting must not add a second status round trip or race it.
         const { allowance, warnings, payment } = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
+        // #4688: `settled` is true only on a CONFIRMED settlement-evidence
+        // outcome — never on the merchant's 2xx alone. A merchant that
+        // verified the payment but never settled it leaves the funded USDC on
+        // the delegate EOA; reporting `settled: true` there is the stranded-
+        // funds bug this arm used to have. The unverified answer mirrors the
+        // erc7710 arm: settled:false, a code, a SETTLEMENT_UNCONFIRMED
+        // warning, a null settlement hash, the allowance block kept, and NO
+        // `purchase_summary` (its published status is `'settled'` only).
+        if (merchant.settlement_evidence_outcome?.outcome !== 'confirmed') {
+          return {
+            payment_id: args.payment_id,
+            funding_tx_hash: funding.txHash ?? null,
+            result: merchant.result,
+            allowance,
+            ...eip3009UnverifiedSettlementAnswer({
+              paymentId: args.payment_id,
+              outcome: merchant.settlement_evidence_outcome,
+              heldSettlementTxHash: merchant.settlement_tx_hash,
+              // #4530: same prefill as the complete arm — the header this
+              // settle forwarded to the merchant.
+              paymentHeader: args.payment_header,
+              paymentStatus: payment?.status,
+              warnings,
+            }),
+          }
+        }
         const purchaseSummary = buildPurchaseSummary({
           payment,
           merchantResult: merchant.result,
@@ -1698,11 +1873,10 @@ export function createPaidMcpCompletionHandlers(
           // #1308: done — nothing left but reporting.
           ...buildAgentGuidance({
             nextAction: AgentPaymentNextAction.None,
-            // #3764 (D1): the settlement-evidence report's outcome maps the
-            // same three arms #3727's `evidenceHandoff` gives the plain-HTTP
-            // outcome report — recorded (or nothing posted) keeps "no tool
-            // follows", a retryable report names the report tool with the
-            // hash prefilled, a refused one names no tool and says why.
+            // #3764 (D1) / #4688: only a CONFIRMED settlement-evidence
+            // outcome reaches this arm, so the handoff is the settled
+            // no-tool answer ("the purchase is settled; no Haven tool
+            // follows") and the reason is the settled-purchase prose.
             ...settlementEvidenceHandoff(
               merchant.settlement_evidence_outcome,
               args.payment_id,

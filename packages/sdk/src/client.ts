@@ -1847,8 +1847,10 @@ export class HavenClient {
      * `undefined` when there was no hash to report at all — no funding tx on
      * the erc7710 branch and no (or a zero) merchant-reported settlement hash.
      * The hosted erc7710 settle/complete gate reads this to decide whether
-     * `settled: true` is honest; the 3009 branch's `settled: true` does not
-     * need it — see `paid-mcp-completion.ts` for why. #3764: this stays the
+     * `settled: true` is honest; the 3009 branch's `settled: true` reads the
+     * SECOND report's outcome (`settlementEvidenceOutcome` below) instead —
+     * #4688: a merchant 2xx alone is never `settled: true` on either scheme.
+     * See `paid-mcp-completion.ts` for why. #3764: this stays the
      * FUNDING/anchor outcome; the merchant's own EIP-3009 settlement is a
      * second report with its own outcome — `settlementEvidenceOutcome` below.
      */

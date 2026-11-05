@@ -102,7 +102,61 @@ export interface TaskSource {
 }
 
 /** The instruction placeholders the runner renders before launch. */
-export type InstructionPlaceholder = 'amount' | 'recipient' | 'target'
+export type InstructionPlaceholder = 'amount' | 'recipient' | 'target' | 'payment_id'
+
+/**
+ * The adapter lanes a task may run on (#4678).
+ *
+ * Absent means EVERY lane — the eleven starter tasks keep running on both
+ * lanes unchanged. A task that needs a per-trial MCP config names
+ * `['claude-code']`: Hermes' template takes only `{instruction}` and `{log}`
+ * and its MCP wiring lives in its profile, so it cannot take one.
+ */
+export type EvalLane = 'hermes' | 'claude-code'
+
+/**
+ * The state the harness prepares for ONE trial before the agent starts
+ * (#4678). A task with no `setup` runs against the shared eval agent exactly
+ * as before.
+ *
+ * `fundingAtomic` is the ONLY amount a throwaway trial takes from the eval
+ * agent's period budget: the funding payment is made BY the eval agent, and
+ * returned USDC does not restore period budget. `"0"` means the trial needs
+ * no eval-budget funds at all (the revoked-agent task), which is what exempts
+ * it from the run-start exit-3 preflight.
+ */
+export interface ThrowawaySetup {
+  kind: 'throwaway-identity'
+  /**
+   * The label in the throwaway email (`qa-<label>-<rand>@haven.test`) and in
+   * the `QA <label> (throwaway)` name — #4679's purge matches on BOTH, so
+   * neither may drift.
+   */
+  label: string
+  /** The budget granted to the throwaway agent, atomic. */
+  budgetAtomic: string
+  /** USDC moved from the eval account into the throwaway account, atomic. */
+  fundingAtomic: string
+  /**
+   * A short grant expiry, seconds from build (the ended-budget task). The
+   * backend accepts any future `expires_at` (`routes/agent-delegations.ts`),
+   * so the trial sets one and then POLLS the authoritative allowance signal
+   * until the budget reads as ended — a fixed sleep races wall-clock and
+   * block time.
+   */
+  expiresInSeconds?: number
+  /**
+   * The prepared state the harness builds before the agent starts:
+   *  - `interrupted-purchase` — a payment intent the agent must RESUME, never
+   *    pay again;
+   *  - `ended-budget` — a grant that has already ended, verified observable
+   *    before launch;
+   *  - `revoked-agent` — the agent's key is revoked before launch.
+   */
+  prepare?: 'interrupted-purchase' | 'ended-budget' | 'revoked-agent'
+}
+
+export type TaskSetup = ThrowawaySetup
 
 /**
  * One eval task — the file the runner loads (JSON, never Markdown, #3958).
@@ -118,16 +172,40 @@ export type InstructionPlaceholder = 'amount' | 'recipient' | 'target'
 export interface EvalTask {
   id: string
   title: string
-  category: 'direct-payment' | 'x402-paywall' | 'over-budget'
+  category: 'direct-payment' | 'x402-paywall' | 'over-budget' | 'interrupted-purchase' | 'budget-ended' | 'agent-revoked'
   instruction: string
   /** What the run needs provisioned before launch (documented in the runbook). */
   requires: string[]
-  amount: AmountRule
+  /**
+   * The amount rule. REQUIRED for a task with no `setup`; a task with a
+   * `setup` may omit it, because its money is the setup's `fundingAtomic` —
+   * the eval agent's period budget is touched by exactly that amount and by
+   * nothing the resolver invents (#4678).
+   */
+  amount?: AmountRule
   /** Graders to apply, in order. All must pass for the trial to pass. */
   graders: Array<{ name: string; options?: Record<string, unknown> }>
   /** True when the task expects an on-chain USDC transfer as its outcome. */
   expectTransfer: boolean
   source: TaskSource
+  /**
+   * The adapter lanes this task may run on (#4678). Absent = every lane.
+   * A task naming lanes that exclude the running lane is reported `skipped`,
+   * and a skipped task NEVER counts as passed.
+   */
+  lanes?: EvalLane[]
+  /**
+   * The per-trial prepared state (#4678). Absent = the shared eval agent,
+   * no setup, no teardown — the eleven starter tasks are unchanged.
+   */
+  setup?: TaskSetup
+  /**
+   * A per-task command template for the Claude lane (#4678). Absent = the
+   * lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. The template may read the trial's
+   * own env (`QA_EVAL_TRIAL_*`), which is how a throwaway trial gets its own
+   * MCP config without Hermes' profile-bound wiring.
+   */
+  commandTemplate?: string
   /**
    * The ORDERING TIER (#3992 A3) — membership comes from the task FILE, not
    * the category. 1 (default): budget-preserving tasks, run in file order.
@@ -186,6 +264,27 @@ export interface ResolvedTask {
    * at the moment the trial started.
    */
   delegateEoaBalanceBeforeAtomic?: string
+  /**
+   * The trial's OWN agent API key (#4678) — a throwaway trial's, never the
+   * eval agent's. The CLI builds that trial's grader context from it, so a
+   * `GET /payments/:id` on a throwaway trial cannot read with the eval key.
+   */
+  trialApiKey?: string
+  /**
+   * Extra env for the adapter's child process (#4678): the trial's MCP
+   * config path, its `HOME`, its API key. The Claude lane merges these over
+   * the inherited env; Hermes has no per-trial config and never sees them.
+   */
+  trialEnv?: Record<string, string>
+  /** The per-task command template override (#4678). */
+  commandTemplate?: string
+  /**
+   * The payment id the harness PREPARED for an interrupted-purchase trial
+   * (#4678). The agent is handed it and must resume it, never pay again.
+   */
+  preparedPaymentId?: string
+  /** The throwaway account address this trial runs against (#4678). */
+  trialAccountAddress?: string
 }
 
 /**
@@ -269,3 +368,4 @@ export type GraderName =
   | 'merchant_settlement_recorded'
   | 'eip3009_settlement_shape'
   | 'nothing_stranded_on_delegate'
+  | 'resume_without_repayment'

@@ -775,3 +775,97 @@ describe('replay detection is not fooled by an unflagged echo, and covers the br
     expect(results[0]!.detail).toContain('idempotent replay')
   })
 })
+
+// ── #4678: resume_without_repayment ────────────────────────────────────────
+
+describe('resume_without_repayment — the interrupted-purchase task', () => {
+  const PREPARED = 'pay-prepared-1'
+  const ctx: GraderContext = {
+    resolved: { ...RESOLVED, preparedPaymentId: PREPARED },
+  }
+
+  it('passes when the agent resumes the prepared payment and creates no second one', async () => {
+    const result = await applyGraders(
+      log(
+        [
+          call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: PREPARED } }),
+          call(`${DEV_PREFIX}haven_resume_x402_payment`, { args: { payment_id: PREPARED } }),
+          call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: PREPARED } }),
+        ],
+        'I resumed the prepared payment.',
+      ),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(true)
+  })
+
+  it('FAILS on a recorded double payment: a haven_pay after the resume', async () => {
+    const result = await applyGraders(
+      log([
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: PREPARED } }),
+        call(`${DEV_PREFIX}haven_pay`, { args: { amount: '0.001' } }),
+      ]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('PAID AGAIN')
+    expect(result[0]!.detail).toContain('haven_pay')
+  })
+
+  it('FAILS on a retry that creates a payment BEFORE the resume', async () => {
+    const result = await applyGraders(
+      log([
+        call(`${DEV_PREFIX}haven_pay_x402_quote`, { args: { url: 'https://merchant.example' } }),
+        call(`${DEV_PREFIX}haven_resume_x402_payment`, { args: { payment_id: PREPARED } }),
+      ]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('haven_pay_x402_quote')
+  })
+
+  it('FAILS when the agent submits a DIFFERENT payment through the signer handoff', async () => {
+    const result = await applyGraders(
+      log([
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: PREPARED } }),
+        call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay-some-other' } }),
+      ]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('DIFFERENT payment')
+  })
+
+  it('FAILS when the agent never resumed the prepared payment', async () => {
+    const result = await applyGraders(
+      log([call(`${DEV_PREFIX}haven_get_agent`)]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('never resumed')
+  })
+
+  it('FAILS when the harness prepared no payment for the trial', async () => {
+    const result = await applyGraders(
+      log([call(`${DEV_PREFIX}haven_resume_x402_payment`)]),
+      [{ name: 'resume_without_repayment' }],
+      { resolved: RESOLVED },
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('no prepared payment id')
+  })
+
+  it('honours mustMention on the final message', async () => {
+    const calls = [call(`${DEV_PREFIX}haven_resume_x402_payment`, { args: { payment_id: PREPARED } })]
+    const missing = await applyGraders(log(calls, 'Done.'), [{ name: 'resume_without_repayment', options: { mustMention: ['resumed'] } }], ctx)
+    expect(missing[0]!.pass).toBe(false)
+    expect(missing[0]!.detail).toContain('did not tell the user')
+    const present = await applyGraders(log(calls, 'I resumed it.'), [{ name: 'resume_without_repayment', options: { mustMention: ['resumed'] } }], ctx)
+    expect(present[0]!.pass).toBe(true)
+  })
+})

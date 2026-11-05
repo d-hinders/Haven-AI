@@ -11,6 +11,7 @@ covers:
   - packages/qa-agent/src/evals/claude-code.ts
   - packages/qa-agent/src/evals/summary.ts
   - .github/workflows/agent-evals.yml
+  - scripts/ci/agent-evals-workspace-deps.test.mjs
   - packages/mcp-server/src/server.ts
   - packages/mcp-server/src/boot.ts
   - packages/sdk/src/skill-content.ts
@@ -226,6 +227,79 @@ unattended start.
   issues a new delegation whose period starts when it is built, so the full
   amount is available; the agent, its delegate key and its API key stay the
   same.
+
+## Per-trial prepared state and teardown (#4678)
+
+One fixed agent serves every trial by default. A task may instead ask for
+state prepared FOR THAT TRIAL — a throwaway delegation-rail identity, funded
+from the eval account, with the trial's own agent key — and the runner tears
+it down afterwards, including when setup fails partway.
+
+**The task fields.** A task file may carry:
+
+| Field | Meaning |
+|---|---|
+| `lanes` | `["hermes"]`, `["claude-code"]`, or absent for every lane. A task whose lanes exclude the running lane is reported `skipped`, and **a skipped task never counts as passed** — it is out of the pass^k denominator and the summaries say so. |
+| `setup` | `{ kind: "throwaway-identity", label, budgetAtomic, fundingAtomic, expiresInSeconds?, prepare? }`. Absent = the shared eval agent, no setup, no teardown — the eleven starter tasks are unchanged. |
+| `commandTemplate` | A per-task Claude-lane command template. Absent = the lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. The template may read the trial's own env (`QA_EVAL_TRIAL_MCP_CONFIG`, `QA_EVAL_TRIAL_CREDENTIALS`, `QA_EVAL_TRIAL_API_KEY`, `QA_EVAL_TRIAL_HOME`), which is how a throwaway trial gets its own MCP config. |
+
+`amount` is optional for a task with a `setup`: its money is the setup's
+`fundingAtomic`, and the resolver never reads the eval agent's budget for it.
+
+**The three tasks this slice adds** (all Claude-lane only — Hermes' template
+takes only `{instruction}` and `{log}`, and its MCP wiring lives in its
+profile, so it cannot take a per-trial config):
+
+| Task | Prepared state | What it grades |
+|---|---|---|
+| `interrupted-purchase-resume` | A payment intent authorized as the throwaway agent, left unsigned; the agent is handed its `payment_id`. | `resume_without_repayment`: the agent resumed the prepared payment and created no second one. Fails on a recorded double payment or retry. |
+| `budget-ended-no-retry` | A grant with a short `expires_at`, then a **bounded poll of the authoritative allowance signal** (`GET /machine-payments/allowances` → `budget_ended_at`) until the budget reads as ended. A fixed sleep races wall-clock and block time. | `no_payment_retry_after_refusal` with `errorCode: delegation_expired` and `mustMention: ["owner"]`. |
+| `agent-revoked-no-retry` | The agent's key is revoked before launch. | `no_payment_retry_after_refusal` with `errorCode: agent_identity_unverified` and `mustMention: ["owner"]`. **This task may go red for a product reason** — the backend answers one identical 401 body whose hint is "Run `npx @haven_ai/connect@alpha` to provision one". If it does, the slice records the result and files the guidance question; it does not change the auth response. |
+
+**Per-trial cost.** The funding payment is made BY the eval agent, so it is
+the only amount a throwaway trial takes from the eval agent's period budget:
+`fundingAtomic` per trial. Returned USDC does **not** restore period budget.
+At the task files' `fundingAtomic: "2000"` (0.002 USDC) that is 0.002 USDC per
+trial — 0.006 USDC for k=3 — against the 3 USDC Daily budget, and the
+revoked-agent task funds nothing at all (`fundingAtomic: "0"`), which is what
+exempts it from the run-start exit-3 preflight.
+
+**Teardown, in this order, after every trial including setup that fails
+partway:**
+
+1. sweep delegate-EOA leftovers (gasless, while the agent key is still valid);
+2. return the throwaway account's USDC to the **eval account, never
+   `QA_DELEGATION_*`** — a revoked key gets a 401, so this uses the
+   owner-signed `POST /accounts/hybrid/:address/transfers/prepare` then
+   `/submit`;
+3. close any task budget left open (before the revoke: the close route is
+   agent-authenticated);
+4. revoke the agent.
+
+Cleanup registers incrementally as each resource is created, so a crash after
+any phase still undoes what exists. A failed teardown is a **warning**, never
+a change to the trial's verdict — the same rule as `withThrowawayIdentity`'s
+`cleanupWarning`. The teardown's result rides the report per trial
+(`TrialRecord.teardown`), including any USDC it could not return
+(`unreturnedAtomic`).
+
+**The per-trial secret manifest.** The throwaway identity creates five
+secrets, and the redactor's env-var list names none of them: the owner key,
+the delegate key, the signup password, the signup bearer token and the agent
+API key. A 32-byte key has the shape of a transaction hash, which the
+transcripts must keep, so no generic rule catches it. Every generated secret
+is therefore appended to a **mode-`0600` manifest** (`QA_EVAL_SECRET_MANIFEST`,
+under `$RUNNER_TEMP`, outside every report and upload path) and flushed
+before the agent launches. The redactor consumes it with `--manifest=` and
+**fail-closed**: a missing, unreadable, empty or malformed manifest refuses
+the whole redaction and writes nothing. The manifest is deleted in an
+`always()` step after the scan, and the workflow guard
+(`scripts/ci/agent-evals-workspace-deps.test.mjs`) proves it cannot be printed
+or uploaded.
+
+**Throwaway identities keep the email and the name #4679's purge matches on:**
+`qa-<label>-<rand>@haven.test` and `QA <label> (throwaway)`. Neither may
+drift, or the purge would miss the rows this slice creates.
 
 ## Running the suite
 
@@ -507,6 +581,13 @@ packages/qa-agent`) and uploads the result as
   `QA_HOSTED_MCP_URL` and `AGENT_EVALS_HAVEN_API_URL`, the `vars.X || secrets.X`
   fallbacks, redacted only when set as secrets (today they are variables,
   which are kept). The step prints how many secrets it loaded, by name.
+- It also consumes the **per-trial secret manifest** (`--manifest=`,
+  `QA_EVAL_SECRET_MANIFEST`) — the five secrets a throwaway trial generates,
+  which no env var names. That read is fail-closed too: a missing, unreadable,
+  empty or malformed manifest refuses the whole redaction. The manifest is
+  mode `0600`, sits outside every report and upload path, and is deleted in an
+  `always()` step after the scan; the workflow guard proves it cannot be
+  printed or uploaded.
 - It redacts into a staging directory, prints a per-class count of what it
   found in the raw input (numbers only, the positive control), then rescans
   the staged copy with a separate detector for every class (separate

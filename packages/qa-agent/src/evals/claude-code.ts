@@ -107,9 +107,20 @@ export function claudeCodeConfigFromEnv(env: NodeJS.ProcessEnv = process.env): C
   }
 }
 
-/** Build the concrete command for one resolved task. */
-export function buildClaudeCodeCommand(cfg: ClaudeCodeAdapterConfig, instruction: string): string {
-  return cfg.commandTemplate.replaceAll('{instruction}', shellQuote(instruction))
+/**
+ * Build the concrete command for one resolved task.
+ *
+ * `template` is the PER-TASK override (#4678) when the task file carries one;
+ * otherwise the lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. A per-task template is
+ * how a throwaway trial points `--mcp-config` at ITS OWN config, which the
+ * lane's single env template cannot express.
+ */
+export function buildClaudeCodeCommand(cfg: ClaudeCodeAdapterConfig, instruction: string, template?: string): string {
+  const chosen = template ?? cfg.commandTemplate
+  if (!chosen.includes('{instruction}')) {
+    throw new ClaudeCodeAdapterError('the command template must contain {instruction} — the task instruction has to reach the agent')
+  }
+  return chosen.replaceAll('{instruction}', shellQuote(instruction))
 }
 
 /** Single-quote for the shell, escaping embedded quotes. */
@@ -132,8 +143,11 @@ export class ClaudeCodeAdapter {
     const taskId = resolved.task.id
     const base = this.cfg.logPath ?? (await mkdtemp(join(tmpdir(), 'qa-eval-claude-')))
     const logPath = `${base}.${taskId}.trial${trial}.jsonl`
-    const command = buildClaudeCodeCommand(this.cfg, resolved.instruction)
-    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial)
+    const command = buildClaudeCodeCommand(this.cfg, resolved.instruction, resolved.commandTemplate)
+    // The trial's own env (#4678): its MCP config, its credential file, its
+    // API key. Merged OVER the inherited env, so a throwaway trial's agent
+    // never sees the eval agent's wiring.
+    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial, resolved.trialEnv)
     const raw = await readFile(logPath, 'utf8')
     const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
     // A non-zero exit after the agent worked (the turn limit, for one) still
@@ -165,6 +179,7 @@ export class ClaudeCodeAdapter {
     logPath: string,
     taskId: string,
     trial: number,
+    trialEnv?: Record<string, string>,
   ): Promise<{ code: number | null; stderrTail: string }> {
     return new Promise((resolve, reject) => {
       let settled = false
@@ -180,7 +195,11 @@ export class ClaudeCodeAdapter {
       // The token travels ONLY in the inherited env — never in the command
       // string, never logged. An error report quotes the template, which is
       // the caller's own (secret-free) command, and the stderr TAIL only.
-      const child = spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(command, {
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        ...(trialEnv ? { env: { ...process.env, ...trialEnv } } : {}),
+      })
       const timer = setTimeout(() => {
         child.kill('SIGKILL')
         done(new ClaudeCodeAdapterError(`claude session timed out after ${this.cfg.timeoutMs}ms (${taskId} trial ${trial})`))

@@ -328,3 +328,181 @@ describe('haven_payment_submitted is not a settlement grader', () => {
     expect(seen[1]).toBe(false)
   })
 })
+
+// ── #4678: lanes, per-trial setup, teardown ────────────────────────────────
+
+describe('the lanes field — a skipped task never counts as passed (#4678)', () => {
+  const claudeOnly: EvalTask = { ...TASK, id: 'claude-only', lanes: ['claude-code'] }
+
+  it('skips a task whose lanes exclude the running lane, and excludes it from pass^k', async () => {
+    const report = await runSuite({
+      tasks: [TASK, claudeOnly],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('hermes', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      lane: 'hermes',
+    })
+    const skipped = report.tasks.find((t) => t.id === 'claude-only')!
+    expect(skipped.skipped).toBe(true)
+    expect(skipped.skipReason).toContain('claude-code')
+    expect(skipped.passAll).toBe(false)
+    expect(skipped.passRate).toBe(0)
+    expect(skipped.trials).toEqual([])
+    // The skipped task is NOT in the denominator of pass^k.
+    expect(report.tasksRun).toBe(1)
+    expect(report.tasksPassingAll).toBe(1)
+    expect(renderSummary(report)).toContain('SKIPPED  claude-only')
+    expect(renderSummary(report)).toContain('a skipped task never counts as passed')
+  })
+
+  it('runs the task on the lane it names', async () => {
+    const report = await runSuite({
+      tasks: [claudeOnly],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('claude-code', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      lane: 'claude-code',
+    })
+    expect(report.tasks[0]!.skipped).toBeUndefined()
+    expect(report.tasks[0]!.passAll).toBe(true)
+  })
+
+  it('a task with no lanes field runs on every lane — the starter tasks are unchanged', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('hermes', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      lane: 'hermes',
+    })
+    expect(report.tasks[0]!.skipped).toBeUndefined()
+  })
+})
+
+describe('the per-trial setup hook and its teardown (#4678)', () => {
+  const setupTask: EvalTask = {
+    ...TASK,
+    id: 'throwaway-task',
+    setup: { kind: 'throwaway-identity', label: 'throwaway', budgetAtomic: '2000', fundingAtomic: '2000' },
+  }
+
+  it('a throwaway trial resolves to EXACTLY its fundingAtomic — the only eval-budget spend', async () => {
+    const seen: string[] = []
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: BigInt(task.setup!.fundingAtomic), instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 2,
+      setup: {
+        prepare: async ({ resolved }) => ({
+          resolved: { trialApiKey: 'sk_agent_trial' },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+      onTrial: (_resolved, record) => seen.push(record.resolvedAmountAtomic!),
+    })
+    expect(seen).toEqual(['2000', '2000'])
+    expect(report.tasks[0]!.trials.every((t) => t.resolvedAmountAtomic === '2000')).toBe(true)
+  })
+
+  it('merges the prepared state onto the resolved task before the adapter runs', async () => {
+    let seenKey: string | undefined
+    await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async (resolved) => {
+        seenKey = resolved.trialApiKey
+        return logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])
+      }),
+      trials: 1,
+      setup: {
+        prepare: async () => ({
+          resolved: { trialApiKey: 'sk_agent_trial' },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+    })
+    expect(seenKey).toBe('sk_agent_trial')
+  })
+
+  it('records the teardown result PER TRIAL, including USDC it could not return', async () => {
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      setup: {
+        prepare: async () => ({
+          teardown: async () => ({ ok: false, warnings: ['return failed'], unreturnedAtomic: '1500' }),
+        }),
+      },
+    })
+    const trial = report.tasks[0]!.trials[0]!
+    expect(trial.pass).toBe(true) // a failed teardown NEVER changes the verdict
+    expect(trial.teardown).toEqual({ ok: false, warnings: ['return failed'], unreturnedAtomic: '1500' })
+    const summary = renderSummary(report)
+    expect(summary).toContain('teardown warning: return failed')
+    expect(summary).toContain('could not return 1500 atomic USDC')
+  })
+
+  it('a setup failure is a RED TRIAL and still runs the teardown for what it created', async () => {
+    const { TrialSetupFailure } = await import('./trial-setup.js')
+    let tornDown = false
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 2,
+      setup: {
+        prepare: async ({ trial }) => {
+          if (trial === 1) {
+            throw new TrialSetupFailure('funding failed', async () => {
+              tornDown = true
+              return { ok: true, warnings: [] }
+            })
+          }
+          return { teardown: async () => ({ ok: true, warnings: [] }) }
+        },
+      },
+    })
+    const t = report.tasks[0]!
+    expect(t.trials[0]!.pass).toBe(false)
+    expect(t.trials[0]!.detail).toContain('setup failure: funding failed')
+    expect(t.trials[0]!.teardown).toEqual({ ok: true, warnings: [] })
+    expect(tornDown).toBe(true)
+    // The later trial still ran.
+    expect(t.trials[1]!.pass).toBe(true)
+  })
+
+  it('runs the teardown after an ADAPTER failure too', async () => {
+    let tornDown = false
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => {
+        throw new Error('claude exited 1')
+      }),
+      trials: 1,
+      setup: {
+        prepare: async () => ({
+          teardown: async () => {
+            tornDown = true
+            return { ok: true, warnings: [] }
+          },
+        }),
+      },
+    })
+    expect(report.tasks[0]!.trials[0]!.detail).toContain('adapter failure')
+    expect(tornDown).toBe(true)
+  })
+
+  it('a task with no setup gets no teardown field — the starter tasks are unchanged', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+    })
+    expect(report.tasks[0]!.trials[0]!.teardown).toBeUndefined()
+  })
+})

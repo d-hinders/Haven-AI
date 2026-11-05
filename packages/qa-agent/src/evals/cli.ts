@@ -63,6 +63,7 @@ import {
   selectTaskSequence,
   exhaustedThresholdAtomic,
   taskNeedsDelegateSnapshot,
+  taskNeedsEvalBudgetFunds,
 } from './tasks.js'
 import {
   renderSummary,
@@ -74,11 +75,13 @@ import {
 } from './runner.js'
 import { renderMarkdownSummary } from './summary.js'
 import { compareAgainstBaseline, formatCompareVerdict, parseCompareReport } from './compare.js'
-import { observerProvider, describeObserverRpc, ERC20_BALANCE_ABI, SEPOLIA_USDC, USDC_DECIMALS } from '../lib/chain.js'
+import { observerProvider, describeObserverRpc, ERC20_BALANCE_ABI, SEPOLIA_USDC, USDC_DECIMALS, BASE_SEPOLIA_CHAIN_ID } from '../lib/chain.js'
 import { ethers } from 'ethers'
 import { HavenApi } from '../lib/haven-api.js'
 import { readOnchainBudget, type BudgetUse } from '../lib/delegation-budget.js'
-import { loadQaConfig } from '../config.js'
+import { loadQaConfig, type QaConfig } from '../config.js'
+import { SecretManifest } from './secret-manifest.js'
+import { createThrowawaySetup, type TrialSetupHook } from './trial-setup.js'
 import type { AgentRunLog, EvalTask, GraderContext, ResolvedTask } from './types.js'
 
 function env(name: string): string {
@@ -133,13 +136,19 @@ function parseHumanAmountToAtomic(amount: unknown): bigint | undefined {
  * tasks need a funded budget and the read says it is exhausted, stop before
  * any agent session with one message that says what to do.
  *
+ * #4678: a task that needs NO eval-budget funds is exempt. A tier-3 task
+ * expects an exhausted budget by definition, and a throwaway task takes
+ * exactly its `fundingAtomic` from the eval agent — so a throwaway task with
+ * `fundingAtomic: "0"` (the revoked-agent task, which never pays) must not be
+ * stopped by this exit.
+ *
  * Returns undefined when the run may go ahead.
  */
 export function budgetPreflightMessage(
-  tasks: Array<Pick<EvalTask, 'tier'>>,
+  tasks: Array<Pick<EvalTask, 'tier' | 'setup'>>,
   read: { remaining: bigint } | { error: string },
 ): string | undefined {
-  const needsFunds = tasks.some((t) => (t.tier ?? 1) !== 3)
+  const needsFunds = tasks.some(taskNeedsEvalBudgetFunds)
   if (!needsFunds || !('error' in read)) return undefined
   if (!/exhausted/i.test(read.error)) return undefined
   return (
@@ -261,6 +270,31 @@ export function buildGraderContext(deps: {
   }
 }
 
+/**
+ * The per-TRIAL grader context (#4678). A throwaway trial's graders must read
+ * with THAT trial's agent key: the eval agent's key cannot read a payment the
+ * throwaway agent created, so a grader built on it would fail for the wrong
+ * reason — and, worse, a passing read would be evidence about a different
+ * identity.
+ *
+ * `GET /payments/:id` is the probe this pins: it is built from
+ * `resolved.trialApiKey` when the trial has one, and from the eval key
+ * otherwise.
+ */
+export function buildGraderContextFor(deps: {
+  cfg: QaConfig
+  evalApiKey: string
+  provider: BlockNumberSource
+  sleep?: (ms: number) => Promise<void>
+}): (resolved: ResolvedTask) => Omit<GraderContext, 'resolved'> {
+  return (resolved) =>
+    buildGraderContext({
+      api: new HavenApi(deps.cfg, resolved.trialApiKey ?? deps.evalApiKey),
+      provider: deps.provider,
+      ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    })
+}
+
 export interface BudgetSourceFor {
   (use: BudgetUse): Promise<{ remaining: bigint } | { error: string }>
 }
@@ -340,6 +374,24 @@ export function createPerTrialResolver(deps: PerTrialResolverDeps): PerTrialReso
   }
 
   const resolve = async (task: EvalTask, trial: number, prior?: PriorTrialOutcome): Promise<ResolvedTask> => {
+    // A task with a per-trial setup (#4678) resolves WITHOUT touching the
+    // eval agent's budget: its money is the setup's `fundingAtomic`, and a
+    // throwaway task with `fundingAtomic: "0"` must run even on an exhausted
+    // eval budget. The consistency guard has nothing to wait for either —
+    // the trial's own funding payment is not a budget slice this run
+    // resolved.
+    if (task.setup) {
+      const startedAtBlock = await deps.blockNumber()
+      const r = await resolveTask(task, {
+        budget: async () => ({ remaining: 0n }),
+        recipient: deps.recipient,
+        x402Target: deps.x402Target,
+        agentAccount: deps.agentAccount,
+        startedAtBlock,
+      })
+      if ('error' in r) throw new Error(r.error)
+      return r.resolved
+    }
     const use: BudgetUse = task.tier === 3 ? 'exhausted-ok' : 'floor'
     // #4071/#4091: a settled trial's spend is NOT always the resolved amount.
     // What the guard deducts is derived from the prior trial's own evidence:
@@ -626,6 +678,42 @@ async function main() {
     }
   }
 
+  // The per-trial prepared state (#4678). Built ONLY when a selected task
+  // asks for it, and its env is checked BEFORE the first agent session — a
+  // missing trial credential must not surface as five identical red trials.
+  const setupTasks = selected.filter((t) => t.setup !== undefined)
+  let setup: TrialSetupHook | undefined
+  let manifest: SecretManifest | undefined
+  if (setupTasks.length > 0) {
+    const manifestPath = process.env.QA_EVAL_SECRET_MANIFEST?.trim()
+    if (!manifestPath) {
+      console.error(
+        'Missing QA_EVAL_SECRET_MANIFEST — a task with a per-trial setup needs the exact-value manifest ' +
+          'the transcript redactor consumes fail-closed (#4678); see docs/operations/agent-evals.md.',
+      )
+      process.exit(2)
+    }
+    manifest = await SecretManifest.create(manifestPath)
+    const agentIdentity = await api.getAgent()
+    if (!agentIdentity.ok || !agentIdentity.data.account_address) {
+      console.error(`Could not read the eval agent's account (HTTP ${agentIdentity.status}) — the throwaway teardown returns USDC there.`)
+      process.exit(2)
+    }
+    setup = createThrowawaySetup({
+      apiUrl: cfg.apiUrl,
+      chainId: BASE_SEPOLIA_CHAIN_ID,
+      evalAccountAddress: agentIdentity.data.account_address,
+      evalAgentApiKey: apiKey,
+      evalDelegateKey: env('AGENT_EVALS_DELEGATE_KEY'),
+      manifest,
+      trialDir: env('QA_EVAL_TRIAL_DIR'),
+      hostedMcpUrl: env('QA_EVAL_HOSTED_MCP_URL'),
+      signerCliPath: env('QA_EVAL_SIGNER_CLI'),
+      x402BindingSigner: process.env.QA_X402_BINDING_SIGNER?.trim() || undefined,
+      recipient,
+    })
+  }
+
   // Where the hosted MCP leg ran (#3959): the subset names the commit it
   // built from this checkout; a dev-deployed run names the URL and says so.
   const hostedMcpSource = args.find((a) => a.startsWith('--hosted-mcp-source='))?.split('=')[1]
@@ -656,7 +744,13 @@ async function main() {
     shuffleSeed,
     ...(taskIds ? { taskFilter: taskIds } : {}),
     hostedMcp,
+    // #4678: the lane decides which tasks are `skipped`, the setup hook
+    // prepares per-trial state, and the per-trial grader context reads with
+    // the trial's own key.
+    lane: adapter.name,
+    ...(setup ? { setup } : {}),
     graderContext: buildGraderContext({ api, provider }),
+    graderContextFor: buildGraderContextFor({ cfg, evalApiKey: apiKey, provider }),
   })
   if (resolver.budgetEvents.length > 0) report.budgetEvents = resolver.budgetEvents
   if (resolver.guardEvents.length > 0) report.guardEvents = resolver.guardEvents

@@ -57,7 +57,7 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment)$/)
     }
   })
 
@@ -192,6 +192,7 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['no_payment_retry_after_refusal', 'preemptiveReadTools', ['haven_quote_x402']],
     ['tool_called', 'name', 'haven_get_allowances'],
     ['tool_called', 'after', 'haven_submit'],
+    ['resume_without_repayment', 'mustMention', ['resumed']],
   ]
 
   it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
@@ -450,9 +451,12 @@ describe('the tiered run order (#3992 A3)', () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     const ordered = orderTasksForSequence(tasks)
     expect(ordered.map((t) => t.id)).toEqual([
+      'agent-revoked-no-retry',
+      'budget-ended-no-retry',
       'direct-send-get-agent-first',
       'direct-send-partial-budget',
       'direct-send-then-report-remaining',
+      'interrupted-purchase-resume',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
       'x402-catalog-guided-purchase',

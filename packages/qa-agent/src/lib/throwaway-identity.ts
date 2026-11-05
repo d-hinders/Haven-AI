@@ -151,12 +151,37 @@ export async function withThrowawayIdentity(
 
 export async function provisionThrowawayIdentity(
   apiUrl: string,
-  options: { chainId: number; budgetAtomic: string; label: string },
+  options: {
+    chainId: number
+    budgetAtomic: string
+    label: string
+    /**
+     * A short grant expiry, unix seconds (#4678). `delegations/build` accepts
+     * any future value, so the ended-budget trial sets one and then polls the
+     * authoritative allowance signal until the budget reads as ended.
+     */
+    expiresAt?: number
+    /**
+     * Called with every generated secret BEFORE it is used (#4678): the owner
+     * key, the delegate key, the signup password, the signup bearer token and
+     * the agent API key. The caller appends each to the per-trial exact-value
+     * manifest the transcript redactor consumes fail-closed.
+     */
+    onSecret?: (name: string, value: string) => Promise<void> | void
+  },
 ): Promise<ThrowawayIdentity | ThrowawayError> {
   const owner = ethers.Wallet.createRandom()
   const delegate = ethers.Wallet.createRandom()
   const email = `qa-${options.label}-${Math.random().toString(36).slice(2, 10)}@haven.test`
   const password = 'Qa-' + ethers.Wallet.createRandom().privateKey.slice(2, 26)
+  const record = async (name: string, value: string): Promise<void> => {
+    if (options.onSecret) await options.onSecret(name, value)
+  }
+  // The two keys exist before any request; record them first so a crash
+  // during signup still leaves them in the inventory.
+  await record('throwaway_owner_key', owner.privateKey)
+  await record('throwaway_delegate_key', delegate.privateKey)
+  await record('throwaway_signup_password', password)
 
   async function userCall<T>(method: string, path: string, token: string | null, body?: unknown) {
     const res = await fetch(`${apiUrl}${path}`, {
@@ -175,6 +200,7 @@ export async function provisionThrowawayIdentity(
   })
   const token = signup.json.token
   if (!token) return { error: `throwaway signup failed (${signup.status}): ${signup.json.error ?? ''}` }
+  await record('throwaway_signup_token', token)
 
   const hybrid = await userCall<{ error?: string }>('POST', '/accounts/hybrid', token, {
     chain_id: options.chainId, owner_address: owner.address,
@@ -202,6 +228,7 @@ export async function provisionThrowawayIdentity(
   if (!agentId || !agentApiKey) {
     return { error: `throwaway agent creation failed (${agentRes.status}): ${agentRes.json.error ?? ''}` }
   }
+  await record('throwaway_agent_api_key', agentApiKey)
 
   let delegateAccountAddress: string | null = null
   let grantDelegation: Record<string, unknown> = {}
@@ -242,7 +269,13 @@ export async function provisionThrowawayIdentity(
       error_code?: string
     }>(
       'POST', `/agents/${agentId}/delegations/build`, token!,
-      { token_address: SEPOLIA_USDC, budget_atomic: options.budgetAtomic, period_seconds: 86_400, ...replaces },
+      {
+        token_address: SEPOLIA_USDC,
+        budget_atomic: options.budgetAtomic,
+        period_seconds: 86_400,
+        ...(options.expiresAt !== undefined ? { expires_at: options.expiresAt } : {}),
+        ...replaces,
+      },
     )
     if (!built.json.delegation_hash || !built.json.signing_payload) {
       return {

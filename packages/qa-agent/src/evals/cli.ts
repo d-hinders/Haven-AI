@@ -609,6 +609,27 @@ async function main() {
     console.error('Missing QA_EVAL_X402_TARGET — a loaded task renders {target} (the x402 URL tasks); see docs/operations/agent-evals.md.')
     process.exit(2)
   }
+
+  // The per-trial secret manifest (#4678). Created for EVERY run, not only a
+  // run with setup tasks: the workflow passes `--manifest=` to the redactor
+  // unconditionally, and the redactor is fail-closed on a missing file — so
+  // a `tasks=` run of a shared-agent task would otherwise fail at redaction.
+  // The header records how many selected tasks asked for a per-trial setup,
+  // which is what keeps the redactor fail-closed: a manifest that declares
+  // setup tasks but recorded no secrets is refused, while `setupTasks: 0`
+  // with no secrets is the honest inventory of a run that prepared nothing.
+  const setupTasks = selected.filter((t) => t.setup !== undefined)
+  const manifestPath = process.env.QA_EVAL_SECRET_MANIFEST?.trim()
+  let manifest: SecretManifest | undefined
+  if (manifestPath) {
+    manifest = await SecretManifest.create(manifestPath, { setupTasks: setupTasks.length })
+  } else if (setupTasks.length > 0) {
+    console.error(
+      'Missing QA_EVAL_SECRET_MANIFEST — a task with a per-trial setup needs the exact-value manifest ' +
+        'the transcript redactor consumes fail-closed (#4678); see docs/operations/agent-evals.md.',
+    )
+    process.exit(2)
+  }
   const outPath = args.find((a) => a.startsWith('--out='))?.split('=')[1] ?? `evals-report-${Date.now()}.json`
 
   // The budget read: live, or nothing — a guessed amount would turn a
@@ -681,19 +702,11 @@ async function main() {
   // The per-trial prepared state (#4678). Built ONLY when a selected task
   // asks for it, and its env is checked BEFORE the first agent session — a
   // missing trial credential must not surface as five identical red trials.
-  const setupTasks = selected.filter((t) => t.setup !== undefined)
+  // The manifest itself was created above for every run; a setup task cannot
+  // reach here without one (the branch above exits 2).
   let setup: TrialSetupHook | undefined
-  let manifest: SecretManifest | undefined
   if (setupTasks.length > 0) {
-    const manifestPath = process.env.QA_EVAL_SECRET_MANIFEST?.trim()
-    if (!manifestPath) {
-      console.error(
-        'Missing QA_EVAL_SECRET_MANIFEST — a task with a per-trial setup needs the exact-value manifest ' +
-          'the transcript redactor consumes fail-closed (#4678); see docs/operations/agent-evals.md.',
-      )
-      process.exit(2)
-    }
-    manifest = await SecretManifest.create(manifestPath)
+    if (!manifest) throw new Error('QA_EVAL_SECRET_MANIFEST is required for a task with a per-trial setup')
     const agentIdentity = await api.getAgent()
     if (!agentIdentity.ok || !agentIdentity.data.account_address) {
       console.error(`Could not read the eval agent's account (HTTP ${agentIdentity.status}) — the throwaway teardown returns USDC there.`)

@@ -228,14 +228,18 @@ export interface RunSuiteOptions {
   /** Grader probes live here (chain/backend), injected per suite. */
   graderContext?: Omit<GraderContext, 'resolved'>
   /**
-   * The per-TRIAL grader context (#4678). When present it wins over
-   * `graderContext` for every trial: a throwaway trial's graders must read
-   * with that trial's key, never the eval agent's.
+   * The per-TRIAL grader context (#4678). It is the DEFAULT for every trial:
+   * a throwaway trial's graders must read with that trial's key, never the
+   * eval agent's. A setup hook that hands back its own `graderContext` wins
+   * over it (the hook knows the identity it just created).
    */
   graderContextFor?: (resolved: ResolvedTask) => Omit<GraderContext, 'resolved'>
   /**
    * The per-trial setup hook (#4678). Absent = the shared eval agent, no
-   * setup, no teardown — the eleven starter tasks are unchanged.
+   * setup, no teardown — the eleven starter tasks are unchanged. When
+   * present it is called ONLY for a task that carries a `setup` block: a
+   * run may mix throwaway tasks with shared-agent ones, and the hook's
+   * contract is "prepare THIS task's state".
    */
   setup?: TrialSetupHook
   /**
@@ -298,17 +302,21 @@ export async function runTaskTrials(
       continue
     }
 
-    // The per-trial setup (#4678). The hook owns its cleanup registry and
-    // hands back a teardown; a setup that fails partway throws a
-    // `TrialSetupFailure` carrying the teardown for what it already created.
+    // The per-trial setup (#4678). The hook is called ONLY for a task that
+    // asks for it: a run may mix throwaway tasks with the shared-agent ones,
+    // and the hook's contract is "prepare THIS task's state" — calling it for
+    // a task with no `setup` would turn every other task in the run red.
+    // The hook owns its cleanup registry and hands back a teardown; a setup
+    // that fails partway throws a `TrialSetupFailure` carrying the teardown
+    // for what it already created.
     let trialResolved = resolved
-    let trialGraderContext = opts.graderContext
+    let hookGraderContext: Omit<GraderContext, 'resolved'> | undefined
     let teardown: (() => Promise<TrialTeardown>) | undefined
-    if (opts.setup) {
+    if (opts.setup && task.setup !== undefined) {
       try {
         const prepared = await opts.setup.prepare({ task, trial, resolved })
         trialResolved = { ...resolved, ...(prepared.resolved ?? {}) }
-        if (prepared.graderContext) trialGraderContext = prepared.graderContext
+        hookGraderContext = prepared.graderContext
         teardown = prepared.teardown
       } catch (err) {
         const failedTeardown = err instanceof TrialSetupFailure ? await err.teardown() : undefined
@@ -328,6 +336,11 @@ export async function runTaskTrials(
         continue
       }
     }
+    // The per-trial grader context (#4678): the hook's own when it supplied
+    // one, otherwise the injected per-trial builder, otherwise the suite's
+    // single context. Built AFTER the setup merge so it sees the trial's key.
+    const trialGraderContext =
+      hookGraderContext ?? (opts.graderContextFor ? opts.graderContextFor(trialResolved) : opts.graderContext)
 
     let log: AgentRunLog
     try {

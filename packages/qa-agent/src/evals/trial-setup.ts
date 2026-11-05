@@ -18,7 +18,8 @@
  *
  *   1. sweep delegate-EOA leftovers — the bridge can strand USDC on the
  *      delegate EOA; it is recovered gaslessly while the agent key is still
- *      valid;
+ *      valid. Skipped for the revoked-agent trial: its key is already dead
+ *      (the sweep would 401) and it never funded the delegate EOA;
  *   2. return account USDC — the throwaway account's balance goes back to the
  *      EVAL ACCOUNT, never `QA_DELEGATION_*` (`agent-evals.yml`). A revoked
  *      key gets a 401, so this uses the OWNER-signed
@@ -59,7 +60,7 @@ export interface TrialTeardown {
 }
 
 /** The resources a trial may create, in the order they come into existence. */
-export type CleanupResourceKind = 'account' | 'agent' | 'funding' | 'delegate-eoa' | 'task-budget'
+export type CleanupResourceKind = 'account' | 'agent' | 'delegate-eoa' | 'task-budget'
 
 /**
  * The teardown steps, injected so a unit test can prove the ORDER and the
@@ -285,6 +286,9 @@ export function createThrowawaySetup(deps: ThrowawaySetupDeps): TrialSetupHook {
 
         // ── 2. funding ───────────────────────────────────────────────────
         // The ONLY amount this trial takes from the eval agent's period budget.
+        // Nothing is registered for it: the funding payment is not undone by
+        // the teardown — the account's USDC is returned to the eval account
+        // (step 2 of the registry) and the keys are discarded.
         const fundingAtomic = BigInt(setup.fundingAtomic)
         if (fundingAtomic > 0n) {
           const human = ethers.formatUnits(fundingAtomic, 6)
@@ -300,7 +304,6 @@ export function createThrowawaySetup(deps: ThrowawaySetupDeps): TrialSetupHook {
               `funding the throwaway account failed for ${task.id} trial ${trial} (${human} USDC): ${funded.error}`,
             )
           }
-          cleanup.register('funding', funded.tx ?? `${task.id}:${trial}`)
         }
 
         // ── 3. the trial's own credential + MCP config ───────────────────
@@ -458,7 +461,15 @@ async function prepareInterruptedPurchase(
   return body.payment_id
 }
 
-/** Re-render the instruction with the prepared payment id. */
+/**
+ * Re-render the instruction with the prepared payment id.
+ *
+ * The resolve path leaves `{payment_id}` in place on purpose (#4678): the
+ * payment does not exist until this setup prepares it, so this is the only
+ * place that can render it. `validateTask` refuses a task that renders the
+ * placeholder without an `interrupted-purchase` setup, so the placeholder
+ * can never reach an agent.
+ */
 function renderPreparedInstruction(resolved: ResolvedTask, paymentId: string): string {
   return resolved.instruction.replaceAll('{payment_id}', paymentId)
 }
@@ -511,6 +522,11 @@ export function throwawayCleanupSteps(
   const readBalance = deps.readUsdcBalance ?? defaultUsdcBalance
   return {
     async sweepDelegateEoa() {
+      // The revoked-agent task revokes BEFORE launch, so this call would
+      // answer 401 and read as a teardown warning on a trial that behaved
+      // exactly as asked. Nothing can be stranded there either: that task's
+      // `fundingAtomic` is "0", so no USDC ever reached the delegate EOA.
+      if (opts.alreadyRevoked) return null
       const res = await fetch(`${deps.apiUrl}/machine-payments/sweep/prepare`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${identity.agentApiKey}` },

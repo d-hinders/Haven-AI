@@ -90,20 +90,54 @@ describe('readSecretManifest — fail-closed', () => {
     expect(read.error).toContain('is empty')
   })
 
-  it('refuses a malformed line', async () => {
+  it('refuses a manifest with no header — the run\'s setup state would be unknown', async () => {
     const dir = await scratch()
     const path = join(dir, 'manifest.json')
-    await writeFile(path, '{"name":"a","value":"b"}\nnot json\n', { mode: 0o600 })
+    await writeFile(path, '{"name":"a","value":"b"}\n', { mode: 0o600 })
     const read = await readSecretManifest(path)
     expect(read.ok).toBe(false)
     if (read.ok) return
-    expect(read.error).toContain('line 2 is not JSON')
+    expect(read.error).toContain('header')
+  })
+
+  it('refuses a manifest that DECLARES setup tasks but records no secrets', async () => {
+    const dir = await scratch()
+    const path = join(dir, 'manifest.json')
+    await writeFile(path, '{"kind":"header","setupTasks":2}\n', { mode: 0o600 })
+    const read = await readSecretManifest(path)
+    expect(read.ok).toBe(false)
+    if (read.ok) return
+    expect(read.error).toContain('declares 2 setup task(s) but records no secrets')
+  })
+
+  it('accepts the honest empty inventory of a run with NO setup task (setupTasks: 0)', async () => {
+    // The workflow passes --manifest= unconditionally, so a `tasks=` run of a
+    // shared-agent task must produce a manifest the redactor can read.
+    const dir = await scratch()
+    const path = join(dir, 'manifest.json')
+    const manifest = await SecretManifest.create(path, { setupTasks: 0 })
+    expect(manifest.filePath).toBe(path)
+    const read = await readSecretManifest(path)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.secrets).toEqual([])
+    expect(read.setupTasks).toBe(0)
+  })
+
+  it('refuses a malformed line', async () => {
+    const dir = await scratch()
+    const path = join(dir, 'manifest.json')
+    await writeFile(path, '{"kind":"header","setupTasks":1}\n{"name":"a","value":"b"}\nnot json\n', { mode: 0o600 })
+    const read = await readSecretManifest(path)
+    expect(read.ok).toBe(false)
+    if (read.ok) return
+    expect(read.error).toContain('line 3 is not JSON')
   })
 
   it('refuses an entry without a name or value', async () => {
     const dir = await scratch()
     const path = join(dir, 'manifest.json')
-    await writeFile(path, '{"name":"","value":"b"}\n', { mode: 0o600 })
+    await writeFile(path, '{"kind":"header","setupTasks":1}\n{"name":"","value":"b"}\n', { mode: 0o600 })
     const read = await readSecretManifest(path)
     expect(read.ok).toBe(false)
     if (read.ok) return

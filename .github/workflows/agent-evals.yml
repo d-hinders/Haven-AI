@@ -171,7 +171,12 @@ jobs:
       # The lane's own eval identity, written from the PROTECTED environment
       # secrets at runtime and never echoed. The delegate key NEVER reaches
       # the hosted server env (the custody guard would refuse to boot) — only
-      # the signer process gets it, via the credential file.
+      # the signer process gets it, via the credential file. It does not reach
+      # the AGENT's process env either: the Claude Code adapter spawns the
+      # child from an explicit env allowlist (claude-code.ts
+      # CHILD_ENV_ALLOWLIST), so AGENT_EVALS_DELEGATE_KEY, HAVEN_CREDENTIALS
+      # and QA_EVAL_AGENT_API_KEY stay in this step's env and every stdio MCP
+      # server the agent spawns sees only the trial's own wiring.
       - name: Write the eval-agent credentials from the protected environment (never echoed)
         env:
           DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}

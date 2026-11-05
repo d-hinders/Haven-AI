@@ -505,4 +505,101 @@ describe('the per-trial setup hook and its teardown (#4678)', () => {
     })
     expect(report.tasks[0]!.trials[0]!.teardown).toBeUndefined()
   })
+
+  it('a MIXED run calls the hook ONLY for the task that asks for it — the plain task passes with no teardown', async () => {
+    // The regression this pins: the hook used to be called for EVERY task
+    // whenever it was wired, and the real hook throws for a task with no
+    // `setup` — so one throwaway task in a run turned every other task red.
+    const plain: EvalTask = { ...TASK, id: 'plain-task' }
+    const prepared: string[] = []
+    const report = await runSuite({
+      tasks: [plain, setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      setup: {
+        // The real hook's contract (createThrowawaySetup.prepare): it refuses
+        // a task that does not ask for a per-trial setup.
+        prepare: async ({ task }) => {
+          if (task.setup === undefined) throw new Error(`task ${task.id} has no throwaway setup`)
+          prepared.push(task.id)
+          return { teardown: async () => ({ ok: true, warnings: [] }) }
+        },
+      },
+    })
+    const plainReport = report.tasks.find((t) => t.id === 'plain-task')!
+    expect(plainReport.trials[0]!.pass).toBe(true)
+    expect(plainReport.trials[0]!.detail).toBe('')
+    expect(plainReport.trials[0]!.teardown).toBeUndefined()
+    // The hook ran exactly once, for the task that asked for it.
+    expect(prepared).toEqual(['throwaway-task'])
+    expect(report.tasks.find((t) => t.id === 'throwaway-task')!.trials[0]!.teardown).toEqual({ ok: true, warnings: [] })
+  })
+
+  const probeTask: EvalTask = {
+    ...TASK,
+    id: 'probe-task',
+    graders: [{ name: 'payment_status_settled' }],
+    // The hook is only called for a task that asks for a per-trial setup.
+    setup: { kind: 'throwaway-identity', label: 'probe', budgetAtomic: '2000', fundingAtomic: '2000' },
+  }
+
+  it('graderContextFor is the per-trial default — built from the MERGED resolved task', async () => {
+    const used: string[] = []
+    const seenKeys: Array<string | undefined> = []
+    const report = await runSuite({
+      tasks: [probeTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_pay', result: { ok: true, paymentId: 'p-1' } }])),
+      trials: 1,
+      graderContextFor: (resolvedTask) => {
+        seenKeys.push(resolvedTask.trialApiKey)
+        return {
+          probePaymentStatus: async () => {
+            used.push('default')
+            return { ok: true, status: 'settled' }
+          },
+        }
+      },
+      setup: {
+        prepare: async () => ({
+          resolved: { trialApiKey: 'sk_trial_key' },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+    })
+    expect(report.tasks[0]!.trials[0]!.pass).toBe(true)
+    expect(used).toEqual(['default'])
+    // The builder saw the trial's own key, not the eval agent's.
+    expect(seenKeys).toEqual(['sk_trial_key'])
+  })
+
+  it("the setup hook's own grader context wins over graderContextFor", async () => {
+    const used: string[] = []
+    const report = await runSuite({
+      tasks: [probeTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_pay', result: { ok: true, paymentId: 'p-1' } }])),
+      trials: 1,
+      graderContextFor: () => ({
+        probePaymentStatus: async () => {
+          used.push('default')
+          return { ok: true, status: 'settled' }
+        },
+      }),
+      setup: {
+        prepare: async () => ({
+          graderContext: {
+            probePaymentStatus: async () => {
+              used.push('hook')
+              return { ok: true, status: 'settled' }
+            },
+          },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+    })
+    expect(report.tasks[0]!.trials[0]!.pass).toBe(true)
+    expect(used).toEqual(['hook'])
+  })
 })

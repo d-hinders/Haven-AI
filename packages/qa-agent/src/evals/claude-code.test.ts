@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ResolvedTask } from './types.js'
 import {
+  buildChildEnv,
   buildClaudeCodeCommand,
   ClaudeCodeAdapter,
   claudeCodeConfigFromEnv,
@@ -170,5 +171,60 @@ describe('ClaudeCodeAdapter.runTask process handling', () => {
     const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-log-')), 's')
     const adapter = new ClaudeCodeAdapter({ commandTemplate: template, logPath: logBase, timeoutMs: 30_000 })
     await expect(adapter.runTask(resolved, 1)).rejects.toThrow(/claude exited 3 .*boom/)
+  })
+})
+
+// ── #4678: the child env is an explicit allowlist ──────────────────────────
+
+describe('the child env is an explicit allowlist (#4678)', () => {
+  it('strips the eval harness secrets and keeps what claude needs', () => {
+    const env = buildChildEnv(
+      {
+        PATH: '/usr/bin',
+        HOME: '/home/runner',
+        CLAUDE_CODE_OAUTH_TOKEN: 'oauth',
+        AGENT_EVALS_DELEGATE_KEY: 'delegate-secret',
+        AGENT_EVALS_API_KEY: 'eval-api-key',
+        QA_EVAL_AGENT_API_KEY: 'eval-api-key',
+        HAVEN_CREDENTIALS: '/runner/haven-eval-agent/agent.json',
+        QA_EVAL_SECRET_MANIFEST: '/runner/eval-secret-manifest/manifest.json',
+      },
+      { QA_EVAL_TRIAL_API_KEY: 'sk_trial' },
+    )
+    expect(env.PATH).toBe('/usr/bin')
+    expect(env.HOME).toBe('/home/runner')
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('oauth')
+    // The trial's own wiring is merged OVER the allowlist.
+    expect(env.QA_EVAL_TRIAL_API_KEY).toBe('sk_trial')
+    for (const name of [
+      'AGENT_EVALS_DELEGATE_KEY',
+      'AGENT_EVALS_API_KEY',
+      'QA_EVAL_AGENT_API_KEY',
+      'HAVEN_CREDENTIALS',
+      'QA_EVAL_SECRET_MANIFEST',
+    ]) {
+      expect(env[name], name).toBeUndefined()
+    }
+  })
+
+  it('the spawned session sees no delegate key — end to end', async () => {
+    const previous = process.env.AGENT_EVALS_DELEGATE_KEY
+    process.env.AGENT_EVALS_DELEGATE_KEY = 'delegate-secret'
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'fake-claude-'))
+      const script = join(dir, 'fake-claude.mjs')
+      await writeFile(
+        script,
+        `const line = JSON.stringify({ type: 'result', subtype: 'success', result: 'delegate=' + (process.env.AGENT_EVALS_DELEGATE_KEY ?? 'absent') + ' path=' + (process.env.PATH ? 'yes' : 'no') });\n` +
+          `process.stdout.write(line + '\\n');\n`,
+      )
+      const logBase = join(await mkdtemp(join(tmpdir(), 'fake-claude-log-')), 's')
+      const adapter = new ClaudeCodeAdapter({ commandTemplate: `node ${shellQuote(script)} {instruction}`, logPath: logBase, timeoutMs: 30_000 })
+      const log = await adapter.runTask({ task: { id: 'fake-task' }, instruction: 'x' } as unknown as ResolvedTask, 1)
+      expect(log.finalMessage).toBe('delegate=absent path=yes')
+    } finally {
+      if (previous === undefined) delete process.env.AGENT_EVALS_DELEGATE_KEY
+      else process.env.AGENT_EVALS_DELEGATE_KEY = previous
+    }
   })
 })

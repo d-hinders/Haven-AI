@@ -129,6 +129,52 @@ export function shellQuote(s: string): string {
 }
 
 /**
+ * The env names the agent's child process inherits (#4678).
+ *
+ * An explicit ALLOWLIST, not `{...process.env}`: the eval harness's own
+ * secrets must never reach the agent under test or any stdio MCP server it
+ * spawns. `AGENT_EVALS_DELEGATE_KEY` is the one that matters — it is the eval
+ * agent's signing authority, and the workflow's custody comment says only the
+ * signer process reads it, via the credential file. `HAVEN_CREDENTIALS` (the
+ * eval agent's credential file path) and `QA_EVAL_AGENT_API_KEY` are the same
+ * class of leak, and neither is on this list. A throwaway trial's own wiring
+ * arrives through `trialEnv`, which is merged over the allowlist.
+ *
+ * Everything listed is what `claude` (a Node CLI) needs to start and
+ * authenticate: the shell/OS basics, the subscription token, the CI runner's
+ * non-secret context, and TLS/proxy settings.
+ */
+export const CHILD_ENV_ALLOWLIST = [
+  // shell + OS basics
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ',
+  'TMPDIR', 'TEMP', 'TMP', 'PWD', 'OLDPWD', 'SHLVL', '_', 'HOSTNAME',
+  // the CI runner's non-secret context
+  'CI', 'GITHUB_ACTIONS', 'GITHUB_WORKSPACE', 'GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_SHA',
+  'GITHUB_REF', 'GITHUB_HEAD_REF', 'GITHUB_BASE_REF', 'RUNNER_TEMP', 'RUNNER_OS', 'RUNNER_ARCH',
+  'RUNNER_NAME', 'RUNNER_TOOL_CACHE',
+  // TLS / proxy, so a runner proxy does not break the session
+  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'no_proxy',
+  // claude's own auth + config
+  'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'DISABLE_AUTOUPDATER', 'DISABLE_TELEMETRY',
+  'FORCE_COLOR', 'NO_COLOR', 'COLORTERM', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+] as const
+
+/**
+ * Build the child env from the allowlist, then merge the trial's own env over
+ * it. Exported so a test can prove the eval harness's secrets are stripped.
+ */
+export function buildChildEnv(base: NodeJS.ProcessEnv, trialEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const name of CHILD_ENV_ALLOWLIST) {
+    const value = base[name]
+    if (value !== undefined) env[name] = value
+  }
+  return { ...env, ...(trialEnv ?? {}) }
+}
+
+/**
  * Launch one task through `claude -p` and collect its tool-call log.
  * The stream-JSON session is captured to a log file and parsed; the
  * session's `total_cost_usd` is recorded on the adapter for the report.
@@ -195,10 +241,13 @@ export class ClaudeCodeAdapter {
       // The token travels ONLY in the inherited env — never in the command
       // string, never logged. An error report quotes the template, which is
       // the caller's own (secret-free) command, and the stderr TAIL only.
+      // The child env is an explicit ALLOWLIST (#4678): the eval harness's
+      // own secrets — AGENT_EVALS_DELEGATE_KEY above all — never reach the
+      // agent under test or the stdio MCP servers it spawns.
       const child = spawn(command, {
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        ...(trialEnv ? { env: { ...process.env, ...trialEnv } } : {}),
+        env: buildChildEnv(process.env, trialEnv),
       })
       const timer = setTimeout(() => {
         child.kill('SIGKILL')

@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { deepFind } from './json-reading.js'
+import { SecretManifest } from './secret-manifest.js'
 import {
   REDACTION_CLASSES,
   loadSecrets,
@@ -352,6 +353,29 @@ describe('runRedaction', () => {
       }
     })
   }
+
+  it('#4678: a run with NO setup task still redacts — the CLI creates the manifest with setupTasks: 0', async () => {
+    // The workflow passes --manifest= unconditionally, so a `tasks=` run of a
+    // shared-agent task used to fail the whole redaction step on a missing
+    // file. The CLI now always creates the manifest; its header says no setup
+    // task ran, so the empty inventory is legitimate.
+    const f = await fixtureRun()
+    const manifestPath = join(f.root, 'eval-secret-manifest', 'manifest.json')
+    await SecretManifest.create(manifestPath, { setupTasks: 0 })
+    const result = await runRedaction({ ...f.opts, env: ENV, manifestPath })
+    expect(result.clean).toBe(true)
+    expect(await ls(f.outDir)).toEqual(['claude-sessions.task-a.trial1.jsonl', 'claude-sessions.task-b.trial1.jsonl'])
+  })
+
+  it('#4678: a manifest that DECLARES setup tasks but records none refuses the redaction', async () => {
+    const f = await fixtureRun()
+    const manifestPath = join(f.root, 'eval-secret-manifest', 'manifest.json')
+    await SecretManifest.create(manifestPath, { setupTasks: 1 })
+    const result = await runRedaction({ ...f.opts, env: ENV, manifestPath })
+    expect(result.clean).toBe(false)
+    expect(await ls(f.outDir)).toBe('missing')
+    expect(f.logs.join('\n')).toContain('declares 1 setup task(s) but records no secrets')
+  })
 
   it('a fallback URL set as a secret with no key-bearing segment is kept whole, with a warning by name', async () => {
     const f = await fixtureRun()

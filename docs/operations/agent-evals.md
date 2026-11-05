@@ -86,7 +86,9 @@ WITHIN tiers only (deterministic per seed, recorded in the report);
 `--limit` slices the canonical order BEFORE any shuffle, so the workflow's
 5-task subset is stable, and `--task=<id>[,…]` selects tasks BY ID from the
 same canonical set — tier order and any `--shuffle` are preserved (#4218,
-see Other flags).
+see Other flags). A task with a per-trial `setup` is EXCLUDED from the
+`--limit` slice (#4678): it provisions its own throwaway identity and spends
+USDC, so it runs only when named with `--task=` or in a full (unlimited) run.
 
 **Two lessons from 2026-10-23 (run 39914610364).** A wait that times out
 makes ONE trial red: later trials do not wait on the same expectation again,
@@ -290,10 +292,16 @@ API key. A 32-byte key has the shape of a transaction hash, which the
 transcripts must keep, so no generic rule catches it. Every generated secret
 is therefore appended to a **mode-`0600` manifest** (`QA_EVAL_SECRET_MANIFEST`,
 under `$RUNNER_TEMP`, outside every report and upload path) and flushed
-before the agent launches. The redactor consumes it with `--manifest=` and
-**fail-closed**: a missing, unreadable, empty or malformed manifest refuses
-the whole redaction and writes nothing. The manifest is deleted in an
-`always()` step after the scan, and the workflow guard
+before the agent launches. The CLI creates the manifest for **every** run —
+the workflow passes `--manifest=` unconditionally — and its first line is a
+header recording how many selected tasks asked for a per-trial setup. The
+redactor consumes it with `--manifest=` and **fail-closed**: a missing,
+unreadable or malformed manifest refuses the whole redaction and writes
+nothing, and so does a manifest that declares setup tasks but records no
+secrets. A header of `setupTasks: 0` with no secrets is the honest, empty
+inventory of a run that prepared nothing, so a `tasks=` run of a shared-agent
+task redacts cleanly. The manifest is deleted in an `always()` step after the
+scan, and the workflow guard
 (`scripts/ci/agent-evals-workspace-deps.test.mjs`) proves it cannot be printed
 or uploaded.
 
@@ -380,7 +388,10 @@ Other flags:
 - `--shuffle=<seed>` — deterministic shuffle WITHIN tiers; the seed and the
   executed order are recorded in the report. `--limit` is applied to the
   canonical order BEFORE the shuffle, so the 5-task subset is the same
-  with or without a shuffle.
+  with or without a shuffle. A task with a per-trial `setup` is excluded
+  from the `--limit` slice (#4678): it provisions its own throwaway
+  identity and spends USDC, so it runs only when named with `--task=` or in
+  a full (unlimited) run.
 - `--task=<id>[,<id>…]` — run EXACTLY the named task ids (#4218), filtered
   from the canonical (tiered) set: tier order and any `--shuffle=<seed>`
   still apply, a repeated id runs once, and NO prerequisite is added
@@ -551,6 +562,13 @@ the stream, which is what the no-retry graders need.
 **Isolation of the agent under test.** `claude` runs from an empty directory
 (`$RUNNER_TEMP/claude-cwd`), so no `CLAUDE.md` or project config from this
 repo reaches it, and `--strict-mcp-config` loads only the two wired servers.
+Its process env is an explicit ALLOWLIST (`claude-code.ts`
+`CHILD_ENV_ALLOWLIST`), not the eval step's whole environment: the eval
+harness's own secrets — `AGENT_EVALS_DELEGATE_KEY` above all, plus
+`HAVEN_CREDENTIALS` (the eval agent's credential file path) and
+`QA_EVAL_AGENT_API_KEY` — never reach the agent or any stdio MCP server it
+spawns. A throwaway trial's own wiring arrives through the per-trial env the
+setup hook returns, merged over the allowlist.
 Because of that, the signer server is launched by absolute path
 (`$GITHUB_WORKSPACE/packages/signer/dist/cli.js`) with
 `HAVEN_X402_BINDING_SIGNER` from `vars.QA_X402_BINDING_SIGNER` (without it
@@ -583,8 +601,11 @@ packages/qa-agent`) and uploads the result as
   which are kept). The step prints how many secrets it loaded, by name.
 - It also consumes the **per-trial secret manifest** (`--manifest=`,
   `QA_EVAL_SECRET_MANIFEST`) — the five secrets a throwaway trial generates,
-  which no env var names. That read is fail-closed too: a missing, unreadable,
-  empty or malformed manifest refuses the whole redaction. The manifest is
+  which no env var names. That read is fail-closed too: a missing, unreadable
+  or malformed manifest refuses the whole redaction, and so does a manifest
+  whose header declares setup tasks but records no secrets. The CLI creates
+  the manifest for every run, so a run with no setup task carries
+  `setupTasks: 0` and an empty inventory, which is legitimate. The manifest is
   mode `0600`, sits outside every report and upload path, and is deleted in an
   `always()` step after the scan; the workflow guard proves it cannot be
   printed or uploaded.
@@ -734,7 +755,9 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   `packages/mcp-server/src/boot.ts`) pointed at the dev backend, and launches
   the signer and skill from the workspace, not npm. The report names the
   hosted MCP commit it ran against and states that backend error bodies stay
-  dev-deployed.
+  dev-deployed. The five are the shared-agent tasks: a task with a per-trial
+  `setup` is excluded from the `--limit` slice (#4678), so the subset never
+  provisions throwaway identities or spends USDC implicitly.
 - **full**: every task, against the deployed dev stack.
 - **tasks** (optional input): a comma-separated list of task ids, e.g.
   `x402-eip3009-bridge-vpn-legacy` — runs EXACTLY those tasks with no

@@ -198,6 +198,17 @@ export function validateTask(raw: unknown, file: string): string | null {
   // still resolves its amount from the live eval budget.
   const setupError = validateSetup(t.setup, t.category, file)
   if (setupError) return setupError
+  // #4678: `{payment_id}` is rendered by the per-trial setup, never by the
+  // resolve path (the payment does not exist until the setup prepares it).
+  // A task that renders it without that setup would hand the agent a raw
+  // placeholder, so the pairing is enforced here rather than discovered in
+  // a live run.
+  if (typeof t.instruction === 'string' && t.instruction.includes('{payment_id}')) {
+    const prepare = (t.setup as { prepare?: unknown } | undefined)?.prepare
+    if (prepare !== 'interrupted-purchase') {
+      return `${file}: instruction renders {payment_id} but setup.prepare is not "interrupted-purchase" — only that setup prepares a payment id to render`
+    }
+  }
   const lanesError = validateLanes(t.lanes, file)
   if (lanesError) return lanesError
   if (t.commandTemplate !== undefined) {
@@ -329,6 +340,12 @@ export async function loadTasks(dir: string = TASKS_DIR): Promise<LoadTasksResul
  * task may legitimately mention `{...}` prose we do not own); a MISSING
  * amount placeholder on an over-budget task is left alone too — the grader
  * still knows the amount.
+ *
+ * `{payment_id}` is the exception among the known placeholders: the resolve
+ * path runs BEFORE the payment exists, so it is left in place for the
+ * per-trial setup to render (`trial-setup.ts`). A task that renders it
+ * without an `interrupted-purchase` setup is refused at load time
+ * (`validateTask`), so a raw placeholder can never reach an agent.
  */
 export function renderInstruction(
   task: EvalTask,
@@ -338,15 +355,15 @@ export function renderInstruction(
   paymentId?: string,
 ): string {
   const human = (Number(amountAtomic) / 1_000_000).toString()
-  return task.instruction
+  const rendered = task.instruction
     .replaceAll('{amount}', human)
     .replaceAll('{recipient}', recipient ?? '(recipient not configured)')
     .replaceAll('{target}', target ?? '(x402 target not configured)')
-    .replaceAll('{payment_id}', paymentId ?? '(no payment was prepared)')
     // A key unique to this render (= this trial): two trials of the same
     // purchase inside Haven's 5-minute idempotency bucket would otherwise
     // replay one payment instead of buying twice (2026-10-23).
     .replaceAll('{purchase_key}', `eval-${task.id}-${randomUUID()}`)
+  return paymentId === undefined ? rendered : rendered.replaceAll('{payment_id}', paymentId)
 }
 
 /** True when any task renders `{target}` — the run then needs QA_EVAL_X402_TARGET set. */
@@ -426,6 +443,14 @@ export function shuffleWithinTiers(tasks: EvalTask[], seed: number): EvalTask[] 
  * precondition then decides). A repeated id runs once. The CLI validates
  * the ids first (`parseTaskSelection`); an id that matches nothing is
  * dropped here.
+ *
+ * The `--limit` slice is the SHARED-AGENT cost pilot (#3959/#3992 B), so a
+ * task with a per-trial `setup` is excluded from it (#4678): such a task
+ * provisions its own throwaway identity and spends USDC, and the workflow's
+ * subset runs on the Claude lane — letting one into the slice implicitly
+ * would spend real testnet funds on every subset run and change which five
+ * tasks the subset is. A setup task runs when it is named with `--task=`,
+ * or in a full (unlimited) run.
  */
 export function selectTaskSequence(
   tasks: EvalTask[],
@@ -440,7 +465,8 @@ export function selectTaskSequence(
     const wanted = new Set(opts.taskIds)
     selected = canonical.filter((t) => wanted.has(t.id))
   }
-  const limited = opts.limit !== undefined ? selected.slice(0, opts.limit) : selected
+  const limited =
+    opts.limit !== undefined ? selected.filter((t) => t.setup === undefined).slice(0, opts.limit) : selected
   return opts.shuffleSeed !== undefined ? shuffleWithinTiers(limited, opts.shuffleSeed) : limited
 }
 

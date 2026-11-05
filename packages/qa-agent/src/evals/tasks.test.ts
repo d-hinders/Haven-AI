@@ -443,6 +443,61 @@ describe('resolveTask — fraction_of_remaining slices the live remaining budget
   })
 })
 
+describe('the per-trial payment id (#4678) — the resolve path leaves the placeholder for the setup', () => {
+  const interrupted = (overrides: Partial<EvalTask> = {}): EvalTask =>
+    ({
+      id: 'interrupted-purchase-resume',
+      title: 'Resume a prepared payment',
+      category: 'interrupted-purchase',
+      instruction: 'A payment was already prepared: payment_id {payment_id}. Resume it.',
+      requires: ['THROWAWAY-identity'],
+      graders: [{ name: 'resume_without_repayment' }],
+      expectTransfer: false,
+      source: { kind: 'scenario', ref: 'x', note: 'n' },
+      lanes: ['claude-code'],
+      setup: {
+        kind: 'throwaway-identity',
+        label: 'interrupted-purchase',
+        budgetAtomic: '2000',
+        fundingAtomic: '2000',
+        prepare: 'interrupted-purchase',
+      },
+      ...overrides,
+    }) as EvalTask
+
+  it('resolveTask KEEPS {payment_id} — the payment does not exist yet, so the setup renders it', async () => {
+    const r = await resolveTask(interrupted(), { budget: async () => ({ remaining: 0n }), recipient: '0xabc' })
+    expect('resolved' in r).toBe(true)
+    if (!('resolved' in r)) return
+    // The regression: this used to read "(no payment was prepared)", which
+    // made the setup's replaceAll a no-op and handed the agent no id at all.
+    expect(r.resolved.instruction).toContain('payment_id {payment_id}')
+    expect(r.resolved.instruction).not.toContain('no payment was prepared')
+  })
+
+  it('renderInstruction renders the id when the caller HAS one', () => {
+    expect(renderInstruction(interrupted(), 2000n, '0xabc', undefined, 'pay-1')).toContain('payment_id pay-1')
+  })
+
+  it('refuses a task that renders {payment_id} without an interrupted-purchase setup', () => {
+    const noSetup = interrupted({ setup: undefined, amount: { rule: 'remaining_period_budget', delta_atomic: '0' } })
+    expect(validateTask(noSetup, 'x.json')).toContain('renders {payment_id} but setup.prepare is not "interrupted-purchase"')
+    const wrongPrepare = interrupted({
+      setup: { kind: 'throwaway-identity', label: 'ended', budgetAtomic: '2000', fundingAtomic: '2000', prepare: 'ended-budget' },
+      category: 'budget-ended',
+    })
+    expect(validateTask(wrongPrepare, 'x.json')).toContain('renders {payment_id}')
+  })
+
+  it('the real interrupted-purchase task file passes that rule', async () => {
+    const { tasks, invalid } = await loadTasks(TASKS_DIR)
+    expect(invalid).toEqual([])
+    const task = tasks.find((t) => t.id === 'interrupted-purchase-resume')!
+    expect(task.instruction).toContain('{payment_id}')
+    expect(task.setup?.prepare).toBe('interrupted-purchase')
+  })
+})
+
 describe('the tiered run order (#3992 A3)', () => {
   const mk = (id: string, tier: number | undefined, amount: EvalTask['amount'], category: EvalTask['category'] = 'direct-payment') =>
     ({ id, title: id, category, instruction: 'x', requires: [], tier, amount, graders: [], expectTransfer: true, source: { kind: 'issue', ref: '1', note: 'n' } }) as EvalTask
@@ -530,6 +585,33 @@ describe('selectTaskSequence — tier order, limit BEFORE shuffle, shuffle withi
     const { tasks } = await loadTasks(TASKS_DIR)
     expect(selectTaskSequence(tasks, { taskIds: ['over-budget-x402-refused'] }).map((t) => t.id)).toEqual(['over-budget-x402-refused'])
     expect(selectTaskSequence(tasks, { taskIds: ['over-budget-x402-refused'] }).some((t) => t.tier === 2)).toBe(false)
+  })
+
+  // #4678 AC #1: "the `subset` keeps the same five tasks". The three new
+  // throwaway tasks sort FIRST alphabetically, so a plain slice would have
+  // swapped two shared-agent tasks for two that provision real testnet
+  // identities and spend USDC on every subset run.
+  it('#4678: the real --limit=5 subset is the SAME five shared-agent tasks as before', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const subset = selectTaskSequence(tasks, { limit: 5 })
+    expect(subset.map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+    ])
+    // No task with a per-trial setup can enter the slice implicitly.
+    expect(subset.every((t) => t.setup === undefined)).toBe(true)
+    // ...and the slice is still shuffle-stable.
+    const shuffled = selectTaskSequence(tasks, { limit: 5, shuffleSeed: 99 })
+    expect([...shuffled].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id)).toEqual([...subset].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id))
+  })
+
+  it('#4678: a setup task still runs when it is NAMED, and in a full (unlimited) run', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(selectTaskSequence(tasks, { taskIds: ['interrupted-purchase-resume'] }).map((t) => t.id)).toEqual(['interrupted-purchase-resume'])
+    expect(selectTaskSequence(tasks).some((t) => t.setup !== undefined)).toBe(true)
   })
 
   it('shuffleWithinTiers never moves a task across its tier boundary', () => {

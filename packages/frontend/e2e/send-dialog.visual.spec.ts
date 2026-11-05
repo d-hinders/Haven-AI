@@ -32,8 +32,10 @@
  * `delegation-send-modal`, the bordered box — not the `role="dialog"` wrapper,
  * which is `fixed inset-0` and would photograph the page behind it, #2903) and
  * the specimen card. The panel is opaque and the same size regardless of the
- * page behind it, so the dashboard's own state reaches a clip only through the
- * panel's rounded corners: a few pixels, inside `maxDiffPixels`.
+ * page behind it, but its clip is not all panel: the 14 px corners (168 px outside
+ * the arc) always show the backdrop over the dashboard, and where the clip rounds
+ * out to whole rows, so do its edge rows (#3872). So a change to the dashboard can
+ * move these baselines, by more than `maxDiffPixels` absorbs.
  *
  * The dialog carries no wall-clock text, but the page behind renders relative
  * timestamps, so the clock is frozen anyway — a moving backdrop must never be
@@ -181,6 +183,7 @@ test.describe('send dialog visual regression (#4641)', () => {
       // The state the capture is OF, asserted before the shutter.
       await expect(to).toHaveAttribute('aria-expanded', 'true')
       await expect(page.getByRole('option', { name: new RegExp(CONTACT_NAME) })).toBeVisible()
+      await expect(page.locator('[data-combobox-inline]')).toHaveCount(vp!.name === 'mobile' ? 1 : 0)
 
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(

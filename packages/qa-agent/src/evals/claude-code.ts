@@ -57,6 +57,12 @@ export interface ClaudeCodeSessionMeta {
   numTurns?: number
   /** The log file the session stream was captured to (kept for the pilot's evidence). */
   logPath?: string
+  /**
+   * The session id the stream reported (`system/init`'s `session_id`), so a
+   * later turn can RESUME this session (#4682). Absent when the stream carried
+   * no init line — a resumed turn cannot be invented from nothing.
+   */
+  sessionId?: string
   /** `claude`'s exit code when it was not 0 (e.g. the turn limit), with the session still graded. */
   exitCode?: number
 }
@@ -257,6 +263,67 @@ export class ClaudeCodeAdapter {
   }
 
   /**
+   * Run ONE turn and return its log plus the session it belongs to (#4682).
+   *
+   * `resumeSessionId` continues an earlier session: `claude -p` accepts
+   * `--resume <id>`, so the hand-off loop can perform a human step and then
+   * carry on in the SAME conversation instead of starting a second one that
+   * knows nothing about the first.
+   *
+   * Unlike {@link runTask} this does NOT throw on a non-zero exit: the loop
+   * needs the log to see what the agent asked for, and an infrastructure
+   * failure is reported on `exitCode` for the caller to judge.
+   */
+  async runTurn(
+    instruction: string,
+    opts: {
+      resumeSessionId?: string
+      logPath?: string
+      template?: string
+      trialEnv?: Record<string, string>
+      cold?: boolean
+      taskId?: string
+      trial?: number
+    } = {},
+  ): Promise<{ log: AgentRunLog; session: ClaudeCodeSessionMeta; exitCode: number | null }> {
+    const taskId = opts.taskId ?? 'handoff'
+    const trial = opts.trial ?? 1
+    const base = this.cfg.logPath ?? (await mkdtemp(join(tmpdir(), 'qa-eval-claude-')))
+    const logPath = opts.logPath ?? `${base}.${taskId}.trial${trial}.turn${Date.now()}.jsonl`
+    const built = buildClaudeCodeCommand(this.cfg, instruction, opts.template)
+    // The session id is a UUID the stream reported; quoting it keeps a
+    // malformed one from becoming a second shell word.
+    const command = opts.resumeSessionId
+      ? `${built} --resume ${shellQuote(opts.resumeSessionId)}`
+      : built
+    const { code, stderrTail } = await this.runCommand(
+      command,
+      logPath,
+      taskId,
+      trial,
+      opts.trialEnv,
+      opts.cold === true,
+    )
+    const raw = await readFile(logPath, 'utf8')
+    const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
+    const recorded: ClaudeCodeSessionMeta = {
+      ...session,
+      logPath,
+      ...(code !== null && code !== 0 ? { exitCode: code } : {}),
+    }
+    this.sessions.push({ ...recorded, taskId, trial })
+    if (code !== 0 && log.calls.length === 0) {
+      // No tool call and a non-zero exit is an infrastructure failure, not the
+      // agent's behaviour — surface claude's own reason on the log.
+      log.finalMessage =
+        `${log.finalMessage ?? ''}` +
+        (log.finalMessage ? '; ' : '') +
+        `claude exited ${code}: ${stderrTail.slice(-400) || '(no stderr)'}`
+    }
+    return { log, session: recorded, exitCode: code }
+  }
+
+  /**
    * Run one session, resolving only when the process has closed AND the
    * captured stdout has been flushed to `logPath`: the final `result` line
    * (the one carrying `total_cost_usd`) is the last thing written, so reading
@@ -338,6 +405,9 @@ export class ClaudeCodeAdapter {
 
 interface StreamLine {
   type?: string
+  subtype?: string
+  /** The `system/init` line's session id (#4682) — what `--resume` takes. */
+  session_id?: unknown
   message?: { model?: string; content?: Array<Record<string, unknown>> | string }
   // The result line:
   total_cost_usd?: unknown
@@ -386,6 +456,14 @@ export function parseClaudeCodeStreamLog(
       // The result line's `result` is the final user-facing text — the
       // "told the user" evidence, same role as Hermes' last text block.
       finalMessage = strField(entry.result) ?? finalMessage
+      continue
+    }
+    // `system/init` is the FIRST line of every session and carries the id a
+    // later turn resumes (#4682). Read it before the block walk: the init line
+    // has no `message`.
+    if (entry.type === 'system' && entry.subtype === 'init') {
+      const id = strField(entry.session_id)
+      if (id) session.sessionId = id
       continue
     }
     const content = entry.message?.content

@@ -399,6 +399,156 @@ environment and a spend, so this slice ships the **recorded-log red** instead:
 `graders.test.ts` proves discovery falls to band 1 on a log that requested
 `/for-agents.md` first, and band 0 when it never arrived. The live red is
 owner-armed with the rest of the lane.
+
+## The full-onboarding spike (#4682)
+
+A spike, not a product change: it decides whether the full-onboarding eval gets
+built. It proves one complete run — the agent starts cold, a **script plays the
+human** at each hand-off, and the run ends at a settled first payment — and it
+records what every attempt cost and what it left behind.
+
+### The stand-in human
+
+`packages/qa-agent/src/evals/stand-in-human.ts` is the script. It owns a
+throwaway wallet and plays the human's steps in the order the code requires:
+
+1. `POST /auth/signup` — the token carries no `purpose`, so `authMiddleware`
+   accepts it on `POST /auth/device/approve`, which refuses an `owner_cli`
+   token (`routes/auth.ts:321`);
+2. `POST /accounts/hybrid` with `owner_address` — the throwaway wallet is the
+   account's owner, exactly as `throwaway-identity.ts` does it;
+3. `POST /agent-connection-setups` — the setup the agent's `agents connect`
+   resolves and registers against;
+4. `POST /auth/device/approve` with the user code the agent handed over;
+5. `POST /agents/:id/delegations/build` → owner signature → `/activate` →
+   `POST /agent-connection-setups/:setupId/budget-approval`.
+
+Step 5 reads the **setup's own** `allowance_amount` and `reset_period_min` and
+builds the grant from those. The harness's `86_400` is not used: the backend
+compares the active delegation's `budget_atomic` and `period_seconds` against
+the setup row (`verifyDelegationSetupAuthority`), so a hard-coded period
+matches only a setup that happens to ask for it. `allowance_amount` is
+**already atomic** — treating it as a human decimal multiplies it by 1e6 and
+the backend refuses the grant with "budget does not match this setup".
+
+Every value the stand-in generates — owner key, signup password, signup token,
+device user code, approval authority — is appended to #4678's per-trial
+manifest **before** the request that uses it, so the transcript redactor can
+prove the boundary rather than assert it.
+
+### The hand-off loop
+
+`packages/qa-agent/src/evals/handoff-loop.ts` is the loop `claude-code.ts`
+cannot express today: run a turn, detect the hand-off the agent asked for
+(a `/device?code=…` link, an "approve the code X" sentence, or an
+`/agents?setup=…` link), let the stand-in perform it, then **resume the same
+session**. `ClaudeCodeAdapter.runTurn` records the stream's `session_id` from
+the `system/init` line and appends `--resume <id>` on the next turn.
+
+The resume message is written by the loop, never by the stand-in, and
+`assertNoStandInValues` refuses to send one that carries an inventory value —
+a runtime guard, not only a test.
+
+`run_command` gains `agents connect` behind `QA_EVAL_COMMAND_ALLOW_CONNECT=1`,
+set by the loop on the post-login turns only. The cold profile's default
+allowlist still refuses it, and every other `agents` action stays refused.
+
+### The recorded runs
+
+`packages/qa-agent/src/evals/spike-full-onboarding.ts` runs N attempts against
+dev. Each attempt is the whole chain: stand-in signup → hybrid account →
+connection setup → the **real connector CLI** registers the agent
+(`agents connect`, the step #4680 defers) → the stand-in approves the budget →
+the agent's first payment settles on Base Sepolia → teardown.
+
+The connector is the "agent" here because it IS the `agents connect` step: it
+resolves the setup, mints the delegate key, signs the challenge, registers the
+agent and writes the runtime config. What the runner does **not** do is drive
+an LLM through the hand-offs — see *What could not be run* below.
+
+Run it with:
+
+```bash
+QA_HAVEN_API_URL=… QA_EVAL_AGENT_API_KEY=… QA_EVAL_DELEGATE_KEY=… \
+QA_EVAL_AGENT_ACCOUNT=… QA_EVAL_RECIPIENT=… QA_EVAL_CONNECT_CLI=… \
+npm run evals:spike -w packages/qa-agent -- --attempts=5 --out=spike-evidence.json
+```
+
+### Evidence, 2026-11-05
+
+All attempts ran against `https://havenbackend-dev-8b95.up.railway.app`
+(dev), Base Sepolia, from a dev QA agent with a live 3.00 USDC budget — never
+`QA_DELEGATION_*`. Funding was 0.1 USDC per attempt; the budget the setup asked
+for was 0.1 USDC per 1440 minutes.
+
+| # | settled | attribution | failed step | spent (atomic) | returned | swept | revoke | cleanup warning |
+|---|---|---|---|---|---|---|---|---|
+| 1 | no | script | setup creation | 0 | 0 | 0 | ok | — |
+| 2 | no | script | `agents connect` (no `--api`) | 0 | 0 | 0 | ok | — |
+| 3 | no | script | connector outcome misread | 0 | 0 | 0 | ok | — |
+| 4 | no | script | budget approval (atomic vs human) | 0 | 0 | 0 | ok | — |
+| 5 | no | haven | funding (eval agent's period budget exhausted) | 0 | 0 | 0 | ok | — |
+| 6 | no | script | settlement status misread (`confirmed`) | 100000 | 0 | 0 | ok | — |
+| 7 | yes | — | — | 100000 | 0 | 0 | ok | — |
+| 8 | yes | — | — | 100000 | 0 | 0 | ok | — |
+| 9 | yes | — | — | 100000 | 0 | 0 | ok | — |
+| 10 | yes | — | — | 100000 | 0 | 0 | ok | — |
+| 11 | yes | — | — | 100000 | 0 | 0 | ok | — |
+
+Attempts 1–6 are the first recorded runs; each exposed a real defect, and the
+attribution says whose it was. Attempts 7–11 are five clean runs, all settled:
+
+| # | payment id | tx |
+|---|---|---|
+| 7 | `aff2afa3-1145-4a0d-995c-4d4ed67a5dc7` | `0x12e33f9cc2144d49ad98081ec67507ca57d5a37cf8be82c496a2569ecf74c2e5` |
+| 8 | `76aa27a0-02e1-40dc-99df-86a801d58a6a` | `0x4370273411262dff6e33fb555668703fa6c2ed41843bfd330edcd5ba4e7a771d` |
+| 9 | `0e838e66-cbd0-4703-9b4e-22d51b23d149` | `0x556fa086663ba68dbd1e68c99cc77f24f585457d36dab195d3fddc4b8918921d` |
+| 10 | `09f71edf-26eb-423f-a82d-6e9e1b84f827` | `0xe133811472b252d8d37b06345d08cf00bbf3258c80fa5fbe502cbe14097cfb69` |
+| 11 | `82c8e6d4-bf1d-49d4-9159-76ddda5dc92d` | `0x08bdbd4c626768cf8d1bd61ef37f8078bebe6c49be3fb0e7573d3993db7e604b` |
+
+All five receipts read `status: 0x1` on Base Sepolia (blocks 54920697,
+54920784, 54920870, 54920958, 54921044), sent to the EntryPoint
+(`0x0000000071727de22e5e9d8baf0edac6f37da032`).
+
+**Amounts.** Each settled attempt moved 0.1 USDC out of the funding agent's
+period budget (the funding payment) and 0.1 USDC from the throwaway account to
+the recipient. The throwaway account ends at zero, so `returned` is 0 — there
+was nothing left to return. Nothing was stranded on a delegate EOA, so `swept`
+is 0. Every attempt revoked its agent (`revoke: ok`) and produced no cleanup
+warning.
+
+**Plan usage.** The runs used no Claude Code subscription: the connector is a
+CLI, not a model. Plan usage was **0**. The cost is testnet USDC only: 0.5 USDC
+of the funding agent's period budget across the five settled attempts (the
+returned USDC does not restore period budget).
+
+### What could not be run
+
+The **claude-code lane** could not be run on the build machine: `claude` is
+installed but has no subscription token (`CLAUDE_CODE_OAUTH_TOKEN` lives only
+in the protected `agent-evals` GitHub environment), and the local
+Anthropic-compatible proxy was unreachable. So the recorded runs above drive
+the chain with the real connector CLI, not with an LLM performing the
+hand-offs.
+
+What that leaves unproven, and what the full-onboarding eval would have to
+prove:
+
+- an LLM actually **detecting** the hand-off in its own tool stream and
+  **resuming** after the human acts — the loop and the `--resume` plumbing are
+  unit-tested against recorded stream fixtures, but no live model ran them;
+- the **tool-profile change partway through the run**: `agents connect` is
+  enabled per turn by `QA_EVAL_COMMAND_ALLOW_CONNECT`, and no live turn
+  exercised the switch;
+- `--strict-mcp-config` on resume: the connector writes the runtime's MCP
+  config, and a resumed `claude -p` with `--strict-mcp-config` would ignore
+  servers it did not load at start. The spike's answer is to pass the trial's
+  own `--mcp-config` on every turn, which the loop supports but no live run
+  confirmed.
+
+The first recorded run of the claude lane is therefore still owed, and it needs
+the owner-approved `agent-evals` environment.
+
 ## Receipts and task budgets (#4677)
 
 Two tasks cover the agent flows that retiring the exploratory `/qa-dev`

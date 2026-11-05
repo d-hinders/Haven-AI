@@ -649,6 +649,12 @@ async function main() {
     console.log(`::error::${preflight}`)
     await writeFile(resolve(`${outPath}.summary.md`), `## Agent evals: not run\n\n${preflight}\n`)
     await writeFile(resolve(`${outPath}.summary.txt`), `Agent evals: not run. ${preflight}\n`)
+    // Nothing was created, so the honest inventory is `setupTasks: 0`. The
+    // manifest was created above with the SELECTED setup-task count; left
+    // that way, the redact step (`if: always()`) would refuse a header that
+    // declares setup tasks and records no secrets — a cascade on an
+    // already-red job, not a second failure.
+    if (manifestPath) await SecretManifest.create(manifestPath, { setupTasks: 0 })
     process.exit(3)
   }
 

@@ -64,6 +64,10 @@ describe('createCleanupRegistry — incremental, ordered, never throws', () => {
           calls.push('return')
           return {}
         },
+        listOpenTaskBudgets: async () => {
+          calls.push('list-budgets')
+          return []
+        },
         closeTaskBudget: async (id) => {
           calls.push(`close:${id}`)
           return null
@@ -77,7 +81,7 @@ describe('createCleanupRegistry — incremental, ordered, never throws', () => {
     }
   }
 
-  it('runs sweep → return → close → revoke, and only for what was registered', async () => {
+  it('runs sweep → return → discover → close → revoke, and only for what was registered', async () => {
     const { steps: s, calls } = steps()
     const registry = createCleanupRegistry(s)
     registry.register('account', THROWAWAY_ACCOUNT)
@@ -86,8 +90,54 @@ describe('createCleanupRegistry — incremental, ordered, never throws', () => {
     registry.register('task-budget', 'tb-1')
 
     const result = await registry.run()
-    expect(calls).toEqual(['sweep', 'return', 'close:tb-1', 'revoke'])
+    expect(calls).toEqual(['sweep', 'return', 'list-budgets', 'close:tb-1', 'revoke'])
     expect(result).toEqual({ ok: true, warnings: [] })
+  })
+
+  it('closes a budget the trial opened and never registered, discovered with its key', async () => {
+    // The trial's agent opens budgets through the hosted MCP tools, so the
+    // registry never sees them. Discovery is the only path that closes them.
+    const { steps: s, calls } = steps({
+      listOpenTaskBudgets: async () => {
+        calls.push('list-budgets')
+        return ['tb-left-open']
+      },
+    })
+    const registry = createCleanupRegistry(s)
+    registry.register('agent', 'agent-1')
+
+    const result = await registry.run()
+    expect(calls).toEqual(['list-budgets', 'close:tb-left-open', 'revoke'])
+    expect(result).toEqual({ ok: true, warnings: [] })
+  })
+
+  it('closes a discovered budget BEFORE the revoke, which would invalidate the key', async () => {
+    const { steps: s, calls } = steps({
+      listOpenTaskBudgets: async () => {
+        calls.push('list-budgets')
+        return ['tb-left-open']
+      },
+    })
+    const registry = createCleanupRegistry(s)
+    registry.register('agent', 'agent-1')
+    await registry.run()
+    expect(calls.indexOf('close:tb-left-open')).toBeLessThan(calls.indexOf('revoke'))
+  })
+
+  it('a failed discovery is a warning, and the registered budgets are still closed', async () => {
+    const { steps: s, calls } = steps({
+      listOpenTaskBudgets: async () => {
+        throw new Error('HTTP 401 listing the trial\'s open task budgets')
+      },
+    })
+    const registry = createCleanupRegistry(s)
+    registry.register('agent', 'agent-1')
+    registry.register('task-budget', 'tb-1')
+
+    const result = await registry.run()
+    expect(calls).toEqual(['close:tb-1', 'revoke'])
+    expect(result.ok).toBe(false)
+    expect(result.warnings).toEqual(["listing open task budgets threw: HTTP 401 listing the trial's open task budgets"])
   })
 
   it('skips a step whose resource was never created', async () => {
@@ -95,7 +145,9 @@ describe('createCleanupRegistry — incremental, ordered, never throws', () => {
     const registry = createCleanupRegistry(s)
     registry.register('agent', 'agent-1')
     await registry.run()
-    expect(calls).toEqual(['revoke'])
+    // Discovery always runs: the trial's agent can open a budget without the
+    // registry knowing, so "nothing registered" is not "nothing to close".
+    expect(calls).toEqual(['list-budgets', 'revoke'])
   })
 
   it('a throwing step becomes a warning, never an exception', async () => {
@@ -122,7 +174,7 @@ describe('createCleanupRegistry — incremental, ordered, never throws', () => {
     registry.register('agent', 'agent-1')
     await registry.run()
     await registry.run()
-    expect(calls).toEqual(['revoke'])
+    expect(calls).toEqual(['list-budgets', 'revoke'])
   })
 
   it('registers a resource once even when the same id is registered twice', () => {
@@ -143,6 +195,8 @@ interface FakeOpts {
   endedAfterPolls?: number
   /** The throwaway account's USDC balance for the return step. */
   accountBalance?: bigint
+  /** The task budgets the trial's agent left open (GET /task-budgets). */
+  openTaskBudgets?: Array<{ id: string }>
 }
 
 /** A scripted API for the whole throwaway lifecycle; records every call. */
@@ -202,6 +256,7 @@ function installFake(opts: FakeOpts = {}) {
         return json({ budget_ended_at: ended ? '2026-11-05T10:00:00.000Z' : null, allowances: ended ? [] : [{}] })
       }
       if (path.endsWith('/revoke')) return json({ ok: true })
+      if (path === '/task-budgets?status=open') return json({ task_budgets: opts.openTaskBudgets ?? [] })
       if (path === '/machine-payments/sweep/prepare') return json({ nothing_stranded: true })
       if (path.includes('/transfers/prepare')) {
         return json({
@@ -460,6 +515,83 @@ describe('createThrowawaySetup — teardown after a setup that fails partway', (
     expect(teardown.ok).toBe(false)
     expect(teardown.unreturnedAtomic).toBe('1500')
     expect(teardown.warnings.join(' ')).toContain('failed at submit')
+  })
+})
+
+describe('createThrowawaySetup — the task budget a trial leaves open', () => {
+  // #4677's acceptance criterion: a failed trial cannot poison the next one.
+  // Open task budgets reserve the parent's remainder, so a child left open
+  // makes later opens refuse. The trial's agent opens budgets through the
+  // hosted MCP tools, so the teardown has to DISCOVER them with its key.
+
+  it('closes a budget the trial left open, with the trial key, before the revoke', async () => {
+    const { calls } = installFake({ openTaskBudgets: [{ id: 'tb-left-open' }] })
+    const d = await deps()
+    const prepared = await createThrowawaySetup(d).prepare({ task: task(), trial: 1, resolved: resolved(task()) })
+    const teardown = await prepared.teardown()
+
+    expect(teardown).toEqual({ ok: true, warnings: [] })
+    const list = calls.find((c) => c.path === '/task-budgets?status=open')
+    expect(list?.method).toBe('GET')
+    // The trial's own key: the eval key cannot see (or close) its budgets.
+    expect(list?.auth).toBe(`Bearer ${prepared.resolved?.trialApiKey}`)
+    expect(list?.auth).not.toBe(`Bearer ${d.evalAgentApiKey}`)
+    const close = calls.findIndex((c) => c.method === 'POST' && c.path === '/task-budgets/tb-left-open/close')
+    expect(close).toBeGreaterThanOrEqual(0)
+    expect(close).toBeLessThan(calls.findIndex((c) => c.path === '/agents/agent-1/revoke'))
+  })
+
+  it('a trial that FAILED between opening a budget and closing it still closes it', async () => {
+    // The trial's agent opened a budget, then the trial failed before it
+    // closed it. The setup failure still carries the teardown.
+    const { calls } = installFake({ openTaskBudgets: [{ id: 'tb-left-open' }] })
+    const d = await deps({ recipient: undefined })
+    const err = await createThrowawaySetup(d)
+      .prepare({ task: task(), trial: 1, resolved: resolved(task()) })
+      .catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(TrialSetupFailure)
+    const teardown = await (err as TrialSetupFailure).teardown()
+    expect(teardown.ok).toBe(true)
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/task-budgets/tb-left-open/close')).toBe(true)
+  })
+
+  it('a failed close is a warning on the record and does not change the verdict', async () => {
+    const { calls } = installFake({
+      openTaskBudgets: [{ id: 'tb-left-open' }],
+      failAt: (p) => p === '/task-budgets/tb-left-open/close',
+    })
+    const d = await deps()
+    const prepared = await createThrowawaySetup(d).prepare({ task: task(), trial: 1, resolved: resolved(task()) })
+    const teardown = await prepared.teardown()
+
+    expect(teardown.ok).toBe(false)
+    expect(teardown.warnings.join(' ')).toContain('task budget tb-left-open was NOT closed (HTTP 500)')
+    // The teardown continues past a failed close: the revoke still runs.
+    expect(calls.some((c) => c.path === '/agents/agent-1/revoke')).toBe(true)
+  })
+
+  it('skips the discovery for the revoked-agent trial — its key is dead and it funds nothing', async () => {
+    const { calls } = installFake({ openTaskBudgets: [{ id: 'tb-left-open' }] })
+    const revoked = task({
+      id: 'agent-revoked-no-retry',
+      category: 'agent-revoked',
+      instruction: 'Pay 0.001 USDC to {recipient}.',
+      graders: [{ name: 'no_payment_retry_after_refusal', options: { errorCode: 'agent_identity_unverified' } }],
+      setup: {
+        kind: 'throwaway-identity',
+        label: 'agent-revoked',
+        budgetAtomic: '2000',
+        fundingAtomic: '0',
+        prepare: 'revoked-agent',
+      },
+    })
+    const d = await deps()
+    const prepared = await createThrowawaySetup(d).prepare({ task: revoked, trial: 1, resolved: resolved(revoked) })
+    const teardown = await prepared.teardown()
+
+    expect(teardown).toEqual({ ok: true, warnings: [] })
+    expect(calls.some((c) => c.path === '/task-budgets?status=open')).toBe(false)
   })
 })
 

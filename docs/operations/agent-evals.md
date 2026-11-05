@@ -274,12 +274,17 @@ partway:**
    `QA_DELEGATION_*`** — a revoked key gets a 401, so this uses the
    owner-signed `POST /accounts/hybrid/:address/transfers/prepare` then
    `/submit`;
-3. close any task budget left open (before the revoke: the close route is
-   agent-authenticated);
+3. close any task budget left open — the trial's agent opens budgets through
+   the hosted MCP tools, so nothing registers them: the teardown **reads the
+   agent's own open-budget list** (`GET /task-budgets?status=open`, with the
+   trial's key) and closes every id it returns (`POST /task-budgets/:id/close`).
+   Before the revoke, because both routes are agent-authenticated;
 4. revoke the agent.
 
 Cleanup registers incrementally as each resource is created, so a crash after
-any phase still undoes what exists. A failed teardown is a **warning**, never
+any phase still undoes what exists. The task budget is the one resource the
+teardown cannot register — the agent opens it, not the harness — so step 3
+discovers it instead. A failed teardown is a **warning**, never
 a change to the trial's verdict — the same rule as `withThrowawayIdentity`'s
 `cleanupWarning`. The teardown's result rides the report per trial
 (`TrialRecord.teardown`), including any USDC it could not return

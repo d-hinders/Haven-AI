@@ -24,8 +24,11 @@
  *      EVAL ACCOUNT, never `QA_DELEGATION_*` (`agent-evals.yml`). A revoked
  *      key gets a 401, so this uses the OWNER-signed
  *      `POST /accounts/hybrid/:address/transfers/prepare` then `/submit`;
- *   3. close any task budget left open — BEFORE the revoke, because the close
- *      route is agent-authenticated and the revoke invalidates the key;
+ *   3. close any task budget left open — the trial's agent opens budgets
+ *      through the hosted MCP tools, so nothing registers them: the teardown
+ *      READS the agent's own open-budget list with the trial's key and closes
+ *      every id it finds. BEFORE the revoke, because both the list and the
+ *      close route are agent-authenticated and the revoke invalidates the key;
  *   4. revoke the agent.
  *
  * A failed teardown is a WARNING, never a change to the trial's verdict — the
@@ -71,6 +74,14 @@ export interface CleanupSteps {
   sweepDelegateEoa(): Promise<string | null>
   /** Owner-signed return of the account's USDC to the eval account. */
   returnAccountUsdc(): Promise<{ warning?: string; unreturnedAtomic?: string }>
+  /**
+   * The ids of the task budgets the trial left OPEN, read with the trial's
+   * own agent key (`GET /task-budgets`, which defaults to open and not
+   * expired). The trial's agent opens budgets through the hosted MCP tools,
+   * so the registry cannot know them — the teardown has to ask. Throwing is
+   * a warning, never a verdict change.
+   */
+  listOpenTaskBudgets(): Promise<string[]>
   /** Close one task budget left open. Warning or null. */
   closeTaskBudget(id: string): Promise<string | null>
   /** Revoke the trial's agent(s). Warning or null. */
@@ -130,8 +141,17 @@ export function createCleanupRegistry(steps: CleanupSteps): CleanupRegistry {
       }
     }
     // 3. close any task budget left open — before the revoke, which would
-    //    invalidate the agent key the close route needs.
-    for (const id of registered('task-budget')) {
+    //    invalidate the agent key the close route needs. The trial's agent
+    //    opens budgets through the hosted MCP tools, so nothing registers
+    //    them: DISCOVER the agent's open budgets with its own key, then close
+    //    every id found plus anything registered.
+    const budgetIds = new Set(registered('task-budget'))
+    try {
+      for (const id of await steps.listOpenTaskBudgets()) budgetIds.add(id)
+    } catch (err) {
+      warnings.push(`listing open task budgets threw: ${(err as Error)?.message ?? String(err)}`)
+    }
+    for (const id of budgetIds) {
       const warning = await attempt(`close task budget ${id}`, () => steps.closeTaskBudget(id))
       if (warning) warnings.push(warning)
     }
@@ -595,6 +615,25 @@ export function throwawayCleanupSteps(
         }
       }
       return {}
+    },
+
+    async listOpenTaskBudgets() {
+      // The revoked-agent task revokes BEFORE launch: its key is dead, the
+      // list would 401, and it funds nothing — the same rule as the sweep and
+      // the revoke.
+      if (opts.alreadyRevoked) return []
+      // `GET /task-budgets` is agent-authenticated and defaults to open, not
+      // expired; `status=open` is passed explicitly so a change to the
+      // default cannot silently widen this to closed rows.
+      const res = await fetch(`${deps.apiUrl}/task-budgets?status=open`, {
+        headers: { authorization: `Bearer ${identity.agentApiKey}` },
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status} listing the trial's open task budgets`)
+      const body = (await res.json().catch(() => ({}))) as { task_budgets?: Array<{ id?: unknown }> }
+      const rows = Array.isArray(body.task_budgets) ? body.task_budgets : []
+      return rows
+        .map((row) => row.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
     },
 
     async closeTaskBudget(id) {

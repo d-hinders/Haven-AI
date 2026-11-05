@@ -197,6 +197,8 @@ interface FakeOpts {
   accountBalance?: bigint
   /** The task budgets the trial's agent left open (GET /task-budgets). */
   openTaskBudgets?: Array<{ id: string }>
+  /** The status `GET /task-budgets/:id` answers (#4677). Default `closed`. */
+  taskBudgetStatus?: string
 }
 
 /** A scripted API for the whole throwaway lifecycle; records every call. */
@@ -257,6 +259,10 @@ function installFake(opts: FakeOpts = {}) {
       }
       if (path.endsWith('/revoke')) return json({ ok: true })
       if (path === '/task-budgets?status=open') return json({ task_budgets: opts.openTaskBudgets ?? [] })
+      // #4677: the lifecycle grader's FINAL-state read, with the trial's key.
+      if (/^\/task-budgets\/[^/]+$/.test(path)) {
+        return json({ task_budget: { id: path.split('/').pop(), status: opts.taskBudgetStatus ?? 'closed' } })
+      }
       if (path === '/machine-payments/sweep/prepare') return json({ nothing_stranded: true })
       if (path.includes('/transfers/prepare')) {
         return json({
@@ -412,6 +418,21 @@ describe('createThrowawaySetup — the prepared state', () => {
     expect(read?.auth).not.toBe(`Bearer ${d.evalAgentApiKey}`)
   })
 
+  // #4677: the task-budget lifecycle's FINAL state must be read with the
+  // TRIAL's key — the eval key cannot see a budget the throwaway agent opened.
+  it('the trial grader context reads GET /task-budgets/:id with the TRIAL key', async () => {
+    const { calls } = installFake({ taskBudgetStatus: 'closed' })
+    const d = await deps()
+    const prepared = await createThrowawaySetup(d).prepare({ task: task(), trial: 1, resolved: resolved(task()) })
+    const ctx = prepared.graderContext
+    expect(ctx?.probeTaskBudget).toBeDefined()
+    expect(await ctx!.probeTaskBudget!('tb-1')).toEqual({ ok: true, status: 'closed' })
+
+    const read = calls.find((c) => c.path === '/task-budgets/tb-1')
+    expect(read?.auth).toBe('Bearer sk_agent_trial_key_0123456789abcdef')
+    expect(read?.auth).not.toBe(`Bearer ${d.evalAgentApiKey}`)
+  })
+
   it('funds the throwaway account with EXACTLY fundingAtomic — the only eval-budget spend', async () => {
     const bodies: Array<{ path: string; body: Record<string, unknown> }> = []
     vi.stubGlobal(
@@ -554,6 +575,30 @@ describe('createThrowawaySetup — the task budget a trial leaves open', () => {
     const teardown = await (err as TrialSetupFailure).teardown()
     expect(teardown.ok).toBe(true)
     expect(calls.some((c) => c.method === 'POST' && c.path === '/task-budgets/tb-left-open/close')).toBe(true)
+  })
+
+  // #4677: the REAL task-budget task, through the real resolver. The trial
+  // opens a budget and fails before closing it; the teardown is what closes
+  // it, so the next trial's open is not refused by the reserved remainder.
+  it('the real task-budget task: a budget the trial left open is closed by the teardown', async () => {
+    const { loadTasks } = await import('./tasks.js')
+    const { tasks } = await loadTasks()
+    const budgetTask = tasks.find((t) => t.id === 'task-budget-lifecycle')
+    if (!budgetTask) throw new Error('task-budget-lifecycle not found')
+    const { calls } = installFake({ openTaskBudgets: [{ id: 'tb-left-open' }] })
+    const d = await deps()
+    const prepared = await createThrowawaySetup(d).prepare({
+      task: budgetTask,
+      trial: 1,
+      resolved: await resolvedViaResolveTask(budgetTask),
+    })
+    const teardown = await prepared.teardown()
+
+    expect(teardown.ok).toBe(true)
+    const close = calls.findIndex((c) => c.method === 'POST' && c.path === '/task-budgets/tb-left-open/close')
+    expect(close).toBeGreaterThanOrEqual(0)
+    // Before the revoke, which would invalidate the key the close needs.
+    expect(close).toBeLessThan(calls.findIndex((c) => c.path === '/agents/agent-1/revoke'))
   })
 
   it('a failed close is a warning on the record and does not change the verdict', async () => {

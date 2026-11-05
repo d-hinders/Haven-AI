@@ -1,0 +1,19 @@
+{
+  "id": "receipt-verify-direct-payment",
+  "title": "Fetch and verify the signed receipt of a direct payment",
+  "category": "direct-payment",
+  "tier": 1,
+  "instruction": "Pay {amount} USDC to {recipient} on Base Sepolia using the DIRECT payment tool (haven_pay), not an x402 purchase. Wait until the payment reads settled (haven_get_payment_status) before fetching anything. Then fetch its signed receipt with haven_get_receipt and verify that bundle with haven_verify_receipt. Report exactly what the verification says about the receipt.",
+  "requires": ["delegation-agent-open-budget", "funded-period-budget", "payment-recipient"],
+  "amount": { "rule": "fraction_of_remaining", "fraction": "1/4" },
+  "graders": [
+    { "name": "transfer_settled", "options": {} },
+    { "name": "receipt_verified_offline", "options": {} }
+  ],
+  "expectTransfer": true,
+  "source": {
+    "kind": "issue",
+    "ref": "4677",
+    "note": "The /qa-dev step 9 receipt goal, made deterministic: a payment pinned to the DIRECT path always answers not_verifiable_offline (a direct bundle carries authorization.signatureScheme eip712_userop and the signed user operation is not in the bundle), while an erc7710 bundle verifies. The agent must fetch the bundle only after settlement and report the offline verdict as 'cannot be verified offline', never as tampering or success."
+  }
+}

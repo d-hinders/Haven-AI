@@ -146,6 +146,27 @@ describe('Combobox — what opens the list', () => {
     expect(screen.getByRole('listbox')).toBeInTheDocument()
   })
 
+  it('stays open on a second click, which places the caret in the query', () => {
+    render(<Harness />)
+    fireEvent.click(field())
+    fireEvent.click(field())
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+  })
+
+  it('Enter on a closed list does not pick a lone match it cannot show', () => {
+    const onPick = vi.fn()
+    const lone: ComboboxGroup[] = [
+      { id: 'new', label: 'New address', options: [{ id: 'new:1', title: 'Send to 0xdead' }] },
+    ]
+    render(<Harness groups={lone} onPick={onPick} />)
+    fireEvent.change(field(), { target: { value: '0xdead' } })
+    fireEvent.keyDown(field(), { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+
+    fireEvent.keyDown(field(), { key: 'Enter' })
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
   it('reopens on a click after Escape closed it, with focus never having left', () => {
     render(<Harness />)
     focusField()

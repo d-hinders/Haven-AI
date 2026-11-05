@@ -3710,7 +3710,7 @@ export default function DesignSystemPage() {
               address prefix; a pasted address collapses the list to one entry.
             </p>
             <div className="mt-4">
-              <DsRecipientSpecimen caption="Empty focus — every group" />
+              <DsRecipientSpecimen caption="Empty query — every group" />
             </div>
           </Card>
         </div>

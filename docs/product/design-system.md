@@ -3520,8 +3520,10 @@ option, scrolling it into view (`block: 'nearest'`). Enter picks the active
 option. A query that leaves exactly one option makes that option active, so
 pasting an address and pressing Enter picks it; an empty query never activates
 anything, so opening the list cannot arm Enter, and a group still loading or
-failed keeps a lone option from counting as alone. Tab closes the list and moves on
-**without picking**.
+failed keeps a lone option from counting as alone. Enter only picks from an open
+list: returning to a field that holds a query leaves the list closed, and a click
+or an arrow key opens it again. Tab closes the list and moves on **without
+picking**.
 
 **Escape is a three-stage state machine**, and the stages exist because
 `ui/Modal.tsx` closes the dialog on any Escape that reaches its `document`
@@ -3610,10 +3612,10 @@ address collapses the list to its entry ("Saved contact · 0x2c9D…77ab" or
 
 **The chip.** A chosen recipient renders as Monogram, name, kind and short
 address, with a "Change recipient" icon button that clears it (`onChange(null)`)
-and returns focus to the input, with the list closed. A cleared chip stays cleared until the preset
-address changes, including when contacts finish loading afterwards and after
-Review → Back. A new address renders with a neutral wallet glyph instead of a
-Monogram.
+and returns focus to the input, with the list closed. A cleared chip stays
+cleared until the preset address changes, including when contacts finish loading
+afterwards and after Review → Back. A new address renders with a neutral wallet
+glyph instead of a Monogram.
 
 **Contacts loading or failing.** While `contactsLoading`, the Contacts group
 shows a one-line skeleton. On `contactsError`, the group shows "Saved

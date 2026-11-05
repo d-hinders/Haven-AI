@@ -352,7 +352,8 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    account. The screen names it once — "From <account name>" — and shows no
    balance. **To** is `RecipientField`: your other Haven accounts on this chain,
    then your saved contacts, then a pasted address. Focus starts here with the
-   list closed, so the whole form shows; a click or typing opens it. **Amount** is an `Input`
+   list closed, so the whole form shows; a click, typing or an arrow key opens
+   it. **Amount** is an `Input`
    with the token symbol as its suffix; a token `Select` appears only when the
    chain lists more than one sendable token. The line "No network fee. You
    review the payment before you approve it." closes the screen. Footer:

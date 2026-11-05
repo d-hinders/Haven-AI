@@ -42,7 +42,8 @@ import type { Locator } from '@playwright/test'
  *
  *   - `ui/Modal`: the `role="dialog"` wrapper above the panel.
  *   - `ReceiveDialog`, `ui/SidePanel`: the panel carries `role="dialog"` itself, so
- *     the overlay is its parent, the element that also holds `.v2-modal-backdrop`.
+ *     the overlay is its parent, the `fixed` element that also holds
+ *     `.v2-modal-backdrop`.
  *
  * What still reaches the edge pixels is `<body>`'s background (the page's base
  * surface token) and the backdrop's own colour. Both are a change to every modal,
@@ -55,8 +56,9 @@ import type { Locator } from '@playwright/test'
  *
  * It throws rather than hiding nothing, or the wrong thing, on a dialog of another
  * shape: an overlay that is a direct child of `<body>` would hide nothing and leave
- * the leak in place, and a `role="dialog"` panel with no backdrop beside it has no
- * overlay to keep. An assertion failing here aborts `update-visual-baselines.yml`
+ * the leak in place, and a `role="dialog"` panel with no backdrop beside it in a fixed
+ * parent has no overlay to keep. `MoreSheet` is that case: its scrim sits directly in
+ * the app frame, and taking that as the overlay would keep the whole page painted. An assertion failing here aborts `update-visual-baselines.yml`
  * before its commit step (#3441), which is the point.
  *
  * Call it last, right before the shutter: it edits the page.
@@ -71,10 +73,14 @@ export async function hidePageBehindModal(panel: Locator): Promise<void> {
     const parent = element.parentElement
     const overlay =
       parent?.closest('[role="dialog"]') ??
-      (element.matches('[role="dialog"]') && parent?.querySelector(':scope > .v2-modal-backdrop') ? parent : null)
+      (element.matches('[role="dialog"]') &&
+      parent?.querySelector(':scope > .v2-modal-backdrop') &&
+      getComputedStyle(parent).position === 'fixed'
+        ? parent
+        : null)
     if (!overlay) {
       throw new Error(
-        `hidePageBehindModal: ${label} has no role="dialog" wrapper above it, and is not a role="dialog" panel beside its own backdrop`,
+        `hidePageBehindModal: ${label} has no role="dialog" wrapper above it, and is not a role="dialog" panel beside its own backdrop in a fixed overlay`,
       )
     }
 

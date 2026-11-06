@@ -2000,8 +2000,16 @@ describe('machine payment routes', () => {
       // MUTATION TARGET: drop the `.catch(() => {})` after the Igdrasil call
       // in modules/mpp/merchant-receipt.ts and the rejection goes unhandled
       // (the listener below records it); `await` it instead and the capture 500s.
+      // A plain function, not `vi.fn`: a spy attaches its own `.then` to the
+      // promise it returns (to record the settled result), which would mark
+      // the rejection handled and hide a missing `.catch`.
       const outage = new Error('igdrasil outage')
-      reportingMocks.lateAttachIgdrasilMerchantReceipt.mockRejectedValue(outage)
+      const igdrasilCalls: unknown[][] = []
+      const spy = reportingMocks.lateAttachIgdrasilMerchantReceipt
+      reportingMocks.lateAttachIgdrasilMerchantReceipt = ((...a: unknown[]) => {
+        igdrasilCalls.push(a)
+        return Promise.reject(outage)
+      }) as unknown as typeof spy
       const unhandled: unknown[] = []
       const onUnhandled = (reason: unknown) => {
         if (reason === outage) unhandled.push(reason)
@@ -2013,25 +2021,29 @@ describe('machine payment routes', () => {
         [/INSERT INTO merchant_receipts/, () => ({ rows: [{ evidence_id: 'evidence-1' }] })],
       )
 
-      const response = await app.inject({
-        method: 'POST',
-        url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
-        headers: { authorization: 'Bearer sk_agent_test' },
-        payload: { json: { fakturanummer: 'FAK-3' } },
-      })
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+          headers: { authorization: 'Bearer sk_agent_test' },
+          payload: { json: { fakturanummer: 'FAK-3' } },
+        })
 
-      expect(response.statusCode).toBe(201)
-      expect(response.json()).toEqual({ stored: true })
-      const args = [AGENT.user_id, PAYMENT_ID, { url: null, inlineJson: { fakturanummer: 'FAK-3' } }]
-      await vi.waitFor(() => {
-        expect(reportingMocks.lateAttachIgdrasilMerchantReceipt).toHaveBeenCalledWith(...args)
-        expect(reportingMocks.lateAttachMerchantReceipt).toHaveBeenCalledWith(...args)
-        expect(reportingMocks.lateAttachAccountedMerchantReceipt).toHaveBeenCalledWith(...args)
-      })
-      // Give an unhandled rejection the turn it needs to be reported, then check none was.
-      await new Promise((r) => setTimeout(r, 20))
-      process.off('unhandledRejection', onUnhandled)
-      expect(unhandled).toEqual([])
+        expect(response.statusCode).toBe(201)
+        expect(response.json()).toEqual({ stored: true })
+        const args = [AGENT.user_id, PAYMENT_ID, { url: null, inlineJson: { fakturanummer: 'FAK-3' } }]
+        expect(igdrasilCalls).toEqual([args])
+        await vi.waitFor(() => {
+          expect(reportingMocks.lateAttachMerchantReceipt).toHaveBeenCalledWith(...args)
+          expect(reportingMocks.lateAttachAccountedMerchantReceipt).toHaveBeenCalledWith(...args)
+        })
+        // Give an unhandled rejection the turn it needs to be reported, then check none was.
+        await new Promise((r) => setTimeout(r, 20))
+        expect(unhandled).toEqual([])
+      } finally {
+        process.off('unhandledRejection', onUnhandled)
+        reportingMocks.lateAttachIgdrasilMerchantReceipt = spy
+      }
     })
 
     it('first write wins: a duplicate report (200) does NOT re-fire the late-attach', async () => {

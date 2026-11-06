@@ -144,9 +144,13 @@ schema UID registered here, **and** the receipt verifier on
 (2026-11-06): a passport anchored where `GET /passport/verify` answers 503 is
 the `issuance_only` state #1151 found. The connect checkbox and the Settings
 action render only when it is true, and both fire-and-forget entry points ask
-the same question. An account that fails it records no passport row at all. It
-no longer records a `pending` row "deferred to the sweep", which a deployment
-without the schema UID could never anchor.
+the same account-level question (`POST /agents` reads the account's
+`account_type` and `execution_rail` for it, without echoing them). An account
+that fails it records no passport row at all. It no longer records a `pending`
+row "deferred to the sweep", which a deployment without the schema UID could
+never anchor, nor a row the #2138 rail gate then marks `failed`. The explicit
+`POST /agents/:id/passport` keeps its own refusals and adds one: a **503**
+while the receipt verifier is off.
 
 Two consequences worth stating rather than leaving to be rediscovered. **A
 passport issued on a legacy account before that gate is left alone**, not

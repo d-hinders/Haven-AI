@@ -41,7 +41,7 @@ vi.mock('../../modules/passport/index.js', () => ({
   issuePassportBestEffort: vi.fn(),
   enqueuePassportRevocation: (...a: unknown[]) => mockEnqueueRevocation(...a),
   revokePassportBestEffort: (...a: unknown[]) => mockRevokeBestEffort(...a),
-  isPassportIssuableOnChain: vi.fn().mockReturnValue(false),
+  isPassportIssuableForAccount: vi.fn().mockReturnValue(false),
 }))
 
 const { mockGetTokenBalance } = vi.hoisted(() => ({

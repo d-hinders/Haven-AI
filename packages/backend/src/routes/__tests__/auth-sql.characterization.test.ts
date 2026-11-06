@@ -233,33 +233,46 @@ describe('auth SQL characterization (pre-#1180)', () => {
      * 2026-11-06 — a passport no merchant can verify is not offered).
      */
     it('carries passport_issuable: true only when the chain, schema UID and verifier all line up', async () => {
-      const row = { id: 's1', chain_id: 84532, account_type: 'delegator_hybrid', owner_address: null, passkey_count: 1 }
+      const sepolia = { id: 's1', chain_id: 84532, account_type: 'delegator_hybrid', owner_address: null, passkey_count: 1 }
+      // Base mainnet with EVERY env var set, so its `false` is the chain leg's
+      // answer and not a side effect of missing config.
+      const mainnet = { ...sepolia, id: 's2', chain_id: 8453 }
       const uidKey = 'AGENT_PASSPORT_SCHEMA_UID_84532'
       const savedUid = process.env[uidKey]
+      const savedMainnetUid = process.env.AGENT_PASSPORT_SCHEMA_UID_8453
+      // Keyed on the statement, not on call order: the profile read and the
+      // accounts read answer by what they ask.
+      mockQuery.mockImplementation(async (sql: string) =>
+        /hybrid_account_passkeys|FROM user_smart_accounts|smart_accounts/.test(String(sql))
+          ? { rows: [sepolia, mainnet] }
+          : { rows: [{ id: 'u-pp', name: 'Ada', email: 'ada@example.com' }] },
+      )
       const me = async () => {
         const token = app.jwt.sign({ sub: 'u-pp', email: 'ada@example.com' }, { expiresIn: '7d' })
-        mockQuery.mockResolvedValueOnce({ rows: [{ id: 'u-pp', name: 'Ada', email: 'ada@example.com' }] })
-        mockQuery.mockResolvedValueOnce({ rows: [row] })
         const res = await app.inject({ method: 'GET', url: '/auth/me', headers: { authorization: `Bearer ${token}` } })
-        return res.json().accounts[0].passport_issuable
+        const accounts = res.json().accounts as Array<{ id: string; passport_issuable: boolean }>
+        return Object.fromEntries(accounts.map((a) => [a.id, a.passport_issuable]))
       }
       try {
         process.env[uidKey] = '0x' + 'ab'.repeat(32)
+        process.env.AGENT_PASSPORT_SCHEMA_UID_8453 = '0x' + 'cd'.repeat(32)
         setReceiptSigningKey('0x' + '11'.repeat(32))
-        expect(await me()).toBe(true)
+        expect(await me()).toEqual({ s1: true, s2: false })
 
         // Verifier off: issuance would anchor a passport no merchant can check.
         setReceiptSigningKey(null)
-        expect(await me()).toBe(false)
+        expect(await me()).toEqual({ s1: false, s2: false })
 
         // Schema UID unset: nothing could anchor here at all.
         setReceiptSigningKey('0x' + '11'.repeat(32))
         delete process.env[uidKey]
-        expect(await me()).toBe(false)
+        expect(await me()).toEqual({ s1: false, s2: false })
       } finally {
         setReceiptSigningKey(null)
         if (savedUid === undefined) delete process.env[uidKey]
         else process.env[uidKey] = savedUid
+        if (savedMainnetUid === undefined) delete process.env.AGENT_PASSPORT_SCHEMA_UID_8453
+        else process.env.AGENT_PASSPORT_SCHEMA_UID_8453 = savedMainnetUid
       }
     })
 

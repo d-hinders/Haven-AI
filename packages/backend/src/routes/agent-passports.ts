@@ -22,6 +22,7 @@ import {
   requestPassport,
   issuePassportBestEffort,
   isPassportConfigured,
+  isReceiptSigningConfigured,
   passportStanding,
   PASSPORT_CHAIN_IDS,
 } from '../modules/passport/index.js'
@@ -100,6 +101,15 @@ export default async function agentPassportRoutes(app: FastifyInstance): Promise
       // not the caller's mistake, so it is a 503 rather than a 400.
       return reply.code(503).send({
         error: 'Passport issuance is not configured on this deployment yet',
+      })
+    }
+    if (!isReceiptSigningConfigured()) {
+      // #4719 (owner decision 2026-11-06): no passport is issued that no
+      // merchant can verify. With `PASSPORT_RECEIPT_SIGNING_KEY` unset,
+      // `GET /passport/verify` answers 503, so anchoring now would create the
+      // `issuance_only` passport #1151 found. A deployment gap, so 503.
+      return reply.code(503).send({
+        error: 'Passport verification is not configured on this deployment yet, so a passport issued now could not be verified',
       })
     }
 

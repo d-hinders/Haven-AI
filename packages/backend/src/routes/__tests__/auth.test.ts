@@ -520,8 +520,12 @@ describe('accounts payload carries the rail (#1069)', () => {
 
     const { readFileSync } = await import('node:fs')
     const src = readFileSync(new URL('../auth.ts', import.meta.url), 'utf8')
-    const mapped = src.match(/\.map\(sessionAccountPayload\)/g) ?? []
-    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionAccountPayload').toBe(2)
+    // #4719: both endpoints map through `sessionAccountWithPassport`, which
+    // adds `passport_issuable` on top of `sessionAccountPayload` — so the
+    // recommendation still has exactly one home.
+    const mapped = src.match(/\.map\(sessionAccountWithPassport\)/g) ?? []
+    expect(mapped.length, 'both /auth/login and /auth/me must map through sessionAccountWithPassport').toBe(2)
+    expect(src).toMatch(/\{ \.\.\.sessionAccountPayload\(row\), passport_issuable: /)
   })
 })
 

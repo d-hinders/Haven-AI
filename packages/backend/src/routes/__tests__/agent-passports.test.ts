@@ -16,16 +16,18 @@ vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
 
-const { mockRequest, mockIssue, mockGetPassport } = vi.hoisted(() => ({
+const { mockRequest, mockIssue, mockGetPassport, mockVerifierOn } = vi.hoisted(() => ({
   mockRequest: vi.fn(),
   mockIssue: vi.fn(),
   mockGetPassport: vi.fn(),
+  mockVerifierOn: vi.fn(() => true),
 }))
 vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequest(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssue(...a),
   getPassport: (...a: unknown[]) => mockGetPassport(...a),
   isPassportConfigured: () => true,
+  isReceiptSigningConfigured: () => mockVerifierOn(),
   // A whole PassportStanding, as the real function returns one (#1446) — the
   // route hands this straight to the client, so a partial mock would describe
   // a response the module cannot produce.
@@ -97,6 +99,16 @@ describe('POST /agents/:id/passport', () => {
     const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
     expect(res.statusCode).toBe(202)
     expect(mockIssue).toHaveBeenCalled()
+  })
+
+  it('#4719: refuses with 503 when the receipt verifier is off — a passport no merchant could verify', async () => {
+    mockVerifierOn.mockReturnValueOnce(false)
+    mockAgent({ chain_id: 84532, status: 'active', execution_rail: 'delegation', account_type: 'delegator_hybrid' })
+    const res = await (await build()).inject({ method: 'POST', url: '/agents/a1/passport' })
+    expect(res.statusCode).toBe(503)
+    expect(res.json().error).toMatch(/verification is not configured/)
+    expect(mockRequest).not.toHaveBeenCalled()
+    expect(mockIssue).not.toHaveBeenCalled()
   })
 
   it('issues for an active agent', async () => {

@@ -13,7 +13,7 @@ import {
   issuePassportBestEffort,
   enqueuePassportRevocation,
   revokePassportBestEffort,
-  isPassportIssuableOnChain,
+  isPassportIssuableForAccount,
 } from '../modules/passport/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
@@ -323,14 +323,21 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // A slow, failing, or unfunded attestation degrades to "pending"/"failed"
       // on the passport row and never touches this response.
       // Narrowed to a local so the chain id stays non-null for the call below.
-      // #4719: the same deployment answer the dashboard reads
-      // (`passport_issuable`): a passport chain whose schema UID AND verifier
-      // are configured here. Anything else records NO row — not a `pending`
-      // one this deployment can never anchor, nor a passport no merchant can
-      // verify. The account's rail is checked by issuePassport's own #2138
-      // gate, as before.
+      // #4719: the same account answer the dashboard reads
+      // (`passport_issuable`): an issuable rail on a passport chain whose
+      // schema UID AND verifier are configured here. Anything else records NO
+      // row — not a `pending` one this deployment can never anchor, not a
+      // `failed` one the #2138 rail gate would write, nor a passport no
+      // merchant can verify. The rail columns are read for this only; the
+      // creation response is unchanged.
+      const { account_type: accountType, execution_rail: executionRail, ...accountInfoPublic } = accountInfo
       const passportChainId =
-        issue_passport === true && isPassportIssuableOnChain(accountInfo.account_chain_id)
+        issue_passport === true &&
+        isPassportIssuableForAccount({
+          chain_id: accountInfo.account_chain_id,
+          account_type: accountType ?? null,
+          execution_rail: executionRail ?? null,
+        })
           ? accountInfo.account_chain_id
           : null
       if (passportChainId != null) {
@@ -344,7 +351,7 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
 
       return reply.code(201).send({
         ...agent,
-        ...accountInfo,
+        ...accountInfoPublic,
         api_key: apiKey,
         // Always empty since #2020 — kept for response-shape compatibility;
         // budgets arrive later as delegation grants.

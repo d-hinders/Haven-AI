@@ -29,7 +29,8 @@ name: Agent evals — Claude Code lane
 # from this checkout against the dev backend) or `full` (all tasks, against
 # the deployed dev stack) — or set `tasks` to a comma-separated list of
 # kebab-case task ids to run EXACTLY those, with no `--limit`, whatever the
-# suite (validated in the slice step before it is used; #4218). Error bodies
+# suite (validated in the slice step before it is used; #4218, and so is every
+# other input; #4716). Error bodies
 # produced by `packages/backend` stay dev-deployed either way; the report
 # says so. Guarded by scripts/ci/agent-evals-workspace-deps.test.mjs.
 #
@@ -114,6 +115,32 @@ jobs:
             fi
             if [[ ! "$TASKS" =~ ^[a-z0-9-]+(,[a-z0-9-]+)*$ ]]; then
               echo "::error::tasks input must be a comma-separated list of kebab-case task ids matching ^[a-z0-9-]+(,[a-z0-9-]+)*\$ — rejected (#4218)."
+              exit 1
+            fi
+          fi
+          # #4716: the other inputs get the same treatment, for the same reason.
+          # The messages never print the rejected value. suite is a choice input,
+          # but this does not rely on GitHub refusing other values at dispatch,
+          # and an unknown mode would silently mean the deployed dev stack.
+          if [ "$MODE" != 'subset' ] && [ "$MODE" != 'full' ]; then
+            echo "::error::suite input must be subset or full — rejected (#4716)."
+            exit 1
+          fi
+          if [[ ! "$TRIALS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::trials input must be a positive integer matching ^[1-9][0-9]*\$ — rejected (#4716)."
+            exit 1
+          fi
+          # Empty is allowed: only a cold task needs the URL, and the eval CLI
+          # exits 2 if one runs without it. Any host, so a PR preview works.
+          # An origin only: the CLI appends /.well-known/haven.json, so a query
+          # cannot reach the manifest, and the graders work from the origin.
+          if [ -n "$INPUT_DEV_LANDING_URL" ]; then
+            if [[ "$INPUT_DEV_LANDING_URL" == *[![:print:]]* ]]; then
+              echo "::error::dev_landing_url input contains control characters — rejected (#4716)."
+              exit 1
+            fi
+            if [[ ! "$INPUT_DEV_LANDING_URL" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+/?$ ]]; then
+              echo "::error::dev_landing_url input must be one https origin (no path, query or credentials) matching ^https://[a-z0-9-]+(\.[a-z0-9-]+)+/?\$ — rejected (#4716)."
               exit 1
             fi
           fi

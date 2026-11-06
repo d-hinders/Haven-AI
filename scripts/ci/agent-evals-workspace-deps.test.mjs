@@ -18,7 +18,9 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -381,12 +383,12 @@ test('the claude tool allowlist is unchanged', () => {
 // validated BEFORE anything is written or echoed; the run step passes
 // "--task=$TASKS" quoted and emits no --limit when it is set.
 
-test('no run: block inlines inputs.tasks — it travels through an env var', () => {
+test('no run: block inlines an input — each travels through an env var', () => {
   for (const step of steps) {
     const runIdx = step.findIndex((line) => /^\s+run:/.test(line))
     if (runIdx === -1) continue
     const body = step.slice(runIdx).join('\n')
-    assert.ok(!/inputs\.tasks/i.test(body), `a run: block inlines inputs.tasks (workflow-command injection surface): ${step[0].trim()}`)
+    assert.ok(!/inputs\.(suite|tasks|trials|dev_landing_url)/i.test(body), `a run: block inlines an input (workflow-command injection surface): ${step[0].trim()}`)
   }
 })
 
@@ -396,7 +398,9 @@ test('the slice step validates the tasks input before it writes GITHUB_OUTPUT or
   const runIdx = slice.findIndex((line) => /^\s+run:/.test(line))
   assert.ok(runIdx !== -1, 'the slice step has no run: block')
   const body = slice.slice(runIdx)
-  const control = body.findIndex((line) => line.includes('*[![:print:]]*'))
+  // Bound to $TASKS: the step has other control-character checks since #4716,
+  // and matching the first of any would pass with this one deleted.
+  const control = body.findIndex((line) => line.includes('"$TASKS" == *[![:print:]]*'))
   const regex = body.findIndex((line) => line.includes('^[a-z0-9-]+(,[a-z0-9-]+)*$'))
   const firstWrite = body.findIndex((line) => line.includes('GITHUB_OUTPUT') || line.includes('::notice::'))
   assert.ok(control !== -1, 'the slice step does not reject control characters in the tasks input')
@@ -407,6 +411,168 @@ test('the slice step validates the tasks input before it writes GITHUB_OUTPUT or
   assert.ok(body.some((line) => line.includes('task_filter=')), 'the slice step does not export the validated filter (task_filter)')
   assert.ok(body.some((line) => /::notice::.*\$FILTER_NOTE/.test(line)), 'the run notice does not print the task filter')
 })
+
+// ── #4716: dev_landing_url and trials are validated before anything is written ──
+//
+// These cells run the step's real shell, extracted from the workflow, because
+// the property is about what bash does with a multi-line value and a static
+// read cannot show that. A rejected value must fail the step, write nothing to
+// $GITHUB_OUTPUT and never reach the step's own output. (The runner still
+// prints the step's env in its header; that is not a line it parses as a command.)
+
+/** Run the "Decide the slice" step the way Actions does (`bash -e`). */
+function runSliceStep(inputs) {
+  const slice = stepNamed(/Decide the slice/)
+  assert.ok(slice, 'agent-evals.yml has no "Decide the slice" step — update this guard')
+  const runIdx = slice.findIndex((line) => /^\s+run: \|\s*$/.test(line))
+  assert.notEqual(runIdx, -1, 'the slice step has no `run: |` block — update this guard')
+  const script = slice.slice(runIdx + 1).map((line) => line.replace(/^ {10}/, '')).join('\n')
+  const dir = mkdtempSync(path.join(tmpdir(), 'agent-evals-slice-'))
+  const output = path.join(dir, 'output')
+  writeFileSync(output, '')
+  try {
+    const result = spawnSync('bash', ['-e', '-c', script], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_OUTPUT: output,
+        INPUT_SUITE: 'subset',
+        INPUT_TRIALS: '1',
+        INPUT_TASKS: '',
+        INPUT_DEV_LANDING_URL: '',
+        ...inputs,
+      },
+    })
+    return { status: result.status, log: result.stdout + result.stderr, written: readFileSync(output, 'utf8') }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+// What the step prints is fixed, whatever the value. Output equal to one of
+// these proves the value never reached it, which a substring search cannot do
+// for a value such as `0` or `https://` that the message itself contains. It
+// also proves the input check did the rejecting: under `set -u`, a forgotten env
+// var would exit non-zero with nothing written too.
+const LANDING_URL_REJECTIONS = [
+  runSliceStep({ INPUT_DEV_LANDING_URL: 'sentinel' }).log,
+  runSliceStep({ INPUT_DEV_LANDING_URL: 'sentinel\n' }).log,
+]
+const TRIALS_REJECTION = runSliceStep({ INPUT_TRIALS: 'sentinel' }).log
+const SUITE_REJECTION = runSliceStep({ INPUT_SUITE: 'sentinel' }).log
+const TASKS_CONTROL_REJECTION = runSliceStep({ INPUT_TASKS: 'sentinel\n' }).log
+
+test('the fixed rejection messages come from the input checks and differ per check', () => {
+  assert.match(LANDING_URL_REJECTIONS[0], /^::error::dev_landing_url input must be one https origin [^\n]*\n$/)
+  assert.match(LANDING_URL_REJECTIONS[1], /^::error::dev_landing_url input contains control characters [^\n]*\n$/)
+  assert.match(TRIALS_REJECTION, /^::error::trials input must be a positive integer [^\n]*\n$/)
+  assert.match(SUITE_REJECTION, /^::error::suite input must be subset or full [^\n]*\n$/)
+  assert.match(TASKS_CONTROL_REJECTION, /^::error::tasks input contains control characters [^\n]*\n$/)
+})
+
+const REJECTED_LANDING_URLS = {
+  'a second line that sets another output': 'https://a.example\ntask_filter=evil',
+  'a trailing newline': 'https://a.example\n',
+  'a carriage return': 'https://a.example\r',
+  'a tab': 'https://a.example\t',
+  'an escape character': 'https://a.example\u001b',
+  'plain http': 'http://a.example',
+  'two URLs': 'https://a.example https://b.example',
+  'a leading space': ' https://a.example',
+  'credentials': 'https://a.example@b.example',
+  'a path': 'https://a.example/landing',
+  'a query': 'https://a.example?x=1',
+  'a fragment': 'https://a.example#x',
+  'no host': 'https://',
+  'a host with no dot': 'https://localhost',
+  'a double trailing slash': 'https://a.example//',
+  'an uppercase host': 'https://A.example',
+  'a port': 'https://a.example:8443',
+  'a workflow command': '::error::injected',
+}
+
+for (const [name, value] of Object.entries(REJECTED_LANDING_URLS)) {
+  test(`the slice step rejects a dev_landing_url with ${name}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_DEV_LANDING_URL: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.ok(LANDING_URL_REJECTIONS.includes(log), `the log is not one of the input check's fixed messages: ${log}`)
+  })
+}
+
+const REJECTED_TRIALS = {
+  'a second line': '1\ndev_landing_url=https://evil.example',
+  'a workflow command': '::error::injected',
+  'zero': '0',
+  'a negative': '-1',
+  'a fraction': '1.5',
+  'a word': 'three',
+  'a leading zero': '01',
+  'an exponent': '1e3',
+  'a plus sign': '+1',
+  'nothing': '',
+}
+
+for (const [name, value] of Object.entries(REJECTED_TRIALS)) {
+  test(`the slice step rejects trials of ${name}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_TRIALS: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.equal(log, TRIALS_REJECTION, 'the log is not the input check\'s fixed message')
+  })
+}
+
+const REJECTED_SUITES = {
+  'a second line': 'subset\nlimit_arg=--limit=999',
+  'another word': 'everything',
+  'a workflow command': '::error::injected',
+}
+
+for (const [name, value] of Object.entries(REJECTED_SUITES)) {
+  test(`the slice step rejects a suite of ${name}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_SUITE: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.equal(log, SUITE_REJECTION, 'the output is not the input check\'s fixed message')
+  })
+}
+
+test('the slice step rejects a multi-line tasks value before it writes anything', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, TASKS_CONTROL_REJECTION, 'the output is not the input check\'s fixed message')
+})
+
+for (const suite of ['subset', 'full']) {
+  test(`the slice step accepts a suite of ${suite}`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_SUITE: suite })
+    assert.equal(status, 0, `the step rejected it: ${log}`)
+    assert.ok(written.split('\n').includes(`mode=${suite}`), 'the suite is not written as the mode')
+  })
+}
+
+// The hosts a run really uses, from the repo's deployment statuses: a preview
+// must stay allowed, because #4713's re-run may use one.
+const ACCEPTED_LANDING_URLS = {
+  'no URL': '',
+  'the dev alias': 'https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app',
+  'a hashed preview': 'https://haven-ai-frontend-a1b2c3d4e-daniels-projects-f3327ba2.vercel.app',
+  'a short hashed preview': 'https://haven-a1b2c3d4e-daniels-projects-f3327ba2.vercel.app',
+  'a trailing slash': 'https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app/',
+}
+
+for (const [name, value] of Object.entries(ACCEPTED_LANDING_URLS)) {
+  test(`the slice step accepts a dev_landing_url of ${name}, and writes it as given`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_DEV_LANDING_URL: value, INPUT_TRIALS: '12' })
+    assert.equal(status, 0, `the step rejected it: ${log}`)
+    assert.deepEqual(
+      written.split('\n').filter((line) => /^(dev_landing_url|trials)=/.test(line)),
+      ['trials=12', `dev_landing_url=${value}`],
+    )
+  })
+}
 
 test('the run step passes --task=$TASKS quoted and NO --limit when tasks is set', () => {
   const run = stepNamed(/Run the eval slice/)

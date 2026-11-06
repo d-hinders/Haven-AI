@@ -23,7 +23,7 @@ import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-sc
 // #2363: HAVEN_SKILL_MD is the canonical shipped skill text — imported, not
 // restated, so the premise pin at the bottom of this file reads the real
 // string rather than a copy that can drift from it.
-import { HavenClient, HAVEN_SKILL_MD } from '@haven_ai/sdk'
+import { HavenApiError, HavenClient, HAVEN_SKILL_MD } from '@haven_ai/sdk'
 import { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 import { HOSTED_SERVER_VERSION } from './server.js'
 // #2348: the LOCAL surface, imported rather than restated — the crossover keys
@@ -38,6 +38,12 @@ import { HOSTED_SERVER_VERSION } from './server.js'
 // the image never copied. (haven-reviewer, #2348.)
 import { toolSchemas as localToolSchemas, computeConsentHash, type ConsentInput } from '@haven_ai/mcp'
 import { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT, buildHostedMcpServer } from './server.js'
+import {
+  AGENT_IDENTITY_UNVERIFIED_MESSAGE,
+  AGENT_IDENTITY_UNVERIFIED_OMITTED_REASON,
+  requireAgentIdentity,
+} from './tools/identity-gate.js'
+import { normalizeError } from './tools/support/errors.js'
 import {
   createToolHandlers,
   toolSchemas,
@@ -906,13 +912,13 @@ describe('hosted identity gate — nothing runs before the agent read succeeds',
     503: { error: 'service_unavailable' },
   }
 
-  function stubHaven(agentStatus: number, open: string[] = []) {
+  function stubHaven(agentStatus: number, open: string[] = [], refusalBody: Record<string, string> = BODIES[agentStatus]) {
     fetches = []
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
       const u = new URL(url)
       fetches.push(`${(init.method ?? 'GET').toUpperCase()} ${u.host}${u.pathname}`)
       const refused = u.host === 'haven.test' && !open.some((p) => u.pathname.endsWith(p))
-      const body = refused ? BODIES[agentStatus] : {}
+      const body = refused ? refusalBody : {}
       return {
         ok: !refused,
         status: refused ? agentStatus : 200,
@@ -951,7 +957,68 @@ describe('hosted identity gate — nothing runs before the agent read succeeds',
     const client = await connectedClient()
     const { text } = await callToolText(client, 'haven_get_agent', {})
     expect(text).toContain('resume this agent')
-    expect(text).not.toContain('did not accept this agent API key')
+    expect(text).not.toContain(AGENT_IDENTITY_UNVERIFIED_MESSAGE)
+    expect(text).not.toContain(AGENT_IDENTITY_UNVERIFIED_OMITTED_REASON)
+  })
+
+  /**
+   * The backend's two agent-key 401 bodies, copied verbatim from
+   * `packages/backend/src/middleware/agentAuth.ts` (`AGENT_MISSING_KEY_BODY`,
+   * `AGENT_INVALID_KEY_BODY`, hints included). This package cannot import the
+   * backend, so the copy is the fixture; what matters is that the two differ.
+   */
+  const AGENT_KEY_DOCS =
+    'Present it as `Authorization: Bearer sk_agent_…` or `X-API-Key`. Run `npx @haven_ai/connect@alpha` to provision one; see /openapi.json.'
+  const AGENT_MISSING_KEY_BODY = {
+    error: 'Missing or invalid API key',
+    hint: `This route needs an agent API key, not an owner session. ${AGENT_KEY_DOCS}`,
+  }
+  const AGENT_INVALID_KEY_BODY = {
+    error: 'Invalid or revoked API key',
+    hint: `This agent API key is not usable. ${AGENT_KEY_DOCS}`,
+  }
+
+  it('a refused key names the account owner and an action that exists for a revoked agent (#4697)', async () => {
+    const haven = {
+      getAgent: async () => {
+        throw new HavenApiError('Invalid or revoked API key', 401, AGENT_INVALID_KEY_BODY)
+      },
+    } as unknown as HavenClient
+    const thrown = await requireAgentIdentity(haven).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(thrown).not.toBeNull()
+    const err = normalizeError(thrown) as unknown as { code: string; message: string; next_tool_omitted_reason?: string }
+    expect(err.code).toBe(AGENT_IDENTITY_UNVERIFIED)
+    expect(err.message).toBe(
+      'Haven did not accept this agent API key. Check the Authorization: Bearer key in your MCP client ' +
+        'configuration. If the key is correct, the account owner (you, if this is your account) can check this ' +
+        'agent in Haven and connect a new one if it no longer has access.',
+    )
+    expect(err.next_tool_omitted_reason).toBe(
+      'the agent API key was not accepted and no payment tool can run; tell the user to check the key, or to ' +
+        'ask the account owner to check this agent in Haven or connect a new one',
+    )
+  })
+
+  it('a missing key and a revoked key get byte-identical answers from a gated tool; neither 401 body is relayed', async () => {
+    const answers: string[] = []
+    for (const body of [AGENT_MISSING_KEY_BODY, AGENT_INVALID_KEY_BODY]) {
+      stubHaven(401, [], body)
+      const client = await connectedClient()
+      const { text } = await callToolText(client, 'haven_get_agent', {})
+      expect(fetches).toEqual(['GET haven.test/machine-payments/agent'])
+      for (const leaked of [body.error, body.hint, 'provision one']) expect(text).not.toContain(leaked)
+      answers.push(text)
+    }
+    // The two bodies differ, so equal answers mean neither was relayed.
+    expect(AGENT_MISSING_KEY_BODY).not.toEqual(AGENT_INVALID_KEY_BODY)
+    expect(answers[1]).toBe(answers[0])
+    const payload = JSON.parse(answers[0]) as { code: string; message: string; next_tool_omitted_reason?: string }
+    expect(payload.code).toBe(AGENT_IDENTITY_UNVERIFIED)
+    expect(payload.message).toBe(AGENT_IDENTITY_UNVERIFIED_MESSAGE)
+    expect(payload.next_tool_omitted_reason).toBe(AGENT_IDENTITY_UNVERIFIED_OMITTED_REASON)
   })
 
   it('haven_verify_receipt is exempt and makes no request', async () => {

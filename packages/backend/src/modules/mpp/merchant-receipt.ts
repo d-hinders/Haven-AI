@@ -25,7 +25,11 @@ import {
   getMerchantReceiptRow,
   insertMerchantReceiptOnce,
 } from '../../infra/repositories/machine-payments.js'
-import { lateAttachMerchantReceipt, lateAttachAccountedMerchantReceipt } from '../accounting/index.js'
+import {
+  lateAttachAccountedMerchantReceipt,
+  lateAttachIgdrasilMerchantReceipt,
+  lateAttachMerchantReceipt,
+} from '../accounting/index.js'
 import type { MppHandlerResult } from './types.js'
 
 /** Inline receipts are bookkeeping metadata, not blob storage. */
@@ -133,13 +137,18 @@ export async function handleMerchantReceiptCapture(
     // invoice (it fires at funding confirmation; the merchant receipt
     // arrives at the retry seconds later) — attach retroactively.
     // Fire-and-forget: capture must never block or fail on feed state.
-    // Both live destinations get the chance (#3918 added Accounted): each
-    // one returns immediately unless ITS pushed underlag row exists.
+    // Every destination gets the chance (#3918 added Accounted, #4521
+    // Igdrasil): each one returns immediately unless ITS pushed underlag row
+    // exists, and each swallows its own failure so one cannot touch another.
     void lateAttachMerchantReceipt(result.userId, paymentId, {
       url: url ?? null,
       inlineJson: json ?? null,
     }).catch(() => {})
     void lateAttachAccountedMerchantReceipt(result.userId, paymentId, {
+      url: url ?? null,
+      inlineJson: json ?? null,
+    }).catch(() => {})
+    void lateAttachIgdrasilMerchantReceipt(result.userId, paymentId, {
       url: url ?? null,
       inlineJson: json ?? null,
     }).catch(() => {})

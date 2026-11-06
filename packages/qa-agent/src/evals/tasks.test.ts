@@ -217,6 +217,7 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['onboarding_first_reply', 'steps', ['signup_and_passkey', 'fund', 'approve_budget']],
     ['onboarding_first_reply', 'threshold', 3],
     ['onboarding_tool_calls', 'max', 12],
+    ['onboarding_tool_calls', 'handoffPath', '/signup'],
     ['onboarding_login_command', 'package', '@haven_ai/cli@dev'],
     ['onboarding_login_command', 'threshold', 1],
     ['client_out_of_date', 'releasesPath', '/releases'],
@@ -521,6 +522,7 @@ describe('the per-trial payment id (#4678) — the resolve path leaves the place
     const wrongPrepare = interrupted({
       setup: { kind: 'throwaway-identity', label: 'ended', budgetAtomic: '2000', fundingAtomic: '2000', prepare: 'ended-budget' },
       category: 'budget-ended',
+      commandTemplate: 'claude -p {instruction}',
     })
     expect(validateTask(wrongPrepare, 'x.json')).toContain('renders {payment_id}')
   })
@@ -873,10 +875,35 @@ describe('validateTask — the cold profile (#4680)', () => {
     source: { kind: 'issue', ref: '4680', note: 'n' },
     lanes: ['claude-code'],
     profile: 'cold',
+    commandTemplate: 'claude -p {instruction} --mcp-config "$QA_EVAL_TRIAL_MCP_CONFIG"',
   }
 
   it('accepts the well-formed cold task', () => {
     expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('refuses a cold task with no commandTemplate, which would run warm on the lane command (#4696)', () => {
+    const { commandTemplate: _dropped, ...noTemplate } = structuredClone(base)
+    expect(validateTask(noTemplate, 'x.json')).toContain('must carry a commandTemplate')
+  })
+
+  it('the real onboarding tasks resolve with their own command, not the lane command (#4696)', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const cold = tasks.filter((t) => t.profile === 'cold')
+    expect(cold.map((t) => t.id).sort()).toEqual(['onboarding-client-out-of-date', 'onboarding-cold-setup'])
+    for (const t of cold) {
+      const r = await resolveTask(t, {
+        budget: async () => ({ remaining: 0n }),
+        recipient: '0x000000000000000000000000000000000000dEaD',
+        agentAccount: '0x0000000000000000000000000000000000000001',
+        startedAtBlock: 1,
+        coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+      })
+      if ('error' in r) throw new Error(r.error)
+      expect(r.resolved.commandTemplate).toBe(t.commandTemplate)
+      expect(r.resolved.commandTemplate).toContain('$QA_EVAL_TRIAL_MCP_CONFIG')
+      expect(r.resolved.commandTemplate).toContain('--allowedTools mcp__eval-command WebFetch')
+    }
   })
 
   it('refuses an unknown profile', () => {
@@ -929,10 +956,16 @@ describe('validateTask — the task-budget category (#4677)', () => {
     expectTransfer: false,
     source: { kind: 'issue', ref: '4677', note: 'n' },
     setup: { kind: 'throwaway-identity', label: 'task-budget', budgetAtomic: '2000', fundingAtomic: '0' },
+    commandTemplate: 'claude -p {instruction} --mcp-config "$QA_EVAL_TRIAL_MCP_CONFIG"',
   }
 
   it('accepts the well-formed task-budget task', () => {
     expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('refuses a setup task with no commandTemplate, which would run as the shared eval agent (#4696)', () => {
+    const { commandTemplate: _dropped, ...noTemplate } = structuredClone(base)
+    expect(validateTask(noTemplate, 'x.json')).toContain('must carry a commandTemplate')
   })
 
   it('requires an amount rule even though the task carries a setup — the cap is a slice, never the whole grant', () => {

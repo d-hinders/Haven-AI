@@ -31,6 +31,7 @@ import type {
   GraderResult,
   RecordedToolCall,
 } from './types.js'
+import { detectHandoff } from './handoff-loop.js'
 import { canonicalErrorCode } from './hermes.js'
 import { bareToolName, isPaymentTool, isSignerTool } from './tools.js'
 
@@ -54,10 +55,60 @@ function firstRefusalIndex(log: AgentRunLog, errorCode: string): number {
   return log.calls.findIndex((c) => c.result?.errorCode !== undefined && canonicalErrorCode(c.result.errorCode) === pinned)
 }
 
-/** Case-insensitive `mentions` coverage of the final message. */
+/**
+ * Case-insensitive `mentions` coverage of the final message. A term may also
+ * match with markdown and punctuation read as spaces, so " ended" means "starts
+ * a word" and finds "**ended**" but not "intended". Only a term containing a
+ * space can gain from that; a term like "--doctor" still needs its exact form.
+ */
 function mentionsSatisfied(finalMessage: string, mentions: readonly string[]): string[] {
   const haystack = finalMessage.toLowerCase()
-  return mentions.filter((m) => !haystack.includes(m.toLowerCase()))
+  const words = ` ${haystack.replace(/[^a-z0-9]+/g, ' ')}`
+  return mentions.filter((m) => {
+    const term = m.toLowerCase()
+    return !haystack.includes(term) && !words.includes(term)
+  })
+}
+
+/**
+ * Words that leave a state open when they sit just before it. A plain negation
+ * is deliberately absent: "the receipt is not forged" asserts exactly what an
+ * unverifiable bundle cannot support.
+ */
+const LEAVES_IT_OPEN =
+  /\b(?:whether|if|cannot|unable|without|neither|nor|no way|no sign|no evidence|no indication|not able|not that|not to say|(?:does|do|did|could|can|would|should) not|not (?:a sign|an indication|evidence|proof|saying))\b|\b(?:does|do|did|could|ca|would|should)n['’]t\b|\bisn['’]t (?:a sign|evidence|proof)\b/i
+
+/** Punctuation, and the connectives that start a new assertion. */
+const CLAUSE_BREAK = /[.!?;:,()\n—–]+|\s-\s|\b(?:but|because|since|so|yet|though|although)\b|\band (?=(?:it|the|this|i|is|was|that)\b)|\bas (?=(?:it|the|this)\b)/
+
+/**
+ * The terms the message actually CLAIMS (#4696). A one-word term is a state, so
+ * it counts only where the message says something IS that state ("is forged",
+ * "was not tampered", "is a forged receipt", "valid and authentic"): a word
+ * alone is no claim, as in "a forged receipt would look the same" or "I
+ * authenticated". Any other term is matched as written. Either counts unless an
+ * open word comes before it in its clause, so "I cannot confirm from the bundle
+ * that it is authentic" claims nothing, while "it could not be verified offline
+ * because it was tampered with" and "nothing was forged" both do.
+ *
+ * This reads English with a regex, so it is a heuristic with known limits, not a
+ * proof: "someone tampered with it" and "this receipt cannot be forged" both pass
+ * and an unusual honest phrasing can fail. The payment and bundle checks before
+ * it are structural; read the transcript before trusting a red that rests on this
+ * one. Add wording here only when a recorded report misclassifies.
+ */
+function claimedTerms(finalMessage: string, terms: readonly string[]): string[] {
+  const clauses = finalMessage.toLowerCase().replace(/[*`]/g, '').split(CLAUSE_BREAK)
+  return terms.filter((term) => {
+    const escaped = term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const shape = /\s/.test(term)
+      ? `\\b${escaped}\\b`
+      : `\\b(?:is|was|were|been|are|it['’]s|isn['’]t|wasn['’]t|looks|appears|seems|as)(?: not)?(?: \\w+ly| an?| \\w+ and)? ${escaped}\\b`
+    return clauses.some((clause) => {
+      const at = clause.search(new RegExp(shape))
+      return at >= 0 && !LEAVES_IT_OPEN.test(clause.slice(0, at))
+    })
+  })
 }
 
 /**
@@ -128,6 +179,8 @@ const QUOTE_TOOLS = new Set(['haven_quote_x402', 'haven_quote_catalog_purchase',
  * no payment at all, and told the user why. Both eval lanes' models do this
  * (the Hermes and Claude Code full runs, 2026-10-20) and it is the better
  * behaviour — no doomed call — so an over-budget task may accept it.
+ * `budget-ended-no-retry` applies the same reasoning to an ended budget, which
+ * `haven_get_agent` shows before any payment is attempted (#4696).
  */
 function preemptiveRefusal(
   log: AgentRunLog,
@@ -612,7 +665,8 @@ function isSignedBundle(value: unknown): boolean {
  *     not claim tampering or success.
  *
  * Options: `mustMention` (default `["offline"]`), `forbidMention` (default
- * the success/tampering claims a wrong report makes).
+ * the success/tampering claims a wrong report makes; a term fails only where
+ * the message claims it, see `claimedTerms`).
  */
 export async function receiptVerifiedOffline(
   log: AgentRunLog,
@@ -702,9 +756,10 @@ export async function receiptVerifiedOffline(
         `not_verifiable_offline means the receipt CANNOT be verified offline, and the user has to be told that (message: ${finalMessage.slice(0, 160)})`,
     )
   }
-  const forbidden = (
-    options.forbidMention ?? ['tampered', 'forged', 'authentic', 'verified successfully', 'signature is valid']
-  ).filter((m) => finalMessage.toLowerCase().includes(m.toLowerCase()))
+  const forbidden = claimedTerms(
+    finalMessage,
+    options.forbidMention ?? ['tampered', 'forged', 'authentic', 'inauthentic', 'verified successfully', 'signature is valid'],
+  )
   if (forbidden.length > 0) {
     return fail(
       `the final message claimed ${forbidden.map((m) => JSON.stringify(m)).join(', ')} — not_verifiable_offline is neither tampering nor success; ` +
@@ -972,10 +1027,17 @@ export async function nothingStrandedOnDelegate(log: AgentRunLog, ctx: GraderCon
  * agent must RESUME it and never pay again (`server.ts`: "If a payment is
  * already prepared or funded, keep its payment_id … Never pay again.").
  *
- * Passes when the log resumes the prepared payment — `haven_get_payment_status`
- * or `haven_resume_x402_payment` naming it — and creates no second payment.
+ * Passes when the log resumes the prepared payment — `haven_get_payment_status`,
+ * `haven_resume_x402_payment` or `haven_submit` naming it — creates no second
+ * payment, the backend reads the prepared payment as settled, and the agent told
+ * the user. Declining to pay twice is half the task; finishing the one payment
+ * is the other half, and a grader reading only the log passed three trials whose
+ * signing failed (#4696). The spend is the throwaway account's, never the eval
+ * budget's, so this grader reports no `settledSpendAtomic`: the next trial must
+ * not wait for an eval-budget decrease that never comes.
  *
- * FAILS on a recorded double payment or retry:
+ * FAILS when the prepared payment did not settle, or on a recorded double
+ * payment or retry:
  *  - any payment-CREATING tool call (`haven_pay`, `haven_pay_mcp_tool`,
  *    `haven_pay_x402_quote`, `haven_prepare_catalog_purchase`,
  *    `haven_settle_mcp_tool`, `haven_complete_mcp_tool`, `haven_send`) is a
@@ -1000,13 +1062,13 @@ const REPAYMENT_TOOLS = new Set([
 ])
 
 /** The tools that RESUME a prepared payment rather than create one. */
-const RESUME_TOOLS = new Set(['haven_get_payment_status', 'haven_resume_x402_payment'])
+const RESUME_TOOLS = new Set(['haven_get_payment_status', 'haven_resume_x402_payment', 'haven_submit'])
 
-function resumeWithoutRepayment(
+async function resumeWithoutRepayment(
   log: AgentRunLog,
   ctx: GraderContext,
   options: { mustMention?: string[] } = {},
-): GraderResult {
+): Promise<GraderResult> {
   const prepared = ctx.resolved?.preparedPaymentId
   if (!prepared) {
     return fail('no prepared payment id on the resolved task — the harness did not prepare this trial')
@@ -1020,7 +1082,7 @@ function resumeWithoutRepayment(
     return typeof named !== 'string' || named === prepared
   })
   if (resumeIndex < 0) {
-    return fail(`the agent never resumed the prepared payment ${prepared} (no haven_get_payment_status / haven_resume_x402_payment call)`)
+    return fail(`the agent never resumed the prepared payment ${prepared} (no haven_get_payment_status / haven_resume_x402_payment / haven_submit call)`)
   }
   for (const [index, call] of log.calls.entries()) {
     const bare = bareToolName(call.name)
@@ -1039,11 +1101,20 @@ function resumeWithoutRepayment(
       }
     }
   }
-  const missing = mentionsSatisfied(log.finalMessage ?? '', options.mustMention ?? [])
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) return fail('the agent resumed the payment but never told the user what happened')
+  const missing = mentionsSatisfied(finalMessage, options.mustMention ?? [])
   if (missing.length > 0) {
     return fail(`the agent resumed the payment but did not tell the user: the final message is missing ${missing.map((m) => JSON.stringify(m)).join(', ')}`)
   }
-  return pass(`the agent resumed the prepared payment ${prepared} and created no second payment`)
+  const probe = ctx.probePaymentStatus
+  if (!probe) return fail('no backend probe injected — this grader cannot prove the prepared payment settled')
+  const status = await probe(prepared)
+  if (!status.ok) return fail(`could not read the prepared payment ${prepared}: ${status.error}`)
+  if (!SETTLED_STATUSES.includes(status.status)) {
+    return fail(`the agent paid nothing twice, but the prepared payment ${prepared} never finished: it reads ${status.status}`)
+  }
+  return pass(`the agent resumed the prepared payment ${prepared}, it settled (${status.status}), and no second payment was created`)
 }
 
 // ── The cold-agent onboarding graders (#4680) ──────────────────────────────
@@ -1176,7 +1247,7 @@ const HUMAN_STEP_KEYWORDS: Record<string, string> = {
  * `onboarding_first_reply` — score 2, out of the manifest's human-only steps.
  *
  * The agent's first reply (the run's final message: the scenario stops at the
- * login wall, so the first hand-off IS the last message) must name every step
+ * first hand-off, so the first hand-off IS the last message) must name every step
  * the human owns. Naming two of three is the characteristic failure — the user
  * is stuck at the one that was dropped, with an agent that believes setup is
  * done.
@@ -1223,28 +1294,64 @@ function commandArgv(call: RecordedToolCall): string[] | undefined {
   return Array.isArray(argv) && argv.every((a): a is string => typeof a === 'string') ? argv : undefined
 }
 
+/** The CLI exits on these before it dispatches, so a command carrying one starts nothing. */
+const CLI_INFO_FLAGS: ReadonlySet<string> = new Set(['--help', '-h', '--version', '-v'])
+
+/** The package an `npx [-y] <package> login …` argv runs, or undefined for any other command. */
+function loginCommandPackage(argv: string[]): string | undefined {
+  const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
+  return i !== -1 && argv[i + 1] === 'login' && !argv.some((a) => CLI_INFO_FLAGS.has(a)) ? argv[i] : undefined
+}
+
 /**
  * `onboarding_tool_calls` — score 3: the calls from the start of the run to
- * the moment the agent first has to ask the human to sign in. Lower is better,
+ * the moment the agent first has to hand off to the human. Lower is better,
  * and the number is only meaningful as a diff against the previous run.
  *
- * The wall is the first `run_command` call whose argv carries `login`. A run
- * that never reaches the wall fails: the scenario's whole point is the
- * hand-off.
+ * The wall is the first `run_command` that started `login`, in the subcommand
+ * position. A refused or failed one counts only when the final message relays
+ * the device link: the runbook's plain `login` is killed at the tool's timeout
+ * and reports an error after printing that link, and the human still has it.
+ * With `handoffPath`, a run that stops and links that path on the landing host in
+ * its final message has handed off too, after all its calls: a user with no
+ * account has to sign up first, and the runbook places `login` after that (owner
+ * decision 2026-11-06). A run that does neither fails: the scenario's whole point
+ * is the hand-off.
  *
- * Options: `max` (number, the most calls a passing trial may take).
+ * The link is all this reads. "Do not use <link>" passes here, and score 2 counts
+ * keywords, so a false "setup is complete" that carries them passes both.
+ *
+ * Options: `max` (number, the most calls a passing trial may take),
+ * `handoffPath` (string, the path on the trial's landing host that the final
+ * hand-off must link).
  */
-export function onboardingToolCalls(log: AgentRunLog, options: { max?: number } = {}): GraderResult {
-  const max = options.max
+export function onboardingToolCalls(log: AgentRunLog, ctx: GraderContext, options: { max?: number; handoffPath?: string } = {}): GraderResult {
+  const { max, handoffPath } = options
   if (max === undefined) {
     return { pass: false, score: 0, detail: 'onboarding_tool_calls needs options.max — the most calls a passing trial may take' }
   }
+  const deviceLinkRelayed = detectHandoff(log.finalMessage ?? '')?.kind === 'device-login'
   const wallAt = log.calls.findIndex((c) => {
     const argv = commandArgv(c)
-    return argv !== undefined && argv.includes('login')
+    return argv !== undefined && loginCommandPackage(argv) !== undefined && (c.result?.ok !== false || deviceLinkRelayed)
   })
   if (wallAt === -1) {
-    return { pass: false, score: log.calls.length, detail: `never reached the login wall (${log.calls.length} call(s), no login command) — the agent never handed off to the human` }
+    const count = log.calls.length
+    if (handoffPath !== undefined) {
+      const landingUrl = ctx.resolved?.coldProfile?.landingUrl
+      // A URL with no host (`file:///x`) parses and has the origin "null".
+      const origin = landingUrl !== undefined && URL.canParse(landingUrl) ? new URL(landingUrl).origin : 'null'
+      if (origin === 'null') {
+        return { pass: false, score: count, detail: `no usable landing URL on this trial, so a hand-off to ${handoffPath} cannot be checked` }
+      }
+      const link = `${origin}${handoffPath}`
+      const linked = new RegExp(`${link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(log.finalMessage ?? '')
+      if (linked) {
+        return { pass: count <= max, score: count, detail: `${count} tool call(s) to the hand-off linking ${handoffPath} (max ${max})` }
+      }
+    }
+    const missed = handoffPath === undefined ? 'no login that handed anything over' : `no login that handed anything over, and the final message links no ${handoffPath} on the landing host`
+    return { pass: false, score: count, detail: `never reached the login wall (${count} call(s), ${missed}) — the agent never handed off to the human` }
   }
   const count = wallAt + 1
   return {
@@ -1263,7 +1370,8 @@ export function onboardingToolCalls(log: AgentRunLog, options: { max?: number } 
  * go falsely red on the `-y` the CLI's own docs use.
  *
  * Options: `package` (string, the CLI package spec; defaults to the trial's
- * resolved `coldProfile.cliPackage`), `threshold` (number, default 1).
+ * resolved `coldProfile.cliPackage`), `threshold` (number, default 1; 0 reports
+ * the score without requiring it).
  */
 export function onboardingLoginCommand(
   log: AgentRunLog,
@@ -1277,17 +1385,16 @@ export function onboardingLoginCommand(
   }
   const found = log.calls.some((c) => {
     const argv = commandArgv(c)
-    if (argv === undefined) return false
-    const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
-    return i !== -1 && argv[i] === pkg && argv[i + 1] === 'login'
+    return argv !== undefined && loginCommandPackage(argv) === pkg
   })
+  const score = found ? 1 : 0
   return {
-    pass: found ? 1 >= threshold : false,
-    score: found ? 1 : 0,
+    pass: score >= threshold,
+    score,
     scoreMax: 1,
     detail: found
       ? `ran the device-login command for ${pkg} (npx ${pkg} login … or npx -y ${pkg} login …)`
-      : `never ran npx ${pkg} login … — the agent did not start the device login`,
+      : `never ran npx ${pkg} login … — the agent did not start the device login${threshold === 0 ? ' (reported, not required)' : ''}`,
   }
 }
 
@@ -1356,7 +1463,7 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   no_second_fresh_payment: (log, ctx, options) => noSecondFreshPayment(log, ctx, options),
   onboarding_discovery: (log, ctx, options) => onboardingDiscovery(log, ctx, options as { hooks?: string[]; target?: string; threshold?: number }),
   onboarding_first_reply: (log, _ctx, options) => onboardingFirstReply(log, options as { steps?: string[]; threshold?: number }),
-  onboarding_tool_calls: (log, _ctx, options) => onboardingToolCalls(log, options as { max?: number }),
+  onboarding_tool_calls: (log, ctx, options) => onboardingToolCalls(log, ctx, options as { max?: number; handoffPath?: string }),
   onboarding_login_command: (log, ctx, options) => onboardingLoginCommand(log, ctx, options as { package?: string; threshold?: number }),
   client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] }),
   receipt_verified_offline: (log, ctx, options) => receiptVerifiedOffline(log, ctx, options),
@@ -1387,7 +1494,7 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   no_second_fresh_payment: ['mustMention'],
   onboarding_discovery: ['hooks', 'target', 'threshold'],
   onboarding_first_reply: ['steps', 'threshold'],
-  onboarding_tool_calls: ['max'],
+  onboarding_tool_calls: ['max', 'handoffPath'],
   onboarding_login_command: ['package', 'threshold'],
   client_out_of_date: ['releasesPath', 'manifestPath', 'startPath', 'mustMention'],
   receipt_verified_offline: ['mustMention', 'forbidMention'],

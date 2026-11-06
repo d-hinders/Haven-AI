@@ -510,6 +510,50 @@ describe('merchant-body: haven_complete_mcp_tool and refusal echoes', () => {
     expect(await ls(join(root, 'u'))).toBe('missing')
   })
 
+  // #4696: the shape of a real `claude -p --output-format stream-json` WebFetch.
+  const WEB_FETCH_TEXT = 'The page is the Haven runbook for agents.'
+  const WEB_FETCH_STREAM = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_w', name: 'WebFetch', input: { url: 'https://haven.example.test/', prompt: 'read it' } }] } }),
+    JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'tu_w', content: WEB_FETCH_TEXT }] },
+      tool_use_result: { bytes: 42, code: 200, codeText: 'OK', result: WEB_FETCH_TEXT, durationMs: 9, url: 'https://haven.example.test/' },
+    }),
+  ].join('\n')
+
+  it('a WebFetch answer scans clean, keeping the text the agent read and its request (#4696)', () => {
+    expect(scanSessionText(WEB_FETCH_STREAM, secrets())['merchant-body']).toBe(1)
+    const { text } = redactSessionText(WEB_FETCH_STREAM, { secrets: secrets() })
+    const line = JSON.parse(text.split('\n')[1])
+    expect(line.message.content[0].content).toBe(WEB_FETCH_TEXT)
+    expect(line.tool_use_result).toEqual({ bytes: 42, code: 200, codeText: 'OK', result: marker('merchant-body'), durationMs: 9, url: 'https://haven.example.test/' })
+    expect(scanSessionText(text, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+  })
+
+  it("WebFetch's exemption is by tool: another tool's bare result still fails the scan (#4696)", () => {
+    const raw = [PAID_TOOL_USE('tu_o', 'haven_get_payment_status'), TOOL_RESULT('tu_o', COMPLETE_BARE)].join('\n')
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(scanSessionText(text, secrets())['merchant-body']).toBeGreaterThan(0)
+  })
+
+  it.each(['mcp__merchant__WebFetch', 'webfetch', 'WebFetch2'])('the name must be exactly WebFetch: %s still fails the scan (#4696)', (name) => {
+    const { text } = redactSessionText(WEB_FETCH_STREAM.replace('"name":"WebFetch"', `"name":"${name}"`), { secrets: secrets() })
+    expect(scanSessionText(text, secrets())['merchant-body']).toBeGreaterThan(0)
+  })
+
+  it('a scan hit names the file and its classes, and no value (#4696)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'redact-4696-hit-'))
+    await writeFile(join(root, 'claude-sessions.some-task.trial2.jsonl'), TOOL_RESULT('tu_missing', COMPLETE_BARE))
+    await writeFile(join(root, 'claude-sessions.clean-task.trial1.jsonl'), WEB_FETCH_STREAM)
+    const logs: string[] = []
+    const result = await runRedaction({ inPrefix: join(root, 'claude-sessions'), stageDir: join(root, 's'), outDir: join(root, 'u'), required: REQUIRED, optional: OPTIONAL, env: ENV, log: (l) => logs.push(l) })
+    expect(result.clean).toBe(false)
+    const named = logs.filter((l) => l.startsWith('::error::redact-sessions scan hit in '))
+    expect(named).toHaveLength(1)
+    expect(named[0]).toMatch(/^::error::redact-sessions scan hit in claude-sessions\.some-task\.trial2\.jsonl: merchant-body: \d+$/)
+    expect(logs.join('\n')).not.toContain('MERCHANT-PAID-CANARY')
+  })
+
   it('a non-paid tool result without result keeps every field', () => {
     const raw = [PAID_TOOL_USE('tu_g', 'haven_get_payment_status'), TOOL_RESULT('tu_g', { payment_id: PAYMENT_ID, status: 'settled', tx_hash: TX_HASH })].join('\n')
     expect(redactSessionText(raw, { secrets: secrets() }).text).toBe(raw)

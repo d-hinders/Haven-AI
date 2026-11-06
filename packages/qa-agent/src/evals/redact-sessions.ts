@@ -24,11 +24,13 @@
  *     substring search over decoded strings and their JSON-escaped forms, its
  *     own URL splitter, a base64 DECODE of every base64-looking run), and it
  *     finds a merchant body with a different, broader predicate (any nested
- *     `result`) than the redactor's (the paid tool's results, or a `result`
- *     beside `payment_id` / `settlement_tx_hash`). A rule that stops
- *     redacting, or a needle built wrong, is caught by the scan.
+ *     `result`) than the redactor's (the paid tool's results, WebFetch's copy
+ *     of its text, or a `result` beside `payment_id` /
+ *     `settlement_tx_hash`). A rule that stops redacting, or a needle built
+ *     wrong, is caught by the scan.
  *  4. MOVE to the upload directory only on a clean scan. Any hit moves
- *     nothing, names each class and its count (never a value), and fails.
+ *     nothing, names each class and its count and each file holding a hit
+ *     (never a value), and fails.
  *
  * Every redaction replaces the WHOLE value, prefix included, with
  * `[REDACTED:<class>]` (never `sk_agent_[REDACTED]`), so a grep for a prefix
@@ -92,6 +94,17 @@ function escapeRe(s: string): string {
 
 /** The paid MCP tools whose results carry the merchant's paid body. */
 const PAID_TOOL = /(?:^|__)haven_(?:complete|settle)_mcp_tool$/
+/**
+ * Claude Code's own fetch answers `tool_use_result: { bytes, code, codeText,
+ * result, durationMs, url }`. That `result` repeats the `tool_result` text, which
+ * stays, and the scan flags any nested `result`, so this copy goes the way a paid
+ * body does (#4696), though the marker overstates it.
+ *
+ * The kept text uploads with no merchant-body check beyond the keyed forms. That
+ * is safe only while WebFetch stays on the cold profile, which cannot pay. A
+ * profile that can pay and also fetch must revisit this.
+ */
+const WEB_FETCH_TOOL = 'WebFetch'
 
 /**
  * Decode `\uXXXX` escapes (at any escape level) that stand for a printable
@@ -491,7 +504,8 @@ class Redactor {
    * Walk a parsed value structurally. `paid`: this value sits inside the
    * result of `haven_complete_mcp_tool` / `haven_settle_mcp_tool`, so every
    * `result` in it is the merchant's paid body (`paid-mcp-completion.ts`:
-   * `data.result` on both tools, with or without `payment_id`).
+   * `data.result` on both tools, with or without `payment_id`). A WebFetch
+   * answer sets it too, for its own `result` (see `WEB_FETCH_TOOL`).
    */
   value(value: unknown, paid = false): unknown {
     if (typeof value === 'string') return this.stringValue(value, paid)
@@ -540,14 +554,17 @@ class Redactor {
     return this.strings(text)
   }
 
-  /** Remember which tool each `tool_use` id names; true when this line answers a paid tool. */
+  /** Remember which tool each `tool_use` id names; true when this line answers a tool whose `result` is stripped. */
   private trackTools(line: unknown): boolean {
     const content = (line as { message?: { content?: unknown } })?.message?.content
     if (!Array.isArray(content)) return false
     let paid = false
     for (const block of content as Array<Record<string, unknown>>) {
       if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') this.toolNames.set(block.id, block.name)
-      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string' && PAID_TOOL.test(this.toolNames.get(block.tool_use_id) ?? '')) paid = true
+      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+        const name = this.toolNames.get(block.tool_use_id) ?? ''
+        if (PAID_TOOL.test(name) || name === WEB_FETCH_TOOL) paid = true
+      }
     }
     return paid
   }
@@ -900,14 +917,23 @@ export async function runRedaction(opts: RedactRunOptions): Promise<RedactRunRes
   // The positive control: what the rules found in the RAW input (numbers only).
   log(`redact-sessions: ${files.length} session file(s); redacted in the raw input: ${formatCounts(rawCounts)}`)
 
+  const hitFiles: string[] = []
   for (const name of files) {
     const counts = scanSessionText(await readFile(join(opts.stageDir, name), 'utf8'), secrets)
     for (const c of REDACTION_CLASSES) scanCounts[c] += counts[c]
+    if (totalOf(counts) > 0) {
+      const hits = REDACTION_CLASSES.filter((c) => counts[c] > 0).map((c) => `${c}: ${counts[c]}`)
+      hitFiles.push(`${name}: ${hits.join(', ')}`)
+    }
   }
   if (totalOf(scanCounts) > 0) {
     for (const c of REDACTION_CLASSES) {
       if (scanCounts[c] > 0) log(`::error::redact-sessions scan hit after redaction: ${c}: ${scanCounts[c]} — nothing uploaded`)
     }
+    // A hit loses the whole run's transcripts, so it says where (#4696), after the
+    // totals because GitHub caps annotations. A session file's name comes from
+    // the task id and trial, which carry no secret.
+    for (const hit of hitFiles) log(`::error::redact-sessions scan hit in ${hit}`)
     await rm(opts.stageDir, { recursive: true, force: true })
     return finish({ clean: false, files, rawCounts, scanCounts })
   }

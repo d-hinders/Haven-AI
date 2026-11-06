@@ -364,7 +364,7 @@ export interface GraderResult {
   settledSpendAtomic?: string
   /**
    * The NUMERIC reading a scoring grader reports (#4680): discovery band 0-3,
-   * first-reply steps named 0-3, tool calls to the wall, login command 0/1.
+   * first-reply steps named 0-3, tool calls to the hand-off, login command 0/1.
    * Present only on a grader that scores rather than merely passes/fails, so
    * the report and the summary can show the number beside the verdict — a
    * bare pass/fail would hide a band that fell from 3 to 2.

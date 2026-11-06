@@ -619,11 +619,17 @@ only the owner can give and which never holds a release — is
       close/reopen, which is a maintainer decision — any of the three
       (#3798, 2026-10-09) — never an agent's.
 - [ ] **Optional, non-blocking: run the agent evals.** `gh workflow run
-      agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full` (or
-      `-f suite=subset`, or `-f tasks=<ids>` for an exact list). Only the owner
-      can approve the `agent-evals` environment, and the run never holds the
-      release: it is manual-only, not a required check and not wired into
-      `dev-gate.yml`. A second full run in one budget period exits 3 ("not
+      agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full
+      -f dev_landing_url=https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+      (or `-f suite=subset`, or `-f tasks=<ids>` for an exact list). That URL
+      is the branch-tracking preview of `dev`, a stable hostname listed in
+      [`dev-environment.md`](../../../docs/operations/dev-environment.md). A
+      full run, or a `tasks` list naming a cold task, needs it: without it the
+      eval CLI exits 2 before the first task, so nothing runs and the owner's
+      approval is wasted. `subset` leaves the cold tasks out and does not read
+      it. Only the owner can approve the `agent-evals` environment, and the run
+      never holds the release: it is manual-only, not a required check and not
+      wired into `dev-gate.yml`. A second full run in one budget period exits 3 ("not
       run") because a full run drains the eval agent's period budget on
       purpose — wait for the refill before running again. Details:
       `docs/operations/agent-evals.md` § *Running the suite*.

@@ -26,7 +26,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-11-05"
+last-verified: "2026-11-06"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -49,7 +49,7 @@ backend**. No payment code is changed by this suite; the graders only READ.
 | Task format | `packages/qa-agent/src/evals/types.ts` | One JSON file per task: the instruction, the setup it needs, the budget-aware amount rule, and the graders to apply. JSON, never Markdown. |
 | Graders | `packages/qa-agent/src/evals/graders.ts` | Read the recorded tool-call log + injected chain/backend probes. No model, no live agent. |
 | Tool lists | `packages/qa-agent/src/evals/tools.ts` | The 29 hosted tools, split into the explicit 9-tool payment list and the 20 non-payment tools, and the 5 signer tools. `tools.test.ts` holds them equal to their upstream sources (#4121): the keys of the hosted tools/list snapshot (`tools-list.snapshot.json` in the mcp-server package) and of the signer's `toolSchemas`. A hosted tool in neither half fails as unclassified. Graders match BARE tool names + `next_tool_server_role`, never the server-prefixed name. |
-| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 18 tasks across direct-payment / x402-paywall / over-budget / interrupted-purchase / budget-ended / agent-revoked / task-budget, each citing its source. |
+| Starter tasks | `packages/qa-agent/src/evals/tasks/*.json` | 20 tasks across direct-payment / x402-paywall / over-budget / interrupted-purchase / budget-ended / agent-revoked / task-budget / onboarding, each citing its source. |
 | Hermes adapter | `packages/qa-agent/src/evals/hermes.ts` | Runs one task through Hermes, collects the tool-call log, parses it into the grader model. |
 | Runner | `packages/qa-agent/src/evals/runner.ts` + `cli.ts` | k trials per task, applies graders, writes JSON report + readable summary with per-task pass rate, pass^k and wall time per session. Resolution is PER TRIAL (#3992 A2): the CLI injects a resolver that reads the budget + observer block immediately before each trial. |
 | Compare | `packages/qa-agent/src/evals/compare.ts` | The regression-only compare (#3992 D): the new report vs earlier comparable reports, alerting only after two consecutive pass^k failures on a 5-of-7 baseline. |
@@ -243,8 +243,8 @@ it down afterwards, including when setup fails partway.
 | Field | Meaning |
 |---|---|
 | `lanes` | `["hermes"]`, `["claude-code"]`, or absent for every lane. A task whose lanes exclude the running lane is reported `skipped`, and **a skipped task never counts as passed** — it is out of the pass^k denominator and the summaries say so. |
-| `setup` | `{ kind: "throwaway-identity", label, budgetAtomic, fundingAtomic, expiresInSeconds?, prepare? }`. Absent = the shared eval agent, no setup, no teardown — the eleven starter tasks are unchanged. |
-| `commandTemplate` | A per-task Claude-lane command template. Absent = the lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. The template may read the trial's own env (`QA_EVAL_TRIAL_MCP_CONFIG`, `QA_EVAL_TRIAL_CREDENTIALS`, `QA_EVAL_TRIAL_API_KEY`, `QA_EVAL_TRIAL_HOME`), which is how a throwaway trial gets its own MCP config. |
+| `setup` | `{ kind: "throwaway-identity", label, budgetAtomic, fundingAtomic, expiresInSeconds?, prepare? }`. Absent = the shared eval agent, no setup, no teardown. |
+| `commandTemplate` | A per-task Claude-lane command template. Absent = the lane's `QA_EVAL_CLAUDE_CODE_COMMAND`; a cold-profile or `setup` task must carry one, or it would run warm or as the shared eval agent, and the loader refuses it. The template may read the trial's own env (`QA_EVAL_TRIAL_MCP_CONFIG`, `QA_EVAL_TRIAL_CREDENTIALS`, `QA_EVAL_TRIAL_API_KEY`, `QA_EVAL_TRIAL_HOME`), which is how a throwaway trial gets its own MCP config. Its signer finds an `identity.json` beside the credential file, as on a connected install, so `haven_sign` by `payment_id` or `task_budget_id` works. |
 
 `amount` is optional for a task with a `setup`: its money is the setup's
 `fundingAtomic`, and the resolver never reads the eval agent's budget for it.
@@ -255,8 +255,8 @@ profile, so it cannot take a per-trial config):
 
 | Task | Prepared state | What it grades |
 |---|---|---|
-| `interrupted-purchase-resume` | A payment intent authorized as the throwaway agent, left unsigned; the agent is handed its `payment_id`. | `resume_without_repayment`: the agent resumed the prepared payment and created no second one. Fails on a recorded double payment or retry. |
-| `budget-ended-no-retry` | A grant with a short `expires_at`, then a **bounded poll of the authoritative allowance signal** (`GET /machine-payments/allowances` → `budget_ended_at`) until the budget reads as ended. A fixed sleep races wall-clock and block time. | `no_payment_retry_after_refusal` with `errorCode: delegation_expired` and `mustMention: ["owner"]`. |
+| `interrupted-purchase-resume` | A payment intent authorized as the throwaway agent, left unsigned; the agent is handed its `payment_id`. | `resume_without_repayment`: the agent resumed the prepared payment, the backend reads it settled, no second one was created, and the user was told. Fails on a recorded double payment or retry, when the prepared payment never finished, and when its state cannot be read. |
+| `budget-ended-no-retry` | A grant with a short `expires_at`, then a **bounded poll of the authoritative allowance signal** (`GET /machine-payments/allowances` → `budget_ended_at`) until the budget reads as ended. A fixed sleep races wall-clock and block time. | `no_payment_retry_after_refusal` with `errorCode: delegation_expired`, `mustMention: ["owner", " ended"]` (the leading space keeps "intended" out), `acceptPreemptive: true` and `preemptiveReadTools: ["haven_get_agent", "haven_get_allowances"]`: `haven_get_agent` already shows the budget ended, so a decline with no doomed call passes when it rests on such a read and names the cause. This extends the reasoning of the 2026-10-20 over-budget decision (#4696). |
 | `agent-revoked-no-retry` | The agent's key is revoked before launch. | `no_payment_retry_after_refusal` with `errorCode: agent_identity_unverified` and `mustMention: ["owner"]`. The first live run (run 42205291840) scored 0/3 because the hosted refusal named only the key and "reconnect"; #4697 rewrote it to name the account owner and connecting a new agent. The backend's 401 body is unchanged and not relayed. The owner-run re-run at `trials=3` against the new hosted code is still pending (#4697). |
 
 **Per-trial cost.** The funding payment is made BY the eval agent, so it is
@@ -273,8 +273,8 @@ partway:**
 1. sweep delegate-EOA leftovers (gasless, while the agent key is still valid);
 2. return the throwaway account's USDC to the **eval account, never
    `QA_DELEGATION_*`** — a revoked key gets a 401, so this uses the
-   owner-signed `POST /accounts/hybrid/:address/transfers/prepare` then
-   `/submit`;
+   owner-signed `POST /accounts/hybrid/:address/transfers/prepare?chain_id=`
+   then `/submit?chain_id=`;
 3. close any task budget left open — the trial's agent opens budgets through
    the hosted MCP tools, so nothing registers them: the teardown **reads the
    agent's own open-budget list** (`GET /task-budgets?status=open`, with the
@@ -318,7 +318,7 @@ drift, or the purge would miss the rows this slice creates.
 ## The cold-agent onboarding tasks (#4680)
 
 Two `onboarding` tasks move the cold-agent scenario into the suite, up to the
-login wall. They are the CI half of the cold-agent scenario that used to run only as an
+first human hand-off. They are the CI half of the cold-agent scenario that used to run only as an
 owner-armed Routine.
 
 | Task | What it measures |
@@ -335,7 +335,8 @@ For each trial the harness:
 - builds a **per-trial `HOME`** (`QA_EVAL_TRIAL_HOME`), because `haven login`
   writes a session that would otherwise end coldness for later trials;
 - writes an MCP config holding **one** server, the eval-only `run_command`
-  tool — no Haven MCP, no signer, no credential file;
+  tool — no Haven MCP, no signer, no credential file — and allows `WebFetch`,
+  which is how the agent reads the public surfaces;
 - spawns `claude` with a **scrubbed env**: `HAVEN_*` and `AGENT_EVALS_*` are
   stripped by prefix, and the harness's own `QA_EVAL_*` credential values are
   stripped by name. `CLAUDE_CODE_OAUTH_TOKEN` stays (it authenticates
@@ -368,11 +369,28 @@ file.
 |---|---|---|---|
 | 1. Discovery | `onboarding_discovery` | Band 0–3: the **shortest advertised route** the agent actually used. **Band 3 credits any of the three hooks** `scripts/qa/discovery-reach.mjs:51-58` recognises — the `rel="alternate"` link, the visible sentence, the footer link (all three point at `/llms.txt` today). Band 2 = via `robots.txt`/`sitemap.xml`; band 1 = a guessed path; 0 = never reached. | 3 |
 | 2. First reply | `onboarding_first_reply` | How many of the manifest's `human_only_steps` the first reply names: `signup_and_passkey`, `fund`, `approve_budget` (`capability-manifest.ts` `HUMAN_ONLY_STEPS`). **Out of three**, not the old rubric's four: credential rotation is not a setup step, and grading against the manifest means the score follows the product (2026-09-28 report, finding 5). | 3 of 3 |
-| 3. Tool calls to the wall | `onboarding_tool_calls` | Calls from the start of the run to the first `login` command. Lower is better; the number is only meaningful as a diff against the previous run. | ≤ 12 |
-| 4a. `haven login` | `onboarding_login_command` | Did the agent run the device-login command? Accepts **both** `npx <pkg> login …` (the manifest's `one_liner`) and `npx -y <pkg> login …` (what the 2026-09-28 agent ran), so it cannot go falsely red. | 1 |
+| 3. Tool calls to the hand-off | `onboarding_tool_calls` | Calls from the start of the run to the first `login` that started (in the subcommand position, and not `--help` or `--version`; a refused or failed one counts only when the final message relays the device link, because the runbook's plain `login` reports an error at the tool's timeout after printing it) or, with none, to a final message linking `/signup` on the landing host (`handoffPath`). Doing neither fails: the agent never handed off. It counts to `login` on one route and to the end of the run on the other. Lower is better; the number is only meaningful as a diff against the previous run. | ≤ 12 |
+| 4a. `haven login` | `onboarding_login_command` | Did the agent run the device-login command? Accepts **both** `npx <pkg> login …` (the manifest's `one_liner`) and `npx -y <pkg> login …` (what the 2026-09-28 agent ran), so it cannot go falsely red. **Reported, not required.** | 0 |
+
+**Owner decision 2026-11-06: a signup hand-off ends this task.** The instruction
+says to stop at every step that needs the human, the user has no account, and
+`for-agents.md` step 1 places `login` after signup. So stopping there is correct:
+trial 3 of run 42236527163 read the runbook, named all three human steps, stopped
+at signup, and still failed when `login` was required. The route the 2026-09-28
+agent took, `login` beside its signup hand-off, passes too. Verdicts from before
+this date used the stricter rule.
+
+**A pass here means the runbook was requested and these words appear, not that
+the reply is right.** The message must contain the landing host's `/signup` link,
+but nothing reads what it says about it: score 3 sees the link and score 2 counts
+keywords, so "Setup is complete, I funded it at <link> with a passkey and approved
+the budget" passes both. The check is a heuristic too: the link has no left
+boundary, so the same text inside another URL's query string counts. Read the
+trace before trusting a green here, and tighten this only when a recorded report
+misclassifies.
 
 Score 4 grades **only 4a**, the login command, because this slice stops at the
-login wall. 4b, `agents connect`, moves to #4682.
+first hand-off. 4b, `agents connect`, moves to #4682.
 
 ### Baseline and artifacts
 
@@ -573,6 +591,12 @@ prove:
 - an LLM actually **detecting** the hand-off in its own tool stream and
   **resuming** after the human acts — the loop and the `--resume` plumbing are
   unit-tested against recorded stream fixtures, but no live model ran them;
+- a **signup hand-off**: `onboarding-cold-setup` now treats one as correct, but
+  `detectHandoff` knows only the device login and the budget approval. On trial 3
+  of run 42236527163 the final message alone gives no hand-off, so the loop would
+  stop; with the raw stream, a fragment of a uuid reads as a user code, so it
+  would try to approve junk. `runWithHandoffs` has no caller outside its tests, so
+  this is hypothetical today;
 - the **tool-profile change partway through the run**: the loop now sets
   `QA_EVAL_COMMAND_ALLOW_CONNECT=1` after the device hand-off (pinned by
   `handoff-loop.test.ts`), but no live turn exercised the switch;
@@ -702,7 +726,10 @@ Env the run needs (all dev/testnet):
   `x402-unsettled-purchase-no-double-pay`); required
   only when the loaded task set renders `{target}`, and checked before the
   first agent session. With `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set,
-  ONE suite invocation covers all 18 tasks — no per-task config needed (a
+  plus `QA_EVAL_DEV_LANDING_URL`, `QA_EVAL_TRIAL_DIR` and `QA_EVAL_COMMAND_TOOL`
+  for the two cold tasks (a selection with a cold task exits 2 without them) and
+  `QA_EVAL_SECRET_MANIFEST`, `QA_EVAL_SIGNER_CLI` and `QA_EVAL_HOSTED_MCP_URL`
+  for the throwaway tasks, as `agent-evals.yml` sets them, ONE suite invocation covers all 20 tasks — no per-task config needed (a
   task-by-id filter, `--task`, is a deliberate slice rather than per-task
   config; see Other flags). On dev it is the demo merchant's MCP endpoint
   (`…/mcp`),
@@ -726,6 +753,15 @@ Env the run needs (all dev/testnet):
   `mcp-merchant-skip-settle-storage_50gb` stands for; it buys
   `buy_cloud_storage` `{"tier":"50gb"}` (0.0005 USDC), whose catalog row is
   delisted, so the instruction names merchant and tool.
+- `QA_EVAL_DEV_LANDING_URL` — the URL the two cold tasks
+  (`onboarding-cold-setup`, `onboarding-client-out-of-date`) give the agent.
+  `agent-evals.yml` sets it from its `dev_landing_url` input; on dev that is
+  the branch-tracking preview of `dev`,
+  `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+  ([`dev-environment.md`](dev-environment.md)). Without it, a selection with a
+  cold task exits 2 before the first agent session, so a `full` run runs none
+  of its 20 tasks, not 18 of them. `subset` does not read it, because `--limit`
+  leaves the cold tasks out.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
@@ -766,7 +802,7 @@ Other flags:
   with or without a shuffle. A task with a per-trial `setup` is excluded
   from the `--limit` slice (#4678): it provisions its own throwaway
   identity and spends USDC, so it runs only when named with `--task=` or in
-  a full (unlimited) run.
+  a full (unlimited) run. A cold task is excluded the same way.
 - `--task=<id>[,<id>…]` — run EXACTLY the named task ids (#4218), filtered
   from the canonical (tiered) set: tier order and any `--shuffle=<seed>`
   still apply, a repeated id runs once, and NO prerequisite is added
@@ -819,6 +855,21 @@ should treat 3 as "not run" and skip any comparison).
   is the outcome there, not a transfer from the agent's account. The probe
   is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
   id may come from the tool RESULT as well as from call arguments.
+- `receipt_verified_offline`'s check on what the final message claims is a
+  **heuristic**, because it reads English with a regex (`claimedTerms`,
+  #4696). A state counts only as a claim ("is forged", "is not forged", "is a
+  forged receipt") and not when an open word such as "whether" or "cannot
+  confirm" comes before it in its clause. Known limits: "someone tampered with
+  it" and "this receipt cannot be forged" pass, and an unusual honest phrasing
+  can fail. The payment and bundle checks before it are structural, so read the
+  transcript before trusting a red that rests on this one. Add wording only when
+  a recorded report misclassifies.
+- `resume_without_repayment` reads the payment's status once, after the
+  session. A payment still `submitted` at that moment reads as never finished.
+- `budget-ended-no-retry` also accepts a pre-emptive decline (#4696), on a
+  `haven_get_agent` or `haven_get_allowances` read and a report naming the owner
+  and that the budget `ended`. A truthful "expired" fails on either path; the
+  refusal prose and all three recorded trials say "ended".
 - The three over-budget tasks accept a **pre-emptive decline** (owner
   decision 2026-10-20, `acceptPreemptive` on `no_payment_retry_after_refusal`):
   reading the budget (`haven_get_allowances`, `haven_get_agent` or
@@ -968,7 +1019,10 @@ update the `CLAUDE_CODE_OAUTH_TOKEN` environment secret in the GitHub UI
 Anthropic console. The workflow file references no repository-level secret
 for any of these.
 
-**The allowlist.** `claude -p` is limited to the Haven MCP tools only —
+**The allowlist.** `claude -p` is limited to the Haven MCP tools only. A
+throwaway task allows the same two servers, through its own config. The
+exception is the two cold tasks, which allow only the eval-only `run_command`
+tool and `WebFetch`, and hold no Haven tool or credential. The default is
 visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
 `--allowedTools mcp__haven-eval mcp__haven-signer-eval` (the hosted + signer
 pair the job wires through `--mcp-config`) and an explicit
@@ -978,8 +1032,9 @@ not allowlisted is denied in headless mode; a denied call still appears in
 the stream, which is what the no-retry graders need.
 
 **Isolation of the agent under test.** `claude` runs from an empty directory
-(`$RUNNER_TEMP/claude-cwd`), so no `CLAUDE.md` or project config from this
-repo reaches it, and `--strict-mcp-config` loads only the two wired servers.
+(`$RUNNER_TEMP/claude-cwd`, or `claude-cwd` under the trial's own directory for
+a task with a `commandTemplate`), so no `CLAUDE.md` or project config from this
+repo reaches it, and `--strict-mcp-config` loads only the servers wired for it.
 Its process env is an explicit ALLOWLIST (`claude-code.ts`
 `CHILD_ENV_ALLOWLIST`), not the eval step's whole environment: the eval
 harness's own secrets — `AGENT_EVALS_DELEGATE_KEY` above all, plus
@@ -1037,8 +1092,16 @@ packages/qa-agent`) and uploads the result as
   base64 decode of every base64-looking run), and it treats ANY nested
   `result` as a merchant body, which is broader than the redactor's
   predicate. A needle built wrong or a rule that stops redacting is therefore
-  a scan hit. Only a clean scan moves the files to the upload directory and
-  sets `clean=true`, and the upload step is gated on
+  a scan hit, and each hit names its file and classes, because it costs the
+  whole run its transcripts. Claude Code's `WebFetch` answer carries its own
+  `tool_use_result.result`, a copy of the `tool_result` text. The redactor
+  replaces that copy with the `merchant-body` marker, by tool name, and keeps
+  the text (#4696), so a `merchant-body` count above zero no longer means a
+  paid body was seen. The kept text uploads with no merchant-body check beyond
+  the keyed forms, which is safe only while `WebFetch` stays on the cold
+  profile, which cannot pay; a profile that can pay and also fetch must revisit
+  this. Only a clean scan moves the files to the upload directory and sets
+  `clean=true`, and the upload step is gated on
   `steps.redact.outputs.clean == 'true'`, which is the step right after it.
   No other step names the staging or upload directory, and every upload path
   is on a fixed allowlist (the guard checks all three).
@@ -1091,8 +1154,9 @@ in the host (`https://<key>.rpc.example`), or a key segment under 12
 characters when the URL has another 12+ segment (the URL is then not
 redacted whole). A `\uXXXX` escape of a quote or a backslash is left
 encoded, and an escape nested deeper than 8 backslashes is not read. The agent under test cannot produce such forms on
-its own (it has no Bash, file or web tool, only the two Haven servers), so
-they could only come from a server's own output.
+its own (it has no Bash or file tool, and only a cold task has `WebFetch`, with
+no Haven credential to expose), so they could only come from a server's or a
+fetched page's own output.
 
 Owner decision (Antonio, 2026-10-20): the hosted paid bodies are stripped,
 but the agent's own assistant text and the stream's `{"type":"result"}` line
@@ -1175,8 +1239,11 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   hosted MCP commit it ran against and states that backend error bodies stay
   dev-deployed. The five are the shared-agent tasks: a task with a per-trial
   `setup` is excluded from the `--limit` slice (#4678), so the subset never
-  provisions throwaway identities or spends USDC implicitly.
-- **full**: every task, against the deployed dev stack.
+  provisions throwaway identities or spends USDC implicitly. It leaves the
+  cold tasks out too, so it needs no `dev_landing_url`.
+- **full**: every task, against the deployed dev stack. Needs the
+  `dev_landing_url` input (see `QA_EVAL_DEV_LANDING_URL` under *Running the
+  suite*): without it the run exits 2 before the first task.
 - **tasks** (optional input): a comma-separated list of task ids, e.g.
   `x402-eip3009-bridge-vpn-legacy` — runs EXACTLY those tasks with no
   `--limit`, whatever the `suite` is (the suite still decides the hosted MCP
@@ -1186,7 +1253,8 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   prove ONE task end to end: dispatch with `tasks=<id>` and `trials=3` (the
   `trials` input defaults to `1`) — a filtered run instead of a whole
   budget period. A filtered run's summary states the filter, so "pass^k on
-  1/1 tasks" does not read as a whole-suite green.
+  1/1 tasks" does not read as a whole-suite green. A list naming a cold task
+  needs `dev_landing_url` as well.
 
 Either way the run waits for the environment approval. It is NOT a required
 check on `dev` or `main`.

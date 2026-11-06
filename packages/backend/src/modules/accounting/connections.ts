@@ -46,6 +46,7 @@ import {
   type ConnectionSettings,
   type ConnectionStatus,
 } from '../../infra/repositories/accounting-connections.js'
+import { config } from '../../config.js'
 import { flagConnectionStatus } from './ops-signals.js'
 import { decryptSecrets } from '../../infra/secrets.js'
 import { connectWithApiKey, webhookApiOrigin, type ProviderWebhookRegistration } from './api-key-flow.js'
@@ -58,6 +59,7 @@ import { getSyncState, reopenMissingPushed } from './feed-sync.js'
 import { fortnoxConfigured, fortnoxCredentials } from './fortnox-connection.js'
 import { fortnoxOAuth2Config } from './fortnox.js'
 import { buildAuthorizeUrl, completeOAuth2Connect, type OAuth2ProviderConfig } from './oauth-flow.js'
+import { pkceVerifierFor } from './oauth-pkce.js'
 import { missingScopesFor, type AccountingProvider } from './provider.js'
 import { assertConnectable, connectorFor, getProvider, listProviders, ProviderNotConnectableError } from './registry.js'
 
@@ -168,23 +170,35 @@ export function oauth2ConfigFor(providerId: string): OAuth2ProviderConfig | null
 }
 
 /**
- * The consent URL for a live OAuth2 provider, given an already-signed state.
- * Throws `ProviderNotConnectableError` for a provider that may not connect.
+ * The PKCE verifier for one state (#4517), when the provider's config asks
+ * for PKCE: derived from the state's `jti` under `JWT_SECRET` — the key
+ * that signs the state — so the connect-url and the callback compute the
+ * same value and nothing is stored (`oauth-pkce.ts`).
  */
-export function connectUrlFor(providerId: string, state: string): string {
+function pkceVerifierForState(cfg: OAuth2ProviderConfig, stateJti: string): string | undefined {
+  return cfg.pkce ? pkceVerifierFor(stateJti, config.jwtSecret) : undefined
+}
+
+/**
+ * The consent URL for a live OAuth2 provider, given an already-signed state
+ * and that state's `jti`. Throws `ProviderNotConnectableError` for a
+ * provider that may not connect.
+ */
+export function connectUrlFor(providerId: string, state: string, stateJti: string): string {
   const { provider } = assertConnectable(providerId, 'oauth2')
   const cfg = oauth2ConfigFor(provider.id)
   if (!cfg) {
     throw new ProviderNotConnectableError('PROVIDER_NOT_CONFIGURED', `${provider.displayName} is not configured on this deployment.`)
   }
-  return buildAuthorizeUrl(cfg, state)
+  return buildAuthorizeUrl(cfg, state, pkceVerifierForState(cfg, stateJti))
 }
 
-/** The callback's work after the state is verified and consumed. */
+/** The callback's work after the state — whose `jti` is passed — is verified and consumed. */
 export async function completeProviderOAuthCallback(
   providerId: string,
   userId: string,
   code: string,
+  stateJti: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ConnectionSummary> {
   const { provider, connector } = assertConnectable(providerId, 'oauth2')
@@ -192,7 +206,15 @@ export async function completeProviderOAuthCallback(
   if (!cfg) {
     throw new ProviderNotConnectableError('PROVIDER_NOT_CONFIGURED', `${provider.displayName} is not configured on this deployment.`)
   }
-  const row = await completeOAuth2Connect({ provider, cfg, connector, userId, code, fetchImpl })
+  const row = await completeOAuth2Connect({
+    provider,
+    cfg,
+    connector,
+    userId,
+    code,
+    pkceVerifier: pkceVerifierForState(cfg, stateJti),
+    fetchImpl,
+  })
   return toConnectionSummary(row)
 }
 

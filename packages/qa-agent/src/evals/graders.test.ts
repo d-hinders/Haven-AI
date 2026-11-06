@@ -1327,6 +1327,94 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
     expect(r.pass).toBe(false)
     expect(r.detail).toContain('never reached the login wall')
   })
+
+  describe('with handoffPath, a signup hand-off ends the run too (owner decision 2026-11-06)', () => {
+    const opts = { max: 3, handoffPath: '/signup' }
+    const fetches = (n: number) => Array.from({ length: n }, () => call('WebFetch', { args: { url: 'https://dev.example/' } }))
+    const SIGNUP = 'Please open https://dev.example/signup?next=/agents and create your account.'
+
+    it('counts every call to a final message naming the path', () => {
+      const r = onboardingToolCalls(log(fetches(3), SIGNUP), opts)
+      expect(r.score).toBe(3)
+      expect(r.pass).toBe(true)
+    })
+
+    it('still applies max to that count', () => {
+      const r = onboardingToolCalls(log(fetches(4), SIGNUP), opts)
+      expect(r.score).toBe(4)
+      expect(r.pass).toBe(false)
+    })
+
+    it('fails a final message that names no such path', () => {
+      const r = onboardingToolCalls(log(fetches(1), 'Create an account with a passkey.'), opts)
+      expect(r.pass).toBe(false)
+      expect(r.detail).toContain('names no /signup')
+    })
+
+    it('fails a run with no final message', () => {
+      expect(onboardingToolCalls(log(fetches(1)), opts).pass).toBe(false)
+    })
+
+    it('counts to a login command when there is one, whatever the message says', () => {
+      const r = onboardingToolCalls(log([...fetches(1), run(['npx', '@haven_ai/cli@dev', 'login']), ...fetches(3)], SIGNUP), opts)
+      expect(r.score).toBe(2)
+      expect(r.pass).toBe(true)
+    })
+
+    it('does not apply without the option', () => {
+      expect(onboardingToolCalls(log(fetches(1), SIGNUP), { max: 3 }).pass).toBe(false)
+    })
+  })
+})
+
+describe('onboarding-cold-setup — the real task against the trials of run 42236527163', () => {
+  const landingUrl = 'https://dev.example'
+  const ctx: GraderContext = {
+    resolved: {
+      task: { id: 'onboarding-cold-setup', title: 't', category: 'onboarding', instruction: 'x', requires: [], graders: [], expectTransfer: false, source: { kind: 'issue', ref: '4680', note: 'n' } },
+      amountAtomic: 0n,
+      instruction: 'x',
+      coldProfile: { landingUrl, cliPackage: '@haven_ai/cli@dev' },
+    },
+  }
+  const fetchOf = (path: string) => call('WebFetch', { args: { url: `${landingUrl}${path}` } })
+  const grade = async (calls: RecordedToolCall[], message: string) => {
+    const t = await loadRealTask('onboarding-cold-setup')
+    const results = await applyGraders(log(calls, message), t.graders, ctx)
+    return Object.fromEntries(results.map((r) => [r.name, r]))
+  }
+  const RUNBOOK = [fetchOf('/'), fetchOf('/llms.txt'), fetchOf('/for-agents.md')]
+  const HANDOFF = `Open ${landingUrl}/signup?next=/agents&via=agent and create the passkey on your device. You will then fund the account with USDC and approve the budget.`
+
+  it('trial 3: read the runbook and stopped at signup, which now passes all four', async () => {
+    const r = await grade(RUNBOOK, HANDOFF)
+    expect(Object.values(r).map((g) => g.pass)).toEqual([true, true, true, true])
+    expect(r.onboarding_tool_calls!.score).toBe(3)
+    expect(r.onboarding_login_command!.score).toBe(0)
+  })
+
+  it('trial 2: stopped at the landing page, so discovery and the first reply stay red', async () => {
+    const r = await grade([fetchOf('/')], `Open ${landingUrl}/signup and create your account with a passkey, then set the budget.`)
+    expect(r.onboarding_discovery!.pass).toBe(false)
+    expect(r.onboarding_first_reply!.pass).toBe(false)
+    expect(r.onboarding_tool_calls!.pass).toBe(true)
+  })
+
+  it('trial 1: no signup link and a refused connect, so it has not handed off', async () => {
+    const connect = call('mcp__eval-command__run_command', { args: { argv: ['npx', '-y', '@haven_ai/connect@alpha'] }, result: { ok: false } })
+    const r = await grade([fetchOf('/'), connect], `Open ${landingUrl} and create an account with a passkey, then set the budget.`)
+    expect(r.onboarding_discovery!.pass).toBe(false)
+    expect(r.onboarding_first_reply!.pass).toBe(false)
+    expect(r.onboarding_tool_calls!.pass).toBe(false)
+  })
+
+  it('the 2026-09-28 route still passes and scores the login', async () => {
+    const login = call('mcp__eval-command__run_command', { args: { argv: ['npx', '-y', '@haven_ai/cli@dev', 'login', '--json', '--no-wait'] } })
+    const r = await grade([...RUNBOOK, login], HANDOFF)
+    expect(Object.values(r).map((g) => g.pass)).toEqual([true, true, true, true])
+    expect(r.onboarding_tool_calls!.score).toBe(4)
+    expect(r.onboarding_login_command!.score).toBe(1)
+  })
 })
 
 describe('onboarding_login_command — accepts npx <pkg> and npx -y <pkg>', () => {
@@ -1352,6 +1440,23 @@ describe('onboarding_login_command — accepts npx <pkg> and npx -y <pkg>', () =
     const r = onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', '--help'])]), ctx)
     expect(r.score).toBe(0)
     expect(r.pass).toBe(false)
+  })
+
+  it('threshold 0 reports the score without requiring it', () => {
+    const r = onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', '--help'])]), ctx, { threshold: 0 })
+    expect(r.score).toBe(0)
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('reported, not required')
+  })
+
+  it('threshold 0 still scores a login that ran', () => {
+    const r = onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', 'login'])]), ctx, { threshold: 0 })
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(true)
+  })
+
+  it('threshold 0 still fails when no package resolves', () => {
+    expect(onboardingLoginCommand(log([]), {}, { threshold: 0 }).pass).toBe(false)
   })
 })
 

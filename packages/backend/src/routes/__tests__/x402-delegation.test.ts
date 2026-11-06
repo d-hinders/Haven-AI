@@ -1794,7 +1794,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(res.statusCode).toBe(200)
       // The UID and the chain id are the substance — the pair a merchant can
       // resolve against a verifier it already pins, or against EAS directly
-      // with the attester check (the schema has no resolver).
+      // with the attester check (the schema has no resolver). Until Haven
+      // publishes its attester address, its verifier is the supported path.
       // `verify_url` is a convenience that this deployment may or may not be
       // able to emit honestly (it needs a configured base URL AND a live
       // verifier), so its two branches are pinned where the decision is made,

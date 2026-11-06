@@ -26,7 +26,7 @@ export function PassportReadinessWarning({ passport }: { passport: PassportReadi
         padding="none"
         className="px-5"
         title="Passports no merchant can verify"
-        description="Issuance is on and the receipt verifier is off: new passports anchor on-chain, and GET /passport/verify answers 503."
+        description="Issuance is on and the receipt verifier is off: new passports can anchor on-chain, and GET /passport/verify answers 503."
         actions={
           <StatusBadge tone="warning">
             {chainIds.length} chain{chainIds.length === 1 ? '' : 's'}
@@ -41,7 +41,7 @@ export function PassportReadinessWarning({ passport }: { passport: PassportReadi
             </p>
             <p className="text-xs text-[var(--v2-ink-3)]">
               Set PASSPORT_RECEIPT_SIGNING_KEY (docs/operations/passport-verification-setup.md), or unset this
-              chain&apos;s AGENT_PASSPORT_SCHEMA_UID to stop issuing.
+              chain&apos;s AGENT_PASSPORT_SCHEMA_UID_{chainId} to stop issuing.
             </p>
           </div>
         ))}

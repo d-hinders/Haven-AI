@@ -9,13 +9,16 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { applyGraders } from './graders.js'
 import { parseHermesSessionLog } from './hermes.js'
 import { renderSummary, runSuite, type EvalAdapter } from './runner.js'
 import { renderMarkdownSummary } from './summary.js'
-import { buildGraderContext, createPerTrialResolver, parseTaskSelection, type BlockNumberSource } from './cli.js'
+import { buildGraderContext, createPerTrialResolver, parseTaskSelection, writeColdTrialConfig, type BlockNumberSource } from './cli.js'
+import { buildClaudeCodeCommand } from './claude-code.js'
 import { selectTaskSequence, loadTasks } from './tasks.js'
 import { HavenApi } from '../lib/haven-api.js'
 import type { BudgetUse } from '../lib/delegation-budget.js'
@@ -1120,5 +1123,48 @@ describe('#4677: buildGraderContext wires probeTaskBudget into task_budget_lifec
     const ctx = buildGraderContext({ api, provider })
     const r = await ctx.probeTaskBudget!('tb-1')
     expect(r.ok).toBe(false)
+  })
+})
+
+// The recorded defect, run 42205291840: every cold session ran on the lane's
+// command, with the Haven pair connected and no web access. This walks the path
+// a cold trial really takes, from the resolver to the command `claude` gets.
+describe('a cold trial reaches its own command and MCP config (#4696)', () => {
+  it.each(['onboarding-cold-setup', 'onboarding-client-out-of-date'])('%s', async (id) => {
+    const trialDir = await mkdtemp(join(tmpdir(), 'cold-trial-'))
+    try {
+      const { tasks } = await loadTasks(TASKS_DIR)
+      const task = tasks.find((t) => t.id === id)!
+      const resolver = createPerTrialResolver({
+        readBudget: async () => {
+          throw new Error('an onboarding task must not read the budget')
+        },
+        blockNumber: async () => 1,
+        recipient: '0xrec',
+        agentAccount: '0xagent',
+        coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+        coldTrialEnv: (t, trial) =>
+          writeColdTrialConfig({ trialDir, taskId: t.id, trial, cliPackage: '@haven_ai/cli@dev', commandToolPath: '/repo/command-tool.js' }),
+        sleep: async () => {},
+      })
+      const resolved = await resolver.resolve(task, 1)
+
+      const lane = {
+        commandTemplate: 'claude -p {instruction} --allowedTools mcp__haven-eval --mcp-config "$RUNNER_TEMP/haven-eval-mcp.json"',
+        logPath: '/tmp/log',
+        timeoutMs: 1000,
+      }
+      const command = buildClaudeCodeCommand(lane, resolved.instruction, resolved.commandTemplate)
+      expect(command).toContain('--allowedTools mcp__eval-command WebFetch')
+      expect(command).toContain('--mcp-config "$QA_EVAL_TRIAL_MCP_CONFIG"')
+      expect(command).not.toContain('haven-eval-mcp.json')
+
+      const config = JSON.parse(await readFile(resolved.trialEnv!.QA_EVAL_TRIAL_MCP_CONFIG!, 'utf8')) as {
+        mcpServers: Record<string, unknown>
+      }
+      expect(Object.keys(config.mcpServers)).toEqual(['eval-command'])
+    } finally {
+      await rm(trialDir, { recursive: true, force: true })
+    }
   })
 })

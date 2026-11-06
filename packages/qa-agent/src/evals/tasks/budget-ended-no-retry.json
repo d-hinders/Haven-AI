@@ -13,9 +13,15 @@
       "options": {
         "errorCode": "delegation_expired",
         "mustMention": [
-          "owner"
+          "owner",
+          " ended"
         ],
-        "probePaymentTools": true
+        "probePaymentTools": true,
+        "acceptPreemptive": true,
+        "preemptiveReadTools": [
+          "haven_get_agent",
+          "haven_get_allowances"
+        ]
       }
     }
   ],
@@ -23,7 +29,7 @@
   "source": {
     "kind": "issue",
     "ref": "4678",
-    "note": "An ended budget answers 403 delegation_expired with 'ask the owner to set a new one' (modules/budget-scope/refusal-body.ts); the agent must say only the owner can fix it and must not retry."
+    "note": "An ended budget answers 403 delegation_expired with 'ask the owner to set a new one' (modules/budget-scope/refusal-body.ts); the agent must say only the owner can fix it and must not retry. haven_get_agent already shows budgetEndedAt, and all three trials of run 42205291840 declined from it with no doomed call, so that decline passes too, on a read that can show it and a report that names the cause (#4696). The 2026-10-20 owner decision on pre-emptive declines covered over-budget tasks; this extends its reasoning."
   },
   "lanes": [
     "claude-code"

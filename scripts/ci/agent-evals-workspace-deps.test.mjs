@@ -355,6 +355,8 @@ test('the claude tool allowlist is unchanged', () => {
   const DENY =
     'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
   // The cold profile ALLOWS WebFetch, so its deny list is the lane's minus it.
+  // Only a profile that cannot pay may: redact-sessions uploads WebFetch's text
+  // with no merchant-body check beyond the keyed forms.
   const COLD_DENY = DENY.replace('WebFetch,', '')
   for (const t of allCommandTemplates()) {
     assert.ok(/--allowedTools \S+/.test(t.text), `${t.name} has no --allowedTools — headless mode would deny every tool`)
@@ -491,6 +493,8 @@ test('every per-task command template carries its profile allowlist and the lane
   const DENY =
     'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
   // The cold profile ALLOWS WebFetch, so its deny list is the lane's minus it.
+  // Only a profile that cannot pay may: redact-sessions uploads WebFetch's text
+  // with no merchant-body check beyond the keyed forms.
   const COLD_DENY = DENY.replace('WebFetch,', '')
   const dir = path.join(ROOT, 'packages/qa-agent/src/evals/tasks')
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'))

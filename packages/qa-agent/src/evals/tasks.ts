@@ -229,6 +229,17 @@ export function validateTask(raw: unknown, file: string): string | null {
     if (!Array.isArray(t.lanes) || t.lanes.length !== 1 || t.lanes[0] !== 'claude-code') {
       return `${file}: a cold-profile task must name lanes ["claude-code"] — the Hermes lane has no cold profile and reports it skipped`
     }
+    // Without its own template a cold task falls back to the lane's command,
+    // which wires the Haven MCP pair and refuses WebFetch: a warm agent graded
+    // on a cold rubric (#4696).
+    if (typeof t.commandTemplate !== 'string') {
+      return `${file}: a cold-profile task must carry a commandTemplate — the lane's command would run it warm, with the Haven tools and no web access`
+    }
+  }
+  // The same fallback on a setup task would provision a throwaway identity and
+  // then run the agent on the shared eval agent's MCP config and budget (#4696).
+  if (t.setup !== undefined && typeof t.commandTemplate !== 'string') {
+    return `${file}: a task with a setup must carry a commandTemplate — the lane's command would run it as the shared eval agent, not the trial's identity`
   }
   // #4678: the per-trial prepared state. A task with a `setup` owns its own
   // money (`fundingAtomic`), so `amount` is optional for it; every other task
@@ -638,6 +649,7 @@ export async function resolveTask(
         agentAccount: opts.agentAccount,
         startedAtBlock: opts.startedAtBlock,
         coldProfile: opts.coldProfile,
+        ...(task.commandTemplate !== undefined ? { commandTemplate: task.commandTemplate } : {}),
       },
     }
   }

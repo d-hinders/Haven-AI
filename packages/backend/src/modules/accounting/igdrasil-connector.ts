@@ -1,5 +1,9 @@
 import { getConnection } from '../../infra/repositories/accounting-connections.js'
-import { getSyncState } from '../../infra/repositories/accounting-feed-syncs.js'
+import {
+  getMerchantInvoiceSyncRef,
+  getSyncState,
+  recordMerchantInvoiceSync,
+} from '../../infra/repositories/accounting-feed-syncs.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { ledgerAmount } from './feed-transaction.js'
 import {
@@ -18,6 +22,7 @@ import { loadReceiptUnderlag, merchantReceiptDocument } from './receipt-underlag
 import { MultiCompanyGrantError, ProviderError, type ProviderCompanyInfo } from './provider.js'
 import { getValidOAuth2AccessToken, revokeToken } from './oauth-flow.js'
 import { ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
+import { markPushed } from './feed-sync.js'
 
 /**
  * Igdrasil feed adapter (#4518, epic #2875) — document-only like Accounted,
@@ -50,8 +55,9 @@ import { ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
  *    Flipping on the 401 itself would also flip on a provider hiccup.
  *  - `503 writes_disabled` (Igdrasil has not switched this app's writes on)
  *    and every other 5xx are transient: thrown, retried by the sweep.
- *  - Late attach of a merchant receipt that arrives after the push is #4521,
- *    not here.
+ *  - A merchant receipt that arrives AFTER the push is uploaded by
+ *    `lateAttachIgdrasilMerchantReceipt` below (#4521), which the capture
+ *    route calls fire-and-forget.
  */
 export class IgdrasilConnector implements AccountingConnector {
   provider = 'igdrasil'
@@ -278,6 +284,74 @@ function preCreateRefusal(err: unknown): PushResult | null {
     return { externalRef: null, status: 'skipped', reason: `the receipt document was not accepted: ${err.message}` }
   }
   return null
+}
+
+/**
+ * Late attach for Igdrasil (#4521, the Accounted #3918 and Fortnox #956
+ * precedent): the x402 feed pushes at funding confirmation, but the merchant
+ * hands its invoice to the agent at the settle retry seconds later — so the
+ * underlag is usually ALREADY pushed when the receipt arrives, and pushed
+ * rows are never re-claimed. The capture route calls this fire-and-forget:
+ * when THIS provider's underlag row for the payment is pushed, upload the
+ * just-captured invoice as the second document and record its own
+ * `merchant-invoice` sync row. Best-effort by contract — a failure becomes a
+ * note on the pushed row, never an error to the agent.
+ *
+ * These guards return before any request, in this order: no pushed Igdrasil
+ * row for the payment (the in-order push attaches at push time, or the
+ * payment never went to Igdrasil); a merchant-invoice row already recorded;
+ * no Igdrasil app on this deployment; no company on the connection. Only then
+ * is the access token read, from the generic flow's row-locked refresh (a
+ * refresh token rotates and a reused one revokes the family, so there is no
+ * second refresh path). An expired token makes that refresh request, which
+ * writes `accounting_connections`; a grant already marked dead, or refused at
+ * that refresh, ends in the catch below as a note.
+ *
+ * Idempotent from three directions: the guard above skips a recorded
+ * delivery, the ledger's `(provider, payment_id, user_id, document_kind)` key
+ * makes a second row-write a no-op, and Igdrasil keys a document on its bytes,
+ * so a racing re-upload of the same bytes names the same document (200). That
+ * last one holds for an inline receipt (rendered deterministically); a URL
+ * receipt is fetched again here, and a merchant that serves different bytes
+ * would make a second document.
+ */
+export async function lateAttachIgdrasilMerchantReceipt(
+  userId: string,
+  paymentId: string,
+  receipt: { url: string | null; inlineJson: unknown | null },
+  fetchImpl: typeof fetch = fetch,
+  receiptFetchOptions: SafeFetchOptions = {},
+): Promise<void> {
+  // MUTATION TARGET (igdrasil-late-attach.db.test.ts "not pushed to Igdrasil"):
+  // without this guard every captured receipt would reach Igdrasil.
+  const sync = await getSyncState(userId, 'igdrasil', paymentId)
+  if (!sync || sync.status !== 'pushed') return
+  if (await getMerchantInvoiceSyncRef(userId, 'igdrasil', paymentId)) return // already recorded
+  if (!igdrasilConfigured()) return
+  const companyId = (await getConnection(userId, 'igdrasil'))?.external_company_id
+  if (!companyId) return
+  try {
+    const accessToken = await getValidOAuth2AccessToken(igdrasilOAuth2Config(igdrasilCredentials()), userId, fetchImpl)
+    if (!accessToken) return // no OAuth row or secrets left (disconnected); nothing to attach to
+    const doc = await merchantReceiptDocument(paymentId, receipt, receiptFetchOptions)
+    if (!doc) return
+    if (doc.bytes.byteLength > IGDRASIL_UPLOAD_MAX_BYTES) return // Igdrasil would refuse it; silent on a best-effort path
+    const { upload } = await igdrasilUploadDocument({
+      accessToken,
+      companyId,
+      file: { filename: doc.filename, bytes: doc.bytes, contentType: doc.contentType },
+      fetchImpl,
+    })
+    await recordMerchantInvoiceSync(userId, 'igdrasil', paymentId, `igdrasil:document:${upload.document_id}`)
+  } catch (err) {
+    await markPushed(
+      userId,
+      'igdrasil',
+      paymentId,
+      sync.external_ref,
+      `the merchant's own invoice was not attached: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 }
 
 /** A foreign or malformed ref can never be a document Haven filed. */

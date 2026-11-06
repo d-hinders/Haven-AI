@@ -1341,8 +1341,22 @@ pushed row, never a failed row. Byte-keyed dedup applies to that file too: a
 merchant invoice fetched by URL that is byte-identical across two payments (a
 static subscription PDF, say) answers 200 with the FIRST payment's document,
 so both payments' `merchantInvoiceRef` name one Igdrasil document. The
-underlag is per payment and never collides. A merchant receipt that arrives after the push
-is not attached yet (#4521).
+underlag is per payment and never collides. A merchant receipt that arrives
+after the push — the normal x402 order, since the push fires at funding
+confirmation and the receipt at the settle retry — is late-attached
+(`lateAttachIgdrasilMerchantReceipt`, #4521, the Accounted shape): the capture
+route calls it fire-and-forget next to the Fortnox and Accounted ones. A pushed
+Igdrasil underlag row and no recorded merchant-invoice row → upload the
+receipt as the second document and record it. No Igdrasil row for the
+payment, a row that is not `pushed`, a row already recorded, no app on the
+deployment or no company on the connection → it returns before any request.
+Past those guards it reads the access token through the generic refresh: an
+expired token makes the refresh request first, and a grant that is already
+dead, or is refused at that refresh, ends as a note on the pushed row, like a
+failed upload. A duplicate report is stopped by the recorded row. A racing
+one re-uploads the same bytes for an inline receipt, which Igdrasil answers
+with the same document; a receipt given by URL is fetched again, so a
+merchant serving different bytes would make a second document.
 
 **Error map** (by HTTP status and the open-enum `error.code`):
 

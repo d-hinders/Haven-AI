@@ -51,7 +51,7 @@ import { completeOAuth2Connect } from '../oauth-flow.js'
 import { pkceVerifierFor } from '../oauth-pkce.js'
 import { IGDRASIL } from '../registry.js'
 import { accountingEntry } from './connector-conformance.js'
-import { IGDRASIL_DOCUMENT_ID, IGDRASIL_MERCHANT_DOCUMENT_ID, igdrasilRouter } from './igdrasil-test-router.js'
+import { IGDRASIL_COMPANY_ID, IGDRASIL_DOCUMENT_ID, IGDRASIL_MERCHANT_DOCUMENT_ID, igdrasilRouter } from './igdrasil-test-router.js'
 
 const KEY = randomBytes(32).toString('base64')
 const UNDERLAG_REF = `igdrasil:document:${IGDRASIL_DOCUMENT_ID}`
@@ -136,6 +136,9 @@ describeDb('Igdrasil late attach of a merchant receipt captured after the push (
     // `lateAttachIgdrasilMerchantReceipt` and both calls below reach Igdrasil.
     const { userId, state, impl } = await connected()
     const pid = `pay-igd-late-${seq}-2`
+    // An expired access token, so a token fetch hoisted above the guards
+    // would show up as a refresh request (reviewer cell R1).
+    await db.query(`UPDATE accounting_connections SET token_expires_at = NOW() - INTERVAL '1 minute' WHERE user_id = $1`, [userId])
     const requestsBefore = state.requests.length
 
     // No sync row at all: the payment never went to Igdrasil.
@@ -150,6 +153,31 @@ describeDb('Igdrasil late attach of a merchant receipt captured after the push (
     await lateAttachIgdrasilMerchantReceipt(userId, pid, RECEIPT, impl)
     expect(state.requests.length).toBe(afterFail)
     expect(await getMerchantInvoiceSyncRef(userId, 'igdrasil', pid)).toBeNull()
+  })
+
+  it('a pushed payment whose connection has no company, or no live grant, makes no request and records nothing', async () => {
+    const { userId, state, impl } = await connected()
+
+    // No company on the connection (reviewer cell R2): without the guard the
+    // upload would go to /companies/undefined/uploads.
+    const noCompany = `pay-igd-late-${seq}-4`
+    expect(await feedSettledPayment(userId, noCompany)).toEqual({ outcome: 'pushed' })
+    await db.query(`UPDATE accounting_connections SET external_company_id = NULL WHERE user_id = $1`, [userId])
+    const before = state.requests.length
+    await lateAttachIgdrasilMerchantReceipt(userId, noCompany, RECEIPT, impl)
+    expect(state.requests.length).toBe(before)
+    expect(await getMerchantInvoiceSyncRef(userId, 'igdrasil', noCompany)).toBeNull()
+
+    // The company is back but the grant is gone: disconnected, no secrets, so
+    // the generic flow answers no token (reviewer cell R6).
+    const noGrant = `pay-igd-late-${seq}-5`
+    await db.query(`UPDATE accounting_connections SET external_company_id = $2 WHERE user_id = $1`, [userId, IGDRASIL_COMPANY_ID])
+    expect(await feedSettledPayment(userId, noGrant)).toEqual({ outcome: 'pushed' })
+    await db.query(`UPDATE accounting_connections SET status = 'disconnected', secrets_ciphertext = NULL WHERE user_id = $1`, [userId])
+    const beforeGrant = state.requests.length
+    await lateAttachIgdrasilMerchantReceipt(userId, noGrant, RECEIPT, impl)
+    expect(state.requests.length).toBe(beforeGrant)
+    expect(await getMerchantInvoiceSyncRef(userId, 'igdrasil', noGrant)).toBeNull()
   })
 
   it('an upload Igdrasil refuses resolves, records no merchant-invoice row and leaves a note on the pushed underlag row', async () => {

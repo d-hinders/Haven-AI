@@ -1347,12 +1347,16 @@ confirmation and the receipt at the settle retry — is late-attached
 (`lateAttachIgdrasilMerchantReceipt`, #4521, the Accounted shape): the capture
 route calls it fire-and-forget next to the Fortnox and Accounted ones. A pushed
 Igdrasil underlag row and no recorded merchant-invoice row → upload the
-receipt as the second document and record it; anything else (no Igdrasil row
-for the payment, a row that is not `pushed`, a row already recorded, no app on
-the deployment, no company or no live grant) → returns before any request. A
-failed upload is a note on the pushed row. A duplicate report is stopped by
-the recorded row; a racing one names the same document, because Igdrasil keys
-on the bytes.
+receipt as the second document and record it. No Igdrasil row for the
+payment, a row that is not `pushed`, a row already recorded, no app on the
+deployment or no company on the connection → it returns before any request.
+Past those guards it reads the access token through the generic refresh: an
+expired token makes the refresh request first, and a grant that is already
+dead, or is refused at that refresh, ends as a note on the pushed row, like a
+failed upload. A duplicate report is stopped by the recorded row. A racing
+one re-uploads the same bytes for an inline receipt, which Igdrasil answers
+with the same document; a receipt given by URL is fetched again, so a
+merchant serving different bytes would make a second document.
 
 **Error map** (by HTTP status and the open-enum `error.code`):
 

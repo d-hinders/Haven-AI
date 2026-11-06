@@ -2006,22 +2006,22 @@ describe('machine payment routes', () => {
       const outage = new Error('igdrasil outage')
       const igdrasilCalls: unknown[][] = []
       const spy = reportingMocks.lateAttachIgdrasilMerchantReceipt
-      reportingMocks.lateAttachIgdrasilMerchantReceipt = ((...a: unknown[]) => {
-        igdrasilCalls.push(a)
-        return Promise.reject(outage)
-      }) as unknown as typeof spy
       const unhandled: unknown[] = []
       const onUnhandled = (reason: unknown) => {
         if (reason === outage) unhandled.push(reason)
       }
-      process.on('unhandledRejection', onUnhandled)
-      primeDb(
-        AUTH,
-        [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
-        [/INSERT INTO merchant_receipts/, () => ({ rows: [{ evidence_id: 'evidence-1' }] })],
-      )
-
       try {
+        reportingMocks.lateAttachIgdrasilMerchantReceipt = ((...a: unknown[]) => {
+          igdrasilCalls.push(a)
+          return Promise.reject(outage)
+        }) as unknown as typeof spy
+        process.on('unhandledRejection', onUnhandled)
+        primeDb(
+          AUTH,
+          [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
+          [/INSERT INTO merchant_receipts/, () => ({ rows: [{ evidence_id: 'evidence-1' }] })],
+        )
+
         const response = await app.inject({
           method: 'POST',
           url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,

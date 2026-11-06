@@ -297,18 +297,23 @@ function preCreateRefusal(err: unknown): PushResult | null {
  * `merchant-invoice` sync row. Best-effort by contract — a failure becomes a
  * note on the pushed row, never an error to the agent.
  *
- * Every guard returns BEFORE any request, in this order: no pushed Igdrasil
+ * These guards return before any request, in this order: no pushed Igdrasil
  * row for the payment (the in-order push attaches at push time, or the
  * payment never went to Igdrasil); a merchant-invoice row already recorded;
- * no Igdrasil app on this deployment; no company on the connection; no live
- * grant. The access token comes from the generic flow's row-locked refresh
- * (a refresh token rotates and a reused one revokes the family, so there is
- * no second refresh path).
+ * no Igdrasil app on this deployment; no company on the connection. Only then
+ * is the access token read, from the generic flow's row-locked refresh (a
+ * refresh token rotates and a reused one revokes the family, so there is no
+ * second refresh path). An expired token makes that refresh request, which
+ * writes `accounting_connections`; a grant already marked dead, or refused at
+ * that refresh, ends in the catch below as a note.
  *
  * Idempotent from three directions: the guard above skips a recorded
  * delivery, the ledger's `(provider, payment_id, user_id, document_kind)` key
  * makes a second row-write a no-op, and Igdrasil keys a document on its bytes,
- * so a racing re-upload of the same invoice names the same document (200).
+ * so a racing re-upload of the same bytes names the same document (200). That
+ * last one holds for an inline receipt (rendered deterministically); a URL
+ * receipt is fetched again here, and a merchant that serves different bytes
+ * would make a second document.
  */
 export async function lateAttachIgdrasilMerchantReceipt(
   userId: string,
@@ -327,7 +332,7 @@ export async function lateAttachIgdrasilMerchantReceipt(
   if (!companyId) return
   try {
     const accessToken = await getValidOAuth2AccessToken(igdrasilOAuth2Config(igdrasilCredentials()), userId, fetchImpl)
-    if (!accessToken) return // the grant is gone; the connection state already says so
+    if (!accessToken) return // no OAuth row or secrets left (disconnected); nothing to attach to
     const doc = await merchantReceiptDocument(paymentId, receipt, receiptFetchOptions)
     if (!doc) return
     if (doc.bytes.byteLength > IGDRASIL_UPLOAD_MAX_BYTES) return // Igdrasil would refuse it; silent on a best-effort path

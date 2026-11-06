@@ -165,8 +165,8 @@ export function logPassportReadiness(
  * Whether THIS deployment can issue a passport on a chain that a merchant can
  * then verify (#4719, epic #4718).
  *
- * All three must hold: the chain is a passport chain (`PASSPORT_CHAIN_IDS`),
- * the schema UID is registered here (`isPassportConfigured`), and the receipt
+ * All three must hold: the chain is a passport chain and its schema UID is
+ * registered here (`isPassportConfigured` answers both), and the receipt
  * verifier is on. The last one is an owner decision (2026-11-06): a passport
  * issued where `GET /passport/verify` answers 503 is the `issuance_only` trap
  * #1151 found, an on-chain credential no merchant can check, so the dashboard
@@ -179,7 +179,10 @@ export function isPassportIssuableOnChain(
   inputs: Pick<PassportReadinessInputs, 'env' | 'verificationConfigured'> = {},
 ): boolean {
   const { env = process.env, verificationConfigured = isReceiptSigningConfigured() } = inputs
-  if (chainId == null || !PASSPORT_CHAIN_IDS.has(chainId)) return false
+  if (chainId == null) return false
+  // `isPassportConfigured` is the passport-chain check too: it is false for
+  // any chain without a pinned EAS deployment (`getEasDeployment` throws), so
+  // a schema-UID env var for a non-passport chain cannot make it true.
   return verificationConfigured && isPassportConfigured(chainId, env)
 }
 

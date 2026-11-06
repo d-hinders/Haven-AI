@@ -14,7 +14,7 @@
         "errorCode": "delegation_expired",
         "mustMention": [
           "owner",
-          "ended"
+          " ended"
         ],
         "probePaymentTools": true,
         "acceptPreemptive": true,

@@ -277,8 +277,8 @@ jobs:
           # signup password, signup bearer token, agent API key) and lives
           # OUTSIDE every report and upload path; the redactor consumes it
           # fail-closed and the `always()` step below deletes it after the
-          # scan. The trial dir holds each trial's own credential + MCP
-          # config, mode 0600.
+          # scan. The trial dir holds each trial's own credential, identity
+          # and MCP config, mode 0600.
           QA_EVAL_SECRET_MANIFEST: ${{ runner.temp }}/eval-secret-manifest/manifest.json
           QA_EVAL_TRIAL_DIR: ${{ runner.temp }}/eval-trials
           QA_EVAL_SIGNER_CLI: ${{ github.workspace }}/packages/signer/dist/cli.js

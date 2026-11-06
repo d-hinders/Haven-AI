@@ -988,6 +988,9 @@ describe('budget-ended-no-retry — the real task accepts a pre-emptive decline'
     const r = await grade([read], 'You are out of funds. Ask the account owner to top up.')
     expect(r[0]!.pass).toBe(false)
     expect(r[0]!.detail).toContain('ended')
+    // "ended" inside another word is not the cause either.
+    const inside = await grade([read], 'I intended to pay, but you are out of funds. Ask the account owner to top up.')
+    expect(inside[0]!.pass).toBe(false)
   })
 
   it('FAILS a decline with no successful read behind it', async () => {
@@ -1479,6 +1482,7 @@ describe('receipt_verified_offline — the receipt task (#4677)', () => {
     'It cannot be verified offline. That is not proof it was tampered with.',
     "It cannot be verified offline. That isn't a sign it was tampered with.",
     "It cannot be verified offline. That isn't proof it was tampered with.",
+    'It cannot be verified offline. This is not an indication it was tampered with.',
     'It cannot be verified offline, and it could not be verified successfully.',
     'It can’t be verified offline, and I can’t confirm it is authentic.',
   ])('passes a report that names a forbidden word without claiming it: %s', async (message) => {
@@ -1510,7 +1514,9 @@ describe('receipt_verified_offline — the receipt task (#4677)', () => {
     ['Offline it cannot be checked — it is forged.', 'forged'],
     ['It was not verified offline since it is forged.', 'forged'],
     // A plain "not" earlier in the clause does not excuse the claim after it.
-    ['This is not verifiable offline as it is forged.', 'forged'],
+    ['This is not verifiable offline given it is forged.', 'forged'],
+    ['It does not verify offline as it is forged.', 'forged'],
+    ['The offline receipt is inauthentic.', 'inauthentic'],
     // A connective starts a new assertion, however short the sentence.
     ['The receipt cannot be verified offline but is authentic.', 'authentic'],
     ["It can't be verified offline and is forged.", 'forged'],

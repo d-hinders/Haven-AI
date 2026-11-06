@@ -157,7 +157,8 @@ Needs attention items after setup (#4324, owner decisions 2026-10-23):
     next failed intent — at the time the intent actually BECAME failed
     (`failed_at`, #4378), so a failure the reconciler marks long after its
     last recorded step still re-arms the item.
-  - "Has used 90% of its budget" returns in the next budget period. It shows
+  - "Has used 90% of its budget" (badge "Nearly spent" — the budget has not
+    been reached) returns in the next budget period. It shows
     only while the agent's "Budget reached" item is not showing, so an agent
     never carries two budget items at once.
 - "Review" on a refusal-based item opens the agent's Activity tab filtered to
@@ -386,6 +387,9 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    the screen offers "Save this address as a contact?" — a name field and Save,
    with the name trimmed and a blank name refused inline. A 409 shows "Already
    saved"; any other failure is an inline, retryable error with the name kept.
+   A save reads "Saved as <name>" over "Past payments to this address now show
+   this name." — names are read per request, so the save shows at once on
+   `/transactions`, the account tab and the dashboard.
    While the save is in flight, Save reads "Saving…" and Done and every close
    path are blocked. Done closes.
 6. Every screen puts its actions in the dialog's footer through the shared

@@ -399,7 +399,7 @@ export default function EditAgentModal({
       )}
 
       {step === 'saving' && error && (
-        <DialogResult state="error" title="Update failed" description={error} />
+        <DialogResult state="error" title="Update failed" description={error} announce />
       )}
 
       {step === 'done' && (
@@ -407,6 +407,7 @@ export default function EditAgentModal({
           state="success"
           title="Agent updated"
           description="Details, labels and organisation saved"
+          announce
         />
       )}
     </Modal>

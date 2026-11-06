@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { DialogResult } from '@/components/ui/DialogResult'
+import { Milestone } from '@/components/ui/Milestone'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { LinkChip } from '@/components/ui/LinkChip'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
@@ -47,6 +48,7 @@ import TransactionDetailPanel from '@/components/transactions/TransactionDetailP
 import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { ConnectSteps } from '@/components/connect-agent/ConnectSteps'
+import { ConnectAgentRow } from '@/components/connect-agent/ConnectAgentRow'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
@@ -1315,6 +1317,82 @@ function ListControlsState({ label, children }: { label: string; children: React
       <p className="max-w-3xl text-xs leading-relaxed text-[var(--v2-ink-3)]">{label}</p>
       {children}
     </div>
+  )
+}
+
+/**
+ * One Milestone strength, with its own Replay control (#4702). The specimen is
+ * static on load — `play` is false until Replay — so the page never animates on
+ * first paint (§ 4 Motion) and a capture is deterministic. Replay bumps the
+ * key, which remounts the pattern and replays the motion.
+ */
+function MilestoneSpecimen({
+  strength,
+  label,
+  children,
+}: {
+  strength: 'peak' | 'step' | 'live'
+  label: string
+  children: ReactNode
+}) {
+  const [plays, setPlays] = useState(0)
+  return (
+    <Card hover={false} className="p-5">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{label}</h3>
+        <Button variant="ghost" size="sm" onClick={() => setPlays((n) => n + 1)}>
+          Replay
+        </Button>
+      </div>
+      <div className="mt-6 flex min-h-24 w-full items-center justify-center">
+        <Milestone key={plays} strength={strength} play={plays > 0} className={strength === 'live' ? 'w-full' : ''}>
+          {children}
+        </Milestone>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * The three DialogResult states, with a Replay for the one that moves (#4702).
+ * Success plays Milestone Step; busy and error are static. `play` is false
+ * until Replay, so the specimen is static on load.
+ */
+function DialogResultShowcase() {
+  const [plays, setPlays] = useState(0)
+  return (
+    <>
+      <div className="flex justify-end">
+        <Button variant="ghost" size="sm" onClick={() => setPlays((n) => n + 1)}>
+          Replay success
+        </Button>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Card hover={false} className="p-5">
+          <DialogResult
+            state="busy"
+            title="Waiting for your approval…"
+            description="Approve in your wallet or with your passkey. The budget changes only after you approve."
+          />
+        </Card>
+        <Card hover={false} className="p-5">
+          <DialogResult
+            key={plays}
+            state="success"
+            play={plays > 0}
+            title="Budget updated"
+            description="The new limits are live and the previous budget is stopped."
+          />
+        </Card>
+        <Card hover={false} className="p-5">
+          <DialogResult
+            state="error"
+            title="Budget update failed"
+            description="Nothing changed — your current budget still works. Try again."
+          />
+        </Card>
+      </div>
+    </>
   )
 }
 
@@ -2969,6 +3047,21 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
+        title="Connect agent row"
+        description="Who you are waiting for, above the connect checklist (#4702). The row names the agent and its state — 'Listening for it…' while the connector runs, 'Connected just now' once it lands. It never restates a step: the checklist below owns progress."
+        testId="ds-connect-agent-row"
+      >
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <ConnectAgentRow name="Research agent" state="waiting" />
+          </Card>
+          <Card hover={false} className="p-5">
+            <ConnectAgentRow name="Research agent" state="connected" />
+          </Card>
+        </div>
+      </Section>
+
+      <Section
         title="DialogActions"
         description="A dialog screen's action pair: secondary then primary, equal halves on the body edges at 40px. Below sm (640px) the pair stacks, primary on top, both full width — resize to see it. A screen with a single action uses one full-width primary instead."
       >
@@ -3604,6 +3697,7 @@ export default function DesignSystemPage() {
             <div className="mt-4 space-y-4">
               <DialogResult
                 state="success"
+                play={false}
                 title="125.00 USDC sent"
                 description="To Acme Services on Base."
               >
@@ -4490,33 +4584,43 @@ export default function DesignSystemPage() {
       </Section>
 
       <Section
-        title="DialogResult"
-        description="A dialog's outcome screen, in one place (#4564). Three states — busy, success, error — with the same icon circle, title and description rhythm, so Edit budget, Edit agent and Fund merchant cannot drift. It owns the centred block only; the action row stays the caller's, in Modal's footer."
-        testId="ds-dialog-result"
+        title="Milestone"
+        description="One pattern for a moment worth noticing (#4702), at three strengths. Peak plays check-pop plus the bloom, once, for a first in your Haven life. Step plays check-pop only, on a change you watch happen. Live fades a row in from a soft brand-soft wash, on a row that arrives while the page is open. It wraps its child, so the size stays the caller's; each specimen is static until Replay."
+        testId="ds-milestone"
       >
         <div className="grid gap-5 lg:grid-cols-3">
-          <Card hover={false} className="p-5">
-            <DialogResult
-              state="busy"
-              title="Waiting for your approval…"
-              description="Approve in your wallet or with your passkey. The budget changes only after you approve."
+          <MilestoneSpecimen strength="peak" label="Peak — check-pop + bloom">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-success-soft)] ring-1 ring-inset ring-success/25 shadow-button">
+              <Icon icon={Check} className="h-7 w-7 text-[var(--v2-success)]" strokeWidth={2.4} />
+            </span>
+          </MilestoneSpecimen>
+          <MilestoneSpecimen strength="step" label="Step — check-pop only">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
+              <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
+            </span>
+          </MilestoneSpecimen>
+          <MilestoneSpecimen strength="live" label="Live — a row that arrives">
+            <Row
+              leading={<Icon icon={ArrowDown} className="h-4 w-4" />}
+              leadingTone="success"
+              title="125.00 USDC received"
+              subtitle="From Acme Services · just now"
             />
-          </Card>
-          <Card hover={false} className="p-5">
-            <DialogResult
-              state="success"
-              title="Budget updated"
-              description="The new limits are live and the previous budget is stopped."
-            />
-          </Card>
-          <Card hover={false} className="p-5">
-            <DialogResult
-              state="error"
-              title="Budget update failed"
-              description="Nothing changed — your current budget still works. Try again."
-            />
-          </Card>
+          </MilestoneSpecimen>
         </div>
+        <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+          Under <code className="rounded bg-[var(--v2-surface)] px-1">prefers-reduced-motion: reduce</code> the
+          component does not opt in to the class at all, so the final state is there straight away and the
+          screen-reader announcement is kept. It owns no live region: the caller announces.
+        </p>
+      </Section>
+
+      <Section
+        title="DialogResult"
+        description="A dialog's outcome screen, in one place (#4564). Three states — busy, success, error — with the same icon circle, title and description rhythm, so Edit budget, Edit agent and Fund merchant cannot drift. It owns the centred block only; the action row stays the caller's, in Modal's footer. Success plays Milestone Step (#4702); busy and error do not animate."
+        testId="ds-dialog-result"
+      >
+        <DialogResultShowcase />
         <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
           The busy state uses the shared <code className="rounded bg-[var(--v2-surface)] px-1">Spinner</code>{' '}
           (#4563), whose rotation is gated behind <code className="rounded bg-[var(--v2-surface)] px-1">motion-safe:</code>.

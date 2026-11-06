@@ -1,0 +1,1 @@
+{"error": {"type": "authorization_error", "code": "grant_role_revoked", "message": "The person who approved this app can no longer write to the company.", "request_id": "req_fixture_grant_role_revoked"}}

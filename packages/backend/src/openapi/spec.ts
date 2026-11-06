@@ -5258,7 +5258,7 @@ export const openapiSpec = {
         operationId: 'listAccountingProviders',
         summary: 'The accounting providers Haven knows about, live or coming soon.',
         description:
-          'Four today: Fortnox and Accounted (`live` — Fortnox over OAuth2, Accounted over a pasted API key) and Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
+          'Four today: Fortnox and Accounted (`live` — Fortnox over OAuth2, Accounted over a pasted API key) and Light, Igdrasil (`coming_soon` — listed by product decision; Light has no connector yet, and Igdrasil\'s connector exists but is not yet live-verified). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {

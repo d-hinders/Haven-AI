@@ -681,6 +681,15 @@ Fortnox is not configured on prod. Whether prod keeps sharing the dev app or
 registers its own is decided when Fortnox is enabled, under #2876. The feed
 was live-proven against dev on 2026-07-16.
 
+**Igdrasil** (#4518) is wired the same way: `IGDRASIL_CLIENT_ID`,
+`IGDRASIL_CLIENT_SECRET` and `IGDRASIL_REDIRECT_URI` (the dev backend's
+`/accounting/connections/igdrasil/callback`) register its connector at boot
+only when all three are set. They are **not set on dev yet**: the app
+registration with Igdrasil is pending, and the secret goes straight
+into Railway when it arrives. The provider stays `coming_soon` until the live
+check on dev (#4519), so setting the variables alone opens nothing.
+[accounting-feed.md](./accounting-feed.md) is the reference.
+
 ### Enabling the ERC-7710 rail on the dev demo-merchant
 
 The dev demo-merchant advertises **EIP-3009 only** by default. The experimental

@@ -463,6 +463,14 @@ export const config = {
   fortnoxClientSecret: process.env.FORTNOX_CLIENT_SECRET ?? '',
   fortnoxRedirectUri: process.env.FORTNOX_REDIRECT_URI ?? '',
 
+  // Igdrasil accounting integration (#4518, epic #2875): Haven's OAuth app,
+  // registered by Igdrasil. Disabled unless all three are set; the redirect
+  // URI is `<backend>/accounting/connections/igdrasil/callback`, exactly as
+  // registered. Secrets — env only, never commit.
+  igdrasilClientId: process.env.IGDRASIL_CLIENT_ID ?? '',
+  igdrasilClientSecret: process.env.IGDRASIL_CLIENT_SECRET ?? '',
+  igdrasilRedirectUri: process.env.IGDRASIL_REDIRECT_URI ?? '',
+
   // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
   // default — it calls an external catalog API and inserts rows, so it's
   // opt-in. The URL is overridable for testing/self-hosted facilitators.

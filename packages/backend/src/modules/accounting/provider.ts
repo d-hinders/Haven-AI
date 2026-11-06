@@ -5,9 +5,10 @@
  * it can do, whether it is open for connection yet, and which scopes the
  * OAuth grant must carry. It is deliberately separate from the connector — the
  * CODE that talks to the provider — so that a provider can be LISTED (owner
- * decision 2026-09-11: Light and Igdrasil appear as *Coming soon* today;
- * Accounted, listed the same way, has been `live` since #3017) before any
- * code for it exists, and so that the routes can answer
+ * decision 2026-09-11: Light and Igdrasil appear as *Coming soon*;
+ * Accounted, listed the same way, has been `live` since #3017, and Igdrasil
+ * has a connector since #4518 but stays listed until its live check) before
+ * any code for it exists, and so that the routes can answer
  * "which providers are there, and which of them may I connect?" without
  * loading a single adapter.
  *
@@ -96,6 +97,28 @@ export class ProviderError extends Error {
  * a connection in the default currency.
  */
 export const UNSUPPORTED_BASE_CURRENCY_MESSAGE = `Haven feeds ${ledgerCurrencyList()} ledgers`
+
+/**
+ * The grant reaches more than one company (#4518). Haven's feed has no
+ * per-push company choice, so a grant that names several companies is
+ * refused at connect rather than booking into the wrong one silently.
+ * Provider-neutral: Igdrasil's consent screen lets a person pick several
+ * companies. (Accounted's pasted key has its own `MultiCompanyKeyError` —
+ * different advice, a key scoped to one company.) The OAuth callback answers
+ * it with `reason=multi_company`.
+ */
+export class MultiCompanyGrantError extends Error {
+  readonly code = 'MULTI_COMPANY_GRANT' as const
+  constructor(
+    public readonly provider: string,
+    public readonly count: number | 'several',
+  ) {
+    super(
+      `The ${provider} grant reaches ${count} companies — Haven feeds exactly one. Connect again and approve one company.`,
+    )
+    this.name = 'MultiCompanyGrantError'
+  }
+}
 
 export class UnsupportedBaseCurrencyError extends Error {
   readonly code = 'UNSUPPORTED_BASE_CURRENCY' as const

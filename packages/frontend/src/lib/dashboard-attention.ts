@@ -611,7 +611,7 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         tone: 'neutral',
         badge: 'Budget reached',
         title: `${agent.name} reached its budget`,
-        subtitle: 'Its budget stopped a payment in the last 7 days.',
+        subtitle: 'Its budget stopped a payment in the last 7 days. No money moved.',
         actionLabel: 'Review',
         href: refusedAttemptsHref(agent.id),
         agentId: agent.id,
@@ -631,7 +631,9 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         id: `budget-usage:${agent.id}`,
         kind: 'budget-usage',
         tone: 'neutral',
-        badge: 'Budget reached',
+        // #4703: the budget has NOT been reached at 90% — the badge says what
+        // is true, and the refusal item keeps "Budget reached".
+        badge: 'Nearly spent',
         title: `${agent.name} has used 90% of its budget`,
         subtitle: 'Its current budget period is nearly spent.',
         actionLabel: 'Review',

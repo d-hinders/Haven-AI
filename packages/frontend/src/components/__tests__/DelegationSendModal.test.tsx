@@ -867,6 +867,8 @@ describe('DelegationSendModal — save as contact (#4641)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(contactsFixture.addContact).toHaveBeenCalledWith('Acme Services', NEW_ADDRESS))
     expect(await screen.findByText('Saved as Acme Services')).toBeTruthy()
+    // #4703: the save is not just a label — it changes how past payments read.
+    expect(screen.getByText('Past payments to this address now show this name.')).toBeTruthy()
   })
 
   it('refuses a blank or whitespace-only name without an API call', async () => {
@@ -886,6 +888,8 @@ describe('DelegationSendModal — save as contact (#4641)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Already saved')).toBeTruthy()
     expect(screen.queryByText(/could not save/)).toBeNull()
+    // #4703: nothing was saved here, so the line about past payments is absent.
+    expect(screen.queryByText('Past payments to this address now show this name.')).toBeNull()
   })
 
   it('shows a retryable inline error with the name kept for any other failure', async () => {
@@ -896,6 +900,8 @@ describe('DelegationSendModal — save as contact (#4641)', () => {
     expect(await screen.findByText('Haven could not save this contact. Try again.')).toBeTruthy()
     expect((screen.getByLabelText('Contact name') as HTMLInputElement).value).toBe('Acme')
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false)
+    // #4703: a failed save changed nothing, so the line about past payments is absent.
+    expect(screen.queryByText('Past payments to this address now show this name.')).toBeNull()
   })
 
   it('blocks Done and every close path while the save is in flight', async () => {

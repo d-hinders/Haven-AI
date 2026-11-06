@@ -26,7 +26,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-11-05"
+last-verified: "2026-11-06"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -335,7 +335,8 @@ For each trial the harness:
 - builds a **per-trial `HOME`** (`QA_EVAL_TRIAL_HOME`), because `haven login`
   writes a session that would otherwise end coldness for later trials;
 - writes an MCP config holding **one** server, the eval-only `run_command`
-  tool — no Haven MCP, no signer, no credential file;
+  tool — no Haven MCP, no signer, no credential file — and allows `WebFetch`,
+  which is how the agent reads the public surfaces;
 - spawns `claude` with a **scrubbed env**: `HAVEN_*` and `AGENT_EVALS_*` are
   stripped by prefix, and the harness's own `QA_EVAL_*` credential values are
   stripped by name. `CLAUDE_CODE_OAUTH_TOKEN` stays (it authenticates
@@ -702,6 +703,8 @@ Env the run needs (all dev/testnet):
   `x402-unsettled-purchase-no-double-pay`); required
   only when the loaded task set renders `{target}`, and checked before the
   first agent session. With `QA_EVAL_RECIPIENT` + `QA_EVAL_X402_TARGET` set,
+  plus `QA_EVAL_DEV_LANDING_URL`, `QA_EVAL_TRIAL_DIR` and `QA_EVAL_COMMAND_TOOL`
+  for the two cold tasks (a selection with a cold task exits 2 without them),
   ONE suite invocation covers all 20 tasks — no per-task config needed (a
   task-by-id filter, `--task`, is a deliberate slice rather than per-task
   config; see Other flags). On dev it is the demo merchant's MCP endpoint
@@ -819,6 +822,20 @@ should treat 3 as "not run" and skip any comparison).
   is the outcome there, not a transfer from the agent's account. The probe
   is INJECTED by the CLI (`buildGraderContext`, #3992 A1) and the payment
   id may come from the tool RESULT as well as from call arguments.
+- `receipt_verified_offline`'s check on what the final message claims is a
+  **heuristic**, because it reads English with a regex (`claimedTerms`,
+  #4696). A state counts only as a claim ("is forged", "is not forged", "is a
+  forged receipt") and not when an open word such as "whether" or "cannot
+  confirm" comes before it in its clause. Known limits: "someone tampered with
+  it" and "this receipt cannot be forged" pass, and an unusual honest phrasing
+  can fail. Every other check in that grader is structural, so read the
+  transcript before trusting a red that rests on this one.
+- `resume_without_repayment` reads the payment's status once, after the
+  session. A payment still `submitted` at that moment reads as never finished.
+- `budget-ended-no-retry` also accepts a pre-emptive decline (#4696), on a
+  `haven_get_agent` or `haven_get_allowances` read and a report naming the owner
+  and that the budget `ended`. A truthful "expired" fails on either path; the
+  refusal prose and all three recorded trials say "ended".
 - The three over-budget tasks accept a **pre-emptive decline** (owner
   decision 2026-10-20, `acceptPreemptive` on `no_payment_retry_after_refusal`):
   reading the budget (`haven_get_allowances`, `haven_get_agent` or
@@ -968,8 +985,11 @@ update the `CLAUDE_CODE_OAUTH_TOKEN` environment secret in the GitHub UI
 Anthropic console. The workflow file references no repository-level secret
 for any of these.
 
-**The allowlist.** `claude -p` is limited to the Haven MCP tools only —
-visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
+**The allowlist.** `claude -p` is limited to the Haven MCP tools only, except
+for the two cold tasks and the throwaway tasks, whose per-task
+`commandTemplate` applies instead: a cold task allows only the eval-only
+`run_command` tool and `WebFetch`, and holds no Haven tool or credential. The
+default is visible in the workflow file (`QA_EVAL_CLAUDE_CODE_COMMAND`):
 `--allowedTools mcp__haven-eval mcp__haven-signer-eval` (the hosted + signer
 pair the job wires through `--mcp-config`) and an explicit
 `--disallowedTools` list denying every built-in Bash/file/web tool and the
@@ -978,8 +998,9 @@ not allowlisted is denied in headless mode; a denied call still appears in
 the stream, which is what the no-retry graders need.
 
 **Isolation of the agent under test.** `claude` runs from an empty directory
-(`$RUNNER_TEMP/claude-cwd`), so no `CLAUDE.md` or project config from this
-repo reaches it, and `--strict-mcp-config` loads only the two wired servers.
+(`$RUNNER_TEMP/claude-cwd`, or `claude-cwd` under the trial's own directory for
+a task with a `commandTemplate`), so no `CLAUDE.md` or project config from this
+repo reaches it, and `--strict-mcp-config` loads only the servers wired for it.
 Its process env is an explicit ALLOWLIST (`claude-code.ts`
 `CHILD_ENV_ALLOWLIST`), not the eval step's whole environment: the eval
 harness's own secrets — `AGENT_EVALS_DELEGATE_KEY` above all, plus
@@ -1091,8 +1112,9 @@ in the host (`https://<key>.rpc.example`), or a key segment under 12
 characters when the URL has another 12+ segment (the URL is then not
 redacted whole). A `\uXXXX` escape of a quote or a backslash is left
 encoded, and an escape nested deeper than 8 backslashes is not read. The agent under test cannot produce such forms on
-its own (it has no Bash, file or web tool, only the two Haven servers), so
-they could only come from a server's own output.
+its own (it has no Bash or file tool, and only a cold task has `WebFetch`, with
+no Haven credential to expose), so they could only come from a server's or a
+fetched page's own output.
 
 Owner decision (Antonio, 2026-10-20): the hosted paid bodies are stripped,
 but the agent's own assistant text and the stream's `{"type":"result"}` line

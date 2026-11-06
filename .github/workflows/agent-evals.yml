@@ -33,8 +33,10 @@ name: Agent evals — Claude Code lane
 # produced by `packages/backend` stay dev-deployed either way; the report
 # says so. Guarded by scripts/ci/agent-evals-workspace-deps.test.mjs.
 #
-# `claude -p` is limited to the Haven MCP tools ONLY, in the open, in
-# QA_EVAL_CLAUDE_CODE_COMMAND below: `--allowedTools` names the two Haven
+# By default `claude -p` is limited to the Haven MCP tools ONLY, in the open, in
+# QA_EVAL_CLAUDE_CODE_COMMAND below (a task with its own commandTemplate uses
+# that instead; a cold task gets run_command + WebFetch and no Haven tool):
+# `--allowedTools` names the two Haven
 # MCP servers this run wires (`mcp__haven-eval` — the hosted pair — and
 # `mcp__haven-signer-eval`), and `--disallowedTools` explicitly denies every
 # built-in Bash/file/web tool. Nothing else is allowlisted, so in headless
@@ -242,7 +244,8 @@ jobs:
 
       # THE spend step — reached only after the owner approved the
       # environment. The allowlist in QA_EVAL_CLAUDE_CODE_COMMAND IS the
-      # "Haven MCP tools only" guarantee, visible right here.
+      # default "Haven MCP tools only" guarantee, visible right here; the task
+      # files' commandTemplate carries the per-task allowlists.
       - name: Run the eval slice
         env:
           QA_EVAL_ADAPTER: claude-code

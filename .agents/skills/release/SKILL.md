@@ -628,8 +628,8 @@ only the owner can give and which never holds a release — is
       eval CLI exits 2 before the first task, so nothing runs and the owner's
       approval is wasted. `subset` leaves the cold tasks out and does not read
       it. Only the owner can approve the `agent-evals` environment, and the run
-      never holds the release: it is manual-only, not a required check and not wired into
-      `dev-gate.yml`. A second full run in one budget period exits 3 ("not
+      never holds the release: it is manual-only, not a required check and not
+      wired into `dev-gate.yml`. A second full run in one budget period exits 3 ("not
       run") because a full run drains the eval agent's period budget on
       purpose — wait for the refill before running again. Details:
       `docs/operations/agent-evals.md` § *Running the suite*.

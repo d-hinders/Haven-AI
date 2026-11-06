@@ -131,16 +131,17 @@ jobs:
             exit 1
           fi
           # Empty is allowed: only a cold task needs the URL, and the eval CLI
-          # exits 2 if one runs without it. Any host, so a PR preview works.
-          # An origin only: the CLI appends /.well-known/haven.json, so a query
-          # cannot reach the manifest, and the graders work from the origin.
+          # exits 2 if one runs without it. No host allowlist, so a PR preview
+          # works. An origin only: the CLI appends /.well-known/haven.json, so a
+          # query cannot reach the manifest, and the hand-off grader builds its
+          # /signup link from the origin, so a sub-path would grade the wrong page.
           if [ -n "$INPUT_DEV_LANDING_URL" ]; then
             if [[ "$INPUT_DEV_LANDING_URL" == *[![:print:]]* ]]; then
               echo "::error::dev_landing_url input contains control characters — rejected (#4716)."
               exit 1
             fi
             if [[ ! "$INPUT_DEV_LANDING_URL" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)+/?$ ]]; then
-              echo "::error::dev_landing_url input must be one https origin (no path, query or credentials) matching ^https://[a-z0-9-]+(\.[a-z0-9-]+)+/?\$ — rejected (#4716)."
+              echo "::error::dev_landing_url input must be one https origin (no path, query, port or credentials) matching ^https://[a-z0-9-]+(\.[a-z0-9-]+)+/?\$ — rejected (#4716)."
               exit 1
             fi
           fi

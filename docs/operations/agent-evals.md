@@ -760,12 +760,14 @@ Env the run needs (all dev/testnet):
   `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
   ([`dev-environment.md`](dev-environment.md)). Without it, a selection with a
   cold task exits 2 before the first agent session, so a `full` run runs none
-  of its 20 tasks, not 18 of them. `subset` does not read it, because `--limit`
-  leaves the cold tasks out. The workflow's slice step accepts an empty input or
-  one https origin, on any host so a PR preview works, and fails before it writes
-  any output otherwise (#4716). That is a syntax check, not trust: the manifest at
-  that host names the package the command tool may run, so the choice of URL
-  rests on the environment approval.
+  of its 20 tasks, not 18 of them. The eval CLI does not read it on `subset`,
+  because `--limit` leaves the cold tasks out. Whatever the suite, the workflow's
+  slice step accepts an empty input, or one https origin with a lowercase dotted
+  hostname and no port (no host allowlist, so a PR preview works; one trailing
+  slash is allowed), and fails before it writes any output otherwise (#4716).
+  That is a syntax check, not trust: the manifest at that host names the package
+  the command tool may run, so the choice of URL rests on the environment
+  approval.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily

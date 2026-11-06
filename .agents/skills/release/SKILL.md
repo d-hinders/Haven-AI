@@ -626,8 +626,8 @@ only the owner can give and which never holds a release — is
       [`dev-environment.md`](../../../docs/operations/dev-environment.md). A
       full run, or a `tasks` list naming a cold task, needs it: without it the
       eval CLI exits 2 before the first task, so nothing runs and the owner's
-      approval is wasted. `subset` leaves the cold tasks out and does not read
-      it. Only the owner can approve the `agent-evals` environment, and the run
+      approval is wasted. `subset` leaves the cold tasks out, so it can stay
+      empty, though a malformed value still fails the slice step. Only the owner can approve the `agent-evals` environment, and the run
       never holds the release: it is manual-only, not a required check and not
       wired into `dev-gate.yml`. A second full run in one budget period exits 3 ("not
       run") because a full run drains the eval agent's period budget on

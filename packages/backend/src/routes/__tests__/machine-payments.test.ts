@@ -486,8 +486,10 @@ describe('machine payment routes', () => {
   })
 
   it('GET /agent reads passport: null for a pending or failed passport — nothing a merchant could resolve (#4721)', async () => {
+    // A non-null UID, so the status check is what yields null — not a
+    // missing UID.
     for (const status of ['pending', 'failed']) {
-      primeDb(AUTH, passportRow(status, null))
+      primeDb(AUTH, passportRow(status))
       const response = await app.inject({
         method: 'GET',
         url: '/machine-payments/agent',
@@ -511,19 +513,35 @@ describe('machine payment routes', () => {
   })
 
   it('GET /agent runs the passport lookup concurrently with the other identity reads (#4721)', async () => {
-    // Hold the passport lookup open and prove the supersession read is
-    // already issued before it settles: sequential awaits would not reach it.
+    // Hold BOTH the passport lookup and the supersession read open, then
+    // prove each is issued while the other is still pending. A refactor that
+    // awaits the passport before the others, or after them, can only issue
+    // one of the two first — and this wait then times out.
     let releasePassport: () => void = () => {}
+    let releaseSupersession: () => void = () => {}
     const passportHeld = new Promise<void>((resolve) => {
       releasePassport = resolve
     })
-    primeDb(AUTH, [
-      /FROM agent_passports WHERE agent_id = \$1/,
-      async () => {
-        await passportHeld
-        return { rows: [] }
-      },
-    ])
+    const supersessionHeld = new Promise<void>((resolve) => {
+      releaseSupersession = resolve
+    })
+    primeDb(
+      AUTH,
+      [
+        /FROM agent_passports WHERE agent_id = \$1/,
+        async () => {
+          await passportHeld
+          return { rows: [] }
+        },
+      ],
+      [
+        /superseded_by_agent_id/,
+        async () => {
+          await supersessionHeld
+          return { rows: [] }
+        },
+      ],
+    )
     const pending = app.inject({
       method: 'GET',
       url: '/machine-payments/agent',
@@ -534,6 +552,7 @@ describe('machine payment routes', () => {
       expect(findCall(/superseded_by_agent_id/)).toBeDefined()
     })
     releasePassport()
+    releaseSupersession()
     const response = await pending
     expect(response.statusCode).toBe(200)
   })

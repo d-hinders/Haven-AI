@@ -157,7 +157,7 @@ export async function passportReferenceFor(
     // reference is not. Logged so the swallow is not also a silence.
     opts.log?.warn(
       { err: err instanceof Error ? err.message : String(err), agent_id: agentId },
-      'passport reference lookup failed; settle response degrades to passport: null',
+      'passport reference lookup failed; the response degrades to passport: null',
     )
     return null
   }

@@ -659,3 +659,20 @@ describe('SIWX sign-in-first guidance for multi-call flows (#3838)', () => {
     expect(paragraph).toMatch(/or the sign-in is refused, pay each call normally instead\./)
   })
 })
+
+/**
+ * #4721 (epic #4718): the passport guidance on `haven_get_agent`. Pinned as
+ * whole sentences — a polarity flip ("always present verifyUrl as proof")
+ * would otherwise keep every keyword in place.
+ */
+describe('passport guidance (#4721)', () => {
+  const flat = HAVEN_SKILL_MD.replace(/\s+/g, ' ')
+  it('tells the agent to hand the UID and chain id to a merchant that asks', () => {
+    expect(flat).toContain(
+      'Give those two fields to a merchant that asks for them; never present `verifyUrl` as proof, because a merchant checks the UID against a Haven verifier it already trusts.',
+    )
+  })
+  it('never lets the agent call a passport "verified"', () => {
+    expect(flat).toContain('A passport says the agent is governed and revocable — never call it "verified".')
+  })
+})

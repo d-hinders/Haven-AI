@@ -17545,8 +17545,8 @@ export interface operations {
                         /** @description The merchant X-PAYMENT header. Single-use and bound to this amount and merchant. */
                         payment_header: string;
                         resource_url?: string | null;
-                        /** @description Optional passport reference for the paying agent. */
-                        passport?: unknown;
+                        /** @description The paying agent's passport reference, or null when it has no anchored passport (#976). */
+                        passport?: components["schemas"]["AgentPassportReference"] | null;
                     };
                 };
             };

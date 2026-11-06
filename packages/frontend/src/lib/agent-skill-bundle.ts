@@ -181,7 +181,12 @@ spending:
   \`budgetEndedAt\`, nobody approved a budget yet; with rows (all at remaining 0) the
   budget is spent for this period, and \`budgetRefillsAt\` says when it refills
   (\`null\`: it ends before it refills) — tell the user, then wait or ask them
-  to raise it.
+  to raise it. \`passport\` is this agent's own Agent Passport reference
+  (\`attestationUid\`, \`chainId\`), or \`null\` when it has none. Give those two
+  fields to a merchant that asks for them; never present \`verifyUrl\` as proof,
+  because a merchant checks the UID against a Haven verifier it already trusts.
+  A passport says the agent is governed and revocable — never call it
+  "verified".
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 - \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at

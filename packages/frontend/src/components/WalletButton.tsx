@@ -12,6 +12,7 @@ import {
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit'
 import { Info, TriangleAlert, Wallet } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { CopyButton } from '@/components/ui/CopyButton'
 import { VIEWPORT_MARGIN } from '@/components/ui/Tooltip'
 import { useScrollEdgeCue } from '@/hooks/useScrollEdgeCue'
 import { useDisconnect } from 'wagmi'
@@ -345,18 +346,9 @@ export function WalletPopover({
 }: PopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
   const { disconnectAsync } = useDisconnect()
-  const [copiedAddress, setCopiedAddress] = useState<string | null>(null)
   const [maxHeight, setMaxHeight] = useState<number | null>(null)
   const scrollBoxRef = useRef<HTMLDivElement>(null)
   const hasContentBelow = useScrollEdgeCue(scrollBoxRef, open)
-  const copyTimerRef = useRef<number | null>(null)
-
-  // Cancel the copy-reset timer on unmount so it never fires into a dead component.
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
-    }
-  }, [])
 
   useEscapeToClose(open, onClose)
 
@@ -434,20 +426,6 @@ export function WalletPopover({
 
   if (!open) return null
 
-  const handleCopy = async (address: string) => {
-    try {
-      await navigator.clipboard.writeText(address)
-      if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
-      setCopiedAddress(address)
-      copyTimerRef.current = window.setTimeout(() => {
-        setCopiedAddress(null)
-        copyTimerRef.current = null
-      }, 1500)
-    } catch {
-      /* ignore */
-    }
-  }
-
   const renderAddressSection = (section: AddressSection, border = false) => (
     <div className={border ? 'pt-4 mt-4 border-t border-[var(--v2-border)]' : undefined}>
       <div className="text-xs text-[var(--v2-ink-3)] mb-1">{section.label}</div>
@@ -462,13 +440,9 @@ export function WalletPopover({
             {truncateAddress(section.address)}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => handleCopy(section.address)}
-          className="px-2 py-1 rounded-md text-xs text-[var(--v2-ink-2)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-        >
-          {copiedAddress === section.address ? 'Copied' : 'Copy'}
-        </button>
+        {/* #4573: the shared copy primitive. The label names the section, so
+            two addresses in one popover do not share an accessible name. */}
+        <CopyButton value={section.address} label={`${section.label} address`} text="Copy" />
       </div>
       {section.chainName && (
         <div className="mt-3 text-xs text-[var(--v2-ink-3)]">

@@ -114,7 +114,7 @@ async function open(page: Page, width: number, height: number, query = '', filte
   await page.setViewportSize({ width, height })
   await page.goto(`/transactions${query}`)
   await dismissMobileSidebar(page)
-  await expect(page.getByRole('heading', { name: 'Transaction history' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Transactions' })).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
 }
 

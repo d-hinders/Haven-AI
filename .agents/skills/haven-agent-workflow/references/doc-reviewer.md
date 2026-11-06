@@ -65,7 +65,9 @@ Start from what the gate already derived: since PR #2478 `npm run docs:coupling`
 
 ## 4. Re-run every re-runnable figure (#2421, #2423, #2444)
 
-Any count, pass/fail total, byte size or version quoted in the diff — body, shard, comment, `last-verified` note — is reproduced from its instrument at the reviewed head, and the command is quoted next to the result. The shard said "39 passed"; the one command a reviewer re-ran returned 38/1 (#2421). "27 files" became 30, 32, 33 (#2423). A figure you cannot reproduce is a **finding**, not a nit, and the fix to prefer is *name the test* over *state the number*.
+Any count, pass/fail total, byte size or version quoted in the diff — body, shard, comment, `last-verified` note, `Re-verified-unchanged:` trailer — is reproduced from its instrument at the reviewed head, and the command is quoted next to the result. The shard said "39 passed"; the one command a reviewer re-ran returned 38/1 (#2421). "27 files" became 30, 32, 33 (#2423). A figure you cannot reproduce is a **finding**, not a nit, and the fix to prefer is *name the test* over *state the number*.
+
+**A figure quoted in a `status: current` doc is held to the rule the docs-quality system states (#4631).** It either carries the command that produced it and the SHA it was taken at and has a row in `docs/quality/scan-baselines.json`'s `docFigures`, or it is written as a **dated reading** of the past — a figure beside the SHA or date it was true at, which no runner re-takes. A figure with neither is a finding, and the fix is the row or the date, never a `last-verified` bump alone. An exhaustive-set or invariant claim is not a figure: it is a pin test beside the code, cited from the prose (#2680).
 
 **A behavioural claim is executed, not read — above all in a compliance
 artifact.** "Pinned by its own test" means you find that test by name and run it;

@@ -26,7 +26,7 @@ import {
   X402_MAX_AUTHORIZATION_WINDOW_SECONDS,
   X402_SETTLEMENT_FORWARD_MARGIN_SECONDS,
 } from '@haven_ai/sdk'
-import { buildFundingLegUserOp } from '@haven_ai/sdk/test-support'
+import { buildFundingLegUserOp, assertLowSSignature, SECP256K1_HALF_N } from '@haven_ai/sdk/test-support'
 import { createEdgeSigner } from './core.js'
 
 // Well-known test keys (Hardhat accounts). Never used for real funds.
@@ -263,5 +263,31 @@ describe('edge signer asset address byte-sensitivity', () => {
   it('echoes the accepted asset address verbatim (checksummed, not lowercased)', async () => {
     const { header } = await buildHeader()
     expect(header.accepted.asset).toBe(BASE_USDC)
+  })
+})
+
+describe('edge signer EIP-3009 wire signature is canonical low-s (#4550)', () => {
+  // x402 facilitators reject a non-canonical (high-s) 65-byte EOA signature in
+  // `exact` EIP-3009 verify, before settlement (x402-foundation/x402#2728;
+  // wire reason `invalid_exact_evm_non_canonical_signature`). Haven complies
+  // today only because viem's `privateKeyToAccount().sign()` passes
+  // `lowS: true` to noble — nothing here checks it. The malleable twin
+  // (r, n - s, v ^ 1) recovers to the SAME address, so the recovery tests
+  // above cannot catch it; only the wire bytes can.
+  it('signs low-s on 32 distinct payment ids (derived nonce)', async () => {
+    const signatures = new Set<string>()
+    for (let i = 0; i < 32; i++) {
+      // core.ts:500 overwrites the nonce with deriveX402PaymentNonce(paymentId),
+      // so varying the payment id is what varies the signed bytes here.
+      const { header } = await buildHeader(PAYMENT_REQUIRED, `pay_low_s_${i}`)
+      const parts = assertLowSSignature(header.payload.signature)
+      expect(parts.length).toBe(65)
+      expect([27, 28]).toContain(parts.v)
+      expect(parts.s).toBeLessThanOrEqual(SECP256K1_HALF_N)
+      signatures.add(header.payload.signature)
+    }
+    // 32 distinct payment ids must yield 32 distinct signatures — otherwise
+    // the loop would be re-asserting one signature 32 times.
+    expect(signatures.size).toBe(32)
   })
 })

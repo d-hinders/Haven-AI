@@ -9,7 +9,7 @@
  * what a caller can and cannot put into it.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { encodeBase64Json } from '@haven_ai/sdk'
+import { HavenClient, encodeBase64Json } from '@haven_ai/sdk'
 import { createToolHandlers, toolDescriptions, type ToolPayload, type ToolSuccess } from './tools.js'
 import {
   clearCalls,
@@ -84,6 +84,84 @@ describe('haven_report_x402_outcome', () => {
     })
     // Never an evidence write on a rejection.
     expect(recordedCalls().some((c) => c.url.endsWith('/machine-payments/evidence'))).toBe(false)
+  })
+
+  it('#4552: a rejected report echoes the merchant-reported reason code', async () => {
+    stubFetch(HAPPY_ROUTES)
+    const result = ok<{ merchant_reported_error?: string | null; next_tool?: string; reason?: string }>(
+      await handlers().haven_report_x402_outcome({
+        payment_id: 'pay_x402',
+        outcome: 'rejected',
+        merchant_status: 402,
+        merchant_body: '{"error":"invalid_exact_evm_non_canonical_signature"}',
+      }),
+    )
+
+    expect(result.data.merchant_reported_error).toBe('invalid_exact_evm_non_canonical_signature')
+    // The handoff does not branch on the reason.
+    expect(result.data.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    // The response says the value is merchant-claimed, never Haven-verified.
+    expect(result.data.reason).toContain("merchant's own claim")
+    // The event carries the same code, parsed from the untruncated body.
+    const posted = recordedCalls().find((c) => c.url.endsWith('/machine-payments/reconciliation-events'))
+    expect(posted?.body).toMatchObject({
+      details: { merchant_reported_error: 'invalid_exact_evm_non_canonical_signature' },
+    })
+  })
+
+  it('#4552: a rejected report with no parseable body echoes null and still sweeps', async () => {
+    stubFetch(HAPPY_ROUTES)
+    const result = ok<{ merchant_reported_error?: string | null; next_tool?: string }>(
+      await handlers().haven_report_x402_outcome({
+        payment_id: 'pay_x402',
+        outcome: 'rejected',
+        merchant_status: 402,
+        merchant_body: 'Payment required',
+      }),
+    )
+
+    expect(result.data.merchant_reported_error).toBeNull()
+    expect(result.data.next_tool).toBe('mcp__haven__haven_sweep_delegate')
+    const posted = recordedCalls().find((c) => c.url.endsWith('/machine-payments/reconciliation-events'))
+    expect(posted?.body).toMatchObject({ details: { merchant_reported_error: null } })
+  })
+
+  it('#4552: an accepted report carries no merchant_reported_error field', async () => {
+    stubFetch(HAPPY_ROUTES)
+    const result = ok<Record<string, unknown>>(
+      await handlers().haven_report_x402_outcome({
+        payment_id: 'pay_x402',
+        outcome: 'accepted',
+        merchant_status: 200,
+      }),
+    )
+
+    expect(result.data).not.toHaveProperty('merchant_reported_error')
+  })
+
+  it('#4552: the echo is the SDK parse result — the server never parses the body itself', async () => {
+    stubFetch(HAPPY_ROUTES)
+    const haven = new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' })
+    // A value the body could NOT produce: a server that parsed the body itself
+    // would answer 'insufficient_funds'.
+    vi.spyOn(haven, 'reportX402MerchantOutcome').mockResolvedValue({
+      paymentId: 'pay_x402',
+      outcome: 'rejected',
+      txHash: TX_HASH,
+      resourceUrl: RESOURCE_URL,
+      recorded: 'reconciliation_event',
+      merchantReportedError: 'from_sdk_only',
+    })
+    const result = ok<{ merchant_reported_error?: string | null }>(
+      await createToolHandlers(haven).haven_report_x402_outcome({
+        payment_id: 'pay_x402',
+        outcome: 'rejected',
+        merchant_status: 402,
+        merchant_body: '{"error":"insufficient_funds"}',
+      }),
+    )
+
+    expect(result.data.merchant_reported_error).toBe('from_sdk_only')
   })
 
   it('an acceptance posts evidence and NOT a reconciliation event', async () => {

@@ -110,6 +110,7 @@ export function BackfillDialog({ open, providerName, onClose, onBackfill }: Back
       subtitle={copy.intro(providerName)}
       closeOnBackdrop={!busy}
       closeOnEscape={!busy}
+      closeButtonDisabled={busy}
       panelTestId={BACKFILL_DIALOG_TEST_ID}
       footer={
         result === null ? (

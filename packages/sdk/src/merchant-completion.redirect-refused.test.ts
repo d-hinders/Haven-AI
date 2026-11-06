@@ -110,6 +110,9 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
           retry_body: null,
           refusal: 'redirect_cross_origin_body',
           redirect_location: elsewhere,
+          // #4552: a refused redirect carries no merchant body and no
+          // headers, so the field is present and null — never absent.
+          merchant_reported_error: null,
         }),
       }),
     )

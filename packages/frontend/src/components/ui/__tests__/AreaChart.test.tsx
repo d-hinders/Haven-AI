@@ -487,21 +487,41 @@ describe('AreaChart — the reveal, the mobile half, the sparse half', () => {
     }
     const gated = css.slice(gate!.index + gate![0].length, close - 1)
     expect(gated).toMatch(/\.v2-chart-draw-stroke\s*\{[\s\S]*?\banimation:/)
-    expect(gated).toMatch(/stroke-dasharray:\s*1/)
     const ungated = css.slice(0, gate!.index) + css.slice(close)
     expect(ungated).not.toMatch(/\.v2-chart-draw[^{]*\{[^}]*\banimation:/)
-    // And the path is given the length the dash trick measures against — a
-    // dasharray of 1 without a pathLength of 1 hides the line in plain ink.
+  })
+
+  it('reveals the line with a clip, because a dash on a non-scaling stroke cuts it short', () => {
+    // The line is non-scaling so its stroke keeps its width when the drawing
+    // stretches (#3903). A browser then measures a dash in CSS px while
+    // pathLength is in viewBox units, so a "whole path" dash ran out at
+    // VIEW_W / the chart's width: on a 1100 px chart the line stopped 58% of
+    // the way across, over a complete area and complete dots. jsdom cannot
+    // draw that, so this pins the combination that causes it.
     renderChart()
     const line = [...document.querySelectorAll('path')].find((p) =>
       (p.getAttribute('class') ?? '').includes('v2-chart-draw-stroke'),
     )!
-    // jsdom matches SVG attribute names case-sensitively and React renders
-    // the SVG spelling (`pathLength`), but attribute-name case handling has
-    // drifted across jsdom versions — accept either spelling rather than pin
-    // the test to one of them.
-    const pathLen = line.getAttribute('pathLength') ?? line.getAttribute('pathlength')
-    expect(pathLen).toBe('1')
+    expect(line.getAttribute('vector-effect')).toBe('non-scaling-stroke')
+    // Either spelling: attribute-name case handling has drifted across jsdom
+    // versions.
+    expect(line.getAttribute('pathLength') ?? line.getAttribute('pathlength')).toBeNull()
+    expect(line.getAttribute('stroke-dasharray')).toBeNull()
+
+    const css = readFileSync(resolve(__dirname, '../../../app/globals.css'), 'utf8')
+    const rule = /\.v2-chart-draw-stroke\s*\{([^}]*)\}/.exec(css)
+    expect(rule).not.toBeNull()
+    expect(rule![1]).not.toMatch(/stroke-dash/)
+    // Nothing may hold the clip after the reveal: `both` or `forwards` would
+    // leave the line's full length resting on the last keyframe.
+    expect(rule![1]).toMatch(/\banimation:[^;]*\bbackwards\b/)
+    // Nor a clip in the rule itself, or a longhand that overrides that fill:
+    // either would leave the line cut with the animation long finished.
+    expect(rule![1]).not.toMatch(/clip-path|animation-fill-mode/)
+    const keyframes = /@keyframes v2-chart-draw-stroke\s*\{([\s\S]*?)\n\}/.exec(css)
+    expect(keyframes).not.toBeNull()
+    expect(keyframes![1]).toMatch(/clip-path:/)
+    expect(keyframes![1]).not.toMatch(/stroke-dash/)
   })
 })
 

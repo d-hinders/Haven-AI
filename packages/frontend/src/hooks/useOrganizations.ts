@@ -35,7 +35,7 @@ export function useOrganizations(options?: { onChanged?: () => void }) {
       setOrganizations(rows)
       return rows
     } catch {
-      setError('We could not load your organizations. Try again in a moment.')
+      setError('We could not load your organisations. Try again in a moment.')
       return []
     } finally {
       setLoading(false)

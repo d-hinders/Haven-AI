@@ -28,6 +28,7 @@ import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import { Amount, type AmountCurrency } from '@/components/haven/Amount'
 import {
   TransactionActivityDayHeader,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
 } from '@/components/haven'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
@@ -35,6 +36,7 @@ import TransactionsLedgerRow from '@/components/transactions/TransactionsLedgerR
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ListExportAction, ListExportNotice, useListExport, type ListExportRequest } from '@/components/ui/ListExportAction'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
@@ -328,7 +330,7 @@ export default function TransactionsClient() {
     return (
       <div className="max-w-5xl">
         <PageHeader
-          title="Transaction history"
+          title="Transactions"
           subtitle="All activity across your accounts."
         />
 
@@ -360,7 +362,7 @@ export default function TransactionsClient() {
 
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Transaction history" subtitle={subtitle} />
+      <PageHeader title="Transactions" subtitle={subtitle} />
 
       <ListExportNotice notice={listExport.notice} className="mb-4" />
 
@@ -438,9 +440,9 @@ export default function TransactionsClient() {
       {/* After the hedge, so the hedge stays under the count it
           qualifies (#4196). */}
       {filtersError && (
-        <p role="alert" className="mt-2 text-xs text-[var(--v2-danger)]">
-          {filtersError}
-        </p>
+        <div className="mt-2">
+          <InlineAlert>{filtersError}</InlineAlert>
+        </div>
       )}
 
       {showNoMatch ? (
@@ -456,20 +458,15 @@ export default function TransactionsClient() {
           {loadingInitial ? (
             <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading transactions">
               {[0, 1, 2].map((item) => (
-                <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                  <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="min-w-0 flex-1">
-                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                    <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  </div>
-                </div>
+                <TransactionActivityRowSkeleton key={item} />
               ))}
             </div>
           ) : error ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Transactions could not load"
-                body={error}
+                body="Your payments are unchanged."
                 className="py-8"
                 action={
                   <Button
@@ -490,6 +487,7 @@ export default function TransactionsClient() {
               {/* A filter that matches nothing is the no-match state above
                   and never reaches here. */}
               <EmptyState
+                bare
                 title="No activity yet"
                 body="Payments and account funding activity will appear here."
                 className="py-8"

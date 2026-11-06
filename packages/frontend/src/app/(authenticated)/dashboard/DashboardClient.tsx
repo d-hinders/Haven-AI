@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useAgents } from '@/hooks/useAgents'
@@ -9,14 +8,11 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
-import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
 import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
-import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
-import ReceiveDialog from '@/components/ReceiveDialog'
-import DelegationSendModal from '@/components/DelegationSendModal'
+import { useMoneyActionLauncher } from '@/components/MoneyActionLauncher'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import MoneyPanel from './MoneyPanel'
@@ -170,15 +166,11 @@ export default function DashboardClient() {
   // what is here: nothing dead-ends.
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
-  const [pickerAction, setPickerAction] = useState<'receive' | 'send' | null>(null)
-  const [receiveOpen, setReceiveOpen] = useState(false)
-  const [sendOpen, setSendOpen] = useState(false)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
-  // Set true the first time the user opens Receive in this session. Combined
-  // with !hasFunds it drives the hero's "Watching for incoming deposits…"
-  // hint so the user knows the dashboard is actively listening.
-  const [hasOpenedReceive, setHasOpenedReceive] = useState(false)
-  const [actionAccountId, setActionAccountId] = useState<string | null>(null)
+  // #4642: Send / Receive and the account question they ask first live in ONE
+  // shared launcher, consumed here and by Contacts. The dashboard's behaviour
+  // is unchanged; the launcher's own header records the null-chain fix.
+  const launcher = useMoneyActionLauncher({ accounts, onSent: refreshDashboardData })
   // #3818: "Hide for now" survives a reload. Stored per user WITH the number
   // of completed steps at the time; the guide comes back as soon as another
   // step completes. A per-device convenience in browser storage — not the
@@ -200,11 +192,6 @@ export default function DashboardClient() {
   const completeDismissed = completeDismissalReady
     ? completeDismissalState.dismissed
     : false
-
-  useEffect(() => {
-    if (actionAccountId && accounts.some((account) => account.id === actionAccountId)) return
-    setActionAccountId(defaultAccount?.id ?? null)
-  }, [actionAccountId, defaultAccount?.id, accounts])
 
   // Read the persisted setup-complete dismissal once the user is known.
   useEffect(() => {
@@ -278,12 +265,8 @@ export default function DashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const selectedActionAccount = accounts.find((account) => account.id === actionAccountId) ?? defaultAccount
-  const actionGate = useAccountOperationGate({
-    accountAddress: selectedActionAccount?.account_address as Address | undefined,
-    chainId: selectedActionAccount?.chain_id,
-  })
-  const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
+  const selectedActionAccount = launcher.selectedAccount
+  const requiresOtherDevice = launcher.requiresOtherDevice
   // The per-account balance/details reads existed only to populate `SendModal`,
   // which is deleted (#1989). They stay wired but permanently disabled so the
   // dashboard makes no chain-fed request it cannot use; `refetchSelectedBalances`
@@ -430,35 +413,6 @@ export default function DashboardClient() {
     setConnectAgentOpen(true)
   }
 
-  function openHeroAction(action: 'receive' | 'send') {
-    // No accounts: the money card renders "Create Haven account" instead of
-    // these buttons, so this is unreachable from the UI; do nothing rather
-    // than open a dialog about nothing.
-    if (accounts.length === 0) return
-
-    if (accounts.length > 1) {
-      setPickerAction(action)
-      return
-    }
-
-    setActionAccountId(defaultAccount?.id ?? null)
-    if (action === 'receive') {
-      setHasOpenedReceive(true)
-      setReceiveOpen(true)
-    }
-    if (action === 'send') setSendOpen(true)
-  }
-
-  function handleActionAccountSelected(accountId: string) {
-    setActionAccountId(accountId)
-    if (pickerAction === 'receive') {
-      setHasOpenedReceive(true)
-      setReceiveOpen(true)
-    }
-    if (pickerAction === 'send') setSendOpen(true)
-    setPickerAction(null)
-  }
-
   // The hide and dismiss buttons unmount themselves; focus moves to the
   // card's heading (tabIndex -1) rather than dropping to <body>.
   function focusAttentionHeading() {
@@ -482,12 +436,6 @@ export default function DashboardClient() {
     if (typeof window !== 'undefined' && user?.id) {
       window.localStorage.setItem(`haven-onboarding-complete-dismissed:${user.id}`, '1')
     }
-  }
-
-  function openAddFundsForAccount(accountId: string) {
-    setActionAccountId(accountId)
-    setHasOpenedReceive(true)
-    setReceiveOpen(true)
   }
 
   function handleDismissAttention(item: AttentionRuleItem) {
@@ -526,11 +474,11 @@ export default function DashboardClient() {
       hasAccounts={accounts.length > 0}
       hasFunds={hasFunds}
       fundingStateKnown={fundingStateKnown}
-      watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
+      watchingForDeposit={fundingStateKnown && !hasFunds && launcher.hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
-      onReceive={() => openHeroAction('receive')}
-      onSend={() => openHeroAction('send')}
+      onReceive={() => launcher.openAction('receive')}
+      onSend={() => launcher.openAction('send')}
       // #4167: the ONE primary-button rule — Send primary once any account
       // holds USDC (`usdcFunded`), Receive primary with Send disabled when
       // known empty, Send primary while the read is loading or failed.
@@ -568,7 +516,7 @@ export default function DashboardClient() {
             pendingAgent={stepTwoAgent}
             hasFirstAgentPayment={hasFirstAgentPayment}
             funding={fundingForOnboarding}
-            onAddFunds={() => openHeroAction('receive')}
+            onAddFunds={() => launcher.openAction('receive')}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
           />
@@ -579,7 +527,7 @@ export default function DashboardClient() {
       hasOverviewError={Boolean(overviewError)}
       onRetry={refetchOverview}
       onDismiss={handleDismissAttention}
-      onAddFunds={openAddFundsForAccount}
+      onAddFunds={launcher.openReceiveForAccount}
     />
   ) : null
 
@@ -641,40 +589,10 @@ export default function DashboardClient() {
         }}
       />
 
-      <DashboardActionPickerModal
-        open={pickerAction !== null}
-        action={pickerAction ?? 'receive'}
-        accounts={accounts}
-        onClose={() => setPickerAction(null)}
-        onSelect={handleActionAccountSelected}
-      />
-
-
-      <ReceiveDialog
-        open={receiveOpen}
-        account={selectedActionAccount}
-        // #4167: with several accounts the dialog's card is a picker, so a
-        // wrong pre-pick is one switch away; one account renders no card.
-        accounts={accounts}
-        onClose={() => setReceiveOpen(false)}
-      />
-
-      {/*
-        Mount the send modal only while open so its wallet hooks
-        (useDelegationSend backs wagmi wallet-client subscriptions) don't run
-        in the background on every dashboard view — the same pattern the
-        account detail page uses. Needs an account with a resolved chain: the
-        delegation send signs on a network.
-      */}
-      {sendOpen && selectedActionAccount?.account_address && selectedActionAccount.chain_id != null && (
-        <DelegationSendModal
-          open
-          onClose={() => setSendOpen(false)}
-          accountAddress={selectedActionAccount.account_address}
-          chainId={selectedActionAccount.chain_id}
-          onSent={refreshDashboardData}
-        />
-      )}
+      {/* #4642: the picker, Receive and Send mounts travel with the shared
+          launcher — Contacts renders the same three, and a second copy of the
+          null-chain guard is what this extraction exists to prevent. */}
+      {launcher.dialogs}
 
       <UsingYourAgentInfo
         open={agentUsageOpen}

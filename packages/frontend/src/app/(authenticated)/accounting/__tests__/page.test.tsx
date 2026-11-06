@@ -144,6 +144,42 @@ describe('/accounting after the connection moved to Settings (#2868)', () => {
 })
 
 /**
+ * #4569: a load error needs a working retry, not only new words. The page's
+ * first-load failure used to be a raw red line with no action at all; it is
+ * the load-error shape now (#4563), and its Try again calls the hook's own
+ * `refetch`. The refetch failure — status already in hand, rows replaced —
+ * gets the same shape behind the same `refetch`.
+ */
+describe('/accounting load errors (#4569)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+  })
+
+  it('first load: the load-error shape, and Try again calls refetch', () => {
+    const refetch = vi.fn()
+    mockFeed.mockReturnValue(feed({ status: null, loading: false, error: 'boom', refetch }))
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Accounting could not load' })).toBeInTheDocument()
+    expect(screen.getByText('Your accounting connections are unchanged.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+
+  it('a failed refetch: the same shape, and Try again calls refetch', () => {
+    const refetch = vi.fn()
+    mockFeed.mockReturnValue(feed({ error: 'boom', refetch }))
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Sync status could not load' })).toBeInTheDocument()
+    expect(screen.getByText('Your sent payments are unchanged.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+})
+
+/**
  * The two OFF states, on the page (#2869). The owner decision is that they
  * read differently: `hosted && !enabled` is Coming soon, `!hosted` says the
  * feed is not available on a self-hosted box and must never suggest it is
@@ -287,7 +323,7 @@ describe('/accounting with the feed on (#2869)', () => {
     withStatus({ counts: { pending: 0, failed: 0, exhausted: 0 }, syncs: [] })
     renderPage()
     expect(screen.queryByTestId('feed-counts')).toBeNull()
-    expect(screen.getByText(/Nothing synced yet/)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing sent yet/)).toBeInTheDocument()
   })
 
   it('keeps the counts row when the counts are zero but rows are listed', () => {
@@ -405,5 +441,83 @@ describe('/accounting: an Igdrasil row (#4520)', () => {
     expect(await screen.findByText(/Evidence archived in Igdrasil — document doc_7f3a/)).toBeInTheDocument()
     expect(screen.queryByText(/Registered in/)).toBeNull()
     expect(screen.queryByText(/invoice/i)).toBeNull()
+  })
+})
+
+/**
+ * The row chip's vocabulary (#4567): the page renders `StatusBadge` from the
+ * SAME `accountingStatusPresentation` the per-payment badge uses, so one state
+ * has one label and one tone on both surfaces. The page used to carry its own
+ * `STATUS` map — Synced / Pending / Failed / Skipped — and that map claimed
+ * delivery on a preview deployment.
+ */
+describe('/accounting: one status vocabulary on the row chip (#4567)', () => {
+  beforeEach(() => {
+    mockReplace.mockReset()
+    searchParamsRef.current = new URLSearchParams()
+  })
+
+  function syncRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 's1', user_id: 'u1', provider: 'fortnox', payment_id: 'pay_1',
+      external_ref: 'fortnox:supplierinvoice:7', status: 'pushed' as const,
+      error: null, attempts: 1,
+      created_at: '2026-09-12T09:00:00.000Z', updated_at: '2026-09-12T09:00:00.000Z',
+      ...overrides,
+    }
+  }
+
+  /** The chip is the row's `StatusBadge` — the only pill in the row's trailing slot. */
+  function chip(): HTMLElement {
+    const badge = screen.getByText(/^(In Fortnox|Evidence archived|Tracked|Sending…|Not sent)$/)
+    expect(badge.className).toContain('rounded-full')
+    return badge
+  }
+
+  it('pushed and live → In Fortnox, success tone', () => {
+    withStatus({ liveSyncReady: true, syncs: [syncRow()] })
+    renderPage()
+    expect(chip()).toHaveTextContent('In Fortnox')
+    expect(chip().className).toContain('--v2-success')
+  })
+
+  it('pushed with the connector not live → Tracked, neutral tone (SR:1583)', () => {
+    withStatus({ liveSyncReady: false, syncs: [syncRow()] })
+    renderPage()
+    expect(chip()).toHaveTextContent('Tracked')
+    expect(chip().className).toContain('--v2-surface-2')
+    // The preview banner is not the only thing standing between the row and a
+    // delivery claim any more.
+    expect(screen.queryByText('In Fortnox')).toBeNull()
+  })
+
+  it('pushed to a record-only provider → Evidence archived', () => {
+    withStatus({
+      liveSyncReady: true,
+      syncs: [syncRow({ provider: 'accounted', external_ref: 'accounted:document:3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10' })],
+    })
+    renderPage()
+    expect(chip()).toHaveTextContent('Evidence archived')
+  })
+
+  it('pending → Sending…', () => {
+    withStatus({ syncs: [syncRow({ status: 'pending', external_ref: null })] })
+    renderPage()
+    expect(chip()).toHaveTextContent('Sending…')
+  })
+
+  it.each(['failed', 'skipped'] as const)('%s → Not sent, warning tone', (status) => {
+    withStatus({ syncs: [syncRow({ status, external_ref: null, error: 'Fortnox 503' })] })
+    renderPage()
+    expect(chip()).toHaveTextContent('Not sent')
+    expect(chip().className).toContain('--v2-warning')
+  })
+
+  it('carries no hand-rolled chip class map — the page renders StatusBadge', () => {
+    withStatus({ syncs: [syncRow()] })
+    renderPage()
+    // `StatusBadge`'s own shape: inline-flex + whitespace-nowrap + the tone fill.
+    expect(chip().className).toContain('inline-flex')
+    expect(chip().className).toContain('whitespace-nowrap')
   })
 })

@@ -389,9 +389,11 @@ describe('haven_sign_siwx handler', () => {
     )
     const parsed = parseSIWxHeader(result.sign_in_with_x_header) as Parameters<typeof verifySIWxSignature>[0]
     const verification = await verifySIWxSignature(parsed)
-    expect(verification.valid).toBe(true)
-    if (verification.valid) {
-      expect(verification.address?.toLowerCase()).toBe(signer.delegateAddress.toLowerCase())
+    // @x402/extensions 2.29 renamed the result fields: `valid` → `isValid`,
+    // `address` → `payer` (#4550).
+    expect(verification.isValid).toBe(true)
+    if (verification.isValid) {
+      expect(verification.payer?.toLowerCase()).toBe(signer.delegateAddress.toLowerCase())
     }
   })
 
@@ -482,6 +484,9 @@ describe('#3728 golden — the signer matches the @x402/extensions reference cli
     const referencePayload = await createSIWxPayload(
       { ...BITREFILL_CHALLENGE.info, chainId: 'eip155:8453', type: 'eip191' } as never,
       account,
+      // @x402/extensions 2.29 requires the response URL and asserts the
+      // challenge's domain/uri are bound to its origin (#4550).
+      BITREFILL_URL,
     )
     const reference = encodeSIWxHeader(referencePayload)
     expect(mine).toBe(reference)

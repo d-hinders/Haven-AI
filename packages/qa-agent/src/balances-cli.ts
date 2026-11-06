@@ -1,7 +1,8 @@
 /**
  * `npm run qa:balances -w packages/qa-agent` — the balances-only entry point
- * (#3631). Reads every wallet the QA flows depend on and writes one JSON
- * report; `scripts/ci/qa-balance-issue.mjs` turns it into the standing issue.
+ * (#3631). Reads every wallet the QA flows depend on, and when the QA budget
+ * grant ends (#4666), and writes one JSON report;
+ * `scripts/ci/qa-balance-issue.mjs` turns it into the standing issue.
  *
  *   tsx src/balances-cli.ts [--history <in.json>] [--out <report.json>]
  *
@@ -25,11 +26,15 @@ import { BASE_SEPOLIA_RPC } from './lib/chain.js'
 import { CdpFaucetError, requestCdpEvmFaucet } from './lib/faucet.js'
 import { HavenApi } from './lib/haven-api.js'
 import {
+  BUDGET_GRANT_KEY,
+  BUDGET_GRANT_NAME,
   buildBalancesReport,
   collectBalanceReadings,
   EVAL_TOPUP_TARGET_ATOMIC,
   fmt,
   MERCHANT_TOPUP_TARGET_WEI,
+  READ_TIMEOUT_MS,
+  readBudgetGrant,
   readEvalClaude,
   readEvalHermes,
   readMerchant,
@@ -42,6 +47,7 @@ import {
   type BalanceReadings,
   type BalanceSources,
   type BalancesReport,
+  type BudgetGrantRow,
   type HistoryEntry,
   type Reading,
   type TopUpOutcome,
@@ -484,7 +490,18 @@ export async function runBalances(
   const api = deps.api !== undefined ? deps.api : src.api
   const sources = { ...src, api: src.apiMissing ? null : api }
   const history = readHistory(arg('history'))
-  const readings = await collectBalanceReadings(sources, deps.deadlineMs)
+  // The grant is read beside the wallets, not after them: the job's worst case
+  // already reaches its 10-minute timeout, and a killed job skips the issue sync.
+  const grantDeadlineMs = deps.deadlineMs ?? READ_TIMEOUT_MS
+  const [readings, budgetGrant] = await Promise.all([
+    collectBalanceReadings(sources, deps.deadlineMs),
+    withDeadline(readBudgetGrant(sources, deps.now), grantDeadlineMs, (): BudgetGrantRow => ({
+      key: BUDGET_GRANT_KEY,
+      name: BUDGET_GRANT_NAME,
+      band: 'unknown',
+      reason: `read timed out after ${Math.round(grantDeadlineMs / 1000)} s`,
+    })),
+  ])
   const provisional = buildBalancesReport(readings, history, deps.now)
   const nowMs = deps.nowMs ?? Date.now
   const deadlineAt = nowMs() + TOPUP_RUN_BUDGET_MS
@@ -520,15 +537,26 @@ export async function runBalances(
   }
   const report = buildBalancesReport(readings, history, deps.now)
   report.topUps = topUps
-  // Name the exact missing variable on the treasury row (the reader only
-  // knows "no API").
+  report.budgetGrant = budgetGrant
+  // Name the exact missing variable on the treasury row and the grant (the
+  // readers only know "no API").
   if (src.apiMissing) {
     const row = report.rows.find((r) => r.key === 'treasury')
     if (row) row.reason = `config missing: ${src.apiMissing}`
+    budgetGrant.reason = `config missing: ${src.apiMissing}`
   }
   const out = arg('out')
   if (out) writeFileSync(out, JSON.stringify(report, null, 2) + '\n')
   return { report, exitCode: report.configMissing ? 1 : 0 }
+}
+
+/** The grant's line in the run log, in the wallet rows' `<band> <name>: …` shape. */
+export function budgetGrantLogLine(grant: BudgetGrantRow | undefined): string | null {
+  if (!grant) return null
+  const when = grant.endsAt
+    ? `${grant.noLiveBudget ? 'latest ended budget' : 'ends'} ${grant.endsAt}${grant.daysLeft !== undefined ? ` (${grant.daysLeft} d)` : ''}`
+    : '—'
+  return `${grant.band.padEnd(8)} ${grant.name}: ${when}${grant.reason ? ` — ${grant.reason}` : ''}`
 }
 
 /** One log line per wallet: `merchant top-up: …` / `eval-hermes top-up: …`. */
@@ -562,6 +590,8 @@ if (isMain) {
         const runway = r.runwayDays !== undefined ? `, runway ${r.runwayDays} d` : ''
         console.log(`${r.band.padEnd(8)} ${r.name}${where}: ${bal}${runway}${r.reason ? ` — ${r.reason}` : ''}`)
       }
+      const grantLine = budgetGrantLogLine(report.budgetGrant)
+      if (grantLine) console.log(grantLine)
       for (const wallet of TOP_UP_WALLETS) {
         const line = topUpLogLine(wallet, report.topUps?.[wallet])
         if (line) console.log(line)

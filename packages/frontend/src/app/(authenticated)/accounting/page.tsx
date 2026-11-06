@@ -6,38 +6,33 @@ import {
   accountingFeedOffState,
   useAccountingFeed,
   type AccountingFeedStatus,
-  type AccountingSyncStatus,
   type AccountingVerification,
 } from '@/hooks/useAccountingFeed'
 import { useT } from '@/context/LocaleContext'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Icon } from '@/components/ui/Icon'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { CircleAlert } from 'lucide-react'
 import { ConnectOutcomeForwarderInSuspense } from '@/components/accounting/ConnectOutcomeForwarder'
 import { ComingSoon, SelfHostedUnavailable } from '@/components/accounting/ComingSoon'
 import { FeedSummary } from '@/components/accounting/FeedSummary'
-import { providerDisplayName, isRecordOnlyProvider } from '@/components/accounting/AccountingBadge'
+import {
+  accountingStatusPresentation,
+  providerDisplayName,
+  isRecordOnlyProvider,
+} from '@/components/accounting/AccountingBadge'
 import { useAccountingProviders, type AccountingProvider } from '@/hooks/useAccounting'
-import { truncate } from '@/lib/format'
-
-const STATUS: Record<AccountingSyncStatus, { label: string; cls: string }> = {
-  pushed: { label: 'Synced', cls: 'bg-[var(--v2-success-soft)] text-[var(--v2-success)]' },
-  pending: { label: 'Pending', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-2)]' },
-  failed: { label: 'Failed', cls: 'bg-[var(--v2-danger-soft)] text-[var(--v2-danger)]' },
-  skipped: { label: 'Skipped', cls: 'bg-[var(--v2-surface-2)] text-[var(--v2-ink-3)]' },
-}
+import { formatTimeOfDay, truncate } from '@/lib/format'
 
 /** Same tone convention as `ui/Row`'s leadingTone — text-color variant (#1364 review). */
 const TONE_TEXT: Record<'success' | 'warning' | 'danger', string> = {
   success: 'text-[var(--v2-success)]',
   warning: 'text-[var(--v2-warning)]',
   danger: 'text-[var(--v2-danger)]',
-}
-
-function StatusChip({ status }: { status: AccountingSyncStatus }) {
-  const s = STATUS[status]
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>
 }
 
 /**
@@ -168,7 +163,7 @@ function verificationSummary(
 
 export default function AccountingPage() {
   const t = useT()
-  const { status, loading, error, sync, verify, reopen } = useAccountingFeed()
+  const { status, loading, error, refetch, sync, verify, reopen } = useAccountingFeed()
   // #4520: where the descriptor list is to hand, `capabilities.verify` is what
   // decides "record-only" — a connector that flips it needs no frontend edit.
   // The badge's explicit set stays the fallback for the ledger row, which has
@@ -252,7 +247,23 @@ export default function AccountingPage() {
       <div className="max-w-3xl">
         <ConnectOutcomeForwarderInSuspense />
         {header}
-        {error ? <p className="text-sm text-[var(--v2-danger)]">{error}</p> : null}
+        {error ? (
+          // #4569: the load-error shape (#4563) — the thing that could not
+          // load, what is still true, and a Try again wired to the hook's own
+          // `refetch`. Before this the first-load failure was a raw red line
+          // with no action at all.
+          <EmptyState
+            tone="danger"
+            icon={<Icon icon={CircleAlert} className="h-full w-full" />}
+            title="Accounting could not load"
+            body="Your accounting connections are unchanged."
+            action={
+              <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+                Try again
+              </Button>
+            }
+          />
+        ) : null}
       </div>
     )
   }
@@ -318,8 +329,13 @@ export default function AccountingPage() {
           <Card className="p-0" hover={false}>
             <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <h2 className="v2-text-h3 text-[var(--v2-ink)]">Synced transactions</h2>
-                <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Drafts fed to your accounting tool. Failures retry on sync.</p>
+                {/* #4601 (N4): the page text says "sent", the verb the row
+                    chips already use (In <Provider> / Sending… / Not sent,
+                    #4567). "Feed" stays the name of the connection — "Feed
+                    settings", "Feeding {provider}", "Sync now" and the
+                    disclaimer are unchanged. */}
+                <h2 className="v2-text-h3 text-[var(--v2-ink)]">Sent transactions</h2>
+                <p className="mt-1 text-sm text-[var(--v2-ink-2)]">Drafts sent to your accounting tool. Failures retry on sync.</p>
                 {hasFeedActivity(status) ? (
                   <div className="mt-2">
                     <FeedCounts counts={status.counts} />
@@ -343,15 +359,42 @@ export default function AccountingPage() {
             </div>
 
             {error ? (
-              <div className="px-5 pb-5 text-sm text-[var(--v2-danger)]">{error}</div>
+              // #4569: a refetch that failed replaces the rows, so it gets the
+              // load-error shape rather than a bare red line — and the same
+              // `refetch` behind Try again.
+              <div className="px-5 pb-5">
+                <EmptyState
+                  bare
+                  tone="danger"
+                  icon={<Icon icon={CircleAlert} className="h-full w-full" />}
+                  title="Sync status could not load"
+                  body="Your sent payments are unchanged."
+                  action={
+                    <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+                      Try again
+                    </Button>
+                  }
+                />
+              </div>
             ) : status.syncs.length === 0 ? (
               <div className="px-5 pb-5 text-sm text-[var(--v2-ink-3)]">
-                Nothing synced yet. Settled agent payments will appear here automatically.
+                Nothing sent yet. Settled agent payments will appear here automatically.
               </div>
             ) : (
               <Card.Section divided>
                 {status.syncs.map((s) => {
                   const record = s.status === 'pushed' ? externalRecord(s.external_ref) : null
+                  // #4567: the row chip is `StatusBadge` fed by the SAME
+                  // presentation the per-payment badge uses. This page used to
+                  // carry its own `STATUS` class map — Synced / Pending /
+                  // Failed / Skipped — a second vocabulary for one state, and
+                  // the one that claimed delivery on a preview deployment.
+                  // `liveSyncReady` is what makes a pushed row read "Tracked"
+                  // here instead of "In <Provider>" (SR:1583).
+                  const chip = accountingStatusPresentation(s, t.accountingBadge, {
+                    liveSyncReady: status.liveSyncReady,
+                    providers,
+                  })
                   // Self-invalidating (#1364 review): a stored verification is
                   // only rendered while the row still points at the SAME
                   // record — a re-sync that changes the row's shape drops the
@@ -403,7 +446,7 @@ export default function AccountingPage() {
                               {verifying === s.payment_id ? 'Checking…' : t.accountingPage.verify.checkIn(providerDisplayName(s.provider))}
                             </Button>
                           )}
-                          <StatusChip status={s.status} />
+                          <StatusBadge tone={chip.tone}>{chip.label}</StatusBadge>
                         </span>
                       </div>
                       <div aria-live="polite">
@@ -416,7 +459,7 @@ export default function AccountingPage() {
                             >
                               {'error' in v
                                 ? v.error
-                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${new Date(v.checked_at).toLocaleTimeString()}.`}
+                                : `${verificationSummary(v, s.provider, t, providers).text} Checked ${formatTimeOfDay(v.checked_at)}.`}
                             </p>
                             {!('error' in v) && !v.registered && (
                               <Button

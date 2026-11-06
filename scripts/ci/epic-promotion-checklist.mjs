@@ -6,8 +6,9 @@
 // section — the operator steps the epic depends on and its product verification
 // on `dev`, each an unticked box naming where it is done. An epic is ready to
 // close only when every box in that section is ticked; otherwise the closeout
-// lists the unticked ones and the epic stays open across the promotion until a
-// human ticks the last box (owner decision 2026-09-08).
+// lists the unticked ones. A box only a promotion can satisfy is filed as its
+// own `Next release` issue and ticked with a link to it, so the epic may close
+// before the promotion (owner decision 2026-10-30, amending 2026-09-08, #2767).
 //
 // Exit codes, so the skill can branch on them without parsing prose:
 //   0  ready — every box ticked, OR the epic has no such section (it predates the

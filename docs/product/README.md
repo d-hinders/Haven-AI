@@ -25,12 +25,13 @@ covers:
   - packages/ui/src/Button.tsx
   - packages/ui/src/Card.tsx
   - packages/ui/src/Input.tsx
+  - packages/ui/src/Spinner.tsx
   - packages/ui/src/Tooltip.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/**
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Haven Product & UX Guide
@@ -219,7 +220,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
   themed surfaces behind it. No `backdrop-filter` blur: it is deliberately left
   out for performance (`.v2-modal-backdrop` in `globals.css`).
 - Modals must use dialog semantics, labelled titles, focus trap, and focus return after close.
-- Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog.
+- Never nest modals. Use inline confirmation panels or close the parent before opening a confirm dialog. When a dialog opens another dialog, close the first, keep its typed values, and reopen it with those values and focus back where it came from when the second closes (#4564).
 
 ### Forms
 
@@ -234,6 +235,7 @@ Before shipping a UI change, compare it against an existing v2 screen with the s
 ### Loading And Feedback
 
 - Use `Skeleton` instead of inline pulse divs.
+- Use the shared `Spinner` for an in-flight action or a standalone busy indicator; it never replaces the words that say what is happening (`design-system.md` § Spinner).
 - Loading regions that replace meaningful content should preserve approximate dimensions and use `role="status"`, `aria-busy="true"`, and `aria-live="polite"` where practical.
 - Use toasts for short feedback after actions such as copy, save, send, or retry.
 - Toasts should supplement visible state. If the user needs to fix something, keep the error next to the relevant field or panel.
@@ -337,15 +339,4 @@ mechanism and its one constraint (keep stacked controls ~8px apart, or two
 targets fight over the same pixels). Controls that are **not** a `Button` inherit
 nothing from this — verify their mobile placement and spacing explicitly.
 
-Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
-the focused first-run view's money card steps its Receive down to ghost with
-Send disabled (#4105 replaced Add funds and Deposit address with Receive,
-#4167); "Coming soon" is no longer acceptable on Settings (#4356 owner decision
-3, #4358/#4359); the money-movement rule says account funds, not Safe funding.
-Re-checked without change: the theme control under Settings → General →
-Preferences; "Get started", "N of 3 done", "Hide for now" and "You're set up";
-the low-balance and zero-USDC hold-back; the inline "Connect your first agent"
-on `/agents`; Analytics second in the Overview group; the raised money panel
-with the 30-day spending; `design-system.md` § Cards; `.v2-modal-backdrop` with
-no blur; `MaxButton`/`PasteButton`; the `#main-content` skip link; `Button`
-`sm` 36px and `md` 40px with a 44px hit area (#1726).
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

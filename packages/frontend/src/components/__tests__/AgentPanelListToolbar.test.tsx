@@ -100,7 +100,7 @@ describe('Agents list controls (#4113)', () => {
     const user = userEvent.setup()
     render(<AgentPanel />)
     const search = screen.getByRole('searchbox', { name: 'Search agents' })
-    expect(search).toHaveAccessibleDescription('by name, description or delegate address')
+    expect(search).toHaveAccessibleDescription('by name, description or wallet address')
     expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull()
 
     await user.type(search, 'br')

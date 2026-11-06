@@ -7,7 +7,7 @@ import type {
   ManualCredential,
 } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
-import { ChevronRight, Copy, Lock } from 'lucide-react'
+import { ChevronRight, Clipboard, Lock } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { CODE_PREVIEW_CLASS, CopyBlock } from './CopyBlock'
@@ -35,6 +35,7 @@ export function WaitingForConnector({
   expiresAt,
   onCancel,
   nestedCopyBlocks = false,
+  halo = false,
 }: {
   setup: CreateSetupResponse
   runtime: string
@@ -71,6 +72,8 @@ export function WaitingForConnector({
    * blocks stay standalone cards, unchanged.
    */
   nestedCopyBlocks?: boolean
+  /** Dialog-only attention cue; omitted for inline and showcase renderings. */
+  halo?: boolean
 }) {
   // Which rendering of the manual credential is shown — .env by default;
   // selecting the format is pure presentation, so it stays local to this
@@ -110,8 +113,8 @@ export function WaitingForConnector({
               variant="ghost"
               size="sm"
               onClick={() => onCopy('prompt', setup.setup_prompt)}
+              leadingIcon={Clipboard}
             >
-              <Icon icon={Copy} className="h-3.5 w-3.5" />
               Copy again
             </Button>
           ),
@@ -136,8 +139,8 @@ export function WaitingForConnector({
                 size={manualInProgress ? 'sm' : 'md'}
                 className={manualInProgress ? 'self-start' : 'w-full'}
                 onClick={() => onCopy('prompt', setup.setup_prompt)}
+                leadingIcon={Clipboard}
               >
-                <Icon icon={Copy} className="h-4 w-4" />
                 Copy setup prompt
               </Button>
               <details className="group text-xs">
@@ -245,7 +248,7 @@ export function WaitingForConnector({
 
   return (
     <>
-      <ConnectSteps rows={promptRows} />
+      <ConnectSteps rows={promptRows} halo={halo} />
 
       {/* #3832: the one trust fact a cautious user needs before pasting,
           placed with the steps it is about. Only true on the connector path:
@@ -322,7 +325,7 @@ export function WaitingForConnector({
                   onClick={onCreateManualCredential}
                   disabled={manualCreating}
                 >
-                  {manualCreating ? 'Creating credentials...' : 'Generate credentials'}
+                  {manualCreating ? 'Creating credentials…' : 'Generate credentials'}
                 </Button>
               </>
             ) : (

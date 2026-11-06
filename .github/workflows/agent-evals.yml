@@ -58,6 +58,10 @@ on:
         description: 'Trials per task (cost pilot: 1)'
         type: string
         default: '1'
+      dev_landing_url:
+        description: 'Dev landing URL the cold-agent tasks give the agent (e.g. https://haven-ai-frontend-git-dev-....vercel.app); empty = the cold tasks cannot run'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -90,6 +94,7 @@ jobs:
           INPUT_SUITE: ${{ github.event.inputs.suite || 'subset' }}
           INPUT_TRIALS: ${{ github.event.inputs.trials || '1' }}
           INPUT_TASKS: ${{ github.event.inputs.tasks || '' }}
+          INPUT_DEV_LANDING_URL: ${{ github.event.inputs.dev_landing_url || '' }}
         run: |
           set -euo pipefail
           MODE="$INPUT_SUITE"
@@ -121,6 +126,7 @@ jobs:
           echo "trials=$TRIALS" >> "$GITHUB_OUTPUT"
           echo "limit_arg=$LIMIT_ARG" >> "$GITHUB_OUTPUT"
           echo "task_filter=$TASKS" >> "$GITHUB_OUTPUT"
+          echo "dev_landing_url=$INPUT_DEV_LANDING_URL" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HOSTED_COMMIT" >> "$GITHUB_OUTPUT"
           echo "::notice::agent-evals mode=$MODE trials=$TRIALS $FILTER_NOTE; hosted MCP: $([ "$MODE" = 'subset' ] && echo "commit $HOSTED_COMMIT (this checkout)" || echo 'the deployed dev stack')"
 
@@ -151,6 +157,9 @@ jobs:
           npm run build -w packages/sdk
           npm run build -w packages/signer
           npm run build -w packages/mcp-server
+          # #4680: the cold profile's eval-only command tool is a stdio MCP
+          # server `claude` spawns, so it must exist as a JS file.
+          npm run build -w packages/qa-agent
 
       # Subset only: boot the hosted MCP FROM THIS CHECKOUT (source enum stays
       # `pr-checkout` internally), relaying to
@@ -171,7 +180,12 @@ jobs:
       # The lane's own eval identity, written from the PROTECTED environment
       # secrets at runtime and never echoed. The delegate key NEVER reaches
       # the hosted server env (the custody guard would refuse to boot) — only
-      # the signer process gets it, via the credential file.
+      # the signer process gets it, via the credential file. It does not reach
+      # the AGENT's process env either: the Claude Code adapter spawns the
+      # child from an explicit env allowlist (claude-code.ts
+      # CHILD_ENV_ALLOWLIST), so AGENT_EVALS_DELEGATE_KEY, HAVEN_CREDENTIALS
+      # and QA_EVAL_AGENT_API_KEY stay in this step's env and every stdio MCP
+      # server the agent spawns sees only the trial's own wiring.
       - name: Write the eval-agent credentials from the protected environment (never echoed)
         env:
           DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}
@@ -255,6 +269,23 @@ jobs:
           QA_EVAL_AGENT_ACCOUNT: ${{ vars.AGENT_EVALS_AGENT_ACCOUNT }}
           QA_EVAL_X402_TARGET: ${{ vars.AGENT_EVALS_X402_TARGET }}
           QA_RPC_URL_BASE_SEPOLIA: ${{ secrets.QA_RPC_URL_BASE_SEPOLIA }}
+          # #4678: the per-trial prepared state. The manifest holds every
+          # secret a throwaway trial generates (owner key, delegate key,
+          # signup password, signup bearer token, agent API key) and lives
+          # OUTSIDE every report and upload path; the redactor consumes it
+          # fail-closed and the `always()` step below deletes it after the
+          # scan. The trial dir holds each trial's own credential + MCP
+          # config, mode 0600.
+          QA_EVAL_SECRET_MANIFEST: ${{ runner.temp }}/eval-secret-manifest/manifest.json
+          QA_EVAL_TRIAL_DIR: ${{ runner.temp }}/eval-trials
+          QA_EVAL_SIGNER_CLI: ${{ github.workspace }}/packages/signer/dist/cli.js
+          # #4680: the cold profile. The landing URL is a workflow input (none
+          # existed before); the command tool is the built eval-only MCP server
+          # the cold tasks' per-trial config points at.
+          QA_EVAL_DEV_LANDING_URL: ${{ steps.slice.outputs.dev_landing_url }}
+          QA_EVAL_COMMAND_TOOL: ${{ github.workspace }}/packages/qa-agent/dist/evals/command-tool.js
+          AGENT_EVALS_DELEGATE_KEY: ${{ secrets.AGENT_EVALS_DELEGATE_KEY }}
+          QA_X402_BINDING_SIGNER: ${{ vars.QA_X402_BINDING_SIGNER }}
           MODE: ${{ steps.slice.outputs.mode }}
           TRIALS: ${{ steps.slice.outputs.trials }}
           LIMIT_ARG: ${{ steps.slice.outputs.limit_arg }}
@@ -264,6 +295,9 @@ jobs:
         run: |
           set -o pipefail
           if [ "$MODE" = 'subset' ]; then SOURCE=pr-checkout; HOSTED_URL='http://127.0.0.1:8788/v1'; else SOURCE=dev-deployed; HOSTED_URL="$DEV_HOSTED_MCP_URL"; fi
+          # #4678: the per-trial MCP config the throwaway tasks point at is
+          # built from this URL, so the CLI needs it as an env var.
+          export QA_EVAL_HOSTED_MCP_URL="$HOSTED_URL"
           # #4218: a task filter replaces the slice — "--task=$TASKS" quoted
           # and NO --limit, whatever the suite; an empty filter emits no
           # --task argument at all.
@@ -318,6 +352,7 @@ jobs:
           --in-prefix="$RUNNER_TEMP/claude-sessions"
           --stage="$RUNNER_TEMP/eval-transcripts-staging"
           --out="$RUNNER_TEMP/eval-transcripts-redacted"
+          --manifest="$RUNNER_TEMP/eval-secret-manifest/manifest.json"
           --required=CLAUDE_CODE_OAUTH_TOKEN,AGENT_EVALS_API_KEY,AGENT_EVALS_DELEGATE_KEY,QA_RPC_URL_BASE_SEPOLIA
           --optional=QA_HOSTED_MCP_URL,AGENT_EVALS_HAVEN_API_URL
 
@@ -329,3 +364,11 @@ jobs:
           path: ${{ runner.temp }}/eval-transcripts-redacted
           retention-days: 3
           if-no-files-found: ignore
+
+      # #4678: the per-trial exact-value manifest is deleted AFTER the scan,
+      # in an `always()` step, so a failed run cannot leave the throwaway
+      # secrets on the runner. It is never printed and never uploaded: the
+      # guard in scripts/ci/agent-evals-workspace-deps.test.mjs proves both.
+      - name: Delete the per-trial secret manifest
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/eval-secret-manifest" "$RUNNER_TEMP/eval-trials"

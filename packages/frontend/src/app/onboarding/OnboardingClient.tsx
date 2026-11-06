@@ -32,7 +32,9 @@ import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Select } from '@/components/ui/Select'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 import HybridEnrollFlow from './HybridEnrollFlow'
 
 type Phase = 'create' | 'success'
@@ -149,10 +151,7 @@ export default function OnboardingClient() {
   if (loading || !user) {
     return (
       <div className="min-h-screen bg-[var(--v2-bg)] flex items-center justify-center">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-          <span className="text-sm text-[var(--v2-ink-2)]">Loading...</span>
-        </div>
+        <RouteLoading />
       </div>
     )
   }
@@ -249,14 +248,7 @@ export default function OnboardingClient() {
                 </div>
               )}
 
-              {error && (
-                <div
-                  role="alert"
-                  className="rounded-md border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3 text-sm text-[var(--v2-danger)]"
-                >
-                  {error}
-                </div>
-              )}
+              {error && <InlineAlert>{error}</InlineAlert>}
 
               {/* Hybrid, unconditionally (#1984). There is no fork left to
                   take: the Safe rail is retired, its deploy/import routes

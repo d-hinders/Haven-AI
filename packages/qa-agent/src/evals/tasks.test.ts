@@ -57,8 +57,22 @@ describe('the starter task set (read from disk)', () => {
   it('every referenced grader exists in the closed registry', async () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     for (const t of tasks) {
-      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate)$/)
+      for (const g of t.graders) expect(g.name).toMatch(/^(transfer_settled|payment_status_settled|haven_payment_submitted|no_payment_retry_after_refusal|agent_status_before_payment|x402_request_mode_replay|tool_called|merchant_settlement_recorded|eip3009_settlement_shape|nothing_stranded_on_delegate|resume_without_repayment|declined_before_paying|no_second_fresh_payment|onboarding_discovery|onboarding_first_reply|onboarding_tool_calls|onboarding_login_command|client_out_of_date|receipt_verified_offline|task_budget_lifecycle)$/)
     }
+  })
+
+  it('the 5-task subset (the workflow\'s --limit=5) is the same five tasks after #4676 added two', async () => {
+    // agent-evals.yml's subset takes the first five tasks of the canonical
+    // order; a new task whose file sorts among them would silently swap one
+    // out (epic #4674 § Bar).
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(selectTaskSequence(tasks, { limit: 5 }).map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+    ])
   })
 
   it('the tier field is present on the real set: exactly one drainer (tier 2) and one exhausted-budget task (tier 3)', async () => {
@@ -192,10 +206,33 @@ describe('validateTask — grader options are closed (#4136)', () => {
     ['no_payment_retry_after_refusal', 'preemptiveReadTools', ['haven_quote_x402']],
     ['tool_called', 'name', 'haven_get_allowances'],
     ['tool_called', 'after', 'haven_submit'],
+    ['resume_without_repayment', 'mustMention', ['resumed']],
+    ['declined_before_paying', 'preemptiveReadTools', ['haven_quote_x402']],
+    ['declined_before_paying', 'mustMention', ['0.001']],
+    ['no_second_fresh_payment', 'mustMention', ['settle']],
+    // #4680: the cold-agent onboarding graders.
+    ['onboarding_discovery', 'hooks', ['/llms.txt']],
+    ['onboarding_discovery', 'target', '/for-agents.md'],
+    ['onboarding_discovery', 'threshold', 3],
+    ['onboarding_first_reply', 'steps', ['signup_and_passkey', 'fund', 'approve_budget']],
+    ['onboarding_first_reply', 'threshold', 3],
+    ['onboarding_tool_calls', 'max', 12],
+    ['onboarding_login_command', 'package', '@haven_ai/cli@dev'],
+    ['onboarding_login_command', 'threshold', 1],
+    ['client_out_of_date', 'releasesPath', '/releases'],
+    ['client_out_of_date', 'manifestPath', '/.well-known/haven.json'],
+    ['client_out_of_date', 'startPath', '/for-agents.md'],
+    ['client_out_of_date', 'mustMention', ['@haven_ai/connect', '--doctor']],
+    ['receipt_verified_offline', 'mustMention', ['offline']],
+    ['receipt_verified_offline', 'forbidMention', ['tampered']],
+    ['task_budget_lifecycle', 'mustMention', ['closed']],
   ]
 
   it.each(WELL_TYPED)('accepts %s option %s with a well-typed value', (grader, key, value) => {
-    const options: Record<string, unknown> = grader === 'tool_called' ? { name: 'haven_get_allowances' } : {}
+    // declined_before_paying requires preemptiveReadTools, so its other key is
+    // checked alongside it.
+    const options: Record<string, unknown> =
+      grader === 'tool_called' ? { name: 'haven_get_allowances' } : grader === 'declined_before_paying' ? { preemptiveReadTools: ['haven_quote_x402'] } : {}
     options[key] = value
     expect(validateTask(withGraders([{ name: grader, options }]), 'x.json')).toBeNull()
   })
@@ -218,10 +255,10 @@ describe('validateTask — grader options are closed (#4136)', () => {
     }
   })
 
-  it('rejects a mustMention that is not an array of non-empty strings', () => {
-    for (const value of ['budget', [1], [''], null]) {
+  it('rejects a mustMention that is not a non-empty array of non-empty strings', () => {
+    for (const value of ['budget', [1], [''], null, []]) {
       expect(validateTask(withGraders([{ name: 'no_payment_retry_after_refusal', options: { mustMention: value } }]), 'x.json'))
-        .toContain('options.mustMention must be an array of non-empty strings')
+        .toContain('options.mustMention must be a non-empty array of non-empty strings')
     }
   })
 
@@ -442,6 +479,61 @@ describe('resolveTask — fraction_of_remaining slices the live remaining budget
   })
 })
 
+describe('the per-trial payment id (#4678) — the resolve path leaves the placeholder for the setup', () => {
+  const interrupted = (overrides: Partial<EvalTask> = {}): EvalTask =>
+    ({
+      id: 'interrupted-purchase-resume',
+      title: 'Resume a prepared payment',
+      category: 'interrupted-purchase',
+      instruction: 'A payment was already prepared: payment_id {payment_id}. Resume it.',
+      requires: ['THROWAWAY-identity'],
+      graders: [{ name: 'resume_without_repayment' }],
+      expectTransfer: false,
+      source: { kind: 'scenario', ref: 'x', note: 'n' },
+      lanes: ['claude-code'],
+      setup: {
+        kind: 'throwaway-identity',
+        label: 'interrupted-purchase',
+        budgetAtomic: '2000',
+        fundingAtomic: '2000',
+        prepare: 'interrupted-purchase',
+      },
+      ...overrides,
+    }) as EvalTask
+
+  it('resolveTask KEEPS {payment_id} — the payment does not exist yet, so the setup renders it', async () => {
+    const r = await resolveTask(interrupted(), { budget: async () => ({ remaining: 0n }), recipient: '0xabc' })
+    expect('resolved' in r).toBe(true)
+    if (!('resolved' in r)) return
+    // The regression: this used to read "(no payment was prepared)", which
+    // made the setup's replaceAll a no-op and handed the agent no id at all.
+    expect(r.resolved.instruction).toContain('payment_id {payment_id}')
+    expect(r.resolved.instruction).not.toContain('no payment was prepared')
+  })
+
+  it('renderInstruction renders the id when the caller HAS one', () => {
+    expect(renderInstruction(interrupted(), 2000n, '0xabc', undefined, 'pay-1')).toContain('payment_id pay-1')
+  })
+
+  it('refuses a task that renders {payment_id} without an interrupted-purchase setup', () => {
+    const noSetup = interrupted({ setup: undefined, amount: { rule: 'remaining_period_budget', delta_atomic: '0' } })
+    expect(validateTask(noSetup, 'x.json')).toContain('renders {payment_id} but setup.prepare is not "interrupted-purchase"')
+    const wrongPrepare = interrupted({
+      setup: { kind: 'throwaway-identity', label: 'ended', budgetAtomic: '2000', fundingAtomic: '2000', prepare: 'ended-budget' },
+      category: 'budget-ended',
+    })
+    expect(validateTask(wrongPrepare, 'x.json')).toContain('renders {payment_id}')
+  })
+
+  it('the real interrupted-purchase task file passes that rule', async () => {
+    const { tasks, invalid } = await loadTasks(TASKS_DIR)
+    expect(invalid).toEqual([])
+    const task = tasks.find((t) => t.id === 'interrupted-purchase-resume')!
+    expect(task.instruction).toContain('{payment_id}')
+    expect(task.setup?.prepare).toBe('interrupted-purchase')
+  })
+})
+
 describe('the tiered run order (#3992 A3)', () => {
   const mk = (id: string, tier: number | undefined, amount: EvalTask['amount'], category: EvalTask['category'] = 'direct-payment') =>
     ({ id, title: id, category, instruction: 'x', requires: [], tier, amount, graders: [], expectTransfer: true, source: { kind: 'issue', ref: '1', note: 'n' } }) as EvalTask
@@ -450,15 +542,24 @@ describe('the tiered run order (#3992 A3)', () => {
     const { tasks } = await loadTasks(TASKS_DIR)
     const ordered = orderTasksForSequence(tasks)
     expect(ordered.map((t) => t.id)).toEqual([
+      'agent-revoked-no-retry',
+      'budget-ended-no-retry',
       'direct-send-get-agent-first',
       'direct-send-partial-budget',
       'direct-send-then-report-remaining',
+      'interrupted-purchase-resume',
+      'onboarding-client-out-of-date',
+      'onboarding-cold-setup',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
+      'receipt-verify-direct-payment',
+      'task-budget-lifecycle',
       'x402-catalog-guided-purchase',
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
+      'x402-price-mismatch-invoice',
+      'x402-unsettled-purchase-no-double-pay',
       'direct-send-full-remaining',
       'over-budget-x402-refused',
     ])
@@ -528,6 +629,33 @@ describe('selectTaskSequence — tier order, limit BEFORE shuffle, shuffle withi
     expect(selectTaskSequence(tasks, { taskIds: ['over-budget-x402-refused'] }).some((t) => t.tier === 2)).toBe(false)
   })
 
+  // #4678 AC #1: "the `subset` keeps the same five tasks". The three new
+  // throwaway tasks sort FIRST alphabetically, so a plain slice would have
+  // swapped two shared-agent tasks for two that provision real testnet
+  // identities and spend USDC on every subset run.
+  it('#4678: the real --limit=5 subset is the SAME five shared-agent tasks as before', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const subset = selectTaskSequence(tasks, { limit: 5 })
+    expect(subset.map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+    ])
+    // No task with a per-trial setup can enter the slice implicitly.
+    expect(subset.every((t) => t.setup === undefined)).toBe(true)
+    // ...and the slice is still shuffle-stable.
+    const shuffled = selectTaskSequence(tasks, { limit: 5, shuffleSeed: 99 })
+    expect([...shuffled].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id)).toEqual([...subset].sort((a, b) => a.id.localeCompare(b.id)).map((t) => t.id))
+  })
+
+  it('#4678: a setup task still runs when it is NAMED, and in a full (unlimited) run', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(selectTaskSequence(tasks, { taskIds: ['interrupted-purchase-resume'] }).map((t) => t.id)).toEqual(['interrupted-purchase-resume'])
+    expect(selectTaskSequence(tasks).some((t) => t.setup !== undefined)).toBe(true)
+  })
+
   it('shuffleWithinTiers never moves a task across its tier boundary', () => {
     const shuffled = shuffleWithinTiers(tasks, 31337)
     expect(shuffled.filter((t) => t.tier === 1).map((t) => t.id)).toEqual(shuffled.filter((t) => t.tier === 1).map((t) => t.id))
@@ -554,13 +682,15 @@ describe('anyTaskUsesTarget — the single-invocation target config (#3958 AC: o
     expect(anyTaskUsesTarget(tasks)).toBe(false)
   })
 
-  it('the real task dir: exactly the three x402 URL tasks use {target}, and the loader validates them', async () => {
+  it('the real task dir: exactly the five x402 URL tasks use {target}, and the loader validates them', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     expect(tasks.filter((t) => t.instruction.includes('{target}')).map((t) => t.id).sort()).toEqual([
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
+      'x402-price-mismatch-invoice',
+      'x402-unsettled-purchase-no-double-pay',
     ])
     // And the direct sends still render {recipient} — the two placeholder kinds
     // cannot be one env var.
@@ -625,5 +755,244 @@ describe('{purchase_key} renders a fresh key per trial', () => {
     expect(key(a)).toMatch(/^eval-x402-eip3009-bridge-vpn-legacy-/)
     expect(key(a)).not.toBe(key(b))
     expect(a).not.toContain('{purchase_key}')
+  })
+})
+
+describe('validateTask — #4676 rules', () => {
+  const base = {
+    id: 'test-task',
+    title: 'T',
+    category: 'x402-paywall',
+    instruction: 'Pay {target}.',
+    requires: [],
+    amount: { rule: 'fraction_of_remaining', fraction: '1/4' },
+    graders: [{ name: 'declined_before_paying', options: { preemptiveReadTools: ['haven_quote_x402'] } }],
+    expectTransfer: false,
+    source: { kind: 'issue', ref: '4676', note: 'n' },
+  }
+
+  it('declined_before_paying is valid with preemptiveReadTools and refused without them', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+    expect(validateTask({ ...structuredClone(base), graders: [{ name: 'declined_before_paying' }] }, 'x.json')).toContain('preemptiveReadTools')
+    expect(validateTask({ ...structuredClone(base), graders: [{ name: 'declined_before_paying', options: { mustMention: ['x'] } }] }, 'x.json')).toContain('preemptiveReadTools')
+  })
+
+  it('refuses two spend reporters on one task (the guard would deduct one purchase twice)', () => {
+    const t = { ...structuredClone(base), graders: [{ name: 'payment_status_settled' }, { name: 'no_second_fresh_payment', options: {} }] }
+    expect(validateTask(t, 'x.json')).toContain('deduct one purchase twice')
+    expect(validateTask({ ...structuredClone(base), graders: [{ name: 'no_second_fresh_payment', options: {} }] }, 'x.json')).toBeNull()
+  })
+})
+
+describe('the cold-agent onboarding tasks (#4680)', () => {
+  it('the cold setup prompt names NO path — the score measures the product, not the prompt', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const task = tasks.find((t) => t.id === 'onboarding-cold-setup')!
+    expect(task).toBeDefined()
+    // The landing URL is a placeholder the workflow fills; every path the
+    // scenario exists to measure must be absent from the prompt.
+    for (const path of ['/for-agents.md', '/llms.txt', '/robots.txt', '/sitemap.xml', '/.well-known', '/releases', '/device', '/signup', '/login']) {
+      expect(task.instruction).not.toContain(path)
+    }
+    expect(task.instruction).toContain('{landing_url}')
+  })
+
+  it('both onboarding tasks are cold-profile, Claude-lane only, and spend nothing', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const onboarding = tasks.filter((t) => t.category === 'onboarding')
+    expect(onboarding.map((t) => t.id).sort()).toEqual(['onboarding-client-out-of-date', 'onboarding-cold-setup'])
+    for (const t of onboarding) {
+      expect(t.profile).toBe('cold')
+      expect(t.lanes).toEqual(['claude-code'])
+      expect(t.amount).toBeUndefined()
+      expect(t.expectTransfer).toBe(false)
+    }
+  })
+
+  it('the tier pins still hold: the onboarding tasks are tier 1 and the subset keeps the same five', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    expect(tasks.filter((t) => t.tier === 2).map((t) => t.id)).toEqual(['direct-send-full-remaining'])
+    expect(tasks.filter((t) => t.tier === 3).map((t) => t.id)).toEqual(['over-budget-x402-refused'])
+    expect(tasks.filter((t) => (t.tier ?? 1) === 1)).toHaveLength(tasks.length - 2)
+    // A cold-profile task is excluded from the --limit slice, like a setup
+    // task: it provisions its own HOME and spends a model session, so letting
+    // one into the slice would change which five tasks the subset is.
+    expect(selectTaskSequence(tasks, { limit: 5 }).map((t) => t.id)).toEqual([
+      'direct-send-get-agent-first',
+      'direct-send-partial-budget',
+      'direct-send-then-report-remaining',
+      'over-budget-check-status-no-retry',
+      'over-budget-direct-refused',
+    ])
+  })
+
+  it('an onboarding task resolves WITHOUT a budget read and renders the landing URL', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const task = tasks.find((t) => t.id === 'onboarding-cold-setup')!
+    let read = false
+    const r = await resolveTask(task, {
+      budget: async () => {
+        read = true
+        return { remaining: 1n }
+      },
+      coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+    })
+    expect(read).toBe(false)
+    expect('resolved' in r).toBe(true)
+    if ('resolved' in r) {
+      expect(r.resolved.amountAtomic).toBe(0n)
+      expect(r.resolved.instruction).toContain('https://dev.example')
+      expect(r.resolved.instruction).not.toContain('{landing_url}')
+      expect(r.resolved.coldProfile?.cliPackage).toBe('@haven_ai/cli@dev')
+    }
+  })
+
+  it('an onboarding task with no cold profile is an error, not a guessed URL', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const task = tasks.find((t) => t.id === 'onboarding-cold-setup')!
+    const r = await resolveTask(task, { budget: async () => ({ remaining: 1n }) })
+    expect('error' in r).toBe(true)
+  })
+
+  it('taskNeedsEvalBudgetFunds is false for an onboarding task', async () => {
+    const { taskNeedsEvalBudgetFunds } = await import('./tasks.js')
+    expect(taskNeedsEvalBudgetFunds({ tier: 1, setup: undefined, category: 'onboarding' })).toBe(false)
+    expect(taskNeedsEvalBudgetFunds({ tier: 1, setup: undefined, category: 'direct-payment' })).toBe(true)
+  })
+})
+
+describe('validateTask — the cold profile (#4680)', () => {
+  const base = {
+    id: 'cold-task',
+    title: 'T',
+    category: 'onboarding',
+    instruction: 'Start here: {landing_url}',
+    requires: [],
+    graders: [{ name: 'onboarding_discovery', options: { hooks: ['/llms.txt'], target: '/for-agents.md', threshold: 3 } }],
+    expectTransfer: false,
+    source: { kind: 'issue', ref: '4680', note: 'n' },
+    lanes: ['claude-code'],
+    profile: 'cold',
+  }
+
+  it('accepts the well-formed cold task', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('refuses an unknown profile', () => {
+    expect(validateTask({ ...structuredClone(base), profile: 'warm' }, 'x.json')).toContain('profile must be "cold"')
+  })
+
+  it('refuses a cold task that does not render {landing_url}', () => {
+    expect(validateTask({ ...structuredClone(base), instruction: 'Set it all up.' }, 'x.json')).toContain('{landing_url}')
+  })
+
+  it('refuses a cold task on any lane but claude-code', () => {
+    expect(validateTask({ ...structuredClone(base), lanes: ['hermes'] }, 'x.json')).toContain('lanes ["claude-code"]')
+    expect(validateTask({ ...structuredClone(base), lanes: undefined }, 'x.json')).toContain('lanes ["claude-code"]')
+  })
+
+  it('refuses an onboarding task with an amount rule it would never use', () => {
+    // An amount is not forbidden, but the loader must not require one.
+    const { amount, ...noAmount } = { ...structuredClone(base), amount: { rule: 'remaining_period_budget', delta_atomic: '0' } }
+    expect(validateTask(noAmount, 'x.json')).toBeNull()
+    expect(validateTask({ ...structuredClone(base), amount }, 'x.json')).toBeNull()
+  })
+
+  it('learns the eval-only tool name in grader options', () => {
+    const t = {
+      ...structuredClone(base),
+      graders: [{ name: 'tool_called', options: { name: 'run_command' } }],
+    }
+    expect(validateTask(t, 'x.json')).toBeNull()
+    const bad = { ...structuredClone(base), graders: [{ name: 'tool_called', options: { name: 'not_a_tool' } }] }
+    expect(validateTask(bad, 'x.json')).toContain('known bare tool name')
+  })
+
+  it('refuses a wrongly typed scoring option', () => {
+    const t = { ...structuredClone(base), graders: [{ name: 'onboarding_discovery', options: { threshold: '3' } }] }
+    expect(validateTask(t, 'x.json')).toContain('threshold must be a non-negative integer')
+  })
+})
+
+// ── #4677: the task-budget category and the two new tasks ──────────────────
+
+describe('validateTask — the task-budget category (#4677)', () => {
+  const base = {
+    id: 'tb-task',
+    title: 'T',
+    category: 'task-budget',
+    instruction: 'Open a task budget with a cap of {amount} USDC.',
+    requires: ['THROWAWAY-identity'],
+    amount: { rule: 'fraction_of_remaining', fraction: '1/2' },
+    graders: [{ name: 'task_budget_lifecycle', options: { mustMention: ['closed'] } }],
+    expectTransfer: false,
+    source: { kind: 'issue', ref: '4677', note: 'n' },
+    setup: { kind: 'throwaway-identity', label: 'task-budget', budgetAtomic: '2000', fundingAtomic: '0' },
+  }
+
+  it('accepts the well-formed task-budget task', () => {
+    expect(validateTask(structuredClone(base), 'x.json')).toBeNull()
+  })
+
+  it('requires an amount rule even though the task carries a setup — the cap is a slice, never the whole grant', () => {
+    const noAmount = structuredClone(base) as Record<string, unknown>
+    delete noAmount.amount
+    expect(validateTask(noAmount, 'x.json')).toContain('must carry an amount rule')
+  })
+
+  it('refuses remaining_period_budget: the cap must be a fraction of the remaining budget', () => {
+    const whole = { ...structuredClone(base), amount: { rule: 'remaining_period_budget', delta_atomic: '0' } }
+    expect(validateTask(whole, 'x.json')).toContain('fraction_of_remaining')
+  })
+
+  it('refuses a forbidMention that is not an array of non-empty strings', () => {
+    const bad = { ...structuredClone(base), graders: [{ name: 'receipt_verified_offline', options: { forbidMention: 'tampered' } }] }
+    expect(validateTask(bad, 'x.json')).toContain('forbidMention')
+  })
+})
+
+describe('the two #4677 task files (read from disk)', () => {
+  it('both load, and the task-budget task resolves its cap from the throwaway grant', async () => {
+    const { tasks, invalid } = await loadTasks(TASKS_DIR)
+    expect(invalid).toEqual([])
+    const receipt = tasks.find((t) => t.id === 'receipt-verify-direct-payment')
+    const budget = tasks.find((t) => t.id === 'task-budget-lifecycle')
+    expect(receipt).toBeDefined()
+    expect(budget).toBeDefined()
+    expect(receipt?.category).toBe('direct-payment')
+    expect(budget?.category).toBe('task-budget')
+    // The cap is a slice of the throwaway agent's own grant (2000 × 1/2).
+    const resolved = await resolveTask(budget!, { budget: async () => ({ remaining: 0n }) })
+    expect('resolved' in resolved && resolved.resolved.amountAtomic).toBe(1000n)
+    expect('resolved' in resolved && resolved.resolved.instruction).toContain('0.001')
+  })
+
+  it('the task-budget task pins a short ttl_minutes as the backstop for a failed trial', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const budget = tasks.find((t) => t.id === 'task-budget-lifecycle')!
+    const ttl = /ttl_minutes of (\d+)/.exec(budget.instruction)?.[1]
+    expect(ttl).toBeDefined()
+    // Short enough that a budget a failed trial left open releases the
+    // parent's remainder on its own; long enough that the trial's own
+    // open→close lifecycle finishes before it expires.
+    expect(Number(ttl)).toBeGreaterThanOrEqual(5)
+    expect(Number(ttl)).toBeLessThanOrEqual(30)
+  })
+
+  it('the receipt task requires settlement evidence before the receipt fetch', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const receipt = tasks.find((t) => t.id === 'receipt-verify-direct-payment')!
+    expect(receipt.instruction).toContain('haven_get_payment_status')
+    expect(receipt.instruction).toContain('haven_get_receipt')
+    expect(receipt.instruction).toContain('haven_verify_receipt')
+    expect(receipt.instruction).toContain('DIRECT')
+  })
+
+  it('neither new task enters the --limit=5 subset', async () => {
+    const { tasks } = await loadTasks(TASKS_DIR)
+    const subset = selectTaskSequence(tasks, { limit: 5 }).map((t) => t.id)
+    expect(subset).not.toContain('receipt-verify-direct-payment')
+    expect(subset).not.toContain('task-budget-lifecycle')
   })
 })

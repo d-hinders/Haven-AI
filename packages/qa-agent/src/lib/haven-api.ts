@@ -180,11 +180,22 @@ export interface CatalogEntry {
   status?: string
 }
 
-/** `GET /machine-payments/allowances` as the over-budget legs need it (#2016). */
+/** `GET /machine-payments/allowances` as the over-budget legs (#2016) and the balances check (#4666) need it. */
 export interface AgentAllowancesResponse {
+  /**
+   * #4352: the latest ended budget's expiry across EVERY token and pin, set
+   * only when `allowances` is empty — a live budget keeps it null, so it is
+   * never "this budget's end".
+   */
+  budget_ended_at?: string | null
   allowances?: {
+    token_address?: string
     token_symbol?: string
     configured_amount?: string
+    /** #3518: null for an open budget; a pinned budget pays only this address. */
+    recipient_address?: string | null
+    /** #4666: when this budget ends; absent on an older backend. */
+    budget_expires_at?: string | null
     onchain?: {
       /** Atomic units. */
       remaining?: string
@@ -261,6 +272,16 @@ export class HavenApi {
   /** Payment evidence for this agent, newest first. */
   listReceipts(limit = 5): Promise<ApiResponse<{ receipts?: MachinePaymentReceipt[] }>> {
     return this.call('GET', `/machine-payments/receipts?limit=${limit}`)
+  }
+
+  /**
+   * ONE task budget by id (#4677) — the state the lifecycle grader reads
+   * from the backend. `GET /task-budgets/:id` answers any status and is
+   * scoped to this agent (`findForAgent`), so a 404 is the backend's own
+   * message rather than another agent's row.
+   */
+  getTaskBudget(id: string): Promise<ApiResponse<{ task_budget?: { id?: string; status?: string } }>> {
+    return this.call('GET', `/task-budgets/${id}`)
   }
 
   /**

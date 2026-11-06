@@ -623,6 +623,33 @@ describe('settle carries ONLY payment_id + signature + payment_header — #1307 
     expect(r.pass).toBe(false)
     expect(r.detail).toMatch(/did not settle/)
   })
+
+  // #4688: `settled: false` is no longer only a funding failure — the EIP-3009
+  // arm reports an unverified merchant settlement this way. A
+  // SETTLEMENT_PENDING on a just-mined settlement is NOT a funding or #1307
+  // rehydration failure: the merchant leg ran, and the hash the settle held is
+  // prefilled in next_arguments for the report-tool handoff.
+  it('follows the report-tool handoff on SETTLEMENT_PENDING instead of failing the funding leg', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_prepare_catalog_purchase') return prep()
+      if (tool === 'haven_settle_mcp_tool') {
+        return settled({
+          settled: false,
+          delivered: true,
+          code: 'SETTLEMENT_PENDING',
+          retryable: true,
+          settlement_tx_hash: null,
+          next_tool: 'mcp__haven__haven_report_settlement_evidence',
+          next_tool_name: 'haven_report_settlement_evidence',
+          next_arguments: { payment_id: 'pay_catalog_1', settlement_tx_hash: MERCHANT_TX },
+        })
+      }
+      return { payment_id: 'pay_catalog_1', settled: true, settlement_tx_hash: MERCHANT_TX }
+    })
+    const r = await x402CatalogGuidedPurchase.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/via a follow-up haven_report_settlement_evidence/)
+  })
 })
 
 describe('the post-purchase allowance block (#1310)', () => {

@@ -508,6 +508,18 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * parenthetical dropped — "only live rows are listed" already says it — the
  * full-cap aside shortened, "next step" tightened): 31,808 UTF-8 bytes, back
  * under the cap. No tool was added — 29 holds. Shrink-only from here.
+ *
+ * **Re-derived — round 32, #4688 (2026-11-05).** `haven_settle_mcp_tool` and
+ * `haven_complete_mcp_tool` now describe the EIP-3009 unverified answer
+ * (`settled:false`, `SETTLEMENT_PENDING`/`DELIVERED_UNSETTLED`, the
+ * SETTLEMENT_UNCONFIRMED warning, a null settlement hash, no
+ * `purchase_summary`, and the verify-then-sweep window). The new sentences
+ * cost +~330 bytes each; the same two descriptions were trimmed by more than
+ * that (the allowance sentence compressed to the canonical names, the
+ * `delivery_reference` aside and the exceptional-state parentheticals
+ * tightened, the shared nextActionGuidance shortened): 31,781 UTF-8 bytes —
+ * 31 bytes UNDER the round-29 pin, so the cap does not move. No tool was
+ * added — 29 holds. Shrink-only from here.
  */
 const MAX_TOTAL_BYTES = 31_812
 // Mean pin: round 29 (#4355 block above): 31,812 / 29 = 1096.9655…, pinned

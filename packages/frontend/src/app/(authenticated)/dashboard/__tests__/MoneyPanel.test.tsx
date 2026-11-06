@@ -360,6 +360,21 @@ describe('MoneyPanel — the balance figures say what they measure (#3977)', () 
   })
 })
 
+/** The lucide glyph a button leads with (#4639) — `lucide-<name>` on its first svg. */
+const leadingGlyph = (button: HTMLElement) => {
+  const svg = button.firstElementChild
+  if (!svg || svg.tagName.toLowerCase() !== 'svg') return null
+  return Array.from(svg.classList).find((c) => c.startsWith('lucide-') && c !== 'lucide-icon') ?? null
+}
+
+describe('MoneyPanel — Send and Receive lead with the direction marks (#4639)', () => {
+  it('Send leads with ArrowUp and Receive with ArrowDown, the DirectionMark glyphs', () => {
+    render(<MoneyPanel {...baseProps} usdcFunded overview={null} />)
+    expect(leadingGlyph(screen.getByRole('button', { name: 'Send' }))).toBe('lucide-arrow-up')
+    expect(leadingGlyph(screen.getByRole('button', { name: 'Receive' }))).toBe('lucide-arrow-down')
+  })
+})
+
 describe('MoneyPanel — the ONE primary-button rule (#4167)', () => {
   const receive = () => screen.getByRole('button', { name: 'Receive' })
   const send = () => screen.getByRole('button', { name: 'Send' })

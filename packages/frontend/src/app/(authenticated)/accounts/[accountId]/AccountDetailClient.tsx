@@ -38,9 +38,11 @@
  *   With one signer the tab carries the warning dot and the card its
  *   warning; Account details (address, network, created date) sit below.
  *   #4474 (mockup v9): both sections are headed ABOVE their card by the
- *   shared `SectionHeading` — "Who can approve" carries the "All signers in
- *   Settings" link on its heading line, and "Account details" is a divided
- *   label/value list (`DetailList`) rather than a two-column grid.
+ *   shared `SectionHeading` — "Who can approve" carries the "Passkeys and
+ *   wallets" link on its heading line (the link text is the owner's
+ *   2026-10-30 decision, #4563, superseding the mockup's "All signers in
+ *   Settings"), and "Account details" is a divided label/value list
+ *   (`DetailList`) rather than a two-column grid.
  *
  * ## Removed with this slice (#4097)
  *
@@ -60,10 +62,9 @@
  * so the mapping and the URL write live here.
  */
 
-import { EllipsisVertical, X } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useRef, useState, type FormEvent } from 'react'
-import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useBalances } from '@/hooks/useBalances'
@@ -92,17 +93,19 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SectionHeading } from '@/components/ui/SectionHeading'
 import { DetailList, type DetailListItem } from '@/components/ui/DetailList'
 import { Tabs } from '@/components/ui/Tabs'
+import { useTabUrlState } from '@/components/ui/useTabUrlState'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { RouteLoading } from '@/components/ui/RouteLoading'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import {
@@ -121,22 +124,29 @@ import { isTestnetChain } from '@/lib/marketplace'
 import { holdingDisplayAmount, holdingRows, holdingRateLine } from '@/lib/account-holdings'
 import { agentSpendSummaryLine } from '@/lib/agent-spend-summary'
 import { computeAttentionItems } from '@/lib/dashboard-attention'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { Modal } from '@/components/ui/Modal'
 
 /** The page's tabs; `activity` is the default and the unknown-value fallback. */
 type AccountTab = 'activity' | 'agents' | 'security'
 
-function accountTabFromUrl(raw: string | null): AccountTab {
-  return raw === 'agents' || raw === 'security' ? raw : 'activity'
-}
+const ACCOUNT_TABS: readonly AccountTab[] = ['activity', 'agents', 'security']
 
 export default function AccountDetailClient() {
   const params = useParams()
   const router = useRouter()
-  const searchParams = useSearchParams()
   const accountId = params.accountId as string
-  const activeTab = accountTabFromUrl(searchParams.get('tab'))
+  // #4573: the one `?tab=` hook. `activity` is the default and carries no
+  // parameter, and a tab switch clears the other parameters (#4226).
+  const { tab: activeTab, setTab } = useTabUrlState({
+    tabs: ACCOUNT_TABS,
+    defaultTab: 'activity',
+    basePath: `/accounts/${encodeURIComponent(accountId)}`,
+  })
+  // The hook writes the URL; whether the tab is already on screen is the
+  // page's question, so the redundant write is skipped here.
+  const handleTabChange = (tab: AccountTab) => {
+    if (tab !== activeTab) setTab(tab)
+  }
 
   const { user, loading: authLoading, passkeys = [] } = useAuth()
   const { renameAccount, removeAccount, setDefault, loading: accountsLoading } = useAccounts()
@@ -278,18 +288,6 @@ export default function AccountDetailClient() {
     void moneyFlow.refresh()
   }
 
-  const handleTabChange = (tab: AccountTab) => {
-    if (tab === activeTab) return
-    // `activity` is the default and carries no parameter — the URL stays
-    // shareable and the default tab is the canonical address.
-    router.replace(
-      tab === 'activity'
-        ? `/accounts/${encodeURIComponent(accountId)}`
-        : `/accounts/${encodeURIComponent(accountId)}?tab=${tab}`,
-      { scroll: false },
-    )
-  }
-
   const handleRename = async (name: string) => {
     if (!account) return
     await renameAccount(account.id, name)
@@ -360,10 +358,7 @@ export default function AccountDetailClient() {
       <div className="max-w-5xl">
         {/* The way back exists in every state of the page (#4028). */}
         <BackLink href="/accounts" label="Accounts" />
-        <div role="status" aria-busy="true" aria-label="Loading account" className="py-16 flex items-center justify-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-[var(--v2-brand)] animate-pulse" />
-          <span className="text-xs text-[var(--v2-ink-3)]">Loading account...</span>
-        </div>
+        <RouteLoading label="Loading account…" className="py-16 justify-center" />
       </div>
     )
   }
@@ -425,12 +420,14 @@ export default function AccountDetailClient() {
                   onClick={() => setSendOpen(true)}
                   variant={accountHoldsMoney ? 'primary' : 'ghost'}
                   disabled={!accountHoldsMoney}
+                  leadingIcon={ArrowUp}
                 >
                   Send
                 </Button>
                 <Button
                   variant={accountHoldsMoney ? 'ghost' : 'primary'}
                   onClick={() => setReceiveOpen(true)}
+                  leadingIcon={ArrowDown}
                 >
                   Receive
                 </Button>
@@ -443,12 +440,10 @@ export default function AccountDetailClient() {
               appears when this isn't already the default account.
             */}
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="Account options"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+                edge="end"
+              />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => setRenameOpen(true)}>
                   Rename
@@ -465,7 +460,7 @@ export default function AccountDetailClient() {
                 ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem tone="danger" onSelect={() => setRemoveOpen(true)}>
-                  Remove account
+                  Remove account…
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -480,7 +475,7 @@ export default function AccountDetailClient() {
           <section aria-label="Balance" className="p-5 sm:p-6">
             <p className="text-sm font-medium text-[var(--v2-ink-2)]">Balance</p>
             {portfolioLoading ? (
-              <div className="mt-3 h-9 w-44 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+              <Skeleton className="mt-3 h-9 w-44" />
             ) : balanceUnavailable ? (
               <p className="mt-2 text-3xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">
                 Unavailable
@@ -515,11 +510,11 @@ export default function AccountDetailClient() {
             </div>
             {portfolioLoading ? (
               <div className="mt-3 space-y-2" role="status" aria-busy="true" aria-label="Loading holdings">
-                <div className="h-4 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton variant="text" className="h-4 w-32" />
+                <Skeleton variant="text" className="h-4 w-24" />
               </div>
             ) : holdings.length === 0 ? (
-              <p className="mt-2 text-sm text-[var(--v2-ink-3)]">No tokens yet</p>
+              <EmptyState size="inline" bare align="start" title="No tokens yet" className="mt-2" />
             ) : (
               <ul className="mt-2 space-y-2">
                 {holdings.map((row) => {
@@ -600,8 +595,8 @@ export default function AccountDetailClient() {
                 aria-busy="true"
                 aria-label="Loading the last 30 days"
               >
-                <div className="h-5 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                <div className="h-5 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton variant="text" className="h-5 w-24" />
+                <Skeleton variant="text" className="h-5 w-24" />
               </div>
             ) : moneyFlow.error ? (
               <div className="mt-2">
@@ -686,10 +681,10 @@ export default function AccountDetailClient() {
               <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-label="Loading agents">
                 {[0, 1, 2].map((item) => (
                   <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="h-8 w-8 rounded-full bg-[var(--v2-surface-2)] animate-pulse" />
+                    <Skeleton variant="circle" className="h-8 w-8" />
                     <div className="min-w-0 flex-1">
-                      <div className="h-3.5 w-36 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                      <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                      <Skeleton variant="text" className="h-3.5 w-36" />
+                      <Skeleton variant="text" className="mt-1.5 h-2.5 w-48" />
                     </div>
                   </div>
                 ))}
@@ -699,6 +694,7 @@ export default function AccountDetailClient() {
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
               <div className="p-6">
                 <EmptyState
+                  bare
                   size="compact"
                   title="Agents could not load"
                   body="Haven could not verify which agents are connected right now."
@@ -711,6 +707,7 @@ export default function AccountDetailClient() {
             <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
               <div className="p-6">
                 <EmptyState
+                  bare
                   size="compact"
                   title="No agents connected"
                   body="Connect an agent when you want it to request payments from this Haven wallet."
@@ -777,7 +774,7 @@ export default function AccountDetailClient() {
                   href="/settings?tab=security#signers"
                   className="rounded-sm text-sm font-medium text-[var(--v2-brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
                 >
-                  All signers in Settings
+                  Passkeys and wallets
                 </Link>
               }
             />
@@ -894,11 +891,9 @@ function RenameModal({
   onRename: (name: string) => Promise<void>
   loading: boolean
 }) {
-  const panelRef = useRef<HTMLDivElement>(null)
   const [name, setName] = useState(account.name)
   const [error, setError] = useState('')
-  useFocusTrap(panelRef, true)
-  useEscapeToClose(true, onClose, { enabled: !loading })
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -916,71 +911,54 @@ function RenameModal({
     }
   }
 
+  // #4566: the shell is `ui/Modal`. A rename in flight disables every way out
+  // together — the ✕, the backdrop and Escape — or the ✕ becomes the one
+  // unguarded exit. The form stays in the body and its submit button sits in
+  // the footer, associated by `form` so Enter in the field still submits
+  // (`docs/product/design-system.md` § Modal).
   return (
-    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
-    // never had one, so every side is exactly its safe-area inset — 0 in any
-    // browser without a notch, and the clearance the home indicator needs in
-    // the installed shell.
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
-      <div className="absolute inset-0 v2-modal-backdrop" onClick={loading ? undefined : onClose} />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rename-account-title"
-        className="relative mx-4 w-full max-w-sm rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal"
-      >
-        <div className="flex items-center justify-between border-b border-[var(--v2-border)] px-5 py-4">
-          <div>
-            <h2 id="rename-account-title" className="text-base font-semibold text-[var(--v2-ink)]">Rename account</h2>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Give this Haven account a name only you see.</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            aria-label="Close"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Icon icon={X} className="h-5 w-5" />
-          </button>
+    <Modal
+      open
+      onClose={onClose}
+      title="Rename account"
+      subtitle="Give this Haven account a name only you see."
+      width="sm"
+      closeButtonDisabled={loading}
+      closeOnBackdrop={!loading}
+      closeOnEscape={!loading}
+      initialFocusRef={inputRef}
+      footer={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button type="submit" form="rename-account-form" disabled={loading}>
+            {loading ? 'Saving…' : 'Save changes'}
+          </Button>
+        </>
+      }
+    >
+      <form id="rename-account-form" onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="rename-account-name" className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
+          <input
+            id="rename-account-name"
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setError('')
+            }}
+            className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2.5 text-sm text-[var(--v2-ink)] transition-colors focus-visible:border-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+          />
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
-          <div>
-            <label htmlFor="rename-account-name" className="mb-1.5 block text-xs text-[var(--v2-ink-2)]">Account name</label>
-            <input
-              id="rename-account-name"
-              type="text"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setError('')
-              }}
-              autoFocus
-              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface-2)] px-3 py-2.5 text-sm text-[var(--v2-ink)] transition-colors focus-visible:border-[var(--v2-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-            />
+        {error && (
+          <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
+            {error}
           </div>
-          {error && (
-            <div className="rounded-lg border border-danger/20 bg-[var(--v2-danger-soft)] px-3 py-2 text-sm text-[var(--v2-danger)]">
-              {error}
-            </div>
-          )}
-          <div className="flex gap-3 pt-1">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onClose}
-              disabled={loading}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading} className="flex-1">
-              {loading ? 'Saving...' : 'Save changes'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+        )}
+      </form>
+    </Modal>
   )
 }

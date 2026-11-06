@@ -10,6 +10,7 @@ import {
   unknownRecipientShortAddress,
 } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
+import { formatDateTime } from '@/lib/format'
 import { Card } from '@/components/ui/Card'
 import { Row } from '@/components/ui/Row'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -188,7 +189,7 @@ function LabelCell({ merchant }: { merchant: AnalyticsMerchantRow }) {
  *  dialect; the full instant rides the title. */
 function LastPaidCell({ iso }: { iso: string }) {
   return (
-    <span className="v2-tabular text-sm text-[var(--v2-ink-2)]" title={new Date(iso).toLocaleString()}>
+    <span className="v2-tabular text-sm text-[var(--v2-ink-2)]" title={formatDateTime(iso)}>
       {lastPaymentCaption(iso)}
     </span>
   )
@@ -371,12 +372,12 @@ function MobileMerchantRow({
           <DisclosureLine
             term="First seen"
             value={formatAnalyticsDay(merchant.first_seen.slice(0, 10))}
-            title={new Date(merchant.first_seen).toLocaleString()}
+            title={formatDateTime(merchant.first_seen)}
           />
           <DisclosureLine
             term="Last paid"
             value={lastPaymentCaption(merchant.last_seen)}
-            title={new Date(merchant.last_seen).toLocaleString()}
+            title={formatDateTime(merchant.last_seen)}
           />
         </dl>
       )}

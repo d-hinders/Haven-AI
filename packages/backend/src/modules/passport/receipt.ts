@@ -50,6 +50,8 @@
  */
 
 import { Wallet, verifyMessage } from 'ethers'
+import { parseEnvPrivateKey } from '../../infra/chain/env-private-key.js'
+import { sameKey } from '../../infra/key-identity.js'
 import type { AnchorState, Standing } from './revocation.js'
 import { AssuranceLevel } from './schema.js'
 
@@ -260,15 +262,12 @@ export function setReceiptSigningKey(
 /**
  * Do two env values denote the SAME private key?
  *
- * Compared on the key's VALUE, not its text. The threat is an operator pasting
- * one key into two variables, and a paste routinely differs in casing or the
- * `0x` prefix while being cryptographically identical — a text comparison would
- * wave exactly the mistake it exists to catch straight through.
+ * The implementation lives in `infra/key-identity.ts` (#4655): the binding-key
+ * boot refusal is in `infra/` and cannot import a module's private file, so the
+ * comparison moved to a neutral home and is re-exported here to keep this
+ * module's public surface unchanged.
  */
-function sameKey(a: string, b: string): boolean {
-  const normalize = (k: string) => k.trim().toLowerCase().replace(/^0x/, '')
-  return normalize(a) === normalize(b)
-}
+export { sameKey }
 
 export function isReceiptSigningConfigured(): boolean {
   return signerKey !== null
@@ -281,7 +280,10 @@ export function isReceiptSigningConfigured(): boolean {
 export function receiptIssuerAddress(): string | null {
   if (!signerKey) return null
   try {
-    return new Wallet(signerKey).address
+    // #4654: the same helper as the signing path, so both accept exactly the
+    // same input. The fail-closed contract is unchanged: a bad key returns null
+    // here, never a throw.
+    return new Wallet(parseEnvPrivateKey('PASSPORT_RECEIPT_SIGNING_KEY', signerKey)).address
   } catch {
     return null
   }
@@ -299,7 +301,11 @@ export async function signReceipt(receipt: PassportReceipt): Promise<SignedPassp
   if (!signerKey) {
     throw new Error('passport receipt signing is not configured (PASSPORT_RECEIPT_SIGNING_KEY)')
   }
-  const signature = await new Wallet(signerKey).signMessage(canonicalize(receipt))
+  // #4654: validate the string first — ethers echoes an unparseable value into
+  // the error it throws, and that error reaches the logs.
+  const signature = await new Wallet(
+    parseEnvPrivateKey('PASSPORT_RECEIPT_SIGNING_KEY', signerKey),
+  ).signMessage(canonicalize(receipt))
   return { receipt, signature }
 }
 

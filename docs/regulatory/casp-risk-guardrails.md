@@ -91,60 +91,8 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
-
-> **Re-verified unchanged (#4265, 2026-10-22, published CLI boundary):** the
-> covered CLI commands and regression fixture send no own-transfer-folding flag
-> and keep both transaction legs plus the existing local CSV behavior. No
-> covered payment, signing, key, custody, advice, settlement or
-> merchant-acquiring surface changes. Scope: §7's factual-history preference
-> and the non-custody boundary for the published CLI only;
-> the document-wide `last-verified` date is not re-stamped.
->
-> **Re-verified #4350 (2026-10-23, the budget end date):** the diff touches
-> covered SDK/CLI files only in their agent-facing PROSE — the runbook's
-> "What Haven is" paragraph (`packages/sdk/src/agent-guidance.ts`, its CLI
-> copy and the served skill files) now says the budget ends on a date the
-> user chose (30, 90, 180 or 365 days) and that renewal is a new approval.
-> That CLOSES the § *Make All Agent Authority User-Approved* ":725" gap for
-> expiry disclosure on the dashboard surfaces, and it is authority-NARROWING
-> only: the owner-facing presets keep an expiry mandatory (no "never"
-> option), the on-chain `Timestamp` caveat is unchanged, and #4351 adds the
-> server-side 365-day cap. No covered payment, signing, key, custody,
-> advice, settlement or merchant-acquiring surface changes; Haven still
-> signs nothing. Scope: the guidance text only; the document-wide
-> `last-verified` date is not re-stamped.
-
-> **Re-verified unchanged (#4408, 2026-10-25, migration comment truthing):**
-> the diff touches one covered file — `db/migrations/066_catalog_submissions.ts`
-> — in its doc comment only: the status-progression block now says `delisted`
-> is set by operator SQL and that no lifecycle path sets it (verified by
-> sweep on `dev`), replacing the stale "operator action, or lifecycle expiry"
-> wording. No covered payment, signing, key, custody, advice, settlement or
-> merchant-acquiring surface changes; the migration's DDL is untouched.
-> Scope: the migration comment only; the document-wide `last-verified` date
-> is not re-stamped.
-
-> **Re-verified unchanged (#4534, 2026-10-29, the purchase correlation key):**
-> the diff touches four covered areas — `modules/mpp/**` (a new
-> `purchase-group.ts` derivation module plus two OPTIONAL inputs on the
-> evidence report), `infra/repositories/machine-payments.ts` (three new
-> evidence-row SQL helpers), `modules/accounting/**` (the entry, feed payload
-> and receipt underlag carry two more fields) and `db/migrations/**`
-> (migration 123 adds two NULLABLE columns to `machine_payment_evidence`).
-> None of them is a payment, signing, key, custody, advice, settlement or
-> merchant-acquiring surface. The two fields are DESCRIPTIVE metadata on a
-> document the accounting feed already produces: `purchase_group_id` is the
-> merchant's own invoice/order id (or an agent-supplied group key) and
-> `parent_payment_id` is the purchase payment a fee call paid for. They
-> authorize nothing, gate nothing, change no amount, and are written
-> first-write-wins on the evidence row only — `payment_intents`, settlement
-> and custody are untouched. An ungrouped payment is fed exactly as before
-> with both fields null, so nothing is withheld because its group could not
-> be resolved, and no historical row is backfilled. Haven still signs nothing
-> and holds no key material. Scope: those four areas; the document-wide
-> `last-verified` date is not re-stamped.
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
 
@@ -261,82 +209,6 @@ Haven backend
 > #1328 log entry below as current on this point — it says the module was
 > "kept, unreferenced", which was true when written and stopped being true two
 > slices later.
->
-> The one caveat this section carried — recorded by the #2244 re-verification
-> and now **closed** ([#2245](https://github.com/d-hinders/Haven-AI/issues/2245)):
-> on `POST /x402/authorize` a caller-supplied `settlementScheme: 'erc7710'` or
-> `facilitatorAddresses` used to be validated *above* the rail resolution, so a
-> retired-rail account setting that field got a 400 — whose body asserted that
-> the retired rail "settles via EIP-3009 only" — instead of the 410 tombstone.
-> The spend decision was never affected (both answers were refusals, both
-> fail-closed with nothing read on-chain and nothing written), which is why the
-> sentence above was true throughout; what was affected was what the account
-> was TOLD. #2245 deleted those two rail-dependent guards
-> (`validateGenericSchemeRail`) rather than rewording them: both tested
-> `agent.execution_rail !== 'delegation'`, the same field `resolveExecutionRail`
-> reads, so the seam already refused every input they refused. The seam is once
-> again the only thing that decides whether a retired-rail account may spend AND
-> the only thing that makes a rail-specific claim to it, on this route as on the
-> others. Note the second half is narrower than "the only thing that answers it",
-> deliberately: refusals that are not rail claims still precede the seam, and a
-> sentence that swallowed them would be false. What still precedes the 410 there
-> is rail-INDEPENDENT and makes no claim about any rail. **Since #3031 most of
-> it is the request SCHEMA, not the route**: required fields, address and
-> network shape and the `settlementScheme` enum are refused by the
-> request-validation plugin at `preValidation`, and the route keeps only the
-> rules JSON Schema cannot state (a non-zero amount, the network/chain
-> agreement, the 64 KB `paymentRequired` bound). The position is unchanged —
-> ahead of the seam, the same place `POST /payments` puts its own gate, the
-> same class as the 401 auth hook — and so is the property: the refusal names
-> a FIELD, never a rail. One consequence is recorded rather than glossed: a
-> request that is BOTH malformed and on a retired rail now meets the 400
-> before the 410. Pinned by
-> `routes/__tests__/allowance-rail-retired.test.ts` → "a caller-supplied
-> settlementScheme cannot divert the tombstone (#2245)", whose assertions
-> moved to the plugin's envelope in that slice.
->
-> **Token resolution no longer belongs in that list**
-> ([#2274](https://github.com/d-hinders/Haven-AI/issues/2274)). This sentence
-> named it as still preceding the 410, and it did, on both routes: a retired-rail
-> account naming an unsupported asset received a 400 carrying `supported: [...]`
-> — the assets it can pay with — before being told the rail is gone and it can
-> pay with none of them. Rail-INDEPENDENT, so the sentence above was true as
-> written and the spend decision was again never affected (both answers refusals,
-> nothing read on-chain, nothing written); what was affected was again what the
-> account was TOLD. #2274 moved the rail gate ABOVE token and amount resolution
-> on `POST /x402/authorize` and `POST /payments` **together** — one route alone
-> would recreate the asymmetry #2245 removed. Pinned by the same file →
-> "the 410 precedes TOKEN RESOLUTION too (#2274)", with positive controls proving
-> a delegation-rail account still receives its 400 *with* the supported list, and
-> a structural-precedence assertion proving the tombstone did not become the
-> route's error handler. Full analysis:
-> `docs/regulatory/casp-changelog/2026-08-31-2274.md`.
->
-> Since #1986 (epic #1440) that covers BOTH retired rails — the session rail
-> (#834) and the legacy Safe AllowanceModule rail — so the delegation rail is
-> the only rail that can spend. The #1121 queued-approval carve-out is
-> history: #1986 closed the approval queue's approvable path (the only rail
-> that ever fed the queue was being retired, so leaving it approvable would
-> have left Haven manufacturing executable payment transactions for a rail it
-> had declared gone), and #2055 dropped the `approval_requests` table itself
-> under the recorded #2021 owner decision.
-> Since #1130 a valid key on a `pending_approval` agent gets a NAMED
-> `403 agent_pending_approval` with the required action on normal agent API
-> requests, instead of the false `401 Invalid or revoked API key` — the
-> authentication gate stays a positive allow-list (revoked and unknown statuses
-> still 401). The exact sweep-recovery routes are a narrow exception for
-> recovering stranded delegate balances; they grant no spending authority.
-> Since #988 the agents/smart-accounts data access lives in
-> `infra/repositories/` with tenant scoping as REQUIRED function parameters —
-> the `WHERE user_id = $1` authorization that used to hide in inline route
-> SQL is now a signature the type checker enforces; the SQL itself moved
-> verbatim and is PREPARE-checked against the real schema in CI.
-> #1167 extended the same treatment to the user, dashboard and agent-activity
-> surfaces. Two of those had NO tenant column to make required: the
-> agent-activity reads filter by `agent_id`, so the authorization is the
-> caller's prior ownership check rather than a parameter — stated as an
-> explicit contract in the repository's header and on each function, and
-> unchanged from what the inline SQL did.
 
 > **Current state (2026-08-30, #2092/#2094/#2096/#2117/#2213):** Haven now runs
 > a **passive settlement observer** on the erc7710 path
@@ -860,7 +732,7 @@ Haven relay must not:
 Server key roles must remain narrow and distinct:
 
 - `RELAYER_PRIVATE_KEY` and per-chain `RELAYER_PRIVATE_KEY_<chainId>` keys fund gas and submit operations that are signed, or bounded, elsewhere: counterfactual DeleGator deployments (#860 — deploying an account grants no authority over it) and delegate-signed sweep transfers. Owner-signed Safe executions rode `/safe/exec` — legacy account management and #1229 recovery — until #2847 deleted that route with the last live Safe-rail behaviour, so the relayer no longer submits anything on the legacy rail. A relayer key never supplies a spend signature and cannot authorise a payment by itself. (It also carries the disclosed #1985 dust-Safe ownership artifact recorded under Hard Architecture Invariants.)
-- `X402_BINDING_PRIVATE_KEY` signs the exact expected x402 authorization context, including the corresponding sweep context. It authenticates Haven-provided context; it does not sign the payment or spend funds.
+- `X402_BINDING_PRIVATE_KEY` signs the exact expected x402 authorization context, including the corresponding sweep context. It authenticates Haven-provided context; it does not sign the payment or spend funds. Its address is published as `HAVEN_X402_BINDING_SIGNER` for installed signers to pin, and it is refused at boot if it matches a relayer key or the receipt key.
 - The relayer additionally signs **L0 agent passport attestations** as *issuer* (epic #970). That is governance metadata, not spend authority: the transaction targets the pinned EAS contract, carries `value: 0`, encodes no transfer, and involves no user key, delegation, or allowance. It is triggered by the owner opting in — never by a payment — so it sits outside the payment paths entirely. Since #2138 (owner decision 2026-08-27) issuance is also **delegation-rail only**: `modules/passport/issuance.ts` refuses a bound account on a retired rail, on the reasoning that a rail which cannot transact has no spending for an on-chain control to govern. Passports already issued on a legacy account are left alone and report `policyEnforcedOnchain: false` — a narrowing of where governance metadata may be created, with no effect on authority in either direction. The owner opts in from two entry points that run the identical eligibility check and fire-and-forget issuance path: `POST /agents`' `issue_passport` flag, and (#1072) an `issue_passport` flag recorded on the Connect Agent 2 setup at creation and acted on once `POST /agent-connection-setups/register` has created the agent row. Neither path can make issuance block, delay, or roll back agent creation/registration.
 - `PASSPORT_RECEIPT_SIGNING_KEY` signs merchant-facing verification receipts. Its address is published for pinning, it asserts only an agent's governance standing, and it is refused at boot if it matches the relayer key.
 - No key above may be reused as an agent, user, or unrestricted payment signer.
@@ -1148,11 +1020,12 @@ not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120).**
-Measured at `ffca80f36`, the pin asserts **50 of the 67
-globs**: the 52 runtime `globs` minus the two `EXEMPT` entries above, and none
-of the 15 `controlGlobs` (measured at `82540f71b` with #4122 applied, before
-#4120 added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120, #4381).**
+Measured at `fc8ac1eb6`, the pin asserts **52 of the 71
+globs**: the 54 runtime `globs` minus the two `EXEMPT` entries above, and none
+of the 17 `controlGlobs` (measured at `ffca80f36` it was 50 of 67 — 52 runtime
+globs and 15 control globs; at `82540f71b` with #4122 applied, before #4120
+added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
 `userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
 (the #2099 period pre-check, moved out of `modules/x402/` by #3616/#3617),
@@ -1160,10 +1033,14 @@ of the 15 `controlGlobs` (measured at `82540f71b` with #4122 applied, before
 `modules/sub-budgets/**`, `routes/task-budgets.ts`, `routes/sub-budgets.ts`,
 `routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
 `sub-budget-guards.ts`), #4122 `packages/sdk/src/merchant-completion.ts`
-(the SDK's post-funding merchant-answer decision), and #4120 (PR #4153)
-`packages/sdk/src/merchant-answer.ts`; all were already covered
+(the SDK's post-funding merchant-answer decision), #4120 (PR #4153)
+`packages/sdk/src/merchant-answer.ts`, and #4381
+`packages/backend/src/domain/x402-settlement-timing.ts` and
+`domain/x402-sweep-window.ts` (the settlement-window constants moved out of
+`modules/x402/`); all were already covered
 here — budget-scope since #3648, the budget families since #3659, the SDK
-files by `packages/sdk/src/**` — so the pin was satisfied on arrival each
+files by `packages/sdk/src/**`, and the two domain files joined `covers:` in
+#4381's own PR — so the pin was satisfied on arrival each
 time. #3661 also added three `modules/payments/` files, `direct-sign-context.ts`,
 `submission-reconciler.ts` and `agent-payment-status.ts`, which were NOT
 covered: they joined `covers:` in the same PR, so edits to them now owe a
@@ -1402,8 +1279,8 @@ all: a device-code flow the human approves in the browser, minting a token that
 carries `purpose: owner_cli` and reaches only the routes on the allow-list in
 `packages/backend/src/middleware/owner-cli.ts` — agents (including building an
 unsigned budget delegation and preparing a revoke, both handed to the owner to
-sign), connect setups, contacts, feedback and read-only account context, never
-signer changes, re-keying, the user's own credentials, provisioning, transfers, or delegation
+sign), connect setups, feedback and read-only account context, contacts included, never
+signer changes, re-keying, the user's own credentials, provisioning, transfers, writing saved contacts, or delegation
 activation. Both are Bearer tokens sent
 to whatever `baseUrlFor` resolves, so the credential-change reasoning above
 applies unchanged to both; what the narrower one bounds is the blast radius if
@@ -1442,7 +1319,7 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-10-25, weekly docs audit #3645)
+## Scope of the current `last-verified` (2026-11-02, weekly docs audit #4605)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
 unable to say **how much** of the document a re-verification covered. That
@@ -1452,46 +1329,9 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**Re-verified against `615686369`** (from the staleness audit #3645; the
-replaced 2026-10-23 pass read `ffca80f36` end to end, #4303). This was a
-targeted pass over the week's drift, not a second full re-read: 27 covered
-commits since 10-23, all narrowing or doc-fix in kind.
-
-- **Every named file, symbol and test was re-checked to exist at this head:**
-  `requireDelegationBound` (`modules/x402/settlement-sweeper.ts`),
-  `assertNonAsserting` (`modules/accounting/fortnox-connector.ts`),
-  `resolveExecutionRail`, `SUPPORTED_X402_EXPECTED_VERSIONS`
-  (`signer/src/capabilities.ts`), `legacyBookkeepingEnabled` and
-  `HAVEN_HOSTED_MCP_URL` (`config.ts`), `modules/passport/issuance.ts`,
-  `routes/__tests__/allowance-rail-retired.test.ts`, both
-  `non-custody-onchain-*.contract.test.ts` suites, and the census pin.
-- **Measured claims were re-measured:** `node --test
-  scripts/ci/money-path.test.mjs` — 23/23 pass, the pin holds at the current
-  globs (the "50 of 67" figure stands as measured at #4303).
-- **The fail-closed sweep attribution is intact after #4075** (proof-header
-  settlement reports, AuthorizationUsed↔Transfer pairing): the observation
-  path still passes `requireDelegationBound: true`
-  (`settlement-sweeper.ts:764`), and the never-from-transfer-shape property
-  is unchanged.
-- **The week's behaviour changes are narrowings, each shard-covered:**
-  #4376's `delegation_expired` refusal (an expired-only budget now answers
-  403 with the end date — authority-narrowing, in `modules/budget-scope/`),
-  #4407's catalog probe cooldown (availability), #4372 part I (README prose),
-  #4405 (skill-text paths). CASP shards exist for the week
-  (`2026-10-24-4389.md`, `2026-10-24-4390.md`, `2026-10-25-4372.md`,
-  `2026-10-25-4407.md`, `2026-10-25-4415.md`, and the
-  `2026-10-23-0.11.0-alpha.0-release.md` release shard that carries #4075
-  and #4376).
-- **Deliberately NOT covered by this date, as before:** the inline *Current
-  state* notes' dated history (present-tense claims were checked; narratives
-  were read, not re-derived), the frozen historical bullet log, the MiCA /
-  ESMA / Finansinspektionen / EBA citations (legal claims, no legal review
-  here), the #1985 dust-Safe live balances, the #832 exit story's live
-  demonstration, and the #3333 counsel position (recorded, not asserted).
-
 ## Verification log
 
-Every re-verification of this document, newest last. A contract doc covering
+Every verification pass on this document, newest last. A contract doc covering
 broad globs is touched by nearly every backend change, so this is the audit
 trail of *what was checked and found unchanged* — not a changelog of the
 document's own edits.
@@ -1580,3 +1420,5 @@ per-PR bump.
 - **#1362** — Fortnox reporting-feed visibility: the dashboard now shows the pushed supplier-invoice number per synced payment, and a new read-only `GET /accounting/reporting/verify/:paymentId` performs the feed's FIRST read-back against Fortnox — does the invoice we pushed still exist (registered), and has a human booked it (voucher assigned)? Perimeter analysis: strictly read-only (test-pinned: a full verification makes no POST and writes nothing), user-scoped through the same entitlement gate as the sync action, and the non-asserting principle (#491) is untouched — Haven still creates only unattested supplier invoices and cannot book, cancel, or modify them; verification REPORTS the accountant's action, never performs it. The cross-check that the invoice carries our `HAVEN-<paymentId>` external number is mutation-proven (a number collision after a Fortnox company switch must read as not-found, never as falsely registered). A new operations runbook (docs/operations/accounting-feed.md) documents the purchase→Fortnox flow, the verification walkthrough, and the failure taxonomy. No payment authority, no custody, no key material — observability over an existing reporting write path. Perimeter unchanged.
 - **#1360** — server-truth hardening of the funding-shape decision, closing the #1358-review gap: the SDK's two EIP-3009-shape writers (`createX402Intent` and the local-key `authorizeX402`) now ALWAYS send `settlementScheme: 'eip3009'`, so a `payTo` made stale by a delegate rotation mid-flow hits the EXISTING `validateDelegationSchemeShape` refusal (400, before any funding intent, selector never consulted — test-pinned) instead of silently reading as a merchant address and routing an open-budget agent to the erc7710 settlement branch. No new validation was added and none was removed — the fix is that the intent's meaning is now declared rather than inferred from an address comparison. The pre-#1360 shape-only selection is characterization-tested for old SDKs (a stale `payTo` without the declaration still reaches the erc7710 selector — documented, not hidden), and legacy-rail backends accept and ignore the declaration (compatibility-pinned). No authority, route, or verification change; a misroute class became a refusal. Perimeter unchanged.
 - **#1328** — the legacy internal `mpp_demo` merchant flow is RETIRED, the #834 session-rail pattern applied to a flow instead of a whole rail: `POST /demo/mpp/*` (`routes/demo-mpp.ts`, its `MPP_DEMO_RECIPIENT_ADDRESS` config, and its route-specific tests) is deleted outright; `POST /machine-payments/authorize` now refuses UNCONDITIONALLY with HTTP 410 before the body is inspected or `authorizeMachinePayment` is called — fail-closed, mutation-proven (severing the refusal made three characterization tests fail); a forward migration (059) DELISTS the seeded "Haven MPP demo resource" catalog row (status vocabulary, not a delete — `GET /catalog` and the periodic refresh probe already exclude `status = 'delisted'`, proven on real Postgres) so discovery stops returning it and the probe stops re-verifying a route that no longer exists. The SDK's demo challenge/quote/resume client surface (`mpp.ts`; `quoteMpp`/`payMppChallenge`/`resumeAuthorizedMpp`/`resumeMppPayment`/the `MACHINE-PAYMENT-CHALLENGE` branch in `haven.fetch()`) and both MCP tool surfaces' `haven_quote_mpp`/`haven_pay_mpp_challenge`/`haven_resume_mpp_payment` tools are removed the same way — MACHINE-PAYMENT-CHALLENGE was never produced by anything besides the now-deleted demo route, confirmed by search before deleting. Narrows the surface; adds no authority, no key material, no new signing path. What is explicitly PRESERVED, unchanged: the generic `/machine-payments/*` reads (identity, allowances, status, receipts, evidence, reconciliation, sweep) and existing `mpp_demo` payment/receipt/evidence/status rows, which stay readable (mutation-proven — severing the evidence-eligibility gate for `mpp_demo` made seven historical-read tests fail); the rail-agnostic `authorizeMachinePayment` orchestration in `modules/mpp/authorize.ts` (kept, unreferenced by any route today, for a possible future non-demo MPP rail — out of this issue's scope per its own file-ownership note); and the `mpp_crypto`/`stripe_deposit`/`spt` type vocabulary everywhere it appears (`MachinePaymentRail`, `AgentPaymentRail`), touched nowhere — the issue explicitly reserves any change there for a separate, reviewed follow-up. Review hardening (#1339 finding 1): historical mpp_demo records are now non-EXECUTABLE as well as non-creatable — the generic sign path (`POST /payments/:id/sign`) refuses an mpp_demo intent 410-with-nothing-written before the claim (mutation-proven: removing the rail guard flips the test to a live execution), and the approval surface refuses approve/proposed for mpp_demo rows via a race-free WHERE-clause exclusion (reject remains allowed as cleanup). The retained `POST /machine-payments/authorize` 410 is a DOCUMENTED deliberate exception (compatibility tombstone — a 410 tells old clients the flow is permanently gone where a 404 invites retries), recorded in the OpenAPI description. Perimeter narrowed, not widened.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

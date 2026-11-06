@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Analytics
@@ -383,42 +383,4 @@ scenarios capture against the real page:
 `npm run screenshot -- --scenario=analytics-populated,analytics-empty,analytics-error`
 produces the desktop and 390px captures, both themes.
 
-Re-verified 2026-09-30 for #3195 (PR #3176's round-3 items), scope = the
-*Currency basis* paragraph above and the front-matter stamp: #3195 moved the
-ONE per-currency locale rule into `lib/format.ts`'s `currencyLocale`, and this
-doc's covered `lib/analytics-format.ts` (`analyticsCurrencyLocale`) now
-delegates to it rather than carrying a byte-identical copy of the ternary —
-no rendered voice changed, which the `lib/__tests__/analytics-format.test.ts`
-byte-level pins prove. In the same scope pass: the *Currency basis* paragraph
-(whose SEK sums wording came from the 2026-09-20 #3127 round-3 edits) was
-re-read against the analytics endpoint and is still accurate — the page
-requests `currency=sek` and renders the endpoint's booked figures, no client
-derivation. The stamp this bump replaces was set by #3205 (2026-09-21), which
-did not touch the SEK passages; they were never explicitly re-verified since
-they landed until this pass. Nothing else in this file was re-read.
-
-Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end, after
-#4331, #4332 (#4373) and #4333 (#4380). Changed: the endpoint's parameters
-include `agentId`; Spent is net of delegate sweeps in the same window (#3755,
-the inline ratio in `TOTALS_SPEND_SQL`/`BY_DAY_SPEND_SQL`/`PER_AGENT_SPEND_SQL`); the Refused tile always shows its attempts; Agents near
-their budget renders "N/M" and "—" without budgets; the Fees tile is a fifth
-tile; an agent's chart fill is its avatar tint and the agents table carries no
-swatch (#4331); the page no longer prints the unsettled-payments sentence
-(#4380 dropped `UnsettledEvidenceFootnote`), while the endpoint still reports
-the count and the empty-window rule still treats it as activity; the API
-reports the refusal ledger's floor (`basis.refusals_recorded_from`, #3013);
-the sponsored-gas count rides the Fees tile; the populated fixture's third
-merchant is an unresolved row (`kind: 'unknown'`); review round 1 found two
-more stale claims and corrected them: there is no "based on N payments" basis
-line (`analytics.visual.spec.ts:197`), and `analytics-empty` captures the
-no-activity state, because `/agents` still answers the harness's agents
-(`analytics.visual.spec.ts:230`); `covers:` gains `packages/ui/src/StatTile.tsx`.
-Re-checked without change:
-`?period=` and `haven.analytics.range` with `replaceState`; the Agent facet
-from `useAgents`, its 404 notice and the agent-scoped Review link; the
-Payments caption; the agents-table columns and the #3540 inclusion rule; the
-merchant naming order (`counterparty-name.ts`), its kind lines and the
-`/transactions?search=…` target; the balance copy and "Net change"; the
-`tz` default and 400; `MIN_CHARTABLE_DAYS = 3`; migration 086's date.
-"Spend over time" beyond the colour sentence is unchanged here: #4334
-(claimed by @PhilipEriksson) rewrites that paragraph.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

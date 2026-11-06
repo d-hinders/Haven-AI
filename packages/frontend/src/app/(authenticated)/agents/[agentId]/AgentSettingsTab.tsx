@@ -32,12 +32,13 @@
  *
  *    The **API key** prefix (the visible, non-secret half of the credential;
  *    the full key is shown once at creation and lives in
- *    `PaymentCredentialsModal`) stays on THIS row's value slot, beside the
- *    server name. #4477's builder decision, and the reason it did not move to
- *    the Payment credentials row: that row is hidden for revoked and archived
- *    agents (`canManageCredentials`), while the prefix must stay visible on
- *    the tab in every state. It shows whenever the agent has a prefix,
- *    including the "No MCP connection recorded" state.
+ *    `PaymentCredentialsModal`) is NOT on this row (#4608, owner decision
+ *    2026-11-02): it shows only under Payment credentials → View. That
+ *    reverses #4477's reason for putting it here — the prefix is no longer
+ *    visible on the tab in every state, and a revoked or archived agent
+ *    therefore shows its prefix nowhere, because Payment credentials is
+ *    hidden for those agents (`canManageCredentials`). The owner accepted
+ *    that residual.
  * 2. **Payment credentials** — View (`PaymentCredentialsModal`) and Replace
  *    signing key (`ReplaceSigningKeyModal`), gated exactly like the ⋮ menu's
  *    `canManageCredentials`: hidden for revoked and archived agents.
@@ -67,6 +68,7 @@ import { ArrowRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { timeAgo } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Row } from '@/components/ui/Row'
 import { SettingsRow, SettingsSection } from '@/components/ui/SettingsSection'
 import { LabelChipRow } from '@/components/haven/LabelChip'
@@ -78,13 +80,6 @@ import {
 } from '@/components/agent-panel/McpServerName'
 import { TaxDeclarationToggle } from '@/components/agent-panel/TaxDeclarationToggle'
 import type { Agent } from '@/hooks/useAgents'
-
-/**
- * The value side of a label/value line — the same mono chip shape
- * `McpServerName` renders, so the two credentials read as one system.
- */
-const VALUE_CHIP_CLASS =
-  'v2-tabular truncate rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 font-mono text-xs text-[var(--v2-ink-2)]'
 
 interface Props {
   agent: Agent
@@ -151,15 +146,6 @@ export default function AgentSettingsTab({
           value={
             <div className="flex flex-col items-start gap-1 sm:items-end">
               {neverConnectedToMcp ? null : <McpServerName value={agent.mcp_server_name} />}
-              {/* The API-key line is the credential, not the connection state —
-                  it shows whenever the agent has a prefix, in every state
-                  above (including "No MCP connection recorded"). */}
-              {agent.api_key_prefix ? (
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--v2-ink-3)]">API key</span>
-                  <span className={VALUE_CHIP_CLASS}>{agent.api_key_prefix}</span>
-                </span>
-              ) : null}
             </div>
           }
         />
@@ -195,7 +181,7 @@ export default function AgentSettingsTab({
             agent.labels.length > 0 ? (
               <LabelChipRow labels={agent.labels} />
             ) : (
-              <span className="text-[var(--v2-ink-3)]">No labels yet.</span>
+              <EmptyState size="inline" bare align="start" title="No labels yet." />
             )
           }
           action={

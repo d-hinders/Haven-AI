@@ -271,24 +271,4 @@ originally granted.
 - [`@haven_ai/connect` README](../../packages/connect/README.md) — every flag, including
   multi-agent wiring
 
-Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
-the preflight reads the old address's USDC balance (`sweepUsdcAddress`); the
-carry table gains the end date (the carry expires at `min(boundary, expires_at)`
-and the steady grant keeps the original `expires_at`, `rekey-carry.ts`); the
-dashboard step says approve, once per replacement budget rule, and that a
-carried budget is up to two rules (`ReplaceSigningKeyModal.tsx`, "one approval
-each"); `--rekey-finish` reinstalls the signer runtime only with `--runtime`
-(`rekey.ts`, `prepareSignerRuntime` inside the `options.runtime` branch); and an
-unrecorded MCP name reads "not recorded" in the agent Settings tab's MCP server
-name row (`McpServerName.tsx`, #4209); and, from review round 1, the
-Compromised choice lists up to five recent payments under "Recent spending to
-review" — there is no exposure-time input (`ReplaceSigningKeyModal.tsx`).
-Re-checked without change: owner-only
-routes and `refuseAgentCaller`; revoke before issue; the remainder and boundary
-carry, the dormant re-issue, the expired grant and the dropped cross-period
-carry (`planCarry`); the old API key rotating in the completion transaction;
-`pending_signature` intents expiring (`INVALIDATE_OLD_PAYER_INTENTS_SQL`); the
-passport re-anchor and its `pending` case (`reanchor.ts`); the connector's
-legacy-rail and revoked refusals and its 24-hour parked keypair; `--doctor`'s
-`identity_match` and parked-re-key report; the #1868 adoption refused after a
-new grant; #1849, #1868, #1878, #1911, #2413 and #3728 closed.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

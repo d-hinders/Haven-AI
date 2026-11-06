@@ -30,6 +30,7 @@
     "ops:cancel-stuck-attest:built": "node dist/ops/cancel-stuck-lane.js",
     "ops:cancel-stuck-lane:built": "node dist/ops/cancel-stuck-lane.js",
     "db:reap-test-schemas": "node scripts/reap-test-schemas.mjs",
+    "qa:purge-throwaways": "tsx scripts/purge-qa-throwaways.ts",
     "generate:route-modules": "tsx scripts/generate-route-modules.ts",
     "check:route-modules": "tsx scripts/generate-route-modules.ts --check"
   },
@@ -56,7 +57,7 @@
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.0",
-    "@x402/core": "2.17.0",
+    "@x402/core": "2.29.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"

@@ -10,6 +10,7 @@ import { resolveDiscoverySource } from '@/lib/discovery'
 import type { ApiSchema } from '@haven_ai/core'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useCopyToClipboard } from '@haven_ai/ui/hooks/useCopyToClipboard'
 import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
@@ -80,9 +81,9 @@ export interface UseAgentConnectionSetupOptions {
    *
    * #4065: the inline first-agent flow on `/agents` passes false. It is
    * mounted with `open` true for as long as it shows, so Escape anywhere on
-   * the page — including the Escape that closes the Labels or Organizations
-   * dialog above it — would reset the form and drop the create-time setup
-   * token. There is nothing for Escape to dismiss there.
+   * the page — including the Escape that closes the Manage labels or Manage
+   * organisations dialog above it — would reset the form and drop the
+   * create-time setup token. There is nothing for Escape to dismiss there.
    */
   escapeToClose?: boolean
 }
@@ -383,6 +384,9 @@ export function useAgentConnectionSetup({
   const creatingRef = useRef(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
+  // #4573: the shared clipboard write, so the setup prompt's copy is the same
+  // primitive `CopyButton` uses — and a failed write cannot advance the step.
+  const copyToClipboard = useCopyToClipboard()
   // #3832: LATCHED, and keyed to the setup it was copied for. `copied` is
   // single-valued — copying the local command or the .env block overwrites
   // 'prompt' — so the connect step's row 1 reads this instead, and a later
@@ -393,6 +397,16 @@ export function useAgentConnectionSetup({
   const [cancelled, setCancelled] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
+  /**
+   * #4570: the close guard. Closing while a one-time manual credential is
+   * unsaved asks first — the credential is shown once and never again. The
+   * question is an INLINE panel inside the flow, not `window.confirm` (the
+   * app's only one) and not a `ConfirmDialog`: `ConnectAgentModal` already
+   * wraps the flow in a `Modal`, and `ConfirmDialog` is itself a `Modal`, so a
+   * dialog here would nest (`docs/product/README.md:222`). The same panel
+   * serves the inline `/agents` path, where the flow has no modal parent.
+   */
+  const [closeGuardOpen, setCloseGuardOpen] = useState(false)
   const [manualCreating, setManualCreating] = useState(false)
   const [manualError, setManualError] = useState<string | null>(null)
 
@@ -522,22 +536,39 @@ export function useAgentConnectionSetup({
     setCancelled(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)
+    setCloseGuardOpen(false)
     setManualCreating(false)
     setManualError(null)
   }, [tokenOptions])
 
   const handleClose = useCallback(() => {
-    if (manualCredentialNeedsSave && typeof window !== 'undefined') {
-      const shouldClose = window.confirm(
-        'This one-time manual credential will be hidden if you close now. Continue?',
-      )
-      if (!shouldClose) return
+    // #4570: ask before dropping an unsaved one-time credential. The panel
+    // renders inside the flow (`ConnectAgentFlow`), so both containers get the
+    // same question and neither nests a dialog.
+    if (manualCredentialNeedsSave) {
+      setCloseGuardOpen(true)
+      return
     }
     resetForm()
     onClose()
   }, [manualCredentialNeedsSave, onClose, resetForm])
 
-  useEscapeToClose(open, handleClose, { enabled: escapeToClose && !creating && !manualCreating })
+  /** The guard's Cancel: keep the credential and stay in the flow. */
+  const cancelClose = useCallback(() => setCloseGuardOpen(false), [])
+
+  /** The guard's Confirm: drop the credential and leave. */
+  const confirmClose = useCallback(() => {
+    setCloseGuardOpen(false)
+    resetForm()
+    onClose()
+  }, [onClose, resetForm])
+
+  // While the guard shows, Escape dismisses the PANEL, not the flow — in both
+  // containers, including the inline one where Escape is otherwise unbound
+  // (#4065). Otherwise the pre-existing rule stands.
+  useEscapeToClose(open, closeGuardOpen ? cancelClose : handleClose, {
+    enabled: closeGuardOpen || (escapeToClose && !creating && !manualCreating),
+  })
 
   const hasMultipleAccounts = userAccounts.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'connect']
@@ -609,12 +640,13 @@ export function useAgentConnectionSetup({
   }
 
   async function copyText(kind: CopyKind, value: string) {
-    const clipboard = navigator.clipboard
-    await clipboard?.writeText(value)
+    // #4573: the shared clipboard write. A failed write copied nothing, so it
+    // must neither paint "Copied" nor latch the setup step forward (#3832) —
+    // latching would hide the prompt's only on-screen copy (row 1's "View the
+    // prompt") for nothing.
+    if (!(await copyToClipboard(value))) return
     setCopied(kind)
-    // Without a clipboard API nothing was copied; latching would hide the
-    // prompt's only on-screen copy (row 1's "View the prompt") for nothing.
-    if (kind === 'prompt' && clipboard && setup) setPromptCopiedFor(setup.setup_id)
+    if (kind === 'prompt' && setup) setPromptCopiedFor(setup.setup_id)
   }
 
   async function handleCancelSetup() {
@@ -732,6 +764,10 @@ export function useAgentConnectionSetup({
     headerSubtitleText: headerSubtitle(step, visibleStatus, installIsReadyForApproval(setupStatus?.install_status)),
     busy: creating || manualCreating,
     handleClose,
+    // #4570: the close guard's state and its two answers.
+    closeGuardOpen,
+    cancelClose,
+    confirmClose,
     // Details step
     name,
     setName,

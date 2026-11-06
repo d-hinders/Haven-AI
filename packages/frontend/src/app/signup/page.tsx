@@ -245,7 +245,7 @@ function SignupForm() {
           disabled={submitting}
           className="w-full"
         >
-          {submitting ? 'Creating account...' : 'Create account'}
+          {submitting ? 'Creating account…' : 'Create account'}
         </Button>
       </form>
 

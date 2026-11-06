@@ -7,6 +7,7 @@ import {
   type UseAgentConnectionSetupOptions,
 } from '@/hooks/useAgentConnectionSetup'
 import { StepProgress } from '../ui/StepProgress'
+import { CloseGuardPanel } from './CloseGuardPanel'
 import { ConnectStep } from './ConnectStep'
 import { DetailsStep } from './DetailsStep'
 import { PolicyStep } from './PolicyStep'
@@ -37,6 +38,13 @@ export interface ConnectAgentFlowParts {
   steps: ReactNode
   /** The *Agent name* input; the modal hands it to `Modal` as its open-time focus. */
   nameInputRef: RefObject<HTMLInputElement | null>
+  /**
+   * The current step's `tabIndex={-1}` region — the flow's own "focus here,
+   * not in a text field" target. The modal hands it to `Modal` as its
+   * open-time focus on a coarse pointer (#4562), so a phone does not open its
+   * keyboard on a dialog the user has not asked to type into.
+   */
+  stepRegionRef: RefObject<HTMLDivElement | null>
   /** Read once at mount (#3687): a touch-first pointer never auto-focuses the name input. */
   coarsePointer: boolean
 }
@@ -144,8 +152,8 @@ export function ConnectAgentFlow({
   // Connect step and never counts. Once the budget is approved the flow is
   // finished, so the band reads all-done rather than Connect still in
   // progress over a success screen. On an expired, cancelled or failed setup
-  // the band reads stopped: Connect goes neutral instead of showing the brand
-  // "in progress" ring over a screen that says nothing more will happen.
+  // the band reads stopped: Connect goes neutral instead of showing the active
+  // ink-2 ring over a screen that says nothing more will happen.
   const progress = (
     <StepProgress
       totalSteps={flow.setupStepCount}
@@ -175,9 +183,13 @@ export function ConnectAgentFlow({
    * `outline-none` keeps a programmatic focus from drawing a ring.
    */
   const steps =
-    flow.step === 'connect' ? (
+    flow.closeGuardOpen ? (
+      // #4570: the close guard REPLACES the step body while it asks. It is an
+      // inline panel, not a dialog — see `CloseGuardPanel`.
+      <CloseGuardPanel onCancel={flow.cancelClose} onConfirm={flow.confirmClose} />
+    ) : flow.step === 'connect' ? (
       <div ref={stepRegionRef} tabIndex={-1} className="outline-none">
-        <ConnectStep flow={flow} nestedCopyBlocks={inline} />
+        <ConnectStep flow={flow} nestedCopyBlocks={inline} halo={!inline} />
       </div>
     ) : (
       <div
@@ -193,5 +205,5 @@ export function ConnectAgentFlow({
       </div>
     )
 
-  return <>{children({ flow, progress, steps, nameInputRef, coarsePointer })}</>
+  return <>{children({ flow, progress, steps, nameInputRef, stepRegionRef, coarsePointer })}</>
 }

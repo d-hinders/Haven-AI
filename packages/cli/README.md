@@ -138,7 +138,6 @@ haven agents revoke <id> [--keep-budget] --yes   # retires the agent in Haven (t
 haven agents rotate-key <id>             # new API key, shown once
 haven agents rename <id> <name>
 haven wallets rename <id> <name>
-haven contacts add <name> <address> | contacts remove <id>
 
 # set an agent up without the dashboard modal (#2527)
 haven agents connect --name <name> --budget <amount> --token USDC --period <minutes>
@@ -311,7 +310,9 @@ commands call routes the allow-list leaves out, so they need an ordinary
 session too: `haven wallets rename` (`PUT /user/accounts/:id`) and
 `haven activity export --format sie` (`GET /accounting/export`). Under a
 device-code session the backend answers all three with a 401, so they exit
-**3**, the same as a missing session. The allow-list lives in
+**3**, the same as a missing session. `haven contacts add` and `remove` refuse under
+any session, exit **4**, without calling the backend: saved contacts are written in
+the dashboard. The allow-list lives in
 `packages/backend/src/middleware/owner-cli.ts`; a route that is not on it
 refuses, because #1640 already refuses every purpose-carrying token everywhere
 and this is a single opt-in exception. A census test measures what the

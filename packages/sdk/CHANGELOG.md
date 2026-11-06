@@ -17,6 +17,50 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **The parent purchase receipt is named for what it holds (#4577).**
+  `HavenPaymentReceipt.parentReceiptId` (raw `parent_receipt_id`) carries the
+  parent purchase receipt's `id` — the `machine_payment_evidence` row id of the
+  purchase leg a fee call paid for. It joins to the receipt's `id`, not to
+  `paymentId`, which is why the old name was wrong: `parentPaymentId` sat beside
+  a `paymentId` that is a payment-intent id, so a join on the two names found
+  nothing. `parentPaymentId` still maps the same value and is now
+  `@deprecated`; it is kept because 0.13.0-alpha.0 shipped it, and removing it
+  is a breaking change that needs its own release decision. Both keys are
+  per-row: a backend that does not send one leaves it absent, never a
+  fabricated null. Additive and optional on a type that is only returned, so
+  existing consumers keep compiling. No update needed.
+
+- **The merchant's own reason for refusing a paid retry is recorded and
+  echoed (#4552).** x402 merchants have started saying WHY they refused: a
+  verify-stage refusal returns `{"error": "<reason>"}` in the 402 body, a
+  stock settlement failure carries it only in the `PAYMENT-RESPONSE` header
+  (`errorReason`), and merchants from before x402-foundation/x402#3795 carry
+  it only in `PAYMENT-REQUIRED` (`error`). A new total parser
+  (`merchantReportedError`) accepts only a code-shaped value
+  (`^[a-z0-9_]{1,64}$`) from the untruncated body, then falls back to those
+  two headers, and never throws — it runs inside `recordRetryRejected`'s
+  swallowing `try`, where a throw would silently drop the stranded-funds
+  event. Both writers now record `details.merchant_reported_error` (the code,
+  or `null`, never absent), and `reportMerchantOutcome` returns it as the
+  optional `merchantReportedError` on `X402MerchantOutcomeReport`, which
+  `haven_report_x402_outcome` echoes as `merchant_reported_error`. The value
+  is merchant-claimed, never something Haven verified, and the handoff stays
+  `haven_sweep_delegate` for every reason. `retry_body` is unchanged.
+  Additive and optional on a type that is only returned, so existing
+  consumers keep compiling. No update needed.
+
+### Changed
+
+- **The agent runbook says signup is passkey-only (#4675).** The account step
+  and the signup hand-off script said "a passkey or a wallet"; signup offers a
+  passkey, and a wallet joins an existing account's signer set later. The
+  later-signer wording ("signs with their passkey or wallet") is unchanged.
+  Wording only; no update needed.
+
+## 0.13.0-alpha.0 — 2026-10-30
+
+### Added
+
 - **`PaymentStatusResult.merchantSettlementTxHash` names the recorded
   settlement transaction (#4530).** `haven_get_payment_status` already
   reported `merchantSettlementRecorded: true` when an EIP-3009 payment's
@@ -29,6 +73,20 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   otherwise, never `null` and never the merchant's unverified echo. Additive
   and optional on a type that is only returned, so existing consumers keep
   compiling. No update needed.
+
+- **The purchase correlation key reaches the SDK (#4534).** `reportX402MerchantOutcome`
+  gains two OPTIONAL inputs: `purchaseGroupId` (1–128 chars — the merchant's own
+  invoice/order id, or a caller-chosen group key when the merchant supplies
+  none) and `merchantResponse` (the merchant's paid response body, from which
+  the backend derives the group id through a small explicit per-merchant map
+  and never stores the body). `HavenPaymentReceipt` gains `purchaseGroupId` and
+  `parentPaymentId` — the merchant's invoice/order id every payment of one
+  purchase shares, and, for a fee call, the purchase payment it paid for. Both
+  are descriptive metadata on a document the accounting feed already produces:
+  they authorize nothing, produce or consume no signature, and no spend
+  decision reads them. A caller that supplies neither sends a byte-identical
+  body to before, and an ungrouped payment is fed exactly as before with both
+  receipt fields null. Additive and optional throughout. No update needed.
 
 ## 0.12.0-alpha.0 — 2026-10-29
 

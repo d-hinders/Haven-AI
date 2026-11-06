@@ -318,7 +318,7 @@ describe('AccountDetailClient', () => {
       mockUseAuth.mockReturnValue({ ...mockUseAuth(), user: null, loading: true })
       render(<AccountDetailClient />)
       expectBackToAccounts()
-      const status = screen.getByRole('status', { name: 'Loading account' })
+      const status = screen.getByRole('status', { name: 'Loading account…' })
       expect(status.contains(screen.getByRole('link', { name: 'Accounts' }))).toBe(false)
     })
 
@@ -348,7 +348,7 @@ describe('AccountDetailClient', () => {
     expect(screen.queryByText('Agent access')).not.toBeInTheDocument()
     expect(screen.queryByText('Token balances')).not.toBeInTheDocument()
     expect(screen.queryByText('Advanced account details')).not.toBeInTheDocument()
-    expect(screen.queryByText('Transaction history')).not.toBeInTheDocument()
+    expect(screen.queryByText('Transactions')).not.toBeInTheDocument()
     expect(screen.queryByText('Receiving USDC')).not.toBeInTheDocument()
   })
 
@@ -385,6 +385,14 @@ describe('AccountDetailClient', () => {
       expect(
         send.compareDocumentPosition(receive) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy()
+    })
+
+    it('Send leads with ArrowUp and Receive with ArrowDown (#4639)', () => {
+      render(<AccountDetailClient />)
+      const glyph = (b: HTMLElement) =>
+        Array.from(b.firstElementChild?.classList ?? []).find((c) => c.startsWith('lucide-') && c !== 'lucide-icon')
+      expect(glyph(screen.getByRole('button', { name: 'Send' }))).toBe('lucide-arrow-up')
+      expect(glyph(screen.getByRole('button', { name: 'Receive' }))).toBe('lucide-arrow-down')
     })
 
     it('Money in and Money out sit on ONE row beside their direction icons (#4197)', () => {
@@ -788,7 +796,7 @@ describe('AccountDetailClient', () => {
       tabParam = 'security'
       render(<AccountDetailClient />)
 
-      const link = screen.getByRole('link', { name: 'All signers in Settings' })
+      const link = screen.getByRole('link', { name: 'Passkeys and wallets' })
       expect(link).toHaveAttribute('href', '/settings?tab=security#signers')
       expect(screen.queryByText(/The ways this account can be approved/)).not.toBeInTheDocument()
       expect(screen.queryByText(/All your passkeys and wallets in Settings/)).not.toBeInTheDocument()
@@ -941,7 +949,7 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     openAccountMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
@@ -977,7 +985,7 @@ describe('AccountDetailClient', () => {
 
     const openDialog = () => {
       openAccountMenu()
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     }
 
     openDialog()
@@ -999,7 +1007,7 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     openAccountMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     const refusal = await screen.findByRole('alert')
@@ -1020,11 +1028,25 @@ describe('AccountDetailClient', () => {
     render(<AccountDetailClient />)
 
     openAccountMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
 
     await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith('/accounts'))
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  // #4570: a menu item that opens a confirmation ends in "…" (copy-guidelines
+  // § Destructive verbs). The account menu's one confirmation is Remove.
+  it('the menu item that opens the remove confirmation ends in "…"', () => {
+    render(<AccountDetailClient />)
+
+    openAccountMenu()
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent ?? '')
+    const remove = items.find((label) => label.startsWith('Remove'))
+    expect(remove).toBe('Remove account…')
+    // The ellipsis is the promise of a dialog, and the dialog is what follows.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove account…' }))
+    expect(screen.getByRole('heading', { name: 'Remove Main account?' })).toBeInTheDocument()
   })
 
   it('renders backup & recovery for a delegation account with zero agents', () => {
@@ -1062,5 +1084,115 @@ describe('AccountDetailClient', () => {
     expect(screen.getByTestId('account-activity-tab')).toBeInTheDocument()
     expect(screen.queryByText(/for this Haven wallet/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/recent transactions/i)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #4566 — the account rename dialog on `ui/Modal`.
+ *
+ * The dialog had no direct test before this slice. Moving it onto `Modal`
+ * moved the dismissal, the focus placement and the focus return into the
+ * shared primitive, so this suite pins what the caller still owns: validation,
+ * the save call, and the busy guards that must hold while a rename is in
+ * flight.
+ */
+describe('AccountDetailClient — rename dialog (#4566)', () => {
+  function openRename() {
+    openAccountMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+  }
+
+  it('opens on the account name with focus in the field', () => {
+    render(<AccountDetailClient />)
+    openRename()
+
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+    const field = screen.getByLabelText('Account name')
+    expect(field).toHaveValue('Main account')
+    expect(field).toHaveFocus()
+  })
+
+  it('refuses an empty name without calling the API', () => {
+    const renameAccount = vi.fn()
+    mockUseAccounts.mockReturnValue({ renameAccount, removeAccount: vi.fn(), setDefault: vi.fn(), loading: false })
+
+    render(<AccountDetailClient />)
+    openRename()
+
+    fireEvent.change(screen.getByLabelText('Account name'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(screen.getByText('Enter an account name.')).toBeInTheDocument()
+    expect(renameAccount).not.toHaveBeenCalled()
+    // The dialog stays open so the user can correct it.
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+  })
+
+  it('saves the trimmed name and closes', async () => {
+    const renameAccount = vi.fn().mockResolvedValue(undefined)
+    mockUseAccounts.mockReturnValue({ renameAccount, removeAccount: vi.fn(), setDefault: vi.fn(), loading: false })
+
+    render(<AccountDetailClient />)
+    openRename()
+
+    fireEvent.change(screen.getByLabelText('Account name'), { target: { value: '  Household  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(renameAccount).toHaveBeenCalledWith('safe-1', 'Household'))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Rename account' })).not.toBeInTheDocument())
+  })
+
+  it('surfaces a failed rename in the dialog instead of closing it', async () => {
+    const renameAccount = vi.fn().mockRejectedValue(new Error('That name is already taken.'))
+    mockUseAccounts.mockReturnValue({ renameAccount, removeAccount: vi.fn(), setDefault: vi.fn(), loading: false })
+
+    render(<AccountDetailClient />)
+    openRename()
+
+    fireEvent.change(screen.getByLabelText('Account name'), { target: { value: 'Household' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    expect(await screen.findByText('That name is already taken.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
+  })
+
+  it('gives focus back to the menu trigger when it closes', () => {
+    render(<AccountDetailClient />)
+    openRename()
+    expect(screen.getByLabelText('Account name')).toHaveFocus()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('heading', { name: 'Rename account' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Account options')).toHaveFocus()
+  })
+
+  /**
+   * The rename is in flight (`loading`), so every way out must be inert: the
+   * ✕ is disabled, the backdrop has no handler, Escape is guarded and Cancel
+   * is disabled. Otherwise the ✕ becomes the one unguarded exit from a request
+   * that is still running.
+   */
+  it('cannot be closed while a rename is in flight', () => {
+    mockUseAccounts.mockReturnValue({
+      renameAccount: vi.fn(() => new Promise(() => {})),
+      removeAccount: vi.fn(),
+      setDefault: vi.fn(),
+      loading: true,
+    })
+
+    const { container } = render(<AccountDetailClient />)
+    openRename()
+
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled()
+
+    const backdrop = container.querySelector('.v2-modal-backdrop')
+    expect(backdrop).not.toBeNull()
+    fireEvent.click(backdrop!)
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.getByRole('heading', { name: 'Rename account' })).toBeInTheDocument()
   })
 })

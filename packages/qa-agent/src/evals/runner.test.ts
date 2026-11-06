@@ -328,3 +328,312 @@ describe('haven_payment_submitted is not a settlement grader', () => {
     expect(seen[1]).toBe(false)
   })
 })
+
+// ── #4678: lanes, per-trial setup, teardown ────────────────────────────────
+
+describe('the lanes field — a skipped task never counts as passed (#4678)', () => {
+  const claudeOnly: EvalTask = { ...TASK, id: 'claude-only', lanes: ['claude-code'] }
+
+  it('skips a task whose lanes exclude the running lane, and excludes it from pass^k', async () => {
+    const report = await runSuite({
+      tasks: [TASK, claudeOnly],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('hermes', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      lane: 'hermes',
+    })
+    const skipped = report.tasks.find((t) => t.id === 'claude-only')!
+    expect(skipped.skipped).toBe(true)
+    expect(skipped.skipReason).toContain('claude-code')
+    expect(skipped.passAll).toBe(false)
+    expect(skipped.passRate).toBe(0)
+    expect(skipped.trials).toEqual([])
+    // The skipped task is NOT in the denominator of pass^k.
+    expect(report.tasksRun).toBe(1)
+    expect(report.tasksPassingAll).toBe(1)
+    expect(renderSummary(report)).toContain('SKIPPED  claude-only')
+    expect(renderSummary(report)).toContain('a skipped task never counts as passed')
+  })
+
+  it('runs the task on the lane it names', async () => {
+    const report = await runSuite({
+      tasks: [claudeOnly],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('claude-code', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      lane: 'claude-code',
+    })
+    expect(report.tasks[0]!.skipped).toBeUndefined()
+    expect(report.tasks[0]!.passAll).toBe(true)
+  })
+
+  it('a task with no lanes field runs on every lane — the starter tasks are unchanged', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('hermes', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      lane: 'hermes',
+    })
+    expect(report.tasks[0]!.skipped).toBeUndefined()
+  })
+})
+
+describe('the per-trial setup hook and its teardown (#4678)', () => {
+  const setupTask: EvalTask = {
+    ...TASK,
+    id: 'throwaway-task',
+    setup: { kind: 'throwaway-identity', label: 'throwaway', budgetAtomic: '2000', fundingAtomic: '2000' },
+  }
+
+  it('a throwaway trial resolves to EXACTLY its fundingAtomic — the only eval-budget spend', async () => {
+    const seen: string[] = []
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: BigInt(task.setup!.fundingAtomic), instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 2,
+      setup: {
+        prepare: async ({ resolved }) => ({
+          resolved: { trialApiKey: 'sk_agent_trial' },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+      onTrial: (_resolved, record) => seen.push(record.resolvedAmountAtomic!),
+    })
+    expect(seen).toEqual(['2000', '2000'])
+    expect(report.tasks[0]!.trials.every((t) => t.resolvedAmountAtomic === '2000')).toBe(true)
+  })
+
+  it('merges the prepared state onto the resolved task before the adapter runs', async () => {
+    let seenKey: string | undefined
+    await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async (resolved) => {
+        seenKey = resolved.trialApiKey
+        return logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])
+      }),
+      trials: 1,
+      setup: {
+        prepare: async () => ({
+          resolved: { trialApiKey: 'sk_agent_trial' },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+    })
+    expect(seenKey).toBe('sk_agent_trial')
+  })
+
+  it('records the teardown result PER TRIAL, including USDC it could not return', async () => {
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      setup: {
+        prepare: async () => ({
+          teardown: async () => ({ ok: false, warnings: ['return failed'], unreturnedAtomic: '1500' }),
+        }),
+      },
+    })
+    const trial = report.tasks[0]!.trials[0]!
+    expect(trial.pass).toBe(true) // a failed teardown NEVER changes the verdict
+    expect(trial.teardown).toEqual({ ok: false, warnings: ['return failed'], unreturnedAtomic: '1500' })
+    const summary = renderSummary(report)
+    expect(summary).toContain('teardown warning: return failed')
+    expect(summary).toContain('could not return 1500 atomic USDC')
+  })
+
+  it('a setup failure is a RED TRIAL and still runs the teardown for what it created', async () => {
+    const { TrialSetupFailure } = await import('./trial-setup.js')
+    let tornDown = false
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 2,
+      setup: {
+        prepare: async ({ trial }) => {
+          if (trial === 1) {
+            throw new TrialSetupFailure('funding failed', async () => {
+              tornDown = true
+              return { ok: true, warnings: [] }
+            })
+          }
+          return { teardown: async () => ({ ok: true, warnings: [] }) }
+        },
+      },
+    })
+    const t = report.tasks[0]!
+    expect(t.trials[0]!.pass).toBe(false)
+    expect(t.trials[0]!.detail).toContain('setup failure: funding failed')
+    expect(t.trials[0]!.teardown).toEqual({ ok: true, warnings: [] })
+    expect(tornDown).toBe(true)
+    // The later trial still ran.
+    expect(t.trials[1]!.pass).toBe(true)
+  })
+
+  it('runs the teardown after an ADAPTER failure too', async () => {
+    let tornDown = false
+    const report = await runSuite({
+      tasks: [setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => {
+        throw new Error('claude exited 1')
+      }),
+      trials: 1,
+      setup: {
+        prepare: async () => ({
+          teardown: async () => {
+            tornDown = true
+            return { ok: true, warnings: [] }
+          },
+        }),
+      },
+    })
+    expect(report.tasks[0]!.trials[0]!.detail).toContain('adapter failure')
+    expect(tornDown).toBe(true)
+  })
+
+  it('a task with no setup gets no teardown field — the starter tasks are unchanged', async () => {
+    const report = await runSuite({
+      tasks: [TASK],
+      resolveForTrial: async () => resolved(),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+    })
+    expect(report.tasks[0]!.trials[0]!.teardown).toBeUndefined()
+  })
+
+  it('a MIXED run calls the hook ONLY for the task that asks for it — the plain task passes with no teardown', async () => {
+    // The regression this pins: the hook used to be called for EVERY task
+    // whenever it was wired, and the real hook throws for a task with no
+    // `setup` — so one throwaway task in a run turned every other task red.
+    const plain: EvalTask = { ...TASK, id: 'plain-task' }
+    const prepared: string[] = []
+    const report = await runSuite({
+      tasks: [plain, setupTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_get_agent' }, { name: 'haven_pay' }])),
+      trials: 1,
+      setup: {
+        // The real hook's contract (createThrowawaySetup.prepare): it refuses
+        // a task that does not ask for a per-trial setup.
+        prepare: async ({ task }) => {
+          if (task.setup === undefined) throw new Error(`task ${task.id} has no throwaway setup`)
+          prepared.push(task.id)
+          return { teardown: async () => ({ ok: true, warnings: [] }) }
+        },
+      },
+    })
+    const plainReport = report.tasks.find((t) => t.id === 'plain-task')!
+    expect(plainReport.trials[0]!.pass).toBe(true)
+    expect(plainReport.trials[0]!.detail).toBe('')
+    expect(plainReport.trials[0]!.teardown).toBeUndefined()
+    // The hook ran exactly once, for the task that asked for it.
+    expect(prepared).toEqual(['throwaway-task'])
+    expect(report.tasks.find((t) => t.id === 'throwaway-task')!.trials[0]!.teardown).toEqual({ ok: true, warnings: [] })
+  })
+
+  const probeTask: EvalTask = {
+    ...TASK,
+    id: 'probe-task',
+    graders: [{ name: 'payment_status_settled' }],
+    // The hook is only called for a task that asks for a per-trial setup.
+    setup: { kind: 'throwaway-identity', label: 'probe', budgetAtomic: '2000', fundingAtomic: '2000' },
+  }
+
+  it('graderContextFor is the per-trial default — built from the MERGED resolved task', async () => {
+    const used: string[] = []
+    const seenKeys: Array<string | undefined> = []
+    const report = await runSuite({
+      tasks: [probeTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_pay', result: { ok: true, paymentId: 'p-1' } }])),
+      trials: 1,
+      graderContextFor: (resolvedTask) => {
+        seenKeys.push(resolvedTask.trialApiKey)
+        return {
+          probePaymentStatus: async () => {
+            used.push('default')
+            return { ok: true, status: 'settled' }
+          },
+        }
+      },
+      setup: {
+        prepare: async () => ({
+          resolved: { trialApiKey: 'sk_trial_key' },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+    })
+    expect(report.tasks[0]!.trials[0]!.pass).toBe(true)
+    expect(used).toEqual(['default'])
+    // The builder saw the trial's own key, not the eval agent's.
+    expect(seenKeys).toEqual(['sk_trial_key'])
+  })
+
+  it("the setup hook's own grader context wins over graderContextFor", async () => {
+    const used: string[] = []
+    const report = await runSuite({
+      tasks: [probeTask],
+      resolveForTrial: async (task) => ({ task, amountAtomic: 2000n, instruction: 'x', startedAtBlock: 1 }),
+      adapter: fakeAdapter('fake', async () => logWith([{ name: 'haven_pay', result: { ok: true, paymentId: 'p-1' } }])),
+      trials: 1,
+      graderContextFor: () => ({
+        probePaymentStatus: async () => {
+          used.push('default')
+          return { ok: true, status: 'settled' }
+        },
+      }),
+      setup: {
+        prepare: async () => ({
+          graderContext: {
+            probePaymentStatus: async () => {
+              used.push('hook')
+              return { ok: true, status: 'settled' }
+            },
+          },
+          teardown: async () => ({ ok: true, warnings: [] }),
+        }),
+      },
+    })
+    expect(report.tasks[0]!.trials[0]!.pass).toBe(true)
+    expect(used).toEqual(['hook'])
+  })
+})
+
+// #4676: no_second_fresh_payment reports the spend of the one purchase it
+// allows; the next trial must wait for it. A decline (a red trial) reports nothing, so the
+// next trial must NOT wait (it would time out on a decrease that never comes).
+describe('a passing grader that reports spend marks the trial settled (#4676)', () => {
+  const STRANDED: EvalTask = { ...TASK, category: 'x402-paywall', graders: [{ name: 'no_second_fresh_payment', options: {} }], settled_amount_unknown: true }
+  const purchase = [
+    { name: 'haven_quote_mcp_tool', result: { ok: true } },
+    { name: 'haven_pay_mcp_tool', result: { ok: true, paymentId: 'pay-1' } },
+  ]
+  const runTwo = async (calls: AgentRunLog['calls'], status: { ok: true; status: string; amountAtomic?: string }) => {
+    const seen: Array<boolean | undefined> = []
+    await runSuite({
+      tasks: [STRANDED],
+      resolveForTrial: async (_task, _trial, prior) => {
+        seen.push(prior?.settled)
+        return resolved()
+      },
+      adapter: fakeAdapter('fake', async () => ({ ...logWith(calls), finalMessage: 'bought it; not settled' })),
+      trials: 2,
+      graderContext: { probePaymentStatus: async () => status },
+    })
+    return seen[1]
+  }
+
+  it('one settled purchase with a known amount: the next trial waits for it', async () => {
+    expect(await runTwo(purchase, { ok: true, status: 'confirmed', amountAtomic: '500' })).toBe(true)
+  })
+
+  it('an unredeemed (submitted) purchase or a failed decline: the next trial does not wait', async () => {
+    expect(await runTwo(purchase, { ok: true, status: 'submitted', amountAtomic: '500' })).toBe(false)
+    expect(await runTwo([{ name: 'haven_quote_mcp_tool', result: { ok: true } }], { ok: true, status: 'confirmed', amountAtomic: '500' })).toBe(false)
+  })
+})

@@ -1014,9 +1014,30 @@ jobs:
     needs: [changes, frontend_checks]
     if: always() && needs.changes.outputs.frontend == 'true' && needs.frontend_checks.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # #4651: 12, not 8. Measured on PR #4650 (2026-11-04) — the PR that added
+    # `e2e/send-dialog.visual.spec.ts` (12 tests) — the job took 8m11s and
+    # 8m22s across two attempts, with EVERY step green and `Upload visual diff
+    # artifacts` SKIPPED because no diff existed. The previous merged UI PR
+    # (#4649) took 7m51s, so 8 was already at the edge and the new spec tipped
+    # it over: the job was killed by its own timeout AFTER the comparisons
+    # passed, and the check read `fail`/`cancelled` — indistinguishable in
+    # `gh pr checks` from a real pixel failure.
+    #
+    # 12 is 1.43x the measured worst case (8m22s). The headroom rule and the
+    # measurement are stated in docs/contributing/ship-playbooks/frontend.md
+    # §4: keep the budget at >= 1.4x the measured worst case, and re-measure
+    # when a visual spec is added. The step at the end of this job makes a
+    # cancellation legible rather than leaving it to look like a pixel diff.
+    timeout-minutes: 12
 
     steps:
+      # #4651: the timeout diagnostic at the end of this job needs the job's
+      # own start, not the run's — `github.run_started_at` is minutes earlier
+      # (this job waits on `changes` and `frontend_checks`), which would make
+      # every superseded run look like a timeout.
+      - name: Record job start (the timeout diagnostic below reads it)
+        run: echo "start=$(date +%s)" > "$RUNNER_TEMP/design-visual-start"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -1138,6 +1159,41 @@ jobs:
           name: visual-regression-diffs
           path: output/playwright/test-results
           retention-days: 7
+
+      # #4651. A job killed by its own `timeout-minutes` is reported as
+      # `fail`/`cancelled`, which `gh pr checks` renders exactly like a pixel
+      # failure — so a reviewer has to open the job and read the step list to
+      # tell them apart. This step runs only on cancellation and says which of
+      # the two it was, in its NAME (the part a reviewer sees without opening
+      # the log) and in the job summary.
+      #
+      # It distinguishes the two cancellation causes by elapsed time, because
+      # `concurrency.cancel-in-progress` cancels a superseded run the same way
+      # the timeout does: at or past the budget it is the timeout, under it a
+      # newer push superseded this run. A real pixel failure never reaches this
+      # step — it fails the comparison step and uploads `visual-regression-diffs`
+      # instead, which is the artifact to look for before believing a red here.
+      - name: Job cancelled — TIMEOUT or superseded run, NOT a pixel diff
+        if: cancelled()
+        run: |
+          set -euo pipefail
+          START_FILE="$RUNNER_TEMP/design-visual-start"
+          BUDGET_SECONDS=$((12 * 60))
+          if [ ! -f "$START_FILE" ]; then
+            echo "::error::The job was cancelled before its first step recorded a start time. This is NOT a pixel diff: a pixel failure uploads the visual-regression-diffs artifact and fails the comparison step, not this one."
+            exit 1
+          fi
+          START=$(cat "$START_FILE")
+          NOW=$(date +%s)
+          ELAPSED=$((NOW - START))
+          echo "Job ran ${ELAPSED}s before cancellation; the budget is ${BUDGET_SECONDS}s."
+          if [ "$ELAPSED" -ge "$BUDGET_SECONDS" ]; then
+            echo "::error::TIMEOUT — the job was killed by its own ${BUDGET_SECONDS}s timeout, not by a pixel diff. Every comparison that ran passed; a real pixel failure uploads the visual-regression-diffs artifact and fails the comparison step instead."
+            echo "TIMEOUT after ${ELAPSED}s (budget ${BUDGET_SECONDS}s) — not a pixel diff. Every comparison that ran passed." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Cancelled after ${ELAPSED}s, under the ${BUDGET_SECONDS}s budget: a newer push superseded this run. Not a timeout and not a pixel diff."
+          echo "SUPERSEDED after ${ELAPSED}s (budget ${BUDGET_SECONDS}s) — not a timeout and not a pixel diff." >> "$GITHUB_STEP_SUMMARY"
 
   ci:
     name: Lint, Type-check & Build

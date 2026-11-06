@@ -5748,7 +5748,7 @@ export type components = {
             superseded_by: components["schemas"]["AgentSupersession"];
             /**
              * Format: date-time
-             * @description #4352 (decision 5, additive): when the agent’s only budgets for this chain have ENDED, the latest ended budget’s expiry (ISO 8601) — read by the same narrow expired-row query the refusal answers use. `null` when no expired row exists; the field NEVER reports a live budget. Lets an agent whose `allowances[]` is empty tell “nobody approved yet” from “the budget ended on this date”. Optional on the schema so an older backend that omits it stays valid.
+             * @description #4352 (decision 5, additive): when the agent’s only budgets for this chain have ENDED, the latest ended budget’s expiry (ISO 8601) — read by the same narrow expired-row query the refusal answers use. `null` whenever `allowances[]` has a row for this chain: a live or dormant budget is never reported as ended, even when an older ended row exists beside it. The date is answered only when `allowances[]` is empty and an expired row exists. Lets an agent whose `allowances[]` is empty tell “nobody approved yet” from “the budget ended on this date”. Optional on the schema so an older backend that omits it stays valid.
              */
             budget_ended_at?: string | null;
             allowances: {
@@ -5780,6 +5780,11 @@ export type components = {
                  * @description #4355: when THIS budget next refills — the end of its current period, from its own start date and period (ISO 8601). `null` when it never refills again: the period boundary falls at or after the budget's end date, so it ends first. With `onchain.remaining` 0 it tells an agent its budget is spent for this period and when it refills, as opposed to never approved. Optional on the schema so an older backend that omits it stays valid.
                  */
                 next_refill_at?: string | null;
+                /**
+                 * Format: date-time
+                 * @description #4666: when THIS budget's validity ends (ISO 8601), after which it never refills and cannot pay. Read-only reporting: the delegation's expiry caveat is what enforces it. `null` when the stored expiry is not a representable timestamp. Optional on the schema so an older backend that omits it stays valid.
+                 */
+                budget_expires_at?: string | null;
                 onchain: {
                     /** @description The configured period budget in ATOMIC units — the same budget as the sibling `configured_amount`, which states it in whole token units. `spent`, `remaining` and `effective_spent` are atomic too (#2295). */
                     amount: string;
@@ -5898,13 +5903,37 @@ export type components = {
             amount_human: string;
             challenge_id?: string | null;
             idempotency_key?: string | null;
+            /** @description #4579: the challenge the payment answered, stored as JSONB. The database enforces no shape on this column, so the schema states none. */
+            challenge_payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description #4579: the payment option the agent selected from the challenge, stored as JSONB. The database enforces no shape on this column, so the schema states none. */
+            selected_payment?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description #4579: the header name the merchant expects the payment proof in; null when the challenge named none. The header VALUE is never returned. */
+            payment_proof_header_name?: string | null;
+            /** @description #4579: the header name the merchant returns its protocol receipt in; null when the challenge named none. The header VALUE is never returned. */
+            protocol_receipt_header_name?: string | null;
+            /** @description #4579: the merchant's PAYMENT-RESPONSE object, relayed verbatim (#3125) and merchant-controlled — nothing inside it is Haven's record. Stored as JSONB with no database-enforced shape, so the schema states none. */
+            protocol_receipt_payload?: {
+                [key: string]: unknown;
+            } | null;
             merchant_status?: number | null;
             /** @enum {string|null} */
             delivery_quality?: "ok" | "unusable" | "partial" | null;
             delivery_note?: string | null;
             /** Format: date-time */
             delivery_reported_at?: string | null;
+            /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
+            delivery_reference?: string | null;
             purchase_group_id?: string | null;
+            /** @description The parent purchase receipt's `id` — the `machine_payment_evidence` row id of the purchase leg a fee call paid for. Null on the purchase itself and on every ungrouped payment. Joins to `id`, not to `payment_id`. */
+            parent_receipt_id?: string | null;
+            /**
+             * @deprecated
+             * @description Deprecated: same value as `parent_receipt_id`. The name is wrong — it holds a receipt (evidence) id, not a payment id. Prefer `parent_receipt_id`.
+             */
             parent_payment_id?: string | null;
             confirmed_at?: string | null;
             /** Format: date-time */

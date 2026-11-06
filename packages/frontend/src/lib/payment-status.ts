@@ -71,19 +71,29 @@ export interface StatusPresentation {
   tone: StatusTone
 }
 
-const AGENT_STATUS: Record<AgentStatus, StatusPresentation> = {
+/**
+ * Exported for `lib/__tests__/status-vocabulary.test.ts`, which walks this map
+ * and `docs/product/design-system.md` § StatusBadge together so a label or
+ * tone that drifts from the published table goes red (#4567).
+ */
+export const AGENT_STATUS: Record<AgentStatus, StatusPresentation> = {
   active: { label: 'Connected', tone: 'success' },
   paused: { label: 'Paused', tone: 'warning' },
   // #1069: setup started but no budget granted yet — the agent exists and is
-  // reachable, it just cannot pay. Warning, not danger: the fix is one step.
+  // reachable, it just cannot pay. `brand`, not `warning` (#4567, owner
+  // decision 2026-10-30): the owner has one step to take, and `warning` is
+  // earned by a change in posture (Paused, Suspended, Revoking…), not by a
+  // setup that has not finished. `AgentRow`'s `agentBadge` and
+  // `lib/dashboard-attention.ts` already said brand; this map was the drift.
   // Note this is the AGENT `pending_approval`, which is alive and produced by
   // `POST /agent-connection-setups/register`; it is unrelated to the retired
   // payment-approval queue and renders "Needs setup", never "Needs approval".
-  pending_approval: { label: 'Needs setup', tone: 'warning' },
+  pending_approval: { label: 'Needs setup', tone: 'brand' },
   revoked: { label: 'Revoked', tone: 'danger' },
 }
 
-const PAYMENT_STATUS: Record<PaymentStatus, StatusPresentation> = {
+/** Exported for the vocabulary drift test — see `AGENT_STATUS`. */
+export const PAYMENT_STATUS: Record<PaymentStatus, StatusPresentation> = {
   pending_signature: { label: 'Awaiting signature', tone: 'brand' },
   submitted: { label: 'Submitted', tone: 'brand' },
   confirmed: { label: 'Sent', tone: 'success' },

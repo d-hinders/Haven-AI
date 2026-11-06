@@ -11,6 +11,7 @@ import { fireEvent, render, within } from '@testing-library/react'
 import { WaitingForConnector } from '../WaitingForConnector'
 import { TerminalSetupState } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
+import { ConnectSteps } from '../ConnectSteps'
 import type { CopyKind, CreateSetupResponse, ManualCredential } from '@/hooks/useAgentConnectionSetup'
 import type { AwaitingConnectionStage } from '@/hooks/useAgentConnectionSetupStatus'
 
@@ -573,6 +574,20 @@ describe('ConnectStepShell (#1377 C, #3832)', () => {
 const CURRENT_ROW = 'ol[aria-label="Connection steps"] > li[aria-current="step"]'
 
 describe('the status checklist on the waiting screen (#3832)', () => {
+  it('halos only the active marker and only when explicitly opted in', () => {
+    const rows = [
+      { id: 'active', state: 'active' as const, title: 'Your turn' },
+      { id: 'working', state: 'working' as const, title: 'Working' },
+    ]
+    const { container, rerender } = render(<ConnectSteps rows={rows} />)
+    expect(container.querySelector('.v2-step-halo')).toBeNull()
+
+    rerender(<ConnectSteps rows={rows} halo />)
+    expect(container.querySelectorAll('.v2-step-halo')).toHaveLength(1)
+    expect(container.querySelector('[data-step-state="active"] .v2-step-halo')).toBeInTheDocument()
+    expect(container.querySelector('[data-step-state="working"] .v2-step-halo')).toBeNull()
+  })
+
   it('markers carry no numerals: the header band is the only counter', () => {
     const { container } = render(renderWaiting(false, 'starting', () => {}, true))
     const rows = Array.from(container.querySelectorAll('ol[aria-label="Connection steps"] > li'))
@@ -581,11 +596,16 @@ describe('the status checklist on the waiting screen (#3832)', () => {
       const marker = li.querySelector('[aria-hidden="true"]') as HTMLElement
       expect(marker.textContent).not.toMatch(/\d/)
       // One disc for every state, so the marker column is a straight edge —
-      // the working spinner sits INSIDE a brand-soft disc, not bare.
+      // the working spinner sits INSIDE a bordered disc, not bare.
       expect(marker.className).toContain('h-7 w-7')
       expect(marker.className).toContain('sm:h-8 sm:w-8')
     }
-    expect(rows[2].querySelector('[aria-hidden="true"]')!.className).toContain('bg-[var(--v2-brand-soft)]')
+    expect(rows[2].querySelector('[aria-hidden="true"]')!.className).toContain('border-[var(--v2-border)]')
+    expect(rows[2].querySelector('[aria-hidden="true"]')!.className).toContain('text-[var(--v2-ink-2)]')
+    expect(rows[1].querySelector('[aria-hidden="true"]')).toHaveClass(
+      'border-[1.5px]',
+      'border-[var(--v2-ink-2)]',
+    )
     // The row text is still the accessible content, state prefix included.
     expect(rows[2].querySelector('h3')?.textContent).toBe('In progress: Approve the budget')
   })
@@ -615,8 +635,8 @@ describe('the status checklist on the waiting screen (#3832)', () => {
     expect(view!.textContent).toContain(SETUP.setup_prompt)
     // The brand-soft callout and its heading are gone.
     expect(container.textContent).not.toContain('Connect your agent')
-    // (The active row's marker uses brand-soft too, so match the callout's
-    // own border, which nothing else on this screen carries.)
+    // Match the callout's own border, which nothing else on this screen
+    // carries.
     expect(container.querySelector('[class*="border-brand/15"]')).toBeNull()
   })
 

@@ -7,7 +7,11 @@ name: QA wallet balances
 # 84532, and since #3997 the two agent-eval accounts' USDC), computes a runway
 # from the observed daily burn, and keeps ONE standing issue — "QA wallet
 # balances low", label `qa-funding` — open while any wallet is within 7 days
-# of running dry (scripts/ci/qa-balance-issue.mjs).
+# of running dry (scripts/ci/qa-balance-issue.mjs). Since #4666 the same issue
+# also opens when the QA budget grant is within 30 days of ending: the 2026-11-03
+# lapse turned money-flow QA red with no warning, and renewing needs a person
+# with the QA owner key. Of the QA identity's keys, this job holds only the agent
+# API key.
 #
 # Read-only except for testnet faucet requests — ETH for the demo merchant's
 # settlement wallet and the dev relayer (#3836), USDC for the two agent-eval

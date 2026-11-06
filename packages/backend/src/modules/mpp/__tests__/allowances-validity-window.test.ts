@@ -36,13 +36,15 @@ vi.mock('../../../infra/chain/delegation-budget-reader.js', async (importOrigina
 }))
 
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
+/** A recipient-pinned slot — a pinned grant and an open one are different slots (#829). */
+const PIN = `0x${'e'.repeat(40)}`
+/** A second token on the same chain — the read passes a null token, so it spans every token. */
+const OTHER_TOKEN = `0x${'f'.repeat(40)}`
 
 let seq = 0
 
-async function seedAgentWithDelegation(over: {
-  startDate?: number
-  expiresAt?: number
-} = {}): Promise<AgentContext> {
+/** A fresh delegation-rail agent with NO delegation rows yet (#4668). */
+async function seedAgent(): Promise<AgentContext> {
   const n = ++seq
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
@@ -59,21 +61,6 @@ async function seedAgentWithDelegation(over: {
      RETURNING id, delegate_address`,
     [user.rows[0].id, account.rows[0].id, `0x${'d'.repeat(40)}`],
   )
-  const nowSec = Math.floor(Date.now() / 1000)
-  await db.query(
-    `INSERT INTO agent_delegations
-       (agent_id, chain_id, token_address, recipient_address, delegation_hash,
-        delegation_json, version, status, budget_atomic, period_seconds,
-        start_date, expires_at, created_at)
-     VALUES ($1, 84532, $2, NULL, $3, '{}', 1, 'active', '1000000', 86400, $4, $5, NOW())`,
-    [
-      agent.rows[0].id,
-      USDC,
-      `0x${String(++seq).padStart(64, '0')}`,
-      over.startDate ?? 0,
-      over.expiresAt ?? 9_999_999_999,
-    ],
-  )
   return {
     id: agent.rows[0].id,
     user_id: user.rows[0].id,
@@ -85,6 +72,49 @@ async function seedAgentWithDelegation(over: {
     execution_rail: 'delegation',
     account_type: 'delegator_hybrid',
   }
+}
+
+/**
+ * Add ONE delegation row to an EXISTING agent (#4668). `seedAgentWithDelegation`
+ * makes a new agent on every call and hard-codes a null recipient, so the
+ * "an ended row BESIDE a live row on the same agent" states — the ones the
+ * `budget_ended_at` contract is about — need this.
+ */
+async function addDelegationRow(
+  agent: AgentContext,
+  over: {
+    tokenAddress?: string
+    recipientAddress?: string | null
+    startDate?: number
+    expiresAt?: number
+    chainId?: number
+  } = {},
+): Promise<void> {
+  await db.query(
+    `INSERT INTO agent_delegations
+       (agent_id, chain_id, token_address, recipient_address, delegation_hash,
+        delegation_json, version, status, budget_atomic, period_seconds,
+        start_date, expires_at, created_at)
+     VALUES ($1, $2, $3, $4, $5, '{}', 1, 'active', '1000000', 86400, $6, $7, NOW())`,
+    [
+      agent.id,
+      over.chainId ?? 84532,
+      over.tokenAddress ?? USDC,
+      over.recipientAddress ?? null,
+      `0x${String(++seq).padStart(64, '0')}`,
+      over.startDate ?? 0,
+      over.expiresAt ?? 9_999_999_999,
+    ],
+  )
+}
+
+async function seedAgentWithDelegation(over: {
+  startDate?: number
+  expiresAt?: number
+} = {}): Promise<AgentContext> {
+  const agent = await seedAgent()
+  await addDelegationRow(agent, over)
+  return agent
 }
 
 describeDb('#3802 — allowances read vs the validity window (characterization)', () => {
@@ -116,14 +146,18 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     // the dormant "steady" grant a credential rotation writes beside the
     // live "carry" row, and hiding it would blind the allowances read for
     // the whole carry window. The expired assertion above stays inverted.
-    const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600 })
+    const endsSec = Math.floor(Date.now() / 1000) + 90 * 86_400
+    const agent = await seedAgentWithDelegation({ startDate: Math.floor(Date.now() / 1000) + 3_600, expiresAt: endsSec })
 
     const result = await handleGetAllowances(agent)
 
     expect(result.statusCode).toBe(200)
-    const body = result.body as { allowances: { configured_amount: string }[] }
+    const body = result.body as { allowances: { configured_amount: string; budget_expires_at: string | null }[] }
     expect(body.allowances).toHaveLength(1)
     expect(body.allowances[0].configured_amount).toBe('1.00')
+    // #4666: its end, not its start. The QA balances check bands a carry/steady
+    // pair on the later end, so a wrong answer here silences or misdates it.
+    expect(body.allowances[0].budget_expires_at).toBe(new Date(endsSec * 1000).toISOString())
   })
 
   it('a LIVE budget keeps being reported (the window must never hide a real one)', async () => {
@@ -158,6 +192,22 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     expect(dormantBody.allowances[0].next_refill_at).toBe(new Date(start * 1000).toISOString())
   })
 
+  it('#4666: each row carries budget_expires_at — the row\'s own expiry — and null when it is not a representable timestamp', async () => {
+    const endsSec = Math.floor(Date.now() / 1000) + 30 * 86_400
+    const live = await seedAgentWithDelegation({ expiresAt: endsSec })
+    const liveBody = (await handleGetAllowances(live)).body as { allowances: { budget_expires_at: string | null }[] }
+    expect(liveBody.allowances[0].budget_expires_at).toBe(new Date(endsSec * 1000).toISOString())
+
+    // BIGINT has no upper bound in the schema, and `toISOString` throws
+    // RangeError past 8.64e15 ms. The read still answers: one bad row must
+    // not take down the spend-authority read behind SDK readiness.
+    const huge = await seedAgentWithDelegation({ expiresAt: Number.MAX_SAFE_INTEGER })
+    const hugeResult = await handleGetAllowances(huge)
+    expect(hugeResult.statusCode).toBe(200)
+    const hugeBody = hugeResult.body as { allowances: { budget_expires_at: string | null }[] }
+    expect(hugeBody.allowances[0].budget_expires_at).toBeNull()
+  })
+
   it('#4352: an expired-only budget answers budget_ended_at with the row\'s expiry — and a live budget answers null', async () => {
     // The ended case: allowances[] stays empty (#3802) and the additive field
     // carries the ended row's expires_at — the same narrow query the refusal
@@ -179,5 +229,120 @@ describeDb('#3802 — allowances read vs the validity window (characterization)'
     }
     expect(liveBody.allowances).toHaveLength(1)
     expect(liveBody.budget_ended_at).toBeNull()
+  })
+
+  // ── #4668: `budget_ended_at` beside a live budget ─────────────────────────
+  //
+  // The spec says `budget_ended_at` is for "when the agent's only budgets for
+  // this chain have ENDED", and the handler's comment says a live row for any
+  // token keeps it null. The code called the expired-row query
+  // unconditionally, so an ended row BESIDE a live one answered a date. Each
+  // case below is ONE agent holding both rows; the characterization commit
+  // pinned the date, and the #4668 fix flips every assertion in this block to
+  // null. The cross-chain case is the exception: it answers the date before
+  // AND after, because the guard reads `budgets` (chain-scoped), never `all`.
+  //
+  // The states are ordinary, not contrived: an ended grant stays
+  // `status = 'active'` (the status CHECK has no expired value), and no sweep
+  // is time-based, so a re-key carry, a different pin and a different token
+  // each leave an ended row beside a live one.
+
+  it('#4668: an ended PINNED row beside a live OPEN row answers null', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const endedSec = nowSec - 60
+    const agent = await seedAgent()
+    await addDelegationRow(agent, { recipientAddress: PIN, expiresAt: endedSec })
+    await addDelegationRow(agent, { recipientAddress: null, expiresAt: nowSec + 90 * 86_400 })
+
+    const body = (await handleGetAllowances(agent)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(body.allowances).toHaveLength(1)
+    expect(body.budget_ended_at).toBeNull()
+  })
+
+  it('#4668: an ended OPEN row beside a live PINNED row answers null', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const endedSec = nowSec - 60
+    const agent = await seedAgent()
+    await addDelegationRow(agent, { recipientAddress: null, expiresAt: endedSec })
+    await addDelegationRow(agent, { recipientAddress: PIN, expiresAt: nowSec + 90 * 86_400 })
+
+    const body = (await handleGetAllowances(agent)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(body.allowances).toHaveLength(1)
+    expect(body.budget_ended_at).toBeNull()
+  })
+
+  it('#4668: an ended row on token A beside a live row on token B answers null', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const endedSec = nowSec - 60
+    const agent = await seedAgent()
+    await addDelegationRow(agent, { tokenAddress: USDC, expiresAt: endedSec })
+    await addDelegationRow(agent, { tokenAddress: OTHER_TOKEN, expiresAt: nowSec + 90 * 86_400 })
+
+    const body = (await handleGetAllowances(agent)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(body.allowances).toHaveLength(1)
+    expect(body.budget_ended_at).toBeNull()
+  })
+
+  it('#4668: an ended CARRY beside the live STEADY row in the same slot answers null', async () => {
+    // The re-key shape: the carry's expiry is the steady's start, and
+    // ACTIVATE_REKEY_DELEGATION_SQL sweeps nothing, so from the boundary
+    // onward both rows are `active` in the same (token, open) slot.
+    const nowSec = Math.floor(Date.now() / 1000)
+    const boundary = nowSec - 60
+    const agent = await seedAgent()
+    await addDelegationRow(agent, { recipientAddress: null, startDate: 0, expiresAt: boundary })
+    await addDelegationRow(agent, { recipientAddress: null, startDate: boundary, expiresAt: nowSec + 90 * 86_400 })
+
+    const body = (await handleGetAllowances(agent)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(body.allowances).toHaveLength(1)
+    expect(body.budget_ended_at).toBeNull()
+  })
+
+  it('#4668: an ended row beside a DORMANT row answers null', async () => {
+    // A dormant row has not ended and arms by itself, so "ask the owner" is
+    // wrong advice while it is there.
+    const nowSec = Math.floor(Date.now() / 1000)
+    const endedSec = nowSec - 60
+    const agent = await seedAgent()
+    await addDelegationRow(agent, { recipientAddress: null, expiresAt: endedSec })
+    await addDelegationRow(agent, { recipientAddress: null, startDate: nowSec + 3_600, expiresAt: nowSec + 90 * 86_400 })
+
+    const body = (await handleGetAllowances(agent)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(body.allowances).toHaveLength(1)
+    expect(body.budget_ended_at).toBeNull()
+  })
+
+  it('#4668: an ended row on THIS chain beside a live row only on ANOTHER chain still answers the date', async () => {
+    // The guard must read `budgets` (chain-scoped), never `all`: a live row on
+    // another chain is not a live budget for the chain this response reports.
+    // This case passes before AND after the fix — it is the guard against the
+    // wrong list, not a characterization of the defect.
+    const nowSec = Math.floor(Date.now() / 1000)
+    const endedSec = nowSec - 60
+    const agent = await seedAgent()
+    await addDelegationRow(agent, { chainId: 84532, expiresAt: endedSec })
+    await addDelegationRow(agent, { chainId: 8453, expiresAt: nowSec + 90 * 86_400 })
+
+    const body = (await handleGetAllowances(agent)).body as {
+      allowances: unknown[]
+      budget_ended_at: string | null
+    }
+    expect(body.allowances).toHaveLength(0)
+    expect(body.budget_ended_at).toBe(new Date(endedSec * 1000).toISOString())
   })
 })

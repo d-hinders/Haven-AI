@@ -140,6 +140,11 @@ describe('bareToolName — graders match bare names, never server-prefixed ones'
     expect(bareToolName('some_other_tool')).toBe('some_other_tool')
   })
 
+  it('strips the prefix from the eval-only command tool (#4680)', () => {
+    expect(bareToolName('mcp__eval-command__run_command')).toBe('run_command')
+    expect(bareToolName('run_command')).toBe('run_command')
+  })
+
   it('every list entry is reachable through bareToolName', () => {
     for (const t of ALL_TOOL_NAMES) expect(bareToolName(t)).toBe(t)
   })

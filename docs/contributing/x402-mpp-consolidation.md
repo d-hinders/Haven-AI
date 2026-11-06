@@ -100,18 +100,4 @@ file-ownership note. Historical `mpp_demo`
 payment/receipt/evidence/status rows stay readable through the generic
 `/machine-payments/*` reads this document does not otherwise cover.
 
-Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
-intro and *Coverage strategies* now speak of `decideCoverage` in the past
-tense (deleted by #1987, with its two strategies), the #1328 section no longer
-calls the "Allowance-only" strategy live, a "below" that pointed at the
-paragraph above now says "above", and (review round 1) the paragraph after
-*Coverage strategies* states the legacy branch and the delegation rail's lack
-of a coverage step in the past tense. Re-checked without change:
-`insertMachineIntent` in `infra/repositories/payment-intents.ts`, called with
-`executionRail: 'delegation'` from `modules/x402/delegation-authorize.ts`;
-`resolvePaymentToken` in `domain/payment-token.ts`; the deleted files
-(`domain/payment-coverage.ts`, `infra/repositories/approval-requests.ts`,
-`modules/mpp/authorize.ts`, `routes/demo-mpp.ts`, `routes/x402-resources.ts`);
-`POST /machine-payments/authorize` answering through `mppDemoRetired()` in
-`routes/machine-payments.ts`; and #830, #834, #1328, #1986, #1987, #2055 and
-#2257, all closed.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

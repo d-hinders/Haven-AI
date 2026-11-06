@@ -218,6 +218,7 @@ export function ConnectionRow({
     ) : (
       <Button
         size="sm"
+        variant="ghost"
         onClick={isApiKeyProvider ? onConnectWithApiKey : onConnect}
         disabled={busy || !canConnect || (isApiKeyProvider && !onConnectWithApiKey)}
       >

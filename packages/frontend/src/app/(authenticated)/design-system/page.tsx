@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, CreditCard, EllipsisVertical, Info, OctagonAlert, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bot, Check, ChevronDown, Circle, Clipboard, CreditCard, Download, EllipsisVertical, ExternalLink, Info, OctagonAlert, Plus, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { MobileTabBar } from '@/components/sidebar/MobileTabBar'
 import { baseNavItems } from '@/components/sidebar/Sidebar'
 import { Icon } from '@/components/ui/Icon'
@@ -17,9 +17,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from '@/components/ui/DropdownMenu'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { DialogResult } from '@/components/ui/DialogResult'
 import { FilterPill } from '@/components/ui/FilterPill'
 import { LinkChip } from '@/components/ui/LinkChip'
 import { FacetMenu, type ListFacet } from '@/components/ui/FacetMenu'
@@ -45,6 +46,7 @@ import { SidePanel } from '@/components/ui/SidePanel'
 import TransactionDetailPanel from '@/components/transactions/TransactionDetailPanel'
 import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
+import { ConnectSteps } from '@/components/connect-agent/ConnectSteps'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
@@ -68,18 +70,24 @@ import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { RouteLoading } from '@/components/ui/RouteLoading'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { StatTile } from '@/components/ui/StatTile'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
+import { AGENT_STATUS, type AgentStatus } from '@/lib/payment-status'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
-import { timeAgo, truncate } from '@/lib/format'
+import { formatClockTime, truncate } from '@/lib/format'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import { AgentCard, type AgentCardDashboard } from '@/components/agent-panel/AgentCard'
 import type { Agent } from '@/hooks/useAgents'
+import { Combobox, type ComboboxGroup } from '@/components/ui/Combobox'
+import { RecipientField, type Recipient } from '@/components/RecipientField'
+import type { Contact } from '@/hooks/useContacts'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -96,6 +104,7 @@ import {
   RiskExplainer,
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
   TransactionMovement,
   WalletIdentityBlock,
@@ -746,6 +755,55 @@ const DS_LEDGER_ACCOUNTING = {
   error: null,
 }
 
+/**
+ * #4572: the phone row's acceptance cases, rendered at 375px. The first row is
+ * the 40-character title (the amount stays on the title line, the title
+ * truncates); the second is the crowded worst case — long title, amount, a
+ * payment-status badge and an accounting badge; the third is a grouped `×N`
+ * row. Timestamps are `Date.now()`-relative like `DS_LEDGER_ROWS`, so the
+ * capture freezes the clock and pins the zone.
+ */
+const DS_PHONE_LEDGER_ROWS: Array<{
+  id: string
+  at: string
+  title: string
+  description: string
+  value: string
+  countLabel?: string
+  status?: string
+  statusTone?: 'warning'
+  accounting?: boolean
+  fiat?: { amount: number; currency: 'SEK' }
+}> = [
+  {
+    id: 'p1',
+    at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    // Exactly 40 characters — the acceptance case's title.
+    title: 'Merchant settlement for September charge',
+    description: 'Research assistant',
+    value: '12.00',
+  },
+  {
+    id: 'p2',
+    at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+    title: 'Merchant settlement for September charge',
+    description: 'Research assistant',
+    value: '320.00',
+    status: 'Pending',
+    statusTone: 'warning',
+    accounting: true,
+  },
+  {
+    id: 'p3',
+    at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+    title: 'api.vendor.com',
+    description: 'Research assistant',
+    value: '36.00',
+    countLabel: '×3',
+    fiat: { amount: 134.5, currency: 'SEK' },
+  },
+]
+
 // ── The transaction detail panel's settlement states (#4320) ───────────────
 // The REAL shared panel (the SidePanel section above shows the primitive's
 // slots with specimen content; this shows the product's own drawer) mounted
@@ -816,7 +874,19 @@ type DsSettlementState = keyof typeof DS_SETTLEMENT_ROWS
 
 const DS_LIST_NOUN = { one: 'agent', other: 'agents' }
 
-const DS_LIST_AGENTS = [
+// #4601 (N9): `status` is typed as `AgentStatus` so the demo's badge can be
+// rendered from `AGENT_STATUS` — the same map the product's agent rows use.
+// The demo used to build its label from the raw status (`Active`) and its tone
+// from `active ? success : neutral`, so an active agent read "Active" instead
+// of **Connected**, and paused and revoked both got `neutral` where the table
+// gives them warning and danger.
+const DS_LIST_AGENTS: Array<{
+  id: string
+  name: string
+  status: AgentStatus
+  budget: string
+  seen: number
+}> = [
   { id: 'a1', name: 'Agent naming', status: 'active', budget: 'recurring', seen: 3 },
   { id: 'a2', name: 'Atlas', status: 'active', budget: 'recurring', seen: 1 },
   { id: 'a3', name: 'Demo agent', status: 'paused', budget: 'none', seen: 5 },
@@ -916,7 +986,7 @@ function ListControlsExample({
         filtering="browser"
         facets={facets}
         sort={DS_LIST_SORT}
-        searchDescription="By name or delegate address"
+        searchDescription="by name or address"
         searchEpoch={searchEpoch}
         actions={actions}
         count={loading ? null : { shown: rows.length, total: DS_LIST_AGENTS.length }}
@@ -947,8 +1017,11 @@ function ListControlsExample({
                     title={row.name}
                     subtitle={row.budget === 'none' ? 'No budget' : 'Has a budget'}
                     trailing={
-                      <StatusBadge tone={row.status === 'active' ? 'success' : 'neutral'}>
-                        {row.status[0].toUpperCase() + row.status.slice(1)}
+                      // #4601 (N9): the demo's badge comes from `AGENT_STATUS`,
+                      // the map the product's agent rows use — Connected /
+                      // success, Paused / warning, Revoked / danger.
+                      <StatusBadge tone={AGENT_STATUS[row.status].tone}>
+                        {AGENT_STATUS[row.status].label}
                       </StatusBadge>
                     }
                   />
@@ -1319,6 +1392,137 @@ function LabelledCopyDemo() {
   )
 }
 
+// ── Combobox and recipient field (#4640) ────────────────────────────────────
+// Fixture data through the props, so every state on the page is deterministic:
+// no hook, no fetch, no clock. The two components own no data by design, which
+// is exactly what makes a specimen this cheap.
+const DS_SENDING_ACCOUNT = '0x1111111111111111111111111111111111111111'
+const DS_SAVINGS = '0x7A58f0D1c9B4e2A6837F5C1d0E9b4a2C6d8191C2'
+const DS_ACME = '0x2c9D0000000000000000000000000000000077ab'
+const DS_RESEARCH = '0x31bc000000000000000000000000000000008d04'
+const DS_UNKNOWN = '0x3b7E00000000000000000000000000000000D09a'
+
+const DS_RECIPIENT_ACCOUNTS: SmartAccount[] = [
+  {
+    id: 'ds-account-1',
+    account_address: DS_SENDING_ACCOUNT,
+    chain_id: 8453,
+    name: 'Operating wallet',
+    is_default: true,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'ds-account-2',
+    account_address: DS_SAVINGS,
+    chain_id: 8453,
+    name: 'Savings',
+    is_default: false,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+]
+
+const DS_RECIPIENT_CONTACTS: Contact[] = [
+  {
+    id: 'ds-contact-1',
+    name: 'Acme Services',
+    address: DS_ACME,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  },
+  {
+    id: 'ds-contact-2',
+    name: 'Research API',
+    address: DS_RESEARCH,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  },
+]
+
+const DS_COMBOBOX_GROUPS: ComboboxGroup[] = [
+  {
+    id: 'accounts',
+    label: 'Your accounts',
+    options: [
+      {
+        id: 'account:savings',
+        title: 'Savings',
+        subtitle: `Your account · ${truncate(DS_SAVINGS)}`,
+        leading: <Monogram name="Savings" size="xs" decorative />,
+      },
+    ],
+  },
+  {
+    id: 'contacts',
+    label: 'Contacts',
+    options: [
+      {
+        id: 'contact:acme',
+        title: 'Acme Services',
+        subtitle: `Saved contact · ${truncate(DS_ACME)}`,
+        leading: <Monogram name="Acme Services" size="xs" decorative />,
+      },
+      {
+        id: 'contact:research',
+        title: 'Research API',
+        subtitle: `Saved contact · ${truncate(DS_RESEARCH)}`,
+        leading: <Monogram name="Research API" size="xs" decorative />,
+      },
+    ],
+  },
+]
+
+/** The Combobox specimen. The list opens from the real trigger — a click — so the
+ * pixel gate drives it rather than photographing a permanently-open copy. */
+function DsComboboxSpecimen({ initialQuery = '' }: { initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery)
+  return (
+    <Combobox
+      label="Recipient"
+      placeholder="Name or address"
+      query={query}
+      onQueryChange={setQuery}
+      groups={DS_COMBOBOX_GROUPS}
+      onPick={() => {}}
+      footer="Or paste a wallet address"
+    />
+  )
+}
+
+/** The RecipientField specimen — controlled, fed fixture data through the props. */
+function DsRecipientSpecimen({
+  caption,
+  initialQuery = '',
+  value = null,
+  contacts = DS_RECIPIENT_CONTACTS,
+  contactsLoading = false,
+  contactsError = null,
+}: {
+  caption: string
+  initialQuery?: string
+  value?: Recipient | null
+  contacts?: Contact[]
+  contactsLoading?: boolean
+  contactsError?: string | null
+}) {
+  const [current, setCurrent] = useState<Recipient | null>(value)
+  return (
+    <div className="space-y-2">
+      <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">{caption}</p>
+      <RecipientField
+        value={current}
+        onChange={setCurrent}
+        initialQuery={initialQuery}
+        chainId={8453}
+        excludeAddress={DS_SENDING_ACCOUNT}
+        accounts={DS_RECIPIENT_ACCOUNTS}
+        contacts={contacts}
+        contactsLoading={contactsLoading}
+        contactsError={contactsError}
+      />
+    </div>
+  )
+}
+
 export default function DesignSystemPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [dsFilterPillActive, setDsFilterPillActive] = useState<string | null>(null)
@@ -1353,6 +1557,12 @@ export default function DesignSystemPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [topModalOpen, setTopModalOpen] = useState(false)
   const [topModalTall, setTopModalTall] = useState(false)
+  // #4562: the two footer shapes, side by side so the owner can pick one on the
+  // PR. `singleScreenFooterOpen` is the shipped rule (right-aligned,
+  // content-width); `multiScreenFooterOpen` is the alternative (DialogActions
+  // everywhere).
+  const [singleScreenFooterOpen, setSingleScreenFooterOpen] = useState(false)
+  const [multiScreenFooterOpen, setMultiScreenFooterOpen] = useState(false)
   const [checkboxOn, setCheckboxOn] = useState(true)
   const [sampleAmount, setSampleAmount] = useState('')
   const [dsBudgetAmount, setDsBudgetAmount] = useState('')
@@ -2184,6 +2394,27 @@ export default function DesignSystemPage() {
               </div>
             </div>
           </Card>
+          {/* #4639: its own card, last in the grid, so adding it moves no
+              earlier sample (the /design-system clips are fold-positioned).
+              `self-start`: it does not stretch to its grid row's height. */}
+          <Card hover={false} className="self-start p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Icons on buttons</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-3" data-testid="ds-button-icons">
+              <Button leadingIcon={Plus}>New account</Button>
+              <Button leadingIcon={ArrowUp}>Send</Button>
+              <Button variant="ghost" leadingIcon={ArrowDown}>Receive</Button>
+              <Button variant="ghost" size="sm" leadingIcon={Clipboard}>Copy setup prompt</Button>
+              <Button variant="ghost" size="sm" leadingIcon={Download}>Export CSV</Button>
+              <Button variant="tertiary" size="sm" href="https://sepolia.basescan.org" target="_blank" rel="noopener noreferrer" trailingIcon={ExternalLink}>View on explorer</Button>
+              <Button variant="ghost" trailingIcon>Continue</Button>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              An icon names the kind of action: Plus to create, the direction marks
+              for money out and in, Clipboard to copy, Download to export, and a
+              trailing ExternalLink or forward arrow. One icon per button, never on
+              Cancel, Back, Close, Save, Approve or a dialog&apos;s confirm.
+            </p>
+          </Card>
         </div>
 
         <div className="grid gap-5 lg:grid-cols-3">
@@ -2448,7 +2679,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="Amount & Address — the two core display objects"
-        description="Render money through <Amount> and on-chain addresses through <Address> — never hand-roll signs, tone classes, or slice(0, 6) truncation. Amount encodes the calm-money rule structurally: neutral ink by default, success only for incoming, danger only for failed; callers pass facts (direction, failed), never colours. Address applies the one truncation rule (0x1234…abcd), monospace, the full value in a tooltip, and optional copy / explorer-link affordances."
+        description="Render money through <Amount> and on-chain addresses through <Address> — never hand-roll signs, tone classes, or slice(0, 6) truncation. Amount encodes the calm-money rule structurally: neutral ink by default, success only for incoming, danger only for failed; callers pass facts (direction, failed), never colours. Address applies the one truncation rule (0x1234…abcd), monospace, the full value in a tooltip, and optional copy / explorer-link affordances. Where a person must compare the whole address before money moves, use grouped: the full value in two lines of five groups."
       >
         <div className="grid gap-4 lg:grid-cols-2">
           <Card hover={false} className="p-5">
@@ -2473,6 +2704,7 @@ export default function DesignSystemPage() {
               <p><Address value={sampleAddress} copy /> <span className="text-xs text-[var(--v2-ink-3)]">— with check-pop copy</span></p>
               <p><Address value={sampleAddress} href="https://basescan.org" /> <span className="text-xs text-[var(--v2-ink-3)]">— explorer link, opens in a new tab</span></p>
               <p className="break-all text-xs"><Address value={sampleAddress} truncate={false} /> <span className="text-[var(--v2-ink-3)]">— full form for receive surfaces</span></p>
+              <div className="text-xs" data-testid="ds-address-grouped"><Address value={sampleAddress} grouped /><span className="mt-1 block text-[var(--v2-ink-3)]">— grouped, for comparing before money moves; copies unbroken</span></div>
             </div>
           </Card>
         </div>
@@ -2588,17 +2820,14 @@ export default function DesignSystemPage() {
 
       <Section
         title="Dropdown menu (kebab)"
-        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is usually a `⋮` icon button (10×10 / h-10 to match Button md). Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
+        description="Overflow menu used for account-, agent-, or row-level settings that shouldn't compete with the page's primary CTAs. The trigger is always DropdownMenuIconTrigger: the three dots with no frame, tinted on hover, with a 44px tap target that draws nothing so it never reads as a different size beside a Button. As the last control on a line, pass edge='end' so the dots line up with the content's right edge. Items support a `tone='danger'` for destructive actions and a `<DropdownMenuSeparator />` between groups. The panel is in flow, not portalled — a container that hosts it must not clip (`overflow-hidden`/`clip`/`auto`/`scroll`, `truncate`, `line-clamp-*`); round its children instead (design-system.md § Cards)."
       >
         <Card hover={false} className="p-5">
           <div className="flex flex-wrap items-center gap-6">
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="Account options"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+              />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => toast.info('Edit agent')}>Edit agent</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => toast.info('Manage labels')}>Manage labels</DropdownMenuItem>
@@ -2707,13 +2936,36 @@ export default function DesignSystemPage() {
         title="StepProgress"
         description="Full-width step indicator for multi-step flows (connect agent, replace signing key): discs at the ends, connectors stretch between them, an optional short label under each disc. 0-indexed currentStep; pass totalSteps as currentStep to render everything completed."
       >
-        <Card hover={false} className="max-w-sm space-y-4 p-5">
-          <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
-          <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
-          <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
-          {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
-          <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
-        </Card>
+        {/* The testid rides a plain wrapper: `Card` forwards no extra props,
+            and the visual spec clips this sample by it. */}
+        <div className="max-w-sm" data-testid="ds-step-progress">
+          <Card hover={false} className="space-y-4 p-5">
+            <StepProgress totalSteps={3} currentStep={0} labels={['Name', 'Budget', 'Connect']} />
+            <StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />
+            <StepProgress totalSteps={3} currentStep={3} labels={['Name', 'Budget', 'Connect']} />
+            {/* `halted`: the flow stopped on Connect (expired / cancelled / failed). */}
+            <StepProgress totalSteps={3} currentStep={2} labels={['Name', 'Budget', 'Connect']} halted />
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="ConnectSteps"
+        description="Connect-agent step-status checklist: done, your turn, working, and not started. The showcase stays static; the active halo belongs only to a live dialog."
+      >
+        {/* Plain testid wrapper, for the same reason as the StepProgress sample. */}
+        <div className="max-w-sm" data-testid="ds-connect-steps">
+          <Card hover={false} className="p-5">
+            <ConnectSteps
+              rows={[
+                { id: 'done', state: 'done', title: 'Setup prompt copied' },
+                { id: 'active', state: 'active', title: 'Run the connector' },
+                { id: 'working', state: 'working', title: 'Preparing the approval' },
+                { id: 'pending', state: 'pending', title: 'Review and approve' },
+              ]}
+            />
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -3259,82 +3511,284 @@ export default function DesignSystemPage() {
 
       <Section
         title="Manual send"
-        description="The only manual send Haven has is a single editable step — amount, token and recipient collected and submitted on one screen. There is no review step and no approval hold, so this showcase is a FORM, not a confirmation summary."
+        description="Two screens in one dialog since #4641: Details collects the recipient and the amount, Review is the confirmation the user reads before the passkey prompt. The Review screen is not an approval hold — nothing queues, and the payment still executes, or reverts on-chain, exactly as before. Actions live in the dialog footer through DialogActions."
       >
-        <Card hover={false} className="max-w-xl p-5">
-          <div className="space-y-3">
-            <p className="text-sm text-[var(--v2-ink-2)]">
-              Send from this account with one approval. No network fee for you.
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <label className="sr-only" htmlFor="ds-send-amount">
-                Amount
-              </label>
-              <Input
-                id="ds-send-amount"
-                className="v2-tabular"
-                placeholder="Amount"
-                defaultValue="125.00"
-                inputMode="decimal"
-                rightAction={<MaxButton onClick={() => toast.success('Amount set to balance')} />}
+        <div className="grid gap-5 xl:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Details</h3>
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-[var(--v2-ink-2)]">From Operating wallet</p>
+              <DsRecipientSpecimen
+                caption="To — your accounts, then your contacts, then a pasted address"
+                value={{ address: DS_ACME, name: 'Acme Services', kind: 'contact' }}
               />
-              <label className="sr-only" htmlFor="ds-send-token">
-                Token
-              </label>
-              <Select id="ds-send-token" defaultValue="usdc" className="sm:w-28 sm:shrink-0">
-                <option value="usdc">USDC</option>
-                <option value="eth">ETH</option>
-              </Select>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-[var(--v2-ink-3)]" htmlFor="ds-send-amount">
+                  Amount
+                </label>
+                <Input
+                  id="ds-send-amount"
+                  className="v2-tabular"
+                  placeholder="0.00"
+                  defaultValue="125.00"
+                  inputMode="decimal"
+                  rightAction={<span className="text-xs font-medium text-[var(--v2-ink-3)]">USDC</span>}
+                />
+              </div>
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                No network fee. You review the payment before you approve it.
+              </p>
+              <DialogActions>
+                <Button variant="ghost">Cancel</Button>
+                <Button>Review</Button>
+              </DialogActions>
             </div>
-            <label className="sr-only" htmlFor="ds-send-recipient">
-              Recipient address
-            </label>
-            <Input
-              id="ds-send-recipient"
-              className="font-mono"
-              placeholder="Recipient address (0x…)"
-              defaultValue="0x7a58f0d1c9b4e2a6837f5c1d0e9b4a2c6d8191c2"
-              rightAction={<PasteButton onPaste={() => toast.success('Address pasted')} />}
-            />
-            <p className="text-xs text-[var(--v2-ink-3)]">
-              Sending on Base from Operating wallet.
-            </p>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost">Cancel</Button>
-              <Button>Send</Button>
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Review</h3>
+            <div className="mt-4 space-y-5">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-[var(--v2-ink-3)]">You&apos;re sending</p>
+                <p className="v2-tabular text-2xl font-semibold text-[var(--v2-ink)]">125.00 USDC</p>
+              </div>
+              <DetailList
+                items={[
+                  {
+                    label: 'To',
+                    value: (
+                      <span className="flex items-start gap-2">
+                        <Monogram name="Acme Services" size="xs" decorative />
+                        <span className="min-w-0">
+                          <span className="block">Acme Services</span>
+                          <span className="mt-0.5 block text-xs font-normal text-[var(--v2-ink-3)]">
+                            <Address value={DS_ACME} grouped />
+                          </span>
+                        </span>
+                      </span>
+                    ),
+                  },
+                  // The rows are built from a tuple list rather than inline
+                  // label literals: `rules-summary-labels.test.tsx` scans this
+                  // file wholesale for the retired AgentRulesSummary spelling
+                  // of the From row (#1431), and this is a DetailList row, not
+                  // that one.
+                  ...(
+                    [
+                      ['From', 'Operating wallet'],
+                      ['Network', 'Base'],
+                      ['Network fee', 'None. Haven covers it.'],
+                    ] as Array<[string, string]>
+                  ).map(([label, value]) => ({ label, value })),
+                ]}
+              />
+              <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                A sent payment can&apos;t be reversed. You approve it on the next step.
+              </p>
+              <DialogActions>
+                <Button variant="ghost">Back</Button>
+                <Button>Send 125.00 USDC</Button>
+              </DialogActions>
             </div>
+          </Card>
+
+          {/*
+            The sent screen is a specimen rather than a live capture: reaching
+            it in a browser needs a completed passkey ceremony, which the visual
+            gate cannot drive. The markup is the dialog's own — `DialogResult`
+            plus the "Save as contact" row — so the clip still pins what ships.
+          */}
+          <div data-testid="ds-send-sent" className="xl:col-span-2">
+            <Card hover={false} className="p-5">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Sent</h3>
+            <div className="mt-4 space-y-4">
+              <DialogResult
+                state="success"
+                title="125.00 USDC sent"
+                description="To Acme Services on Base."
+              >
+                <p>
+                  <span className="font-medium text-[var(--v2-brand)]">View transaction</span>
+                </p>
+              </DialogResult>
+              <div className="space-y-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+                <p className="text-xs font-medium text-[var(--v2-ink-2)]">Save this address as a contact?</p>
+                <label className="sr-only" htmlFor="ds-send-contact-name">
+                  Contact name
+                </label>
+                <Input id="ds-send-contact-name" placeholder="Name" defaultValue="Acme Services" />
+                <Button size="sm">Save</Button>
+              </div>
+              <Button variant="ghost" className="w-full">
+                Done
+              </Button>
+            </div>
+            </Card>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Contacts and recipients"
+        description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments. A saved recipient is a Row: Monogram, name, the short address with its networks, then a visible Send and a ⋯ menu holding Copy address, Edit and Delete (#4642)."
+      >
+        <Card hover={false} className="max-w-xl p-0">
+          <Card.Header
+            title="Saved recipients"
+            description="Use names for people and services you pay often. Confirm the network in Send."
+            actions={
+              <Button size="sm" leadingIcon={Plus} className="flex-shrink-0 whitespace-nowrap">
+                Add contact
+              </Button>
+            }
+          />
+          <div className="divide-y divide-[var(--v2-border)]">
+            {[
+              ['Acme Services', '0x7a58...91c2'],
+              ['Research API', '0x31bc...8d04'],
+            ].map(([name, address]) => (
+              <Row
+                key={name}
+                leading={<Monogram name={name} />}
+                leadingClassName="h-9 w-9"
+                title={name}
+                subtitle={<span className="font-mono">{address}</span>}
+                trailing={
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={ArrowUp}
+                      aria-label={`Send to ${name}`}
+                    >
+                      Send
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuIconTrigger
+                        aria-label={`More actions for ${name}`}
+                      />
+                      <DropdownMenuContent>
+                        <DropdownMenuItem onSelect={() => undefined}>Copy address</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => undefined} tone="danger">
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                }
+              />
+            ))}
           </div>
         </Card>
       </Section>
 
       <Section
-        title="Contacts and recipients"
-        description="Recipient surfaces show names first, keep wallet addresses subordinate, and preserve direct address entry for one-off payments."
+        title="Combobox and recipient field"
+        description="The searchable picker the design system did not have. Combobox is the primitive — an editable combobox over caller-supplied groups, owning no data. RecipientField is the Send dialog's field built on it: your accounts, then your contacts, then a pasted address, with the caller owning the one useContacts() and one useAccounts() so a contact saved in the dialog shows up here. Click a field to open its list; the pixel gate drives that trigger for the clips below."
       >
-        <Card hover={false} className="max-w-xl overflow-hidden p-0">
-          <Card.Header
-            title="Saved recipients"
-            description="Use names for people and services you pay often. Confirm the network in Send."
-            actions={
-              <Button size="sm" className="flex-shrink-0 whitespace-nowrap">
-                Add contact
-              </Button>
-            }
-          />
-          {[
-            ['Acme Services', '0x7a58...91c2'],
-            ['Research API', '0x31bc...8d04'],
-          ].map(([name, address]) => (
-            <div key={name} className="flex items-center gap-3 border-b border-[var(--v2-border)] px-5 py-3 last:border-b-0">
-              <Monogram name={name} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{name}</p>
-                <p className="mt-0.5 font-mono text-xs text-[var(--v2-ink-3)]">{address}</p>
-              </div>
-              <StatusBadge tone="neutral">Recipient</StatusBadge>
+        <div data-testid="ds-combobox" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Combobox</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Groups named by their visible label, options shaped like Row, the active option on
+              <code className="mx-1 font-mono">--v2-surface-hover</code>. From <code className="font-mono">sm</code> up
+              the list is a portaled popover; below it, inline under the field.
+            </p>
+            <div className="mt-4">
+              <DsComboboxSpecimen />
             </div>
-          ))}
-        </Card>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-field" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Recipient field</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Your accounts, then your contacts, then a pasted address. Typing filters by name or
+              address prefix; a pasted address collapses the list to one entry.
+            </p>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Empty query — every group" />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-paste" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Pasted address</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              A known address collapses to its entry, with the kind it resolved to. Precedence is
+              own account, then contact, then new.
+            </p>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Pasted known address" initialQuery={DS_ACME} />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-status" className="min-h-[560px]">
+          <Card hover={false} className="h-full p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Contacts unavailable</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+              Your accounts and paste keep working. The failure line is the one
+              <code className="mx-1 font-mono">docs/product/screen-recipes.md</code> requires.
+            </p>
+            <div className="mt-4">
+              <DsRecipientSpecimen
+                caption="Contacts failed to load"
+                contacts={[]}
+                contactsError="We could not load your contacts."
+              />
+            </div>
+          </Card>
+        </div>
+
+        <div data-testid="ds-recipient-chips" className="grid gap-4 sm:grid-cols-3">
+          <DsRecipientSpecimen
+            caption="Chosen — your account"
+            value={{ address: DS_SAVINGS, name: 'Savings', kind: 'account' }}
+          />
+          <DsRecipientSpecimen
+            caption="Chosen — saved contact"
+            value={{ address: DS_ACME, name: 'Acme Services', kind: 'contact' }}
+          />
+          <DsRecipientSpecimen
+            caption="Chosen — new address"
+            value={{ address: DS_UNKNOWN, kind: 'new' }}
+          />
+        </div>
+
+        {/* The remaining states, deterministic through the props and covered by
+            the vitest suites rather than by a clip: a filtered Combobox, a
+            pasted new address, no match, and contacts still loading. */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Filtered</h3>
+            <div className="mt-4">
+              <DsComboboxSpecimen initialQuery="ac" />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Pasted new address</h3>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Not saved anywhere" initialQuery={DS_UNKNOWN} />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">No match</h3>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="Nothing saved matches" initialQuery="zzz" />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Contacts loading</h3>
+            <div className="mt-4">
+              <DsRecipientSpecimen caption="One-line skeleton" contacts={[]} contactsLoading />
+            </div>
+          </Card>
+        </div>
       </Section>
 
       <Section
@@ -3494,7 +3948,56 @@ export default function DesignSystemPage() {
                           ) : undefined
                         }
                         asset="USDC"
-                        timestamp={timeAgo(row.at)}
+                        timestamp={formatClockTime(row.at)}
+                        onOpen={() => setDsLedgerOpened(row.title)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+          <p className="mt-3 text-xs text-[var(--v2-ink-3)]">
+            {dsLedgerOpened
+              ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`
+              : 'Click a row (or press Enter) — the account page opens the shared TransactionDetailPanel from the row.'}
+          </p>
+        </div>
+      </Section>
+
+      {/* #4572: the phone row at 375px — the two acceptance cases the
+          desktop-width ledger clip above cannot show. */}
+      <Section
+        title="Activity ledger on a phone"
+        description="TransactionActivityRow below 640px (#4572): two bands, not three. The title line carries the title (truncating) and the amount, right-aligned; the description line carries the description and the clock time. Badges ride a subordinate line, so they can never squeeze the amount. The first row is a 40-character title; the second is the crowded worst case — long title, amount, a payment-status badge and an accounting badge; the third is a grouped ×N row. Rows under a day band show the clock time, never “29d ago”: the band already states the day."
+      >
+        <div className="max-w-[375px]">
+          <div data-testid="ds-activity-ledger-phone">
+            <Card hover={false} className="overflow-hidden">
+              <div className="divide-y divide-[var(--v2-border)]">
+                {transactionDayGroups(DS_PHONE_LEDGER_ROWS, (row) => row.at).map((group) => (
+                  <div key={group.dayKey}>
+                    <TransactionActivityDayHeader label={group.label} />
+                    {group.items.map((row, index) => (
+                      <TransactionActivityRow
+                        key={row.id}
+                        insetDivider={index > 0}
+                        direction="out"
+                        title={row.title}
+                        description={row.description}
+                        value={row.value}
+                        countLabel={row.countLabel}
+                        status={row.status}
+                        statusTone={row.statusTone}
+                        extraBadges={
+                          row.accounting ? (
+                            <AccountingBadge accounting={DS_LEDGER_ACCOUNTING} interactive={false} />
+                          ) : undefined
+                        }
+                        fiat={row.fiat}
+                        asset="USDC"
+                        timestamp={formatClockTime(row.at)}
+                        density="compact"
                         onOpen={() => setDsLedgerOpened(row.title)}
                       />
                     ))}
@@ -3584,12 +4087,9 @@ export default function DesignSystemPage() {
                   </div>
                 </div>
                 <DropdownMenu>
-                  <DropdownMenuTrigger
+                  <DropdownMenuIconTrigger
                     aria-label="Budget options 250 USDC per week"
-                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Icon icon={EllipsisVertical} className="h-4 w-4" />
-                  </DropdownMenuTrigger>
+                  />
                   <DropdownMenuContent align="right">
                     <DropdownMenuItem onSelect={() => toast.info('Edit budget')}>Edit budget</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => toast.info('Add budget')}>Add budget</DropdownMenuItem>
@@ -3901,19 +4401,46 @@ export default function DesignSystemPage() {
         <Card hover={false} className="p-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Widths</h3>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Anatomy</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Choose <code className="rounded bg-[var(--v2-surface)] px-1">sm</code>,{' '}
-                <code className="rounded bg-[var(--v2-surface)] px-1">md</code>,{' '}
-                <code className="rounded bg-[var(--v2-surface)] px-1">lg</code>, or{' '}
-                <code className="rounded bg-[var(--v2-surface)] px-1">xl</code> for the content, not the page.
+                Title, an optional subtitle, a close button, the body, and an optional footer. Every
+                dialog reads the same, top to bottom.
+              </p>
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setSingleScreenFooterOpen(true)}>
+                Open a single-screen dialog
+              </Button>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close button</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                On by default. Opt out only when another control is the dismiss — a confirmation&apos;s
+                Cancel. A dialog that guards closing while busy passes{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">closeButtonDisabled</code> so the ✕
+                is guarded too.
               </p>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Header</h3>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Field labels</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Dialog panels are white with a compact <code className="rounded bg-[var(--v2-surface)] px-1">text-sm</code>{' '}
-                title. Add a subtitle, close button, or header accessory when the flow needs them.
+                Sentence case, <code className="rounded bg-[var(--v2-surface)] px-1">text-sm font-medium</code>{' '}
+                in ink. Uppercase, letter-spaced labels are retired.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Open-time focus</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                The body&apos;s first focusable element, never the ✕. The ✕ is the fallback only when the
+                body has nothing focusable in it.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Widths</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+                <code className="rounded bg-[var(--v2-surface)] px-1">sm</code> for one question,{' '}
+                <code className="rounded bg-[var(--v2-surface)] px-1">md</code> (default) for a one- or
+                two-field form, <code className="rounded bg-[var(--v2-surface)] px-1">lg</code> for a list
+                manager, <code className="rounded bg-[var(--v2-surface)] px-1">xl</code> for a multi-screen
+                flow. Width follows the content, not the page.
               </p>
             </div>
             <div>
@@ -3936,11 +4463,65 @@ export default function DesignSystemPage() {
             <div>
               <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Close behavior</h3>
               <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
-                Backdrop, Escape, and the optional close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
+                Backdrop, Escape, and the close button dismiss ordinary dialogs. Disable only the affordances an active execution step must protect.
               </p>
             </div>
           </div>
         </Card>
+
+        <Card hover={false} className="mt-4 p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Footer — the owner&apos;s choice</h3>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+            Two dialog kinds, two footer rules. A <em>multi-screen</em> dialog uses{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">DialogActions</code>: equal halves, stacking
+            below <code className="rounded bg-[var(--v2-surface)] px-1">sm</code>. A <em>single-screen</em>{' '}
+            dialog uses right-aligned, content-width buttons. The alternative — one footer shape everywhere —
+            is shown beside it; the owner picks on the PR that introduced this section.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSingleScreenFooterOpen(true)}>
+              Single-screen footer (shipped rule)
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setMultiScreenFooterOpen(true)}>
+              Single-screen with DialogActions (alternative)
+            </Button>
+          </div>
+        </Card>
+      </Section>
+
+      <Section
+        title="DialogResult"
+        description="A dialog's outcome screen, in one place (#4564). Three states — busy, success, error — with the same icon circle, title and description rhythm, so Edit budget, Edit agent and Fund merchant cannot drift. It owns the centred block only; the action row stays the caller's, in Modal's footer."
+        testId="ds-dialog-result"
+      >
+        <div className="grid gap-5 lg:grid-cols-3">
+          <Card hover={false} className="p-5">
+            <DialogResult
+              state="busy"
+              title="Waiting for your approval…"
+              description="Approve in your wallet or with your passkey. The budget changes only after you approve."
+            />
+          </Card>
+          <Card hover={false} className="p-5">
+            <DialogResult
+              state="success"
+              title="Budget updated"
+              description="The new limits are live and the previous budget is stopped."
+            />
+          </Card>
+          <Card hover={false} className="p-5">
+            <DialogResult
+              state="error"
+              title="Budget update failed"
+              description="Nothing changed — your current budget still works. Try again."
+            />
+          </Card>
+        </div>
+        <p className="mt-4 text-xs leading-relaxed text-[var(--v2-ink-3)]">
+          The busy state uses the shared <code className="rounded bg-[var(--v2-surface)] px-1">Spinner</code>{' '}
+          (#4563), whose rotation is gated behind <code className="rounded bg-[var(--v2-surface)] px-1">motion-safe:</code>.
+          Tone is the state&apos;s, never the caller&apos;s.
+        </p>
       </Section>
 
       <Section
@@ -3990,6 +4571,217 @@ export default function DesignSystemPage() {
             action={<Button size="sm" variant="ghost">Try again</Button>}
           />
         </div>
+      </Section>
+
+      <Section
+        title="Loading states — RouteLoading and the activity-row skeleton"
+        description="Two shapes that already shipped ten and four times over, now one each. RouteLoading is the route and auth fallback: one brand dot, one ink tone, and a visible Loading… label that is also the element's accessible name (role=status, aria-busy, aria-live=polite). TransactionActivityRowSkeleton stands in for a ledger row at the row's own density — comfortable for the ledgers, compact for the dashboard preview, where it keeps the amount placeholder and the 72px desktop height."
+        testId="ds-loading-states"
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <p className="text-sm font-medium text-[var(--v2-ink-2)]">RouteLoading</p>
+            <div className="mt-4">
+              <RouteLoading />
+            </div>
+            <div className="mt-4">
+              <RouteLoading label="Loading account…" />
+            </div>
+          </Card>
+          <Card hover={false} className="overflow-hidden">
+            <Card.Header title="TransactionActivityRowSkeleton" />
+            <div
+              className="divide-y divide-[var(--v2-border)]"
+              role="status"
+              aria-busy="true"
+              aria-live="polite"
+              aria-label="Loading activity"
+            >
+              <TransactionActivityRowSkeleton />
+              <TransactionActivityRowSkeleton density="compact" />
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="EmptyState — sizes, the in-card form, and the load-error shape"
+        description="One primitive for every absence. The dashed shell is a filled surface, so inside a Card it must be dropped with `bare` — otherwise the card holds a second filled surface, which the surface-hierarchy rule forbids."
+        testId="ds-empty-state"
+      >
+        <div className="grid gap-5 lg:grid-cols-3">
+          <EmptyState
+            title="No agents yet"
+            body="Connect an agent to let it make payments within rules you control."
+            action={<Button size="sm">Connect an agent</Button>}
+          />
+          <EmptyState
+            size="compact"
+            title="No payments yet"
+            body="Payments your agents make appear here."
+          />
+          <EmptyState size="inline" title="No budget set yet" />
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5" data-testid="ds-empty-state-in-card">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">In-card form — `bare`</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              The same state inside a Card, with no shell of its own. This is the dashboard
+              Transactions card&apos;s shape.
+            </p>
+            <div className="mt-4">
+              <EmptyState
+                bare
+                size="compact"
+                title="No payments yet"
+                body="Payments your agents make appear here."
+              />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5" data-testid="ds-empty-state-load-error">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Load-error shape</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              &quot;&lt;Thing&gt; could not load&quot;, what is still true, and a <strong>Try again</strong> button
+              (screen-recipes SR:676).
+            </p>
+            <div className="mt-4">
+              <EmptyState
+                bare
+                tone="danger"
+                icon={<Icon icon={OctagonAlert} className="h-full w-full" />}
+                title="Agent budgets could not load"
+                body="Existing agent budgets are unchanged."
+                action={<Button size="sm" variant="ghost">Try again</Button>}
+              />
+            </div>
+          </Card>
+          <Card hover={false} className="p-5" data-testid="ds-empty-state-align-start">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">In left-aligned content — `align=&quot;start&quot;`</h3>
+            <p className="mt-1 text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              Where the state sits in a left-aligned column and must line up with it. This is the agent
+              page&apos;s Spending card with no budget: the line and the button share the left edge.
+            </p>
+            <div className="mt-4">
+              <p className="text-sm font-medium text-[var(--v2-ink-2)]">Budget</p>
+              <div className="mt-3">
+                <EmptyState size="inline" bare align="start" title="No budget yet." />
+                <Button size="sm" variant="ghost" className="mt-2">
+                  Set budget
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="StatusBadge — one label and one tone per state"
+        description="Five tones, and a vocabulary table in design-system.md § StatusBadge that names one label and one tone per state for agents, payments, accounting sync, merchant budgets, the agent passport and the network chip."
+        testId="ds-status-badge"
+      >
+        <Card hover={false} className="p-5">
+          <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Every tone</h3>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <StatusBadge tone="success">Sent</StatusBadge>
+            <StatusBadge tone="warning">Needs attention</StatusBadge>
+            <StatusBadge tone="danger">Failed</StatusBadge>
+            <StatusBadge tone="neutral">Archived</StatusBadge>
+            <StatusBadge tone="brand">Needs setup</StatusBadge>
+          </div>
+          <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+            <code className="rounded bg-[var(--v2-surface)] px-1">brand</code> is a next step for the
+            owner, not a problem — which is why <strong>Needs setup</strong> is brand and not warning.
+            <code className="rounded bg-[var(--v2-surface)] px-1">warning</code> is earned by a change
+            in posture: Paused, Suspended, Revoking….
+          </p>
+        </Card>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Agents and payments</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">Connected</StatusBadge>
+              <StatusBadge tone="warning">Paused</StatusBadge>
+              <StatusBadge tone="brand">Needs setup</StatusBadge>
+              <StatusBadge tone="danger">Revoked</StatusBadge>
+              <StatusBadge tone="neutral">Archived</StatusBadge>
+              <StatusBadge tone="neutral">Budget ended</StatusBadge>
+              <StatusBadge tone="neutral">92% used</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="brand">Awaiting signature</StatusBadge>
+              <StatusBadge tone="brand">Submitted</StatusBadge>
+              <StatusBadge tone="success">Sent</StatusBadge>
+              <StatusBadge tone="danger">Failed</StatusBadge>
+              <StatusBadge tone="neutral">Expired</StatusBadge>
+              <StatusBadge tone="success">Recovered</StatusBadge>
+              <StatusBadge tone="warning">Confirming</StatusBadge>
+              <StatusBadge tone="warning">Needs attention</StatusBadge>
+            </div>
+          </Card>
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Accounting, merchants, passport, network</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">In Fortnox</StatusBadge>
+              <StatusBadge tone="success">Evidence archived</StatusBadge>
+              <StatusBadge tone="neutral">Tracked</StatusBadge>
+              <StatusBadge tone="neutral">Sending…</StatusBadge>
+              <StatusBadge tone="warning">Not sent</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">Current</StatusBadge>
+              <StatusBadge tone="warning">Old address</StatusBadge>
+              <StatusBadge tone="warning">Address unconfirmed</StatusBadge>
+              <StatusBadge tone="warning">Not every offer</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge tone="success">Issued</StatusBadge>
+              <StatusBadge tone="neutral">Issuing…</StatusBadge>
+              <StatusBadge tone="danger">Issuance failed</StatusBadge>
+              <StatusBadge tone="warning">Revoking…</StatusBadge>
+              <StatusBadge tone="danger">Revoked on-chain</StatusBadge>
+              <StatusBadge tone="success">Active</StatusBadge>
+              <StatusBadge tone="warning">Suspended</StatusBadge>
+              <StatusBadge tone="neutral">Unknown</StatusBadge>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <StatusBadge>Test network</StatusBadge>
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              Contextual tags — tool-call results, connect-setup steps, the credential handoff,
+              VIES and &quot;This device&quot; — are outside the vocabulary table by name.
+            </p>
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="Spinner — the one busy indicator"
+        description="Two sizes on the icon scale, and the rotation is gated with motion-safe so a reduced-motion user gets a still glyph. Decorative by default; pass a label when the spinner is the only thing saying the surface is busy."
+        testId="ds-spinner"
+      >
+        <Card hover={false} className="p-5">
+          <div className="flex flex-wrap items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Spinner />
+              <span className="text-sm text-[var(--v2-ink-2)]">sm — 16px, beside text</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Spinner size="md" />
+              <span className="text-sm text-[var(--v2-ink-2)]">md — 20px, standalone</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Spinner label="Loading payments" />
+              <span className="text-sm text-[var(--v2-ink-2)]">labelled — role=&quot;status&quot;</span>
+            </div>
+          </div>
+          <p className="mt-4 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+            A spinner never replaces the words that say what is happening: a button in flight still
+            swaps its label to <code className="rounded bg-[var(--v2-surface)] px-1">Verbing…</code> with{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">aria-busy</code>, and a loading
+            container still carries <code className="rounded bg-[var(--v2-surface)] px-1">aria-busy</code> and{' '}
+            <code className="rounded bg-[var(--v2-surface)] px-1">aria-live</code> around its skeletons.
+          </p>
+        </Card>
       </Section>
 
       <Section
@@ -4579,12 +5371,13 @@ export default function DesignSystemPage() {
             meta="My account · Base · Created 2 months ago · Last activity 3 minutes ago"
             actions={
               <>
-                <Button variant="tertiary" size="sm">
-                  Pause payments
-                </Button>
-                <Button variant="ghost" size="sm" aria-label="More actions">
-                  ⋮
-                </Button>
+                <Button variant="ghost">Pause payments</Button>
+                <DropdownMenu>
+                  <DropdownMenuIconTrigger aria-label="Agent options" edge="end" />
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             }
           />
@@ -4604,9 +5397,12 @@ export default function DesignSystemPage() {
             meta="My account · Created 3 weeks ago · Active 2h ago"
             inlineActions
             actions={
-              <Button variant="ghost" size="sm" aria-label="More actions">
-                ⋮
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuIconTrigger aria-label="Agent options" edge="end" />
+                <DropdownMenuContent>
+                  <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             }
           />
         </div>
@@ -4623,9 +5419,12 @@ export default function DesignSystemPage() {
             meta="My account · Created 3 weeks ago · Active 2h ago"
             inlineActions
             actions={
-              <Button variant="ghost" size="sm" aria-label="More actions">
-                ⋮
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuIconTrigger aria-label="Agent options" edge="end" />
+                <DropdownMenuContent>
+                  <DropdownMenuItem onSelect={() => undefined}>Edit</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             }
           />
           <div>
@@ -4671,6 +5470,58 @@ export default function DesignSystemPage() {
         </div>
       </Modal>
 
+      {/* #4562: the two footer shapes for a SINGLE-SCREEN dialog, side by side
+          so the owner can pick one on the PR. Both carry the same body — a
+          title, a subtitle, one labelled field — so the only difference on
+          screen is the footer. */}
+      <Modal
+        open={singleScreenFooterOpen}
+        onClose={() => setSingleScreenFooterOpen(false)}
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
+        width="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSingleScreenFooterOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => setSingleScreenFooterOpen(false)}>Save budget</Button>
+          </>
+        }
+      >
+        <div>
+          <label htmlFor="ds-single-screen-budget" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+            Budget per day
+          </label>
+          <Input id="ds-single-screen-budget" placeholder="5.00" inputMode="decimal" />
+        </div>
+      </Modal>
+
+      <Modal
+        open={multiScreenFooterOpen}
+        onClose={() => setMultiScreenFooterOpen(false)}
+        title="Set agent budget"
+        subtitle="Set the budget this agent may spend."
+        width="md"
+        footer={
+          <DialogActions>
+            <Button variant="ghost" className="flex-1" onClick={() => setMultiScreenFooterOpen(false)}>
+              Cancel
+            </Button>
+            <Button className="flex-1" onClick={() => setMultiScreenFooterOpen(false)}>
+              Save budget
+            </Button>
+          </DialogActions>
+        }
+      >
+        <div>
+          <label htmlFor="ds-multi-screen-budget" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
+            Budget per day
+          </label>
+          <Input id="ds-multi-screen-budget" placeholder="5.00" inputMode="decimal" />
+        </div>
+      </Modal>
+
       {/* #4094: the one Receive dialog, opened by its showcase section above. */}
       <ReceiveDialog
         open={receiveDialogOpen}
@@ -4685,7 +5536,7 @@ export default function DesignSystemPage() {
         subtitle="Set the budget this agent may spend."
         showCloseButton
         width="lg"
-        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} />}
+        headerAccessory={<StepProgress totalSteps={3} currentStep={1} labels={['Name', 'Budget', 'Connect']} halo />}
         footer={
           <>
             <Button variant="ghost" onClick={() => setModalOpen(false)}>

@@ -25,7 +25,8 @@ import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
 import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
 import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
-import { relayerKeysFromEnv } from './infra/relayer-env-keys.js'
+import { relayerKeyEntriesFromEnv, relayerKeysFromEnv } from './infra/relayer-env-keys.js'
+import { assertBindingKeyNotReused } from './infra/binding-key-collision.js'
 import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
@@ -506,6 +507,17 @@ setAnchorUidRepair(repairAnchorUidFromReceipt)
 setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
   config.relayerPrivateKey,
   ...relayerKeysFromEnv(),
+])
+// #4655 (owner decision 2): the x402 binding key is a third server key role —
+// it authenticates expected context and sweep authorizations, and its address is
+// published as HAVEN_X402_BINDING_SIGNER for installed signers to pin. Refuse to
+// boot when an operator pasted a relayer or receipt key into it. Unset stays
+// allowed (a deployment that does not sign binding context has no key to
+// collide), and the refusal names the variables, never the values.
+assertBindingKeyNotReused(process.env.X402_BINDING_PRIVATE_KEY, [
+  { variable: 'RELAYER_PRIVATE_KEY', value: config.relayerPrivateKey },
+  ...relayerKeyEntriesFromEnv(),
+  { variable: 'PASSPORT_RECEIPT_SIGNING_KEY', value: process.env.PASSPORT_RECEIPT_SIGNING_KEY },
 ])
 // Warn — once, at boot — when this deployment anchors passports it cannot
 // verify (#1151). Silent in every other combination. Must run AFTER the signer

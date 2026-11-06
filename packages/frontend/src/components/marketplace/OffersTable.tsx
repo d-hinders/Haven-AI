@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Table } from '@/components/ui/Table'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import {
   ANY_RECIPIENT_BUDGET_TAG,
   agentsThatCanPay,
@@ -62,14 +63,10 @@ function OfferCard({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-[var(--v2-ink)]">{entry.name}</span>
         {degraded && (
-          <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
-            Limited availability
-          </span>
+          <StatusBadge tone="warning">Limited availability</StatusBadge>
         )}
         {tagged && (
-          <span className="rounded-full bg-[var(--v2-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--v2-warning)]">
-            {ANY_RECIPIENT_BUDGET_TAG}
-          </span>
+          <StatusBadge tone="warning">{ANY_RECIPIENT_BUDGET_TAG}</StatusBadge>
         )}
       </div>
       <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{entry.description}</p>

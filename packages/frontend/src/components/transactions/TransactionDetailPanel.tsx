@@ -12,7 +12,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
-import { truncate } from '@/lib/format'
+import { formatDateTime, truncate } from '@/lib/format'
 import { parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
 import { strandedFundsCauseWithLocation } from '@/lib/stranded-funds-copy'
 import {
@@ -252,9 +252,9 @@ function headerLine(tx: AggregatedTransaction, kind: Kind): string {
   return `${verb} from ${account}`
 }
 
-/** The header's "when": the date and the time to the minute, in the viewer's locale. */
+/** The header's "when": the date and the time to the minute, in the app's en-GB voice. */
 export function formatWhen(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return formatDateTime(timestamp * 1000)
 }
 
 // ── The panel ──────────────────────────────────────────────────────
@@ -279,8 +279,11 @@ export default function TransactionDetailPanel({
 
   const kind = rowKind(tx)
   // The rows' one precedence (`transactionRowBadge`, #4266); the panel
-  // alone names a plain settled payment "Executed".
-  const status = transactionRowBadge(tx) ?? { label: 'Executed', tone: 'success' as const }
+  // alone names a plain settled payment "Sent" — the same word
+  // `PAYMENT_STATUS.confirmed` uses (#4567). The #3810 no-badge rule ("a
+  // confirmed row carries no badge") is for LIST rows; the panel's anatomy
+  // carries a status badge.
+  const status = transactionRowBadge(tx) ?? { label: 'Sent', tone: 'success' as const }
   // The title matches the list row: who was paid (or who paid), never a raw
   // address; a folded move reads as the ledger row does.
   const title =
@@ -344,9 +347,9 @@ export default function TransactionDetailPanel({
       <DetailRow key="by" label="By" value={tx.initiatedBy === 'human' ? 'You' : 'Your accounts'} />,
     )
   } else {
-    // A delegate sweep: the agent's unspent allowance funding, returned.
+    // A delegate sweep: the agent's unused budget, returned.
     details.push(
-      <DetailRow key="what" label="What happened" value="Unspent allowance returned" />,
+      <DetailRow key="what" label="What happened" value="Unused budget returned" />,
     )
   }
   // #2870: only when the list joined a sync row for this payment — the same
@@ -478,9 +481,9 @@ export default function TransactionDetailPanel({
             target="_blank"
             rel="noopener noreferrer"
             className="-ml-3.5"
+            trailingIcon={ExternalLink}
           >
             View on explorer
-            <Icon icon={ExternalLink} className="h-3.5 w-3.5" />
           </Button>
         ) : undefined
       }

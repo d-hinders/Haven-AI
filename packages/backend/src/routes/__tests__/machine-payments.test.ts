@@ -10,6 +10,8 @@ import machinePaymentsReconciliationEventsRoutes from '../machine-payments-recon
 import { installRequestValidation } from '../../openapi/request-validation.js'
 // #1444: validate the real payload against the spec's own schema.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+// #4579: the guard reads the DECLARED key set from the spec itself.
+import { openapiSpec } from '../../openapi/spec.js'
 // #1987 (epic #1440 slice #1987): `modules/mpp/authorize.ts` — and its
 // exported `authorizeMachinePayment` / `AuthorizeMachinePaymentInput` — is
 // DELETED. It had no production caller left: `POST /machine-payments/authorize`
@@ -99,6 +101,53 @@ const challenge = {
   recipient: RECIPIENT,
   expiresAt: '2099-01-01T00:00:00.000Z',
   metadata: { demoResource: 'market-summary' },
+}
+
+/**
+ * #4579: the canonical served receipt row — one `machine_payment_evidence`
+ * row exactly as `LIST_EVIDENCE_RECEIPTS_SQL` returns it, including the two
+ * header VALUES (`payment_proof_header`, `protocol_receipt_header`) that the
+ * serializer must never emit. Shared by the exact-shape test below and by the
+ * emitted-vs-declared guard, so both read the same row.
+ */
+const RECEIPT_ROW = {
+  id: '44444444-4444-4444-4444-444444444444',
+  payment_intent_id: PAYMENT_ID,
+  approval_request_id: null,
+  agent_id: AGENT.id,
+  user_id: AGENT.user_id,
+  rail: 'mpp_demo',
+  proof_status: 'payment_confirmed',
+  tx_hash: TX_HASH,
+  chain_id: 8453,
+  resource_url: challenge.resource,
+  merchant_address: RECIPIENT.toLowerCase(),
+  payer_address: AGENT.account_address.toLowerCase(),
+  settlement_address: RECIPIENT.toLowerCase(),
+  token_symbol: 'USDC',
+  token_address: USDC,
+  amount_raw: '10000',
+  amount_human: '0.01',
+  challenge_id: challenge.challengeId,
+  idempotency_key: 'mpp_demo:test',
+  challenge_payload: { rail: 'mpp_demo' },
+  selected_payment: null,
+  payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+  payment_proof_header: 'secret-proof-header',
+  protocol_receipt_header_name: 'Payment-Receipt',
+  protocol_receipt_header: 'receipt-header',
+  protocol_receipt_payload: { ok: true },
+  merchant_status: 200,
+  confirmed_at: '2026-05-15T12:00:00.000Z',
+  created_at: '2026-05-15T12:00:01.000Z',
+  updated_at: '2026-05-15T12:00:01.000Z',
+  settlement_scheme: 'eip3009',
+  // #2960: `pi.delegate_address AS intent_delegate_address` /
+  // `pi.machine_metadata->>'delegate_account_address'`, joined by
+  // `LIST_EVIDENCE_RECEIPTS_SQL` — the delegate that PAID this intent, not the
+  // calling agent's current delegate.
+  intent_delegate_address: AGENT.delegate_address,
+  intent_delegate_account_address: null,
 }
 
 /**
@@ -584,6 +633,8 @@ describe('machine payment routes', () => {
           // (expires_at is far beyond it). Derived here rather than frozen,
           // since the route reads the real clock.
           next_refill_at: new Date((Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000).toISOString(),
+          // #4666: the seed row's expires_at ('99999999999'), as ISO 8601.
+          budget_expires_at: '5138-11-16T09:46:39.000Z',
           onchain: {
             amount: '10000000',
             spent: '0',
@@ -637,6 +688,29 @@ describe('machine payment routes', () => {
       expect(degraded.statusCode).toBe(200)
       expectMatchesSpec('GET', '/machine-payments/allowances', degraded.json())
       expect(degraded.json().superseded_by).toBeNull()
+    })
+
+    it('delegation rail: budget_expires_at is null for an unrepresentable expiry, and the spec allows it (#4666)', async () => {
+      primeDb(
+        authAs(DELEGATION_AGENT),
+        delegationRows([{
+          id: '55555555-5555-4555-8555-555555555555',
+          agent_id: AGENT.id,
+          chain_id: 84532,
+          token_address: SEPOLIA_USDC,
+          budget_atomic: '1234567',
+          period_seconds: 86_400,
+          expires_at: '9007199254740991',
+        }]),
+      )
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().allowances[0].budget_expires_at).toBeNull()
+      expectMatchesSpec('GET', '/machine-payments/allowances', response.json())
     })
 
     // #2328: the AllowanceSummary round trip. `GET /agents` and
@@ -909,45 +983,7 @@ describe('machine payment routes', () => {
       AUTH,
       receiptsTotal(1),
       [/FROM machine_payment_evidence e/, () => ({
-        rows: [{
-          id: '44444444-4444-4444-4444-444444444444',
-          payment_intent_id: PAYMENT_ID,
-          approval_request_id: null,
-          agent_id: AGENT.id,
-          user_id: AGENT.user_id,
-          rail: 'mpp_demo',
-          proof_status: 'payment_confirmed',
-          tx_hash: TX_HASH,
-          chain_id: 8453,
-          resource_url: challenge.resource,
-          merchant_address: RECIPIENT.toLowerCase(),
-          payer_address: AGENT.account_address.toLowerCase(),
-          settlement_address: RECIPIENT.toLowerCase(),
-          token_symbol: 'USDC',
-          token_address: USDC,
-          amount_raw: '10000',
-          amount_human: '0.01',
-          challenge_id: challenge.challengeId,
-          idempotency_key: 'mpp_demo:test',
-          challenge_payload: { rail: 'mpp_demo' },
-          selected_payment: null,
-          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
-          payment_proof_header: 'secret-proof-header',
-          protocol_receipt_header_name: 'Payment-Receipt',
-          protocol_receipt_header: 'receipt-header',
-          protocol_receipt_payload: { ok: true },
-          merchant_status: 200,
-          confirmed_at: '2026-05-15T12:00:00.000Z',
-          created_at: '2026-05-15T12:00:01.000Z',
-          updated_at: '2026-05-15T12:00:01.000Z',
-          settlement_scheme: 'eip3009',
-          // #2960: `pi.delegate_address AS intent_delegate_address` /
-          // `pi.machine_metadata->>'delegate_account_address'`, joined by
-          // `LIST_EVIDENCE_RECEIPTS_SQL` — the delegate that PAID this
-          // intent, not the calling agent's current delegate.
-          intent_delegate_address: AGENT.delegate_address,
-          intent_delegate_account_address: null,
-        }],
+        rows: [RECEIPT_ROW],
       })],
     )
 
@@ -1006,7 +1042,10 @@ describe('machine payment routes', () => {
         delivery_reference: null,
         // #4534: no purchase correlation reported for this seed — null, not
         // absent. An ungrouped payment is fed exactly as before.
+        // #4577: `parent_receipt_id` is the same value under the name that says
+        // what it holds; `parent_payment_id` stays as the deprecated alias.
         purchase_group_id: null,
+        parent_receipt_id: null,
         parent_payment_id: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
@@ -1022,6 +1061,48 @@ describe('machine payment routes', () => {
     })
     expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
     expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
+  })
+
+  // #4579: the schema-side half of the emitted-vs-declared check. Quality-scan
+  // block 9 compares the emitted keys with what the SDK MAPPER reads; nothing
+  // compared them with what the SPEC declares. `MachinePaymentReceipt` sets
+  // `additionalProperties: true`, so `expectMatchesSpec` above passes an
+  // undeclared key BY DESIGN — six keys rode that gap until this guard.
+  //
+  // Declared set: read from the spec's own component schema, never a
+  // hand-written list. Emitted set: read from the live route's response, never
+  // a fixture literal. The allowlist is empty and pinned, so it can only stay
+  // empty — an undeclared key is a contract gap, not something to allowlist.
+  it('#4579: every key the receipts route emits is declared on MachinePaymentReceipt', async () => {
+    primeDb(
+      AUTH,
+      receiptsTotal(1),
+      [/FROM machine_payment_evidence e/, () => ({ rows: [RECEIPT_ROW] })],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=10',
+      headers: { authorization: 'Bearer sk_agent_test_key_4579' },
+    })
+    expect(response.statusCode).toBe(200)
+
+    const schemas = openapiSpec.components.schemas as unknown as Record<
+      string,
+      { properties: Record<string, unknown> }
+    >
+    const declared = Object.keys(schemas.MachinePaymentReceipt.properties)
+    const emitted = new Set(
+      (response.json().receipts as Record<string, unknown>[]).flatMap((receipt) => Object.keys(receipt)),
+    )
+
+    const allowlist: string[] = []
+    expect(allowlist).toEqual([])
+
+    const undeclared = [...emitted]
+      .filter((key) => !declared.includes(key) && !allowlist.includes(key))
+      .sort()
+    expect(undeclared, `receipt keys the schema does not declare: ${undeclared.join(', ')}`).toEqual([])
   })
 
   // #2960 finding 3: the erc7710 case was missing here — receipts had only

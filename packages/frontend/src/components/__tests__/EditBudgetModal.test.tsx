@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DelegationBudget } from '@/hooks/useDelegationBudget'
@@ -430,6 +430,43 @@ describe('EditBudgetModal (#3166) — wiring pins', () => {
       read('../DelegationBudgetCard.tsx'),
       'the budget card must open the shared edit modal',
     ).toMatch(/import EditBudgetModal from '\.\/EditBudgetModal'/)
+  })
+
+  // #4564: the bespoke `role="dialog"` shell is gone — the modal is built on
+  // the shared shell, and its outcome screens on the shared result primitive.
+  it('is built on ui/Modal — no bespoke role="dialog" shell of its own', () => {
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+    const source = read('../EditBudgetModal.tsx')
+    expect(source).toMatch(/import \{ Modal \} from '\.\/ui\/Modal'/)
+    expect(source).not.toMatch(/role="dialog"/)
+    // The hand-rolled spinner ring is gone with it.
+    expect(source).not.toMatch(/animate-spin/)
+  })
+
+  it('renders its outcomes through the shared DialogResult', async () => {
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+    const source = read('../EditBudgetModal.tsx')
+    expect(source).toMatch(/import \{ DialogResult \} from '\.\/ui\/DialogResult'/)
+
+    let resolveEdit: ((value: unknown) => void) | undefined
+    mockEditBudget.mockImplementation(
+      () => new Promise((resolve) => { resolveEdit = resolve }),
+    )
+    renderModal({ budget: budget({ recipient_address: RECIPIENT }) })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
+
+    // The busy screen is the shared primitive: a status region named by its
+    // title, not a hand-rolled ring.
+    const busy = await screen.findByRole('status')
+    expect(busy.textContent).toContain('Waiting for your approval…')
+
+    await act(async () => {
+      resolveEdit?.({ ok: true, newDelegationHash: '0x' + 'be'.repeat(32), oldDelegationRevoked: true })
+    })
+    await waitFor(() => expect(screen.getByText('Budget updated')).toBeInTheDocument())
+    expect(screen.queryByRole('status')).toBeNull()
   })
 })
 

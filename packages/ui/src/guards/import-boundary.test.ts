@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -121,6 +121,9 @@ describe('the @haven_ai/ui import boundary (#3508)', () => {
       'Row.tsx',
       'SegmentedControl.tsx',
       'Skeleton.tsx',
+      // #4563: the one busy indicator — #4564 (`DialogResult`) and #4568
+      // consume it, so it lives beside the primitives they already import.
+      'Spinner.tsx',
       'StatTile.tsx',
       'StatusBadge.tsx',
       'Table.tsx',
@@ -133,6 +136,34 @@ describe('the @haven_ai/ui import boundary (#3508)', () => {
       .filter((f) => f.endsWith('.tsx'))
       .sort()
     expect(actual, 'packages/ui/src must hold exactly the moved primitives').toEqual(expected)
+  })
+
+  it('every `exports` entry resolves, and every primitive is in the barrel (#4563)', () => {
+    // The deep-import contract: `packages/ui/package.json` enumerates each
+    // primitive under `exports`, and `src/index.ts` is the root barrel. A
+    // primitive that exists but is missing from either is invisible to a
+    // consumer — `@haven_ai/ui/Spinner` would not resolve, or the barrel would
+    // not carry it — and nothing else in the repo checks the two lists agree.
+    const pkg = JSON.parse(readFileSync(join(SRC, '..', 'package.json'), 'utf8')) as {
+      exports: Record<string, string>
+    }
+    const missingTargets = Object.entries(pkg.exports)
+      .filter(([, target]) => !existsSync(join(SRC, '..', target)))
+      .map(([key, target]) => `${key} → ${target}`)
+    expect(missingTargets, 'every exports target must exist on disk').toEqual([])
+
+    const barrel = readFileSync(join(SRC, 'index.ts'), 'utf8')
+    const primitives = readdirSync(SRC).filter((f) => f.endsWith('.tsx'))
+    const unexported = primitives.filter((f) => {
+      const symbol = f.replace(/\.tsx$/, '')
+      return !new RegExp(`export \\{[^}]*\\b${symbol}\\b`).test(barrel)
+    })
+    expect(unexported, 'every primitive must be re-exported from the barrel').toEqual([])
+
+    // The two halves of the acceptance criterion, named so a rename cannot
+    // quietly satisfy the loops above while breaking the documented import.
+    expect(pkg.exports['./Spinner']).toBe('./src/Spinner.tsx')
+    expect(barrel).toMatch(/export \{ Spinner \} from '\.\/Spinner'/)
   })
 
   it('ships tokens.css and a Tailwind preset that agree with it', () => {

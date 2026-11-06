@@ -349,7 +349,7 @@ describe('ConnectionsCard', () => {
   it('a failed listing is one sentence, not a crash', async () => {
     mockApi.get.mockRejectedValue(new Error('down'))
     renderCard()
-    expect(await screen.findByRole('alert')).toHaveTextContent('We could not load accounting connections.')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Accounting connections could not load.')
   })
 
   /**

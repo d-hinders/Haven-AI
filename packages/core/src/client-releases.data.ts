@@ -15,8 +15,24 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.12.0-alpha.0",
+    "released_version": "0.13.0-alpha.0",
     "notes": [
+      {
+        "version": "0.13.0-alpha.0",
+        "date": "2026-10-30",
+        "summary": "PaymentStatusResult.merchantSettlementTxHash names the recorded settlement transaction. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "PaymentStatusResult.merchantSettlementTxHash",
+            "code": true
+          },
+          {
+            "text": " names the recorded settlement transaction. (+1 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
@@ -32,32 +48,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.11.0-alpha.0",
-        "date": "2026-10-23",
-        "summary": "Without merchantEgress, the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to. (+14 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "Without ",
-            "code": false
-          },
-          {
-            "text": "merchantEgress",
-            "code": true
-          },
-          {
-            "text": ", the transport follows redirects itself, and a hop to another origin keeps credentials and payment headers at the origin they were sent to. (+14 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.12.0-alpha.0",
+    "released_version": "0.13.0-alpha.0",
     "notes": [
+      {
+        "version": "0.13.0-alpha.0",
+        "date": "2026-10-30",
+        "summary": "No changes to this package in this release.",
+        "summary_segments": [
+          {
+            "text": "No changes to this package in this release.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
@@ -69,32 +77,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.11.0-alpha.0",
-        "date": "2026-10-23",
-        "summary": "An x402 binding now records which shape the signer verified when minting it, and haven_x402_sign_header builds an EIP-3009 merchant header only from a funding-leg binding. (+2 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "An x402 binding now records which shape the signer verified when minting it, and ",
-            "code": false
-          },
-          {
-            "text": "haven_x402_sign_header",
-            "code": true
-          },
-          {
-            "text": " builds an EIP-3009 merchant header only from a funding-leg binding. (+2 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.12.0-alpha.0",
+    "released_version": "0.13.0-alpha.0",
     "notes": [
+      {
+        "version": "0.13.0-alpha.0",
+        "date": "2026-10-30",
+        "summary": "No changes to this package in this release.",
+        "summary_segments": [
+          {
+            "text": "No changes to this package in this release.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
@@ -114,24 +114,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.11.0-alpha.0",
-        "date": "2026-10-23",
-        "summary": "A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state. The embedded SDK no longer re-sends a paid request to a different origin. (+6 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "A paid x402 call whose merchant redirects the paid request to another origin now reports the funded, undelivered state. The embedded SDK no longer re-sends a paid request to a different origin. (+6 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.12.0-alpha.0",
+    "released_version": "0.13.0-alpha.0",
     "notes": [
+      {
+        "version": "0.13.0-alpha.0",
+        "date": "2026-10-30",
+        "summary": "No changes to this package in this release.",
+        "summary_segments": [
+          {
+            "text": "No changes to this package in this release.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
@@ -175,48 +175,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.11.0-alpha.0",
-        "date": "2026-10-23",
-        "summary": "The installed skill passes the payment header with the settlement report. On the EIP-3009 plain-HTTP path, the skill now tells the agent to pass payment_header (the exact header it retried the merchant with) on haven_report_x402_outcome and on haven_report_settlement_evidence. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "The installed skill passes the payment header with the settlement report. On the EIP-3009 plain-HTTP path, the skill now tells the agent to pass ",
-            "code": false
-          },
-          {
-            "text": "payment_header",
-            "code": true
-          },
-          {
-            "text": " (the exact header it retried the merchant with) on ",
-            "code": false
-          },
-          {
-            "text": "haven_report_x402_outcome",
-            "code": true
-          },
-          {
-            "text": " and on ",
-            "code": false
-          },
-          {
-            "text": "haven_report_settlement_evidence",
-            "code": true
-          },
-          {
-            "text": ". (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.12.0-alpha.0",
+    "released_version": "0.13.0-alpha.0",
     "notes": [
+      {
+        "version": "0.13.0-alpha.0",
+        "date": "2026-10-30",
+        "summary": "No changes to this package in this release.",
+        "summary_segments": [
+          {
+            "text": "No changes to this package in this release.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.12.0-alpha.0",
         "date": "2026-10-29",
@@ -252,46 +228,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": " set: the budget ENDED on that date — waiting will not help, ask the owner to set a new one. (+3 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.11.0-alpha.0",
-        "date": "2026-10-23",
-        "summary": "haven budget grant into an agent's occupied (token, recipient) slot is refused instead of silently replacing the live budget: exit 4, error_code: BUDGET_SLOT_OCCUPIED and existing_delegation_hash under --json, and a hint to edit that budget on the agent's page, which replaces it and stops the old one on-chain. (+3 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven budget grant",
-            "code": true
-          },
-          {
-            "text": " into an agent's occupied (token, recipient) slot is refused instead of silently replacing the live budget: exit 4, ",
-            "code": false
-          },
-          {
-            "text": "error_code: BUDGET_SLOT_OCCUPIED",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "existing_delegation_hash",
-            "code": true
-          },
-          {
-            "text": " under ",
-            "code": false
-          },
-          {
-            "text": "--json",
-            "code": true
-          },
-          {
-            "text": ", and a hint to edit that budget on the agent's page, which replaces it and stops the old one on-chain. (+3 more in the changelog)",
             "code": false
           }
         ],

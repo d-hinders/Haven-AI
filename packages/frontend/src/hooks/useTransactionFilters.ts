@@ -42,7 +42,10 @@ export function useTransactionFilters(): UseTransactionFiltersReturn {
     } catch (err) {
       if (requestId !== requestIdRef.current) return
       setError(
-        err instanceof Error ? err.message : 'Failed to load filters',
+        // #4569: this string DOES reach the screen — the two ledger pages
+        // render it in an `InlineAlert` under the toolbar — so it speaks the
+        // load-error voice rather than the old "Failed to load filters".
+        err instanceof Error ? err.message : 'Filters could not load.',
       )
     } finally {
       if (requestId !== requestIdRef.current) return

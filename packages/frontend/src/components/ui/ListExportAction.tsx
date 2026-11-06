@@ -25,7 +25,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { Icon } from '@/components/ui/Icon'
 import { api } from '@/lib/api'
 import {
   buildCsvFilename,
@@ -135,8 +134,8 @@ export function ListExportAction({ state }: { state: ListExportState }) {
       onClick={() => void state.onExport()}
       disabled={!state.exportable || state.exporting}
       aria-busy={state.exporting || undefined}
+      leadingIcon={Download}
     >
-      <Icon icon={Download} className="h-3.5 w-3.5" />
       {state.exporting ? 'Preparing…' : 'Export CSV'}
     </Button>
   )

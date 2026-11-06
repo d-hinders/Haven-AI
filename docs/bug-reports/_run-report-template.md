@@ -20,10 +20,8 @@ covers:
   - .github/workflows/ci.yml
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
-  - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
-  - .claude/commands/qa-explore-agent-onboarding.md
-last-verified: "2026-10-25"
+last-verified: "2026-11-02"
 ---
 
 <!--
@@ -109,20 +107,6 @@ npm run test:e2e:live -w packages/frontend
 npm run qa:dev -w packages/qa-agent
 ```
 
-The commands and artifact paths in this template were re-verified against the
-repos on 2026-10-25 (weekly docs audit #3645, at dev `615686369`; previous
-verification 2026-09-30, audit #3413 at `5b5bd059`): the five script names
-above in `packages/frontend/package.json` and
-`packages/qa-agent/package.json`, and both Playwright `outputDir` values in
-`playwright.config.ts` / `playwright.live.config.ts` — all unchanged as
-documented (the `output/playwright*/` paths are gitignored working dirs).
-The intervening commits (#4372 parts A–I, #4405 agent-dir paths, #4407
-catalog probe cooldown, #4352 expired-only budgets) changed the suites and
-covered code, not the template's fields, tables or artifact layout. The
-scenario table's over-budget claims still match the code: the typed HTTP 403
-`delegation_budget_exceeded` pre-check covers both the EIP-3009 leg and the
-erc7710 direct-settlement scheme (`modules/x402/delegation-authorize.ts`).
-
 ## Agent Connection — When In Scope
 
 | Check | Expected evidence | Result | Actual evidence / notes |
@@ -186,3 +170,5 @@ A failed secret review blocks committing the report or artifacts.
 ## Notes For The Coding Agent
 
 <!-- Concrete suggestions or open questions to feed back for improvement. -->
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

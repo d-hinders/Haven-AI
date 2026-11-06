@@ -184,58 +184,9 @@ tests above.
 Rate limiting / WAF, Sentry, autoscaling beyond Railway defaults, custom
 domain DNS automation. Tracked separately if/when needed.
 
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`), 42
-mcp-server commits after the last verification: every operational claim above
-still matches the code: `assertHostedEnv`'s `HAVEN_DELEGATE_KEY` refusal and
-message text (`boot.ts`), `HAVEN_CONNECTOR_CHANNEL` dist-tag validation
-(`connector-channel.ts`), the `POST /v1` + `GET /healthz` surface
-(`http.ts`, `HAVEN_MCP_PATH` in `cli.ts`), the one-line access log (`log.ts`),
-the compose wiring (`docker-compose.yml` `mcp-server` service: Dockerfile
-path, 8788, `depends_on`, `HAVEN_API_URL: http://backend:3001`), and the CI
-job names this doc cites ("MCP server checks", "Docker build
-(MCP server)"). The intervening commits (#2812 tool extraction into
-`src/tools/`, #3118/#3155 the plain-HTTP x402 profile, #3102 refusal next
-steps, #3126 `haven_check_funds`) changed the tool surface behind the same
-HTTP and custody posture this doc describes; nothing here needed rewriting.
-
-Re-verified 2026-10-05 (weekly docs audit #3645, at dev `c3df5b19`), a full
-re-read, 50 covered commits after the last verification. The 2026-09-21
-note's "every operational claim above still matches the code" was wrong; each
-error below was already wrong at `7f17c9f3`, and none came from the
-intervening commits:
-
-- **Audit rows.** The doc said every tool dispatch leaves an
-  `agent_tool_invocations` row. The backend records only an allowlist
-  (`MCP_TOOL_NAMES`), and `haven_pay`/`haven_submit` were never on it.
-- **Environment.** The variables list missed `BASE_RPC_URL`.
-- **Custom domain.** The step pointed at a frontend URL generator. The hosted
-  URL actually comes from the backend's `HAVEN_HOSTED_MCP_URL`, which a
-  non-production backend must set.
-- **Domain names.** The predicted domain `havenmcp-production-*` matches no
-  deployed host.
-- **Dist-tag pattern.** It lacked its 32-character cap.
-- **`docker:up`.** It does not rebuild the image; `--build` does.
-- **`HAVEN_DELEGATE_KEY`.** The boot refusal fires on a non-blank value, not
-  on the variable merely being set.
-
 `covers:` gains the backend and SDK files those claims rest on.
-
-Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.
-Changed: the Dockerfile builds `@haven_ai/core` before the SDK and the server
-(`packages/mcp-server/Dockerfile`), and `npm run docker:up` also starts
-`postgres` (`docker-compose.yml`). Re-checked without change: the
-`HAVEN_DELEGATE_KEY` non-blank refusal (`boot.ts`), the keyless
-`createHostedHavenClient` (`server.ts`), `GET`/`HEAD /healthz` answering
-`{"status":"ok"}` and a missing Bearer token answering 401 (`http.ts`), the
-access-log fields (`log.ts`), `HAVEN_MCP_PATH` defaulting to `/v1` (`cli.ts`),
-the dist-tag pattern and `alpha` default (`sdk/src/connector-channel.ts`), the
-`BASE_RPC_URL` one-confirmation wait of up to 30 s on 8453
-(`sdk/src/x402-funding-leg.ts`), the hosted-URL resolution and its
-non-production refusal (`routes/agent-connection-setups.ts`
-`hostedMcpUrl`, reported rather than thrown by `routes/discovery.ts`), the
-eight-name `MCP_TOOL_NAMES` allowlist (`middleware/agentToolAudit.ts`), the
-compose port 8788, and the CI job and step names ("MCP server checks" is a
-job, "Docker build (MCP server)" a step in it).
 
 Review round 1 (haven-doc-reviewer @ `344d7ea91`): "the two CI job names"
 became "the CI job and step names", because the Docker build is a step.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

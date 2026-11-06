@@ -397,6 +397,50 @@ describe('#4469: the receipt mapper reads the six fields the receipts wire carri
   })
 })
 
+describe('#4577: the receipt mapper names the parent receipt for what it holds', () => {
+  // `parent_receipt_id` is the parent purchase receipt's `id`; `parent_payment_id`
+  // is the same value under the name 0.13.0-alpha.0 shipped, kept as a
+  // deprecated alias. Both are per-row: a key an older backend does not send
+  // stays ABSENT, never a fabricated null.
+  it('carries parentReceiptId when the backend sends it, and the deprecated alias beside it', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({
+      parent_receipt_id: 'evidence-parent-1',
+      parent_payment_id: 'evidence-parent-1',
+    }))
+    expect(receipt.parentReceiptId).toBe('evidence-parent-1')
+    // The alias still maps — deleting `payment-mappers.ts`'s
+    // `parent_payment_id` block would fail here.
+    expect(receipt.parentPaymentId).toBe('evidence-parent-1')
+    // Control: a field the mapper already read still survives.
+    expect(receipt.id).toBe('receipt_1')
+  })
+
+  it('carries a stated null as null — "ungrouped" is a value the backend states', () => {
+    const receipt = mapPaymentReceipt(rawReceipt({
+      parent_receipt_id: null,
+      parent_payment_id: null,
+    }))
+    expect(receipt).toHaveProperty('parentReceiptId', null)
+    expect(receipt).toHaveProperty('parentPaymentId', null)
+  })
+
+  it('leaves both absent on an older backend that does not send them', () => {
+    const receipt = mapPaymentReceipt(rawReceipt())
+    expect(receipt).not.toHaveProperty('parentReceiptId')
+    expect(receipt).not.toHaveProperty('parentPaymentId')
+  })
+
+  it('maps the two keys independently — one present, the other absent', () => {
+    const onlyNew = mapPaymentReceipt(rawReceipt({ parent_receipt_id: 'evidence-parent-1' }))
+    expect(onlyNew.parentReceiptId).toBe('evidence-parent-1')
+    expect(onlyNew).not.toHaveProperty('parentPaymentId')
+
+    const onlyOld = mapPaymentReceipt(rawReceipt({ parent_payment_id: 'evidence-parent-1' }))
+    expect(onlyOld.parentPaymentId).toBe('evidence-parent-1')
+    expect(onlyOld).not.toHaveProperty('parentReceiptId')
+  })
+})
+
 describe('receipt vocabulary converges on the transaction names (#3134)', () => {
   // Each pair is asserted from the RAW column, not from another mapped key: a
   // test that compared two mapped keys would pass if the mapper pointed both at

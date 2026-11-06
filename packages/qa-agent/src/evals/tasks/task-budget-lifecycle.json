@@ -1,0 +1,26 @@
+{
+  "id": "task-budget-lifecycle",
+  "title": "Open, read and close a task budget through the full sign-and-submit lifecycle",
+  "category": "task-budget",
+  "tier": 1,
+  "instruction": "Open a task budget with a cap of {amount} USDC and a ttl_minutes of 20, then take it through its FULL lifecycle: open it, sign the open handoff with haven_sign, submit the signature with haven_submit, read it back with haven_get_task_budget (it must read open), close it with haven_close_task_budget, sign the close handoff with haven_sign, submit that signature with haven_submit, and read it back again with haven_get_task_budget (it must read closed). The open and close tools only PREPARE a haven_sign handoff — nothing changes until the signature is submitted. Tell the user the final state.",
+  "requires": ["THROWAWAY-identity", "delegation-agent-open-budget"],
+  "amount": { "rule": "fraction_of_remaining", "fraction": "1/2" },
+  "graders": [
+    { "name": "task_budget_lifecycle", "options": { "mustMention": ["closed"] } }
+  ],
+  "expectTransfer": false,
+  "source": {
+    "kind": "issue",
+    "ref": "4677",
+    "note": "haven_open_task_budget and a live haven_close_task_budget only prepare: they return a haven_sign handoff and state does not change until it is signed and submitted (mcp-server/src/tools/task-budgets.ts:120-166). The grader reads the FINAL state from the backend, because tool_called only proves a call occurred."
+  },
+  "lanes": ["claude-code"],
+  "setup": {
+    "kind": "throwaway-identity",
+    "label": "task-budget",
+    "budgetAtomic": "2000",
+    "fundingAtomic": "0"
+  },
+  "commandTemplate": "mkdir -p \"$QA_EVAL_TRIAL_HOME/claude-cwd\" && cd \"$QA_EVAL_TRIAL_HOME/claude-cwd\" && claude -p {instruction} --output-format stream-json --verbose --model sonnet --max-turns 30 --allowedTools mcp__haven-eval mcp__haven-signer-eval --disallowedTools Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification --mcp-config \"$QA_EVAL_TRIAL_MCP_CONFIG\" --strict-mcp-config"
+}

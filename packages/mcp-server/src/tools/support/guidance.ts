@@ -510,6 +510,12 @@ export async function eip3009ConfirmedReplayResponse(
  * #1349: normalize only the small merchant display fields agents need to
  * report a purchase. Merchant content is deliberately never allowed to set
  * status, money, network, merchant identity, or transaction hashes.
+ *
+ * #4688: `status` is hardcoded to `'settled'` because this summary is the
+ * VERIFIED-purchase report — call it only on an arm whose settlement evidence
+ * outcome is `confirmed`. An unverified merchant settlement must omit
+ * `purchase_summary` entirely rather than widen `AgentPurchaseSummary.status`
+ * (the published type is `'settled'` only).
  */
 export function buildPurchaseSummary(input: {
   payment: Awaited<ReturnType<HavenClient['getPaymentStatus']>> | null

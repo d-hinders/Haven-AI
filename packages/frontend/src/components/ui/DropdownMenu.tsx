@@ -12,6 +12,8 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { EllipsisVertical } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
 
 // ── Context ────────────────────────────────────────────────────────────────
@@ -52,9 +54,7 @@ function useDropdownMenu() {
  *
  * Usage:
  *   <DropdownMenu>
- *     <DropdownMenuTrigger aria-label="Account options">
- *       <KebabIcon />
- *     </DropdownMenuTrigger>
+ *     <DropdownMenuIconTrigger aria-label="Account options" />
  *     <DropdownMenuContent>
  *       <DropdownMenuItem onSelect={openRename}>Rename</DropdownMenuItem>
  *       <DropdownMenuItem onSelect={remove} tone="danger">Remove</DropdownMenuItem>
@@ -99,7 +99,7 @@ export function DropdownMenu({
 
 type TriggerProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-haspopup' | 'aria-expanded'>
 
-export function DropdownMenuTrigger({ children, onClick, className = '', ...rest }: TriggerProps) {
+function DropdownMenuTrigger({ children, onClick, className = '', ...rest }: TriggerProps) {
   const { open, setOpen, triggerId, menuId, triggerRef } = useDropdownMenu()
 
   return (
@@ -119,6 +119,42 @@ export function DropdownMenuTrigger({ children, onClick, className = '', ...rest
     >
       {children}
     </button>
+  )
+}
+
+const ICON_TRIGGER_CLASS =
+  'inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-hover)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-50'
+
+/**
+ * The one ⋮ button (owner decision, 2026-11-04): the three dots with no frame,
+ * tinted on hover. The 44px tap target stays but draws nothing, so the button
+ * cannot sit beside a 36px or 40px `Button` and read as a different size, which
+ * is what a framed copy did on the contacts row. Build every overflow menu's
+ * trigger from this, never from a hand-written class. The name is required
+ * because the glyph says nothing: say what the menu acts on.
+ *
+ * `edge="end"` is for the last control on a line, such as a page header or a
+ * list row. With no frame, the empty part of the target would leave the dots
+ * floating well inside the line's right edge, so it pulls the target over the
+ * edge until the icon box sits on it. The dots end up about 7px in, which reads
+ * as aligned and keeps the hover tint close to the content.
+ */
+export function DropdownMenuIconTrigger({
+  'aria-label': ariaLabel,
+  edge,
+  ...rest
+}: Omit<TriggerProps, 'children' | 'className' | 'aria-label'> & {
+  'aria-label': string
+  edge?: 'end'
+}) {
+  return (
+    <DropdownMenuTrigger
+      aria-label={ariaLabel}
+      className={edge === 'end' ? `${ICON_TRIGGER_CLASS} -mr-3.5` : ICON_TRIGGER_CLASS}
+      {...rest}
+    >
+      <Icon icon={EllipsisVertical} className="h-4 w-4" />
+    </DropdownMenuTrigger>
   )
 }
 

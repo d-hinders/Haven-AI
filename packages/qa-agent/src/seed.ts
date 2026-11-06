@@ -46,8 +46,11 @@
  *   - The dev **relayer** sponsors the UserOps, including the counterfactual
  *     account's first deployment.
  *   - **SEED_OWNER needs no ETH.** Provisioning is counterfactual and the grant
- *     is a signature, not a transaction — this seed sends nothing on-chain and
- *     opens no RPC connection.
+ *     is a signature, not a transaction. This seed opens no RPC connection and
+ *     sends no transaction itself. Haven's relayer deploys the account at the
+ *     first grant, and a later plain grant sends nothing on-chain. Replacing a
+ *     live grant also submits an owner-signed Stop of each old grant through
+ *     Haven.
  *
  * Everything is testnet/dev-only — never a production credential.
  *
@@ -304,7 +307,43 @@ interface DelegationRow {
   expires_at?: string | number | null
 }
 
-async function ensureBudget(
+/**
+ * How long a seeded grant lasts. The build route defaults to 90 days and caps
+ * at 365 on its own clock (#4351), so this stays a day short of the cap. Every
+ * spending leg of the money-flow suite stops when the grant ends, as it did on
+ * 2026-11-03, and renewing it takes an owner signature, so a testnet QA
+ * identity asks for the longest grant the route allows.
+ */
+const QA_BUDGET_LIFETIME_SECONDS = 364 * 86_400
+
+/**
+ * Refuse before signing with a key that is not the account's owner. Activate
+ * checks only the signature's shape, because the real validator is EIP-1271 at
+ * redemption. A wrong key's grant would therefore read as granted, revert on
+ * every payment, and make later runs with the right key skip it as live.
+ */
+async function assertKeyOwnsAccount(
+  cfg: SeedConfig,
+  token: string,
+  agentId: string,
+  owner: ethers.Wallet,
+): Promise<void> {
+  const { owner_address } = await api<{ owner_address: string | null }>(
+    cfg,
+    'GET',
+    `/agents/${agentId}/account-signers`,
+    { token },
+  )
+  if (owner_address?.toLowerCase() !== owner.address.toLowerCase()) {
+    throw new Error(
+      `SEED_OWNER_PRIVATE_KEY is for ${owner.address}, but this account's owner is ` +
+        `${owner_address ?? 'not an EOA (the account has only passkey signers)'}. ` +
+        'Nothing was signed. Use the key of the owner that provisioned this account.',
+    )
+  }
+}
+
+export async function ensureBudget(
   cfg: SeedConfig,
   token: string,
   agentId: string,
@@ -316,23 +355,17 @@ async function ensureBudget(
     `/agents/${agentId}/delegations`,
     { token },
   )
-  const active = delegations.find(
-    (d) =>
-      d.status === 'active' &&
-      d.chain_id === CHAIN_ID &&
-      d.token_address?.toLowerCase() === ADDR.usdc.toLowerCase() &&
-      d.budget_atomic === budgetAtomic,
-  )
-  if (active) {
-    console.log('  ✓ active USDC budget delegation already granted — skipping')
-    return
-  }
+  // Only a LIVE row counts. An expired grant keeps status='active' (the status
+  // CHECK has no expired value), so without the expiry test a lapsed budget
+  // reads as "already granted" and a recovery run changes nothing, which is what
+  // the 2026-11-03 lapse of the standing QA budget ran into.
+  //
   // #3933: a live budget in the same (USDC, open) slot with a different
   // amount is REPLACED through the edit composition — the new grant names
   // EVERY live row of the slot as `replaces` (a re-keyed agent's budget is a
   // carry/steady pair), then each is stopped on-chain. A plain grant into an
   // occupied slot, or one naming only part of it, is refused by build and
-  // activate.
+  // activate. An expired row occupies nothing, so it is not named.
   const nowSec = Math.floor(Date.now() / 1000)
   const occupying = delegations.filter(
     (d) =>
@@ -343,7 +376,14 @@ async function ensureBudget(
       Number(d.expires_at ?? 0) > nowSec &&
       typeof d.delegation_hash === 'string',
   )
+  if (occupying.some((d) => d.budget_atomic === budgetAtomic)) {
+    console.log('  ✓ active USDC budget delegation already granted — skipping')
+    return
+  }
   const replaces = occupying.length > 0 ? occupying.map((d) => d.delegation_hash as string) : undefined
+
+  const owner = new ethers.Wallet(cfg.ownerKey)
+  await assertKeyOwnsAccount(cfg, token, agentId, owner)
 
   const built = await api<{
     delegation_hash?: string
@@ -358,6 +398,7 @@ async function ensureBudget(
       recipient_address: null,
       budget_atomic: budgetAtomic,
       period_seconds: cfg.periodMin * 60,
+      expires_at: nowSec + QA_BUDGET_LIFETIME_SECONDS,
       ...(replaces ? { replaces } : {}),
     },
   })
@@ -365,7 +406,6 @@ async function ensureBudget(
     throw new Error('delegations/build did not return a signable payload')
   }
 
-  const owner = new ethers.Wallet(cfg.ownerKey)
   const { domain, types, message } = built.signing_payload
   const signable = Object.fromEntries(
     Object.entries(types).filter(([name]) => name !== 'EIP712Domain'),
@@ -432,7 +472,7 @@ export async function main(): Promise<void> {
   const budgetAtomic = ethers.parseUnits(cfg.budgetUsdc, USDC_DECIMALS).toString()
 
   console.log(`Seeding QA identity on Base Sepolia → ${cfg.apiUrl}`)
-  console.log(`  owner ${owner.address}  (no ETH needed — nothing here is sent on-chain)`)
+  console.log(`  owner ${owner.address}  (no ETH needed — the owner only signs)`)
 
   console.log('\n[1/4] QA user')
   const token = await ensureUser(cfg)

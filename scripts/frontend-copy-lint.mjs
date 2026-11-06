@@ -407,6 +407,21 @@ export const BANNED = [
   // what a matcher can hold.
   ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you approved'"],
   ['haven gave you', 'the credential is generated on the user’s device; Haven never receives the signing key'],
+  // ── The 2026-10-30 copy rules (#4563) ─────────────────────────────────────
+  // Two of the five rules added that day have an unambiguous multi-word
+  // phrase, so they get a literal here; the rest (British spellings, the
+  // destructive-verb table, "…" vs "...", the "Try again" retry label) are
+  // bare tokens and stay documentation-only — see `copy-guidelines.md`
+  // § Enforcement, "Bare tokens are out of reach, by design (CG:688)".
+  //
+  // Measured before adding, at `31c07cd49`: one occurrence of each, both
+  // reworded in this same change, so no baseline entry and no false-positive
+  // cost. `all signers in settings` is the link text the owner's 2026-10-30
+  // decision overrides (the Settings section is "Passkeys and wallets");
+  // `unspent allowance` is the jargon the mapping table already replaces with
+  // "budget" (Allowance module → Rules / budget controls).
+  ['all signers in settings', "'Passkeys and wallets'"],
+  ['unspent allowance', "'unused budget'"],
 ]
 
 const IGNORE = 'copy-lint-ignore'

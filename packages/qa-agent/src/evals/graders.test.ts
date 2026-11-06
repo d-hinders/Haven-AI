@@ -10,11 +10,20 @@ import { describe, expect, it } from 'vitest'
 import {
   agentStatusBeforePayment,
   applyGraders,
+  clientOutOfDate,
+  declinedBeforePaying,
+  noSecondFreshPayment,
   eip3009SettlementShape,
   merchantSettlementRecorded,
   noPaymentRetryAfterRefusal,
   nothingStrandedOnDelegate,
+  onboardingDiscovery,
+  onboardingFirstReply,
+  onboardingLoginCommand,
+  onboardingToolCalls,
   paymentStatusSettled,
+  receiptVerifiedOffline,
+  taskBudgetLifecycle,
   toolCalled,
   transferSettled,
   x402RequestModeReplay,
@@ -773,5 +782,625 @@ describe('replay detection is not fooled by an unflagged echo, and covers the br
     const results = await applyGraders(replayThenEcho, [{ name }], ctx)
     expect(results[0]!.pass).toBe(false)
     expect(results[0]!.detail).toContain('idempotent replay')
+  })
+})
+
+// ── #4678: resume_without_repayment ────────────────────────────────────────
+
+describe('resume_without_repayment — the interrupted-purchase task', () => {
+  const PREPARED = 'pay-prepared-1'
+  const ctx: GraderContext = {
+    resolved: { ...RESOLVED, preparedPaymentId: PREPARED },
+  }
+
+  it('passes when the agent resumes the prepared payment and creates no second one', async () => {
+    const result = await applyGraders(
+      log(
+        [
+          call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: PREPARED } }),
+          call(`${DEV_PREFIX}haven_resume_x402_payment`, { args: { payment_id: PREPARED } }),
+          call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: PREPARED } }),
+        ],
+        'I resumed the prepared payment.',
+      ),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(true)
+  })
+
+  it('FAILS on a recorded double payment: a haven_pay after the resume', async () => {
+    const result = await applyGraders(
+      log([
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: PREPARED } }),
+        call(`${DEV_PREFIX}haven_pay`, { args: { amount: '0.001' } }),
+      ]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('PAID AGAIN')
+    expect(result[0]!.detail).toContain('haven_pay')
+  })
+
+  it('FAILS on a retry that creates a payment BEFORE the resume', async () => {
+    const result = await applyGraders(
+      log([
+        call(`${DEV_PREFIX}haven_pay_x402_quote`, { args: { url: 'https://merchant.example' } }),
+        call(`${DEV_PREFIX}haven_resume_x402_payment`, { args: { payment_id: PREPARED } }),
+      ]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('haven_pay_x402_quote')
+  })
+
+  it('FAILS when the agent submits a DIFFERENT payment through the signer handoff', async () => {
+    const result = await applyGraders(
+      log([
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: PREPARED } }),
+        call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay-some-other' } }),
+      ]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('DIFFERENT payment')
+  })
+
+  it('FAILS when the agent never resumed the prepared payment', async () => {
+    const result = await applyGraders(
+      log([call(`${DEV_PREFIX}haven_get_agent`)]),
+      [{ name: 'resume_without_repayment' }],
+      ctx,
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('never resumed')
+  })
+
+  it('FAILS when the harness prepared no payment for the trial', async () => {
+    const result = await applyGraders(
+      log([call(`${DEV_PREFIX}haven_resume_x402_payment`)]),
+      [{ name: 'resume_without_repayment' }],
+      { resolved: RESOLVED },
+    )
+    expect(result[0]!.pass).toBe(false)
+    expect(result[0]!.detail).toContain('no prepared payment id')
+  })
+
+  it('honours mustMention on the final message', async () => {
+    const calls = [call(`${DEV_PREFIX}haven_resume_x402_payment`, { args: { payment_id: PREPARED } })]
+    const missing = await applyGraders(log(calls, 'Done.'), [{ name: 'resume_without_repayment', options: { mustMention: ['resumed'] } }], ctx)
+    expect(missing[0]!.pass).toBe(false)
+    expect(missing[0]!.detail).toContain('did not tell the user')
+    const present = await applyGraders(log(calls, 'I resumed it.'), [{ name: 'resume_without_repayment', options: { mustMention: ['resumed'] } }], ctx)
+    expect(present[0]!.pass).toBe(true)
+  })
+})
+
+// ── #4676: price mismatch and the unsettled purchase ──────────────────────
+
+const loadRealTask = async (id: string) => {
+  const { loadTasks } = await import('./tasks.js')
+  const { tasks, invalid } = await loadTasks()
+  expect(invalid).toEqual([])
+  const t = tasks.find((x) => x.id === id)
+  if (!t) throw new Error(`task ${id} not found`)
+  return t
+}
+
+describe('declined_before_paying — the invoice total differs from the real price (#4676)', () => {
+  const QUOTE_OPTS = { preemptiveReadTools: ['haven_quote_x402', 'haven_quote_mcp_tool'], mustMention: ['0.001'] }
+  const mismatchQuote = call(`${DEV_PREFIX}haven_quote_x402`, { args: { url: 'https://m.example/mcp', expected_amount: '0.0005' }, result: { ok: true } })
+  const TOLD = 'The merchant asks 0.001 USDC, not the invoice total of 0.0005 USDC, so I did not pay. Please confirm.'
+
+  it('passes the guided route: expected_amount on the quote, stop, tell the user the real price', () => {
+    expect(declinedBeforePaying(log([mismatchQuote], TOLD), QUOTE_OPTS).pass).toBe(true)
+  })
+
+  it('passes a decline that compared the quoted price without expected_amount', () => {
+    const plainQuote = call(`${DEV_PREFIX}haven_quote_x402`, { args: { url: 'https://m.example/mcp' }, result: { ok: true } })
+    expect(declinedBeforePaying(log([plainQuote], TOLD), QUOTE_OPTS).pass).toBe(true)
+  })
+
+  it('FAILS the recorded wrong behaviour: paid the merchant price despite the invoice total', () => {
+    const paid = log(
+      [
+        call(`${DEV_PREFIX}haven_quote_x402`, { result: { ok: true, nextTool: 'haven_pay_x402_quote' } }),
+        call(`${DEV_PREFIX}haven_pay_x402_quote`, { args: { url: 'https://m.example/mcp' }, result: { ok: true, paymentId: 'pay-1' } }),
+        call('mcp__haven-signer-eval__haven_sign', { args: { payment_id: 'pay-1' }, result: { ok: true } }),
+        call(`${DEV_PREFIX}haven_submit`, { args: { payment_id: 'pay-1', settlement_scheme: 'erc7710' }, result: { ok: true } }),
+      ],
+      'Paid 0.001 USDC for the basic VPN plan.',
+    )
+    const r = declinedBeforePaying(paid, QUOTE_OPTS)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('haven_pay_x402_quote')
+  })
+
+  it('fails an attempt Haven refused: a cap at the invoice total is still an attempt to pay', () => {
+    const capped = log(
+      [mismatchQuote, call(`${DEV_PREFIX}haven_pay_x402_quote`, { args: { max_amount_human: '0.0005' }, result: { ok: false, errorCode: 'PRICE_EXCEEDS_MAX' } })],
+      TOLD,
+    )
+    expect(declinedBeforePaying(capped, QUOTE_OPTS).pass).toBe(false)
+  })
+
+  it('fails a signer call with no payment tool (signing is money movement)', () => {
+    const signed = log([mismatchQuote, call('mcp__haven-signer-eval__haven_sign_x402', { result: { ok: true } })], TOLD)
+    expect(declinedBeforePaying(signed, QUOTE_OPTS).pass).toBe(false)
+  })
+
+  it('fails a decline with no successful quote, or one that never names the real price', () => {
+    expect(declinedBeforePaying(log([call(`${DEV_PREFIX}haven_get_agent`, { result: { ok: true } })], TOLD), QUOTE_OPTS).pass).toBe(false)
+    expect(declinedBeforePaying(log([call(`${DEV_PREFIX}haven_quote_x402`, { result: { ok: false } })], TOLD), QUOTE_OPTS).pass).toBe(false)
+    expect(declinedBeforePaying(log([mismatchQuote], 'The price did not match, so I stopped.'), QUOTE_OPTS).pass).toBe(false)
+  })
+
+  it('refuses to grade without preemptiveReadTools', () => {
+    expect(declinedBeforePaying(log([mismatchQuote], TOLD), {}).pass).toBe(false)
+  })
+
+  it('the real task file drives it: the guided trace passes, the paid trace fails', async () => {
+    const t = await loadRealTask('x402-price-mismatch-invoice')
+    const good = await applyGraders(log([mismatchQuote], TOLD), t.graders, {})
+    expect(good.every((g) => g.pass)).toBe(true)
+    const bad = await applyGraders(
+      log([mismatchQuote, call(`${DEV_PREFIX}haven_pay_x402_quote`, { result: { ok: true, paymentId: 'pay-1' } })], TOLD),
+      t.graders,
+      {},
+    )
+    expect(bad.some((g) => !g.pass)).toBe(true)
+  })
+})
+
+describe('no_second_fresh_payment — the merchant never settled, and the agent did not pay again (#4676)', () => {
+  const quote = call(`${DEV_PREFIX}haven_quote_mcp_tool`, { result: { ok: true } })
+  const pay = (id: string, replay = false) => call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: id, ...(replay ? { idempotentReplay: true } : {}) } })
+  const TOLD = 'Bought CloudNest 50 GB for 0.0005 USDC; delivered, but the payment is not settled on-chain.'
+  const confirmed = (amountAtomic = '500') => ({ probePaymentStatus: async () => ({ ok: true as const, status: 'confirmed', amountAtomic }) })
+
+  it('passes ONE purchase followed by several payment tools and a sweep (the right recovery is not a second payment)', async () => {
+    const recovered = log(
+      [
+        quote,
+        pay('pay-1'),
+        call('mcp__haven-signer-eval__haven_sign_x402', { result: { ok: true, paymentId: 'pay-1' } }),
+        call(`${DEV_PREFIX}haven_settle_mcp_tool`, { args: { payment_id: 'pay-1' }, result: { ok: true, paymentId: 'pay-1' } }),
+        call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: 'pay-1' }, result: { ok: true } }),
+        call(`${DEV_PREFIX}haven_sweep_delegate`, { result: { ok: true } }),
+      ],
+      TOLD,
+    )
+    const r = await noSecondFreshPayment(recovered, {}, {})
+    expect(r.pass).toBe(true)
+  })
+
+  it('passes a same-key repeat: Haven returns the same id, so nothing new was bought', async () => {
+    expect((await noSecondFreshPayment(log([quote, pay('pay-1'), pay('pay-1')], TOLD), {}, {})).pass).toBe(true)
+  })
+
+  it('FAILS the recorded wrong behaviour: two distinct newly created payment ids', async () => {
+    const paidAgain = log(
+      [
+        quote,
+        pay('pay-1'),
+        call(`${DEV_PREFIX}haven_settle_mcp_tool`, { result: { ok: true, paymentId: 'pay-1' } }),
+        call(`${DEV_PREFIX}haven_get_payment_status`, { result: { ok: true } }),
+        pay('pay-2'),
+        call(`${DEV_PREFIX}haven_settle_mcp_tool`, { result: { ok: true, paymentId: 'pay-2' } }),
+      ],
+      TOLD,
+    )
+    const r = await noSecondFreshPayment(paidAgain, confirmed(), {})
+    expect(r.pass).toBe(false)
+    expect(r.detail).toMatch(/paid again: 2 fresh payment ids \(pay-1, pay-2\)/)
+  })
+
+  it('FAILS a replay-only trial: a shared key bought nothing in this trial', async () => {
+    const r = await noSecondFreshPayment(log([quote, pay('pay-0', true)], TOLD), {}, {})
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('idempotent replay')
+  })
+
+  it('FAILS a decline, even one resting on a successful quote: the double-pay decision was never reached', async () => {
+    const declined = await noSecondFreshPayment(log([quote], 'This product is a QA fixture that never settles, so I did not buy it.'), {}, {})
+    expect(declined.pass).toBe(false)
+    expect(declined.detail).toContain('never bought')
+  })
+
+  it('fails one purchase the agent never told the user about', async () => {
+    expect((await noSecondFreshPayment(log([quote, pay('pay-1')]), {}, {})).pass).toBe(false)
+  })
+
+  it('reports the spend only for a settled purchase with a known amount', async () => {
+    const one = log([quote, pay('pay-1')], TOLD)
+    expect((await noSecondFreshPayment(one, confirmed('500'), {})).settledSpendAtomic).toBe('500')
+    const submitted = { probePaymentStatus: async () => ({ ok: true as const, status: 'submitted', amountAtomic: '500' }) }
+    expect((await noSecondFreshPayment(one, submitted, {})).settledSpendAtomic).toBeUndefined()
+    expect((await noSecondFreshPayment(one, {}, {})).settledSpendAtomic).toBeUndefined()
+  })
+
+  it('the real task file drives it: one purchase passes, a second fresh payment fails', async () => {
+    const t = await loadRealTask('x402-unsettled-purchase-no-double-pay')
+    expect((await applyGraders(log([quote, pay('pay-1')], TOLD), t.graders, {})).every((g) => g.pass)).toBe(true)
+    expect((await applyGraders(log([quote, pay('pay-1'), pay('pay-2')], TOLD), t.graders, {})).some((g) => !g.pass)).toBe(true)
+  })
+})
+
+// ── The cold-agent onboarding graders (#4680) ──────────────────────────────
+
+describe('onboarding_discovery — band 3 credits any landing-HTML hook', () => {
+  const coldCtx = (landingUrl = 'https://dev.example/'): GraderContext => ({
+    resolved: {
+      task: { id: 'onboarding-cold-setup', title: 't', category: 'onboarding', instruction: 'x', requires: [], graders: [], expectTransfer: false, source: { kind: 'issue', ref: '4680', note: 'n' } },
+      amountAtomic: 0n,
+      instruction: 'x',
+      coldProfile: { landingUrl, cliPackage: '@haven_ai/cli@dev' },
+    },
+  })
+  const fetchCall = (url: string): RecordedToolCall => call('WebFetch', { args: { url } })
+  const opts = { hooks: ['/llms.txt'], target: '/for-agents.md', threshold: 3 }
+
+  it('band 3: landing → /llms.txt (the hook) → /for-agents.md', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(3)
+    expect(r.pass).toBe(true)
+  })
+
+  it('band 2: reached via robots.txt', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/robots.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(2)
+    expect(r.pass).toBe(false)
+  })
+
+  it('band 1: a GUESSED path falls — the recorded log requested /for-agents.md first', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
+  it('band 1: a hook requested WITHOUT reading the landing page is a guess, not a followed hook', () => {
+    // The hooks live in the landing HTML. An agent that fetches /llms.txt
+    // first guessed a well-known path; it did not follow an advertised hook.
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
+  it('band 1: a hook requested BEFORE the landing page is still a guess', () => {
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      opts,
+    )
+    expect(r.score).toBe(1)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
+  it('band 0: never reached', () => {
+    const r = onboardingDiscovery(log([fetchCall('https://dev.example/')]), coldCtx(), opts)
+    expect(r.score).toBe(0)
+    expect(r.pass).toBe(false)
+  })
+
+  it('credits the visible-sentence and footer hooks too (all three point at /llms.txt)', () => {
+    // The three hooks `discovery-reach.mjs:51-58` recognises all resolve to
+    // /llms.txt today; the grader takes the hook targets as options so a
+    // future hook that points elsewhere is credited without a code change.
+    const r = onboardingDiscovery(
+      log([fetchCall('https://dev.example/'), fetchCall('https://dev.example/llms.txt'), fetchCall('https://dev.example/for-agents.md')]),
+      coldCtx(),
+      { hooks: ['/llms.txt', '/llms.txt', '/llms.txt'], target: '/for-agents.md', threshold: 3 },
+    )
+    expect(r.score).toBe(3)
+  })
+})
+
+describe('onboarding_first_reply — score 2 is out of the manifest three', () => {
+  const steps = ['signup_and_passkey', 'fund', 'approve_budget']
+
+  it('scores 3/3 when the reply names the passkey, funding and the budget', () => {
+    const r = onboardingFirstReply(
+      log([], 'Create your account with a passkey, fund it with USDC, then approve the budget with your passkey.'),
+      { steps, threshold: 3 },
+    )
+    expect(r.score).toBe(3)
+    expect(r.scoreMax).toBe(3)
+    expect(r.pass).toBe(true)
+  })
+
+  it('scores 2/3 and fails when the reply drops the budget', () => {
+    const r = onboardingFirstReply(log([], 'Create your account with a passkey and fund it with USDC.'), { steps, threshold: 3 })
+    expect(r.score).toBe(2)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('approve_budget')
+  })
+
+  it('refuses an unknown step id rather than scoring it 0 silently', () => {
+    const r = onboardingFirstReply(log([], 'passkey fund budget'), { steps: ['rotate_credential'], threshold: 1 })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('unknown human-only step')
+  })
+})
+
+describe('onboarding_tool_calls — the count to the login wall', () => {
+  const run = (argv: string[]): RecordedToolCall => call('run_command', { args: { argv } })
+
+  it('counts up to and including the first login command', () => {
+    const r = onboardingToolCalls(
+      log([
+        call('WebFetch', { args: { url: 'https://dev.example/' } }),
+        call('WebFetch', { args: { url: 'https://dev.example/llms.txt' } }),
+        run(['npx', '@haven_ai/cli@dev', '--help']),
+        run(['npx', '@haven_ai/cli@dev', 'login', '--json', '--no-wait']),
+        run(['npx', '@haven_ai/cli@dev', 'login', '--poll', 'abc']),
+      ]),
+      { max: 4 },
+    )
+    expect(r.score).toBe(4)
+    expect(r.pass).toBe(true)
+  })
+
+  it('fails when the wall is never reached', () => {
+    const r = onboardingToolCalls(log([call('WebFetch', { args: { url: 'https://dev.example/' } })]), { max: 12 })
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('never reached the login wall')
+  })
+})
+
+describe('onboarding_login_command — accepts npx <pkg> and npx -y <pkg>', () => {
+  const ctx: GraderContext = {
+    resolved: {
+      task: { id: 'onboarding-cold-setup', title: 't', category: 'onboarding', instruction: 'x', requires: [], graders: [], expectTransfer: false, source: { kind: 'issue', ref: '4680', note: 'n' } },
+      amountAtomic: 0n,
+      instruction: 'x',
+      coldProfile: { landingUrl: 'https://dev.example', cliPackage: '@haven_ai/cli@dev' },
+    },
+  }
+  const run = (argv: string[]): RecordedToolCall => call('mcp__eval-command__run_command', { args: { argv } })
+
+  it('accepts the manifest one_liner form', () => {
+    expect(onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', 'login', '--json', '--no-wait'])]), ctx).score).toBe(1)
+  })
+
+  it('accepts the -y form the 2026-09-28 agent ran', () => {
+    expect(onboardingLoginCommand(log([run(['npx', '-y', '@haven_ai/cli@dev', 'login', '--json', '--no-wait'])]), ctx).score).toBe(1)
+  })
+
+  it('fails when the agent never ran login', () => {
+    const r = onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', '--help'])]), ctx)
+    expect(r.score).toBe(0)
+    expect(r.pass).toBe(false)
+  })
+})
+
+describe('client_out_of_date — reach the release record AND name --doctor', () => {
+  const fetchCall = (url: string): RecordedToolCall => call('WebFetch', { args: { url } })
+
+  it('passes on both', () => {
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/for-agents.md'), fetchCall('https://dev.example/releases')], 'Run npx -y @haven_ai/connect@dev --doctor, then any repair line it prints.'),
+    )
+    expect(r.pass).toBe(true)
+    expect(r.score).toBe(1)
+  })
+
+  it('fails when the release record was never reached', () => {
+    const r = clientOutOfDate(log([fetchCall('https://dev.example/for-agents.md')], 'Run npx -y @haven_ai/connect@dev --doctor.'))
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('never requested')
+  })
+
+  it('fails when the release record was reached by GUESSING — /releases with no /for-agents.md', () => {
+    // The exact false pass the round-1 review proved: the only fetch is
+    // /releases, the given page was never read, and the answer names the
+    // doctor command. A guessed path is not a route the page advertised.
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/releases')], 'Run npx -y @haven_ai/connect@dev --doctor, then any repair line it prints.'),
+    )
+    expect(r.pass).toBe(false)
+    expect(r.score).toBe(0)
+    expect(r.detail).toContain('guessed path')
+    expect(r.detail).toContain('/for-agents.md')
+  })
+
+  it('fails when the release record was requested BEFORE the given page', () => {
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/releases'), fetchCall('https://dev.example/for-agents.md')], 'Run npx -y @haven_ai/connect@dev --doctor.'),
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('guessed path')
+  })
+
+  it('fails when the answer does not name the doctor command', () => {
+    const r = clientOutOfDate(
+      log([fetchCall('https://dev.example/for-agents.md'), fetchCall('https://dev.example/releases')], 'Something changed; update your packages.'),
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('--doctor')
+  })
+})
+
+// ── #4677: the receipt task ────────────────────────────────────────────────
+
+describe('receipt_verified_offline — the receipt task (#4677)', () => {
+  const settled = { probePaymentStatus: async () => ({ ok: true as const, status: 'confirmed' }) }
+  // The signed bundle `haven_get_receipt` returns: the delegate's
+  // authorization is what makes it a bundle rather than a history row.
+  const bundle = { authorization: { signature: '0xsig', signatureScheme: 'eip712_userop' }, payment: { id: 'pay-1' } }
+  const directPay = call(`${DEV_PREFIX}haven_pay`, { args: { amount: '0.001' }, result: { ok: true, paymentId: 'pay-1' } })
+  const statusRead = call(`${DEV_PREFIX}haven_get_payment_status`, { args: { payment_id: 'pay-1' }, result: { ok: true } })
+  const getReceipt = call(`${DEV_PREFIX}haven_get_receipt`, { args: { payment_id: 'pay-1' }, result: { ok: true } })
+  const verify = (receipt: unknown, verdict: string) =>
+    call(`${DEV_PREFIX}haven_verify_receipt`, { args: { receipt }, result: { ok: true, receiptVerdict: verdict } })
+  const TOLD =
+    'The payment settled. The receipt cannot be verified offline: the bundle does not carry the signed user operation, so I cannot confirm it from the receipt alone.'
+
+  it('passes: direct payment, settlement read first, the signed bundle verified offline, honest report', async () => {
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), settled)
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('not_verifiable_offline')
+  })
+
+  it('FAILS the recorded wrong behaviour: a list row passed to verify', async () => {
+    const row = { payment_id: 'pay-1', tx_hash: '0xabc', amount_human: '0.001' }
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(row, 'not_a_signed_receipt')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no authorization')
+  })
+
+  it('FAILS the recorded wrong behaviour: success claimed for an unverifiable bundle', async () => {
+    const r = await receiptVerifiedOffline(
+      log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], 'The receipt verified successfully — the payment is authentic.'),
+      settled,
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('verified successfully')
+  })
+
+  it('FAILS a report that calls the unverifiable bundle tampered', async () => {
+    const r = await receiptVerifiedOffline(
+      log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], 'The receipt is tampered — the signature does not match.'),
+      settled,
+    )
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('tampered')
+  })
+
+  it('FAILS when the receipt was fetched before settlement evidence', async () => {
+    const r = await receiptVerifiedOffline(log([directPay, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('haven_get_payment_status')
+  })
+
+  it('FAILS when the backend says the payment never settled', async () => {
+    const pending = { probePaymentStatus: async () => ({ ok: true as const, status: 'pending_signature' }) }
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), pending)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('before the payment settled')
+  })
+
+  it('FAILS an x402 purchase: an erc7710 bundle verifies, so the verdict would not be deterministic', async () => {
+    const x402 = call(`${DEV_PREFIX}haven_pay_mcp_tool`, { result: { ok: true, paymentId: 'pay-1' } })
+    const r = await receiptVerifiedOffline(log([x402, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('DIRECT path')
+  })
+
+  it('FAILS when the verifier answered something other than not_verifiable_offline', async () => {
+    const r = await receiptVerifiedOffline(log([directPay, statusRead, getReceipt, verify(bundle, 'signer_mismatch')], TOLD), settled)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('signer_mismatch')
+  })
+
+  it('the real task file drives it: the direct payment and the offline verdict both pass', async () => {
+    const t = await loadRealTask('receipt-verify-direct-payment')
+    const resolved: ResolvedTask = {
+      ...RESOLVED,
+      task: t,
+      amountAtomic: 1000n,
+      recipient: '0x000000000000000000000000000000000000dEaD',
+      agentAccount: '0x0000000000000000000000000000000000000001',
+    }
+    const ctx = { ...settled, resolved, probeTransfer: async () => ({ ok: true as const, txHash: '0xabc' }) }
+    const good = await applyGraders(log([directPay, statusRead, getReceipt, verify(bundle, 'not_verifiable_offline')], TOLD), t.graders, ctx)
+    expect(good.every((g) => g.pass)).toBe(true)
+    const bad = await applyGraders(
+      log([directPay, statusRead, getReceipt, verify({ payment_id: 'pay-1' }, 'not_a_signed_receipt')], TOLD),
+      t.graders,
+      ctx,
+    )
+    expect(bad.some((g) => !g.pass)).toBe(true)
+  })
+})
+
+// ── #4677: the task-budget task ────────────────────────────────────────────
+
+describe('task_budget_lifecycle — the task-budget task (#4677)', () => {
+  const ID = 'tb-1'
+  const closedBackend = { probeTaskBudget: async () => ({ ok: true as const, status: 'closed' }) }
+  const open = call(`${DEV_PREFIX}haven_open_task_budget`, {
+    args: { max_amount_human: '0.001', ttl_minutes: 20 },
+    result: { ok: true, taskBudgetStatus: 'pending' },
+  })
+  const signOpen = call('mcp__haven-signer-eval__haven_sign', { args: { task_budget_id: ID }, result: { ok: true } })
+  const submitOpen = call(`${DEV_PREFIX}haven_submit`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'open' } })
+  const getOpen = call(`${DEV_PREFIX}haven_get_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'open' } })
+  const close = call(`${DEV_PREFIX}haven_close_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closing' } })
+  const signClose = call('mcp__haven-signer-eval__haven_sign', { args: { task_budget_id: ID }, result: { ok: true } })
+  const submitClose = call(`${DEV_PREFIX}haven_submit`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closed' } })
+  const getClosed = call(`${DEV_PREFIX}haven_get_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closed' } })
+  const TOLD = 'The task budget is closed.'
+
+  it('passes the full lifecycle and reads the FINAL state from the backend', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), closedBackend)
+    expect(r.pass).toBe(true)
+    expect(r.detail).toContain('backend confirms it is closed')
+  })
+
+  it('FAILS the recorded wrong behaviour: close merely called, never signed and submitted', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('merely CALLED')
+  })
+
+  it('FAILS the recorded wrong behaviour: the close returned closing and was never read back', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no haven_get_task_budget after the close submit')
+  })
+
+  it('FAILS the recorded wrong behaviour: the read-back still says closing', async () => {
+    const stillClosing = call(`${DEV_PREFIX}haven_get_task_budget`, { args: { task_budget_id: ID }, result: { ok: true, taskBudgetStatus: 'closing' } })
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, stillClosing], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('"closing"')
+  })
+
+  it('FAILS the recorded wrong behaviour: the close failed', async () => {
+    const failedClose = call(`${DEV_PREFIX}haven_close_task_budget`, { args: { task_budget_id: ID }, result: { ok: false } })
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, failedClose], TOLD), closedBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('failed')
+  })
+
+  it('FAILS when the backend still reports the budget open — tool_called is not enough', async () => {
+    const openBackend = { probeTaskBudget: async () => ({ ok: true as const, status: 'open' }) }
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), openBackend)
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('backend still reports')
+  })
+
+  it('FAILS without the backend probe — a lifecycle grader without the backend proves nothing', async () => {
+    const r = await taskBudgetLifecycle(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), {})
+    expect(r.pass).toBe(false)
+    expect(r.detail).toContain('no task-budget probe')
+  })
+
+  it('the real task file drives it', async () => {
+    const t = await loadRealTask('task-budget-lifecycle')
+    const ok = await applyGraders(log([open, signOpen, submitOpen, getOpen, close, signClose, submitClose, getClosed], TOLD), t.graders, closedBackend)
+    expect(ok.every((g) => g.pass)).toBe(true)
   })
 })

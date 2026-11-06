@@ -47,7 +47,7 @@ the retry sweep, what on-call reads when something is stuck — is in
   (2026-10-23, #4359 — superseding the 2026-09-11 decision to list them as
   *Coming soon*): a provider that is not live, or live but not configured on
   the deployment, renders no row, and when nothing qualifies the whole card
-  renders nothing. A footer link, *See synced payments on Accounting*, leads
+  renders nothing. A footer link, *See sent payments on Accounting*, leads
   to the feed page when at least one connector shows. The card lives on the
   Business tab (`/settings?tab=business`), whose own visibility follows the
   same rule — it appears only when company details or the accounting card
@@ -61,7 +61,10 @@ the retry sweep, what on-call reads when something is stuck — is in
   carries a small dot when the connection needs a reconnect or a payment has
   given up retrying — it says "look", the page says what.
 - **Transactions** shows a small badge on each fed payment — *In Fortnox*,
-  *Feeding…*, *Not fed* — and links to `/accounting` (#2870).
+  *Sending…*, *Not sent* — and links to `/accounting` (#2870). A pushed row on
+  a deployment whose live connector is not configured reads *Tracked* instead
+  of *In Fortnox*: nothing left Haven, so the row may not claim delivery
+  (#4567, SR:1583).
 
 The feature is **on for every account in dev and production**. Production
 connects Accounted; Fortnox comes to production later (#2876). A self-hosted
@@ -303,9 +306,4 @@ above means the switch never re-feeds history.
 - It does not email you. The state shows on the row, on `/accounting`, and
   as the sidebar dot (#2869).
 
-> **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
-> this diff touched `hooks/useAccounting.ts`, in this document's coverage list, by
-> defaulting the array keys it stores (`?? []`) so an API answer without the key degrades to an empty state instead
-> of sending the route into the ErrorBoundary. No endpoint, flow or
-> behaviour this document describes changes. Scope of this note: those
-> expressions. Nothing else in this document was re-verified.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

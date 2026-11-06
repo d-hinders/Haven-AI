@@ -185,7 +185,11 @@ describe('ReceiveDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy address' }))
 
     expect(writeText).toHaveBeenCalledWith(SAFE.account_address)
-    expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument()
+    // #4573: the write is awaited before the confirmation paints, so the
+    // "Copied" state lands a microtask after the click.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument(),
+    )
 
     // No toggle to flip: the QR is generated the moment the dialog opens.
     await waitFor(() => {

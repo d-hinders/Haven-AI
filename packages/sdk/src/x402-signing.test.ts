@@ -50,6 +50,7 @@ import {
 } from './x402.js'
 import type { X402PaymentRequired, X402PaymentOption } from './types.js'
 import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
+import { assertLowSSignature, SECP256K1_HALF_N } from './test-support/low-s.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
 // carries 'eip712_userop' plus the account's typed data. Fixtures updated by
@@ -446,5 +447,54 @@ describe('asset address byte-sensitivity', () => {
       decoded.payload.signature,
     )
     expect(recovered).toBe(DELEGATE_ADDRESS)
+  })
+})
+
+describe('EIP-3009 wire signature is canonical low-s (#4550)', () => {
+  // x402 facilitators reject a non-canonical (high-s) 65-byte EOA signature in
+  // `exact` EIP-3009 verify, before settlement (x402-foundation/x402#2728;
+  // wire reason `invalid_exact_evm_non_canonical_signature`). Haven complies
+  // today only because viem's `privateKeyToAccount().sign()` passes
+  // `lowS: true` to noble — nothing here checks it. The malleable twin
+  // (r, n - s, v ^ 1) recovers to the SAME address, so the recovery tests
+  // above cannot catch it; only the wire bytes can.
+  //
+  // The two branches below are the two ways `createPaymentHeader` mints a
+  // header: the #3888 paymentId branch (derived nonce, signPaymentHeader) and
+  // the no-paymentId branch (the library's own random nonce,
+  // createPaymentHeader). Both must stay low-s.
+
+  it('signs low-s on the paymentId branch across 32 distinct payment ids', async () => {
+    const haven = makeHaven()
+    const signatures = new Set<string>()
+    for (let i = 0; i < 32; i++) {
+      const header = decodeHeader(
+        await buildHeader(haven, paymentRequired, accepted, `pay_low_s_${i}`),
+      )
+      const parts = assertLowSSignature(header.payload.signature)
+      expect(parts.length).toBe(65)
+      expect([27, 28]).toContain(parts.v)
+      expect(parts.s).toBeLessThanOrEqual(SECP256K1_HALF_N)
+      signatures.add(header.payload.signature)
+    }
+    // 32 distinct payment ids must yield 32 distinct signatures — otherwise
+    // the loop would be re-asserting one signature 32 times.
+    expect(signatures.size).toBe(32)
+  })
+
+  it('signs low-s on the no-paymentId branch across 32 signings', async () => {
+    const haven = makeHaven()
+    const signatures = new Set<string>()
+    for (let i = 0; i < 32; i++) {
+      const header = decodeHeader(await buildHeader(haven))
+      const parts = assertLowSSignature(header.payload.signature)
+      expect(parts.length).toBe(65)
+      expect([27, 28]).toContain(parts.v)
+      expect(parts.s).toBeLessThanOrEqual(SECP256K1_HALF_N)
+      signatures.add(header.payload.signature)
+    }
+    // The library draws a fresh random nonce per signing, so 32 signings must
+    // produce 32 distinct signatures.
+    expect(signatures.size).toBe(32)
   })
 })

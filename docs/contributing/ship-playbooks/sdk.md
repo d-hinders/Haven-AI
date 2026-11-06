@@ -37,24 +37,4 @@ Run the package `typecheck` (`tsc --noEmit`) as the **final** gate step, after e
 
 `area:sdk` / `area:mcp` PRs auto-merge on green CI + clean review. A change that also touches a money-path file or release tooling (`scripts/release-bump.mjs`, `.github/workflows/publish.yml`) is classified `money-path` — which loads `money.md` and its characterization-test bar, but does not pause the merge (#1024). Only database migrations are hard-gated, by `.github/CODEOWNERS`.
 
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-published-package set (`@haven_ai/{sdk,signer,mcp,connect,cli}`), the internal
-pin rule's both directions as enforced by `npm run lint:workspace-pins`, the
-`smoke:pack` script, and the release tooling names above are unchanged at this
-head. The intervening package commits (#3134 vocabulary convergence, #3173
-`@haven_ai/sdk/edge` split, #3155 the x402 MCP transport profile) changed
-package internals, not anything this playbook claims about process.
-
-Re-verified 2026-10-07 (weekly docs audit #3645, at dev `009bd611`): §§1–5
-re-read. The private-consumer list in § Versioning gains `ops` (#3570), which
-`npm run lint:workspace-pins` already enforces by its `private: true` field.
-Everything else above is unchanged at this head.
-
-Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`): §§1–5 re-read,
-nothing changed. Checked: `scripts/README.md` and `scripts/release-bump.mjs`;
-`smoke:pack` in `packages/connect`; `lint:workspace-pins`; the five published packages pin exact
-internal versions and the private consumers (backend, frontend, ops, qa-agent,
-mcp-server) pin `"*"`; `release-bump` and `publish.yml` are on the
-money-path globs; `.github/CODEOWNERS` gates only
-`packages/backend/src/db/migrations/*.ts`, and *Haven automerge rules* (on `dev`
-and `main`) and *Dev gate* (on `main`) both require code-owner review.
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

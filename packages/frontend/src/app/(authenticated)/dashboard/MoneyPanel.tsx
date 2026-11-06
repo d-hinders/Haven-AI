@@ -30,10 +30,12 @@
  *   `BalanceFreshnessIndicator`** — the same #3295 contract the hero had.
  */
 
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useCountUp } from '@/hooks/useCountUp'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatTile } from '@/components/ui/StatTile'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { AreaChart, type SparklinePoint } from '@/components/ui/AreaChart'
 import { SeriesSwatch } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
@@ -348,7 +350,7 @@ export default function MoneyPanel({
       <h2 className="text-sm font-medium text-[var(--v2-ink-2)]">Agent spending, last 30 days</h2>
       <div className="mt-2">
         {loading ? (
-          <div className="h-8 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+          <Skeleton className="h-8 w-32" />
         ) : unavailable ? (
           <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
         ) : d30 ? (
@@ -481,7 +483,7 @@ export default function MoneyPanel({
             <div>
               <p className="text-sm font-medium text-[var(--v2-ink-2)]">Balance</p>
               {loading ? (
-                <div className="mt-3 h-11 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton className="mt-3 h-11 w-56" />
               ) : unavailable ? (
                 <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink-3)]">
                   Unavailable
@@ -571,12 +573,13 @@ export default function MoneyPanel({
                 // is unchanged (#4167): Send primary once funded, Receive
                 // primary with Send disabled when known empty.
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
-                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
+                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled} leadingIcon={ArrowUp}>
                     Send
                   </Button>
                   <Button
                     onClick={onReceive}
                     variant={sendPrimary || receiveSecondary ? 'ghost' : 'primary'}
+                    leadingIcon={ArrowDown}
                   >
                     Receive
                   </Button>

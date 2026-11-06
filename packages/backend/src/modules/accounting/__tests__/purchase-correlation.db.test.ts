@@ -9,8 +9,10 @@
  * evidence rows and the real entry builder:
  *
  * - all three rows end up on ONE `purchase_group_id` (Bitrefill's `invoice_id`);
- * - `parent_payment_id` points at the `invoice/pay` payment on both fee legs,
- *   and is null on the purchase itself;
+ * - `parent_payment_id` holds the purchase's receipt (evidence) id — the
+ *   `machine_payment_evidence.id` of the `invoice/pay` leg — on both fee legs,
+ *   and is null on the purchase itself. It is NOT a payment-intent id (#4577);
+ *   the wire names the same value `parent_receipt_id`;
  * - the settlement ORDER does not matter — `invoice/create` settles first, so
  *   its parent is backfilled when `invoice/pay` lands;
  * - an orphan fee payment (no merchant correlation) is still fed, ungrouped,
@@ -27,7 +29,7 @@ vi.mock('../../agents/index.js', () => ({ accountingFeedAvailable: mocks.account
 
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
-import { recordPurchaseGroup, type MachinePaymentEvidenceSource } from '../../mpp/evidence.js'
+import { recordPurchaseGroup, listReceipts, type MachinePaymentEvidenceSource } from '../../mpp/evidence.js'
 import { buildAccountingEntryForPayment } from '../entry.js'
 import { toFeedTransaction } from '../feed-transaction.js'
 import { underlagFromData } from '../receipt-underlag.js'
@@ -193,11 +195,11 @@ describeDb('purchase correlation key (#4534)', () => {
     const createEntry = await buildAccountingEntryForPayment(userId, create.intentId)
     expect(createEntry).not.toBeNull()
     expect(createEntry!.purchaseGroupId).toBe(INVOICE_ID)
-    expect(createEntry!.parentPaymentId).toBe(pay.evidenceId)
+    expect(createEntry!.parentReceiptRef).toBe(pay.evidenceId)
 
     const tx = toFeedTransaction(createEntry!, { ledgerCurrency: 'SEK' })
     expect(tx.purchaseGroupId).toBe(INVOICE_ID)
-    expect(tx.parentPaymentId).toBe(pay.evidenceId)
+    expect(tx.parentReceiptRef).toBe(pay.evidenceId)
 
     const pdf = underlagFromData({
       paymentId: tx.paymentId,
@@ -222,7 +224,9 @@ describeDb('purchase correlation key (#4534)', () => {
       transactionKind: tx.transactionKind,
       description: tx.description,
       purchaseGroupId: tx.purchaseGroupId,
-      parentPaymentId: tx.parentPaymentId,
+      parentReceiptRef: tx.parentReceiptRef,
+      // #4577: this document's own evidence id, printed as `Receipt ref`.
+      receiptRef: tx.receiptRef,
       chainId: createEntry!.chainId,
       txHash: tx.txHash,
       txHashIsFunding: tx.txHashIsFunding,
@@ -232,7 +236,66 @@ describeDb('purchase correlation key (#4534)', () => {
       signature: null,
     }).pdf.toString('latin1')
     expect(pdf).toContain(`Purchase group ${INVOICE_ID}`)
-    expect(pdf).toContain(`Parent payment ${pay.evidenceId}`)
+    // #4577: the parent is named for what it holds — a receipt id — and the
+    // document prints its OWN evidence id so the two documents join by eye.
+    expect(pdf).toContain(`Parent receipt ${pay.evidenceId}`)
+    expect(pdf).toContain(`Receipt ref    ${create.evidenceId}`)
+    expect(pdf).not.toContain('Parent payment')
+  })
+
+  /**
+   * #4577: the correlation value is a RECEIPT id, so it must JOIN — on the feed
+   * payload and on the receipts wire alike. Before this the field was named
+   * `parentPaymentId` beside a `paymentId` that is a payment-intent id, so a
+   * join on the two names found nothing. This test goes red if
+   * `parent_receipt_id` is removed from `mapEvidence`, or if the internal
+   * `parentReceiptRef` stops carrying the purchase leg's `receiptRef`.
+   */
+  it('joins a fee leg to its purchase leg by receipt id, on the feed and on the receipts wire (#4577)', async () => {
+    const { userId, agentId } = await seedUser()
+    const create = await seedSettled(userId, agentId, 'https://api.bitrefill.com/x402/invoice/create', '0.002', 300)
+    const pay = await seedSettled(userId, agentId, 'https://api.bitrefill.com/x402/invoice/pay', '0.010', 240)
+    const status = await seedSettled(userId, agentId, 'https://api.bitrefill.com/x402/invoice/status', '0.001', 180)
+
+    for (const seeded of [create, pay, status]) {
+      await recordPurchaseGroup(seeded.source, {
+        agentId,
+        merchantResponse: { invoice_id: INVOICE_ID, status: 'paid' },
+      })
+    }
+
+    // The purchase leg's own receipt id — what every fee leg must point at.
+    const payEntry = await buildAccountingEntryForPayment(userId, pay.intentId)
+    expect(payEntry).not.toBeNull()
+    const purchaseReceiptRef = payEntry!.receiptRef
+    expect(purchaseReceiptRef).toBe(pay.evidenceId)
+
+    // Feed payload: each fee leg's `parentReceiptRef` IS the purchase leg's
+    // `receiptRef` — the join the field exists for.
+    for (const fee of [create, status]) {
+      const entry = await buildAccountingEntryForPayment(userId, fee.intentId)
+      expect(entry).not.toBeNull()
+      const tx = toFeedTransaction(entry!, { ledgerCurrency: 'SEK' })
+      expect(tx.parentReceiptRef).toBe(purchaseReceiptRef)
+      // And the fee's own ref is its own evidence row, not the parent's.
+      expect(tx.receiptRef).toBe(fee.evidenceId)
+    }
+
+    // Receipts wire: `parent_receipt_id` equals the purchase receipt's `id`,
+    // and the deprecated alias carries the same value.
+    const page = await listReceipts(agentId, 10)
+    expect(page).not.toBeNull()
+    const byId = new Map(page!.receipts.map((r) => [r.id, r]))
+    const purchaseReceipt = byId.get(pay.evidenceId)
+    expect(purchaseReceipt).toBeDefined()
+    expect(purchaseReceipt!.parent_receipt_id).toBeNull()
+
+    for (const fee of [create, status]) {
+      const receipt = byId.get(fee.evidenceId)
+      expect(receipt).toBeDefined()
+      expect(receipt!.parent_receipt_id).toBe(purchaseReceipt!.id)
+      expect(receipt!.parent_payment_id).toBe(receipt!.parent_receipt_id)
+    }
   })
 
   it('feeds an orphan fee payment ungrouped — visible, never dropped', async () => {
@@ -250,11 +313,11 @@ describeDb('purchase correlation key (#4534)', () => {
     const entry = await buildAccountingEntryForPayment(userId, orphan.intentId)
     expect(entry).not.toBeNull()
     expect(entry!.purchaseGroupId).toBeNull()
-    expect(entry!.parentPaymentId).toBeNull()
+    expect(entry!.parentReceiptRef).toBeNull()
 
     const tx = toFeedTransaction(entry!, { ledgerCurrency: 'SEK' })
     expect(tx.purchaseGroupId).toBeNull()
-    expect(tx.parentPaymentId).toBeNull()
+    expect(tx.parentReceiptRef).toBeNull()
 
     const pdf = underlagFromData({
       paymentId: tx.paymentId,
@@ -279,7 +342,9 @@ describeDb('purchase correlation key (#4534)', () => {
       transactionKind: tx.transactionKind,
       description: tx.description,
       purchaseGroupId: tx.purchaseGroupId,
-      parentPaymentId: tx.parentPaymentId,
+      parentReceiptRef: tx.parentReceiptRef,
+      // #4577: this document's own evidence id, printed as `Receipt ref`.
+      receiptRef: tx.receiptRef,
       chainId: entry!.chainId,
       txHash: tx.txHash,
       txHashIsFunding: tx.txHashIsFunding,
@@ -289,7 +354,8 @@ describeDb('purchase correlation key (#4534)', () => {
       signature: null,
     }).pdf.toString('latin1')
     expect(pdf).toContain('Purchase group ungrouped')
-    expect(pdf).toContain('Parent payment n/a')
+    expect(pdf).toContain('Parent receipt n/a')
+    expect(pdf).not.toContain('Parent payment')
   })
 
   it('uses an agent-supplied group key when the merchant supplies none', async () => {

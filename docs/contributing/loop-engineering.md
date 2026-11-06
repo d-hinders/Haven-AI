@@ -210,13 +210,4 @@ behavior (reward-hacking) rather than independent truth.
 - [`loop-harness-index.md`](./loop-harness-index.md) — the loop portfolio (none live today).
 - [`ai-agent-workflow.md`](./ai-agent-workflow.md) — the broader agentic delivery workflow.
 
-Re-verified 2026-10-24 (#4372 part D, at dev `f590d946c`). Changed: the
-body's "Last updated" line, which predated the withdrawal edits below it, is
-removed (`last-verified` carries the date), and §2's reference-model bullet
-says the withdrawn allowance loops "used" one.
-Re-checked without change: no `loop-harness/` directory is tracked (`git
-ls-files | grep loop-harness/` is empty), no package defines `test:loop`,
-`loop-harness-index.md` says none is live (LP-2 withdrawn, #2848), #2020 and
-#2848 are closed, #1024 removed the money-path merge pause, and the linked
-`autonomous-pr-loop.md`, `ai-agent-workflow.md` and the quality-scan
-`discovery-method.md` exist.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

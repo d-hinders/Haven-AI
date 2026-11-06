@@ -30,7 +30,7 @@ The loop reads **GitHub Issues**. Two sources (see
 | Source | When | How to run |
 | --- | --- | --- |
 | **Standalone labeled issue** | a small, self-contained task | open an issue + add the **`code-quality`** label → run `ship-next` |
-| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>`; its **Promotion checklist** (operator steps + product verification on `dev`, each an unticked box) keeps the epic open until a human ticks the last one — `ship-next` reports it ready to close only then ([#2767](https://github.com/d-hinders/Haven-AI/issues/2767)) |
+| **Epic + sub-issues** | a multi-PR plan that burns down together | open a parent issue with sub-issues → run `ship-next epic=#<n>`; its **Promotion checklist** (operator steps + product verification on `dev`, each an unticked box) is what `ship-next` reports ready to close on — every box ticked. A box only a promotion can satisfy is filed as its own `Next release` issue, the box rewritten to link it and ticked, so the epic may close before the promotion (owner decision 2026-10-30, amending [#2767](https://github.com/d-hinders/Haven-AI/issues/2767)); the [convention](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main) owns the filing rule |
 
 Issue state *is* the backlog state: an open issue with no PR, no live claim or
 work overlap, no open `Depends on` target, no **`pending-review`** label, and not from outside the

@@ -154,6 +154,9 @@ async function main() {
     merchantName: tx.counterparty.name,
     merchantAddress: tx.counterparty.address,
     resourceUrl: tx.resourceUrl,
+    // #4577: the document's own evidence id, printed as `Receipt ref` on a
+    // protocol underlag. Synthetic here, like the on-chain fields below.
+    receiptRef: tx.receiptRef,
     chainId: 84532,
     txHash: '0x' + 'cd'.repeat(32),
     txHashIsFunding: false,

@@ -588,17 +588,4 @@ Do not run git mutation commands. The captain owns branch, commit, push, and PR 
 If you need a shared change, report it instead of making it.
 ```
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: *Inline Gate Placement* no longer points at a hoisted-notice layout
-> in `EditAgentModal` — #2331 removed it, and no product file renders
-> `<OnchainActionNotice />` now. The rule itself is unchanged, and the
-> *Safe setup* phrase in the self-check list is left to open PR #4388.
-> Re-checked without change: the three rulesets (`gh api …/rulesets`: code
-> owner review required on `dev` and `main`), `CLAUDE.md` § *How shipping is
-> governed*, `AGENTS.md` § *Agentic Workflow*, `.claude/hooks/ship-next-guard.sh`,
-> the seven `.claude/agents/` adapters and their canonical references,
-> `npm run preflight`, the named frontend symbols, `pendingApprovals` always 0
-> (`routes/agent-activity.ts`), the ship-next verdict-line and arming rules,
-> the Proportionality lane anchor, `scripts/ci/review-isolation.mjs`'s flags
-> and its "not asserted" lines, prove-red's backup naming, `npm run
-> screenshot`, and every cited issue's state with `gh api`.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

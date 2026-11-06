@@ -1925,6 +1925,10 @@ export async function serveAgentDetailResponses(
     // allowances empty out and its received grants ride on the list read
     // (the shared sub-budgets/received handler answers the detail fetch).
     receivedSubBudgets?: Array<{ parent_agent_id: string; parent_agent_name: string; open: boolean }>
+    // #4602: research an agent with NO budget yet — no active delegation and
+    // so (the view, #1090) no allowances, and no received grant either. Not
+    // `receivedSubBudgets: []`, which means "a grant holder with none open".
+    noBudget?: true
   } = {},
 ) {
   await page.route('**/api/**', async (route) => {
@@ -1960,7 +1964,7 @@ export async function serveAgentDetailResponses(
             // The spread keeps the literal under the `allowances: [` key the
             // fixture-shape-parity test classifies it by.
             allowances: [
-              ...(options.receivedSubBudgets !== undefined
+              ...(options.receivedSubBudgets !== undefined || options.noBudget
                 ? []
                 : [
                     {
@@ -2024,9 +2028,9 @@ export async function serveAgentDetailResponses(
       // One ACTIVE delegation — the spend authority row the budget card and
       // the page summary both read. 250.00 USDC per week, recipient-pinned,
       // mirroring the screenshot harness's `dlg-1` shape so both capture
-      // paths describe the same authority.
+      // paths describe the same authority. `noBudget` (#4602) answers none.
       await fulfillJson(route, {
-        delegations: [
+        delegations: options.noBudget ? [] : [
           {
             id: 'dlg-e2e-1',
             chain_id: testSafe.chain_id,

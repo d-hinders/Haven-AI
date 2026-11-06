@@ -474,6 +474,23 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
       })
       expect(result.current.promptCopied).toBe(false)
     })
+
+    it('does not latch when the clipboard write rejects — nothing was copied (#4573)', async () => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+        configurable: true,
+      })
+      const { result } = renderFlow()
+      await act(async () => {
+        await result.current.handleCreateSetup()
+      })
+      await act(async () => {
+        await result.current.copyText('prompt', 'prompt')
+      })
+      // The step advances only on a copy that actually happened.
+      expect(result.current.promptCopied).toBe(false)
+      expect(result.current.copied).toBeNull()
+    })
   })
 
   it('flags a connected-but-wrong-chain wallet instead of treating it as absent (#1070)', () => {

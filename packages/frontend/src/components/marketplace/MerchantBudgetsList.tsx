@@ -11,6 +11,7 @@
 import Link from 'next/link'
 import { formatUnits } from 'viem'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
+import { SectionHeading } from '@/components/ui/SectionHeading'
 import { truncateAddress } from '@/components/haven'
 import { chainName } from '@/lib/marketplace'
 import { getChainConfig } from '@/lib/chains'
@@ -74,7 +75,7 @@ export function MerchantBudgetsList({ budgets }: { budgets: MerchantBudget[] }) 
 
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold text-[var(--v2-ink)]">Agent budgets for this merchant</h2>
+      <SectionHeading title="Agent budgets for this merchant" />
       <ul className="space-y-2" data-testid="merchant-budgets-list">
         {budgets.map((b) => {
           // #3331 review finding F8: an unknown token must not silently read

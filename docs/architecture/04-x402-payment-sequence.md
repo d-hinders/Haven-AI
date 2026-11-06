@@ -1096,30 +1096,6 @@ Sequence:
    merchant-leg evidence yet, the funded-awaiting-merchant / check-status-later
    answer — see the compat note's #3527 entry for the exact split.
 
-   > **#3518 re-verification, 2026-10-01 — WHICH budget the compare runs
-   > against.** The pre-check selects the payment's OWN budget
-   > (`selectBudgetForPaymentReport`, the mirror of the payment rule
-   > `SELECT_DELEGATION_FOR_PAYMENT_SQL`): a recipient-pinned budget for
-   > `merchantTo` wins, a pin to a different payee is excluded, and the open
-   > budget answers everything else — never the FIRST per-token row, which
-   > with an open 0.001 beside a pinned 0.005 described a budget that did
-   > not pay. No `merchantTo` in the call → only the open budget is
-   > eligible (a pinless quote cannot claim a recipient-scoped grant). This
-   > changes refusals in both directions: an open 0.001 plus a pinned 0.005
-   > for the pinned merchant is no longer refused; a large open budget
-   > beside a small pin for this payee is now refused on the pin's
-   > remaining. Success and refusal bodies both name the budget that paid
-   > (`budget_id`, `budget_delegation_hash`,
-   > `budget_recipient_address`, `budget_merchant_id`), additive/optional;
-   > the typed refusal contract (`error_code`, `phase`,
-   > `next_action`, `remaining_atomic`, `shortfall_atomic`, the refusal
-   > ledger row) is unchanged — only the budget whose figures it cites
-   > moved. The allowance rows this section's summary reports carry the
-   > same identity (`delegation_hash`) plus scope
-   > (`recipient_address`, `merchant_id`) and the Haven-side
-   > reservation (`reserved_haven_atomic`, summed beside the on-chain
-   > remaining, never folded into it).
-
    > **This bullet described a two-rail split until #2265, and the legacy half
    > was false on every clause.** It read: "on the **legacy** rail, an
    > insufficient allowance does NOT refuse here … the resulting funding intent
@@ -1151,7 +1127,9 @@ derivation.
 
 ## Post-Purchase Allowance Summary (#1310)
 
-`haven_settle_mcp_tool`'s `settled: true` branch, and `haven_get_payment_status`
+`haven_settle_mcp_tool`'s `settled: true` branch — and its unverified arms,
+which keep the block while reporting `settled: false` (#4688) — and
+`haven_get_payment_status`
 for a genuinely settled x402 payment (`rail: 'x402'`, `phase:
 'payment_confirmed'` — `funded_but_unsettled` is deliberately excluded, since
 that phase means the merchant did NOT accept the paid retry), carry an
@@ -1223,22 +1201,6 @@ surface it as a warning; `remaining_atomic` / `remainingAtomic` still reflect
 the last successful
 chain read, not a guaranteed-live one, and phrasing here avoids claiming
 freshness.
-
-#3518 re-verification (2026-10-01): the settled row now names the budget that
-metered it. `payment_intents.budget_delegation_hash` (recorded at authorize,
-migration 053) rides `GET /machine-payments/:id/status` as
-`budget_delegation_hash` / SDK `budgetDelegationHash` (additive/optional;
-omitted on the legacy rail and on rows predating migration 053), and the
-settle summary picks the allowance row whose `delegationHash` equals it —
-the budget that PAID — instead of re-deriving a (token, payee) first match
-whose winner can move between pay and settle (the grants' window can shift,
-and task-/sub-budget payments meter their PARENT by hash while the payee
-matches no pin at all). The token first-match remains only as the fallback
-for an older backend whose status predates the field. A status payload that
-carries the field but matches none of the agent's own rows (a sub-budget
-payment metering another agent's budget, or a re-key between pay and settle)
-reports the figure unavailable (`ALLOWANCE_CHECK_UNAVAILABLE`), never another
-budget's remaining; the failed-read degradation above is unchanged.
 
 ## Resuming An Authorized Payment
 
@@ -1347,56 +1309,6 @@ case 1 fires on the next status call; `accepted` posts `POST
 /machine-payments/evidence`, which upgrades `proof_status` to
 `merchant_response_observed` and therefore removes the payment from case 2's
 predicate permanently rather than until the window elapses.
-
-> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** An `accepted`
-> outcome on an eip3009 payment with no merchant *settlement* recorded yet
-> (a separate fact from the evidence row above — the delegate → merchant
-> transfer, not the merchant's HTTP response) also names
-> `haven_report_settlement_evidence` as the next tool, `payment_id`
-> prefilled: pass the merchant's `PAYMENT-RESPONSE.transaction` as
-> `settlement_tx_hash` if it returned one. A call carrying only `payment_id`
-> is a well-formed success no-op — nothing checked, nothing recorded — never
-> a refusal, since the merchant may simply have returned no hash.
-> `last-verified` unchanged.
->
-> **Folded in one call earlier (#3727).** The outcome tool itself now takes
-> the optional evidence — `settlement_tx_hash` and/or the raw base64
-> `PAYMENT-RESPONSE` header as `payment_response` — and on an `accepted`
-> outcome records it through the same `reportSettlementEvidence` seam,
-> verified on-chain BEFORE recording (a mismatching or zero hash refuses
-> before anything is written; the decoded header contributes `transaction`
-> only, never `payer`). With evidence supplied the response names no next
-> tool, so the plain-HTTP eip3009 purchase needs one call fewer; the standalone `haven_report_settlement_evidence` stays for agents
-> that call it and for the paid-MCP/erc7710 handoffs that already name it.
->
-> **The proof header rides the report (#4061, passage only).** Since #3925 a
-> REPORTED EIP-3009 merchant settlement is recorded only with the payment
-> header the agent sent the merchant (the passive sweep still records a
-> derived-nonce settlement with no report). Haven never sees that header on this path, so both
-> report tools take an optional `payment_header`: the exact header the agent
-> retried with. It is forwarded as `paymentProofHeader` plus the names
-> `x402PaymentHeaderNamesSent` derives, the funding report's pair. A report
-> without it is refused with `error_code: "settlement_proof_header_missing"`,
-> and the tools answer `SETTLEMENT_PROOF_HEADER_MISSING`, naming
-> `haven_report_settlement_evidence` again with the hash prefilled. The
-> agent adds `payment_header`; the hash was not judged. Every other refusal
-> keeps its terminal answer. `last-verified` unchanged.
->
-> **The header is prefilled where the arm holds it (#4530, passage only).**
-> "The agent adds `payment_header`" is no longer the whole story. On the arms
-> that already hold the agent's header — the retryable settlement-evidence
-> handoff of `haven_complete_mcp_tool` / `haven_settle_mcp_tool`, the report
-> tool's own status-unreadable arm, and the plain-HTTP outcome report's
-> folded-evidence retryable and offer arms — `next_arguments` now carries
-> `payment_header` beside the hash, so the agent re-supplies nothing. The
-> plain-HTTP retryable arm prefills what the call FORWARDED as `proofHeader`,
-> never the raw argument. The prefill is omitted when the header exceeds the
-> report tools' 16,384-character cap, and the prose still names the header for
-> a client holding a stale tool list. The missing-header arms stay prose-only:
-> there the call carried no header, so there is nothing to prefill. The status
-> read also names the recorded transaction now
-> (`merchant_settlement_tx_hash`), so an agent can confirm on that read which
-> settlement Haven recorded. `last-verified` unchanged.
 
 The report is caller-**asserted**, and the boundary is drawn the way #2092/#2096
 drew it for a caller-asserted settlement hash:
@@ -2694,27 +2606,6 @@ short explanation above the task-budget list —
 an open child reserves nothing on-chain, so the two figures are shown apart
 rather than netted into a number the chain would not agree with.
 
-#3518 re-verification (2026-10-01): the agent-facing reads now say which
-budget and what is reserved. `GET /machine-payments/allowances` rows carry
-`delegation_hash` / `recipient_address` (null = open) / `merchant_id`
-(null except a #3331 merchant-locked budget) / `reserved_haven_atomic` —
-the sum of the budget's OPEN, unexpired task- and sub-budget children's
-caps, keyed by delegation hash and reported BESIDE `onchain.remaining`,
-never folded into it (the on-chain figure stays authoritative; a
-reservation releases on close/expire without any chain event). The
-sub-budget half of that sum walks grant → parent-child → the budget
-delegation's hash (`SUM_OPEN_RESERVED_FOR_BUDGET_DELEGATION_SQL`) —
-`sumOpenReservedForParent` keys on the parent-child row's OWN hash and
-would answer 0 here. `GET /task-budgets?status=live` (and the MCP/SDK reads
-over it) list unexpired pending, open, and closing rows, each
-with its `status` (closed rows and every expired row omitted — an
-expired `closing` row owes no close signature, since the close would
-be trivial #3329 N2(c) / #3773; `status=all` still
-answers every row), and
-`GET /task-budgets/:id` is the read-by-id the MCP
-`haven_get_task_budget` surfaces — the status check a close refusal's
-"re-check the budget's status" points at, for any status.
-
 ## Sub-agent budgets — an agent re-delegates a narrower budget to another agent (#3330)
 
 A **sub-budget** is agent A re-delegating a narrower budget to agent B in the
@@ -2865,227 +2756,11 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 - Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
   before changing x402/MPP flows or merchant-facing demos.
 
-The dated notes below record what each diff changed when it landed. Their
-census figures (call sites, refusal steps) are as of that diff. The current
-hosted figures are `EMISSION_SITE_COUNT` and `REFUSAL_STEP_CALLS` in
+The dated notes that recorded what each diff changed when it landed are
+archived; their census figures (call sites, refusal steps) are as of that
+diff. The current hosted figures are `EMISSION_SITE_COUNT` and
+`REFUSAL_STEP_CALLS` in
 [`packages/mcp-server/src/test-support/next-step-fixtures.ts`](../../packages/mcp-server/src/test-support/next-step-fixtures.ts),
 which the characterization tests enforce.
 
-> **Re-verification (#3097, the paid retry's target, 2026-09-18):** this diff
-> touches the hosted plain-HTTP handlers, the hosted tool contracts and the
-> SDK's quote/transport modules in this document's coverage list. What changed:
-> `haven_pay_x402_quote` and `haven_resume_x402_payment` take an optional `url`
-> (the URL the agent quoted), the quote returns `request_url` / `retry_url` /
-> `resource_url_differs_from_request`, pay and resume return `retry_url`, and a
-> public `http://` retry target is refused (`INSECURE_RETRY_TARGET`) before an
-> intent exists on the hosted surface, and on the SDK side at
-> `McpMerchantTransport.deliverPayment` (after funding on the MCP-merchant
-> family, annotated by the hosted completion tool). The
-> flows above are otherwise unchanged: selection, caps, funding, signing and
-> settlement evidence keep their positions; the paragraph "Where the paid retry
-> goes" is the new statement. Scope of this note: that paragraph and the
-> diagram's `url` argument. Nothing else in this document was re-verified.
-
-> **Re-verification (#3101, the typed next-step builder, 2026-09-18):** this
-> diff adds `packages/sdk/src/next-step.ts` (the builder, exported from the
-> SDK's `index.ts`) and touches `packages/mcp-server/src/tools/support/{guidance,errors}.ts`,
-> `packages/mcp-server/src/tools/{contracts,catalog-purchase,plain-http-x402,paid-mcp-completion,state-direct-recovery}.ts`,
-> the hosted server's instructions (they name the omitted-reason field; that
-> file is on `mcp-runtime-compatibility.md`'s list), the SDK's `types.ts` (a new optional `next_tool_omitted_reason` on
-> `AgentNextStep`) and `skill-content.ts`, and, annotation only,
-> `packages/signer/src/tools.ts` and `packages/mcp/src/tools.ts`. The
-> hosted `next_tool` family is now rendered by the SDK's builder from a bare
-> tool name + server role over a target map derived from the hosted
-> `toolSchemas` (which keeps its keys via `as const satisfies`) plus the two
-> signer handoff shapes the hosted server declares itself — it never imports
-> the edge signer at runtime; a test pins them to the signer's schemas; the
-> wire strings are byte-identical on the 9 sites the epic did not re-decide,
-> and all 17 `buildAgentGuidance` call sites (a census the characterization
-> test enforces — an 18th site fails it) are pinned by
-> `next-step-characterization.test.ts`, the 8 re-decided ones marked. New on the wire:
-> `next_tool_omitted_reason` wherever no tool is named (the three refusals
-> that used to hand `{ payment_id: null }` to a tool requiring a string, the
-> recovery module's own-HTTP-retry step, the report-accepted step and the
-> three settled done-states), and the same `next_tool` family on refusals
-> whose `HostedToolError` carries a step. No tool name, schema key,
-> strict/permissive split, expected-context version, signer contract, cap,
-> funding, signing or settlement decision changes; the local runtime's
-> `nextAction` emission is untouched (slice #3103). Scope of this note: those
-> fields. Nothing else in this document was re-verified.
-
-> **Re-verification (#3102, every hosted refusal names its next step, 2026-09-18):**
-> this diff touches `packages/mcp-server/src/tools/support/{errors,guidance,cap-price,catalog-entry,mcp-context}.ts`
-> and `packages/mcp-server/src/tools/{catalog-purchase,plain-http-x402,paid-mcp-completion}.ts`.
-> `HostedToolError` no longer takes a bare `nextAction`: a refusal thrown as a
-> `HostedToolError` names an action only through a typed `nextStep`
-> (`refusalNextStep`, the same builder and target map as the success path),
-> so each of the 28 refusal steps (27 sites, one of them following the live
-> payment state) now also carries either a tool with arguments that tool declares
-> (six name a tool: `haven_get_payment_status { payment_id }` on the
-> post-funding timeout, the erc7710 rejection and an eip3009 rejection whose
-> live state says retry or poll; `haven_sweep_delegate {}` on the eip3009
-> rejection and the funded insecure-target branch, as their messages say) or `next_tool_omitted_reason` (every stop-and-tell-user,
-> retry-with-explicit-context, fund-account and window-expired refusal). The
-> one other hosted refusal shape, the SDK's `HavenPaymentStateError` passed
-> through `normalizeError`, takes its step from the per-action default table
-> (status read, sweep) or says why none follows, so no hosted refusal carries
-> a bare `next_action`. `next_action` and `suggested_tool` are byte-identical
-> on every refusal, pinned by `next-step-refusals-characterization.test.ts`
-> (written before the change; a census of `refusalNextStep` calls enforces the
-> 27); `status`, `phase`, `rail` and `retry_with_new_quote` are untouched by
-> the diff and pinned where they were, in `tools.test.ts` and
-> `paid-mcp-completion.test.ts`. No tool name, schema
-> key, cap, funding, signing or settlement decision changes; the local
-> runtime is untouched (slice #3103). Scope of this note: those fields.
-> Nothing else in this document was re-verified.
-
-> **Re-verification (#3104, cross-surface handoff parity and the ratchet,
-> 2026-09-18):** this diff adds the next-step ratchet (`npm run
-> lint:next-steps`, a shrink-only gate with a zero baseline, wired into CI),
-> moves the hosted next-step fixtures into the hosted server's test-support
-> module, and extends the hosted parity test (the one on
-> `mcp-runtime-compatibility.md`'s list) into the cross-surface walk: every hosted emission fixture is built for real and
-> its arguments parsed with the named tool's strict schema on the surface its
-> role names. No emission, tool name, schema key or decision changes; the epic's
-> contract as it stands after #3100–#3103 is what the walk and the ratchet
-> hold. Scope of this note: the tests and the gate. Nothing else in this
-> document was re-verified.
-
-> **Re-verification (#3103, the signer and the local runtime name a next tool,
-> 2026-09-18):** this diff adds `packages/signer/src/next-step.ts` (the signer's
-> declared hosted handoff shapes — `haven_get_payment_status { payment_id }` —
-> and its refusal-side builder over the SDK's) and touches
-> `packages/signer/src/{sign-context,tools,index}.ts` and `packages/mcp/src/tools.ts`.
-> The signer's five decision sites now carry a typed step beside `next_action`:
-> a backend refusal of the signing context (not expired) names the hosted
-> status read with the payment id through the role fields
-> (`next_tool_server_role: hosted`, `next_tool_name`), so a `--name <slug>`
-> install resolves it; a transport failure, a malformed body, an expired window
-> and a version skew name no tool and say why (`next_tool_omitted_reason`).
-> `HavenSignContextError` gains the optional `next_tool*` fields additively;
-> no signing decision, expected-context version or binding version changes.
-> The local runtime's failure envelope dual-emits `nextAction` and
-> `next_action` (decision 10, one release before the old spelling is dropped;
-> this supersedes the #2983 note's "its failure shape is camelCase") and its
-> two decision sites — the ones the signer's symmetric grep returns
-> (`nextAction: …` or `nextAction = …`): the `MERCHANT_NOT_READY` envelope
-> and the `UNKNOWN_ERROR` fallback — say why no tool follows.
-> Every field the refusals emitted before is byte-identical, pinned by
-> `next-step-characterization.test.ts` in each package (written before the
-> change). The hosted server's suite pins the signer's declared shapes to the
-> hosted schemas. Scope of this note: those fields. Nothing else in this
-> document was re-verified.
-
-> **Re-verification (#3344, one observer-receipt helper, 2026-09-26):** this
-> diff touches `packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts` only
-> to replace its private copy of `waitForReceipt` with the harness's one shared
-> observer-receipt helper, called with the leg's own
-> `TIMING.receiptWaitMs` / `pollIntervalMs` (read per call, so the test seam is
-> unchanged). The leg's assertions, its reads and every payment step it drives
-> are unchanged; its suite passes unmodified. Scope of this note: that helper.
-> Nothing else in this document was re-verified.
-
-> **Re-verification (#3332, additive `parties.buyer`, 2026-09-27):** this diff
-> adds an OPTIONAL `buyer` field to `Parties` (`openapi/party-model.ts`) — the
-> paying agent's owner's company details, present only when
-> `HAVEN_OWNER_COMPANY_DETAILS` is on and the owner has saved details, absent
-> (the key missing, never present-and-null) otherwise. It is not part of any
-> settlement typed data, does not change `withParties`' existing four fields,
-> and does not touch `routes/x402.ts`, `x402-delegation.ts`, the settlement-
-> transfer verifier, or `agent-payment-status.ts` (deliberately not wired in
-> this slice — see `docs/product/owner-company-details.md`). Every existing
-> consumer of `Parties` is unaffected by construction: an optional key nothing
-> previously read. Scope of this note: that one field. Nothing else in this
-> document was re-verified.
-
-> **Re-verified #3423 (slice A, hosted agent-surface polish, 2026-09-29):**
-> this diff made three passages stale. This document said an
-> "unknown/degraded/non-MCP catalog row" and the `2.` sequence step's
-> "`degraded` row or one missing MCP tool metadata (`protocol`/`tool_name`)"
-> ALL shared one fallback, `haven_pay_mcp_tool` — that was already wrong for a
-> plain-HTTP row (no `tool_name` to pass it) before this fix, and this fix is
-> what corrected the code. Both passages now read: a plain-HTTP row hands off
-> to `haven_quote_x402 { url: resource_url }` (checked FIRST); a degraded or
-> tool-less MCP row keeps `haven_pay_mcp_tool`; an unknown catalog_id names
-> `haven_discover_tools`. The `agent_summary.purchase_summary` passage gained
-> one sentence: on erc7710, `funding_tx_hash` is always `null` (no funding
-> leg), never back-filled from the settlement hash `payment.txHash` otherwise
-> carries on that scheme — the erc7710 settled branch of
-> `haven_settle_mcp_tool` did not build `purchase_summary` at all before this
-> fix, so the field's existing generic description was previously read as
-> EIP-3009-only; it is now true of both schemes. Scope of this note: those
-> three passages. Nothing else in this document was re-verified.
-> `last-verified` is not re-stamped.
-
-> **Re-verified #3988 (2026-10-15 — a read-only holder-side sub-budget
-> listing).** The diff touches one covered path:
-> `routes/agent-sub-budgets.ts` gains
-> `GET /agents/{id}/sub-budgets/received` — a SELECT-only read of the
-> non-closed grants an agent RECEIVES, with the parent agent's name joined,
-> for the holder's own page. It prepares, signs and redeems nothing and
-> offers no mutation (closing stays the delegator's DELETE); the
-> payment-time chain check (`checkSubBudgetForPayment`) is untouched, and
-> the display verdict the Agent payload ships is the same chain that check
-> already enforced, so no display can now present a chain the payment path
-> would refuse. Scope of this note: that one route. Nothing else in this
-> document was re-verified; `last-verified` is bumped to 2026-10-15 for
-> exactly this coverage.
-
-> **Re-verification (#4119, qa-dev asserts the merchant settlement was
-> recorded, 2026-10-20):** this diff touches
-> `packages/qa-agent/src/scenarios/x402-hosted-mcp-signer.ts` to ADD an
-> assertion after `haven_settle_mcp_tool` returns, through a new helper the
-> four qa-dev EIP-3009 legs share: the payment status must
-> carry `merchant_settlement_recorded`, the receipt's `settlement_tx_hash`
-> must equal the settle's, and the settle's eip3009 evidence guidance is
-> followed — a `haven_report_settlement_evidence` follow-up carries the
-> leg's own `payment_header`, and any refusal fails the leg. It reads the
-> existing status flag, receipt field and hosted guidance, and makes one
-> WRITE: on the report-tool arm (retryable, or the missing-proof-header
-> refusal) it calls the guided `haven_report_settlement_evidence` with the
-> prefilled `next_arguments` plus its own `payment_header`, as the guidance
-> instructs an agent to. No backend, hosted or SDK behaviour or signing
-> decision changes, and the leg's quote, sign and settle calls are
-> unchanged. Scope of this
-> note: that harness assertion. Nothing else in this document was
-> re-verified; `last-verified` is not re-stamped.
-
-> **Re-verified #4303 part E (2026-10-23, full re-read).** Every section of
-> this document was re-read against the code at `d061a2b90`. Corrected: the
-> hosted EIP-3009 diagram now draws the default `haven_sign_x402` one-shot and
-> the outcome report; the expected-context table gains its v3 row; the
-> paid-MCP fast path states its erc7710 shape; the catalog preflight's step
-> reference, refusal summary and round-trip budget match the code after
-> #3054; the unpinned settlement child lists all three ways authorize
-> receives no `facilitatorAddresses`; and several counts were replaced with
-> pointers to the instruments that hold them. A review round then found the
-> post-purchase summary still describing the #1306 preflight's pre-#3054
-> read, and a forward reference to #3102 that the shipped slice did not
-> fulfil; both are corrected, and the #3054 fact family was swept with the
-> wrapped lines joined. `last-verified` is bumped for this re-read.
-
-> **Re-verified 2026-10-26 (#4449, the signer's success next-step family):** the
-> signer's six success results and the settlement-child guidance were re-read
-> against `packages/signer/src/tools.ts`, `next-step.ts` and
-> `no-funding-leg.ts` at `origin/dev` `b9f9f1e47`. Scope of this note: the
-> paragraph added above. The rest of this document was not re-read for it, and
-> `last-verified` is not bumped.
-
-> **Re-verified 2026-10-29 (#4534, the purchase correlation key on the outcome
-> report):** this diff touched four files in this document's coverage list —
-> `packages/sdk/src/client.ts`, `packages/sdk/src/merchant-completion.ts`,
-> `packages/sdk/src/types.ts` and `packages/mcp-server/src/tools/**` — and none
-> of the sequence, signing or settlement claims above. `reportX402MerchantOutcome`
-> gains two OPTIONAL inputs, `purchaseGroupId` and `merchantResponse`, spread
-> into the same `POST /machine-payments/evidence` payload the accepted arm
-> already posts, so the accepted-outcome behaviour described above is
-> unchanged: `proof_status` still upgrades to `merchant_response_observed` and
-> the payment still leaves case 2's predicate permanently. The hosted
-> `haven_report_x402_outcome` gains the same two optional arguments and
-> forwards them to that same report. `HavenPaymentReceipt` gains two optional
-> read-only fields (`purchaseGroupId`, `parentPaymentId`), absent on an older
-> backend. Nothing here authorizes, signs, funds or settles anything: the
-> fields are descriptive metadata on a document the accounting feed already
-> produces, and a payment with no correlation is reported exactly as before.
-> Scope of this note: those four files. Nothing else in this document was
-> re-verified, and `last-verified` is not bumped.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

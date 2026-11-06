@@ -201,6 +201,13 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+it('halos exactly the active StepProgress disc in this dialog', async () => {
+  const { container } = renderModal()
+  await waitForSignerReady()
+  expect(container.querySelectorAll('.v2-step-halo')).toHaveLength(1)
+  expect(container.querySelector('.v2-step-halo')).toHaveClass('border-[var(--v2-ink-2)]')
+})
+
 describe('the point of no return (#1868)', () => {
   it('gates the destructive step behind an explicit acknowledgement', async () => {
     renderModal()

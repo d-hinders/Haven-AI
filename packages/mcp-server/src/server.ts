@@ -19,7 +19,7 @@ export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identit
 export { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.12.0-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.13.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -99,6 +99,7 @@ export const HOSTED_INSTRUCTIONS = [
   'then haven_submit, then retry the merchant yourself with the returned',
   'payment_header (both header names, below), then haven_report_x402_outcome',
   'with that same payment_header (a reported settlement is recorded only with it).',
+  "On a rejection, pass the merchant's body as merchant_body so its reason is recorded.",
   'erc7710: haven_sign, then haven_submit with settlement_scheme "erc7710", then',
   'retry the merchant yourself with the payment_header haven_submit returns',
   '(PAYMENT-SIGNATURE only), then record the merchant\'s settlement with',
@@ -151,13 +152,18 @@ export const HOSTED_INSTRUCTIONS = [
   '',
   'What settled means, every settle/complete response: true ONLY after Haven',
   'verified the settlement on-chain — a merchant answering 2xx is delivery,',
-  'not money. On an unverified erc7710 settlement: settled false, delivered',
-  'true (the goods are real), code DELIVERED_UNSETTLED or SETTLEMENT_PENDING,',
-  'a SETTLEMENT_UNCONFIRMED warning carrying expires_at, and',
+  'not money. On an unverified settlement (eip3009 or erc7710): settled false,',
+  'delivered true (the goods are real), code DELIVERED_UNSETTLED or',
+  'SETTLEMENT_PENDING, a SETTLEMENT_UNCONFIRMED warning, and',
   'settlement_tx_hash null when no transaction is known (a zero/placeholder',
   'hash is never emitted). Report the goods to the user but not a settled',
   'payment; follow next_tool — poll haven_get_payment_status, or hand a held',
-  'settlement hash to haven_report_settlement_evidence for verification.',
+  'settlement hash to haven_report_settlement_evidence for verification. On',
+  'eip3009 the funding evidence makes the status read answer delivered with no',
+  'next action, so poll it after about 3 minutes (the settlement sweep window)',
+  'and use haven_sweep_delegate only if merchant_settlement_recorded is still',
+  'not true then — a merchant that settled without sending a hash is recorded',
+  'by the sweep and must not be swept.',
   '',
   'A payment outside the agent budget is declined before any money moves. Haven',
   'holds no approval queue, so there is nothing to poll and no approval will ever',

@@ -7,6 +7,7 @@ covers:
   - docs/product/copy-guidelines.md
   - docs/regulatory/casp-risk-guardrails.md
   - packages/frontend/src/components/ReceiveDialog.tsx
+  - packages/frontend/src/components/RecipientField.tsx
   - packages/frontend/src/components/ui/Select.tsx
   - packages/frontend/src/components/ui/LinkChip.tsx
   - packages/frontend/src/lib/agent-budget.ts
@@ -55,7 +56,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-10-25"
+last-verified: "2026-11-05"
 ---
 
 # Haven Screen Recipes
@@ -96,7 +97,8 @@ Structure (#3818):
    `Get started`, three numbered steps, then the rule items that still apply
    (another agent waiting for setup, a recommended backup signer once funded)
    below them in the same card. Never a second card beside it.
-3. Only the next step is highlighted and carries the primary action. Connecting
+3. Only the next step is highlighted and carries the primary action. The
+   highlight is its marker's ink-2 ring, not a tinted row (#4638). Connecting
    an agent stays available before funding, at secondary weight and without the
    highlight; step 3 stays locked until an agent can pay.
 4. The steps own the card only until the first agent payment. After it, one
@@ -274,10 +276,13 @@ only, so they cannot drift:
 - **Inline first agent** (`InlineAgentSetup`) — `/agents` for a user with no
   agents (see Agent List). A `Card` titled "Connect your first agent", the same
   subtitle and stepper band, the same steps and copy, at the modal's width.
-  Three differences, all for the same reason — there is nothing to dismiss:
-  step 1 has no Cancel (its one action, "Set agent budget", is full width);
+  Four differences. The first three have one reason, there is nothing to
+  dismiss: step 1 has no Cancel (its one action, "Set agent budget", is full width);
   Escape is not bound, so it never resets the flow or drops the setup prompt;
-  nothing is focused on page load (focus moves on a step change only). Step 3's
+  nothing is focused on page load (focus moves on a step change only). The
+  fourth follows the dialog-only halo rule (design-system.md § Motion): its
+  current step-status marker stays static, while the modal may halo that one
+  user-turn row. Step 3's
   disclosure copy blocks drop their own card shell inside it (no nested filled
   card). It opens with the starter budget (10 USDC per day) prefilled. Every exit
   the flow offers — Done, or Close on the approval step, a terminal state or an
@@ -341,37 +346,67 @@ Money and risk clarity:
 
 Use when the user manually sends funds from a Haven wallet.
 
-Structure:
-1. Single form step for token, amount, and recipient — there is no
-   separate review step. `DelegationSendModal` is titled `Send` and submits from
-   the same step it collects on. The account is chosen before it opens: the
-   dashboard's account picker when the user has several accounts, or the
-   account page's own account. The recipient is a pasted address, or one of
-   the user's other Haven accounts ("Or send to another Haven account").
-2. Shared `Input` fields with inline validation. `MaxButton` and `PasteButton`
-   exist in `packages/ui` but the send modal does not use them today.
-3. Lead with the amount and token as the dominant information.
-4. Compact context for network.
-5. Primary action: `Send`; secondary action: `Cancel`.
+Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
+1. **Details.** The account is chosen before the dialog opens: the dashboard's
+   account picker when the user has several accounts, or the account page's own
+   account. The screen names it once — "From <account name>" — and shows no
+   balance. **To** is `RecipientField`: your other Haven accounts on this chain,
+   then your saved contacts, then a pasted address. Without a preset recipient,
+   focus starts here with the list closed, so the whole form shows; a click,
+   typing or an arrow key opens it. **Amount** is an `Input`
+   with the token symbol as its suffix; a token `Select` appears only when the
+   chain lists more than one sendable token. The line "No network fee. You
+   review the payment before you approve it." closes the screen. Footer:
+   `Cancel` | `Review`, with Review disabled until a recipient is chosen and the
+   amount parses.
+2. **Review.** "You're sending", with the amount large. A detail list carries
+   **To**, **From**, **Network**, and **Network fee** ("None. Haven
+   covers it."). **To** leads with the name and its Monogram, or "New address" when there is no
+   name. Below it, your own account shows the short address through `Address`, with
+   the full one on hover or tap: the name is what you check there, and no agent can
+   create an account. Everything else, a saved contact included, shows the full
+   address through `Address grouped`, because lookalike scam addresses match the
+   characters a short form keeps (owner decisions 2026-11-04, narrowing #4641's
+   "never truncated"). A neutral note
+   follows: "A sent payment can't be reversed. You
+   approve it on the next step." The passkey hint and the wallet-connect state
+   live here, where the ceremony starts. Footer: `Back` | `Send <amount>
+   <token>`, with Back keeping every field. Focus lands on the screen's content
+   and never on Send, so a stray Enter cannot start a payment, and returns there
+   after a cancelled or failed send; Back returns it to Amount.
+3. **Working.** While the send is in flight the Send button reads "Sending…"
+   and every dismissal path is blocked — the ✕, Escape and a backdrop click.
+4. **Cancelled or failed.** Both land back on Review with their message:
+   "Approval was cancelled." for a dismissed approval, the server's message (or
+   "Haven could not send this payment. Try again.") for a failure, with the Send
+   button reading `Try again`.
+5. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
+   address> on <chain>", and **View transaction** linking to the chain explorer
+   when the send returned a transaction hash. After a send to a **new address**
+   the screen offers "Save this address as a contact?" — a name field and Save,
+   with the name trimmed and a blank name refused inline. A 409 shows "Already
+   saved"; any other failure is an inline, retryable error with the name kept.
+   While the save is in flight, Save reads "Saving…" and Done and every close
+   path are blocked. Done closes.
+6. Every screen puts its actions in the dialog's footer through the shared
+   action pair — the equal-halves shape, stacking primary-first below `sm`.
 
-Money and risk clarity (today the modal names neither the account nor its
-network, so the first bullet and structure item 4 are not met yet):
+Money and risk clarity:
 - Show the selected Haven wallet before money moves.
 - Show the recipient as a contact name when available; keep raw addresses subordinate.
 - Say that the send takes one approval and costs the user no network fee.
-- Result toasts: `Sent.` on success, `Approval was cancelled.` when the
-  approval is cancelled, and "Haven could not send this payment. Try again."
-  (or the server's message) on failure.
-- Use toasts for short success/copy feedback, but keep blocking validation next to the field.
+- Keep blocking validation next to the field, and use toasts only for short
+  copy feedback.
 
-> **Why there is no review step or approval hold here (#2265).** Both were the
-> retired Safe rail's shape: a second confirm screen, and a multi-signature
-> account that could hold a payment until the remaining owners signed. The
-> delegation rail has neither — the owner-signed budget delegation is the
-> approval, and a payment outside it reverts on-chain rather than waiting for
-> anyone (epic #1440). A recipe that still prescribed `Approve and send` /
-> `Back` was telling a contributor to rebuild a deleted screen; its
-> `/design-system` twin ("Manual send") was rebased in the same change.
+> **The Review screen is a confirmation, not an approval hold (#4641).** The
+> owner approved a Review screen before every send on the mockup canvas
+> ("Send 1" to "Send 4"). It is the screen the user reads before the passkey
+> prompt: nothing queues, and the payment still executes, or reverts on-chain,
+> exactly as before. This reverses the earlier rationale (#2265) that a second
+> confirm screen was the retired Safe rail's shape — that was a Safe-retirement
+> documentation clean-up rather than an owner ruling against review. The
+> retired Safe rail's *approval hold* is still gone, and the delegation rail
+> still has no second signature to wait for (epic #1440).
 
 ## Receive Funds
 
@@ -451,15 +486,25 @@ Use when the user saves payment recipients or chooses who receives a manual paym
 Structure:
 1. Header that frames contacts as saved recipients, not a technical address book.
 2. Searchable list with contact name first and recipient address subordinate.
+   Each row is a `Row` (Monogram, name, the short address with its "Used on"
+   networks) carrying a visible **Send** and a ⋯ menu — Copy address, Edit,
+   then Delete in the danger tone (#4642). Copy announces through the app toast
+   and, on a failed write, prints the full address to copy by hand.
 3. Add/edit modal with contact name and recipient address labels.
 4. Delete confirmation that says past payments are not affected.
 5. Send flow selector that lets users choose a saved recipient or paste an
-   address directly. Not built: `DelegationSendModal` offers the user's other
-   Haven accounts and a pasted address, and no saved-contact picker
-   (`grep -ci contact` on it prints 0).
+   address directly. Built in #4641: `DelegationSendModal`'s Details screen
+   renders `RecipientField`, which offers your other Haven accounts, then your
+   saved contacts, then a pasted address. The dialog owns the one `useContacts()`
+   instance, so a contact saved on its success screen is in the picker at once.
+   A row's Send opens that same dialog with the contact preset (#4642): with
+   more than one account the account picker asks first, and an account with no
+   resolved network cannot send — the picker marks it non-interactive, and with
+   no sendable account the row's Send is disabled with its reason in visible
+   text.
 
 Money and risk clarity:
-- In Send (once the selector exists), show the contact name as the primary recipient label and keep the raw address subordinate.
+- In Send, show the contact name as the primary recipient label and keep the raw address subordinate.
 - If contacts cannot load, say saved recipients are unavailable and that the user can still paste an address.
 - If no contacts are saved, offer a clear path to add contacts without blocking manual address entry.
 - Prevent duplicate saved recipient addresses; do not imply duplicate contacts can be created.
@@ -595,14 +640,16 @@ Use for `/agents`: every managed agent as a card, with the list controls above i
 Structure:
 1. `PageHeader`, as on Accounts (#4209): the title and subtitle, **Connect
    agent** as the primary action level with the title, and a ⋯ menu
-   (`EllipsisVertical`, the agent page's overflow icon) holding **Labels** and
+   (`DropdownMenuIconTrigger`, every overflow menu's button) holding **Labels** and
    **Organizations**. No count chip — the list summary line owns the count. The
    header renders inside `AgentPanel`, beside the state it reads. With no Haven
    account the page shows the title and the "Create a Haven account" empty
    state, and no Connect agent.
 2. Toolbar: the [List controls](design-system.md#list-controls--listtoolbar-facetmenu-periodpicker-4110)
    pattern (#4113), browser-filtered: search ("Search agents";
-   name, description and delegate address, as its screen-reader description),
+   name, description and wallet address, as its screen-reader description —
+   #4571 replaced "delegate address", an internal term, with the copy
+   guidelines' plain word),
    the multi-select facets from the page's registry (Status, Budget, and
    Account and Organization when registered), **Archived** (single-select,
    Hidden / Shown, no All row, Hidden by default), and a **Sort: Name** chip.
@@ -795,19 +842,23 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    exists. With payments but no recorded time, Last paid reads "—". A revoked
    or otherwise uncovered agent is not in the overview, so it renders no
    Last 30 days column; its history is under Activity.
-   **Add budget is collapsed once a budget exists**: with no budget the
-   section reads "No budget yet." with a "Set budget" control that opens the
-   grant form; once one exists, adding another is the rows' ⋯ menu "Add
-   budget" item (#4261 — no button under the list), which opens the form in
-   place (Cancel collapses it and returns focus to the row's trigger; after a
-   `?grant=` prefill, which has no origin, focus goes to the first row's
-   trigger, or to Set budget when there are no rows), never a permanent
-   second form — unless `?grant=` asks for the form, in which case it opens
-   expanded. Sharing part of an existing budget with another agent lives
-   INSIDE the Add budget panel — a quiet line and an "Issue sub-budget"
-   button below the grant form, shown only while the panel is open (#3716) —
-   never as a permanent card row; the Sub-agent budgets list of issued slices
-   stays on the card, outside the panel. A revoked or removed agent's
+   **Setting a budget always happens in a dialog** (owner decision D3,
+   2026-10-30; #4564). With no budget the section reads "No budget yet." with
+   a "Set budget" button; once one exists, adding another is the rows' ⋯ menu
+   "Add budget" item (#4261 — no button under the list). Both open the ONE
+   Set budget dialog, which hosts the grant form and its Cancel in the
+   dialog's action row; closing it returns focus to the row's trigger (after
+   a `?grant=` prefill, which has no origin, focus goes to the first row's
+   trigger, or to Set budget when there are no rows). `?grant=` opens the
+   dialog prefilled. A failed budget read shows the load-error shape with
+   Try again plus a Set budget button, so the form stays reachable (#2473).
+   Sharing part of an existing budget with another agent lives INSIDE the
+   dialog — a quiet line and an "Issue sub-budget" button below the grant
+   form, shown only while it is open (#3716) — never as a permanent card row;
+   opening it closes the dialog first (no nested modals), and closing it
+   reopens the dialog with the typed amount and recipient and focus back on
+   the entry. The Sub-agent budgets list of issued slices stays on the card,
+   outside the dialog. A revoked or removed agent's
    section is read-only plus Stop (#3549). The one read-only budget summary
    on the page is the **Received budgets** block (#3988): when the agent
    RECEIVES sub-budget grants (not closed), the card lists each — the
@@ -817,8 +868,8 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    a closing one "closing") — inside the same card, with no actions: closing
    a grant is the granting agent's owner's move. When the agent holds
    received grants and no budget of its own, the grant form's heading still
-   reads "Set its first budget" but its line says the agent spends through
-   the received budgets below — it must never imply the agent cannot pay.
+   reads "Set its first budget" but its line says the agent already spends
+   through its received budgets — it must never imply the agent cannot pay.
 5. Tabs and Activity (#4226): below the hero, the tab row (no counts), then
    the tab's panel. **Activity** — the agent's OWN payments (`payment_intents`,
    failed and pending included — deliberately NOT the wallet-scoped
@@ -863,8 +914,9 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
    carry the Needs attention badge while the Status facet can narrow to them.
    The row badge reads the machine-payment lifecycle before the intent's own
    status, the same precedence as the wallet feed's rows: a stranded
-   payment's intent is `confirmed` (its funding settled), so the status alone
-   would say Sent (#4249).
+   payment's intent is `confirmed` (its funding settled), and a confirmed
+   payment's row carries no badge at all (#4608), so the lifecycle badge is
+   what reads (#4249).
    **Tool calls** is the agent's MCP audit log (see **Agent Tool Calls**
    below).
 6. Settings (#4228, rebuilt on the shared settings rows by #4477): the tab is
@@ -882,12 +934,14 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       tooltip. An agent with no name AND no `mcp_last_seen_at` reads
       "**No MCP connection recorded**" — and does NOT say "API key": a null
       name alone also means an MCP agent connected before names were
-      recorded. The **API key** prefix line (the visible prefix half of the
+      recorded. The **API key** prefix (the visible prefix half of the
       credential; the full key is shown once at creation and in the
-      credentials modal) lives on THIS row's value slot, beside the server
-      name, in every connection state. It did not move to Payment
-      credentials because that row is hidden for revoked and archived
-      agents, while the prefix must stay visible on the tab in every state.
+      credentials modal) is NOT on this row (#4608, owner decision
+      2026-11-02): it shows only under Payment credentials → View. That
+      reverses #4477's reason for the placement — a revoked or archived agent
+      therefore shows its prefix nowhere, because Payment credentials is
+      hidden for those agents (`canManageCredentials`), and the owner
+      accepted that residual.
    2. **Payment credentials**: **View** (opens `PaymentCredentialsModal`) and
       **Replace signing key** (`ReplaceSigningKeyModal`) — hidden for
       revoked and archived agents, matching the header ⋮ menu's
@@ -1054,10 +1108,10 @@ Money and risk clarity:
 are ROLLING — the owner decision (epic #3801, 2026-10-09): `[now − 7×24h,
 now)` on the payment instant, the same definition `/analytics/overview` uses;
 no calendar months. The header sentence, the Needs-attention items that say
-"in the last 7 days" and the Activity card all cover that one interval (the
+"in the last 7 days" and the Transactions card all cover that one interval (the
 wire's `activityWindowStart` is its boundary). They differ in what they put
 in it, not when it ends: the header counts confirmed agent payments, the
-Activity card also carries deposits, sweeps, failed and pending rows.
+Transactions card also carries deposits, sweeps, failed and pending rows.
 
 **The dashboard's activity list is grouped and merchant-first (#3810).** The
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per
@@ -1148,10 +1202,13 @@ Structure:
    (merchant-first, `counterpartyLabel` no-address mode); the subline names who
    acted ("You" or the agent) plus " · <account>" when the user has two or more
    accounts; the badge is `transactionRowBadge(tx)` plus the accounting badge; the
-   amount sits right with the time under it. An own-account transfer (the
+   amount sits right with the time under it. Below `sm` the row is two bands
+   instead of three (#4572): title and amount on the first line, description and
+   the clock time on the second, with badges wrapping to a subordinate line so
+   the amount keeps its place. An own-account transfer (the
    backend's `foldOwnTransfers=1`, #4265) reads "Moved between your accounts"
    with `DirectionMark direction="move"`, the subline "You · <from> → <to>" (or
-   "Your accounts · …"), and an unsigned amount. The dashboard's Activity card
+   "Your accounts · …"), and an unsigned amount. The dashboard's Transactions card
    shows the same move as one row too (#4268), without the actor. The summary line carries
    "In <total> · Out <total>" beside the count. No Initiator, From/To or link
    columns. A row opens `TransactionDetailPanel`, where the full address and
@@ -1432,9 +1489,11 @@ it):
      one line says how many are hidden and links to the Agents page's
      revoked facet.
    - **Security & details** — "Who can approve": the section carries ONE
-     heading, ABOVE its card, with "All signers in Settings" as a link at the
+     heading, ABOVE its card, with "Passkeys and wallets" as a link at the
      right of the heading row (#4474, mockup v9 — the intro sentence and the
-     in-card Settings row are gone); it is the ONLY place in the app that can
+     in-card Settings row are gone; the link text is the owner's 2026-10-30
+     decision, #4563, superseding the mockup's "All signers in Settings"); it
+     is the ONLY place in the app that can
      add or remove a signer or run recovery (`AccountSignersCard` renders
      here; Settings → Security's "Passkeys and wallets" section lists them
      without add or remove flows). Each signer is a two-line row — the kind
@@ -1580,8 +1639,12 @@ Structure:
    the Accounting section of Settings → Business (#2868, #4359); the feed page
    links there and offers none.
 5. Show draft transaction states with retry where supported. Only a live
-   connector may say `Synced`. Preview/local tracking must say `Tracked`,
-   `Prepared`, or `Not delivered`; it must not imply external delivery.
+   connector may say `In <Provider>`. Preview/local tracking must say `Tracked`,
+   `Prepared`, or `Not delivered`; it must not imply external delivery. The
+   one vocabulary is `In <Provider>` / `Evidence archived` / `Tracked` /
+   `Sending…` / `Not sent`, rendered through `StatusBadge` from
+   `accountingStatusPresentation` on both the ledger badge and the
+   `/accounting` row chip (#4567).
 
 Regulatory and trust clarity:
 - Records are factual, draft, and non-asserting. The user or accountant codes
@@ -1591,10 +1654,14 @@ Regulatory and trust clarity:
 - Keep empty, loading, error, unavailable, disconnected, preview, and sync
   states honest.
 
-Known implementation gap: the preview currently maps backend `pushed` records
-to a `Synced` chip even when `liveSyncReady` is false. The preview banner is not
-enough to make that row label safe; change it before treating the surface as
-live-delivery accurate.
+Known implementation gap — **closed by #4567**: the preview used to map backend
+`pushed` records to a `Synced` chip even when `liveSyncReady` was false. The
+`/accounting` page now passes `liveSyncReady` to `accountingStatusPresentation`,
+so a pushed row on a preview deployment reads `Tracked`; the preview banner is
+no longer the only thing standing between the row and a delivery claim. The
+ledger badge and the detail drawer still read `In <Provider>` for a pushed row,
+because neither has a feed status to consult — that is the remaining edge, and
+it is named here rather than left to be rediscovered.
 
 ## Settings And Recovery
 
@@ -1612,7 +1679,9 @@ Money and risk clarity:
 - Use `sign-in method` and `approve actions`, not `signer` or `owner`.
 - Explain recovery limitations plainly without making the user feel at fault.
 - Personal profile details (name, email, member since) live in Settings → General → Profile (#4358); `/profile` redirects there. General also carries Preferences and Your data; Security carries the passkeys/wallets and the recovery sections.
-- Accounting connections and company details are Business-tab sections (#4358, reshaped #4359) whose TAB is visible only when one of them has something to show (a tri-state over the two reads: absent while pending — with an explicit `?tab=business` kept on a skeleton — and a deep link that settles empty falls back to the General body without rewriting the URL). One `SettingsRow` per connector the user can act on — coming-soon and not-configured providers render NO row, and a card with nothing to show renders nothing (#4359) — with a status chip and the one action that resolves the state; the feed settings open inline under the row through `SettingsRow`'s full-width `below` slot (`Card.Section divided`, never a nested filled card); Disconnect confirms and says history in Haven stays; a footer link, *See synced payments on Accounting*, points at the feed page when at least one connector shows; the section header carries the responsibility line (data tooling, not accounting or tax advice — the accountant remains responsible for coding, correctness and filing); copy follows the accounting guardrail — a payment *appears in the ledger with payment evidence attached; the accountant books it*.
+- Accounting connections and company details are Business-tab sections (#4358, reshaped #4359) whose TAB is visible only when one of them has something to show (a tri-state over the two reads: absent while pending — with an explicit `?tab=business` kept on a skeleton — and a deep link that settles empty falls back to the General body without rewriting the URL). One `SettingsRow` per connector the user can act on — coming-soon and not-configured providers render NO row, and a card with nothing to show renders nothing (#4359) — with a status chip and the one action that resolves the state; the feed settings open inline under the row through `SettingsRow`'s full-width `below` slot (`Card.Section divided`, never a nested filled card); Disconnect confirms and says history in Haven stays; a footer link, *See sent payments on Accounting*, points at the feed page when at least one connector shows; the section header carries the responsibility line (data tooling, not accounting or tax advice — the accountant remains responsible for coding, correctness and filing); copy follows the accounting guardrail — a payment *appears in the ledger with payment evidence attached; the accountant books it*.
 - Company details (`CompanyDetailsCard`, #3332, reshaped #4359) is the same shape of Settings section as Accounting beside it: no frontend-side flag of its own (it reads the API's status alone — 404 hides it; 200 `null` shows "No company details" with **Add company details**, which reveals the blank form; a row renders the filled form), the purpose text shown above the form and the Add button, in the empty state too but not in the error state (not behind a tooltip), Country a native `Select` of ISO 3166-1 names that saves the same alpha-2 code (a stored code outside the list renders as its own option and round-trips unchanged), the VIES state a `StatusBadge` ("Checked against VIES" success / "Not found in VIES" warning / everything else neutral — never "verified"), and "Remove company details" a `ghost` trigger in the footer row left of Save, a confirm dialog before `DELETE`, the same danger-button pattern Accounting's Disconnect uses. See [`docs/product/owner-company-details.md`](owner-company-details.md).
-- "Passkeys and wallets" is a Security-tab section (owner decision 2026-10-09, #3825; tabbed #4358; pills #4472): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves — each account an outline pill link (`LinkChip`, design-system.md § *Account link pill*) to its `/accounts/<id>?tab=security`, in a wrapping row under the signer's label. The pill shows the account name alone; the `(network)` suffix is appended to EVERY pill in the section only when the listed accounts span more than one network, so one account reads the same on every row (owner decision 2026-10-27). A passkey whose credential this device holds carries a neutral "This device" `StatusBadge` beside its label; wallet rows never do. The section speaks in outcomes ("Browser wallet", "Passkey · added {date}", "This device"), never "signer" (`copy-guidelines.md`); the account card's link to it ("All signers in Settings", on the "Who can approve" heading row since #4474) targets `?tab=security#signers`. No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Passkeys and wallets reads as one more signer), now that the top bar carries no wallet pill.
+- "Passkeys and wallets" is a Security-tab section (owner decision 2026-10-09, #3825; tabbed #4358; pills #4472): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves — each account an outline pill link (`LinkChip`, design-system.md § *Account link pill*) to its `/accounts/<id>?tab=security`, in a wrapping row under the signer's label. The pill shows the account name alone; the `(network)` suffix is appended to EVERY pill in the section only when the listed accounts span more than one network, so one account reads the same on every row (owner decision 2026-10-27). A passkey whose credential this device holds carries a neutral "This device" `StatusBadge` beside its label; wallet rows never do. The section speaks in outcomes ("Browser wallet", "Passkey · added {date}", "This device"), never "signer" (`copy-guidelines.md`); the account card's link to it ("Passkeys and wallets", on the "Who can approve" heading row since #4474 — the link text is the owner's 2026-10-30 decision, #4563, superseding the mockup's "All signers in Settings") targets `?tab=security#signers`. No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Passkeys and wallets reads as one more signer), now that the top bar carries no wallet pill.
 - Avoid duplicating account summary facts already shown on Dashboard, Account details, or the Profile section.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { forwardRef } from 'react'
 import { ArrowRight } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Icon } from './Icon'
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from 'react'
 
@@ -11,6 +12,21 @@ const SIZE_CLASS: Record<Size, string> = {
   sm: 'h-9 px-3.5 text-[13px]',
   md: 'h-10 px-4 text-[14px]',
   lg: 'h-11 px-5 text-[15px]',
+}
+
+/**
+ * The same three sizes for a label that is allowed to wrap (#4561).
+ *
+ * A fixed `h-*` cannot hold two lines: the second one paints outside the
+ * button's box and lands on whatever is below it. So the wrapping form swaps
+ * the height for the same number as a `min-h-*` plus vertical padding — one
+ * line still paints at 36 / 40 / 44px, two lines grow the button instead of
+ * spilling out of it.
+ */
+const WRAP_SIZE_CLASS: Record<Size, string> = {
+  sm: 'min-h-9 px-3.5 py-1.5 text-[13px]',
+  md: 'min-h-10 px-4 py-2 text-[14px]',
+  lg: 'min-h-11 px-5 py-2 text-[15px]',
 }
 
 /**
@@ -79,7 +95,23 @@ const VARIANT_CLASS: Record<Variant, string> = {
     'bg-[var(--v2-danger)] text-[var(--v2-ink-on-brand)] hover:bg-danger/90 shadow-button focus-visible:ring-danger/80',
 }
 
-type ButtonProps = {
+/**
+ * The button's one icon (#4639, DS § Buttons → Icons on buttons).
+ *
+ * `leadingIcon` draws a lucide icon before the label; `trailingIcon` draws one
+ * after it — `true` keeps the forward `ArrowRight` every existing caller has,
+ * a lucide component draws that glyph instead (an `ExternalLink`). The two are
+ * MUTUALLY EXCLUSIVE in the type: the rule is one icon per button, and a union
+ * makes a second one a compile error rather than a review comment. Either way
+ * the icon is decorative (`aria-hidden`, via `Icon`) at the 14px rung beside
+ * `text-sm`, in the label's colour, at the base `gap-1.5`; the label stays and
+ * remains the accessible name.
+ */
+type IconProps =
+  | { leadingIcon?: LucideIcon; trailingIcon?: never }
+  | { leadingIcon?: never; trailingIcon?: boolean | LucideIcon }
+
+type ButtonProps = IconProps & {
   children: ReactNode
   href?: string
   target?: AnchorHTMLAttributes<HTMLAnchorElement>['target']
@@ -132,12 +164,35 @@ type ButtonProps = {
    */
   'aria-expanded'?: boolean
   'aria-controls'?: string
+  /**
+   * The id of the element that explains this button (#4642). A disabled
+   * control is not focusable, so a reason that lives only in a neighbouring
+   * paragraph is never announced; `aria-describedby` is what ties the two
+   * together for a screen reader that reaches the button by other means.
+   * `button` branch only — an anchor has no disabled state to explain.
+   */
+  'aria-describedby'?: string
   disabled?: boolean
   onClick?: ButtonHTMLAttributes<HTMLButtonElement>['onClick']
   variant?: Variant
   size?: Size
   className?: string
-  trailingIcon?: boolean
+  /**
+   * Let the label break onto a second line (#4561).
+   *
+   * The default is `whitespace-nowrap`: a label that wraps mid-phrase reads as
+   * a layout bug, and the measured case was "Set budget" splitting onto two
+   * lines inside a 98px button at 1288px. The one caller that needs the
+   * opposite is `CopyButton`'s `copiedText` ("Copied — paste it to <agent>"),
+   * whose contract is that wrapping beats truncating.
+   *
+   * `wrap` also swaps the fixed height for a `min-h-*` (see
+   * `WRAP_SIZE_CLASS`), because a fixed height cannot hold the second line.
+   * Do not reach for `className="whitespace-normal"` instead: both utilities
+   * set `white-space`, and which one wins is decided by declaration order in
+   * Tailwind's generated stylesheet, not by position in the class attribute.
+   */
+  wrap?: boolean
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({
@@ -151,22 +206,29 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   'aria-busy': ariaBusy,
   'aria-expanded': ariaExpanded,
   'aria-controls': ariaControls,
+  'aria-describedby': ariaDescribedBy,
   disabled,
   onClick,
   variant = 'primary',
   size = 'md',
   className = '',
+  leadingIcon,
   trailingIcon,
+  wrap = false,
 }, ref) {
   // Ring geometry is uniform and lives here; ring COLOUR is per-variant and
   // lives in VARIANT_CLASS, next to the fill it must agree with (#1817).
-  const classes = `inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${SIZE_CLASS[size]} ${TAP_TARGET_CLASS[size]} ${VARIANT_CLASS[variant]} ${className}`
+  //
+  // `whitespace-nowrap` is the default (#4561): a label that breaks mid-phrase
+  // is a layout bug, not a wrap. `wrap` is the one opt-out, and it carries the
+  // matching size class because a fixed height cannot hold a second line.
+  const classes = `inline-flex items-center justify-center gap-1.5 rounded-md font-medium tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)] disabled:cursor-not-allowed disabled:opacity-60 ${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} ${wrap ? WRAP_SIZE_CLASS[size] : SIZE_CLASS[size]} ${TAP_TARGET_CLASS[size]} ${VARIANT_CLASS[variant]} ${className}`
+  const trailing = trailingIcon === true ? ArrowRight : trailingIcon || null
   const content = (
     <>
+      {leadingIcon && <Icon icon={leadingIcon} className="w-3.5 h-3.5" />}
       {children}
-      {trailingIcon && (
-        <Icon icon={ArrowRight} className="w-3.5 h-3.5" />
-      )}
+      {trailing && <Icon icon={trailing} className="w-3.5 h-3.5" />}
     </>
   )
 
@@ -180,6 +242,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
         aria-busy={ariaBusy}
         aria-expanded={ariaExpanded}
         aria-controls={ariaControls}
+        aria-describedby={ariaDescribedBy}
         disabled={disabled}
         onClick={onClick}
         className={classes}

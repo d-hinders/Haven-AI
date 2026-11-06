@@ -36,6 +36,16 @@
  * that extends the HIT area to 44px vertically — never sideways, the tabs
  * abut — the same mechanism as `SegmentedControl`'s options (#4056); the
  * painted height stays 36px.
+ *
+ * **That 44px is aspirational here, and #4571 measured it.** The list is a
+ * horizontal scroll container, and a scroll container clips in every
+ * direction, so the `::after`'s 4px above the row and 2px below it are both
+ * clipped: the effective target is the tab's own 38px box. The pseudo-element
+ * is kept because it costs nothing and starts working the moment a consumer
+ * renders the list without overflow, but no test should claim 44px for this
+ * component. `overflow-y-hidden` on the list is what stops the clipped
+ * decoration from painting a vertical scrollbar — see the comment on the
+ * element itself.
  */
 import { useRef } from 'react'
 
@@ -103,7 +113,27 @@ export function Tabs<T extends string>({
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
-      className="flex items-stretch gap-1 overflow-x-auto border-b border-[var(--v2-border)]"
+      // #4571: `overflow-y-hidden` is load-bearing, not decoration.
+      //
+      // `overflow-x-auto` alone makes this a scroll container on BOTH axes —
+      // CSS computes `overflow-y: visible` to `auto` when the other axis is
+      // not `visible`. Two things then overflow vertically by 3px: the
+      // selected tab's `-mb-px` (1px, the underline overlapping the list's
+      // border) and the 44px `::after` hit area centred on a 38px tab (2px).
+      // Chrome paints an overlay vertical scrollbar for that overflow, which
+      // is the thin grey line at the right end of the Settings tab row at
+      // 375px in dark mode. Measured on the real markup at 375x812 dark:
+      // `clientHeight` 37, `scrollHeight` 40, and the rightmost 8px of the row
+      // painted `#494a4e` instead of the page background.
+      //
+      // Nothing is lost by clipping it. The scroll container already clips
+      // the `::after` in every direction — measured with `elementFromPoint`,
+      // the pseudo-element is hit-testable 4px above the row only when the
+      // list is NOT a scroll container — so the effective target has always
+      // been the tab's own 38px box, and the 2px below the row was already
+      // clipped. `overflow-y-hidden` only stops the clipped decoration from
+      // painting a scrollbar.
+      className="flex items-stretch gap-1 overflow-x-auto overflow-y-hidden border-b border-[var(--v2-border)]"
     >
       {tabs.map((tab, index) => {
         const active = tab.value === value

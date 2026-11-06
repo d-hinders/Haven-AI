@@ -14,10 +14,12 @@
  * #1844 refusal, naming no network. The unit tests pin only whether each
  * element is present; pixel baselines keep the variants from drifting.
  *
- * Three ELEMENT-SCOPED clips (the dialog, the same scoping
- * `edit-budget-modal.visual.spec.ts` uses for the Edit budget modal — the
- * panel is opaque and the same size regardless of the page behind it, so the
- * dashboard's own state cannot leak into a clip):
+ * Three ELEMENT-SCOPED clips of the panel, which carries `role="dialog"` itself
+ * here (`ui/Modal` puts it on a `fixed inset-0` wrapper instead). The panel is
+ * opaque and the same size whatever is behind it, but its clip is a rectangle.
+ * The rounded corners, and the edge rows a fractional height rounds out to, show
+ * the backdrop over the page. The dashboard is hidden before each capture
+ * (`hidePageBehindModal`, #3872), so it cannot move these baselines:
  *
  *   - `receive-dialog-testnet`      — the shared account re-chained to 84532
  *     with the onramp id CONFIGURED: faucet shown, onramp hidden. Configured
@@ -67,6 +69,7 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import {
   dismissMobileSidebar,
   mockHavenApi,
@@ -217,6 +220,7 @@ test.describe('receive dialog visual regression (#4094, gate #3483)', () => {
         await variant.assert(dialog)
 
         await page.evaluate(() => document.fonts.ready)
+        await hidePageBehindModal(dialog)
         await expect(dialog).toHaveScreenshot(`${variant.stem}-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`, SNAPSHOT_OPTIONS)
       })
     }

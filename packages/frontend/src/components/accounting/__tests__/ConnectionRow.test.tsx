@@ -164,6 +164,34 @@ describe('ConnectionRow states', () => {
   })
 })
 
+describe('ConnectionRow — Connect is not a primary (#4561)', () => {
+  // The Business tab showed two primaries side by side — Fortnox's Connect and
+  // Accounted's Connect — because the row's Connect/Reconnect took the default
+  // variant. It is ghost now, matching the row's own Settings action and the
+  // Security tab's Connect wallet. Asserted on the variant's own classes: the
+  // primary fill is `bg-[var(--v2-brand)]`, the ghost border is
+  // `border-[var(--v2-border-strong)]`.
+  const PRIMARY_FILL = 'bg-[var(--v2-brand)]'
+  const GHOST_BORDER = 'border-[var(--v2-border-strong)]'
+  const classesOf = (el: HTMLElement) => el.className.split(/\s+/)
+
+  it('disconnected: Connect is ghost, and the row renders no primary', () => {
+    renderRow({ connection: connection({ status: 'disconnected', isActiveDestination: false }) })
+    const connect = within(actions()).getByRole('button', { name: 'Connect' })
+    expect(classesOf(connect)).toContain(GHOST_BORDER)
+    expect(classesOf(connect)).not.toContain(PRIMARY_FILL)
+    expect(within(actions()).getAllByRole('button').filter((b) => classesOf(b).includes(PRIMARY_FILL))).toEqual([])
+  })
+
+  it('needs_reauthorisation: Reconnect is ghost, and the row renders no primary', () => {
+    renderRow({ connection: connection({ status: 'needs_reauthorisation', isActiveDestination: true }) })
+    const reconnect = within(actions()).getByRole('button', { name: 'Reconnect' })
+    expect(classesOf(reconnect)).toContain(GHOST_BORDER)
+    expect(classesOf(reconnect)).not.toContain(PRIMARY_FILL)
+    expect(within(actions()).getAllByRole('button').filter((b) => classesOf(b).includes(PRIMARY_FILL))).toEqual([])
+  })
+})
+
 describe('ConnectionRow — api_key providers (#3017)', () => {
   const accountedProvider = () =>
     provider({

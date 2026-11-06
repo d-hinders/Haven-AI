@@ -292,6 +292,12 @@ describe('owner_cli route census (#2526)', () => {
       for (const [pattern, why] of forbidden) {
         if (pattern.test(entry.path)) violations.push(`${key(entry)} — ${why}`)
       }
+      // A saved contact is a name the owner trusts when paying. Reading the
+      // address book is fine; an agent writing to it could swap a name onto its
+      // own address (owner decision, 2026-11-04).
+      if (/^\/contacts(\/|$)/.test(entry.path) && entry.method !== 'GET') {
+        violations.push(`${key(entry)} — writing a saved recipient`)
+      }
       // `/user/...` reads are fine; writes to the user record are not.
       if (/^\/user(\/|$)/.test(entry.path) && entry.method !== 'GET') {
         violations.push(`${key(entry)} — writing to the user record`)
@@ -322,6 +328,11 @@ describe('owner_cli route census (#2526)', () => {
       // owner_cli token to reach, allow-list or no allow-list.
       { method: 'POST', path: '/agents/{id}/rotate-key' },
       { method: 'POST', path: '/auth/device/approve' },
+      // Owner decision, 2026-11-04: an agent must not write the names the owner
+      // trusts when paying. `GET /contacts` stays.
+      { method: 'POST', path: '/contacts' },
+      { method: 'PUT', path: '/contacts/{id}' },
+      { method: 'DELETE', path: '/contacts/{id}' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)
@@ -358,6 +369,8 @@ describe('owner_cli route census (#2526)', () => {
       // this census, so the assertion below that they are NOT on the
       // allow-list is a real check rather than a vacuous one.
       'GET /user/accounts',
+      // `haven contacts list` needs it; only the writes left the list (2026-11-04).
+      'GET /contacts',
     ]) {
       expect(OWNER_CLI_ALLOWED_ROUTES.map(key)).toContain(entry)
       expect(real, `${entry} must still exist`).toContain(entry)

@@ -164,6 +164,7 @@ const paying = new Set([
   'direct-send-partial-budget',
   'direct-send-then-report-remaining',
   'direct-send-full-remaining',
+  'receipt-verify-direct-payment',
   'x402-catalog-guided-purchase',
   'x402-plain-http-request-mode',
   'x402-eip3009-bridge-vpn-legacy',
@@ -271,6 +272,9 @@ describe('A2 false failures: runSuite with the CLI resolver over a simulated bud
       adapter,
       trials: 3,
       trialCountFor: (t) => (t.tier === 2 ? 1 : 3),
+      // #4680: the cold-profile tasks are Claude-lane only; on the Hermes
+      // lane they are reported `skipped` and never resolved.
+      lane: 'hermes',
       graderContext: {
         probeTransfer: async () => ({ ok: true as const, txHash: '0xdead' }),
         probePaymentStatus: async () => ({ ok: true as const, status: 'settled' }),
@@ -741,7 +745,7 @@ describe('#4218: a tier-3-only selection does not route around the tier-3 precon
 // ── A3: ordering tiers, the once-only drainer ──────────────────────────────
 
 describe('A3: the drainer runs after every tier-1 task, before the exhausted-budget task, exactly once', () => {
-  it('the real 11-task set: tier order, drainer k=1, tier-3 k=3, "k=1 (drains budget)" in the report', async () => {
+  it('the real task set: tier order, drainer k=1, tier-3 k=3, "k=1 (drains budget)" in the report', async () => {
     const { tasks, invalid } = await loadTasks(TASKS_DIR)
     expect(invalid).toEqual([])
     const calls: string[] = []
@@ -757,19 +761,31 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
       },
       trials: 3,
       trialCountFor: (t) => (t.tier === 2 ? 1 : 3),
+      // #4680: the cold-profile tasks are Claude-lane only; on the Hermes
+      // lane they are reported `skipped` and never run.
+      lane: 'hermes',
     })
 
     const order = report.order
     expect(order).toEqual([
+      'agent-revoked-no-retry',
+      'budget-ended-no-retry',
       'direct-send-get-agent-first',
       'direct-send-partial-budget',
       'direct-send-then-report-remaining',
+      'interrupted-purchase-resume',
+      'onboarding-client-out-of-date',
+      'onboarding-cold-setup',
       'over-budget-check-status-no-retry',
       'over-budget-direct-refused',
+      'receipt-verify-direct-payment',
+      'task-budget-lifecycle',
       'x402-catalog-guided-purchase',
       'x402-eip3009-bridge-vpn-legacy',
       'x402-plain-http-request-mode',
       'x402-price-cap-below-price',
+      'x402-price-mismatch-invoice',
+      'x402-unsettled-purchase-no-double-pay',
       'direct-send-full-remaining',
       'over-budget-x402-refused',
     ])
@@ -778,7 +794,7 @@ describe('A3: the drainer runs after every tier-1 task, before the exhausted-bud
     const drainerCalls = calls.filter((c) => c.startsWith('direct-send-full-remaining#'))
     expect(drainerCalls).toEqual(['direct-send-full-remaining#1'])
     const drainerPos = order.indexOf('direct-send-full-remaining')
-    expect(drainerPos).toBeGreaterThan(order.indexOf('x402-price-cap-below-price'))
+    expect(drainerPos).toBeGreaterThan(order.indexOf('x402-unsettled-purchase-no-double-pay'))
     expect(drainerPos).toBeLessThan(order.indexOf('over-budget-x402-refused'))
     expect(calls.filter((c) => c.startsWith('over-budget-x402-refused#'))).toHaveLength(3)
 
@@ -819,20 +835,40 @@ describe('budgetPreflightMessage — stop at run start on a spent budget', () =>
 
   it('stops when paying tasks are selected and the budget is exhausted, saying what to do', async () => {
     const { budgetPreflightMessage } = await import('./cli.js')
-    const msg = budgetPreflightMessage([{ tier: 1 }, { tier: 3 }], exhausted)
+    const msg = budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }, { tier: 3, category: 'over-budget' }], exhausted)
     expect(msg).toMatch(/period budget is already spent/)
     expect(msg).toMatch(/edit the eval agent's budget/)
   })
 
   it('lets a run go ahead with budget left, or when only tier-3 tasks are selected', async () => {
     const { budgetPreflightMessage } = await import('./cli.js')
-    expect(budgetPreflightMessage([{ tier: 1 }], { remaining: 1_000_000n })).toBeUndefined()
-    expect(budgetPreflightMessage([{ tier: 3 }], exhausted)).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }], { remaining: 1_000_000n })).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 3, category: 'over-budget' }], exhausted)).toBeUndefined()
   })
 
   it('does not stop on other read errors (they surface per trial with their own cause)', async () => {
     const { budgetPreflightMessage } = await import('./cli.js')
-    expect(budgetPreflightMessage([{ tier: 1 }], { error: 'could not read the agent\'s budget (HTTP 502)' })).toBeUndefined()
+    expect(budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }], { error: 'could not read the agent\'s budget (HTTP 502)' })).toBeUndefined()
+  })
+
+  // #4678: a task that needs NO eval-budget funds is exempt. The revoked-agent
+  // task funds nothing (fundingAtomic "0") and never pays, so an exhausted
+  // eval budget is not a reason to stop it.
+  it('exempts a throwaway task whose fundingAtomic is "0"', async () => {
+    const { budgetPreflightMessage } = await import('./cli.js')
+    const noFunds = {
+      tier: 1 as const,
+      category: 'agent-revoked' as const,
+      setup: { kind: 'throwaway-identity' as const, label: 'agent-revoked', budgetAtomic: '2000', fundingAtomic: '0' },
+    }
+    expect(budgetPreflightMessage([noFunds], exhausted)).toBeUndefined()
+    // A throwaway task that DOES fund from the eval agent is not exempt.
+    const funded = {
+      tier: 1 as const,
+      category: 'interrupted-purchase' as const,
+      setup: { kind: 'throwaway-identity' as const, label: 'interrupted-purchase', budgetAtomic: '2000', fundingAtomic: '2000' },
+    }
+    expect(budgetPreflightMessage([funded], exhausted)).toMatch(/period budget is already spent/)
   })
 })
 
@@ -849,7 +885,7 @@ describe('budgetPreflightMessage — with the real budget reader', () => {
       }),
     } as never
     const read = await readOnchainBudget(api, 'USDC', 'floor')
-    expect(budgetPreflightMessage([{ tier: 1 }], read)).toMatch(/period budget is already spent/)
+    expect(budgetPreflightMessage([{ tier: 1, category: 'direct-payment' }], read)).toMatch(/period budget is already spent/)
   })
 })
 
@@ -906,11 +942,183 @@ describe('consistency guard: a timeout fails one trial, not the rest', () => {
     expect(resolver.guardEvents).toEqual([expect.objectContaining({ kind: 'consistency_wait_skipped', beforeTrial: 3, priorKey: 'x402-catalog-guided-purchase#1' })])
   })
 
+  it('#4676: deducts the spend no_second_fresh_payment reported — a smaller drop is not enough', async () => {
+    // The read drops by 100 while the prior reported 500. Waiting for "any
+    // decrease" would accept it; deducting the reported spend must not.
+    let reads = 0
+    const resolver = createPerTrialResolver({
+      readBudget: async () => ({ remaining: reads++ === 0 ? 221_255n : 221_155n }),
+      blockNumber: async () => 1,
+      recipient: '0x' + '22'.repeat(20),
+      x402Target: 'https://merchant.example/mcp',
+      agentAccount: '0x' + '11'.repeat(20),
+      consistencyTimeoutMs: 5,
+      consistencyPollMs: 1,
+      sleep: async () => {},
+    } as never)
+    const t = await task('direct-send-partial-budget')
+    await resolver.resolve(t, 1)
+    const prior = settledPrior('x402-unsettled-purchase-no-double-pay', [{ name: 'no_second_fresh_payment', pass: true, settledSpendAtomic: '500' }])
+    await expect(resolver.resolve(t, 2, prior as never)).rejects.toThrow(/settled spend of 500/)
+  })
+
   it('still waits (and can time out) after an erc7710 settlement, where the merchant redeems later', async () => {
     const resolver = makeResolver()
     const t = await task('direct-send-partial-budget')
     await resolver.resolve(t, 1)
     const prior = settledPrior('x402-catalog-guided-purchase', [{ name: 'payment_status_settled', pass: true, settledSpendAtomic: '1000' }])
     await expect(resolver.resolve(t, 2, prior as never)).rejects.toThrow(/budget consistency timeout/)
+  })
+})
+
+// ── #4678: per-trial grader context and the setup resolver ─────────────────
+
+describe('buildGraderContextFor — a throwaway trial reads with ITS OWN key', () => {
+  it('GET /payments/:id uses the trial key, never the eval key', async () => {
+    const { buildGraderContextFor } = await import('./cli.js')
+    const seen: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: string | URL, init?: RequestInit) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        seen.push(headers.authorization ?? headers.Authorization ?? null)
+        return new Response(JSON.stringify({ status: 'confirmed', amount: '0.002' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+    const provider: BlockNumberSource = { getBlockNumber: async () => 1 }
+    const ctxFor = buildGraderContextFor({
+      cfg: { apiUrl: 'https://api.example', paymentTo: '0x' + '11'.repeat(20) } as never,
+      evalApiKey: 'sk_agent_eval_key',
+      provider,
+    })
+    const ctx = ctxFor({
+      task: { id: 't' } as never,
+      amountAtomic: 2000n,
+      instruction: 'x',
+      trialApiKey: 'sk_agent_trial_key',
+    })
+    const result = await ctx.probePaymentStatus!('pay-1')
+    expect(result).toEqual({ ok: true, status: 'confirmed', amountAtomic: '2000' })
+    expect(seen).toEqual(['Bearer sk_agent_trial_key'])
+    expect(seen).not.toContain('Bearer sk_agent_eval_key')
+    vi.unstubAllGlobals()
+  })
+
+  it('falls back to the eval key for a task with no per-trial key', async () => {
+    const { buildGraderContextFor } = await import('./cli.js')
+    const seen: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: string | URL, init?: RequestInit) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        seen.push(headers.authorization ?? headers.Authorization ?? null)
+        return new Response(JSON.stringify({ status: 'confirmed' }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }),
+    )
+    const ctxFor = buildGraderContextFor({
+      cfg: { apiUrl: 'https://api.example', paymentTo: '0x' + '11'.repeat(20) } as never,
+      evalApiKey: 'sk_agent_eval_key',
+      provider: { getBlockNumber: async () => 1 },
+    })
+    await ctxFor({ task: { id: 't' } as never, amountAtomic: 1n, instruction: 'x' }).probePaymentStatus!('pay-1')
+    expect(seen).toEqual(['Bearer sk_agent_eval_key'])
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('the per-trial resolver — a setup task never reads the eval budget (#4678)', () => {
+  it('resolves to fundingAtomic without calling readBudget, even on an exhausted budget', async () => {
+    const { createPerTrialResolver } = await import('./cli.js')
+    const reads: BudgetUse[] = []
+    const resolver = createPerTrialResolver({
+      readBudget: async (use) => {
+        reads.push(use)
+        return { error: 'the USDC budget is already exhausted (remaining 0 of 3.00)' }
+      },
+      blockNumber: async () => 42,
+    })
+    const setupTask = {
+      id: 'agent-revoked-no-retry',
+      title: 'x',
+      category: 'agent-revoked',
+      instruction: 'Pay 0.001 USDC to {recipient}.',
+      requires: [],
+      graders: [{ name: 'no_payment_retry_after_refusal' }],
+      expectTransfer: false,
+      source: { kind: 'issue', ref: '4678', note: 'n' },
+      lanes: ['claude-code'],
+      setup: { kind: 'throwaway-identity', label: 'agent-revoked', budgetAtomic: '2000', fundingAtomic: '0' },
+    } as EvalTask
+
+    const resolved = await resolver.resolve(setupTask, 1)
+    expect(reads).toEqual([])
+    expect(resolved.amountAtomic).toBe(0n)
+    expect(resolved.startedAtBlock).toBe(42)
+  })
+
+  // #4677: a setup task that ALSO carries an amount rule (the task-budget
+  // task) resolves the cap from the throwaway agent's own grant — still
+  // without reading the eval budget.
+  it('resolves a setup task WITH an amount rule from setup.budgetAtomic, not the eval budget', async () => {
+    const { createPerTrialResolver } = await import('./cli.js')
+    const reads: BudgetUse[] = []
+    const resolver = createPerTrialResolver({
+      readBudget: async (use) => {
+        reads.push(use)
+        return { remaining: 9_000_000n }
+      },
+      blockNumber: async () => 7,
+    })
+    const budgetTask = {
+      id: 'task-budget-lifecycle',
+      title: 'x',
+      category: 'task-budget',
+      instruction: 'Open a task budget with a cap of {amount} USDC.',
+      requires: ['THROWAWAY-identity'],
+      amount: { rule: 'fraction_of_remaining', fraction: '1/2' },
+      graders: [{ name: 'task_budget_lifecycle' }],
+      expectTransfer: false,
+      source: { kind: 'issue', ref: '4677', note: 'n' },
+      lanes: ['claude-code'],
+      setup: { kind: 'throwaway-identity', label: 'task-budget', budgetAtomic: '2000', fundingAtomic: '0' },
+    } as EvalTask
+
+    const resolved = await resolver.resolve(budgetTask, 1)
+    expect(reads).toEqual([])
+    expect(resolved.amountAtomic).toBe(1000n)
+    expect(resolved.instruction).toContain('0.001')
+  })
+})
+
+describe('#4677: buildGraderContext wires probeTaskBudget into task_budget_lifecycle', () => {
+  const provider: BlockNumberSource = { getBlockNumber: async () => 99 }
+
+  it('reads GET /task-budgets/:id and returns its status', async () => {
+    const api = {
+      getTaskBudget: vi.fn(async () => ({ ok: true, status: 200, data: { task_budget: { id: 'tb-1', status: 'closed' } } })),
+    } as unknown as HavenApi & { getTaskBudget: ReturnType<typeof vi.fn> }
+    const ctx = buildGraderContext({ api, provider })
+    expect(await ctx.probeTaskBudget!('tb-1')).toEqual({ ok: true, status: 'closed' })
+    expect(api.getTaskBudget).toHaveBeenCalledWith('tb-1')
+  })
+
+  it('a backend read failure is an error, never a guessed status', async () => {
+    const api = {
+      getTaskBudget: vi.fn(async () => ({ ok: false, status: 404, data: { error: 'Task budget not found' } })),
+    } as unknown as HavenApi
+    const ctx = buildGraderContext({ api, provider })
+    const r = await ctx.probeTaskBudget!('tb-1')
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.error).toContain('HTTP 404')
+  })
+
+  it('a row with no status is an error, not a pass', async () => {
+    const api = { getTaskBudget: vi.fn(async () => ({ ok: true, status: 200, data: {} })) } as unknown as HavenApi
+    const ctx = buildGraderContext({ api, provider })
+    const r = await ctx.probeTaskBudget!('tb-1')
+    expect(r.ok).toBe(false)
   })
 })

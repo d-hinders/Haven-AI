@@ -9,10 +9,30 @@
  * invariant pins that the receipt signer never names a relayer key
  * (`__tests__/non-custody.invariants.test.ts`).
  */
+
+/** One configured relayer key, with the variable it came from. */
+export interface RelayerKeyEntry {
+  /** The env variable name — the only thing a refusal may print (#4655). */
+  variable: string
+  value: string | undefined
+}
+
+/**
+ * The same enumeration as `relayerKeysFromEnv`, keeping each key's variable
+ * name. #4655's binding-key refusal has to name the colliding variable in its
+ * error text and must never print the value, so it cannot work from a bare
+ * value list.
+ */
+export function relayerKeyEntriesFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): RelayerKeyEntry[] {
+  return Object.keys(env)
+    .filter((name) => /^RELAYER_PRIVATE_KEY(_\d+)?$/.test(name))
+    .map((name) => ({ variable: name, value: env[name] }))
+}
+
 export function relayerKeysFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): Array<string | undefined> {
-  return Object.keys(env)
-    .filter((name) => /^RELAYER_PRIVATE_KEY(_\d+)?$/.test(name))
-    .map((name) => env[name])
+  return relayerKeyEntriesFromEnv(env).map((entry) => entry.value)
 }

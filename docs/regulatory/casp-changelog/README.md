@@ -5,7 +5,7 @@ covers:
   - docs/regulatory/casp-changelog/**
   - scripts/docs/coupling-gate.mjs
   - scripts/release-bump.mjs
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -63,7 +63,7 @@ also edits.
   (frozen as of 2026-08-12). Its `last-verified` now reflects genuine
   re-verification of the BODY claims (for example a pass the weekly docs
   audit asks for: `docs-audit.yml` runs on Mondays and keeps one tracking
-  issue, #3645 at present), not per-PR bumps.
+  issue, #4605 at present), not per-PR bumps.
 
 ## Once merged, a shard is immutable
 
@@ -137,41 +137,4 @@ version rather than an issue:
   bump itself touches (version strings and pins only)>. Perimeter unchanged.
 ```
 
-Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), end to end:
-
-- **Count and names.** The directory holds 677 shards plus this README:
-  `git ls-tree --name-only b79b112ec docs/regulatory/casp-changelog/` prints
-  678 lines. The same command at `5b5bd059` prints 508, which is 507 shards
-  plus the README, the previous note's count. 39 of the 677
-  do not match `YYYY-MM-DD-<issue>.md` or `YYYY-MM-DD-<version>-release.md`
-  exactly: they carry a suffix (`-1441b`, `-2769-pending-nonce`), a topic
-  slug instead of an issue (`2026-10-07-blockscout-api-key.md`) or the
-  pre-#1789 release names. 28 of those were already present at `5b5bd059`, so
-  the previous note's "every one still matching" was wrong when written. That
-  is consistent with *Nothing validates a shard filename* above:
-  `git grep casp-changelog` over `scripts/` and `.github/` finds no name check.
-  The newest shard is `2026-10-24-4387.md`; the newest release shard is
-  `2026-10-23-0.11.0-alpha.0-release.md`.
-- **Shape.** 119 of the 677 shards use nested bullets (81 of October's 161),
-  and 78 have no match for `/perimeter (is )?(unchanged|narrow)/i` once
-  whitespace is flattened (`\s+` to one space). Without flattening the count
-  is 96, because 18 shards carry the verdict across a hard line wrap.
-  `2026-10-24-4387.md` matches either way, as a control. The
-  *Content* bullet now says so and that nothing checks either.
-- **Gate.** The added-match rule (#2192) is `implicatedDocs` in
-  `scripts/docs/coupling-gate.mjs`, with `parseNameStatus` counting only `A`
-  lines, so a rename does not count. The previous note said #2192 was the last
-  behaviour change; #2323 came after it and reports a shard-cleared parent as
-  an advisory finding. Editing a parent doc clears it because the gate skips
-  any doc the diff touches. `04-x402-payment-sequence.md` carries the same
-  `satisfied-by` glob (#1496); the *The gate* bullet named only the CASP doc.
-- **Release naming.** `scripts/release-bump.mjs` prints
-  `docs/regulatory/casp-changelog/<date>-${newVersion}-release.md` as its next
-  step, and every release shard from 0.1.30 on follows that pattern (0.1.29's is
-  `2026-08-22-1783-release.md`, the guess the *Filename, release PRs* bullet
-  describes).
-- **Weekly audit.** #1248 is a closed instance of the weekly audit issue.
-  `docs-audit.yml` (cron `0 6 * * 1`) upserts one open tracking issue, now
-  #3645.
-- **Exemption.** `validate-frontmatter.mjs:236` exempts every file here but
-  this README.
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

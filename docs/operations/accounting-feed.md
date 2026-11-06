@@ -37,7 +37,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-10-29"
+last-verified: "2026-10-30"
 ---
 
 # Accounting feed — operations runbook
@@ -279,7 +279,7 @@ a separate manual decision, and unsetting it is the rollback.
 
 | `hosted` | `enabled` | `/accounting` | sidebar entry | Settings → Accounting card |
 |---|---|---|---|---|
-| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868); a footer link, *See synced payments on Accounting* (#4359) |
+| true | true | the summary line + the feed (or the add-on card when `entitled` is false) | rendered; attention dot per the rule above | the five connection states (#2868); a footer link, *See sent payments on Accounting* (#4359) |
 | true | **false** | **Coming soon**: what the feed will do, the platforms being lined up, and "Nothing can be connected yet." No connect or sync control is reachable | rendered, with a muted **Soon** pill (accessible name and, below `lg`, visible text: *Coming soon*) | **renders nothing at all (#4359, 2026-10-23 — superseding the 2026-09-11 decision to list every provider as *Coming soon* with no action)**: coming-soon providers are hidden, so there is no row and no card; the deep link `?tab=business` falls back to the General body with the URL untouched |
 | **false** | either | **"Not available on self-hosted"** — the feed is part of the hosted service; this copy must never read as coming soon | **hidden** (the page still renders the copy by URL) | the same not-available sentence, and **no providers listed** — same backend 404 underneath (#2918). The explanation is information: it renders whenever the Business tab is visible (e.g. because company details render), but on its own it does not make the tab appear (#4359) |
 
@@ -472,15 +472,20 @@ The kind is DERIVED server-side from the stored payment record
 cannot set it. The ladder, strongest signal first:
 
 1. `direction` — `in` is income/refund, so `refund`.
-2. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
+2. the direct-payment rail (#4578) — the entry source's direct branch emits
+   this signal as a literal, so a settled direct payment (`haven_send`,
+   `POST /payments`) is a movement of funds to an address, so `transfer`. The
+   literal is written by the SQL branch, never read from an intent column, so
+   no agent-written metadata can set it.
+3. the merchant's own document (`merchant_receipts.inline_json`, #956) — an
    invoice-shaped body (invoice/order number, line items, seller block) is a
    `purchase`; a body with none of those markers is a bare acknowledgement, so
    `api_fee`.
-3. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
+4. `machine_payment_evidence.delivery_reference` (#3778) — the agent named a
    deliverable, so `purchase`.
-4. `machine_metadata.mcp_call_context.toolName` (#1307) — an MCP tool call IS
+5. `machine_metadata.mcp_call_context.toolName` (#1307) — an MCP tool call IS
    the paid deliverable, so `purchase`.
-5. the x402 route — the last path segment of `resource_url` against three
+6. the x402 route — the last path segment of `resource_url` against three
    closed vocabularies: purchase verbs (`pay`, `purchase`, `buy`, `order`, …),
    fee verbs (`create`, `status`, `search`, `detail`, `quote`, …) and transfer
    verbs (`send`, `transfer`, `withdraw`, …).
@@ -488,7 +493,10 @@ cannot set it. The ladder, strongest signal first:
 A route verb outside those sets is `unknown`, never a guess — `price` is
 deliberately absent, because `https://api.anchor-x402.com/v1/price/token` is a
 paid data call whose OUTPUT is the price. A payment with no derivable signal
-renders `unknown` and does not fail the feed.
+renders `unknown` and does not fail the feed. A direct payment is no longer one
+of those: since #4578 it renders `transfer`, and its `Description` names the
+counterparty's canonical address — `0x1517…799a (transfer)` — because a direct
+payment has no merchant name and no resource host to name.
 
 **Why it exists.** One BikBok gift-card purchase through Bitrefill's
 plain-HTTP x402 route settled three payments on production 2026-10-29 —
@@ -504,6 +512,48 @@ it — error 2000359). Accounted's document upload takes exactly `file` +
 `upload_source` (`additionalProperties: false`), so there is no metadata field
 to carry them: the PDF is the carrier. Existing stored receipts are untouched —
 the kind renders at push time and nothing re-renders a delivered document.
+
+**The purchase correlation key (#4534, renamed #4577).** One purchase can settle
+as several payments — the Bitrefill shape above is three — and the feed files
+one document per payment, because a pushed document is immutable. What links
+them is the correlation key, and it is a **receipt** id, not a payment id:
+
+- `purchase_group_id` — the merchant's own invoice/order id (or an
+  agent-supplied group key) shared by every payment of one purchase.
+- `parent_receipt_id` — for a fee call, the parent purchase receipt's `id`: the
+  `machine_payment_evidence` row id of the purchase leg it paid for. Null on the
+  purchase itself and on every ungrouped payment.
+
+The underlag renders both, plus its own evidence id, so a fee's document and its
+purchase's document match by eye:
+
+```
+Purchase group inv_bikbok_4497
+Parent receipt 3f2a…-the-invoice-pay-evidence-id
+Receipt ref    9c41…-this-document's-own-evidence-id
+```
+
+`Receipt ref` appears on a **protocol** underlag only. On a direct payment
+(`POST /payments`, `haven_send`) `receiptRef` is the payment-intent id, which
+`Payment id` already prints, so the line is omitted rather than printing the
+same value twice. An ungrouped payment renders `Purchase group ungrouped` and
+`Parent receipt n/a`.
+
+The feed payload carries the same two values as `FeedTransaction.purchaseGroupId`
+/ `.parentReceiptRef` — named `parentReceiptRef` to match `receiptRef`, which is
+what it joins to. The stored column is still `machine_payment_evidence.parent_payment_id`
+(no migration); the receipts wire carries the value as `parent_receipt_id` and
+keeps `parent_payment_id` beside it as a **deprecated alias**, because the SDK
+shipped `parentPaymentId` in 0.13.0-alpha.0. The old name was wrong: it sat
+beside a `payment_id` that is a payment-intent id, so a join on the two names
+found nothing.
+
+**Accepted risk — Accounted write-once bytes.** Accounted's idempotency key comes
+from `paymentId`, and re-filing a document with different bytes ends in a
+terminal `IDEMPOTENCY_KEY_REUSE` skip (see *Sync statuses* below). A grouped row
+whose first upload reached Accounted but which is retried after this deploy
+re-renders with the two new lines and takes that skip. Rows already `pushed` are
+final and are never re-rendered.
 
 **A USD ledger records the quoted rate, not an assumed 1:1.** A USDC payment into
 a USD-booking company carries the rate the source actually quoted, with its
@@ -1326,70 +1376,4 @@ token family) and clears the local secrets whether or not that succeeds.
 the connector makes to the token, revoke, companies and uploads endpoints —
 never `…/supplier-invoices`, voucher drafts, `…/book` or a delete.
 
-> **Re-verified 2026-10-24 (#4372 part E, at dev `ee7fdd27`), a full re-read.**
-> Changed: the intro, the flow diagram and the providers row now say two
-> connectors are live (Fortnox and Accounted, live since #3017, `registry.ts`);
-> the `api-key` row lists the route's real answers (`accounting-connections.ts`
-> and `registry.ts`'s `ProviderNotConnectableError`) instead of "no live
-> `api_key` provider today → 409"; the Transactions badge says *Evidence
-> archived* for a pushed Accounted row and the *Check in* action names the
-> row's provider, a read-back only on Fortnox (`AccountingBadge.tsx`
-> `RECORD_ONLY_PROVIDERS`, `en.ts`), and on the ledger row it is the pill
-> alone since #4298, its link and reason living in the detail panel
-> (`TransactionsLedgerRow.tsx`, `TransactionDetailPanel.tsx`); the
-> `pushed` row names Accounted's `external_ref` shape; the Settings card's
-> fail-closed guard no longer reads as waiting on #2918 (closed); the seller
-> block says the `Merchant` line always renders (`receipt-underlag.ts`); and
-> the Accounted slice-1 paragraph is in the past tense, with `revoke` a no-op.
-> Re-checked without change: the configuration table, party identity, the
-> settlement-side reasons table, the off-state table, every other route row,
-> connection and sync states, ledger currency, feed-from/backfill/settings,
-> the retry sweep's constants (`retry-sweep.ts`: 25 requests / 5 s, 8 per
-> push, batch 200), the booked-hash section, ops signals, secrets at rest
-> (`CURRENT_KEY_VERSION = 1`), the schema section, and both provider notes.
-> A sweep of the doc's backticked identifiers against `packages/` matched all
-> of them except the Accounted webhook API's own field and scope names, which
-> are the provider's, not this repo's.
-
-> **Re-verified #3093 (frontend hooks: wire keys default instead of crashing):**
-> this diff touched `hooks/useAccounting.ts`, in this document's coverage list, by
-> defaulting the array keys it stores (`?? []`) so an API answer without the key degrades to an empty state instead
-> of sending the route into the ErrorBoundary. No endpoint, flow or
-> behaviour this document describes changes. Scope of this note: those
-> expressions. Nothing else in this document was re-verified.
-
-> **Re-verified #4497 (2026-10-29, production enabled).** Changed: the
-> Configuration table's prod column now reads `HAVEN_ACCOUNTING_ENABLED=true`,
-> mode `all`, `HAVEN_SECRETS_KEY` set, and `FORTNOX_*` with the client id and
-> secret set (the dev app's) but the redirect URI unset; the two-off-states
-> section now says the flag-off state describes a deployment that switched the
-> feed off, not either of Haven's two deployments; the ledger-currency
-> blockquote keeps "no production connection is non-SEK" and rewords its
-> "ahead of its first user" reasoning, because production has Accounted
-> connections that book in SEK by the default; the key-rotation follow-on is
-> due now rather than with #2876; and the verify-call paragraph records that a
-> first-attempt `RATE_LIMITED` on two of the three subscriptions is expected
-> and self-heals on the provider's retry. Re-checked against the measured prod
-> state of 2026-10-29 (feed status for two accounts, the providers list, the
-> 503 on the Fortnox connect-url, one connected Accounted destination with
-> `base_currency` null, three verified subscriptions) and against the code
-> claims the changed sentences rest on. Nothing else in this document was
-> re-verified, and `last-verified` is not bumped.
-
-> **Re-verified #4532 (2026-10-29, receipt transaction kind).** Added: the
-> "What kind of transaction it is" block under *What the accountant sees on the
-> attachment* — the closed enum, the derivation ladder, the three pinned
-> Bitrefill routes, and where each connector carries the fields. Changed: the
-> Fortnox provider note's description of the `Comments` field now names the
-> description part and its `/` → `-` fold. Re-checked against
-> `modules/accounting/transaction-kind.ts`, `entry.ts`, `feed-transaction.ts`,
-> `receipt-underlag.ts`, `fortnox-connector.ts` and `accounted-connector.ts`.
-> Nothing else in this document was re-verified, and `last-verified` is not
-> bumped.
-
-> **Re-verified #4518 (2026-10-31, Igdrasil connector).** Added: the
-> `IGDRASIL_*` row in *Configuration* and the *Provider notes: Igdrasil*
-> section. Re-checked against `igdrasil.ts`, `igdrasil-client.ts`,
-> `igdrasil-connector.ts`, `routes/accounting-connections.ts` and
-> `config.ts`. Nothing else in this document was re-verified, and
-> `last-verified` is not bumped.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

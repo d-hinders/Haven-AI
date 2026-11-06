@@ -14,7 +14,7 @@ name: Docs quality
 # Vale) are separate jobs on purpose:
 #
 #   * `continue-on-error` protects against a step FAILING, not against the job
-#     TIMING OUT. Sharing a job meant a slow lychee run over ~130 external URLs
+#     TIMING OUT. Sharing a job meant a slow lychee run over the whole tree
 #     could cancel the whole job — and a cancelled required check blocks
 #     auto-merge just as hard as a failing one, despite "only front-matter
 #     blocks" being the intent.
@@ -45,7 +45,7 @@ name: Docs quality
 #
 # `advisory` opts OUT of `edited` instead of the trigger staying narrow,
 # because its inputs are entirely in the repository: re-running lychee over
-# ~130 external URLs because someone reworded a description is waste, and the
+# the whole tree because someone reworded a description is waste, and the
 # job's whole reason for existing is that those network steps are slow. It is
 # not a required check, so a skipped run reports as skipped and blocks nothing
 # — the #933 hazard applies to `validate`, which is why `validate` does not
@@ -90,7 +90,7 @@ jobs:
 
     steps:
       # A shallow clone is enough: the #1843 chain-integrity check that read
-      # the merge base was retired by #2681, and none of the five `docs:check`
+      # the merge base was retired by #2681, and none of the six `docs:check`
       # scripts reads git history (two call `git ls-files`, which reads the
       # index, not history).
       - uses: actions/checkout@v4
@@ -102,7 +102,8 @@ jobs:
       # Every doc has valid front-matter, every `covers` glob resolves, no doc
       # names a file its `covers:` cannot reach (#2679), portable agent skills
       # plus client adapters stay aligned, and — since #2657 — no live doc
-      # sentence restates either UI merge-gate rule #2636 retired.
+      # sentence restates either UI merge-gate rule #2636 retired, and — since
+      # #4614 — no governed doc carries a re-verification note in its body.
       # Dependency-free, so no `npm ci` is needed.
       #
       # #2657 hangs off `docs:check` rather than off a new workflow or a new
@@ -169,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Nothing here reads the pull request itself, so a reworded description
-    # cannot change any verdict below. Skipping keeps ~130 external URL checks
+    # cannot change any verdict below. Skipping keeps the whole link check
     # off every description tweak. Safe to skip precisely because this job is
     # advisory — see the `edited` note in the header.
     #

@@ -40,6 +40,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
 } from '@/components/haven'
 import { Button } from '@/components/ui/Button'
@@ -86,7 +87,7 @@ import {
 } from '@/lib/transaction-presentation'
 import { transactionTokenLabel } from '@/lib/transaction-filters'
 import { parseX402Hostname } from '@/lib/transaction-labels'
-import { timeAgo } from '@/lib/format'
+import { formatClockTime } from '@/lib/format'
 import type { AggregatedTransaction, TransactionFilterTokenOption } from '@/types/transactions'
 
 interface AgentActivityTabProps {
@@ -299,7 +300,13 @@ export function activityToTransaction(
     paymentProofStatus: item.payment_proof_status ?? null,
     paymentFlowStatus: item.payment_flow_status ?? null,
     paymentAttentionReason: item.payment_attention_reason ?? null,
-    statusBadge: { label: status.label, tone: status.tone },
+    // #4608 (owner decision 2026-11-02): a confirmed payment's ledger row
+    // carries NO badge, like Transactions — the epic's ledger-row rule wins
+    // over DS:886's "Sent everywhere" on rows. The detail panel still names
+    // it "Sent" (`TransactionDetailPanel`'s fallback). Every other status
+    // keeps its badge.
+    statusBadge:
+      item.status === 'confirmed' ? undefined : { label: status.label, tone: status.tone },
     explorerUrl: item.explorer_url,
   }
 }
@@ -645,20 +652,15 @@ export default function AgentActivityTab({
               aria-label="Loading activity"
             >
               {[0, 1, 2].map((item) => (
-                <div key={item} className="flex items-center gap-3 px-5 py-3.5">
-                  <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="min-w-0 flex-1">
-                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                    <div className="mt-1.5 h-2.5 w-48 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  </div>
-                </div>
+                <TransactionActivityRowSkeleton key={item} />
               ))}
             </div>
           ) : activeError ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Activity could not load"
-                body={activeError}
+                body="This agent's payments are unchanged."
                 className="py-8"
                 action={
                   <Button variant="ghost" size="sm" onClick={() => void activeRefresh()}>
@@ -671,6 +673,7 @@ export default function AgentActivityTab({
             refusalRows.length === 0 ? (
               <div className="p-6">
                 <EmptyState
+                  bare
                   title="No refused attempts"
                   body="When a guardrail or budget stops one of this agent's payments, the attempt shows here."
                   className="py-8"
@@ -697,6 +700,7 @@ export default function AgentActivityTab({
           ) : rows.length === 0 ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="No payments yet"
                 body={
                   needsSetup
@@ -767,7 +771,9 @@ function AgentRefusalRow({ view, insetDivider }: { view: RefusalRowView; insetDi
       asset={view.item.token_symbol}
       status="Refused"
       statusTone="neutral"
-      timestamp={timeAgo(view.timestamp * 1000)}
+      // #4572: both agent ledger rows sit under a day band, so they show the
+      // clock time — the band already states the day.
+      timestamp={formatClockTime(view.timestamp * 1000)}
       direction="neutral"
       density="compact"
       insetDivider={insetDivider}
@@ -807,7 +813,7 @@ function AgentLedgerRow({
       failed={tx.isError}
       status={badge?.label}
       statusTone={badge?.tone}
-      timestamp={timeAgo(tx.timestamp * 1000)}
+      timestamp={formatClockTime(tx.timestamp * 1000)}
       direction={tx.direction}
       fiat={fiat}
       density="compact"

@@ -390,6 +390,12 @@ explicitly open schema stays open. That is the spec's decision; tightening it
 is a separate contract change, not something a test helper should do behind the
 spec's back.
 
+One open schema no longer relies on that trust alone: `MachinePaymentReceipt`
+keeps `additionalProperties: true`, but a backend test now pins its emitted
+keys — it reads the declared set from the component schema and the emitted set
+from the live `GET /machine-payments/receipts` response, and fails naming any
+key the schema omits, with an empty allowlist (#4579).
+
 A schema composed with `allOf` is also left open, on purpose. `additionalProperties`
 only sees the properties declared at its own level, so closing one `allOf` member
 makes it reject the properties its siblings contribute — a valid payload would be
@@ -445,7 +451,10 @@ about routes that had shipped long ago:
 The first two went unnoticed because `Agent` sets `additionalProperties: true` —
 the same limit recorded above. An open schema is a deliberate choice, but it
 means undeclared fields accumulate silently, and consumers generating clients
-from the spec never learn the fields exist.
+from the spec never learn the fields exist. `MachinePaymentReceipt` is the first
+open schema to close that gap from the test side: its emitted keys are pinned
+against the declared set by a guard with an empty allowlist (#4579), so a new
+field on the receipts wire cannot ship undeclared again.
 
 `DelegateBalance` was also lifted out of the inline
 `/agents/{id}/delegate-balance` response into a named component. The frontend
@@ -502,7 +511,7 @@ the rule as "no *accidental* open envelope" rather than "none":
   for "an OpenAPI document" that the spec could hold about itself, so the open
   shape is the honest one.
 
-Count the pattern, not the prose, if you re-check this: the literal is
+Count the pattern, not the prose, when checking this: the literal is
 `schema: { type: 'object', additionalProperties: true }`, and a first pass at
 this section reported **one** because its regex required no trailing comma —
 `/openapi.json` writes the property across lines and ends it with one. Both
@@ -606,7 +615,10 @@ rail, each row also carries an additive `next_refill_at` beside its
 `onchain` block (#4355: when that budget next refills — the end of its current
 period, null when its end date comes first), which the SDK uses to tell a
 budget spent for the period from no budget at all without adding a readiness
-value; and each `onchain` block an additive, optional
+value; an additive `budget_expires_at` (#4666: when that budget's validity ends,
+null when the stored expiry is not a representable timestamp), reporting only,
+which the SDK does not surface and the daily QA balances check reads; and each
+`onchain` block an additive, optional
 `remaining_is_from_chain` boolean (#1319): true when `remaining` came from a
 live on-chain enforcer read, false when that read failed and `remaining` is
 the #1145 fallback (the full configured budget) — reporting only. The spec used
@@ -707,42 +719,4 @@ entry and a shrink-only ceiling, and #1446 documents the modules one domain at a
 time. Read the numbers there as the current truth; this paragraph is a pointer,
 not a second copy.
 
-Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
-the `/agents` facet sentence names the account (#3719) and organization
-facets beside the built-in status and budget ones (`AgentPanel.tsx`); the agent-activity reads gain #4366's export
-(review round 1 of #4377); the
-spend-authority read names #4355's `next_refill_at` (spec entry beside each
-row's `onchain` block); the `AgentApiKey` operation count is 46 (five also
-accept `DashboardJwt` or `SetupToken`); the route total is 211 across 49
-modules, one undocumented (`safe-deploy.ts`), re-counted with the coverage
-gate's own survey. Re-checked without change: the four security schemes,
-`apiBaseUrl`'s four callers and its gating (`domain/request-origin.ts`),
-`PUBLIC_CATALOG_FIELDS` and the eight-word search, the SDK's `POST /x402`
-alias, the resume union, the empty `KNOWN_UNDOCUMENTED_ROUTES` and the
-1/1 ceilings (`openapi/route-coverage.ts`), the three `allOf` components,
-the five human-decimal emitters (`rails/delegation-budget-view.ts`
-importers), and `RefusalActivityEntry` (#4323).
-
-Re-verified 2026-10-26 (weekly docs audit #4438, at dev `ebf567f1c`), a
-targeted re-read of the counts and the discoverability claims rather than a
-second full pass. Re-derived with the coverage gate's own extractor
-(`openapi/route-inventory.ts`): **211 declared routes across 49 registered
-modules**, one undocumented (`safe-deploy.ts`), `KNOWN_UNDOCUMENTED_ROUTES`
-empty and `MAX_UNDOCUMENTED_MODULES`/`MAX_UNDOCUMENTED_ROUTES` both 1 — the
-same figures the 2026-10-23 pass recorded. `AgentApiKey` is still the security
-scheme on **46** operations, with **5** of those also accepting `DashboardJwt`
-or `SetupToken`, and the four schemes are unchanged. Re-checked without change:
-`servers[0]`'s derivation from `domain/request-origin.ts` (including the
-`TRUST_PROXY_HOPS` gating and the leftmost-scheme residue), the root document's
-thinness, `PUBLIC_CATALOG_FIELDS` and the eight-word `search`, the
-`GET /payments/{id}/sign-context` / `GET /x402/{id}/sign-context` /
-`GET /x402/by-idempotency-key/{key}` / `GET /payments/{id}/resume_state` reads,
-`POST /machine-payments/budget-precheck` and `GET /machine-payments/balance-coverage`,
-the `/task-budgets/*` and `/sub-budgets/*` families with their owner routes, the
-`/labels` family and `PUT /agents/{id}/labels`, `BUILT_IN_FACETS` plus the
-account (#3719) and organization facets, and the catalog's
-`tool_arguments_schema` / `http_method` / `body_type` / `body_example` shapes.
-The 21 covered commits since 2026-10-23 — #4404's `payment_intents.failed_at`
-(a one-line spec description change), #4434's money-path globs, the analytics
-and token fixes, and the #4372 doc sweeps — moved no operation, scheme or route
-count.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

@@ -20,7 +20,7 @@ covers:
   - packages/frontend/src/components/EditAgentModal.tsx
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/frontend/src/components/OnchainActionGate.tsx
-last-verified: "2026-10-24"
+last-verified: "2026-11-02"
 ---
 
 # Haven AI UX Review
@@ -74,7 +74,7 @@ Use this checklist before finishing any Haven UI task. It is written for AI impl
   three elevations `Card` implements (`flat`, `raised`, `anchor`); do not
   invent additional elevations.
 - Inputs use the shared `Input` primitive for visible borders, focus, validation, Max/Paste actions, and helper text.
-- Skeleton loading uses `Skeleton` rather than inline pulse divs.
+- Skeleton loading uses `Skeleton` rather than inline pulse divs, and an in-flight action or standalone busy indicator uses the shared `Spinner` (`design-system.md` § Spinner).
 - Toast and Tooltip are used through shared primitives, not one-off floating elements.
 - Amounts, addresses, percentages, counters, step numbers, and numeric metadata
   use `.v2-tabular`.
@@ -177,38 +177,4 @@ Any remaining matches should be deliberate technical disclosure, developer copy,
 - For animation/style changes, verify the class remains stable across state
   transitions and reduced-motion behavior is covered.
 
-Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
-needed rewriting; every covered file still exists (all six named modals/cards,
-`TransactionActivityRow` in `components/haven/`, `TransactionsTable` in
-`components/transactions/`). Re-checked against the code: `RetiredRailNotice`
-is still absent from the frontend; `.v2-tabular` and the
-`prefers-reduced-motion: no-preference` gate are in `globals.css`; the `Card`
-primitive implements exactly the three elevations the checklist describes
-(`flat`/`raised`/`anchor`, with `anchor` still absent from the static
-design-system table as noted); `Tooltip` still carries the #2038 hover-only
-nesting rule; the shared `Table` emits `aria-sort` and the transactions table
-sorts amount on the raw `value` field, not the display string; the
-`delegator_hybrid` filtering lives in `useAgentPanelState` and the account/agent
-hooks as described. The intervening UI drift (#3442 token-label wrap, #3437
-releases wrap, #3482 faucet/onramp, #3408 receive side, #3198 agent labels,
-#3205 chart callouts, #3087 marketplace) changed screens the checklist reviews
-without changing any review criterion, primitive name, or process step here. (`TransactionsTable` was deleted after this re-verification, with #4266.)
-
-Re-verified 2026-10-24 (#4372 part C, at dev `795c50fc7`), end to end. Changed:
-the regulatory trigger says "account or signer setup", as `AGENTS.md` does;
-`design-system.md` § 3 now lists all three `Card` elevations, so the note that
-the static table lacked `anchor` is gone; `Design visual regression` is a
-required check on `main` and advisory on `dev` (the branch rulesets), not
-blocking everywhere, and compares `/design-system` through scoped captures
-only (#2635); and, from review round 1, the token values live in
-`packages/ui/src/tokens.css` since #3508 (`.v2-tabular` in
-`packages/ui/src/type.css` since #3611), new code imports shared primitives from
-`@haven_ai/ui`, and `covers:` gains `packages/ui/src/**`. The 2026-09-30 note
-above predates #3508 and is left as written. Re-checked without change: the `#patterns` anchor and the
-#4109 rule; every ledger and the dashboard preview rendering
-`TransactionActivityRow`; the one
-permanently-open showcase (`WalletPopover`, pinned by
-`showcase-permanently-open-pin.test.ts`); the #2038 Tooltip rule; `aria-sort`
-in `Table`; the every-PR `haven-reviewer` rule in `CLAUDE.md` § How shipping
-is governed; the environment badge beside the sidebar wordmark and the
-`#main-content` skip link.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

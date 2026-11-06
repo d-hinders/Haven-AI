@@ -73,6 +73,15 @@ for how the environments are wired, see
       rebuilding reflexively. Do not hand-count the diff
       ([#2724](https://github.com/d-hinders/Haven-AI/issues/2724)).
 
+- [ ] **Run the owed-issues selector, and link what this promotion carries.** A
+      step that can only be done at or after a promotion is filed as its own
+      issue under the `Next release` convention — defined once in
+      [`branch-and-release-flow.md` § *Promotion to production*](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main),
+      which also owns the selector. Run it, check each issue's prerequisite is in
+      `origin/main..origin/dev`, and link it from the promotion PR as `Refs #<n>`
+      under *Owed at this release*. An issue whose prerequisite is not in range is
+      carried to the next promotion, with the reason recorded on the issue.
+
 ## The promotion window — `dev` is held while the PR is open
 
 **From opening the promotion PR until it merges, do not merge anything into
@@ -215,7 +224,7 @@ so this is a rule to point at rather than a question to ask the release runner.
       The per-branch inventory and the `gh api` command that produced it are in
       [`../contributing/autonomous-pr-loop.md`](../contributing/autonomous-pr-loop.md#one-time-github-setup-required)
       step 3.
-- [ ] **Sweep the docs staleness audit** (the open "Docs staleness audit (weekly)" issue, [#3645](https://github.com/d-hinders/Haven-AI/issues/3645) at this writing — `docs-audit.yml` rewrites the open one every Monday, and opens a new one when the last was closed). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived`, `research` and `record` docs are not ranked and need no disposition (#2638, #4459). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked.
+- [ ] **Sweep the docs staleness audit** (the open "Docs staleness audit (weekly)" issue, [#3645](https://github.com/d-hinders/Haven-AI/issues/3645) at this writing — `docs-audit.yml` rewrites the open one every Monday, and opens a new one when the last was closed). Open it and give every `current`-status doc it ranks one of three dispositions: **fix** it in a follow-up, **file** it, or **accept** it with a reason recorded in this promotion PR. Contract docs cannot reach here — the coupling gate blocks them on the PR that made them stale — so what this sweeps is the *non-contract* drift that is allowed to accumulate on `dev` between promotions, which is exactly the class no per-PR gate is watching. `archived`, `research` and `record` docs are not ranked and need no disposition (#2638, #4459). An empty or unchanged report is a valid outcome; say so rather than leaving the item silently unticked. The same issue now carries a **Doc figures that moved** section (#4631): give each moved figure the same fix / file / accept disposition — refresh the figure in the doc (figures + `sha` in its row in `docs/quality/scan-baselines.json`) or rewrite it as a dated reading, never `last-verified` alone.
 - [ ] **The request-validation rollout's named residue (`#3223`, epic #3028) is expected here.** `POST /machine-payments/reconciliation-events` is intentionally NOT enforced — the shadow reading did not cover it and CANNOT have: the route is only posted on a genuine merchant rejection after a confirmed payment, and driving it synthetically would write a false record into a payment's ledger (owner decision 2026-09-24 on epic #3028). Do not read its `NOT PROVEN` row in a shadow table, or its entry in `lint-request-schemas-baseline.json` (`routes/machine-payments-reconciliation-events.ts`), as unfinished slice work; it is the standing residue until a real rejection — or a QA scenario that produces one — gives the reading traffic to prove it, at which point its file joins `enforcedModules` and its handler rungs delete like every other flip.
 - [ ] A code-owner approval, from an owner other than the PR author, is present
       if the batch touches an owned path — today only migration files:
@@ -349,6 +358,13 @@ so this is a rule to point at rather than a question to ask the release runner.
       `--burst`. A failing line means the endpoint cannot carry Haven's traffic —
       the September 2026 qa-dev waves were a provider that refused batches over
       three and the `pending` tag (epic #3335).
+- [ ] **Work the owed issues.** The promotion is not closed out while an issue
+      listed under *Owed at this release* is open and not carried. For each one,
+      record the result on the issue, remove `operator-verify` and close it; an
+      issue whose prerequisite did not reach prod is carried to the next
+      promotion with the reason recorded on the issue. The convention is defined
+      once in
+      [`branch-and-release-flow.md` § *Promotion to production*](../contributing/branch-and-release-flow.md#promotion-to-production-dev--main).
 
 ### Manual check in the Railway web UI
 
@@ -455,29 +471,4 @@ since **2026-06-26**. That was a promotion backlog, not a deploy bug, and
 promotions have run since: the latest at this doc's last verification is
 #4338 (0.11.0-alpha.0), merged to `main` on 2026-10-23 with a merge commit.
 
-> **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):**
-> the whole checklist was re-read. Changed: the npm item names the #3797
-> hold-back; the request-validation item names the right three routes enforced
-> on test evidence (#3223) and keeps reconciliation-events in shadow; the docs
-> audit item points at the open standing issue rather than the closed #2645;
-> and the closing note no longer says `main` has not moved since June.
-> Checked and accurate: the 19 required contexts (15 + 4, read from the live
-> rulesets), `dismiss_stale_reviews_on_push` and the strict up-to-date rule on
-> `main`, the one CODEOWNERS rule, `release:scope`'s exit codes 2 and 1, the
-> RPC probe's defaults (batch 10, burst 20, cap 50), the public RPC defaults,
-> `SWEEP_MIN_USDC`'s `0.01` default, and the `enforce` default. Not checkable
-> from the repo: the npm token's expiry date.
-
-> **Re-verified 2026-10-25 (#4372 part H, at dev `e778da444`):** the whole
-> checklist was re-read. Changed: the merge item records that *Dev gate* now
-> allows only the `merge` method on `main`, and the closing note names #4338
-> as the latest promotion. Checked and accurate: the 19 required contexts (15
-> on *Haven automerge rules* for `main` and `dev`, plus `gate`, `qa-freshness`,
-> *Design visual regression* and *Frontend browser smoke* on *Dev gate*), the
-> strict up-to-date rule on `main` only, `dismiss_stale_reviews_on_push`, the
-> one CODEOWNERS rule (migration files), *External intake gate* required on
-> `dev` only, the workflow names, `publish.yml`'s `promote-tags` job and its
-> FAILED rows, `release:scope`'s exit codes 2 and 1, the RPC probe's defaults
-> (batch 10, burst 20, cap 50, logs range 500), `SWEEP_MIN_USDC`'s `0.01`
-> default, the `enforce` default, and every link anchor. Not checkable from the
-> repo: the npm token's expiry date.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

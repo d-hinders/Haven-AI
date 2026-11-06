@@ -162,8 +162,17 @@ vi.mock('@/components/DelegationBudgetCard', () => ({
 }))
 
 vi.mock('@/components/PaymentCredentialsModal', () => ({
-  default: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="payment-credentials-modal" /> : null,
+  // The dialog's own anatomy and masking are pinned by
+  // PaymentCredentialsModal.test.tsx; this stand-in renders the masked
+  // credential the real modal builds from `api_key_prefix`
+  // (`${prefix}${'•'.repeat(12)}`), so the Settings tab's test can prove the
+  // prefix still reaches View (#4608).
+  default: ({ open, agent }: { open: boolean; agent: { api_key_prefix?: string | null } }) =>
+    open ? (
+      <div data-testid="payment-credentials-modal">
+        {agent.api_key_prefix ? `${agent.api_key_prefix}${'•'.repeat(12)}` : null}
+      </div>
+    ) : null,
 }))
 
 vi.mock('@/components/agent-panel/ReplaceSigningKeyModal', () => ({
@@ -616,16 +625,20 @@ describe('AgentDetailClient last-activity metadata', () => {
       expectBackToAgents()
     })
 
-    it('renders when the agent could not load', () => {
+    it('renders when the agent could not load, and Try again calls refetch (#4569)', () => {
+      const refetch = vi.fn()
       mockUseAgents.mockReturnValue({
         ...mockUseAgents(),
         agents: [],
         loading: false,
         error: new Error('offline'),
+        refetch,
       })
       render(<AgentDetailClient agentId="agent-1" />)
       expect(screen.getByRole('heading', { name: 'Agent could not load' })).toBeInTheDocument()
       expectBackToAgents()
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(refetch).toHaveBeenCalledOnce()
     })
   })
 
@@ -690,26 +703,25 @@ describe('AgentDetailClient last-activity metadata', () => {
       expect(within(row).queryByText(MCP_NOT_RECORDED_NOTE)).toBeNull()
     })
 
-    it('an API-key agent gets the API-key line; an agent without a prefix does not (#4228)', () => {
+    it('shows no API-key line on the MCP row; the prefix lives behind Payment credentials → View (#4608)', () => {
       const base = mockUseAgents()
       mockUseAgents.mockReturnValue({
         ...base,
         agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, api_key_prefix: 'haven_e2e' })),
       })
-      // No prefix — no line (the prefix is all the agents read carries).
-      // Unmount first: RTL cleanup is manual in this file, and both renders
-      // would otherwise stand in the document.
-      const first = renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
-      const row = screen.getByTestId('mcp-server-name-row')
-      expect(within(row).getByText('API key')).toBeInTheDocument()
-      expect(within(row).getByText('haven_e2e')).toBeInTheDocument()
-      first.unmount()
-      mockUseAgents.mockReturnValue({
-        ...base,
-        agents: base.agents.map((a: Record<string, unknown>) => ({ ...a, api_key_prefix: null })),
-      })
       renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
-      expect(screen.queryByText('API key')).not.toBeInTheDocument()
+
+      // Neither the label nor the prefix TEXT: a chip that came back without
+      // its label still fails (#4608, owner decision 2026-11-02).
+      const row = screen.getByTestId('mcp-server-name-row')
+      expect(within(row).queryByText('API key')).toBeNull()
+      expect(within(row).queryByText('haven_e2e')).toBeNull()
+      expect(row.textContent).not.toContain('haven_e2e')
+
+      // The prefix stays reachable: Payment credentials → View.
+      fireEvent.click(screen.getByRole('button', { name: 'View' }))
+      const dialog = screen.getByTestId('payment-credentials-modal')
+      expect(within(dialog).getByText(`haven_e2e${'•'.repeat(12)}`)).toBeInTheDocument()
     })
 
     it('shows Last active from the MCP last-seen read (#4228)', () => {

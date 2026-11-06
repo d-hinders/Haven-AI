@@ -514,15 +514,15 @@ describe('AgentCard footer: one line, never a raw address', () => {
 describe('AgentCard ⋯ menu: every action that is not the CTA', () => {
   it('active: Pause payments and Remove; Move only when an organization exists (#3222)', () => {
     const { unmount } = renderCard(agentFixture())
-    expect(menuItemNames()).toEqual(['Pause payments', 'Remove'])
+    expect(menuItemNames()).toEqual(['Pause payments', 'Remove…'])
     unmount()
     renderCard(agentFixture(), { organizations: [ORG] })
-    expect(menuItemNames()).toEqual(['Pause payments', 'Move to organization', 'Remove'])
+    expect(menuItemNames()).toEqual(['Pause payments', 'Move to organisation', 'Remove…'])
   })
 
   it('paused: Resume payments, not Pause', () => {
     renderCard(agentFixture({ status: 'paused' }))
-    expect(menuItemNames()).toEqual(['Resume payments', 'Remove'])
+    expect(menuItemNames()).toEqual(['Resume payments', 'Remove…'])
   })
 
   it('pending_approval: Remove in the menu; Finish setup is the CTA, to the budget card', () => {
@@ -531,17 +531,34 @@ describe('AgentCard ⋯ menu: every action that is not the CTA', () => {
     })
     const cta = within(screen.getByTestId('agent-card-cta')).getByRole('link', { name: 'Finish setup' })
     expect(cta.getAttribute('href')).toBe(`/agents/agent-1#${DELEGATION_BUDGET_CARD_ID}`)
-    expect(menuItemNames()).toEqual(['Remove'])
+    expect(menuItemNames()).toEqual(['Remove…'])
   })
 
   it('revoked: Remove from list only', () => {
     renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
-    expect(menuItemNames()).toEqual(['Remove from list'])
+    expect(menuItemNames()).toEqual(['Remove from list…'])
   })
 
   it('archived: Restore to list only — even for an active agent', () => {
     renderCard(agentFixture({ archived_at: ARCHIVED }))
     expect(menuItemNames()).toEqual(['Restore to list'])
+  })
+
+  /**
+   * #4570: a menu item that opens a confirmation ends in "…"
+   * (copy-guidelines § Destructive verbs). On this card the confirmation is
+   * RemoveAgentDialog, reached by "Remove…" (active) and "Remove from list…"
+   * (revoked). Pause/Resume act immediately and carry no ellipsis.
+   */
+  it('the item that opens the remove confirmation ends in "…", and the immediate ones do not', () => {
+    renderCard(agentFixture())
+    const menu = openMenu()
+    const labels = within(menu).getAllByRole('menuitem').map((item) => item.textContent ?? '')
+    expect(labels.find((label) => label.startsWith('Remove'))).toBe('Remove…')
+    expect(labels.find((label) => label.startsWith('Pause'))).toBe('Pause payments')
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Remove…' }))
+    expect(screen.getByTestId('remove-agent-dialog')).toBeInTheDocument()
   })
 
   /** #3717: one click, no confirm dialog. */
@@ -561,20 +578,20 @@ describe('AgentCard ⋯ menu: every action that is not the CTA', () => {
   it('Remove opens RemoveAgentDialog; it is not mounted before that', () => {
     renderCard(agentFixture())
     expect(screen.queryByTestId('remove-agent-dialog')).toBeNull()
-    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Remove' }))
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Remove…' }))
     expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('remove')
   })
 
   it('Remove from list opens the same dialog for a revoked agent', () => {
     renderCard(agentFixture({ status: 'revoked' }), { dashboard: dashboardFor(null) })
-    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Remove from list' }))
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Remove from list…' }))
     expect(screen.getByTestId('remove-agent-dialog').getAttribute('data-mode')).toBe('remove')
   })
 
-  it('Move to organization opens MoveAgentModal', () => {
+  it('Move to organisation opens MoveAgentModal', () => {
     renderCard(agentFixture(), { organizations: [ORG] })
     expect(screen.queryByTestId('move-agent-modal')).toBeNull()
-    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Move to organization' }))
+    fireEvent.click(within(openMenu()).getByRole('menuitem', { name: 'Move to organisation' }))
     expect(screen.getByTestId('move-agent-modal')).toBeTruthy()
   })
 

@@ -3,7 +3,10 @@
 Loaded by [`quality-scan`](../SKILL.md) § *Method* step 3. Each block states
 the **command**, the **sample** and **what clean looks like**; the figures
 under each block are the run in which the command last produced a number —
-its positive control until the ledger supersedes them.
+its positive control until the ledger supersedes them. The prose here and in
+the ledger explains; the machine-readable source of the commands and their
+latest figures is `docs/quality/scan-baselines.json` (#4625), whose rows the
+weekly `scan-remeasure.yml` re-runs at one SHA.
 
 Blocks 1–6 are the classes the 2026-09-03 retrospective measured the 600-issue
 wave to consist of. Blocks 8 and 9 are not: they come from the 2026-10-27
@@ -121,17 +124,62 @@ about (its own `last-verified` note records the widening); a change to the
 other 7 would never have re-implicated it.
 
 ```bash
-# Sample: every doc whose FRONT-MATTER declares `contract: true` — the
-# anchored `^contract: true` (8 docs). An unanchored grep returns 18: the
-# same 8 plus 7 casp-changelog shards and 3 contributing docs that mention
-# the phrase in prose. Shards are dated records and never carry the key, so
-# they are excluded by construction, not by list.
+# Sample: every doc whose FRONT-MATTER declares `contract: true` — the key
+# read from the FIRST front-matter block only. A whole-file grep cannot do
+# that: `rg -l "^contract: true" docs --glob '*.md'` returns 8 at `99ef8d063`
+# and 8 at `f11274ada`, and one of the 8 is
+# `docs/contributing/docs-quality-system.md`, which carries the key only
+# inside its body's front-matter schema example (`:49`) and has no `contract`
+# key of its own (`:1-29`; its `last-verified` chain records the same at
+# `docs/archive/last-verified-chains-2026-09.md:467`). The front-matter read
+# returns 7 at both SHAs. An unanchored grep returns 25 at `99ef8d063` and 26
+# at `f11274ada`: the 8 plus 10 casp-changelog shards and 7 docs that mention
+# the phrase in prose (8 at `f11274ada`, the 2026-10-30 scan report being the
+# extra one). Shards are dated records and never carry the key, so they are
+# excluded by construction, not by list.
+# The match is `^contract: true` followed by whitespace or end of line — the
+# trailing-comment form, because the repo's own parser strips a trailing
+# ` # comment` from a scalar (`scripts/docs/validate-frontmatter.mjs:216-218`)
+# and `coupling-gate.mjs:548` reads `parsed.data.contract === 'true'`.
 # Derivation, as a command: every backticked path in the BODY that exists
 # as a tracked file, diffed against the declared `covers:` (globs matched by
 # prefix). A heuristic — the reader judges each miss; the coupling gate's
 # reverse walk (`coupling-gate.mjs`, #2457) names the declared side.
+FM='FNR==1{c=0} /^---$/{c++; next} c==1 && /^contract: true([[:space:]]|$)/{print FILENAME; nextfile}'
+# Counter-control, before the loop: the selector must read the front-matter
+# block and nothing else. A fixture whose BODY carries the key must NOT be
+# selected; one whose front matter carries it MUST be. A fixture tests the
+# selector's logic, not today's repository, so it does not depend on
+# `docs-quality-system.md:49` staying unindented.
+CTL=$(mktemp -d)
+cat > "$CTL/body-only.md" <<'EOF'
+---
+owner: "@x"
+status: current
+covers:
+  - scripts/docs/**
+last-verified: "2026-10-30"
+---
+
+contract: true
+EOF
+cat > "$CTL/front-matter.md" <<'EOF'
+---
+owner: "@x"
+status: current
+contract: true
+covers:
+  - scripts/docs/**
+last-verified: "2026-10-30"
+---
+
+no key in the body
+EOF
+awk "$FM" "$CTL/body-only.md" | grep -q . && echo "CONTROL FAILED body-only fixture selected"
+awk "$FM" "$CTL/front-matter.md" | grep -q . || echo "CONTROL FAILED front-matter fixture not selected"
+rm -rf "$CTL"
 set -f  # no pathname expansion: `packages/signer/**` must stay a glob STRING, not become the directory listing
-for d in $(rg -l "^contract: true" docs --glob '*.md' | sort); do
+for d in $(git ls-files 'docs/*.md' | xargs awk "$FM" | sort); do
   declared=$(awk '/^---$/{c++; next} c==1' "$d" | awk '/^covers:/{f=1;next} f&&/^  - /{sub(/^  - /,"");print;next} f{f=0}' | sort -u)
   claimed=$(awk '/^---$/{c++; next} c>=2' "$d" | grep -o '`[^` ]*`' | tr -d '`' | grep -E '^(packages|scripts|\.github)/[^ ]+\.[a-z]+$' | sort -u | while read p; do git ls-files --error-unmatch "$p" >/dev/null 2>&1 && echo "$p"; done)
   missing=0; for p in $claimed; do hit=0; for g in $declared; do case "$g" in *'**'*) [[ "$p" == "${g%%\*\**}"* ]] && hit=1;; *) [ "$p" = "$g" ] && hit=1;; esac; done; [ $hit = 0 ] && missing=$((missing+1)); done
@@ -139,6 +187,11 @@ for d in $(rg -l "^contract: true" docs --glob '*.md' | sort); do
 done
 set +f
 ```
+
+The series converts: the old selector's 17 (2026-10-26) is the new 15 plus
+the body-example doc's 2, and its 18 (2026-09-25 to 10-21) was taken on the
+same false 8-doc sample, so the next run's drop from 17 to 15 is that doc
+leaving the sample, not two misses fixed.
 
 Run it under `bash` — zsh does not word-split `$claimed`, and the loop then
 reports one miss per doc whatever the truth is (measured: that is exactly the
@@ -158,13 +211,17 @@ the doc for a path the loop reports as uncovered. The loop is a heuristic over
 glob strings; the gate is the authority, and `--strict` is how CI invokes it
 (without the flag the gate drops test and generated paths swept up by a
 wildcard, which strict mode keeps for contract docs — see *Run each
-instrument the way CI runs it* above). Measured
+instrument the way CI runs it* above). On `99ef8d063` and `f11274ada` the
+loop reports 15 misses across 5 of 7 documents with the front-matter selector,
+against 19 across 6 of 8 with the whole-file grep. Measured
 on `e42ed68f` with `--strict`: of the first reading's 21 misses, the gate names
 the runtime doc for all 14 false ones and for none of the 7 true ones, so the
 confirmation alone would have settled that reading. On `893d74f6`:
 8 contract docs; `docs-quality-system.md` cites 17 existing paths and covers
 3 of them (10 with `set -f`), `mcp-runtime-compatibility.md` 18 and 5 (11
 with `set -f`), `dev-environment.md` 5 and 1 (unchanged); `delegation-rail-security-model.md` declares 23 and cites 0.
+The 8 there included the body-example doc (C1, 2026-10-30); at `893d74f6` it
+also had no front-matter key.
 
 **3. Stale numbers in prose — re-derive from the instrument.** Two figures
 that reached CASP shards and had to be corrected in place: #2421's shard
@@ -191,8 +248,11 @@ done
 # how many of those lines also quote the command that produced the figure.
 rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | wc -l
 rg -n "$R" $(ls docs/regulatory/casp-changelog/2026-*.md | sort | tail -25) | rg -c '`(rg|grep|git|node|npm|find|ls|wc) '
-# Sample B: the previous ledger entry's `Probed clean:` lines — re-run each
-# recorded command verbatim and diff the number.
+# Sample B: the manifest's rows (`docs/quality/scan-baselines.json`, #4625) —
+# run `node scripts/docs/scan-remeasure.mjs --sha <sha>` and read each delta;
+# the ledger's `Probed clean:` lines are prose and carry no runnable command.
+# Its `docFigures` section re-runs the figures quoted in current docs, so a doc
+# row enters this block by construction (#4631).
 rg -c ': any\b|as any' packages/*/src --type ts -g '!*test*' | awk -F: '{s+=$2} END{print s}'
 npm run lint:db-mocks 2>&1 | rg 'db-mock gauge'
 ```
@@ -344,9 +404,20 @@ exiting 1 on the marker.
 
 ```bash
 # Copy lint: files that can carry product copy but are outside SCAN_DIRS and
-# SCAN_FILES, run through the lint's own matcher.
-git ls-files 'packages/frontend/src/**/*.ts' 'packages/frontend/src/**/*.tsx' 'packages/sdk/src/**/*.ts' | grep -vE '\.test\.|__tests__|/app/|/components/|/hooks/' > "$SCRATCH/cl.txt"
-node -e 'import("./scripts/frontend-copy-lint.mjs").then(async (m) => { const fs = await import("node:fs"); const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter((f) => !m.SCAN_FILES.includes(f)); let hit = 0; for (const f of files) { const n = m.findCopyIssues(fs.readFileSync(f, "utf8")).length; if (n) { hit++; console.log(n, f) } } console.log("unscanned:", files.length, "with hits:", hit) })' "$SCRATCH/cl.txt"
+# SCAN_FILES, run through the lint's own matcher. The list is a pinned
+# `git ls-tree`, not a pathspec: in a plain pathspec `**` is not special (`*`
+# already crosses `/`), so `packages/sdk/src/**/*.ts` forces one more
+# directory level and reaches 0 of the 46 non-test files directly under
+# `packages/sdk/src` (115 before the `.test.` exclusion) — #4611. The content
+# read is pinned to the same SHA — `git show <sha>:<file>` — because
+# `fs.readFileSync` reads the live checkout, and a file deleted after <sha>
+# would crash the read.
+SHA=e0617aa9f
+git ls-tree -r --name-only "$SHA" packages/frontend/src packages/sdk/src | grep -E '\.(ts|tsx)$' | grep -vE '\.test\.|__tests__|/app/|/components/|/hooks/' > "$SCRATCH/cl.txt"
+# Positive control: the listing must reach the top level of both trees.
+grep -cE '^packages/sdk/src/[^/]+\.ts$' "$SCRATCH/cl.txt"             # 46 at e0617aa9f
+grep -cE '^packages/frontend/src/[^/]+\.(ts|tsx)$' "$SCRATCH/cl.txt"  # 1 at e0617aa9f
+node -e 'import("./scripts/frontend-copy-lint.mjs").then(async (m) => { const fs = await import("node:fs"); const cp = await import("node:child_process"); const sha = process.argv[2]; const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").filter((f) => !m.SCAN_FILES.includes(f)); let hit = 0; for (const f of files) { const n = m.findCopyIssues(cp.execFileSync("git", ["show", sha + ":" + f], { encoding: "utf8" })).length; if (n) { hit++; console.log(n, f) } } console.log("unscanned:", files.length, "with hits:", hit) })' "$SCRATCH/cl.txt" "$SHA"
 # Money-path perimeter: files that call a money verb but match no glob.
 rg -l -e 'sendTransaction|redeemDelegation|signTypedData|sendUserOperation|executeTransaction|broadcastTransaction' packages --type ts -g '!*test*' -g '!**/dist/**' > "$SCRATCH/mv.txt"
 node -e 'import("./scripts/ci/qa-freshness.mjs").then(async (q) => { const fs = await import("node:fs"); const globs = [...q.loadMoneyPathGlobs(), ...q.loadMoneyPathControlGlobs()]; const files = fs.readFileSync(process.argv[1], "utf8").trim().split("\n"); const out = files.filter((f) => !globs.some((g) => q.matchesGlob(f, g))); console.log("verb files:", files.length, "outside perimeter:", out.length); console.log(out.join("\n")) })' "$SCRATCH/mv.txt"
@@ -377,14 +448,41 @@ model. Report per gate: what it does not reach, which entries carry the
 content class, and the exit-branch list with line numbers. **Take the
 docs-boundary count pinned** — `git ls-tree -r --name-only <sha>` rather than
 `git ls-files`, which reads the live worktree: re-taken unpinned on a branch
-that ADDS a Markdown file, this block reads 37 where the pinned figure is 36,
+that ADDS a Markdown file, this block reads 44 where the pinned figure is 43,
 and the extra file is the reader's own change. (Observed on this block's own
-review; the same hazard is why block 5 prints its SHA.) On `893d74f6`:
-copy lint 72 unscanned files, 5 with hits (all identifier-shaped — the
-documented false-positive class); money path 29 verb files, 20 outside the
-perimeter (qa-agent pilots, backend scripts, `sdk/src/sweep.ts`,
-`frontend/src/lib/hybridAccountOps.ts`); visual gate 4 of 24 app routes
-shot; 36 Markdown files outside both docs-quality boundaries.
+review; the same hazard is why block 5 prints its SHA.) On `e0617aa9f`:
+copy lint 111 unscanned files, 14 with hits — the frontend's 4, unchanged
+from the glob's reading, plus 10 files at the SDK's top level the glob could
+not see, carrying 16 hits: 6 in agent-facing strings (one each in six files)
+and 10 in JSDoc (the documented false-positive class); money path 32 verb
+files, 20 outside the perimeter (qa-agent pilots, backend scripts,
+`sdk/src/sweep.ts`, `frontend/src/lib/hybridAccountOps.ts`); visual gate 15 of
+27 app routes shot (12 not shot); 43 Markdown files outside both docs-quality
+boundaries. The copy-lint figure is pinned to that SHA; the other three are
+live-tree readings taken at that checkout, so they drift with the tree (see
+the note below).
+
+The series converts: every ledger entry from 2026-09-15 to 2026-11-02
+(#4609 adds the tenth) quoted the glob's reading — 75 / 6, 87 / 6, 98 / 6,
+52 / 4, 56 / 4, 60 / 4, 64 / 4, 64 / 4, 66 / 4 — and this block's own
+recorded 72 / 5 at `893d74f6` was taken the same way, with that SHA's
+`SCAN_FILES`, that SHA's matcher and the filter before `fe491ac24` added
+`/hooks/`. The 72 reproduces on that list; the 5 is that SHA's matcher —
+today's matcher reads 7 on the same list, because the three `src/hooks/`
+files are hits under the pre-`/hooks/` filter and the matcher changed 222
+lines between the two SHAs. Re-run with today's allowlist and filter it reads
+35 / 4. So the next entry's step from 66 / 4 to 111 / 14 is the selector
+change, not 45 new unscanned files.
+
+**Observation for the lint's owner, not a decision of this block:** the six
+agent-facing strings the glob never reached are
+`packages/sdk/src/tools.ts:158`, `tool-descriptions.ts:261`,
+`x402-protocol.ts:459`, `merchant-completion.ts:570`,
+`x402-funding-leg.ts:440` and `types.ts:2058` — all `transaction hash`, in
+tool descriptions or agent-read error text. Whether they join `SCAN_FILES`
+is #2317's call (#3882 is the precedent); this block only reports them. The
+money-path, visual-gate and docs-boundary halves of this fence still read
+the live tree — out of scope for #4611, which fixes the copy-lint half only.
 
 **8. Refusal census — what the backend suite's own answers become at the hosted
 mapper.** The 2026-10-27 channel measurement found the refusal class came

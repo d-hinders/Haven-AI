@@ -56,6 +56,16 @@ const topMaxHeightClasses: Record<ModalMaxHeight, string> = {
 
 type ModalPlacement = 'center' | 'top'
 
+/**
+ * What counts as focusable for the OPEN-time focus placement. It mirrors the
+ * Tab trap's selector below, for the same reason: a `disabled` control cannot
+ * take focus, so a query that returns one silently leaves focus on `<body>`.
+ * `tabindex="-1"` is excluded on purpose — it is the programmatic-focus handle
+ * a step region uses, not something a Tab reaches.
+ */
+const FIRST_FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export function Modal({
   open,
   onClose,
@@ -67,7 +77,7 @@ export function Modal({
   initialFocusRef,
   closeOnBackdrop = true,
   closeOnEscape = true,
-  showCloseButton = false,
+  showCloseButton = true,
   closeButtonDisabled = false,
   width = 'md',
   maxHeight = 'default',
@@ -86,7 +96,18 @@ export function Modal({
   initialFocusRef?: React.RefObject<HTMLElement | null>
   closeOnBackdrop?: boolean
   closeOnEscape?: boolean
+  /**
+   * The header's ✕. **On by default** — every dialog reads the same, and a
+   * dialog whose only way out is the backdrop or Escape strands a keyboard
+   * user. Pass `false` only when another control IS the dismiss (a
+   * confirmation's Cancel), and say why in a comment beside the prop.
+   */
   showCloseButton?: boolean
+  /**
+   * Disables the ✕ while a request is in flight. A dialog that guards Escape
+   * and the backdrop with `!busy` must pass this too, or the new ✕ becomes the
+   * one unguarded way to close it mid-request.
+   */
   closeButtonDisabled?: boolean
   width?: ModalWidth
   maxHeight?: ModalMaxHeight
@@ -150,14 +171,21 @@ export function Modal({
   // Initial focus and restore-on-close run on OPEN only (and on a new
   // `initialFocusRef`). The focus call stays synchronous — ConfirmDialog's
   // "Cancel focused on open" and the frontend playbook rely on that.
+  //
+  // #4562: the target is the BODY's first focusable, not the panel's. The ✕ is
+  // on by default now and sits in the header, so a panel-wide query would put
+  // focus on Close in every dialog that does not pass `initialFocusRef` — Send,
+  // the contacts editor, ApiKeyConnect — and the user's first keystroke would
+  // dismiss the dialog instead of filling its first field. The ✕ stays the
+  // fallback for a body with nothing focusable in it, which is the only case
+  // where it is the honest target.
   useEffect(() => {
     if (!open) return
 
     const focusTarget =
       initialFocusRef?.current ??
-      panelRef.current?.querySelector<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )
+      bodyRef.current?.querySelector<HTMLElement>(FIRST_FOCUSABLE) ??
+      panelRef.current?.querySelector<HTMLElement>(FIRST_FOCUSABLE)
     const previousActiveElement = document.activeElement as HTMLElement | null
     focusTarget?.focus()
 
@@ -239,6 +267,7 @@ export function Modal({
               onClick={onClose}
               disabled={closeButtonDisabled}
               aria-label="Close"
+              data-modal-close=""
               className="-m-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-[var(--v2-ink-3)] transition-colors hover:bg-[var(--v2-surface-2)] hover:text-[var(--v2-ink-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 disabled:cursor-not-allowed disabled:opacity-20"
             >
               <Icon icon={X} className="h-4 w-4" />

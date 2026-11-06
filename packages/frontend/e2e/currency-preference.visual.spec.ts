@@ -15,9 +15,9 @@
  * win. Each test asserts the state's own distinguishing SEK copy BEFORE the
  * capture — a locator that drifts is a red test rather than a baseline of
  * the wrong thing — and the dashboard test additionally pins the frozen-clock
- * literal (`3mo ago`), because the recent-transactions row renders through
- * `timeAgo` and an unfrozen baseline here would drift on a calendar boundary
- * exactly like the ones #2318 rejected.
+ * literal (`06:40`, the activity row's clock time since #4572), because the
+ * row sits under a day band and an unfrozen baseline here would drift on a
+ * calendar boundary exactly like the ones #2318 rejected.
  *
  * #3195: the round-2 finding asked for dashboard + Settings at 390 at
  * minimum, and `/accounts` — the surface finding 6 was about — was pinned by
@@ -127,9 +127,11 @@ test.describe('currency preference renders SEK (#3127 finding 8)', () => {
       // still match the new label.
       await expect(main.getByText('Agent spending, last 30 days', { exact: true })).toHaveCount(1)
       await expect(main.getByText('517,66 kr')).toHaveCount(1)
-      // The frozen clock is in effect — the transactions row renders its
-      // literal, so the baseline cannot drift on a calendar boundary.
-      await expect(main.getByText('3mo ago', { exact: true }).first()).toBeVisible()
+      // The frozen clock is in effect — the activity row renders its clock
+      // time (#4572: the row sits under a day band, so it shows `06:40` in the
+      // config's UTC zone rather than "3mo ago"), so the baseline cannot drift
+      // on a calendar boundary.
+      await expect(main.getByText('06:40', { exact: true }).first()).toBeVisible()
 
       await expectNoSkeletons(main, `/dashboard (SEK, ${vp.name})`)
       await settleFonts(page)

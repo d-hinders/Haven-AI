@@ -8,7 +8,7 @@ import type { Organization } from '@/hooks/useOrganizations'
  * filter lib's header promised ("organizations from #3164"). Everything here
  * is pure and mirrored in `lib/__tests__/agent-organizations.test.ts`.
  *
- * Terminology: UI copy says "Organizations" — never "groups" or "folders"
+ * Terminology: UI copy says "Organisation" — never "groups" or "folders"
  * (the coordinator's settled decision on the issue). Only `ParentId` in a
  * helper's signature says parent, because TypeScript does.
  */
@@ -164,7 +164,7 @@ export function organizationFacet(organizations: Organization[]): AgentFacet {
   }
   return {
     id: 'organization',
-    label: 'Organization',
+    label: 'Organisation',
     match: 'any',
     options,
     predicate: (agent: Agent, value: string) => {

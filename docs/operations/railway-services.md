@@ -6,7 +6,7 @@ covers:
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
   - packages/backend/src/config.ts
-last-verified: "2026-11-04"
+last-verified: "2026-11-06"
 ---
 
 # Railway Services
@@ -16,7 +16,8 @@ live in Railway, not in the repo.** No service uses config-as-code
 (`railwayConfigFile` is unset on all eight service instances: four services
 × two environments), so this page is the only place
 they are written down. When you change a setting in Railway, change this page
-too.
+too. Secrets and their rotation are in
+[secret-rotation.md](secret-rotation.md).
 
 Read the live values in each service's **Settings** in the dashboard, or with
 the Railway CLI's token against the GraphQL API
@@ -104,6 +105,31 @@ Then restart the service, which briefly interrupts everything using dev:
 ```bash
 railway restart --service Postgres --environment dev --yes
 ```
+
+## Postgres access
+
+Neither database has a public endpoint. The production TCP proxy was closed on
+2026-10-27 and the dev proxy on 2026-10-29 (owner decision after the 2026-10-21
+Railway incident; the inventory is in
+[secret-rotation.md](secret-rotation.md)). Both `RAILWAY_TCP_PROXY_DOMAIN`
+values are empty, checked on 2026-11-06.
+
+Use `railway connect Postgres` instead. It tunnels over SSH when the service has
+no public proxy URL, so it works with the proxy closed:
+
+```bash
+railway connect Postgres -e dev
+railway connect Postgres -e production
+```
+
+The local database client must be installed. `--tunnel-only` opens the tunnel
+without a client and prints connection details for a GUI tool (TablePlus,
+DBeaver, pgAdmin); it holds the tunnel open until Ctrl+C.
+
+If a tool truly needs a TCP proxy, open it temporarily in Railway → Postgres →
+Settings → Networking → TCP Proxy, use it, then close it. Do not leave it open:
+the incident exposed both database passwords, and a public endpoint widens the
+blast radius for no operational gain.
 
 ## Reading cost
 

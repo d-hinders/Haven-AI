@@ -11,8 +11,10 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/new-task/SKILL.md
+  - .agents/skills/review-issue/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
+  - .claude/commands/review-issue.md
 last-verified: "2026-10-25"
 ---
 
@@ -35,9 +37,10 @@ and only comes back to you for a real decision, a blocking review finding, a
 live work overlap, or stuck CI.
 
 Pieces:
-- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path, plus a Design system brief for `area:frontend`), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path, plus a Design system brief for `area:frontend`), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit. It delegates its mandatory post-filing review to `review-issue`.
+- **`review-issue`** ([canonical skill](../../.agents/skills/review-issue/SKILL.md)) — **review**: reviews an existing issue or epic for specification quality and queue readiness, and is the single canonical issue-review workflow — the rubric, the three questions, the isolation and delta rules, the verdict contract, and the registered re-measurement live there. Review-only by default: it comments only when asked and repairs only when explicitly authorized. **Every** filed issue — single task or epic — gets one independent pass plus a verdict comment before it is queued, shipped or announced.
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
-- **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
+- **Client adapters** — Claude Code exposes thin `/new-task`, `/review-issue`, and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
 - **Docs acceptance gate** — `docs:check` and `docs:test` are **CI required checks** on every PR ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023) — the *Docs front-matter & agent skills* job), so a PR with invalid front-matter or an unresolved `covers:` glob cannot reach auto-merge no matter how it was opened. `ship-next` still runs them locally before pushing, but only to save a round trip — it is no longer the thing that enforces them. Same shape for **Design-system coupling (strict)**.
 - **haven-doc-reviewer** — per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Running it after implementation is a **hard definition-of-done step in the loop**, and the docs whose `covers:` front-matter maps to the changed code are the floor of what it reviews, not the scope — the pass derives that from the diff's claims (#2499): `ship-next` must review those docs and, in the same PR, update the stale claims (or genuinely re-verify and bump `last-verified`) before opening the PR. This is a loop requirement enforced by the skill, independent of GitHub required-checks — the **docs↔code** coupling comment (`docs-coupling.yml`) stays advisory and does not by itself block auto-merge, except for docs marked `contract: true`. A wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement is **blocking** in any doc, whether or not it is `contract: true` (#4174). (Not to be confused with the *design-system* coupling gate one bullet up, which does block.)

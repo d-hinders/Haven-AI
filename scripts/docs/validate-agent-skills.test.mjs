@@ -7,6 +7,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  COMMAND_TARGETS,
+  MAX_COMMAND_WRAPPER_BODY_CHARS,
+  MAX_COMMAND_WRAPPER_BODY_LINES,
   REQUIRED_ROLES,
   REQUIRED_SKILLS,
   RESET_CLIENTS,
@@ -15,6 +18,22 @@ import {
 } from "./validate-agent-skills.mjs";
 
 const scriptPath = fileURLToPath(new URL("./validate-agent-skills.mjs", import.meta.url));
+
+/**
+ * The command adapters the validator must require, written out here rather than
+ * derived from `COMMAND_TARGETS` (#4712). A fixture that reads the inventory it
+ * is meant to guard shrinks silently when an entry is deleted; this literal
+ * reddens instead.
+ */
+const EXPECTED_COMMANDS = [
+  "new-task",
+  "review-issue",
+  "ship-next",
+  "haven-reset",
+  "quality-scan",
+  "release",
+  "prove-red",
+];
 
 function write(root, relativePath, source) {
   const filePath = path.join(root, relativePath);
@@ -62,7 +81,7 @@ function makeValidFixture() {
     );
   }
 
-  for (const command of ["new-task", "ship-next", "haven-reset", "quality-scan", "release", "prove-red"]) {
+  for (const command of EXPECTED_COMMANDS) {
     const suffix =
       command === "ship-next"
         ? " When invoked through /loop, complete exactly one issue and stop."
@@ -198,6 +217,75 @@ test("rejects vendor identifiers in portable text but permits the Claude reset a
   assert.match(errors, /ship-next\/SKILL\.md:.*"mcp__github__"/);
   assert.match(errors, /ship-next\/SKILL\.md:.*"Read"/);
   assert.doesNotMatch(errors, /claude-code\.md: portable workflow/);
+});
+
+test("requires review-issue in the skill and command inventories", () => {
+  assert.ok(
+    REQUIRED_SKILLS.includes("review-issue"),
+    "REQUIRED_SKILLS must require review-issue",
+  );
+  assert.deepEqual(
+    Object.keys(COMMAND_TARGETS),
+    EXPECTED_COMMANDS.map((name) => `.claude/commands/${name}.md`),
+    "COMMAND_TARGETS must carry exactly the expected command adapters",
+  );
+  assert.equal(
+    COMMAND_TARGETS[".claude/commands/review-issue.md"],
+    ".agents/skills/review-issue/SKILL.md",
+    "the review-issue adapter must target the canonical skill",
+  );
+});
+
+test("fails when the review-issue skill or its command adapter is missing", () => {
+  const root = makeValidFixture();
+  unlinkSync(path.join(root, ".agents/skills/review-issue/SKILL.md"));
+  unlinkSync(path.join(root, ".claude/commands/review-issue.md"));
+
+  const errors = validateAgentSkills(root).join("\n");
+  assert.match(errors, /\.agents\/skills\/review-issue\/SKILL\.md: required skill file is missing/);
+  assert.match(errors, /\.claude\/commands\/review-issue\.md: required wrapper is missing/);
+});
+
+test("rejects a command wrapper that embeds workflow policy", () => {
+  const root = makeValidFixture();
+  const embedded = [
+    "---",
+    'description: "Review an issue."',
+    "---",
+    "",
+    "Read and follow `.agents/skills/review-issue/SKILL.md`. Treat $ARGUMENTS as input.",
+    "",
+    "## Workflow",
+    "",
+    "1. Read the issue body, every label, and every comment in order, then record the commit the body names as its measurement base and the current tip of the default branch so the drift check can be reported separately from the claim re-run.",
+    "2. Re-run every claim.",
+    "3. Check the acceptance criteria against the three questions, then check the mechanism each criterion proposes actually observes the transition it is meant to detect, because a criterion whose probe cannot see the state is unsatisfiable in the direction that matters.",
+    "4. Check the guards.",
+    "5. Check the levers.",
+    "6. Post the verdict.",
+    "",
+    "```bash",
+    "gh issue view 1",
+    "```",
+    "",
+  ].join("\n");
+  write(root, ".claude/commands/review-issue.md", embedded);
+
+  const errors = validateAgentSkills(root).join("\n");
+  assert.match(
+    errors,
+    new RegExp(
+      `review-issue\\.md: command wrapper body has \\d+ non-empty lines \\(max ${MAX_COMMAND_WRAPPER_BODY_LINES}\\)`,
+    ),
+  );
+  assert.match(
+    errors,
+    new RegExp(
+      `review-issue\\.md: command wrapper body is \\d+ characters \\(max ${MAX_COMMAND_WRAPPER_BODY_CHARS}\\)`,
+    ),
+  );
+  assert.match(errors, /review-issue\.md: command wrapper must not carry workflow headings/);
+  assert.match(errors, /review-issue\.md: command wrapper must not carry fenced blocks/);
 });
 
 test("CLI exits nonzero and prints actionable errors", () => {

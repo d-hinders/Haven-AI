@@ -1,8 +1,8 @@
 /**
  * The stand-in human for the full-onboarding spike (#4682).
  *
- * The cold onboarding eval stops at the login wall because the next steps are
- * the HUMAN's: approve a device login, approve a budget. This module is the
+ * The cold onboarding eval stops at the first hand-off because the next steps
+ * are the HUMAN's: approve a device login, approve a budget. This module is the
  * script that plays that human, so one recorded run can go from the landing
  * URL to a settled first payment.
  *

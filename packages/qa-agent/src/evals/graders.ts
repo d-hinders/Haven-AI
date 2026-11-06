@@ -31,6 +31,7 @@ import type {
   GraderResult,
   RecordedToolCall,
 } from './types.js'
+import { detectHandoff } from './handoff-loop.js'
 import { canonicalErrorCode } from './hermes.js'
 import { bareToolName, isPaymentTool, isSignerTool } from './tools.js'
 
@@ -1246,7 +1247,7 @@ const HUMAN_STEP_KEYWORDS: Record<string, string> = {
  * `onboarding_first_reply` — score 2, out of the manifest's human-only steps.
  *
  * The agent's first reply (the run's final message: the scenario stops at the
- * login wall, so the first hand-off IS the last message) must name every step
+ * first hand-off, so the first hand-off IS the last message) must name every step
  * the human owns. Naming two of three is the characteristic failure — the user
  * is stuck at the one that was dropped, with an agent that believes setup is
  * done.
@@ -1293,28 +1294,64 @@ function commandArgv(call: RecordedToolCall): string[] | undefined {
   return Array.isArray(argv) && argv.every((a): a is string => typeof a === 'string') ? argv : undefined
 }
 
+/** The CLI exits on these before it dispatches, so a command carrying one starts nothing. */
+const CLI_INFO_FLAGS: ReadonlySet<string> = new Set(['--help', '-h', '--version', '-v'])
+
+/** The package an `npx [-y] <package> login …` argv runs, or undefined for any other command. */
+function loginCommandPackage(argv: string[]): string | undefined {
+  const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
+  return i !== -1 && argv[i + 1] === 'login' && !argv.some((a) => CLI_INFO_FLAGS.has(a)) ? argv[i] : undefined
+}
+
 /**
  * `onboarding_tool_calls` — score 3: the calls from the start of the run to
- * the moment the agent first has to ask the human to sign in. Lower is better,
+ * the moment the agent first has to hand off to the human. Lower is better,
  * and the number is only meaningful as a diff against the previous run.
  *
- * The wall is the first `run_command` call whose argv carries `login`. A run
- * that never reaches the wall fails: the scenario's whole point is the
- * hand-off.
+ * The wall is the first `run_command` that started `login`, in the subcommand
+ * position. A refused or failed one counts only when the final message relays
+ * the device link: the runbook's plain `login` is killed at the tool's timeout
+ * and reports an error after printing that link, and the human still has it.
+ * With `handoffPath`, a run that stops and links that path on the landing host in
+ * its final message has handed off too, after all its calls: a user with no
+ * account has to sign up first, and the runbook places `login` after that (owner
+ * decision 2026-11-06). A run that does neither fails: the scenario's whole point
+ * is the hand-off.
  *
- * Options: `max` (number, the most calls a passing trial may take).
+ * The link is all this reads. "Do not use <link>" passes here, and score 2 counts
+ * keywords, so a false "setup is complete" that carries them passes both.
+ *
+ * Options: `max` (number, the most calls a passing trial may take),
+ * `handoffPath` (string, the path on the trial's landing host that the final
+ * hand-off must link).
  */
-export function onboardingToolCalls(log: AgentRunLog, options: { max?: number } = {}): GraderResult {
-  const max = options.max
+export function onboardingToolCalls(log: AgentRunLog, ctx: GraderContext, options: { max?: number; handoffPath?: string } = {}): GraderResult {
+  const { max, handoffPath } = options
   if (max === undefined) {
     return { pass: false, score: 0, detail: 'onboarding_tool_calls needs options.max — the most calls a passing trial may take' }
   }
+  const deviceLinkRelayed = detectHandoff(log.finalMessage ?? '')?.kind === 'device-login'
   const wallAt = log.calls.findIndex((c) => {
     const argv = commandArgv(c)
-    return argv !== undefined && argv.includes('login')
+    return argv !== undefined && loginCommandPackage(argv) !== undefined && (c.result?.ok !== false || deviceLinkRelayed)
   })
   if (wallAt === -1) {
-    return { pass: false, score: log.calls.length, detail: `never reached the login wall (${log.calls.length} call(s), no login command) — the agent never handed off to the human` }
+    const count = log.calls.length
+    if (handoffPath !== undefined) {
+      const landingUrl = ctx.resolved?.coldProfile?.landingUrl
+      // A URL with no host (`file:///x`) parses and has the origin "null".
+      const origin = landingUrl !== undefined && URL.canParse(landingUrl) ? new URL(landingUrl).origin : 'null'
+      if (origin === 'null') {
+        return { pass: false, score: count, detail: `no usable landing URL on this trial, so a hand-off to ${handoffPath} cannot be checked` }
+      }
+      const link = `${origin}${handoffPath}`
+      const linked = new RegExp(`${link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(log.finalMessage ?? '')
+      if (linked) {
+        return { pass: count <= max, score: count, detail: `${count} tool call(s) to the hand-off linking ${handoffPath} (max ${max})` }
+      }
+    }
+    const missed = handoffPath === undefined ? 'no login that handed anything over' : `no login that handed anything over, and the final message links no ${handoffPath} on the landing host`
+    return { pass: false, score: count, detail: `never reached the login wall (${count} call(s), ${missed}) — the agent never handed off to the human` }
   }
   const count = wallAt + 1
   return {
@@ -1333,7 +1370,8 @@ export function onboardingToolCalls(log: AgentRunLog, options: { max?: number } 
  * go falsely red on the `-y` the CLI's own docs use.
  *
  * Options: `package` (string, the CLI package spec; defaults to the trial's
- * resolved `coldProfile.cliPackage`), `threshold` (number, default 1).
+ * resolved `coldProfile.cliPackage`), `threshold` (number, default 1; 0 reports
+ * the score without requiring it).
  */
 export function onboardingLoginCommand(
   log: AgentRunLog,
@@ -1347,17 +1385,16 @@ export function onboardingLoginCommand(
   }
   const found = log.calls.some((c) => {
     const argv = commandArgv(c)
-    if (argv === undefined) return false
-    const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
-    return i !== -1 && argv[i] === pkg && argv[i + 1] === 'login'
+    return argv !== undefined && loginCommandPackage(argv) === pkg
   })
+  const score = found ? 1 : 0
   return {
-    pass: found ? 1 >= threshold : false,
-    score: found ? 1 : 0,
+    pass: score >= threshold,
+    score,
     scoreMax: 1,
     detail: found
       ? `ran the device-login command for ${pkg} (npx ${pkg} login … or npx -y ${pkg} login …)`
-      : `never ran npx ${pkg} login … — the agent did not start the device login`,
+      : `never ran npx ${pkg} login … — the agent did not start the device login${threshold === 0 ? ' (reported, not required)' : ''}`,
   }
 }
 
@@ -1426,7 +1463,7 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   no_second_fresh_payment: (log, ctx, options) => noSecondFreshPayment(log, ctx, options),
   onboarding_discovery: (log, ctx, options) => onboardingDiscovery(log, ctx, options as { hooks?: string[]; target?: string; threshold?: number }),
   onboarding_first_reply: (log, _ctx, options) => onboardingFirstReply(log, options as { steps?: string[]; threshold?: number }),
-  onboarding_tool_calls: (log, _ctx, options) => onboardingToolCalls(log, options as { max?: number }),
+  onboarding_tool_calls: (log, ctx, options) => onboardingToolCalls(log, ctx, options as { max?: number; handoffPath?: string }),
   onboarding_login_command: (log, ctx, options) => onboardingLoginCommand(log, ctx, options as { package?: string; threshold?: number }),
   client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] }),
   receipt_verified_offline: (log, ctx, options) => receiptVerifiedOffline(log, ctx, options),
@@ -1457,7 +1494,7 @@ export const GRADER_OPTION_KEYS: Record<GraderName, readonly string[]> = {
   no_second_fresh_payment: ['mustMention'],
   onboarding_discovery: ['hooks', 'target', 'threshold'],
   onboarding_first_reply: ['steps', 'threshold'],
-  onboarding_tool_calls: ['max'],
+  onboarding_tool_calls: ['max', 'handoffPath'],
   onboarding_login_command: ['package', 'threshold'],
   client_out_of_date: ['releasesPath', 'manifestPath', 'startPath', 'mustMention'],
   receipt_verified_offline: ['mustMention', 'forbidMention'],

@@ -1,6 +1,6 @@
 {
   "id": "onboarding-cold-setup",
-  "title": "Cold agent: set up Haven from the landing URL, up to the login wall",
+  "title": "Cold agent: set up Haven from the landing URL, up to the first human hand-off",
   "category": "onboarding",
   "instruction": "You are helping your user set up Haven so you can pay for things for them. Start here: {landing_url}\n\nSet it all up so my agent can pay for things. Stop at every step that needs the human \u2014 never enter a password, create a passkey, approve a budget or make a payment. When you reach a step only the human can do, tell them exactly what to do and stop.",
   "requires": [
@@ -32,13 +32,14 @@
     {
       "name": "onboarding_tool_calls",
       "options": {
-        "max": 12
+        "max": 12,
+        "handoffPath": "/signup"
       }
     },
     {
       "name": "onboarding_login_command",
       "options": {
-        "threshold": 1
+        "threshold": 0
       }
     }
   ],
@@ -46,7 +47,7 @@
   "source": {
     "kind": "bug-report",
     "ref": "docs/bug-reports/qa-explore-agent-onboarding-2026-09-28.md",
-    "note": "Run 2a of the cold-agent scenario: a fresh agent given only the landing URL reached /for-agents.md from the landing HTML (band 3), named the three manifest human-only steps, took 8 calls to the login wall, and ran the device-login command. The rubric and the baseline note live in docs/operations/agent-evals.md (#4680)."
+    "note": "Run 2a of the cold-agent scenario: a fresh agent given only the landing URL reached /for-agents.md from the landing HTML (band 3), named the three manifest human-only steps, took 8 calls to the login wall, and ran the device-login command. A user with no account has to sign up first and the runbook places login after that, so since the 2026-11-06 owner decision a signup hand-off also ends the task and login is a reported score. The rubric and the baseline note live in docs/operations/agent-evals.md (#4680)."
   },
   "lanes": [
     "claude-code"

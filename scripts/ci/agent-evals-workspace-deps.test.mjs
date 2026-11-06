@@ -603,11 +603,43 @@ test('the slice step still rejects bad trials on a filtered run', () => {
   assert.equal(log, trialsRejection(), 'the output is not the input check\'s fixed message')
 })
 
-for (const suite of ['subset', 'full']) {
-  test(`the slice step accepts a suite of ${suite}`, () => {
+test('the slice step still rejects a bad suite on a filtered run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task', INPUT_SUITE: 'subset\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, suiteRejection(), 'the output is not the input check\'s fixed message')
+})
+
+// A full run is the release dispatch, and the one suite whose whole run reads the URL.
+test('the slice step still rejects a bad dev_landing_url on a full run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_SUITE: 'full', INPUT_DEV_LANDING_URL: 'https://a.example\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.ok(landingUrlRejections().includes(log), `the output is not one of the input check's fixed messages: ${log}`)
+})
+
+test('the slice step still rejects bad trials on a full run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_SUITE: 'full', INPUT_TRIALS: '1\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, trialsRejection(), 'the output is not the input check\'s fixed message')
+})
+
+test('the slice step accepts the release dispatch: a full run with the dev alias', () => {
+  const url = 'https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app'
+  const { status, log, written } = runSliceStep({ INPUT_SUITE: 'full', INPUT_DEV_LANDING_URL: url })
+  assert.equal(status, 0, `the step rejected it: ${log}`)
+  assert.ok(written.split('\n').includes(`dev_landing_url=${url}`), 'the URL is not written as given')
+})
+
+// `limit_arg` is what makes subset a slice: without it a subset run takes every task.
+for (const [suite, limitArg] of [['subset', '--limit=5'], ['full', '']]) {
+  test(`the slice step accepts a suite of ${suite}, with limit_arg=${limitArg}`, () => {
     const { status, log, written } = runSliceStep({ INPUT_SUITE: suite })
     assert.equal(status, 0, `the step rejected it: ${log}`)
-    assert.ok(written.split('\n').includes(`mode=${suite}`), 'the suite is not written as the mode')
+    const lines = written.split('\n')
+    assert.ok(lines.includes(`mode=${suite}`), 'the suite is not written as the mode')
+    assert.ok(lines.includes(`limit_arg=${limitArg}`), 'the suite does not write its limit')
   })
 }
 

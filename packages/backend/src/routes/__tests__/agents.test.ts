@@ -24,14 +24,17 @@ vi.mock('../../db.js', () => ({
 
 // The passport module is mocked so the creation-path guarantee can be tested
 // directly: a passport problem must never fail, delay, or roll back the agent.
-const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+const { mockRequestPassport, mockIssueBestEffort, mockIssuableOnChain } = vi.hoisted(() => ({
   mockRequestPassport: vi.fn(),
   mockIssueBestEffort: vi.fn(),
+  // #4719: the deployment answer (passport chain + schema UID + verifier).
+  // Defaults to "Base Sepolia is issuable here"; a test flips it.
+  mockIssuableOnChain: vi.fn((chainId: number | null) => chainId === 84532),
 }))
 vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
-  PASSPORT_CHAIN_IDS: new Set([84532]),
+  isPassportIssuableOnChain: (chainId: number | null) => mockIssuableOnChain(chainId),
 }))
 
 vi.mock('../../middleware/auth.js', () => ({
@@ -456,6 +459,7 @@ describe('agent creation — passport opt-in never breaks creation', () => {
     mockQuery.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
+    mockIssuableOnChain.mockReset().mockImplementation((chainId: number | null) => chainId === 84532)
   })
 
   /** Mock the create path's queries: safe lookup, BEGIN, INSERT, safe info, COMMIT. */
@@ -498,6 +502,34 @@ describe('agent creation — passport opt-in never breaks creation', () => {
     const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
     expect(res.statusCode).toBe(201)
     expect(mockQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
+  })
+
+  it('requests and issues a passport when opted in on a chain this deployment can issue and verify on', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(true)
+    expect(mockIssuableOnChain).toHaveBeenCalledWith(84532)
+    expect(mockRequestPassport).toHaveBeenCalledWith(AGENT_UUID, 84532)
+    expect(mockIssueBestEffort).toHaveBeenCalledWith(AGENT_UUID, 'user-1')
+  })
+
+  it('#4719: an opt-in on a chain this deployment cannot issue on records NO passport row, and the agent is still created', async () => {
+    // Before #4719 an unregistered schema still recorded a `pending` row
+    // "deferred to the sweep" that this deployment could never anchor.
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+    mockIssuableOnChain.mockReturnValue(false)
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+    expect(mockIssueBestEffort).not.toHaveBeenCalled()
   })
 
   it('does not request a passport unless explicitly opted in', async () => {

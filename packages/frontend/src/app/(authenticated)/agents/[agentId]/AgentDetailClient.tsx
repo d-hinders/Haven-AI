@@ -782,7 +782,11 @@ export default function AgentDetailClient({ agentId }: Props) {
         <div className="mt-6" data-testid="agent-settings-section">
           <AgentSettingsTab
             agent={currentAgent}
-            account={account ? { id: account.id, name: account.name } : null}
+            account={
+              account
+                ? { id: account.id, name: account.name, passport_issuable: account.passport_issuable }
+                : null
+            }
             isRevoked={isRevoked}
             canManageCredentials={canManageCredentials}
             canEditDetails={canEditDetails}

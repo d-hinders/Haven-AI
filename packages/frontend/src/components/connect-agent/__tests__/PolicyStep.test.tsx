@@ -37,7 +37,9 @@ function flow(overrides: Record<string, unknown> = {}): AgentConnectionSetupFlow
 
 describe('PolicyStep copy', () => {
   it('labels the passport opt-in with the bare choice and no helper line', () => {
-    render(<PolicyStep flow={flow()} />)
+    // #4719: the opt-in renders only for an issuable wallet, so this copy
+    // test passes the answer explicitly rather than leaning on a default.
+    render(<PolicyStep flow={flow({ passportIssuable: true })} />)
 
     expect(screen.getByRole('checkbox', { name: 'Issue an Agent Passport' })).toBeInTheDocument()
     expect(screen.queryByText(/revocable record/)).not.toBeInTheDocument()
@@ -50,5 +52,22 @@ describe('PolicyStep copy', () => {
     expect(screen.getByText(/Nothing can spend until you approve this budget/)).toBeInTheDocument()
     expect(screen.queryByText(/Setup grants one/)).not.toBeInTheDocument()
     expect(screen.queryByText(/More tokens can be added/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * #4719 (epic #4718): the opt-in is offered only where this deployment can
+ * issue the selected wallet's agents a passport a merchant can verify. The
+ * flow's `passportIssuable` is the session payload's server-computed answer.
+ */
+describe('PolicyStep passport gate', () => {
+  it('does not render the opt-in for a wallet that cannot issue a passport', () => {
+    render(<PolicyStep flow={flow({ passportIssuable: false })} />)
+    expect(screen.queryByRole('checkbox', { name: 'Issue an Agent Passport' })).not.toBeInTheDocument()
+  })
+
+  it('fails closed: a flow that does not carry the answer offers no opt-in', () => {
+    render(<PolicyStep flow={flow()} />)
+    expect(screen.queryByRole('checkbox', { name: 'Issue an Agent Passport' })).not.toBeInTheDocument()
   })
 })

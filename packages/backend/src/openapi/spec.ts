@@ -867,19 +867,24 @@ const sessionAccountProperties = {
     description:
       'Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account.',
   },
+  passport_issuable: {
+    type: 'boolean',
+    description:
+      "Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true.",
+  },
 } as const
 
 /**
  * An account as the session payloads carry it. `sessionAccountPayload` STRIPS
  * owner_address and passkey_count — the raw signer inputs — and replaces them
- * with the two derived answers the UI actually needs. The deprecated alias
+ * with the derived answers the UI actually needs (#4719 added `passport_issuable`). The deprecated alias
  * schema went with #2914.
  */
 const sessionAccount = {
   type: 'object',
   required: [
     'id', 'account_address', 'chain_id', 'name', 'is_default', 'created_at',
-    'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
+    'account_type', 'value_bearing_chain', 'needs_backup_recommendation', 'passport_issuable',
   ],
   properties: { ...sessionAccountProperties },
 } as const
@@ -11917,7 +11922,7 @@ export const openapiSpec = {
           approval_url: { type: 'string', format: 'uri' },
           passport_requested: {
             type: 'boolean',
-            description: 'True when the setup opted in and its chain issues L0 passports.',
+            description: 'True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here.',
           },
         },
         additionalProperties: false,
@@ -12311,7 +12316,9 @@ export const openapiSpec = {
               /**
                * #1445: whether an Agent Passport attestation was requested for
                * this agent (#970). Always present on creation — false when the
-               * caller did not opt in, or the chain has no passport support.
+               * caller did not opt in, or this deployment cannot issue on the
+               * account's chain (#4719: no schema UID or no receipt verifier
+               * here counts too).
                * Governance metadata, never spend authority.
                */
               passport_requested: { type: 'boolean' },

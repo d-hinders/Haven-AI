@@ -115,6 +115,23 @@ database refuses to store a tier above L0, and the verifier refuses to report a
 tier it cannot issue rather than quietly describing it as L0. A tier that is
 merely *intended* to stay unreachable eventually gets reached.
 
+## Where the dashboard offers it
+
+The opt-in appears only where this deployment can issue a passport that a
+merchant can then verify. Each session account carries `passport_issuable`
+(#4719), computed by the backend. It is true only when all four hold:
+
+- the account is on the delegation rail;
+- its chain is a passport chain (Base Sepolia today);
+- the chain's schema UID is registered on this deployment;
+- the receipt verifier is on.
+
+Everywhere else, the connect flow shows no checkbox, and the agent's Settings
+row says passports are not available for that wallet. Both agent-creation
+paths (`POST /agents` and connect-setup registration) record no passport for
+such an account, so no request sits `pending` that the deployment can never
+anchor. A passport issued before this gate renders as it always did.
+
 ## For merchants
 
 You get a signed answer covering four things: the agent's current standing, its

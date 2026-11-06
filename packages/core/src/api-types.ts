@@ -5034,7 +5034,7 @@ export type components = {
             next_action: "return_to_haven_for_wallet_approval";
             /** Format: uri */
             approval_url: string;
-            /** @description True when the setup opted in and its chain issues L0 passports. */
+            /** @description True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here. */
             passport_requested?: boolean;
         };
         AgentConnectionSetupStatus: {
@@ -16416,6 +16416,8 @@ export interface operations {
                                 value_bearing_chain: boolean;
                                 /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                                 needs_backup_recommendation: boolean | null;
+                                /** @description Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true. */
+                                passport_issuable: boolean;
                             }[];
                         };
                     };
@@ -16515,6 +16517,8 @@ export interface operations {
                                 value_bearing_chain: boolean;
                                 /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                                 needs_backup_recommendation: boolean | null;
+                                /** @description Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true. */
+                                passport_issuable: boolean;
                             }[];
                         };
                     };
@@ -16607,6 +16611,8 @@ export interface operations {
                             value_bearing_chain: boolean;
                             /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                             needs_backup_recommendation: boolean | null;
+                            /** @description Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true. */
+                            passport_issuable: boolean;
                         }[];
                     };
                 };

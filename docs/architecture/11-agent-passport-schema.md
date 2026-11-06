@@ -136,6 +136,18 @@ fire-and-forget entry points — `issue_passport` at agent creation, and the
 connect-setup register path — skip silently, because a passport that cannot be
 issued must never fail the agent creation it is attached to.
 
+**The dashboard offers only what can succeed (#4719).** Each session account
+carries `passport_issuable`: an issuable rail, a passport chain, the chain's
+schema UID registered here, **and** the receipt verifier on
+(`isPassportIssuableForAccount` / `isPassportIssuableOnChain` in
+`modules/passport/readiness.ts`). The verifier leg is an owner decision
+(2026-11-06): a passport anchored where `GET /passport/verify` answers 503 is
+the `issuance_only` state #1151 found. The connect checkbox and the Settings
+action render only when it is true, and both fire-and-forget entry points ask
+the same question. An account that fails it records no passport row at all. It
+no longer records a `pending` row "deferred to the sweep", which a deployment
+without the schema UID could never anchor.
+
 Two consequences worth stating rather than leaving to be rediscovered. **A
 passport issued on a legacy account before that gate is left alone**, not
 revoked — `issuePassport`'s idempotent early return sends an already-anchored

@@ -898,6 +898,7 @@ page passes it and a preview deployment reads "Tracked".
 | issuance | label | tone |
 |---|---|---|
 | not issued | Not issued | `neutral` |
+| not issued, account not `passport_issuable` (#4719) | Not issued, with the detail line "Passports are not available for this wallet yet." and no action | `neutral` |
 | `failed` | Issuance failed | `danger` |
 | `pending` | Issuing… | `neutral` |
 | anchored, `revoked_onchain` | Revoked on-chain | `danger` |

@@ -13,8 +13,7 @@ import {
   issuePassportBestEffort,
   enqueuePassportRevocation,
   revokePassportBestEffort,
-  isPassportConfigured,
-  PASSPORT_CHAIN_IDS,
+  isPassportIssuableOnChain,
 } from '../modules/passport/index.js'
 import { formatTokenValue } from '../domain/tokens.js'
 import { deriveDelegationAllowances } from '../rails/delegation-budget-view.js'
@@ -323,32 +322,21 @@ export default async function agentRoutes(app: FastifyInstance): Promise<void> {
       // requestPassport records the intent, then the EAS write is fire-and-forget.
       // A slow, failing, or unfunded attestation degrades to "pending"/"failed"
       // on the passport row and never touches this response.
-      // Narrowed to a local so the chain id stays non-null for the call below;
-      // eligibility mirrors POST /agents/:id/passport so the two entry points
-      // agree rather than one silently creating a permanently-failed row.
+      // Narrowed to a local so the chain id stays non-null for the call below.
+      // #4719: the same deployment answer the dashboard reads
+      // (`passport_issuable`): a passport chain whose schema UID AND verifier
+      // are configured here. Anything else records NO row — not a `pending`
+      // one this deployment can never anchor, nor a passport no merchant can
+      // verify. The account's rail is checked by issuePassport's own #2138
+      // gate, as before.
       const passportChainId =
-        issue_passport === true &&
-        accountInfo.account_chain_id != null &&
-        PASSPORT_CHAIN_IDS.has(accountInfo.account_chain_id)
+        issue_passport === true && isPassportIssuableOnChain(accountInfo.account_chain_id)
           ? accountInfo.account_chain_id
           : null
       if (passportChainId != null) {
         try {
           await requestPassport(agent.id, passportChainId)
-          // Parity with POST /agents/:id/passport (#1043): on a deployment
-          // where the schema UID is not registered, the :id route 503s. Agent
-          // creation must not fail for that — the intent is recorded above and
-          // the sweep anchors it once the operator registers — but firing a
-          // guaranteed-to-fail attempt here would only burn a retry and start
-          // the backoff clock early.
-          if (isPassportConfigured(passportChainId)) {
-            issuePassportBestEffort(agent.id, sub)
-          } else {
-            request.log.info(
-              { agentId: agent.id, chainId: passportChainId },
-              'passport requested but schema not registered — deferred to the sweep',
-            )
-          }
+          issuePassportBestEffort(agent.id, sub)
         } catch (err) {
           request.log.warn({ err, agentId: agent.id }, 'passport request failed; agent created')
         }

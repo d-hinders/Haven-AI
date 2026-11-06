@@ -416,7 +416,17 @@ export function useAgentConnectionSetup({
   const chainId = selectedAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
   const walletName = selectedAccount?.name ?? 'Selected Haven wallet'
+  // #4719: the session payload's server-computed answer — whether this
+  // deployment can issue the selected wallet's agents a passport a merchant
+  // can verify. Only an explicit `true` offers the opt-in; an older backend
+  // that omits the field reads as not issuable (fail closed).
+  const passportIssuable = selectedAccount?.passport_issuable === true
   const walletNetworkName = resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
+  // #4719: switching to a wallet that cannot issue clears a ticked opt-in, so
+  // the box never reappears pre-ticked on a later switch back.
+  useEffect(() => {
+    if (!passportIssuable) setIssuePassport(false)
+  }, [passportIssuable])
   // A setup created in THIS session wins over a resumed id: the user who just
   // clicked through the wizard is looking at their own new setup, not at
   // whatever id happened to be in the URL that opened the page.
@@ -610,7 +620,9 @@ export function useAgentConnectionSetup({
           allowance_amount: parseUnits(allowance.amount, allowance.decimals).toString(),
           reset_period_min: allowance.resetTimeMin,
         })),
-        issue_passport: issuePassport || undefined,
+        // #4719: never sent for a wallet that cannot issue it, even if the
+        // box was ticked before the wallet was switched.
+        issue_passport: (issuePassport && passportIssuable) || undefined,
         // #2302: discovery-source attribution. URL ?src= wins when present;
         // otherwise the first-touch value captured to localStorage at landing
         // (DiscoverySourceCapture in the root layout) — the query string does
@@ -794,6 +806,7 @@ export function useAgentConnectionSetup({
     setAddReset,
     issuePassport,
     setIssuePassport,
+    passportIssuable,
     handleAddAmountChange,
     // Setup creation
     creating,

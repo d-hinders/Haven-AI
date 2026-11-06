@@ -147,9 +147,10 @@ describe('AgentPassportCard (#1072)', () => {
     })
   })
 
-  it('renders the opt-in state when the agent has no passport', () => {
+  it('renders the opt-in state when the agent has no passport and its account is passport_issuable', () => {
     mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" />)
+    // #4719: the answer is passed explicitly — the default is fail-closed.
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
     expect(screen.getByText('Not issued')).toBeTruthy()
     expect(screen.getByRole('button', { name: /issue a passport/i })).toBeTruthy()
     // Naming discipline: never "verified" — reserved for L2.
@@ -164,7 +165,25 @@ describe('AgentPassportCard (#1072)', () => {
 
   it('hides the issue action for a revoked agent', () => {
     mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" agentRevoked />)
+    render(<AgentPassportCard agentId="agent-1" agentRevoked passportIssuable />)
+    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
+  })
+
+  // ── #4719: offered only where this deployment can issue ────────────────
+  it('offers no issue action on an account that is not passport_issuable, and says why', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={false} />)
+    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    expect(screen.getByText('Not issued')).toBeTruthy()
+    expect(screen.getByText('Passports are not available for this wallet yet.')).toBeTruthy()
+    // The reason REPLACES the opt-in sentence; there is no opt-in to describe.
+    expect(screen.queryByText(/Issuing one is optional/)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/verified/i)
+  })
+
+  it('fails closed: without the answer, no issue action is offered', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" />)
     expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
   })
 
@@ -271,7 +290,7 @@ describe('AgentPassportCard (#1072)', () => {
   it('calls issuePassport when the opt-in button is clicked', async () => {
     const { fireEvent } = await import('@testing-library/react')
     mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" />)
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
     fireEvent.click(screen.getByRole('button', { name: /issue a passport/i }))
     await waitFor(() => expect(mockIssuePassport).toHaveBeenCalledTimes(1))
   })

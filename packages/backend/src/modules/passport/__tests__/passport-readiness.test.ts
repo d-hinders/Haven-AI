@@ -17,6 +17,8 @@ import {
   isReceiptSigningConfigured,
   receiptIssuerAddress,
   PASSPORT_CHAIN_IDS,
+  isPassportIssuableOnChain,
+  isPassportIssuableForAccount,
   type PassportReadiness,
 } from '../index.js'
 
@@ -175,5 +177,47 @@ describe('defaults read live configuration', () => {
       issuerAddress: null,
     })
     expect(readiness.chains.map((c) => c.chainId)).toEqual([100, 8453, 84532])
+  })
+})
+
+/**
+ * #4719 (epic #4718): the answer the dashboard reads before offering the
+ * opt-in. Each leg is driven on its own so a predicate that dropped one would
+ * fail here, not only in the route test.
+ */
+describe('passport_issuable — chain, schema UID, verifier and rail', () => {
+  const on = { env: withUid, verificationConfigured: true }
+
+  it('is true only when the chain is a passport chain AND both halves are configured', () => {
+    expect(isPassportIssuableOnChain(CHAIN, on)).toBe(true)
+    expect(isPassportIssuableOnChain(CHAIN, { env: withoutUid, verificationConfigured: true })).toBe(false)
+    expect(isPassportIssuableOnChain(CHAIN, { env: withUid, verificationConfigured: false })).toBe(false)
+  })
+
+  it('is false on a chain that is not a passport chain, even with every env var set', () => {
+    const env = { ...withUid, AGENT_PASSPORT_SCHEMA_UID_8453: UID } as NodeJS.ProcessEnv
+    expect(PASSPORT_CHAIN_IDS.has(8453)).toBe(false)
+    expect(isPassportIssuableOnChain(8453, { env, verificationConfigured: true })).toBe(false)
+    expect(isPassportIssuableOnChain(null, on)).toBe(false)
+  })
+
+  it('reads the live verifier by default', () => {
+    setReceiptSigningKey(SIGNING_KEY)
+    expect(isPassportIssuableOnChain(CHAIN, { env: withUid })).toBe(true)
+    setReceiptSigningKey(null)
+    expect(isPassportIssuableOnChain(CHAIN, { env: withUid })).toBe(false)
+  })
+
+  it('requires an issuable rail on the account (the #2138 allowlist)', () => {
+    expect(isPassportIssuableForAccount({ chain_id: CHAIN, account_type: 'delegator_hybrid' }, on)).toBe(true)
+    expect(
+      isPassportIssuableForAccount({ chain_id: CHAIN, account_type: null, execution_rail: 'delegation' }, on),
+    ).toBe(true)
+    expect(isPassportIssuableForAccount({ chain_id: CHAIN, account_type: 'legacy_safe' }, on)).toBe(false)
+    expect(
+      isPassportIssuableForAccount({ chain_id: CHAIN, account_type: null, execution_rail: 'allowance_module' }, on),
+    ).toBe(false)
+    // The rail alone is not enough: the chain leg still applies.
+    expect(isPassportIssuableForAccount({ chain_id: 8453, account_type: 'delegator_hybrid' }, on)).toBe(false)
   })
 })

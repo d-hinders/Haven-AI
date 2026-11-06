@@ -22,6 +22,7 @@ vi.mock('../../db.js', () => ({
 }))
 
 import { buildApp } from '../../__tests__/helpers.js'
+import { setReceiptSigningKey } from '../../modules/passport/index.js'
 
 /** Every SQL string the route layer sent, in order. */
 const sqlSent = () => mockQuery.mock.calls.map((c) => String(c[0]))
@@ -198,6 +199,8 @@ describe('auth SQL characterization (pre-#1180)', () => {
           account_type: 'delegator_hybrid',
           value_bearing_chain: true,
           needs_backup_recommendation: true,
+          // #4719: Base mainnet is not a passport chain, so no opt-in.
+          passport_issuable: false,
         },
       ])
     })
@@ -220,6 +223,44 @@ describe('auth SQL characterization (pre-#1180)', () => {
       // never a client-supplied id.
       expect(paramsSent()[0]).toEqual(['u-jwt'])
       expect(paramsSent()[1]).toEqual(['u-jwt'])
+    })
+
+    /**
+     * #4719: `passport_issuable` is the deployment's answer for the account,
+     * computed server-side so the dashboard never offers an opt-in the
+     * backend would drop. True only with BOTH halves configured here: the
+     * schema UID for the chain and the receipt verifier (owner decision
+     * 2026-11-06 — a passport no merchant can verify is not offered).
+     */
+    it('carries passport_issuable: true only when the chain, schema UID and verifier all line up', async () => {
+      const row = { id: 's1', chain_id: 84532, account_type: 'delegator_hybrid', owner_address: null, passkey_count: 1 }
+      const uidKey = 'AGENT_PASSPORT_SCHEMA_UID_84532'
+      const savedUid = process.env[uidKey]
+      const me = async () => {
+        const token = app.jwt.sign({ sub: 'u-pp', email: 'ada@example.com' }, { expiresIn: '7d' })
+        mockQuery.mockResolvedValueOnce({ rows: [{ id: 'u-pp', name: 'Ada', email: 'ada@example.com' }] })
+        mockQuery.mockResolvedValueOnce({ rows: [row] })
+        const res = await app.inject({ method: 'GET', url: '/auth/me', headers: { authorization: `Bearer ${token}` } })
+        return res.json().accounts[0].passport_issuable
+      }
+      try {
+        process.env[uidKey] = '0x' + 'ab'.repeat(32)
+        setReceiptSigningKey('0x' + '11'.repeat(32))
+        expect(await me()).toBe(true)
+
+        // Verifier off: issuance would anchor a passport no merchant can check.
+        setReceiptSigningKey(null)
+        expect(await me()).toBe(false)
+
+        // Schema UID unset: nothing could anchor here at all.
+        setReceiptSigningKey('0x' + '11'.repeat(32))
+        delete process.env[uidKey]
+        expect(await me()).toBe(false)
+      } finally {
+        setReceiptSigningKey(null)
+        if (savedUid === undefined) delete process.env[uidKey]
+        else process.env[uidKey] = savedUid
+      }
     })
 
     it('404s when the user row is gone, without reading accounts', async () => {

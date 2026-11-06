@@ -61,7 +61,7 @@ on:
         type: string
         default: '1'
       dev_landing_url:
-        description: 'Dev landing URL the cold-agent tasks give the agent (e.g. https://haven-ai-frontend-git-dev-....vercel.app); empty = the cold tasks cannot run'
+        description: 'Dev landing URL the cold-agent tasks give the agent (e.g. https://haven-ai-frontend-git-dev-....vercel.app); empty = a full run, or a tasks list naming a cold task, exits 2 before any task runs'
         type: string
         default: ''
 

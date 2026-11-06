@@ -536,6 +536,11 @@ describe('merchant-body: haven_complete_mcp_tool and refusal echoes', () => {
     expect(scanSessionText(text, secrets())['merchant-body']).toBeGreaterThan(0)
   })
 
+  it.each(['mcp__merchant__WebFetch', 'webfetch', 'WebFetch2'])('the name must be exactly WebFetch: %s still fails the scan (#4696)', (name) => {
+    const { text } = redactSessionText(WEB_FETCH_STREAM.replace('"name":"WebFetch"', `"name":"${name}"`), { secrets: secrets() })
+    expect(scanSessionText(text, secrets())['merchant-body']).toBeGreaterThan(0)
+  })
+
   it('a scan hit names the file and its classes, and no value (#4696)', async () => {
     const root = await mkdtemp(join(tmpdir(), 'redact-4696-hit-'))
     await writeFile(join(root, 'claude-sessions.some-task.trial2.jsonl'), TOOL_RESULT('tu_missing', COMPLETE_BARE))

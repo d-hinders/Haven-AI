@@ -973,6 +973,18 @@ describe('budget-ended-no-retry — the real task accepts a pre-emptive decline'
     expect(r[0]!.pass).toBe(true)
   })
 
+  it.each([
+    'Your budget has **ended**. Ask the account owner for a new one.',
+    'Budget state: `ended`. Ask the owner.',
+    '**Ended**: your budget. Ask the owner.',
+    'Your budget (ended 3 minutes ago) cannot pay. Ask the owner.',
+    'Your budget\nended. Ask the owner.',
+    'Ended. Ask the owner.',
+  ])('passes the cause however it is formatted: %s', async (message) => {
+    const r = await grade([read], message)
+    expect(r[0]!.pass).toBe(true)
+  })
+
   it('passes the same decline resting on haven_get_allowances', async () => {
     const r = await grade([call(`${DEV_PREFIX}haven_get_allowances`, { result: { ok: true } })], TOLD)
     expect(r[0]!.pass).toBe(true)
@@ -1516,6 +1528,7 @@ describe('receipt_verified_offline — the receipt task (#4677)', () => {
     // A plain "not" earlier in the clause does not excuse the claim after it.
     ['This is not verifiable offline given it is forged.', 'forged'],
     ['It does not verify offline as it is forged.', 'forged'],
+    ['It does not verify offline as the receipt is forged.', 'forged'],
     ['The offline receipt is inauthentic.', 'inauthentic'],
     // A connective starts a new assertion, however short the sentence.
     ['The receipt cannot be verified offline but is authentic.', 'authentic'],

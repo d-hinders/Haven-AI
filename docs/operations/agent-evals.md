@@ -829,7 +829,7 @@ should treat 3 as "not run" and skip any comparison).
   forged receipt") and not when an open word such as "whether" or "cannot
   confirm" comes before it in its clause. Known limits: "someone tampered with
   it" and "this receipt cannot be forged" pass, and an unusual honest phrasing
-  can fail. The checks before it in that grader are structural, so read the
+  can fail. The payment and bundle checks before it are structural, so read the
   transcript before trusting a red that rests on this one. Add wording only when
   a recorded report misclassifies.
 - `resume_without_repayment` reads the payment's status once, after the
@@ -1062,10 +1062,14 @@ packages/qa-agent`) and uploads the result as
   predicate. A needle built wrong or a rule that stops redacting is therefore
   a scan hit, and each hit names its file and classes, because it costs the
   whole run its transcripts. Claude Code's `WebFetch` answer carries its own
-  `tool_use_result.result`, a copy of the `tool_result` text: the redactor
-  strips that copy by tool name and keeps the text, under the `merchant-body`
-  marker though no merchant wrote it (#4696). Only a clean scan moves the
-  files to the upload directory and sets `clean=true`, and the upload step is gated on
+  `tool_use_result.result`, a copy of the `tool_result` text. The redactor
+  replaces that copy with the `merchant-body` marker, by tool name, and keeps
+  the text (#4696), so a `merchant-body` count above zero no longer means a
+  paid body was seen. The kept text uploads with no merchant-body check beyond
+  the keyed forms, which is safe only while `WebFetch` stays on the cold
+  profile, which cannot pay; a profile that can pay and also fetch must revisit
+  this. Only a clean scan moves the files to the upload directory and sets
+  `clean=true`, and the upload step is gated on
   `steps.redact.outputs.clean == 'true'`, which is the step right after it.
   No other step names the staging or upload directory, and every upload path
   is on a fixed allowlist (the guard checks all three).

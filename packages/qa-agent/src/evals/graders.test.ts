@@ -1334,9 +1334,22 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
     ['a login that failed', ['npx', '@haven_ai/cli@dev', 'login'], { ok: false }],
     ['another program', ['npm', 'login'], { ok: false }],
     ['login as a later word', ['npx', '@haven_ai/cli@dev', 'guide', 'login'], { ok: true }],
+    ['login --help', ['npx', '-y', '@haven_ai/cli@dev', 'login', '--help'], { ok: true }],
+    ['login -h', ['npx', '@haven_ai/cli@dev', 'login', '-h'], { ok: true }],
+    ['login --version', ['npx', '@haven_ai/cli@dev', 'login', '--version'], { ok: true }],
   ])('%s is not the wall (#4674 review)', (_label, argv, result) => {
     const r = onboardingToolCalls(log([call('run_command', { args: { argv }, result })], 'You need a passkey, to fund it and to approve a budget.'), {}, { max: 12 })
     expect(r.pass).toBe(false)
+  })
+
+  it.each([
+    ['a device URL', 'Approve this login: https://dev.example/device?code=ABCD-1234'],
+    ['a named code', 'Please approve the code ABCD-1234 in your browser.'],
+  ])('a login killed at the timeout is the wall when the message relays %s', (_label, message) => {
+    const killed = call('run_command', { args: { argv: ['npx', '@haven_ai/cli@dev', 'login', '--api', 'https://api.example'] }, result: { ok: false } })
+    const r = onboardingToolCalls(log([call('WebFetch', { args: { url: 'https://dev.example/' } }), killed], message), {}, { max: 12 })
+    expect(r.pass).toBe(true)
+    expect(r.score).toBe(2)
   })
 
   describe('with handoffPath, a signup hand-off ends the run too (owner decision 2026-11-06)', () => {
@@ -1370,6 +1383,7 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
     it.each([
       ['another host', 'Open https://evil.example/signup now.'],
       ['a host that only starts the same', 'Open https://dev.example.evil.test/signup now.'],
+      ['a host that only differs at the dot', 'Open https://devXexample/signup now.'],
       ['a longer path', 'Open https://dev.example/signups/help now.'],
       ['a hyphenated path', 'Open https://dev.example/signup-help now.'],
       ['a path alone', 'Open /signup now.'],
@@ -1397,6 +1411,8 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
       const broken: GraderContext = { resolved: { ...ctx.resolved!, coldProfile: { landingUrl: 'not a url', cliPackage: '@haven_ai/cli@dev' } } }
       expect(() => onboardingToolCalls(log(fetches(1), SIGNUP), broken, opts)).not.toThrow()
       expect(onboardingToolCalls(log(fetches(1), SIGNUP), broken, opts).pass).toBe(false)
+      const noHost: GraderContext = { resolved: { ...ctx.resolved!, coldProfile: { landingUrl: 'file:///x', cliPackage: '@haven_ai/cli@dev' } } }
+      expect(onboardingToolCalls(log(fetches(1), 'Open null/signup now.'), noHost, opts).pass).toBe(false)
     })
 
     it('counts to a login command when there is one, whatever the message says', () => {
@@ -1496,6 +1512,10 @@ describe('onboarding_login_command — accepts npx <pkg> and npx -y <pkg>', () =
     const r = onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', '--help'])]), ctx)
     expect(r.score).toBe(0)
     expect(r.pass).toBe(false)
+  })
+
+  it('login --help does not score as running the login', () => {
+    expect(onboardingLoginCommand(log([run(['npx', '@haven_ai/cli@dev', 'login', '--help'])]), ctx).score).toBe(0)
   })
 
   it('threshold 0 reports the score without requiring it', () => {

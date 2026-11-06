@@ -31,6 +31,7 @@ import type {
   GraderResult,
   RecordedToolCall,
 } from './types.js'
+import { detectHandoff } from './handoff-loop.js'
 import { canonicalErrorCode } from './hermes.js'
 import { bareToolName, isPaymentTool, isSignerTool } from './tools.js'
 
@@ -1293,10 +1294,13 @@ function commandArgv(call: RecordedToolCall): string[] | undefined {
   return Array.isArray(argv) && argv.every((a): a is string => typeof a === 'string') ? argv : undefined
 }
 
+/** The CLI exits on these before it dispatches, so a command carrying one starts nothing. */
+const CLI_INFO_FLAGS: ReadonlySet<string> = new Set(['--help', '-h', '--version', '-v'])
+
 /** The package an `npx [-y] <package> login …` argv runs, or undefined for any other command. */
 function loginCommandPackage(argv: string[]): string | undefined {
   const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
-  return i !== -1 && argv[i + 1] === 'login' ? argv[i] : undefined
+  return i !== -1 && argv[i + 1] === 'login' && !argv.some((a) => CLI_INFO_FLAGS.has(a)) ? argv[i] : undefined
 }
 
 /**
@@ -1304,13 +1308,15 @@ function loginCommandPackage(argv: string[]): string | undefined {
  * the moment the agent first has to hand off to the human. Lower is better,
  * and the number is only meaningful as a diff against the previous run.
  *
- * The wall is the first `run_command` that ran `login`: in the subcommand
- * position, and not refused or failed, since the agent has nothing to hand over
- * otherwise. With `handoffPath`, a run that stops and links that path on the
- * landing host in its final message has handed off too, after all its calls: a
- * user with no account has to sign up first, and the runbook places `login` after
- * that (owner decision 2026-11-06). A run that does neither fails: the scenario's
- * whole point is the hand-off.
+ * The wall is the first `run_command` that started `login`, in the subcommand
+ * position. A refused or failed one counts only when the final message relays
+ * the device link: the runbook's plain `login` is killed at the tool's timeout
+ * and reports an error after printing that link, and the human still has it.
+ * With `handoffPath`, a run that stops and links that path on the landing host in
+ * its final message has handed off too, after all its calls: a user with no
+ * account has to sign up first, and the runbook places `login` after that (owner
+ * decision 2026-11-06). A run that does neither fails: the scenario's whole point
+ * is the hand-off.
  *
  * The link is all this reads. "Do not use <link>" passes here, and score 2 counts
  * keywords, so a false "setup is complete" that carries them passes both.
@@ -1324,24 +1330,27 @@ export function onboardingToolCalls(log: AgentRunLog, ctx: GraderContext, option
   if (max === undefined) {
     return { pass: false, score: 0, detail: 'onboarding_tool_calls needs options.max — the most calls a passing trial may take' }
   }
+  const deviceLinkRelayed = detectHandoff(log.finalMessage ?? '')?.kind === 'device-login'
   const wallAt = log.calls.findIndex((c) => {
     const argv = commandArgv(c)
-    return argv !== undefined && c.result?.ok !== false && loginCommandPackage(argv) !== undefined
+    return argv !== undefined && loginCommandPackage(argv) !== undefined && (c.result?.ok !== false || deviceLinkRelayed)
   })
   if (wallAt === -1) {
     const count = log.calls.length
     if (handoffPath !== undefined) {
       const landingUrl = ctx.resolved?.coldProfile?.landingUrl
-      if (landingUrl === undefined || !URL.canParse(landingUrl)) {
+      // A URL with no host (`file:///x`) parses and has the origin "null".
+      const origin = landingUrl !== undefined && URL.canParse(landingUrl) ? new URL(landingUrl).origin : 'null'
+      if (origin === 'null') {
         return { pass: false, score: count, detail: `no usable landing URL on this trial, so a hand-off to ${handoffPath} cannot be checked` }
       }
-      const link = `${new URL(landingUrl).origin}${handoffPath}`
+      const link = `${origin}${handoffPath}`
       const linked = new RegExp(`${link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(log.finalMessage ?? '')
       if (linked) {
         return { pass: count <= max, score: count, detail: `${count} tool call(s) to the hand-off linking ${handoffPath} (max ${max})` }
       }
     }
-    const missed = handoffPath === undefined ? 'no login command' : `no login command, and the final message links no ${handoffPath} on the landing host`
+    const missed = handoffPath === undefined ? 'no login that handed anything over' : `no login that handed anything over, and the final message links no ${handoffPath} on the landing host`
     return { pass: false, score: count, detail: `never reached the login wall (${count} call(s), ${missed}) — the agent never handed off to the human` }
   }
   const count = wallAt + 1

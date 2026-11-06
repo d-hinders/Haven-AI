@@ -160,7 +160,11 @@ describeDb('Igdrasil late attach of a merchant receipt captured after the push (
     expect(await feedSettledPayment(userId, pid)).toEqual({ outcome: 'pushed' })
 
     state.writesDisabled = true
-    await expect(lateAttachIgdrasilMerchantReceipt(userId, pid, RECEIPT, impl)).resolves.toBeUndefined()
+    const settled = await lateAttachIgdrasilMerchantReceipt(userId, pid, RECEIPT, impl).then(
+      () => 'resolved',
+      (err: unknown) => `rejected: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    expect(settled).toBe('resolved')
     expect(await getMerchantInvoiceSyncRef(userId, 'igdrasil', pid)).toBeNull()
     const underlag = await getSyncState(userId, 'igdrasil', pid)
     expect(underlag?.status).toBe('pushed')

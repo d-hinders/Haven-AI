@@ -1998,9 +1998,15 @@ describe('machine payment routes', () => {
 
     it('an Igdrasil late-attach that rejects changes nothing: the capture still answers 201 and the other destinations still fire (#4521)', async () => {
       // MUTATION TARGET: drop the `.catch(() => {})` after the Igdrasil call
-      // in modules/mpp/merchant-receipt.ts and this rejection goes unhandled,
-      // which fails the run; `await` it instead and the capture 500s.
-      reportingMocks.lateAttachIgdrasilMerchantReceipt.mockRejectedValue(new Error('igdrasil outage'))
+      // in modules/mpp/merchant-receipt.ts and the rejection goes unhandled
+      // (the listener below records it); `await` it instead and the capture 500s.
+      const outage = new Error('igdrasil outage')
+      reportingMocks.lateAttachIgdrasilMerchantReceipt.mockRejectedValue(outage)
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown) => {
+        if (reason === outage) unhandled.push(reason)
+      }
+      process.on('unhandledRejection', onUnhandled)
       primeDb(
         AUTH,
         [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
@@ -2022,8 +2028,10 @@ describe('machine payment routes', () => {
         expect(reportingMocks.lateAttachMerchantReceipt).toHaveBeenCalledWith(...args)
         expect(reportingMocks.lateAttachAccountedMerchantReceipt).toHaveBeenCalledWith(...args)
       })
-      // Let the rejection settle inside this test, so an unhandled one is attributed here.
-      await new Promise((r) => setTimeout(r, 10))
+      // Give an unhandled rejection the turn it needs to be reported, then check none was.
+      await new Promise((r) => setTimeout(r, 20))
+      process.off('unhandledRejection', onUnhandled)
+      expect(unhandled).toEqual([])
     })
 
     it('first write wins: a duplicate report (200) does NOT re-fire the late-attach', async () => {

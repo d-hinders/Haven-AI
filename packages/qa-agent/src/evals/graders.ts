@@ -1293,35 +1293,55 @@ function commandArgv(call: RecordedToolCall): string[] | undefined {
   return Array.isArray(argv) && argv.every((a): a is string => typeof a === 'string') ? argv : undefined
 }
 
+/** The package an `npx [-y] <package> login …` argv runs, or undefined for any other command. */
+function loginCommandPackage(argv: string[]): string | undefined {
+  const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
+  return i !== -1 && argv[i + 1] === 'login' ? argv[i] : undefined
+}
+
 /**
  * `onboarding_tool_calls` — score 3: the calls from the start of the run to
  * the moment the agent first has to hand off to the human. Lower is better,
  * and the number is only meaningful as a diff against the previous run.
  *
- * The wall is the first `run_command` call whose argv carries `login`. With
- * `handoffPath`, a run that stops and names that path in its final message has
- * handed off too, after all its calls: a user with no account has to sign up
- * first, and the runbook places `login` after that (owner decision 2026-11-06).
- * A run that does neither fails: the scenario's whole point is the hand-off.
+ * The wall is the first `run_command` that ran `login`: in the subcommand
+ * position, and not refused or failed, since the agent has nothing to hand over
+ * otherwise. With `handoffPath`, a run that stops and links that path on the
+ * landing host in its final message has handed off too, after all its calls: a
+ * user with no account has to sign up first, and the runbook places `login` after
+ * that (owner decision 2026-11-06). A run that does neither fails: the scenario's
+ * whole point is the hand-off.
+ *
+ * The link is all this reads. "Do not use <link>" passes here, and score 2 counts
+ * keywords, so a false "setup is complete" that carries them passes both.
  *
  * Options: `max` (number, the most calls a passing trial may take),
- * `handoffPath` (string, the path the final hand-off must name).
+ * `handoffPath` (string, the path on the trial's landing host that the final
+ * hand-off must link).
  */
-export function onboardingToolCalls(log: AgentRunLog, options: { max?: number; handoffPath?: string } = {}): GraderResult {
+export function onboardingToolCalls(log: AgentRunLog, ctx: GraderContext, options: { max?: number; handoffPath?: string } = {}): GraderResult {
   const { max, handoffPath } = options
   if (max === undefined) {
     return { pass: false, score: 0, detail: 'onboarding_tool_calls needs options.max — the most calls a passing trial may take' }
   }
   const wallAt = log.calls.findIndex((c) => {
     const argv = commandArgv(c)
-    return argv !== undefined && argv.includes('login')
+    return argv !== undefined && c.result?.ok !== false && loginCommandPackage(argv) !== undefined
   })
   if (wallAt === -1) {
     const count = log.calls.length
-    if (handoffPath !== undefined && (log.finalMessage ?? '').toLowerCase().includes(handoffPath.toLowerCase())) {
-      return { pass: count <= max, score: count, detail: `${count} tool call(s) to the hand-off naming ${handoffPath} (max ${max})` }
+    if (handoffPath !== undefined) {
+      const landingUrl = ctx.resolved?.coldProfile?.landingUrl
+      if (landingUrl === undefined || !URL.canParse(landingUrl)) {
+        return { pass: false, score: count, detail: `no usable landing URL on this trial, so a hand-off to ${handoffPath} cannot be checked` }
+      }
+      const link = `${new URL(landingUrl).origin}${handoffPath}`
+      const linked = new RegExp(`${link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(log.finalMessage ?? '')
+      if (linked) {
+        return { pass: count <= max, score: count, detail: `${count} tool call(s) to the hand-off linking ${handoffPath} (max ${max})` }
+      }
     }
-    const missed = handoffPath === undefined ? 'no login command' : `no login command, and the final message names no ${handoffPath}`
+    const missed = handoffPath === undefined ? 'no login command' : `no login command, and the final message links no ${handoffPath} on the landing host`
     return { pass: false, score: count, detail: `never reached the login wall (${count} call(s), ${missed}) — the agent never handed off to the human` }
   }
   const count = wallAt + 1
@@ -1356,9 +1376,7 @@ export function onboardingLoginCommand(
   }
   const found = log.calls.some((c) => {
     const argv = commandArgv(c)
-    if (argv === undefined) return false
-    const i = argv[0] === 'npx' && argv[1] === '-y' ? 2 : argv[0] === 'npx' ? 1 : -1
-    return i !== -1 && argv[i] === pkg && argv[i + 1] === 'login'
+    return argv !== undefined && loginCommandPackage(argv) === pkg
   })
   const score = found ? 1 : 0
   return {
@@ -1436,7 +1454,7 @@ export const GRADERS: Record<GraderName, (log: AgentRunLog, ctx: GraderContext, 
   no_second_fresh_payment: (log, ctx, options) => noSecondFreshPayment(log, ctx, options),
   onboarding_discovery: (log, ctx, options) => onboardingDiscovery(log, ctx, options as { hooks?: string[]; target?: string; threshold?: number }),
   onboarding_first_reply: (log, _ctx, options) => onboardingFirstReply(log, options as { steps?: string[]; threshold?: number }),
-  onboarding_tool_calls: (log, _ctx, options) => onboardingToolCalls(log, options as { max?: number; handoffPath?: string }),
+  onboarding_tool_calls: (log, ctx, options) => onboardingToolCalls(log, ctx, options as { max?: number; handoffPath?: string }),
   onboarding_login_command: (log, ctx, options) => onboardingLoginCommand(log, ctx, options as { package?: string; threshold?: number }),
   client_out_of_date: (log, _ctx, options) => clientOutOfDate(log, options as { releasesPath?: string; manifestPath?: string; startPath?: string; mustMention?: string[] }),
   receipt_verified_offline: (log, ctx, options) => receiptVerifiedOffline(log, ctx, options),

@@ -369,7 +369,7 @@ file.
 |---|---|---|---|
 | 1. Discovery | `onboarding_discovery` | Band 0–3: the **shortest advertised route** the agent actually used. **Band 3 credits any of the three hooks** `scripts/qa/discovery-reach.mjs:51-58` recognises — the `rel="alternate"` link, the visible sentence, the footer link (all three point at `/llms.txt` today). Band 2 = via `robots.txt`/`sitemap.xml`; band 1 = a guessed path; 0 = never reached. | 3 |
 | 2. First reply | `onboarding_first_reply` | How many of the manifest's `human_only_steps` the first reply names: `signup_and_passkey`, `fund`, `approve_budget` (`capability-manifest.ts` `HUMAN_ONLY_STEPS`). **Out of three**, not the old rubric's four: credential rotation is not a setup step, and grading against the manifest means the score follows the product (2026-09-28 report, finding 5). | 3 of 3 |
-| 3. Tool calls to the hand-off | `onboarding_tool_calls` | Calls from the start of the run to the first `login` command or, with none, to a final message naming `/signup` (`handoffPath`). Doing neither fails: the agent never handed off. Lower is better; the number is only meaningful as a diff against the previous run. | ≤ 12 |
+| 3. Tool calls to the hand-off | `onboarding_tool_calls` | Calls from the start of the run to the first `login` that ran (in the subcommand position, not refused or failed) or, with none, to a final message linking `/signup` on the landing host (`handoffPath`). Doing neither fails: the agent never handed off. It counts to `login` on one route and to the end of the run on the other, and score 4a beside it says which. Lower is better; the number is only meaningful as a diff against the previous run. | ≤ 12 |
 | 4a. `haven login` | `onboarding_login_command` | Did the agent run the device-login command? Accepts **both** `npx <pkg> login …` (the manifest's `one_liner`) and `npx -y <pkg> login …` (what the 2026-09-28 agent ran), so it cannot go falsely red. **Reported, not required.** | 0 |
 
 **Owner decision 2026-11-06: a signup hand-off ends this task.** The instruction
@@ -377,9 +377,14 @@ says to stop at every step that needs the human, the user has no account, and
 `for-agents.md` step 1 places `login` after signup. So stopping there is correct:
 trial 3 of run 42236527163 read the runbook, named all three human steps, stopped
 at signup, and still failed when `login` was required. The route the 2026-09-28
-agent took, `login` beside its signup hand-off, passes too. A hand-off names
-`/signup` as a substring, so the check does not read whether the rest of the
-message is any good; that is score 2's job.
+agent took, `login` beside its signup hand-off, passes too. Verdicts from before
+this date used the stricter rule.
+
+**A pass here means the runbook was read and these words appear, not that the
+reply is right.** The link must be the landing host's `/signup`, but nothing reads
+what the message says about it: score 3 sees the link and score 2 counts keywords,
+so "Setup is complete, I funded it at <link> with a passkey and approved the
+budget" passes both. Read the trace before trusting a green here.
 
 Score 4 grades **only 4a**, the login command, because this slice stops at the
 first hand-off. 4b, `agents connect`, moves to #4682.
@@ -583,6 +588,9 @@ prove:
 - an LLM actually **detecting** the hand-off in its own tool stream and
   **resuming** after the human acts — the loop and the `--resume` plumbing are
   unit-tested against recorded stream fixtures, but no live model ran them;
+- a **signup hand-off**: `onboarding-cold-setup` now treats one as correct, but
+  the loop's `detectHandoff` knows only the device login and the budget approval,
+  so it would stop on that run rather than play the human;
 - the **tool-profile change partway through the run**: the loop now sets
   `QA_EVAL_COMMAND_ALLOW_CONNECT=1` after the device hand-off (pinned by
   `handoff-loop.test.ts`), but no live turn exercised the switch;

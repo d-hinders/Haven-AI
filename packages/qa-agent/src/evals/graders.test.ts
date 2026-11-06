@@ -1316,6 +1316,7 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
         run(['npx', '@haven_ai/cli@dev', 'login', '--json', '--no-wait']),
         run(['npx', '@haven_ai/cli@dev', 'login', '--poll', 'abc']),
       ]),
+      {},
       { max: 4 },
     )
     expect(r.score).toBe(4)
@@ -1323,46 +1324,101 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
   })
 
   it('fails when the wall is never reached', () => {
-    const r = onboardingToolCalls(log([call('WebFetch', { args: { url: 'https://dev.example/' } })]), { max: 12 })
+    const r = onboardingToolCalls(log([call('WebFetch', { args: { url: 'https://dev.example/' } })]), {}, { max: 12 })
     expect(r.pass).toBe(false)
     expect(r.detail).toContain('never reached the login wall')
   })
 
+  it.each([
+    ['a refused login', ['npx', '-y', '@haven_ai/cli', 'login'], { ok: false }],
+    ['a login that failed', ['npx', '@haven_ai/cli@dev', 'login'], { ok: false }],
+    ['another program', ['npm', 'login'], { ok: false }],
+    ['login as a later word', ['npx', '@haven_ai/cli@dev', 'guide', 'login'], { ok: true }],
+  ])('%s is not the wall (#4674 review)', (_label, argv, result) => {
+    const r = onboardingToolCalls(log([call('run_command', { args: { argv }, result })], 'You need a passkey, to fund it and to approve a budget.'), {}, { max: 12 })
+    expect(r.pass).toBe(false)
+  })
+
   describe('with handoffPath, a signup hand-off ends the run too (owner decision 2026-11-06)', () => {
     const opts = { max: 3, handoffPath: '/signup' }
+    const ctx: GraderContext = {
+      resolved: {
+        task: { id: 'onboarding-cold-setup', title: 't', category: 'onboarding', instruction: 'x', requires: [], graders: [], expectTransfer: false, source: { kind: 'issue', ref: '4680', note: 'n' } },
+        amountAtomic: 0n,
+        instruction: 'x',
+        coldProfile: { landingUrl: 'https://dev.example/some/page', cliPackage: '@haven_ai/cli@dev' },
+      },
+    }
     const fetches = (n: number) => Array.from({ length: n }, () => call('WebFetch', { args: { url: 'https://dev.example/' } }))
     const SIGNUP = 'Please open https://dev.example/signup?next=/agents and create your account.'
 
-    it('counts every call to a final message naming the path', () => {
-      const r = onboardingToolCalls(log(fetches(3), SIGNUP), opts)
+    it('counts every call to a final message linking the path', () => {
+      const r = onboardingToolCalls(log(fetches(3), SIGNUP), ctx, opts)
       expect(r.score).toBe(3)
       expect(r.pass).toBe(true)
     })
 
+    it.each([
+      'Open HTTPS://DEV.EXAMPLE/SIGNUP now.',
+      'Open **https://dev.example/signup** now.',
+      'Open [the page](https://dev.example/signup).',
+      'Open https://dev.example/signup.',
+    ])('accepts the link however it is written: %s', (message) => {
+      expect(onboardingToolCalls(log(fetches(1), message), ctx, opts).pass).toBe(true)
+    })
+
+    it.each([
+      ['another host', 'Open https://evil.example/signup now.'],
+      ['a host that only starts the same', 'Open https://dev.example.evil.test/signup now.'],
+      ['a longer path', 'Open https://dev.example/signups/help now.'],
+      ['a hyphenated path', 'Open https://dev.example/signup-help now.'],
+      ['a path alone', 'Open /signup now.'],
+      ['no link at all', 'Create an account with a passkey.'],
+    ])('fails %s', (_label, message) => {
+      const r = onboardingToolCalls(log(fetches(1), message), ctx, opts)
+      expect(r.pass).toBe(false)
+      expect(r.detail).toContain('links no /signup')
+    })
+
     it('still applies max to that count', () => {
-      const r = onboardingToolCalls(log(fetches(4), SIGNUP), opts)
+      const r = onboardingToolCalls(log(fetches(4), SIGNUP), ctx, opts)
       expect(r.score).toBe(4)
       expect(r.pass).toBe(false)
     })
 
-    it('fails a final message that names no such path', () => {
-      const r = onboardingToolCalls(log(fetches(1), 'Create an account with a passkey.'), opts)
-      expect(r.pass).toBe(false)
-      expect(r.detail).toContain('names no /signup')
+    it('fails a run with no final message', () => {
+      expect(onboardingToolCalls(log(fetches(1)), ctx, opts).pass).toBe(false)
     })
 
-    it('fails a run with no final message', () => {
-      expect(onboardingToolCalls(log(fetches(1)), opts).pass).toBe(false)
+    it('fails closed with no usable landing URL', () => {
+      const noLanding = onboardingToolCalls(log(fetches(1), SIGNUP), {}, opts)
+      expect(noLanding.pass).toBe(false)
+      expect(noLanding.detail).toContain('no usable landing URL')
+      const broken: GraderContext = { resolved: { ...ctx.resolved!, coldProfile: { landingUrl: 'not a url', cliPackage: '@haven_ai/cli@dev' } } }
+      expect(() => onboardingToolCalls(log(fetches(1), SIGNUP), broken, opts)).not.toThrow()
+      expect(onboardingToolCalls(log(fetches(1), SIGNUP), broken, opts).pass).toBe(false)
     })
 
     it('counts to a login command when there is one, whatever the message says', () => {
-      const r = onboardingToolCalls(log([...fetches(1), run(['npx', '@haven_ai/cli@dev', 'login']), ...fetches(3)], SIGNUP), opts)
+      const r = onboardingToolCalls(log([...fetches(1), run(['npx', '@haven_ai/cli@dev', 'login']), ...fetches(3)], 'Done.'), ctx, opts)
       expect(r.score).toBe(2)
       expect(r.pass).toBe(true)
     })
 
+    it('a refused login with no link has not handed off', () => {
+      const refused = call('run_command', { args: { argv: ['npx', '-y', '@haven_ai/cli', 'login'] }, result: { ok: false } })
+      expect(onboardingToolCalls(log([refused], 'You need a passkey.'), ctx, opts).pass).toBe(false)
+    })
+
+    it('a failed login followed by a link has handed off, counting every call', () => {
+      const failed = call('run_command', { args: { argv: ['npx', '@haven_ai/cli@dev', 'login'] }, result: { ok: false } })
+      const r = onboardingToolCalls(log([...fetches(1), failed], SIGNUP), ctx, opts)
+      expect(r.pass).toBe(true)
+      expect(r.score).toBe(2)
+    })
+
     it('does not apply without the option', () => {
-      expect(onboardingToolCalls(log(fetches(1), SIGNUP), { max: 3 }).pass).toBe(false)
+      expect(onboardingToolCalls(log(fetches(1), SIGNUP), ctx, { max: 3 }).pass).toBe(false)
     })
   })
 })

@@ -92,6 +92,13 @@ function escapeRe(s: string): string {
 
 /** The paid MCP tools whose results carry the merchant's paid body. */
 const PAID_TOOL = /(?:^|__)haven_(?:complete|settle)_mcp_tool$/
+/**
+ * Claude Code's own fetch answers `tool_use_result: { bytes, code, codeText,
+ * result, durationMs, url }`. That `result` repeats the `tool_result` text, which
+ * stays, and the scan flags any nested `result`, so this copy goes the way a paid
+ * body does (#4696). It is not a merchant's body, so the marker overstates it.
+ */
+const WEB_FETCH_TOOL = 'WebFetch'
 
 /**
  * Decode `\uXXXX` escapes (at any escape level) that stand for a printable
@@ -540,14 +547,17 @@ class Redactor {
     return this.strings(text)
   }
 
-  /** Remember which tool each `tool_use` id names; true when this line answers a paid tool. */
+  /** Remember which tool each `tool_use` id names; true when this line answers a tool whose `result` is stripped. */
   private trackTools(line: unknown): boolean {
     const content = (line as { message?: { content?: unknown } })?.message?.content
     if (!Array.isArray(content)) return false
     let paid = false
     for (const block of content as Array<Record<string, unknown>>) {
       if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') this.toolNames.set(block.id, block.name)
-      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string' && PAID_TOOL.test(this.toolNames.get(block.tool_use_id) ?? '')) paid = true
+      if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+        const name = this.toolNames.get(block.tool_use_id) ?? ''
+        if (PAID_TOOL.test(name) || name === WEB_FETCH_TOOL) paid = true
+      }
     }
     return paid
   }
@@ -903,6 +913,12 @@ export async function runRedaction(opts: RedactRunOptions): Promise<RedactRunRes
   for (const name of files) {
     const counts = scanSessionText(await readFile(join(opts.stageDir, name), 'utf8'), secrets)
     for (const c of REDACTION_CLASSES) scanCounts[c] += counts[c]
+    // A hit loses the whole run's transcripts, so it says where (#4696). The
+    // name is `<base>.<task>.trial<N>.jsonl`, which carries no secret.
+    if (totalOf(counts) > 0) {
+      const hits = REDACTION_CLASSES.filter((c) => counts[c] > 0).map((c) => `${c}: ${counts[c]}`)
+      log(`::error::redact-sessions scan hit in ${name}: ${hits.join(', ')}`)
+    }
   }
   if (totalOf(scanCounts) > 0) {
     for (const c of REDACTION_CLASSES) {

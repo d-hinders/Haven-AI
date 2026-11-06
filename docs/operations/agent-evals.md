@@ -1060,8 +1060,12 @@ packages/qa-agent`) and uploads the result as
   base64 decode of every base64-looking run), and it treats ANY nested
   `result` as a merchant body, which is broader than the redactor's
   predicate. A needle built wrong or a rule that stops redacting is therefore
-  a scan hit. Only a clean scan moves the files to the upload directory and
-  sets `clean=true`, and the upload step is gated on
+  a scan hit, and each hit names its file and classes, because it costs the
+  whole run its transcripts. Claude Code's `WebFetch` answer carries its own
+  `tool_use_result.result`, a copy of the `tool_result` text: the redactor
+  strips that copy by tool name and keeps the text, under the `merchant-body`
+  marker though no merchant wrote it (#4696). Only a clean scan moves the
+  files to the upload directory and sets `clean=true`, and the upload step is gated on
   `steps.redact.outputs.clean == 'true'`, which is the step right after it.
   No other step names the staging or upload directory, and every upload path
   is on a fixed allowlist (the guard checks all three).

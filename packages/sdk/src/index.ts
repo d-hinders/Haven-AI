@@ -136,6 +136,7 @@ export type {
   MachinePaymentRail,
   HavenAgent,
   HavenAgentSupersession,
+  HavenAgentPassport,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,

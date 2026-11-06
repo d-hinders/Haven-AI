@@ -6761,7 +6761,10 @@ export const openapiSpec = {
                     status: { type: 'string', enum: ['submitted'] },
                     payment_header: { type: 'string', description: 'The merchant X-PAYMENT header. Single-use and bound to this amount and merchant.' },
                     resource_url: { type: ['string', 'null'] },
-                    passport: { description: 'Optional passport reference for the paying agent.' },
+                    passport: {
+                      description: 'The paying agent\'s passport reference, or null when it has no anchored passport (#976).',
+                      anyOf: [{ $ref: '#/components/schemas/AgentPassportReference' }, { type: 'null' }],
+                    },
                   },
                 },
               },
@@ -12949,9 +12952,23 @@ export const openapiSpec = {
           { $ref: '#/components/schemas/MppResumeState' },
         ],
       },
+      AgentPassportReference: {
+        type: 'object',
+        required: ['attestation_uid', 'chain_id'],
+        description:
+          "An anchored passport's compact reference (#976, #4721). A merchant resolves `attestation_uid` + `chain_id` against a Haven verifier it already pins (`GET /passport/verify?uid=`), never against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust.",
+        properties: {
+          attestation_uid: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          chain_id: { type: 'integer' },
+          verify_url: {
+            type: 'string',
+            description: 'Present only when this deployment has a configured base URL AND a live verifier.',
+          },
+        },
+      },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail', 'superseded_by'],
+        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail', 'superseded_by', 'passport'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -12967,6 +12984,15 @@ export const openapiSpec = {
            */
           delegate_account_address: { anyOf: [address, { type: 'null' }] },
           superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
+          /**
+           * #4721 (epic #4718): the agent's OWN passport reference, so it can
+           * present it to a merchant that asks. Null when the agent has no
+           * anchored passport (none, pending or failed) and when the bounded
+           * lookup failed — metadata, never authority.
+           */
+          passport: {
+            anyOf: [{ $ref: '#/components/schemas/AgentPassportReference' }, { type: 'null' }],
+          },
           chain_id: { type: 'integer' },
           execution_rail: {
             type: 'string',

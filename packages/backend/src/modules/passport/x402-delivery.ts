@@ -15,7 +15,7 @@
  * | Scheme | Can the reference ride the payment? | Delivery |
  * |---|---|---|
  * | **erc7710** (direct settlement) | Best-effort | Haven's settle response carries it; the agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a bonus, not the mechanism. |
- * | **EIP-3009** (#946, the path with real merchant reach) | **No** | The merchant sees a STANDARD header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the ONLY delivery. |
+ * | **EIP-3009** (#946, the path with real merchant reach) | **No** | The merchant sees a STANDARD header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery to the merchant; the agent can read its own reference from `GET /machine-payments/agent` (#4721) and hand it over out of band. |
  *
  * The 3009 row is the strongest argument for the verifier endpoint being
  * PRIMARY rather than a fallback — the scheme with actual merchant adoption
@@ -46,7 +46,8 @@ export interface PassportReference {
    * A CONVENIENCE link to Haven's verifier, not a root of trust.
    *
    * This whole object reaches a merchant by way of the AGENT — Haven returns it
-   * on the settle response, the agent forwards it over whatever channel it
+   * on the settle response and on the agent's own identity read
+   * (`GET /machine-payments/agent`, #4721), the agent forwards it over whatever channel it
    * likes. So every field here is agent-controlled by construction, `verify_url`
    * included: an agent can substitute a URL it operates and have it answer
    * `{ found: true }` for anything. A merchant that resolves the supplied URL is

@@ -5701,6 +5701,13 @@ export type components = {
             expiresAt: string;
         };
         PaymentResumeState: components["schemas"]["X402ResumeState"] | components["schemas"]["MppResumeState"];
+        /** @description An anchored passport's compact reference (#976, #4721). A merchant resolves `attestation_uid` + `chain_id` against a Haven verifier it already pins (`GET /passport/verify?uid=`), never against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust. */
+        AgentPassportReference: {
+            attestation_uid: string;
+            chain_id: number;
+            /** @description Present only when this deployment has a configured base URL AND a live verifier. */
+            verify_url?: string;
+        };
         MachinePaymentAgent: {
             /** Format: uuid */
             id: string;
@@ -5712,6 +5719,7 @@ export type components = {
             delegate_address: string;
             delegate_account_address: string | null;
             superseded_by: components["schemas"]["AgentSupersession"];
+            passport: components["schemas"]["AgentPassportReference"] | null;
             chain_id: number;
             /**
              * @description Which rail this agent's account is on (#1306). `delegation` means spend is gated by the agent's active budget delegations, enforced on-chain by the caveat enforcers. `legacy` is the RETIRED Safe / AllowanceModule rail (#1986) and gates nothing any more — every payment entry point answers 410 for such an account, so read it as "this account cannot pay until it re-onboards via POST /accounts/hybrid", not as a second live policy primitive. Reporting only; the enum keeps both values because a retired-rail account can still read its own identity here.

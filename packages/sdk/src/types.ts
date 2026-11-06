@@ -730,6 +730,22 @@ export interface HavenAgent {
    * removes it. Null when not superseded, and on an older backend that sends nothing.
    */
   supersededBy: HavenAgentSupersession | null
+  /**
+   * #4721: this agent's own Agent Passport reference, or null when it has no
+   * anchored passport (none, pending or failed), when the read failed, and on
+   * an older backend that sends nothing. Present `attestationUid` + `chainId`
+   * to a merchant that asks for them; never treat `verifyUrl` as authority —
+   * a merchant resolves the UID against a Haven verifier it already pins.
+   */
+  passport: HavenAgentPassport | null
+}
+
+/** #4721: an anchored passport's compact reference. */
+export interface HavenAgentPassport {
+  attestationUid: string
+  chainId: number
+  /** A convenience link to Haven's verifier; absent when the deployment cannot honestly emit one. */
+  verifyUrl?: string
 }
 
 /** #3772: the "this agent was replaced" notice carried by agent reads. */
@@ -2691,6 +2707,8 @@ export interface RawHavenAgent {
   execution_rail: string
   /** #3772: absent on an older backend. */
   superseded_by?: { agent_id: string; superseded_at: string } | null
+  /** #4721: absent on an older backend. */
+  passport?: { attestation_uid: string; chain_id: number; verify_url?: string } | null
 }
 
 /** @internal */

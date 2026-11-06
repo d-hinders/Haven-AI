@@ -8,6 +8,58 @@ describe('agent info helpers', () => {
     vi.restoreAllMocks()
   })
 
+  // ── #4721: the agent's own passport reference ───────────────────────────
+  it('maps an anchored passport reference onto HavenAgent.passport (#4721)', async () => {
+    const uid = '0x' + 'ab'.repeat(32)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        id: 'agent-1', name: 'A', status: 'active', account_address: '0xSafe', delegate_address: '0xDelegate',
+        chain_id: 84532, execution_rail: 'delegation',
+        passport: { attestation_uid: uid, chain_id: 84532, verify_url: 'https://api.example/passport/verify?uid=' + uid },
+      })),
+    )
+    const agent = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgent()
+    expect(agent.passport).toEqual({
+      attestationUid: uid,
+      chainId: 84532,
+      verifyUrl: 'https://api.example/passport/verify?uid=' + uid,
+    })
+  })
+
+  it('reads a malformed passport as null, never as a reference to present (#4721)', async () => {
+    const bad = [
+      null,
+      'not-an-object',
+      { attestation_uid: '0x1234', chain_id: 84532 },
+      { attestation_uid: '0x' + 'ab'.repeat(32), chain_id: '84532' },
+      { attestation_uid: '0x' + 'ab'.repeat(32), chain_id: 0 },
+      { chain_id: 84532 },
+    ]
+    for (const passport of bad) {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: 'agent-1', name: 'A', status: 'active', account_address: '0xSafe', delegate_address: '0xDelegate',
+          chain_id: 84532, execution_rail: 'delegation', passport,
+        })),
+      )
+      const agent = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgent()
+      expect(agent.passport, JSON.stringify(passport)).toBeNull()
+    }
+  })
+
+  it('drops a non-string verify_url rather than coercing it (#4721)', async () => {
+    const uid = '0x' + 'cd'.repeat(32)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        id: 'agent-1', name: 'A', status: 'active', account_address: '0xSafe', delegate_address: '0xDelegate',
+        chain_id: 84532, execution_rail: 'delegation',
+        passport: { attestation_uid: uid, chain_id: 84532, verify_url: 42 },
+      })),
+    )
+    const agent = await new HavenClient({ apiKey: 'sk_agent_test', baseUrl }).getAgent()
+    expect(agent.passport).toEqual({ attestationUid: uid, chainId: 84532 })
+  })
+
   it('maps the authenticated agent identity', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({
@@ -32,6 +84,8 @@ describe('agent info helpers', () => {
       chainId: 8453,
       executionRail: 'legacy',
       supersededBy: null,
+      // #4721: the stub carries no passport key (an older backend) — null.
+      passport: null,
     })
     expect(fetchMock).toHaveBeenCalledWith(
       `${baseUrl}/machine-payments/agent`,
@@ -213,6 +267,7 @@ describe('agent info helpers', () => {
       chainId: 8453,
       executionRail: 'legacy',
       supersededBy: null,
+      passport: null,
       readiness: 'ready',
       // #1590: same value under the honest name; `readiness` is the
       // deprecated alias and stays byte-identical.

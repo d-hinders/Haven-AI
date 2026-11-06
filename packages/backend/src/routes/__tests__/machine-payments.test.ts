@@ -459,7 +459,83 @@ describe('machine payment routes', () => {
       parent_sub_budgets: [],
       // #3772: always present; null for an agent that was never superseded.
       superseded_by: null,
+      // #4721: always present; null for an agent with no anchored passport.
+      passport: null,
     })
+  })
+
+  // ── #4721: the agent reads its OWN passport reference ────────────────────
+  const PASSPORT_UID = '0x' + 'ab'.repeat(32)
+  const passportRow = (status: string, uid: string | null = PASSPORT_UID): DbRoute => [
+    /FROM agent_passports WHERE agent_id = \$1/,
+    () => ({ rows: [{ agent_id: AGENT.id, chain_id: 84532, status, attestation_uid: uid }] }),
+  ]
+
+  it('GET /agent carries the anchored passport reference (#4721)', async () => {
+    primeDb(AUTH, passportRow('anchored'))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
+    expect(response.json().passport).toMatchObject({ attestation_uid: PASSPORT_UID, chain_id: 84532 })
+    // Read for THIS agent, never another.
+    expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)?.params).toEqual([AGENT.id])
+  })
+
+  it('GET /agent reads passport: null for a pending or failed passport — nothing a merchant could resolve (#4721)', async () => {
+    for (const status of ['pending', 'failed']) {
+      primeDb(AUTH, passportRow(status, null))
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/agent',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().passport).toBeNull()
+    }
+  })
+
+  it('GET /agent stays 200 with passport: null when the passport lookup fails (#4721)', async () => {
+    primeDb(AUTH, [/FROM agent_passports WHERE agent_id = \$1/, () => { throw new Error('passport table unavailable') }])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().passport).toBeNull()
+    expect(response.json().id).toBe(AGENT.id)
+  })
+
+  it('GET /agent runs the passport lookup concurrently with the other identity reads (#4721)', async () => {
+    // Hold the passport lookup open and prove the supersession read is
+    // already issued before it settles: sequential awaits would not reach it.
+    let releasePassport: () => void = () => {}
+    const passportHeld = new Promise<void>((resolve) => {
+      releasePassport = resolve
+    })
+    primeDb(AUTH, [
+      /FROM agent_passports WHERE agent_id = \$1/,
+      async () => {
+        await passportHeld
+        return { rows: [] }
+      },
+    ])
+    const pending = app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    await vi.waitFor(() => {
+      expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)).toBeDefined()
+      expect(findCall(/superseded_by_agent_id/)).toBeDefined()
+    })
+    releasePassport()
+    const response = await pending
+    expect(response.statusCode).toBe(200)
   })
 
   // ── #3772: superseded_by (warning only) ──────────────────────────────────

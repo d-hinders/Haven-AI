@@ -848,7 +848,7 @@ narrowness is the point:
 | Scheme | Reference rides the payment? | Delivery |
 |---|---|---|
 | **erc7710** (direct settlement) | Best-effort | `POST /x402/:id/settle` returns `passport: { attestation_uid, chain_id }`, optionally with `verify_url`. The agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
-| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **No** | The merchant sees a **standard** header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery **Haven provides to the agent** — `GET /agents/:id/passport` is dashboard-auth, so an agent cannot fetch its own UID, though an owner can hand it over out of band. |
+| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **No** | The merchant sees a **standard** header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery **to the merchant**. The agent reads its own reference from its identity read, `GET /machine-payments/agent` → `passport` (#4721; `HavenAgent.passport` in the SDK, `haven_get_agent` in both MCP servers), and can hand it over out of band. |
 
 **The 3009 row is why the verifier endpoint is primary, not a fallback.** The
 scheme with actual merchant adoption cannot carry the reference at all.

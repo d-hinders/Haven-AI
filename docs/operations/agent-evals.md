@@ -730,6 +730,15 @@ Env the run needs (all dev/testnet):
   `mcp-merchant-skip-settle-storage_50gb` stands for; it buys
   `buy_cloud_storage` `{"tier":"50gb"}` (0.0005 USDC), whose catalog row is
   delisted, so the instruction names merchant and tool.
+- `QA_EVAL_DEV_LANDING_URL` — the URL the two cold tasks
+  (`onboarding-cold-setup`, `onboarding-client-out-of-date`) give the agent.
+  `agent-evals.yml` sets it from its `dev_landing_url` input; on dev that is
+  the branch-tracking preview of `dev`,
+  `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+  ([`dev-environment.md`](dev-environment.md)). Without it, a selection with a
+  cold task exits 2 before the first agent session, so a `full` run runs none
+  of its 20 tasks, not 18 of them. `subset` does not read it, because `--limit`
+  leaves the cold tasks out.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
@@ -770,7 +779,7 @@ Other flags:
   with or without a shuffle. A task with a per-trial `setup` is excluded
   from the `--limit` slice (#4678): it provisions its own throwaway
   identity and spends USDC, so it runs only when named with `--task=` or in
-  a full (unlimited) run.
+  a full (unlimited) run. A cold task is excluded the same way.
 - `--task=<id>[,<id>…]` — run EXACTLY the named task ids (#4218), filtered
   from the canonical (tiered) set: tier order and any `--shuffle=<seed>`
   still apply, a repeated id runs once, and NO prerequisite is added
@@ -1207,8 +1216,11 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   hosted MCP commit it ran against and states that backend error bodies stay
   dev-deployed. The five are the shared-agent tasks: a task with a per-trial
   `setup` is excluded from the `--limit` slice (#4678), so the subset never
-  provisions throwaway identities or spends USDC implicitly.
-- **full**: every task, against the deployed dev stack.
+  provisions throwaway identities or spends USDC implicitly. It leaves the
+  cold tasks out too, so it needs no `dev_landing_url`.
+- **full**: every task, against the deployed dev stack. Needs the
+  `dev_landing_url` input (see `QA_EVAL_DEV_LANDING_URL` under *Running the
+  suite*): without it the run exits 2 before the first task.
 - **tasks** (optional input): a comma-separated list of task ids, e.g.
   `x402-eip3009-bridge-vpn-legacy` — runs EXACTLY those tasks with no
   `--limit`, whatever the `suite` is (the suite still decides the hosted MCP
@@ -1218,7 +1230,8 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   prove ONE task end to end: dispatch with `tasks=<id>` and `trials=3` (the
   `trials` input defaults to `1`) — a filtered run instead of a whole
   budget period. A filtered run's summary states the filter, so "pass^k on
-  1/1 tasks" does not read as a whole-suite green.
+  1/1 tasks" does not read as a whole-suite green. A list naming a cold task
+  needs `dev_landing_url` as well.
 
 Either way the run waits for the environment approval. It is NOT a required
 check on `dev` or `main`.

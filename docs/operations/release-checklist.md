@@ -2,7 +2,7 @@
 owner: "@d-hinders"
 status: current
 covers: []  # narrative — list the code paths this doc describes, one per line
-last-verified: "2026-10-29"
+last-verified: "2026-11-06"
 ---
 
 # Release checklist
@@ -48,9 +48,13 @@ unclear; this page is the order, not the reasoning.
    duplicate check before a new unique index) against prod before merging.
    See `promoting-dev-to-main.md` § *Migrations*.
 6. **Optional, non-blocking: run the agent evals.** Start a run from the
-   Actions tab or with
-   `gh workflow run agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full`
-   (`-f suite=subset`, or `-f tasks=<ids>` for an exact list). The job sits
+   Actions tab, filling in `dev_landing_url`, or with
+   `gh workflow run agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full -f dev_landing_url=https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+   (`-f suite=subset`, or `-f tasks=<ids>` for an exact list). That URL is the
+   branch-tracking preview of `dev`, a stable hostname listed in
+   [`dev-environment.md`](dev-environment.md). A full run, or a `tasks` list
+   naming a cold task, needs it: without it the run exits 2 before the first
+   task and nothing is tested. `subset` leaves the cold tasks out. The job sits
    behind the owner-approved `agent-evals` environment, so **only the owner can
    approve it** — that approval is the one step here a maintainer cannot do for
    another. It **never blocks a release**: the workflow is manual-only, is not a

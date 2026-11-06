@@ -12,11 +12,11 @@ a follow-up out of a PR review, a finding deferred from `ship-next`, a
 quality-scan handoff. A bare `gh issue create` (or the GitHub integration's
 create call) is the *mechanism* step 6 uses, not a substitute for the skill: an
 issue filed around it skips the measurement rule, the prior-art sweep, the
-backlog default and the § *Issue review* pass, and every one of those exists
-because an issue filed without it went wrong. Exempt: issues that CI workflows
-and scripts open by themselves (for example `guard-freshness`'s `ci-health`
-issue, or the `docs-audit` workflow), which record a
-machine's observation, not an agent's judgement.
+backlog default and the [review-issue](../review-issue/SKILL.md) pass, and every
+one of those exists because an issue filed without it went wrong. Exempt: issues
+that CI workflows and scripts open by themselves (for example
+`guard-freshness`'s `ci-health` issue, or the `docs-audit` workflow), which
+record a machine's observation, not an agent's judgement.
 
 ## Workflow
 
@@ -86,9 +86,11 @@ machine's observation, not an agent's judgement.
    minutes, so an issue is never filed on the assumption that nobody will start
    it while its review or an owner question is still open.
 7. Apply every inferred `area:*` label and `money-path` when applicable. **Leave the issue unassigned** unless the requester asks to own it — both issue templates ship `assignees: []`, and a queue of unassigned issues is what the loop expects to read. Assignment records ownership; a `🔒 CLAIM` comment, never an assignee, records that someone is building right now. A PR that closes the issue clears every assignee on merge (#3177), so an assignee used for tracking does not survive the close.
-8. Run § *Issue review* on the created issue, apply its corrections, and post
-   the verdict comment. **Not optional, and not sized:** it runs on every issue
-   this skill files, single task or epic, whatever its size or risk.
+8. Run [review-issue](../review-issue/SKILL.md) on the created issue in repair
+   mode — the filing request authorizes repairing only the issue just created —
+   apply its corrections, and post the verdict comment. **Not optional, and not
+   sized:** it runs on every issue this skill files, single task or epic,
+   whatever its size or risk.
 9. Lift `pending-review` only when § *Hold until ready* allows it, then return
    the issue link, applied labels, what the review changed, and — when the label
    stays on — exactly which owner questions it is waiting for.
@@ -101,8 +103,8 @@ agent coordination* and `ship-next`'s selector both treat an issue carrying it
 as unclaimable. It goes on at creation (step 6) and comes off only when **all**
 of these hold:
 
-1. the § *Issue review* pass has run, its corrections are in the body, and the
-   verdict comment is posted;
+1. the [review-issue](../review-issue/SKILL.md) pass has run, its corrections are
+   in the body, and the verdict comment is posted;
 2. **no owner question is open** — every question addressed to the owner is
    answered by the owner, recorded on the issue, and folded into the body;
 3. the body says so: owner questions live under `## Open questions (owner)`,
@@ -129,8 +131,8 @@ a maintainer nor a Bot. There, the label's absence does NOT make the issue
 ready: an external issue stays unclaimable until a maintainer accepts it by
 removing `external` (AGENTS.md § *Cross-session agent coordination*, rule 0b),
 whatever else it carries. After acceptance, `pending-review` comes off like any
-other issue's — once the § *Issue review* has run on it, by the session that
-runs it, or by the maintainer.
+other issue's — once the [review-issue](../review-issue/SKILL.md) pass has run on
+it, by the session that runs it, or by the maintainer.
 
 **Put it back** the moment a new owner question appears on an issue nobody has
 claimed yet — a review finding that needs a ruling, a scope gap the code
@@ -270,150 +272,39 @@ Measured on `origin/dev` @ `3d056b8f`.
 ````
 
 - **Post one spec-review verdict comment on the epic before partners are
-  pinged.** The § *Issue review* pass below ends with the captain posting this
-  shape on the tracking issue (a single task gets the same comment on itself):
-
-````markdown
-Spec-review verdict on `origin/dev` @ `3d056b8f`: 9 claims re-run, 8 reproduce,
-1 wrong (fixed): "27 `-rgb` twins" measures 20 (`grep -rc "rgb(" packages/frontend/src/app`).
-Open questions: whether refusal caps belong on the ledger or the agent card.
-Corrections: 1.
-````
-
-The comment **starts** with `Spec-review verdict` and **ends** with
-`Corrections: <n>.` — the number of body edits the review caused (wrong claims
-fixed, scope gaps settled, criteria rewritten; `0` when the body stood). That
-last line is what § *Issue review* → *Re-measure* counts, so it is written on
-every verdict, `0` included.
+  pinged.** The [review-issue](../review-issue/SKILL.md) pass ends with the
+  captain posting the verdict on the tracking issue (a single task gets the same
+  comment on itself). Its shape, the `Corrections: <n>.` line, and the
+  registered re-measurement that reads that line are defined once in
+  [review-issue § Comment mode](../review-issue/SKILL.md#comment-mode) — do not
+  restate them here.
 
 ## Issue review
 
 **Every issue this skill files gets one independent review before it is
 announced, queued or shipped** — a single task and an epic alike, with no size,
-risk or "docs-only" exemption. A per-issue test of whether the review is worth
-running is the conditional the owner already rejected for pull requests
-(CLAUDE.md, 2026-08-21); this rule extends the same decision to issues.
+risk or "docs-only" exemption. The canonical workflow is
+[review-issue](../review-issue/SKILL.md): its rubric, the three questions, the
+isolation and delta rules, the verdict contract, and the registered
+issue-review re-measurement all live there. This skill keeps no second copy of
+them.
 
-**Why it is mandatory (2026-09-24).** It used to run for epics only ("not run
-for single tasks"). On 2026-09-24 three single tasks were filed with every
-figure measured at a named commit — #3264, #3266, #3267 — and a review of each
-still found material defects in all three, none of which measurement catches:
-seven missed copies of the stale claim being fixed; an acceptance criterion that
-capped the diff at two files and so forbade the fix; a criterion whose grep also
-matched an unrelated word ("fail-safes") that nothing in the scope could remove;
-a rename that would have made three "retired names must stay gone" guard tests
-vacuous; test fixtures that already passed without exercising anything; a
-caller list that named three wrong files; and an open question with a real
-answer (a fail-open path that still gates multi-replica). The measurement rule
-in step 1 proves the figures; this pass proves the *scope* and the *criteria*.
-The three reviews ran in parallel in under two minutes each.
+What this skill still owns, in order:
 
-**When.** After the issue (or the epic and its sub-issues) is created, and
-**before** any of: `code-quality` is added, a `--ship` hands off to
-[ship-next](../ship-next/SKILL.md), `pending-review` is lifted, or the issue is
-announced to partners. An issue the loop can select before its review has run
-has skipped it.
+1. **Dispatch it after filing** (step 8), before `code-quality` is added, a
+   `--ship` hands off to [ship-next](../ship-next/SKILL.md), `pending-review`
+   is lifted, or the issue is announced to partners.
+2. **Repair only the issue it just created.** The request to file is the
+   authorization for that repair; it does not authorize a direct
+   `$review-issue` invocation to mutate anything.
+3. **Post the verdict** in the shape [review-issue § Comment
+   mode](../review-issue/SKILL.md#comment-mode) defines — it starts with
+   `Spec-review verdict on` and ends with `Corrections: <n>.`
+4. **Lift `pending-review`** only when § *Hold until ready* allows it.
 
-**Who.** The captain dispatches **one
-[haven-reviewer](../haven-agent-workflow/SKILL.md) pass per issue** (per epic:
-one pass covering the tracking issue and every sub-issue) with the brief below.
-Several issues filed together are reviewed in parallel. The role already exists
-([`.agents/skills/haven-agent-workflow/references/reviewer.md`](../haven-agent-workflow/references/reviewer.md),
-dispatched by `.claude/agents/haven-reviewer.md`) — no new agent file, and the
-review runs in its own isolated tree per that role's rules. The brief is fixed
-text so two sessions dispatch the same review:
-
-> Re-run every claim in the issue body (for an epic, the tracking issue and
-> each sub-issue) against `origin/dev` at the commit the body names: every
-> `file:line`, count, status list, schema and mechanism claim, reading the
-> statement that does the work, not the comment above it. Report each as
-> *reproduces* / *wrong (with the measured value and command)* / *could not
-> verify*. Then:
-> 1. **Completeness** — find every other copy of the claim or pattern the issue
->    fixes (code, comments, env examples, docs, tests, skill text) and list the
->    ones the scope misses; name the historical records (CASP shards, archive,
->    ledger entries) that must stay as written.
-> 2. **Criteria** — for each acceptance criterion: is it false today, reachable
->    when the work is done, and impossible to satisfy while the problem
->    survives? Flag a criterion that forbids the fix, matches something
->    unrelated, or is already true.
-> 3. **Guards** — would the change as scoped weaken a test, lint or guard (a
->    rename inside a "must stay absent" test, a fixture or route the code no
->    longer reads)? Name any test that already passes without exercising what
->    its name claims.
-> 4. **Levers** — name anything that could break an installed client (SDK,
->    signer, connector, credential file, env var, persisted browser storage), a
->    wire field, a live payment path, or a migration ordering.
-> 5. **Gaps** — list what the scope does not say that a builder would have to
->    decide, and answer any question the issue poses where the code answers it.
-> 6. **Design system** — for `area:frontend`, compare the issue's `## Design
->    system` section with `/design-system` and the existing component usages.
->    Flag a missing matching Pattern, an incomplete caller list, or an
->    unlabeled new pattern that lacks a separate design-system-first slice and
->    owner approval.
->
-> Findings by severity (blocking / should-fix / nit); no edits; no issues filed.
-
-The captain then has three obligations before the issue is queued or announced:
-
-1. **Fix** every *wrong* claim and every blocking or should-fix finding in the
-   body — re-measured by the captain at a named SHA, never copied from the
-   reviewer's wording.
-2. **Resolve or state** every named lever and scope gap: settle it in the body,
-   or record it as an open question naming who answers it — one for the owner
-   goes under `## Open questions (owner)` and keeps `pending-review` on
-   (§ *Hold until ready*); one for a partner or the builder does not.
-3. **Post the verdict comment** on the issue (for an epic, on the tracking
-   issue): it opens with the words `Spec-review verdict on` and the reviewed SHA,
-   lists the corrections applied and the open questions, and ends with
-   `Corrections: <n>.` (the full shape and an example are in § *Epics* above).
-   The comment is the record that the review ran, and *Re-measure* counts it.
-
-A body with no code claims still gets the pass — the claim re-run is empty, but
-completeness, criteria and gaps are not.
-
-### Re-measure (registered 2026-09-24, #2781 discipline)
-
-Making this pass mandatory for single tasks is a rule agents must follow, so it
-carries a number checked afterwards, the same way #2781 checked the filing bar
-(reverted by #3248 when it did not move). Agreed **before** the result is
-known:
-
-- **Window:** `FROM` = the day after the rule merges to `dev`; `END` = `FROM`
-  + 14 days, exclusive (14 whole days). Re-measure on `END` or later.
-- **Metric:** among verdict comments *created* in the window on issues **not**
-  labelled `epic` (epic reviews were already mandatory, so they are not what is
-  under test), the share whose `Corrections:` line is ≥ 1 — how often the newly
-  mandatory pass changes the issue it reviewed. Baseline is 3 of 3 (#3264,
-  #3266, #3267, 2026-09-24), a favourable sample: three issues filed fast, in an
-  unfamiliar area, by one session.
-- **Decision rule:** fewer than **1 in 4** single-task verdicts with a
-  correction, **or** fewer than 8 single-task verdicts in the window (the rule
-  was not followed, so it measured nothing) → the "did not move" arm: single
-  tasks go back to optional review, epics keep theirs, and no other rule is
-  added in its place. Otherwise the rule stays. Verdicts reported as
-  `missing` (no `Corrections:` line) count as verdicts **without** a
-  correction.
-- **Instrument** — run exactly this; a changed instrument is a new baseline:
-
-```bash
-# new-task issue-review re-measure. FROM=YYYY-MM-DD END=YYYY-MM-DD (exclusive)
-export FROM END
-gh api --paginate "repos/{owner}/{repo}/issues/comments?since=${FROM}T00:00:00Z&per_page=100" \
-  --jq '.[] | select(.created_at >= ($ENV.FROM + "T00:00:00Z") and .created_at < ($ENV.END + "T00:00:00Z"))
-        | select(.body | test("^[#* ]*Spec-review verdict"))
-        | [.issue_url, ([.body | scan("Corrections: ([0-9]+)")] | last // ["missing"])[0]] | @tsv' \
-| while IFS=$'\t' read -r url c; do
-    gh api "$url" --jq "if any(.labels[]; .name == \"epic\") then empty else \"$c\" end"
-  done \
-| awk '{n++; if ($1 == "missing") m++; else if ($1 > 0) c++}
-       END {printf "single-task verdicts: %d, with corrections: %d (%d%%), missing line: %d\n", n, c, n ? 100*c/n : 0, m}'
-```
-
-`since` filters on `updated_at`, so it only narrows the fetch; the `created_at`
-bounds are what define the window, and a verdict edited later is still counted
-once, in the window it was created in. One value per comment: the last
-`Corrections:` line in the body.
+The registered issue-review re-measurement — window, metric, decision rule, and
+the instrument that must be run unchanged — is [review-issue §
+Re-measure](../review-issue/SKILL.md#re-measure-registered-2026-09-24-2781-discipline).
 
 ### Re-measure: threat model first and follow-up batching (registered 2026-09-24)
 
@@ -449,7 +340,8 @@ gh issue list --label money-path --state all --limit 200 \
 **An issue is ready when its spec is right, not when it carries a label.** The
 spec is right once:
 - every claim is measured (step 1);
-- the § *Issue review* pass has run and its corrections are applied;
+- the [review-issue](../review-issue/SKILL.md) pass has run and its corrections
+  are applied;
 - the verdict comment is posted;
 - every owner decision it needed is recorded on the issue.
 
@@ -487,7 +379,7 @@ red.
 ## Guardrails
 
 - Do not fabricate requirements for money-path, authentication, authorization, or schema tasks.
-- Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and no issue — single task or epic — is queued, shipped or announced before its § *Issue review* pass and verdict comment.
+- Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and no issue — single task or epic — is queued, shipped or announced before its [review-issue](../review-issue/SKILL.md) pass and verdict comment.
 - Do not file an issue without `pending-review`, and do not lift it while an owner question is open (§ *Hold until ready*).
 - Do not file around this skill. Every agent-filed issue goes through it; a bare `gh issue create` is only the mechanism of step 6.
 - Keep generated and hand-written loop issues interchangeable.

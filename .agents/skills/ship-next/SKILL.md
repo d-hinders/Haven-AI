@@ -14,7 +14,7 @@ Accept one source:
 - no argument or `label=<name>`: choose the lowest-numbered open issue with the label, defaulting to `code-quality`;
 - `epic=#<n>`: choose the lowest-numbered open sub-issue;
 - a specified ready issue: ship that issue;
-- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*, and lifting `pending-review` per its § *Hold until ready* — if an owner question stays open, ask it and stop), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
+- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory [review-issue](../review-issue/SKILL.md) pass, and lifting `pending-review` per its § *Hold until ready* — if an owner question stays open, ask it and stop), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
 
 **Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
 
@@ -517,9 +517,10 @@ do not restate them here.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons. A deferred finding that is
    filed is filed **through [new-task](../new-task/SKILL.md)** — its measurement
-   rule, prior-art sweep and mandatory § *Issue review* — never with a bare
-   `gh issue create`. Deferred findings from one pull request that share a
-   surface go into **one** epic, or into that surface's open epic (new-task §
+   rule, prior-art sweep and mandatory [review-issue](../review-issue/SKILL.md)
+   pass — never with a bare `gh issue create`. Deferred findings from one pull
+   request that share a surface go into **one** epic, or into that surface's
+   open epic (new-task §
    *Epics*), not one standalone issue each. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
    `Depends on #<new issue>` into the

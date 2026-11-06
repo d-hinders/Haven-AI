@@ -12,9 +12,9 @@
  *     time; the setup polls the authoritative allowance signal instead.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createCleanupRegistry,
@@ -264,6 +264,11 @@ function installFake(opts: FakeOpts = {}) {
         return json({ task_budget: { id: path.split('/').pop(), status: opts.taskBudgetStatus ?? 'closed' } })
       }
       if (path === '/machine-payments/sweep/prepare') return json({ nothing_stranded: true })
+      // The route resolves the account by `chain_id` and refuses without it
+      // (hybrid-accounts.ts `resolveOwnedHybridAccount`), #4696.
+      if (path.includes('/transfers/') && !/[?&]chain_id=\d+/.test(path)) {
+        return json({ error: 'chain_id is required' }, 400)
+      }
       if (path.includes('/transfers/prepare')) {
         return json({
           signature_scheme: 'eip712_userop',
@@ -480,6 +485,41 @@ describe('createThrowawaySetup — the prepared state', () => {
 
     const funding = bodies.find((b) => b.path === '/payments')?.body
     expect(funding).toMatchObject({ token: 'USDC', amount: '0.002', to: THROWAWAY_ACCOUNT })
+  })
+})
+
+describe('createThrowawaySetup — what the trial\'s signer and teardown need (#4696)', () => {
+  it('writes an identity.json the real signer loader accepts, beside the credential file', async () => {
+    installFake()
+    const prepared = await createThrowawaySetup(await deps()).prepare({ task: task(), trial: 1, resolved: resolved(task()) })
+    const credentials = prepared.resolved?.trialEnv?.QA_EVAL_TRIAL_CREDENTIALS
+    expect(credentials).toBeDefined()
+
+    // The signer's own loader, not a re-parse of the shape: a field it stops
+    // accepting has to go red here, not in a live run. The path is computed
+    // because qa-agent's tsc rootDir stops at src and the signer does not
+    // export this helper.
+    const loader = new URL('../../../signer/src/sign-context.ts', import.meta.url).href
+    const { loadHavenIdentity } = (await import(/* @vite-ignore */ loader)) as {
+      loadHavenIdentity: (path: string | undefined) => Promise<{ apiKey: string; apiUrl: string } | null>
+    }
+    const loaded = await loadHavenIdentity(credentials)
+    expect(loaded).toEqual({ apiKey: prepared.resolved?.trialEnv?.QA_EVAL_TRIAL_API_KEY, apiUrl: API })
+
+    const path = join(dirname(credentials as string), 'identity.json')
+    expect((await stat(path)).mode & 0o777).toBe(0o600)
+  })
+
+  it('the teardown returns the USDC with chain_id on both transfer calls', async () => {
+    const { calls } = installFake()
+    // A chain other than the default, so a hard-coded value goes red.
+    const prepared = await createThrowawaySetup(await deps({ chainId: 8453 })).prepare({ task: task(), trial: 1, resolved: resolved(task()) })
+    const teardown = await prepared.teardown()
+
+    expect(teardown).toMatchObject({ ok: true, warnings: [] })
+    expect(teardown.unreturnedAtomic).toBeUndefined()
+    const transfers = calls.filter((c) => c.path.includes('/transfers/')).map((c) => c.path.split('/').pop())
+    expect(transfers).toEqual(['prepare?chain_id=8453', 'submit?chain_id=8453'])
   })
 })
 

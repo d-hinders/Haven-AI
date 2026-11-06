@@ -23,7 +23,8 @@
  *   2. return account USDC — the throwaway account's balance goes back to the
  *      EVAL ACCOUNT, never `QA_DELEGATION_*` (`agent-evals.yml`). A revoked
  *      key gets a 401, so this uses the OWNER-signed
- *      `POST /accounts/hybrid/:address/transfers/prepare` then `/submit`;
+ *      `POST /accounts/hybrid/:address/transfers/prepare?chain_id=` then
+ *      `/submit?chain_id=`;
  *   3. close any task budget left open — the trial's agent opens budgets
  *      through the hosted MCP tools, so nothing registers them: the teardown
  *      READS the agent's own open-budget list with the trial's key and closes
@@ -419,10 +420,15 @@ function parseHumanAmountToAtomic(amount: unknown): string | undefined {
 }
 
 /**
- * Write the trial's credential file and MCP config, mode `0600`, and return
- * the env the adapter's child process gets. The delegate key NEVER reaches
- * the hosted server env — only the signer process reads it, via the
- * credential file (the custody guard would refuse to boot otherwise).
+ * Write the trial's credential file, identity file and MCP config, mode
+ * `0600`, and return the env the adapter's child process gets. The delegate
+ * key NEVER reaches the hosted server env — only the signer process reads it,
+ * via the credential file (the custody guard would refuse to boot otherwise).
+ *
+ * `identity.json` sits beside the credential file as the connector leaves it
+ * on a real install: `haven_sign` by `payment_id` or `task_budget_id` reads it
+ * to fetch the bytes it signs (#4696). The key it holds is already in the
+ * secret manifest, and the trial directory is outside every upload path.
  */
 async function writeTrialConfig(
   deps: ThrowawaySetupDeps,
@@ -435,6 +441,11 @@ async function writeTrialConfig(
   const credentials = join(dir, 'agent.json')
   const mcpConfig = join(dir, 'mcp.json')
   await writeFile(credentials, JSON.stringify({ delegate_key: identity.delegate.privateKey }, null, 2), { mode: 0o600 })
+  await writeFile(
+    join(dir, 'identity.json'),
+    JSON.stringify({ agent_id: identity.agentId, api_key: identity.agentApiKey, api_url: deps.apiUrl }, null, 2),
+    { mode: 0o600 },
+  )
   const config = {
     mcpServers: {
       'haven-eval': {
@@ -595,7 +606,7 @@ export function throwawayCleanupSteps(
         return { warning: `could not read the throwaway account's USDC balance: ${(err as Error)?.message ?? String(err)}` }
       }
       if (balance === 0n) return {}
-      const prepared = await fetch(`${deps.apiUrl}/accounts/hybrid/${identity.accountAddress}/transfers/prepare`, {
+      const prepared = await fetch(`${deps.apiUrl}/accounts/hybrid/${identity.accountAddress}/transfers/prepare?chain_id=${deps.chainId}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${identity.token}` },
         body: JSON.stringify({ token_address: SEPOLIA_USDC, to: deps.evalAccountAddress, amount_atomic: balance.toString() }),
@@ -612,7 +623,7 @@ export function throwawayCleanupSteps(
         }
       }
       const signature = await signTyped(identity.owner, prep.signing_payload as never)
-      const submitted = await fetch(`${deps.apiUrl}/accounts/hybrid/${identity.accountAddress}/transfers/submit`, {
+      const submitted = await fetch(`${deps.apiUrl}/accounts/hybrid/${identity.accountAddress}/transfers/submit?chain_id=${deps.chainId}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${identity.token}` },
         body: JSON.stringify({

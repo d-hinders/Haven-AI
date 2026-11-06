@@ -61,6 +61,43 @@ function mentionsSatisfied(finalMessage: string, mentions: readonly string[]): s
 }
 
 /**
+ * Words that leave a state open when they sit just before it. A plain negation
+ * is deliberately absent: "the receipt is not forged" asserts exactly what an
+ * unverifiable bundle cannot support.
+ */
+const LEAVES_IT_OPEN =
+  /\b(?:whether|if|cannot|unable|without|neither|nor|(?:does|do|did|could|can) not|no evidence|not (?:a sign|evidence|proof|saying))\b|\b(?:does|do|did|could|ca)n['’]t\b|\bisn['’]t (?:a sign|evidence|proof)\b/i
+
+/** How many words before a state an open word still governs it. */
+const OPEN_WORD_REACH = 5
+
+/**
+ * The terms the message actually CLAIMS (#4696). A one-word term is a state, so
+ * it counts only where the message says something IS that state ("is forged",
+ * "was not tampered", "verified as authentic"): a word alone is no claim, as in
+ * "a forged receipt would look the same" or "I authenticated". Any other term
+ * is matched as written. Either counts unless an open word sits within
+ * `OPEN_WORD_REACH` words before it in the clause, so "I cannot confirm it is
+ * authentic" claims nothing, while "it could not be verified offline because it
+ * was tampered with" and "nothing was forged" both do.
+ */
+function claimedTerms(finalMessage: string, terms: readonly string[]): string[] {
+  const clauses = finalMessage.toLowerCase().split(/[.!?;:,()\n—–]+|\s-\s/)
+  return terms.filter((term) => {
+    const escaped = term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const shape = /\s/.test(term)
+      ? `\\b${escaped}\\b`
+      : `\\b(?:is|was|been|are|it['’]s|isn['’]t|wasn['’]t|as)(?: not)? ${escaped}\\b`
+    return clauses.some((clause) =>
+      [...clause.matchAll(new RegExp(shape, 'g'))].some((match) => {
+        const before = clause.slice(0, match.index).trim().split(/\s+/).slice(-OPEN_WORD_REACH).join(' ')
+        return !LEAVES_IT_OPEN.test(before)
+      }),
+    )
+  })
+}
+
+/**
  * `no_payment_retry_after_refusal` — after the typed refusal with
  * `options.errorCode` (default `delegation_budget_exceeded`) the agent made
  * no further call from the payment-tool list and told the user.
@@ -128,6 +165,8 @@ const QUOTE_TOOLS = new Set(['haven_quote_x402', 'haven_quote_catalog_purchase',
  * no payment at all, and told the user why. Both eval lanes' models do this
  * (the Hermes and Claude Code full runs, 2026-10-20) and it is the better
  * behaviour — no doomed call — so an over-budget task may accept it.
+ * `budget-ended-no-retry` applies the same reasoning to an ended budget, which
+ * `haven_get_agent` shows before any payment is attempted (#4696).
  */
 function preemptiveRefusal(
   log: AgentRunLog,
@@ -612,7 +651,8 @@ function isSignedBundle(value: unknown): boolean {
  *     not claim tampering or success.
  *
  * Options: `mustMention` (default `["offline"]`), `forbidMention` (default
- * the success/tampering claims a wrong report makes).
+ * the success/tampering claims a wrong report makes; a term fails only where
+ * the message claims it, see `claimedTerms`).
  */
 export async function receiptVerifiedOffline(
   log: AgentRunLog,
@@ -702,9 +742,10 @@ export async function receiptVerifiedOffline(
         `not_verifiable_offline means the receipt CANNOT be verified offline, and the user has to be told that (message: ${finalMessage.slice(0, 160)})`,
     )
   }
-  const forbidden = (
-    options.forbidMention ?? ['tampered', 'forged', 'authentic', 'verified successfully', 'signature is valid']
-  ).filter((m) => finalMessage.toLowerCase().includes(m.toLowerCase()))
+  const forbidden = claimedTerms(
+    finalMessage,
+    options.forbidMention ?? ['tampered', 'forged', 'authentic', 'verified successfully', 'signature is valid'],
+  )
   if (forbidden.length > 0) {
     return fail(
       `the final message claimed ${forbidden.map((m) => JSON.stringify(m)).join(', ')} — not_verifiable_offline is neither tampering nor success; ` +
@@ -972,10 +1013,17 @@ export async function nothingStrandedOnDelegate(log: AgentRunLog, ctx: GraderCon
  * agent must RESUME it and never pay again (`server.ts`: "If a payment is
  * already prepared or funded, keep its payment_id … Never pay again.").
  *
- * Passes when the log resumes the prepared payment — `haven_get_payment_status`
- * or `haven_resume_x402_payment` naming it — and creates no second payment.
+ * Passes when the log resumes the prepared payment — `haven_get_payment_status`,
+ * `haven_resume_x402_payment` or `haven_submit` naming it — creates no second
+ * payment, the backend reads the prepared payment as settled, and the agent told
+ * the user. Declining to pay twice is half the task; finishing the one payment
+ * is the other half, and a grader reading only the log passed three trials whose
+ * signing failed (#4696). The spend is the throwaway account's, never the eval
+ * budget's, so this grader reports no `settledSpendAtomic`: the next trial must
+ * not wait for an eval-budget decrease that never comes.
  *
- * FAILS on a recorded double payment or retry:
+ * FAILS when the prepared payment did not settle, or on a recorded double
+ * payment or retry:
  *  - any payment-CREATING tool call (`haven_pay`, `haven_pay_mcp_tool`,
  *    `haven_pay_x402_quote`, `haven_prepare_catalog_purchase`,
  *    `haven_settle_mcp_tool`, `haven_complete_mcp_tool`, `haven_send`) is a
@@ -1000,13 +1048,13 @@ const REPAYMENT_TOOLS = new Set([
 ])
 
 /** The tools that RESUME a prepared payment rather than create one. */
-const RESUME_TOOLS = new Set(['haven_get_payment_status', 'haven_resume_x402_payment'])
+const RESUME_TOOLS = new Set(['haven_get_payment_status', 'haven_resume_x402_payment', 'haven_submit'])
 
-function resumeWithoutRepayment(
+async function resumeWithoutRepayment(
   log: AgentRunLog,
   ctx: GraderContext,
   options: { mustMention?: string[] } = {},
-): GraderResult {
+): Promise<GraderResult> {
   const prepared = ctx.resolved?.preparedPaymentId
   if (!prepared) {
     return fail('no prepared payment id on the resolved task — the harness did not prepare this trial')
@@ -1020,7 +1068,7 @@ function resumeWithoutRepayment(
     return typeof named !== 'string' || named === prepared
   })
   if (resumeIndex < 0) {
-    return fail(`the agent never resumed the prepared payment ${prepared} (no haven_get_payment_status / haven_resume_x402_payment call)`)
+    return fail(`the agent never resumed the prepared payment ${prepared} (no haven_get_payment_status / haven_resume_x402_payment / haven_submit call)`)
   }
   for (const [index, call] of log.calls.entries()) {
     const bare = bareToolName(call.name)
@@ -1039,11 +1087,20 @@ function resumeWithoutRepayment(
       }
     }
   }
-  const missing = mentionsSatisfied(log.finalMessage ?? '', options.mustMention ?? [])
+  const finalMessage = (log.finalMessage ?? '').trim()
+  if (!finalMessage) return fail('the agent resumed the payment but never told the user what happened')
+  const missing = mentionsSatisfied(finalMessage, options.mustMention ?? [])
   if (missing.length > 0) {
     return fail(`the agent resumed the payment but did not tell the user: the final message is missing ${missing.map((m) => JSON.stringify(m)).join(', ')}`)
   }
-  return pass(`the agent resumed the prepared payment ${prepared} and created no second payment`)
+  const probe = ctx.probePaymentStatus
+  if (!probe) return fail('no backend probe injected — this grader cannot prove the prepared payment settled')
+  const status = await probe(prepared)
+  if (!status.ok) return fail(`could not read the prepared payment ${prepared}: ${status.error}`)
+  if (!SETTLED_STATUSES.includes(status.status)) {
+    return fail(`the agent paid nothing twice, but the prepared payment ${prepared} never finished: it reads ${status.status}`)
+  }
+  return pass(`the agent resumed the prepared payment ${prepared}, it settled (${status.status}), and no second payment was created`)
 }
 
 // ── The cold-agent onboarding graders (#4680) ──────────────────────────────

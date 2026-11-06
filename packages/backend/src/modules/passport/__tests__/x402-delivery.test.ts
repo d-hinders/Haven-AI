@@ -166,7 +166,7 @@ describe('verify_url is emitted only when it can be honest', () => {
   it('never omits the UID or chain id — those are the part a merchant verifies', async () => {
     // The degradation must be the CONVENIENCE, not the substance. A merchant
     // resolves `attestation_uid` + `chain_id` against a verifier it already
-    // pins, or against EAS directly; dropping either would leave the reference
+    // pins, or against EAS directly with the attester check; dropping either would leave the reference
     // useless while still looking present.
     delete process.env.HAVEN_API_URL
     mockSigningConfigured.mockReturnValue(false)

@@ -54,7 +54,10 @@ export interface PassportReference {
    *
    * The only sound merchant behaviour is to take `attestation_uid` + `chain_id`
    * and resolve them against a verifier it ALREADY knows — its own pinned Haven
-   * base URL, or EAS on that chain directly. The UID and chain id are safe to
+   * base URL, or EAS on that chain directly TOGETHER WITH the attester check
+   * (the schema has no resolver, so anyone can attest under its UID; Haven
+   * does not publish its attester address yet, so the Haven verifier is the
+   * supported path). The UID and chain id are safe to
    * accept from the agent precisely because they are checkable against a source
    * the agent does not control; the URL is not. Same reasoning as the
    * `X-PAYMENT` header note above: the trust boundary is what the merchant can
@@ -88,7 +91,7 @@ export interface PassportReference {
  *
  * Omitting costs nothing that matters. `attestation_uid` + `chain_id` are what
  * a merchant should be resolving anyway — against a verifier it already pins,
- * or against EAS directly.
+ * or against EAS directly with the attester check (see `verify_url` above).
  */
 function verifyUrlFor(attestationUid: string): string | null {
   const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
@@ -113,9 +116,10 @@ function verifyUrlFor(attestationUid: string): string | null {
  * already been authorised and signed by the time we get here, and a lookup
  * ERROR must not turn a good payment into an error. Absence is the graceful
  * degradation the acceptance criteria ask for, and it is also the failure mode.
- * Note the scope: this covers a throw, not an unbounded hang. There is no
- * timeout here, and the caller handles that case by ordering — see the comment
- * at the call site in `routes/x402.ts`.
+ * Note the scope: the lookup is bounded to 1500 ms below, so a slow passport
+ * table degrades to `null`. The caller also computes the reference before the
+ * settle UPDATE, by ordering — see the comment at the call site in
+ * `modules/x402/settle.ts`.
  *
  * The swallowed error is REPORTED through `log`, and that is not decoration
  * either. "Absence is normal" and "the lookup broke" produce the identical

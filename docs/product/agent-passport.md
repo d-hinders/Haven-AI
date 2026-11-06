@@ -46,14 +46,15 @@ on-chain**, and can be **revoked**.
 > universal. Read the claims below as describing what Haven **issues**; read the
 > receipt for what a specific passport **asserts**.
 
-Four claims, each independently checkable:
+Four claims. The right-hand column says what a merchant can check today
+without taking Haven's word for it, and what is Haven's signed assertion:
 
-| Claim | What it means |
-|---|---|
-| **Issued** | A known operator provisioned this agent. It did not appear from nowhere. |
-| **Bound to a treasury** | The account whose funds it may spend is named. Its reach is finite and stated. |
-| **Governed** | The limits on it are enforced by the chain during the payment, not by a service that could be bypassed or misconfigured. True by construction: Haven issues only on the rail where that holds. |
-| **Revocable** | Authority can be withdrawn, and the withdrawal takes effect immediately — not when a cache expires. |
+| Claim | What it means | What a merchant can check without trusting Haven |
+|---|---|---|
+| **Issued** | A known operator provisioned this agent. It did not appear from nowhere. | Only with Haven's attester address, which Haven does not publish yet. Until then this is Haven's signed receipt. The schema has no resolver, so an attestation under it proves nothing by itself. |
+| **Bound to a treasury** | The account whose funds it may spend is named. Its reach is finite and stated. | The `treasury` field is public in the on-chain attestation, subject to the same attester caveat. |
+| **Governed** | The limits on it are enforced by the chain during the payment, not by a service that could be bypassed or misconfigured. True by construction: Haven issues only on the rail where that holds. | On an erc7710 payment, the merchant sees the delegation itself during redemption. On an EIP-3009 payment it is a boolean in Haven's signed receipt (`controls.policyEnforcedOnchain`). The `policyUri` field (`haven:agent:<id>`) resolves nowhere. |
+| **Revocable** | Authority can be withdrawn, and the withdrawal takes effect immediately — not when a cache expires. | By design, Haven's verifier is the authority. The on-chain revoke follows and may lag (see the schema doc). |
 
 **Revocable is the load-bearing one.** A credential that cannot be withdrawn is
 a claim about the past. A merchant checking a passport is asking about *now*.
@@ -115,9 +116,20 @@ database refuses to store a tier above L0, and the verifier refuses to report a
 tier it cannot issue rather than quietly describing it as L0. A tier that is
 merely *intended* to stay unreachable eventually gets reached.
 
+## Availability
+
+- **Base Sepolia only.** Base mainnet is not a passport chain, and no mainnet
+  passport exists.
+- **Verification is a per-deployment setting.** It needs
+  `PASSPORT_RECEIPT_SIGNING_KEY`. Where it is off, `GET /passport/issuer` and
+  `GET /passport/verify` answer 503 and no signed answer is available. The
+  operator procedure is
+  [Passport verification setup](../operations/passport-verification-setup.md).
+
 ## For merchants
 
-You get a signed answer covering four things: the agent's current standing, its
+Where the deployment's verifier is on, you get a signed answer covering four
+things: the agent's current standing, its
 assurance tier, the addresses it is bound to, and how long the answer is good
 for.
 

@@ -341,10 +341,10 @@ The hosted server lists its tools for any well-formed Bearer token. Every tool
 call (except `haven_verify_receipt` and `haven_sweep_delegate`) first checks the
 key with Haven and does nothing else if that check fails. A call failing with
 `code: AGENT_IDENTITY_UNVERIFIED` and `statusCode: 401` means Haven did not
-accept the token: it is missing or mistyped, or the agent was archived or
-revoked. The refusal does not say which. Check the Bearer key first; if it is
-correct, the account owner checks the agent in Haven: an archived agent can be
-un-archived, and a revoked one needs a new agent, because nothing re-activates
+accept the token: it is mistyped or not an agent key (`sk_agent_…`), or the
+agent was archived or revoked. The refusal does not say which. Check the Bearer key first; if it is
+correct, the account owner checks the agent in Haven: an archived agent that
+was not revoked can be un-archived, and a revoked one needs a new agent, because nothing re-activates
 a revoked agent. The refusal's own text sends the user to the account owner to
 check the agent and connect a new one if it no longer has access. A 403
 `agent_pending_approval` means the agent is still waiting for its first budget

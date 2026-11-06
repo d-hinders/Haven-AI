@@ -1337,9 +1337,16 @@ describe('onboarding_tool_calls — the count to the login wall', () => {
     ['login --help', ['npx', '-y', '@haven_ai/cli@dev', 'login', '--help'], { ok: true }],
     ['login -h', ['npx', '@haven_ai/cli@dev', 'login', '-h'], { ok: true }],
     ['login --version', ['npx', '@haven_ai/cli@dev', 'login', '--version'], { ok: true }],
+    ['login -v', ['npx', '@haven_ai/cli@dev', 'login', '-v'], { ok: true }],
   ])('%s is not the wall (#4674 review)', (_label, argv, result) => {
     const r = onboardingToolCalls(log([call('run_command', { args: { argv }, result })], 'You need a passkey, to fund it and to approve a budget.'), {}, { max: 12 })
     expect(r.pass).toBe(false)
+  })
+
+  it('a refused login with no real code in the message has not handed off', () => {
+    const refused = call('run_command', { args: { argv: ['npx', '-y', '@haven_ai/cli', 'login'] }, result: { ok: false } })
+    const message = 'You can run it in your own terminal and approve the code shown in your browser.'
+    expect(onboardingToolCalls(log([refused], message), {}, { max: 12 }).pass).toBe(false)
   })
 
   it.each([

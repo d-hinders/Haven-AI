@@ -53,7 +53,8 @@ export interface Handoff {
 /** A user code is the backend's shape: uppercase alphanumerics, dash-separated. */
 const USER_CODE = /[A-Z0-9]{4,}(?:-[A-Z0-9]{2,})+/g
 const DEVICE_URL = /\/device\?code=([A-Za-z0-9_-]+)/
-const APPROVE_CODE = /approve (?:the )?code\s+([A-Z0-9][A-Z0-9-]{3,})/i
+/** The code keeps its uppercase shape: a case-insensitive capture reads "approve the code shown" as a code. */
+const APPROVE_CODE = /[Aa]pprove (?:[Tt]he )?[Cc]ode\s+([A-Z0-9][A-Z0-9-]{3,})/
 const SETUP_URL = /\/agents\?setup=([0-9a-fA-F-]{36})/
 const SETUP_ID = /setup[ _-]?id[:\s]+([0-9a-fA-F-]{36})/i
 

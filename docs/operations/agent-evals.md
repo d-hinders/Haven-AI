@@ -342,9 +342,9 @@ For each trial the harness:
   stripped by name. `CLAUDE_CODE_OAUTH_TOKEN` stays (it authenticates
   `claude`, not Haven). A test asserts the env passed to spawn and to the
   command tool;
-- renders `{landing_url}` from the workflow input `dev_landing_url`
-  (`QA_EVAL_DEV_LANDING_URL`), never from the task file, so the same task runs
-  against a preview or a local target.
+- renders `{landing_url}` from `QA_EVAL_DEV_LANDING_URL`, never from the task
+  file, so the same task runs against a preview or a local target. The workflow
+  sets it from its `dev_landing_url` input; a local run sets it directly.
 
 `run_command` runs an **argv array with no shell**. It accepts only
 `npx [-y] <the CLI package the manifest serves> <allowed subcommand>`, where
@@ -760,8 +760,14 @@ Env the run needs (all dev/testnet):
   `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
   ([`dev-environment.md`](dev-environment.md)). Without it, a selection with a
   cold task exits 2 before the first agent session, so a `full` run runs none
-  of its 20 tasks, not 18 of them. `subset` does not read it, because `--limit`
-  leaves the cold tasks out.
+  of its 20 tasks, not 18 of them. The eval CLI does not read it on `subset`,
+  because `--limit` leaves the cold tasks out. Whatever the suite, the workflow's
+  slice step accepts an empty input, or one https origin with a lowercase dotted
+  hostname and no port (no host allowlist, so a PR preview works; one trailing
+  slash is allowed), and fails before it writes any output otherwise (#4716).
+  That is a syntax check, not trust: the manifest at that host names the package
+  the command tool may run, so the choice of URL rests on the environment
+  approval.
 - `QA_EVAL_AGENT_ACCOUNT` — the eval agent's **smart account** address (the
   payer the chain probe accepts; not the delegate EOA). The Claude Code lane's
   `AGENT_EVALS_AGENT_ACCOUNT` (below) holds the same role, and the daily
@@ -1254,7 +1260,10 @@ for the owner's approval). Two suite choices, plus an optional task filter:
   `trials` input defaults to `1`) — a filtered run instead of a whole
   budget period. A filtered run's summary states the filter, so "pass^k on
   1/1 tasks" does not read as a whole-suite green. A list naming a cold task
-  needs `dev_landing_url` as well.
+  needs `dev_landing_url` as well. The other inputs are validated in the same
+  place, before anything is written: `suite` is `subset` or `full`, `trials` is a
+  positive integer, and `dev_landing_url` is described under *Running the suite*
+  (#4716).
 
 Either way the run waits for the environment approval. It is NOT a required
 check on `dev` or `main`.

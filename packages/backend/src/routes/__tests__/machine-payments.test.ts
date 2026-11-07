@@ -561,7 +561,9 @@ describe('machine payment routes', () => {
         expect(findCall(/FROM agent_sub_budgets b/)).toBeDefined()
         expect(findCall(/superseded_by_agent_id/)).toBeDefined()
         expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)).toBeDefined()
-      })
+        // Must stay BELOW `passportReferenceFor`'s 1500 ms bound: past it, a
+        // passport awaited first times out to null and lets the others start.
+      }, { timeout: 500 })
       for (const release of holds) release()
       const response = await pending
       expect(response.statusCode).toBe(200)

@@ -196,8 +196,9 @@ spending:
   (\`attestationUid\`, \`chainId\`), or \`null\` when it has none. Give those two
   fields to a merchant that asks for them; never present \`verifyUrl\` as proof,
   because a merchant checks the UID against a Haven verifier it already trusts.
-  A passport says the agent is governed and revocable — never call it
-  "verified".
+  Presenting the UID lets anyone link your delegate address to your treasury on
+  EAS, so give it only to a merchant that asks. A passport says the agent is
+  governed and revocable — never call it "verified".
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 - \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at

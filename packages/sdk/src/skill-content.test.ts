@@ -672,6 +672,11 @@ describe('passport guidance (#4721)', () => {
       'Give those two fields to a merchant that asks for them; never present `verifyUrl` as proof, because a merchant checks the UID against a Haven verifier it already trusts.',
     )
   })
+  it('says what presenting the UID discloses (#4721 spec review)', () => {
+    expect(flat).toContain(
+      'Presenting the UID lets anyone link your delegate address to your treasury on EAS, so give it only to a merchant that asks.',
+    )
+  })
   it('never lets the agent call a passport "verified"', () => {
     expect(flat).toContain('A passport says the agent is governed and revocable — never call it "verified".')
   })

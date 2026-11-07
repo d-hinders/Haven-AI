@@ -1330,9 +1330,11 @@ describe('AgentDetailClient last-activity metadata', () => {
   it('#4719: fails closed when the agent\'s account is not among the session accounts', () => {
     mockUseAuth.mockReturnValue({ user: { accounts: [{ ...SAFE, id: 'some-other-account', passport_issuable: true }] } })
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
-    expect(
-      within(screen.getByTestId('agent-passport-row')).queryByRole('button', { name: /issue a passport/i }),
-    ).toBeNull()
+    const row = screen.getByTestId('agent-passport-row')
+    expect(within(row).queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    // #4719 review: an unresolved account is "not known yet", so the row does
+    // not flash the "not available" reason before the account arrives.
+    expect(within(row).queryByText('Passports are not available for this wallet yet.')).toBeNull()
   })
 
   it('an ARCHIVED agent also loses the credential rows (#4228)', () => {

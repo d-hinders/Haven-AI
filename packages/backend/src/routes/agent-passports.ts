@@ -22,7 +22,7 @@ import {
   requestPassport,
   issuePassportBestEffort,
   isPassportConfigured,
-  isReceiptSigningConfigured,
+  receiptIssuerAddress,
   passportStanding,
   PASSPORT_CHAIN_IDS,
 } from '../modules/passport/index.js'
@@ -117,7 +117,7 @@ export default async function agentPassportRoutes(app: FastifyInstance): Promise
       // originally got the order wrong.
       return reply.code(200).send({ passport: serialize(existing), already_issued: true })
     }
-    if (!isReceiptSigningConfigured()) {
+    if (receiptIssuerAddress() === null) {
       // AFTER the idempotent early return above, like the #2138 rail gate:
       // a repeat POST for a passport that already exists still answers 200.
       // #4719 (owner decision 2026-11-06): no passport is issued that no

@@ -206,6 +206,10 @@ describe('passport_issuable — chain, schema UID, verifier and rail', () => {
     expect(isPassportIssuableOnChain(CHAIN, { env: withUid })).toBe(true)
     setReceiptSigningKey(null)
     expect(isPassportIssuableOnChain(CHAIN, { env: withUid })).toBe(false)
+    // #4719 review: a malformed key is "configured" but derives no issuer, so
+    // `/passport/issuer` answers 503 and nothing a merchant could verify.
+    setReceiptSigningKey('0xnot-a-key')
+    expect(isPassportIssuableOnChain(CHAIN, { env: withUid })).toBe(false)
   })
 
   it('requires an issuable rail on the account (the #2138 allowlist)', () => {

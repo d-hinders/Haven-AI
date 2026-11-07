@@ -27,7 +27,7 @@ vi.mock('../../modules/passport/index.js', () => ({
   issuePassportBestEffort: (...a: unknown[]) => mockIssue(...a),
   getPassport: (...a: unknown[]) => mockGetPassport(...a),
   isPassportConfigured: () => true,
-  isReceiptSigningConfigured: () => mockVerifierOn(),
+  receiptIssuerAddress: () => (mockVerifierOn() ? '0x000000000000000000000000000000000000dEaD' : null),
   // A whole PassportStanding, as the real function returns one (#1446) — the
   // route hands this straight to the client, so a partial mock would describe
   // a response the module cannot produce.

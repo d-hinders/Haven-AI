@@ -178,7 +178,10 @@ export function isPassportIssuableOnChain(
   chainId: number | null | undefined,
   inputs: Pick<PassportReadinessInputs, 'env' | 'verificationConfigured'> = {},
 ): boolean {
-  const { env = process.env, verificationConfigured = isReceiptSigningConfigured() } = inputs
+  // `receiptIssuerAddress()`, not `isReceiptSigningConfigured()`: a malformed
+  // key is "configured" but leaves `/passport/issuer` answering 503, so only a
+  // derivable issuer address means a merchant can verify (#4719 review).
+  const { env = process.env, verificationConfigured = receiptIssuerAddress() !== null } = inputs
   if (chainId == null) return false
   // `isPassportConfigured` is the passport-chain check too: it is false for
   // any chain without a pinned EAS deployment (`getEasDeployment` throws), so

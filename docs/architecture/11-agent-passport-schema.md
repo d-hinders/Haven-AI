@@ -147,10 +147,20 @@ action render only when it is true, and both fire-and-forget entry points ask
 the same account-level question (`POST /agents` reads the account's
 `account_type` and `execution_rail` for it, without echoing them). An account
 that fails it records no passport row at all. It no longer records a `pending`
-row "deferred to the sweep", which a deployment without the schema UID could
-never anchor, nor a row the #2138 rail gate then marks `failed`. The explicit
-`POST /agents/:id/passport` keeps its own refusals and adds one: a **503**
-while the receipt verifier is off.
+row "deferred to the sweep", nor a row the #2138 rail gate then marks
+`failed`. The explicit `POST /agents/:id/passport` keeps its own refusals and
+adds one: a **503** while the receipt verifier is off.
+
+"The verifier is on" means `receiptIssuerAddress()` derives an address, not
+merely that `PASSPORT_RECEIPT_SIGNING_KEY` is set: a malformed key leaves
+`/passport/issuer` answering 503, so it counts as off. **The same requirement
+holds server-side in `issuePassport`**, so the retry sweep does not anchor a
+`pending` row recorded before the gate while the verifier is off. It marks the
+row `failed` with a retryable reason, exactly like the schema-unset case, and the
+row anchors once the verifier is on. A `failed` row on an account that is not
+`passport_issuable` renders in the dashboard as the neutral "not available for
+this wallet yet" reason, never the danger-tone "Issuance failed" (owner
+decision 2026-11-07). No data is changed.
 
 Two consequences worth stating rather than leaving to be rediscovered. **A
 passport issued on a legacy account before that gate is left alone**, not

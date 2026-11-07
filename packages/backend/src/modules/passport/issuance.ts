@@ -32,6 +32,7 @@ import { computeHybridAccountAddress } from '../../rails/hybrid-provisioning.js'
 import { getEasDeployment, isPassportConfigured } from './schema.js'
 import { AssuranceLevel } from './schema.js'
 import { buildAddressBinding, encodeAddressBinding } from './binding.js'
+import { receiptIssuerAddress } from './receipt.js'
 import {
   hasBoundAccount,
   isPassportIssuableAccount,
@@ -178,6 +179,17 @@ export async function issuePassport(agentId: string, userId: string): Promise<Pa
     // Not a defect — the schema is simply not registered on this chain yet
     // (#971's operator step). Stays retryable; no attestation is attempted.
     await markFailed(agentId, `passport schema not registered on chain ${chainId}`)
+    return getPassport(agentId)
+  }
+  if (receiptIssuerAddress() === null) {
+    // #4719 (owner decision 2026-11-06): no passport is anchored that no
+    // merchant can verify. With the receipt verifier off (or its key
+    // malformed), `GET /passport/verify` and `/passport/issuer` answer 503, so
+    // an anchor now is the `issuance_only` credential #1151 found. This is the
+    // server-side half of the dashboard gate: the sweep reaches rows recorded
+    // before the gate, and the route gates only its own POST. Retryable, like
+    // the schema-unset case: the row anchors once the verifier is on.
+    await markFailed(agentId, 'passport verifier not configured on this deployment — not anchoring')
     return getPassport(agentId)
   }
 

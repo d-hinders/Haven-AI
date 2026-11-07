@@ -37,7 +37,9 @@ describe('AgentPassportCard (#1072)', () => {
   it('renders a retryable error — not the opt-in state — when the lookup failed', () => {
     const refetch = vi.fn()
     mockUseAgentPassport.mockReturnValue(state({ loadError: true, refetch }))
-    render(<AgentPassportCard agentId="agent-1" />)
+    // #4719 review: issuable, so the assertion that no Issue button renders is
+    // the load-error guard's own, not the fail-closed default's.
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
     expect(screen.getByText(/Passport status could not load/)).toBeTruthy()
     expect(screen.queryByText(/has no passport/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Issue a passport/ })).toBeNull()
@@ -179,6 +181,45 @@ describe('AgentPassportCard (#1072)', () => {
     // The reason REPLACES the opt-in sentence; there is no opt-in to describe.
     expect(screen.queryByText(/Issuing one is optional/)).toBeNull()
     expect(document.body.textContent).not.toMatch(/verified/i)
+  })
+
+  it('renders neither the opt-in nor the reason while the account is still loading', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={null} />)
+    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    expect(screen.queryByText('Passports are not available for this wallet yet.')).toBeNull()
+    expect(screen.queryByText(/Issuing one is optional/)).toBeNull()
+  })
+
+  // Owner decision 2026-11-07: a failed row on an account that cannot issue
+  // (recorded before the gate, or refused by it) reads as unavailable, in a
+  // neutral tone, never as a danger-tone failure the user cannot act on.
+  it('a failed row on a non-issuable account reads "Not available", neutral, with no error text', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'failed', assurance_level: 0, attestation_uid: null, chain_id: 84532,
+        tx_hash: null, attempts: 1, requested_at: '2026-06-02T10:00:00.000Z', anchored_at: null,
+        last_error: 'passport verifier not configured on this deployment — not anchoring',
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={false} />)
+    expect(screen.queryByText('Issuance failed')).toBeNull()
+    expect(screen.getByText('Not available')).toBeTruthy()
+    expect(screen.getByText('Passports are not available for this wallet yet.')).toBeTruthy()
+    expect(screen.queryByText(/verifier not configured/)).toBeNull()
+  })
+
+  it('a failed row on an issuable account still reads "Issuance failed" with its error', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'failed', assurance_level: 0, attestation_uid: null, chain_id: 84532,
+        tx_hash: null, attempts: 1, requested_at: '2026-06-02T10:00:00.000Z', anchored_at: null,
+        last_error: 'rpc timeout',
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
+    expect(screen.getByText('Issuance failed')).toBeTruthy()
+    expect(screen.getByText('rpc timeout')).toBeTruthy()
   })
 
   it('fails closed: without the answer, no issue action is offered', () => {

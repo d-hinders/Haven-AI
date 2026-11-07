@@ -724,6 +724,10 @@ export const FIXTURE_ACCOUNT = {
   // keeps `fixture-shape-parity.test.ts`'s strict key comparison honest now
   // that the e2e `testSafe` carries the field.
   account_type: 'delegator_hybrid',
+  // #4719: a Base Sepolia account on a deployment with schema UID and
+  // verifier set, so the captures show the passport opt-in, not the
+  // "not available" reason.
+  passport_issuable: true,
   created_at: '2026-05-01T10:00:00.000Z',
 }
 export const FIXTURE_USER = {

@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi, beforeAll, afterAll } from 'vitest'
+import { setReceiptSigningKey } from '../receipt.js'
+// #4719: issuance refuses to anchor while the receipt verifier is off (no
+// passport no merchant can verify). These suites exercise the anchoring path,
+// so the verifier is on for them; the refusal itself is pinned in
+// passport-issuance.test.ts.
+beforeAll(() => setReceiptSigningKey('0x' + '4719'.repeat(16)))
+afterAll(() => setReceiptSigningKey(null))
+
 
 vi.mock('../../../db.js', () => ({ default: { query: vi.fn() } }))
 vi.mock('../../../rails/hybrid-provisioning.js', () => ({
@@ -163,6 +171,31 @@ describe('the EAS write NEVER blocks agent creation', () => {
     expect(recorded).toMatch(/not registered/)
     // Never spends gas against an unregistered schema.
     expect(anchor).not.toHaveBeenCalled()
+  })
+
+  // #4719 review: the verifier requirement holds on the SWEEP too, not only
+  // on the dashboard and the POST route. A row recorded before the gate, with
+  // the schema UID set and the receipt key unset, must not anchor.
+  it.each([
+    ['unset', null],
+    ['malformed', '0xnot-a-key'],
+  ])('a pending row does not anchor while the receipt verifier key is %s, and stays retryable', async (_label, key) => {
+    setReceiptSigningKey(key)
+    try {
+      let recorded = ''
+      mockDb({
+        passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 },
+        retryRows: [{ agent_id: AGENT, user_id: USER }],
+        onUpdate: (sql, p) => { if (/failed/.test(sql)) recorded = String(p[1]) },
+      })
+      const anchor = vi.fn()
+      setAnchor(anchor)
+      await retryPendingPassports()
+      expect(anchor).not.toHaveBeenCalled()
+      expect(recorded).toMatch(/verifier not configured/)
+    } finally {
+      setReceiptSigningKey('0x' + '4719'.repeat(16))
+    }
   })
 })
 

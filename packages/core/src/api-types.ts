@@ -4943,7 +4943,7 @@ export type components = {
             /** @description Legacy local-MCP opt-in (#3032: sent by the dashboard, `useAgentConnectionSetup.ts`, whenever the owner picked local MCP). `true` with an explicit runtime outside Claude Code / Codex / Cowork is refused with 400; otherwise it records the preference. */
             local_mcp?: boolean;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
-            /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
+            /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. Ignored, and no passport row is recorded, when the account is not `passport_issuable` (#4719). */
             issue_passport?: boolean;
             /** @description Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused. */
             source?: string;

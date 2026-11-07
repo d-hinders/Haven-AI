@@ -212,11 +212,13 @@ export default function AgentSettingsTab({
         {/* 5. Agent Passport — `AgentPassportCard` renders the row itself;
             the divided section carries its hairline. Its revoked and
             not-issuable gates
-            stands inside the component (archived is NOT gated there). */}
+            stand inside the component (archived is NOT gated there). */}
         <AgentPassportCard
           agentId={agent.id}
           agentRevoked={isRevoked}
-          passportIssuable={account?.passport_issuable === true}
+          // Null while the account loads, so the card renders neither the
+          // opt-in nor the "not available" reason yet (#4719 review).
+          passportIssuable={account ? account.passport_issuable === true : null}
         />
       </SettingsSection>
 

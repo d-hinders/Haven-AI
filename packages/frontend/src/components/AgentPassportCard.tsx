@@ -61,8 +61,12 @@ interface Props {
    * whether this deployment can issue a passport a merchant can verify.
    * Defaults to FALSE so the gate fails closed: a caller that does not know
    * the answer offers no action the backend would refuse.
+   *
+   * `null` means the answer is still loading (the account has not resolved):
+   * no action and no reason line, so "not available" never flashes and then
+   * flips to the opt-in (#4719 review).
    */
-  passportIssuable?: boolean
+  passportIssuable?: boolean | null
 }
 
 function headlineBadge(
@@ -171,7 +175,14 @@ export default function AgentPassportCard({ agentId, agentRevoked = false, passp
     )
   }
 
-  const headline = headlineBadge(passport?.status ?? null, standing?.anchor ?? null)
+  // #4719 (owner decision 2026-11-07): a `failed` row on an account that
+  // cannot issue — recorded before the gate, or refused by it — is a gap in
+  // this deployment, not an error the user can act on. Neutral reason line,
+  // never the danger-tone "Issuance failed". No data changes.
+  const unavailableFailure = passport?.status === 'failed' && passportIssuable === false
+  const headline = unavailableFailure
+    ? { label: 'Not available', tone: 'neutral' as StatusTone }
+    : headlineBadge(passport?.status ?? null, standing?.anchor ?? null)
   // The passport's OWN chain_id, not the account's — attestation issuance is
   // gated to a specific chain (currently Base Sepolia only) that can differ
   // from the account's chain.
@@ -190,16 +201,20 @@ export default function AgentPassportCard({ agentId, agentRevoked = false, passp
         </span>
       }
       detail={
-        passport
-          ? DESCRIPTION
-          : passportIssuable
-            ? 'This agent has no passport. Issuing one is optional and does not change what it can spend.'
-            : NOT_AVAILABLE
+        unavailableFailure
+          ? NOT_AVAILABLE
+          : passport
+            ? DESCRIPTION
+            : passportIssuable === true
+              ? 'This agent has no passport. Issuing one is optional and does not change what it can spend.'
+              : passportIssuable === false
+                ? NOT_AVAILABLE
+                : undefined
       }
       action={
         // An existing passport renders exactly as before whatever the gate
         // says — a passport issued before #4719 stays visible.
-        passport || agentRevoked || !passportIssuable ? undefined : (
+        passport || agentRevoked || passportIssuable !== true ? undefined : (
           <Button size="sm" variant="ghost" onClick={() => void issuePassport()} disabled={issuing}>
             {issuing ? 'Issuing…' : 'Issue a passport'}
           </Button>
@@ -263,7 +278,7 @@ export default function AgentPassportCard({ agentId, agentRevoked = false, passp
                     </div>
                   ) : null}
                 </dl>
-                {passport.status === 'failed' && passport.last_error ? (
+                {passport.status === 'failed' && passport.last_error && !unavailableFailure ? (
                   <p className="mt-3 text-xs text-[var(--v2-danger)]">{passport.last_error}</p>
                 ) : null}
                 {/* An `else if`, not a second `if`. The two notes contradict each

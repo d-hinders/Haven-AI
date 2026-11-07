@@ -11738,7 +11738,8 @@ export const openapiSpec = {
           },
           issue_passport: {
             type: 'boolean',
-            description: 'Opt in to an L0 Agent Passport for the agent this setup creates. Default false.',
+            description:
+              'Opt in to an L0 Agent Passport for the agent this setup creates. Default false. Ignored, and no passport row is recorded, when the account is not `passport_issuable` (#4719).',
           },
           source: {
             type: 'string',

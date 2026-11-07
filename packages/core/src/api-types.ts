@@ -5701,7 +5701,7 @@ export type components = {
             expiresAt: string;
         };
         PaymentResumeState: components["schemas"]["X402ResumeState"] | components["schemas"]["MppResumeState"];
-        /** @description An anchored passport's compact reference (#976, #4721). A merchant resolves `attestation_uid` + `chain_id` against a Haven verifier it already pins (`GET /passport/verify?uid=`), never against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust. */
+        /** @description An anchored passport's compact reference (#976, #4721). A merchant resolves the payer's standing against a Haven verifier it already pins (`GET /passport/verify?address=<payer>`); `attestation_uid` + `chain_id` are only a hint, because a UID is public on EAS and a UID alone cannot bind the passport to the payer. Never resolve against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust. */
         AgentPassportReference: {
             attestation_uid: string;
             chain_id: number;

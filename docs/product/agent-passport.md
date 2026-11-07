@@ -167,10 +167,16 @@ build on the first and cannot safely build on the second.
 
 ## How it works, briefly
 
-The attestation lives on-chain, so anyone can read it without asking Haven. Live
-standing — revoked or not — comes from Haven, because the chain lags and
-revocation has to be immediate. An agent can carry a pointer to its own passport
-alongside a payment, so a merchant **verifies** rather than **discovers**.
+The attestation lives on-chain, so anyone can read it. Reading it proves
+something only once the reader checks the attester against Haven's address,
+which Haven does not publish yet (see *Availability*). Live standing — revoked or
+not — comes from Haven, because the chain lags and revocation has to be
+immediate. The goal is that an agent carries a pointer to its own passport
+alongside a payment, so a merchant **verifies** rather than **discovers**. Today
+the pointer appears only in Haven's erc7710 settle response, and no client
+forwards it to the merchant. The x402 extension that puts it in the payment
+itself is being built (#4722), and it will not cover the default hosted+signer
+EIP-3009 path at first.
 
 No personal data is in the attestation; everything person-shaped stays behind
 the API. One trade-off is deliberate and worth stating plainly: the on-chain

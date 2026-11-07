@@ -36,8 +36,11 @@ four states — and one of them is a trap:
 with actual merchant reach — `GET /passport/verify?address=…` is the *only*
 delivery mechanism (`modules/passport/x402-delivery.ts`), so a 3009 merchant has
 no way to learn a passport exists at all. On **erc7710**, settle responses still
-carry `attestation_uid` + `chain_id` (which is what a merchant should resolve
-independently anyway), but `verify_url` is silently omitted.
+carry `attestation_uid` + `chain_id`, but `verify_url` is silently omitted. The
+UID alone is not enough: an attestation under a schema with no resolver proves
+nothing until the merchant checks its attester against Haven's, and Haven does
+not publish that address yet (see *Availability* in
+[`docs/product/agent-passport.md`](../product/agent-passport.md)).
 
 Dev sat in `issuance_only` with three anchored passports and nobody noticed for
 days ([#1151](https://github.com/d-hinders/Haven-AI/issues/1151)). Since then the
@@ -92,7 +95,10 @@ Restart the service — the signer is installed at boot.
 
 ## Check the state
 
-`GET /health/ops` reports it to an operator using `HAVEN_OPS_TOKEN`. The public
+Three places report it. The ops console's health page shows a warning when any
+chain is `issuance_only` (#4720). The boot log carries one warning naming the
+chain (below). And `GET /health/ops` reports it to an operator using
+`HAVEN_OPS_TOKEN`. The public
 `GET /health` deliberately carries only status, timestamp, and database health.
 The diagnostics contain booleans plus the already-published issuer address only
 — no key material, no schema UID:

@@ -5,7 +5,8 @@ covers:
   - packages/backend/src/modules/passport/readiness.ts
   - packages/backend/src/modules/passport/receipt.ts
   - packages/backend/src/routes/passport-verify.ts
-last-verified: "2026-09-04"
+  - packages/backend/src/modules/passport/__tests__/passport-sdk-cross-check.test.ts
+last-verified: "2026-11-07"
 ---
 
 # Passport verification setup
@@ -161,11 +162,17 @@ Both must succeed. Reading them:
   from *this* environment's database.
 - **`issuer` differs from what a merchant pinned** — the key was rotated.
   Merchants pinning the old address will reject every receipt until they re-pin;
-  treat rotation as a breaking change, not an operational tweak.
+  treat rotation as a breaking change, not an operational tweak. The demo
+  merchant is one such consumer: it pins the address in
+  `MERCHANT_PASSPORT_ISSUER` (#4723) and answers `not_signed_by_issuer` until
+  that value is updated.
 
 You can verify a receipt offline exactly as a merchant would, with
 `verifyReceipt` from `modules/passport` — a verification path only Haven can
-execute proves nothing.
+execute proves nothing. A merchant uses `verifyPassportReceipt` /
+`checkPassport` from `@haven_ai/sdk`, which is the same canonicalizer and the
+same verifier; the cross-check test lives in
+`packages/backend/src/modules/passport/__tests__/passport-sdk-cross-check.test.ts`.
 
 ## Related
 

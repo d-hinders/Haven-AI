@@ -237,9 +237,9 @@ export const ROUTING_MATRIX = [
   // ─── Dependency propagation ────────────────────────────────────────────────
   {
     files: ['packages/sdk/src/client.ts'],
-    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent'],
+    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant'],
     kind: CONTRACT,
-    why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. qa_agent joined in #3005: its tests import the SDK, and its job runs those tests. Frontend stays out because it consumes @haven_ai/core, not the SDK.',
+    why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. qa_agent joined in #3005: its tests import the SDK, and its job runs those tests. demo_merchant joined in #4723: the demo merchant imports @haven_ai/sdk at runtime (the merchant-side passport verifier) and demo_merchant_checks runs its suite, so an SDK change can break it with its job never running. Frontend stays out because it consumes @haven_ai/core, not the SDK.',
   },
   {
     files: ['packages/mcp/src/index.ts'],
@@ -331,7 +331,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/sdk/src/agent-guidance.ts'],
-    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent'],
+    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant'],
     kind: CONTRACT,
     why:
       'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
@@ -358,6 +358,7 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
     ],
     kind: CONTRACT,
     why:
@@ -392,6 +393,7 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
     ],
     kind: CONTRACT,
     why:
@@ -417,6 +419,7 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
     ],
     kind: CONTRACT,
     why:
@@ -438,6 +441,7 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
     ],
     kind: CONTRACT,
     why:
@@ -684,9 +688,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/network-map-pins.test.mjs'],
-    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent'],
+    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'demo_merchant'],
     kind: CONTRACT,
-    why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005) appear without being named by the rule.',
+    why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005, demo_merchant since #4723) appear without being named by the rule.',
   },
 
   // ─── Guard data and shared vitest/frontend helpers, one entry each (#3229) ─

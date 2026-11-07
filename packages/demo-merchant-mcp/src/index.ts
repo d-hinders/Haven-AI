@@ -1,5 +1,6 @@
 import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
+import type { PassportVerifierConfig } from './x402.js'
 import {
   DEFAULT_SETTLEMENT_METHOD,
   PRODUCTS,
@@ -22,6 +23,56 @@ const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
 const HOSTED_DEMO_URL = hostedMerchantBaseUrlForChain(CHAIN_ID)
 const IS_HOSTED_RUNTIME = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN || process.env.NODE_ENV === 'production')
 const BASE_URL = resolveBaseUrl(process.env.BASE_URL)
+
+// #4723: the passport check is opt-in and needs BOTH values. With either
+// missing the merchant advertises only `haven-demo`, exactly as before — the
+// no-env case is pinned by a test, not left to the code's own constant.
+const PASSPORT_CONFIG = resolvePassportConfig(
+  process.env.MERCHANT_HAVEN_BASE_URL,
+  process.env.MERCHANT_PASSPORT_ISSUER,
+)
+
+/**
+ * #4723: resolve the passport verifier config from env.
+ *
+ * Both values are required together. A half-configured merchant is a mistake
+ * worth a warning, but not a reason to refuse payments: the check is advisory,
+ * so a bad value disables it rather than taking the merchant down.
+ */
+function resolvePassportConfig(
+  baseUrlRaw: string | undefined,
+  issuerRaw: string | undefined,
+): PassportVerifierConfig | undefined {
+  const baseUrl = baseUrlRaw?.trim()
+  const issuer = issuerRaw?.trim()
+  if (!baseUrl || !issuer) {
+    if (baseUrl || issuer) {
+      console.warn(
+        'Passport checking is disabled: set BOTH MERCHANT_HAVEN_BASE_URL and MERCHANT_PASSPORT_ISSUER. ' +
+          'The merchant advertises only haven-demo until both are set.',
+      )
+    }
+    return undefined
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(issuer)) {
+    console.warn(
+      'MERCHANT_PASSPORT_ISSUER is not a 0x-prefixed 20-byte address. Passport checking is disabled.',
+    )
+    return undefined
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(baseUrl)
+  } catch {
+    console.warn('MERCHANT_HAVEN_BASE_URL is not a valid URL. Passport checking is disabled.')
+    return undefined
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    console.warn('MERCHANT_HAVEN_BASE_URL must be http(s). Passport checking is disabled.')
+    return undefined
+  }
+  return { baseUrl: baseUrl.replace(/\/+$/, ''), issuer }
+}
 
 const REQUESTED_SETTLEMENT_METHODS = parseSettlementMethods(process.env.MERCHANT_X402_SETTLEMENT_METHODS)
 const ERC7710_CONFIG = resolveErc7710Config(REQUESTED_SETTLEMENT_METHODS)
@@ -131,8 +182,8 @@ const settlementClient = createViemSettlementClient({
 const paymentProcessor = createX402PaymentProcessor(
   settlementClient,
   ERC7710_CONFIG
-    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS }
-    : { settlementMethods: SETTLEMENT_METHODS },
+    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG }
+    : { settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG },
 )
 
 const server = createDemoMerchantServer({
@@ -141,6 +192,7 @@ const server = createDemoMerchantServer({
   paymentProcessor,
   settlementMethods: SETTLEMENT_METHODS,
   settlementClient,
+  passport: PASSPORT_CONFIG,
 })
 
 server.listen(PORT, () => {
@@ -152,6 +204,11 @@ server.listen(PORT, () => {
   console.log(`  Merchant:  ${MERCHANT_ADDRESS}`)
   console.log(`  Network:   eip155:${CHAIN_ID}${networkLogLabel(CHAIN_ID) ? ` (${networkLogLabel(CHAIN_ID)})` : ''}`)
   console.log(`  Payment:   USDC via x402 ${SETTLEMENT_METHODS.join(' + ')} (default ${DEFAULT_METHOD})`)
+  console.log(
+    PASSPORT_CONFIG
+      ? `  Passport:  standing checked against ${PASSPORT_CONFIG.baseUrl} (issuer ${PASSPORT_CONFIG.issuer})`
+      : '  Passport:  not advertised (MERCHANT_HAVEN_BASE_URL / MERCHANT_PASSPORT_ISSUER unset)',
+  )
   console.log()
   console.log(
     `Products: vpn_basic $${formatUsdc(PRODUCTS.vpn_basic.price_usdc)} | ` +

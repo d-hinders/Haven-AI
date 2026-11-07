@@ -8,13 +8,14 @@ covers:
   - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
   - packages/sdk/src/x402.ts
+  - packages/sdk/src/passport.ts
   - packages/backend/src/db/migrations/048_agent_passports.ts
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
   - packages/backend/src/db/migrations/096_agent_passports_uid_repair_confirmed_at.ts
   - packages/backend/src/db/migrations/099_agent_passports_uid_repair_next_at.ts
-last-verified: "2026-09-27"
+last-verified: "2026-11-07"
 ---
 
 # L0 Agent Passport — EAS schema
@@ -724,7 +725,53 @@ if the clause is removed.
 A bare `{ ok: true }` forces a live call to Haven for every merchant decision:
 an availability coupling (Haven down means merchants cannot gate) and a privacy
 one (Haven sees every merchant's traffic). The response is instead a
-self-contained artifact whose authenticity a merchant checks **offline**:
+self-contained artifact whose authenticity a merchant checks **offline**.
+
+**Use the SDK helper.** `@haven_ai/sdk` exports the merchant-side verifier
+([#4723](https://github.com/d-hinders/Haven-AI/issues/4723)), and it is the same
+canonicalizer Haven signs with — there is exactly one copy, so it cannot drift:
+
+```ts
+import { checkPassport } from '@haven_ai/sdk'
+
+const result = await checkPassport({
+  baseUrl: HAVEN,                                 // e.g. https://api.haven.dev
+  issuer: PINNED_ISSUER,                          // from GET /passport/issuer, pinned once
+  payer: authorization.from,                      // EIP-3009; the erc7710 `delegator` on that rail
+  rail: 'eip3009',                                // or 'erc7710'
+  chainId: 8453,                                  // the merchant's chain
+  reference: extensions['haven-passport']?.info,  // the payment's reference, if any
+})
+// { ok, standing, reason, checked_at }
+```
+
+`checkPassport` fetches `GET /passport/verify?address=<payer>` and verifies the
+answer. `verifyPassportReceipt(body, options)` is the pure half — the same
+options minus `baseUrl` — for a merchant that already holds the body.
+
+**The lookup is by payer address, never by the UID the payment carried.** A UID
+is public on EAS, so a UID-only lookup lets any payer present another active
+agent's passport and be reported `active` — a "lent passport", and an authority
+claim. The reference's `attestation_uid` is a hint, cross-checked against the
+receipt's `evidenceUid`; a mismatch is `subject_mismatch`. The receipt's own
+`issuer` field is never trusted either: the pin is a required argument.
+
+The reasons are the backend's own `verifyReceipt` vocabulary
+(`not_signed_by_issuer`, `malformed_signature`, `expired`,
+`unsupported_version`), the verifier's `found: false` answers (`no_passport`,
+`unsupported_assurance_level`), `not_active`, `subject_mismatch`, and
+`unavailable` (503, 429, a timeout, a network error, a non-JSON body).
+`checkPassport` never throws and never refuses anything: a merchant decides what
+to do with the answer. The demo merchant reports it and settles regardless.
+
+Pin `PINNED_ISSUER` once from `GET /passport/issuer`. Do **not** take it from
+the receipt's own `issuer` field — authenticating an artifact against a value it
+carries is circular.
+
+#### If you verify by hand
+
+The helper is the recommended path, but the artifact is designed to be
+verifiable with nothing but `ethers` or `viem`:
 
 ```ts
 import { verifyMessage } from 'ethers' // or viem's verifyMessage
@@ -740,10 +787,6 @@ const { receipt, signature } = await fetch(`${HAVEN}/passport/verify?address=${a
 const ok = verifyMessage(JSON.stringify(canon(receipt)), signature).toLowerCase() === PINNED_ISSUER.toLowerCase()
 if (!ok || receipt.standing !== 'active' || receipt.expiresAt < Date.now() / 1000) return deny()
 ```
-
-Pin `PINNED_ISSUER` once from `GET /passport/issuer`. Do **not** take it from
-the receipt's own `issuer` field — authenticating an artifact against a value it
-carries is circular.
 
 Key ordering does not matter: the signature is over a canonical serialization
 (**every** key sorted, at every depth, no whitespace), so a merchant that parses

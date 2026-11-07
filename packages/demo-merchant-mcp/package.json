@@ -9,13 +9,15 @@
     "haven-demo-merchant": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "npm --prefix ../core run build && npm --prefix ../sdk run build && tsup",
     "start": "node dist/index.js",
     "dev": "tsup --watch & sleep 2 && node dist/index.js",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "test": "npm --prefix ../core run build && npm --prefix ../sdk run build && vitest run",
+    "typecheck": "npm --prefix ../core run build && npm --prefix ../sdk run build && tsc --noEmit",
+    "smoke:start": "node scripts/start-smoke.mjs"
   },
   "dependencies": {
+    "@haven_ai/sdk": "*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@x402/core": "^2.29.0",
     "viem": "^2.0.0",

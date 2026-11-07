@@ -200,11 +200,13 @@ describe('the fan-out the issue specifies', () => {
     )
   })
 
-  test('sdk fans out to backend, connect, mcp, mcp_server, signer and qa_agent', () => {
+  test('sdk fans out to backend, connect, demo_merchant, mcp, mcp_server, signer and qa_agent', () => {
     // qa_agent joined in #3005 — the QA harness's tests import the SDK and its
     // job runs those tests, exactly the shape that put mcp_server here in
-    // #2348.
-    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'signer'])
+    // #2348. demo_merchant joined in #4723: the demo merchant imports the SDK's
+    // merchant-side passport verifier at runtime, and demo_merchant_checks runs
+    // its suite.
+    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'demo_merchant', 'mcp', 'mcp_server', 'qa_agent', 'signer'])
   })
 
   test('mcp fans out to connect AND mcp_server', () => {

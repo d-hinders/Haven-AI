@@ -20,7 +20,14 @@ import {
 } from './products.js'
 import { invoiceForPayment, renderInvoiceText, type Invoice } from './invoice.js'
 import { QA_FIXTURE_DESCRIPTION_SUFFIX, isSkipSettleProduct } from './x402.js'
-import type { SettledPayment, SettlementState, X402PaymentProcessor } from './x402.js'
+import type { PassportVerifierConfig, SettledPayment, SettlementState, X402PaymentProcessor } from './x402.js'
+import {
+  checkPassport,
+  type CheckPassportOptions,
+  type PassportCheckReason,
+  type PassportCheckResult,
+  type PassportStanding,
+} from '@haven_ai/sdk'
 import type { Address } from 'viem'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
@@ -36,6 +43,12 @@ export interface MerchantConfig {
   settlementMethods?: readonly SettlementMethod[]
   /** Chain named in agent-facing text; defaults to the process `CHAIN_ID`. */
   chainId?: number
+  /**
+   * #4723: where a payment's passport reference is resolved, and which issuer
+   * is pinned. Set only when BOTH env values are present; absent, the merchant
+   * advertises only `haven-demo` and reports `passport: null`.
+   */
+  passport?: PassportVerifierConfig
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -82,6 +95,12 @@ interface MerchantStrings {
   /** #2989: appended to a skip-settle product's `list_products` line — see
    *  `isSkipSettleProduct` in x402.ts. */
   qaFixtureLine: string
+  /**
+   * #4723: the passport line. Says the standing was CHECKED — never "verified
+   * agent": only L2 may say verified, and L2 is not issuable.
+   */
+  passportChecked: (standing: string) => string
+  passportNotChecked: (reason: string) => string
 }
 
 // Exported for the #2989 pin test only: the QA-fixture disclosure quotes the
@@ -116,6 +135,8 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
       'Full invoice omitted (result_detail: "summary") — re-call with result_detail: "full" for the ' +
       'rendered invoice + bookkeeping JSON; the same document also travels as the x-receipt-json response header.',
     qaFixtureLine: QA_FIXTURE_DESCRIPTION_SUFFIX.trim(),
+    passportChecked: (standing) => `Passport: standing checked — ${standing}`,
+    passportNotChecked: (reason) => `Passport: standing not checked — ${reason}`,
   },
   sv: {
     monthSubscription: '1 månads abonnemang',
@@ -148,6 +169,8 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
     qaFixtureLine:
       'QA-fixtur: verifierad men aldrig avräknad på kedjan — kvittot kommer att visa ' +
       '"Levererad — ej bekräftad på kedjan".',
+    passportChecked: (standing) => `Passport: status kontrollerad — ${standing}`,
+    passportNotChecked: (reason) => `Passport: status ej kontrollerad — ${reason}`,
   },
 }
 
@@ -192,7 +215,32 @@ export interface PurchaseSummary {
    * `status: 'confirmed'` carries a real transaction hash.
    */
   settlement_tx_hash: string | null
+  /**
+   * #4723: the agent's passport standing, CHECKED against the merchant's
+   * pinned Haven issuer — advisory, never a condition of the purchase.
+   *
+   * `null` when the payment carried no `haven-passport` reference. A verified
+   * receipt reports `{ standing, checked_at }`; anything the merchant could not
+   * verify reports `{ error, checked_at }` and never a standing. The copy rule
+   * applies here too: this says the standing was checked, never that the agent
+   * is "verified".
+   */
+  passport: PassportSummary | null
 }
+
+/**
+ * #4723: what the purchase response says about the agent's passport.
+ *
+ * `{ standing, checked_at }` only when the receipt authenticated, was
+ * unexpired, named this chain and bound the payer. `{ error, checked_at }`
+ * otherwise — including `not_active`, whose standing is deliberately NOT
+ * reported here: the merchant's job is to say whether the check passed, and a
+ * non-active standing is a failed check, not a fact to relay as if it were
+ * verified.
+ */
+export type PassportSummary =
+  | { standing: PassportStanding; checked_at: string }
+  | { error: PassportCheckReason; checked_at: string }
 
 const SUMMARY_STATUS_BY_SETTLEMENT: Record<SettlementState, PurchaseSummary['status']> = {
   settled_onchain: 'confirmed',
@@ -205,7 +253,11 @@ const SUMMARY_STATUS_BY_SETTLEMENT: Record<SettlementState, PurchaseSummary['sta
  *  reachable only via this function, and only after `waitForReceipt` has
  *  proven the on-chain transaction succeeded (see x402.ts
  *  `confirmSubmittedPayment`) for the settled case. */
-export function buildPurchaseSummary(payment: SettledPayment, invoice: Invoice): PurchaseSummary {
+export function buildPurchaseSummary(
+  payment: SettledPayment,
+  invoice: Invoice,
+  passport: PassportSummary | null = null,
+): PurchaseSummary {
   const product = PRODUCTS[payment.productId]
   return {
     status: SUMMARY_STATUS_BY_SETTLEMENT[payment.settlement],
@@ -217,7 +269,78 @@ export function buildPurchaseSummary(payment: SettledPayment, invoice: Invoice):
     asset: 'USDC',
     network: `eip155:${CHAIN_ID}`,
     settlement_tx_hash: payment.settlement === 'settled_onchain' ? payment.txHash : null,
+    passport,
   }
+}
+
+/**
+ * #4723: resolve the passport reference a settled payment carried.
+ *
+ * Runs AFTER settlement, never before: a check before settlement would lengthen
+ * the hot-delegate window for a fact that is advisory anyway. The result is
+ * cached per `SettledPayment`, so a duplicate tool call (the #1550 replay path)
+ * reuses the first check instead of hitting Haven again.
+ *
+ * Never throws and never refuses. A missing reference, a missing config, a
+ * verifier that is down, a timeout and a malformed reference all produce a
+ * value the caller can render — the purchase itself is already settled and is
+ * never revisited.
+ */
+const passportChecks = new WeakMap<SettledPayment, Promise<PassportCheckResult>>()
+
+export async function passportSummaryFor(
+  payment: SettledPayment,
+  options: {
+    passport?: PassportVerifierConfig
+    chainId?: number
+    /** Injectable for tests; defaults to the SDK's `checkPassport`. */
+    check?: (options: CheckPassportOptions) => Promise<PassportCheckResult>
+  } = {},
+): Promise<PassportSummary | null> {
+  if (!payment.passportReference || !options.passport) return null
+
+  const cached = passportChecks.get(payment)
+  const pending: Promise<PassportCheckResult> = cached ?? (() => {
+    const check = options.check ?? checkPassport
+    const started = check({
+      baseUrl: options.passport!.baseUrl,
+      issuer: options.passport!.issuer,
+      payer: payment.from,
+      // The rail decides WHICH bound address the payer must match: EIP-3009
+      // pays from the delegate EOA, erc7710 from the Hybrid delegator.
+      rail: payment.settlementMethod === 'erc7710' ? 'erc7710' : 'eip3009',
+      chainId: options.chainId ?? CHAIN_ID,
+      reference: payment.passportReference,
+    })
+    passportChecks.set(payment, started)
+    return started
+  })()
+
+  let result: PassportCheckResult
+  try {
+    result = await pending
+  } catch {
+    // `checkPassport` never throws, but an injected checker might. The purchase
+    // is already settled; a broken check must not break the response.
+    return { error: 'unavailable', checked_at: new Date().toISOString() }
+  }
+
+  if (result.ok) return { standing: result.standing ?? 'active', checked_at: result.checked_at }
+  return { error: result.reason ?? 'unavailable', checked_at: result.checked_at }
+}
+
+/**
+ * #4723: the passport line in the purchase text, or `''` when the payment
+ * carried no reference.
+ *
+ * Exported so the copy rule has a mechanism: a test asserts this line says the
+ * standing was CHECKED and never says "verified". `lint:copy` scans the
+ * frontend only, so without this the rule would be advice.
+ */
+export function renderPassportLine(passport: PassportSummary | null, locale: MerchantLocale): string {
+  if (!passport) return ''
+  const t = STRINGS[locale]
+  return 'standing' in passport ? t.passportChecked(passport.standing) : t.passportNotChecked(passport.error)
 }
 
 export function runWithSettledPayment<T>(payment: SettledPayment | undefined, fn: () => T): T {
@@ -344,7 +467,7 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
   return server
 }
 
-function completePurchase(
+async function completePurchase(
   config: MerchantConfig,
   productId: ProductId,
   options: {
@@ -394,7 +517,14 @@ function completePurchase(
   // payment), so the summary below can never disagree between a fresh
   // purchase and a retried/duplicate one.
   const invoice = invoiceForPayment(payment, productId, config.chainId)
-  const summary = buildPurchaseSummary(payment, invoice)
+  // #4723: advisory, AFTER settlement, cached per payment. Never a condition
+  // of the purchase — the goods are already owed by the time this runs.
+  const passport = await passportSummaryFor(payment, {
+    passport: config.passport,
+    chainId: config.chainId,
+  })
+  const summary = buildPurchaseSummary(payment, invoice, passport)
+  const passportLine = renderPassportLine(passport, locale)
 
   // #1550: cached per (locale, detail) — the replay guarantee is per VARIANT,
   // so a duplicate call with the same options replays byte-identical text.
@@ -430,7 +560,10 @@ function completePurchase(
       ? `${t.fromDelegate(payment.from)}\n`
       : `${t.fromLabel}:     ${payment.from}\n`) +
     (isSettled ? `Tx:       ${payment.txHash}\n` : '') +
-    `Nonce:    ${payment.nonce}\n`
+    `Nonce:    ${payment.nonce}\n` +
+    // #4723: only when the payment carried a reference. "checked" is the
+    // claim; "verified" is reserved for L2, which is not issuable.
+    (passportLine ? `${passportLine}\n` : '')
 
   const text =
     detail === 'summary'

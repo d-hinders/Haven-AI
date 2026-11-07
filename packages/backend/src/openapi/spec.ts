@@ -12964,7 +12964,7 @@ export const openapiSpec = {
         type: 'object',
         required: ['attestation_uid', 'chain_id'],
         description:
-          "An anchored passport's compact reference (#976, #4721). A merchant resolves `attestation_uid` + `chain_id` against a Haven verifier it already pins (`GET /passport/verify?uid=`), never against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust.",
+          "An anchored passport's compact reference (#976, #4721). A merchant resolves the payer's standing against a Haven verifier it already pins (`GET /passport/verify?address=<payer>`); `attestation_uid` + `chain_id` are only a hint, because a UID is public on EAS and a UID alone cannot bind the passport to the payer. Never resolve against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust.",
         properties: {
           attestation_uid: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
           chain_id: { type: 'integer' },

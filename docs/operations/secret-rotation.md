@@ -195,7 +195,7 @@ rotate today. If one is set later, it joins the inventory above.
 
 | Variable | Read by | If it is ever set |
 |---|---|---|
-| `PASSPORT_RECEIPT_SIGNING_KEY` | `packages/backend/src/modules/passport/receipt.ts` | Signs merchant-facing verification receipts. Its address is published for pinning, so rotating it breaks every merchant that pinned the old issuer address. Treat it as a breaking change: publish the new address first. |
+| `PASSPORT_RECEIPT_SIGNING_KEY` | `packages/backend/src/modules/passport/receipt.ts` | Signs merchant-facing verification receipts. Its address is published for pinning, so rotating it breaks every merchant that pinned the old issuer address. Treat it as a breaking change: publish the new address first. **Known consumer:** the demo merchant pins it in `MERCHANT_PASSPORT_ISSUER` (#4723) and answers `not_signed_by_issuer` for every receipt until that value is updated. |
 | `CATALOG_OWNERSHIP_SECRET` | `packages/backend/src/modules/catalog/ownership.ts` | Computes catalog ownership proofs. Rotating it invalidates proofs already issued. |
 | `DELEGATE_ALERT_WEBHOOK_URL` | `packages/backend/src/infra/delegate-alert-webhook.ts` | A webhook URL; the URL is the credential, so treat it as a secret. |
 | `BLOCKSCOUT_API_KEY`, `BASESCAN_API_KEY` | `packages/backend/src/config.ts` | Explorer API keys; quota only. |

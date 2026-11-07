@@ -199,6 +199,25 @@ describe('OnboardingClient (#1162)', () => {
     expect(document.body.textContent).not.toContain(CREATED_ADDRESS)
   })
 
+  it('plays Peak on the success screen with exactly two motions (#4702)', async () => {
+    render(<OnboardingClient />)
+    // The create phase keeps its own step-rise; only the success wrapper loses it.
+    expect(document.querySelector('.v2-animate-step-rise')).toBeTruthy()
+
+    await completeCreation()
+
+    const success = screen.getByTestId('onboarding-success')
+    // Peak would silently gain a third motion on this one screen if the
+    // wrapper kept the wizard's step-rise.
+    expect(success.className).not.toContain('v2-animate-step-rise')
+    // Success colours, not the old brand indigo.
+    expect(success.innerHTML).toContain('bg-[var(--v2-success-soft)]')
+    expect(success.innerHTML).toContain('text-[var(--v2-success)]')
+    expect(success.innerHTML).not.toContain('rgba(99,102,241')
+    // The announcement stays with the caller, not the pattern.
+    expect(screen.getByRole('status').textContent).toContain("You're in")
+  })
+
   it('auto-advances to the dashboard, marking just-onboarded before navigating', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     render(<OnboardingClient />)

@@ -6,6 +6,7 @@ import { agentExecutionRailLabel } from '../rails/execution-rail.js'
 import { computeHybridAccountAddress } from '../rails/hybrid-provisioning.js'
 import { toCanonicalAddress } from '../modules/transactions/index.js'
 import { findAgentSupersession } from '../infra/repositories/agents.js'
+import { passportReferenceFor } from '../modules/passport/index.js'
 import { findOpenGrantsForAgent, type AgentParentSubBudget } from '../infra/repositories/sub-budgets.js'
 import {
   handleGetAllowances,
@@ -68,14 +69,14 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // on the legacy rail, where no such account exists. A failed derivation
     // degrades to null rather than failing the whole identity read — this
     // field is reconciliation metadata, not authority.
-    let delegateAccountAddress: string | null = null
-    if (agentExecutionRailLabel(agent.execution_rail) === 'delegation') {
+    const deriveDelegateAccount = async (): Promise<string | null> => {
+      if (agentExecutionRailLabel(agent.execution_rail) !== 'delegation') return null
       try {
-        delegateAccountAddress = await computeHybridAccountAddress(agent.chain_id, {
+        return await computeHybridAccountAddress(agent.chain_id, {
           ownerAddress: agent.delegate_address as `0x${string}`,
         })
       } catch {
-        delegateAccountAddress = null
+        return null
       }
     }
 
@@ -86,14 +87,30 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
     // A read failure degrades to an empty array rather than failing the
     // identity read — the same reconciliation-metadata-not-authority rule the
     // delegate-account derivation above follows.
-    let parent_sub_budgets: AgentParentSubBudget[] = []
-    try {
-      parent_sub_budgets = await findOpenGrantsForAgent(agent.id)
-    } catch {
-      parent_sub_budgets = []
+    const readGrants = async (): Promise<AgentParentSubBudget[]> => {
+      try {
+        return await findOpenGrantsForAgent(agent.id)
+      } catch {
+        return []
+      }
     }
 
-    const superseded_by = await readSupersededBy(agent.id)
+    // #4721 (epic #4718): the agent's OWN passport reference, so it can
+    // present `attestation_uid` + `chain_id` to a merchant that asks — until
+    // now only the owner's dashboard could read it. `passportReferenceFor` is
+    // bounded (1500 ms) and never throws: no row, a pending/failed row or a
+    // lookup error all read `null`, the same metadata-not-authority rule.
+    //
+    // The four reads run CONCURRENTLY: this route sits on the paid path
+    // (`getAgent()` in the SDK's completion and sweep) and behind installed
+    // connectors' 3 s identity probe, so the passport lookup must add no
+    // sequential time to the slowest of them.
+    const [delegateAccountAddress, parent_sub_budgets, superseded_by, passport] = await Promise.all([
+      deriveDelegateAccount(),
+      readGrants(),
+      readSupersededBy(agent.id),
+      passportReferenceFor(agent.id, { log: request.log }),
+    ])
 
     return ({
       id: agent.id,
@@ -123,6 +140,8 @@ export default async function machinePaymentRoutes(app: FastifyInstance): Promis
       // replacement since revoked or archived, or the read failed). A stale-duplicate
       // WARNING only — it changes nothing about this agent's authority.
       superseded_by,
+      // #4721: null unless an anchored passport exists (see above).
+      passport,
       parent_sub_budgets: parent_sub_budgets.map((g) => ({
         sub_budget_id: g.sub_budget_id,
         parent_agent_id: g.parent_agent_id,

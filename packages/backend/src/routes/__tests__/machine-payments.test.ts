@@ -64,6 +64,19 @@ vi.mock('../../db.js', () => ({
 
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
+// #4721 review: a holdable `computeHybridAccountAddress`, so the GET /agent
+// concurrency test can keep the delegate-account derivation (an unbounded
+// factory RPC in production) pending. Pass-through unless a test sets a hold.
+const hybridHold = vi.hoisted(() => ({ fn: null as null | (() => Promise<string>) }))
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
+  return {
+    ...actual,
+    computeHybridAccountAddress: (...args: Parameters<typeof actual.computeHybridAccountAddress>) =>
+      hybridHold.fn ? hybridHold.fn() : actual.computeHybridAccountAddress(...args),
+  }
+})
+
 // Fee recording at settlement must not consume a mocked DB call in these
 // sequence-based tests; neutralize it (the module is dark anyway).
 vi.mock('../../modules/fee/index.js', () => ({
@@ -459,7 +472,104 @@ describe('machine payment routes', () => {
       parent_sub_budgets: [],
       // #3772: always present; null for an agent that was never superseded.
       superseded_by: null,
+      // #4721: always present; null for an agent with no anchored passport.
+      passport: null,
     })
+  })
+
+  // ── #4721: the agent reads its OWN passport reference ────────────────────
+  const PASSPORT_UID = '0x' + 'ab'.repeat(32)
+  const passportRow = (status: string, uid: string | null = PASSPORT_UID): DbRoute => [
+    /FROM agent_passports WHERE agent_id = \$1/,
+    () => ({ rows: [{ agent_id: AGENT.id, chain_id: 84532, status, attestation_uid: uid }] }),
+  ]
+
+  it('GET /agent carries the anchored passport reference (#4721)', async () => {
+    primeDb(AUTH, passportRow('anchored'))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
+    expect(response.json().passport).toMatchObject({ attestation_uid: PASSPORT_UID, chain_id: 84532 })
+    // Read for THIS agent, never another.
+    expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)?.params).toEqual([AGENT.id])
+  })
+
+  it('GET /agent reads passport: null for a pending or failed passport — nothing a merchant could resolve (#4721)', async () => {
+    // A non-null UID, so the status check is what yields null — not a
+    // missing UID.
+    for (const status of ['pending', 'failed']) {
+      primeDb(AUTH, passportRow(status))
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/agent',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().passport).toBeNull()
+    }
+  })
+
+  it('GET /agent stays 200 with passport: null when the passport lookup fails (#4721)', async () => {
+    primeDb(AUTH, [/FROM agent_passports WHERE agent_id = \$1/, () => { throw new Error('passport table unavailable') }])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().passport).toBeNull()
+    expect(response.json().id).toBe(AGENT.id)
+  })
+
+  it('GET /agent runs the passport lookup concurrently with the other identity reads (#4721)', async () => {
+    // Hold ALL FOUR reads open — the delegate-account derivation (delegation
+    // rail, so it really runs), the sub-budget grants, the supersession read
+    // and the passport lookup — and require every one to be ISSUED before any
+    // is released. Any sequential placement awaits one read before starting
+    // another, so at least one is never issued while the first is held and
+    // this wait times out: the passport first or last, and equally a
+    // derivation or grants read awaited ahead of the other three (#4721
+    // review: a test holding only two reads let those partial orders pass).
+    const holds: Array<() => void> = []
+    const held = <T,>(value: T) =>
+      new Promise<T>((resolve) => {
+        holds.push(() => resolve(value))
+      })
+    let deriveStarted = false
+    hybridHold.fn = () => {
+      deriveStarted = true
+      return held('0x' + '77'.repeat(20))
+    }
+    try {
+      primeDb(
+        authAs({ ...AGENT, chain_id: 84532, execution_rail: 'delegation', account_type: 'delegator_hybrid' }),
+        [/FROM agent_sub_budgets b/, () => held({ rows: [] })],
+        [/superseded_by_agent_id/, () => held({ rows: [] })],
+        [/FROM agent_passports WHERE agent_id = \$1/, () => held({ rows: [] })],
+      )
+      const pending = app.inject({
+        method: 'GET',
+        url: '/machine-payments/agent',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      await vi.waitFor(() => {
+        expect(deriveStarted).toBe(true)
+        expect(findCall(/FROM agent_sub_budgets b/)).toBeDefined()
+        expect(findCall(/superseded_by_agent_id/)).toBeDefined()
+        expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)).toBeDefined()
+        // Must stay BELOW `passportReferenceFor`'s 1500 ms bound: past it, a
+        // passport awaited first times out to null and lets the others start.
+      }, { timeout: 500 })
+      for (const release of holds) release()
+      const response = await pending
+      expect(response.statusCode).toBe(200)
+    } finally {
+      hybridHold.fn = null
+    }
   })
 
   // ── #3772: superseded_by (warning only) ──────────────────────────────────

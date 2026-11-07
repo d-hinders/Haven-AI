@@ -1035,6 +1035,32 @@ describe('Haven MCP tool handlers', () => {
     })
   })
 
+  it('#4721: haven_get_agent carries the agent\'s passport reference', async () => {
+    const uid = '0x' + 'ab'.repeat(32)
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agt_1', name: 'Test', status: 'active', account_address: safeAddress,
+          delegate_address: delegateAddress, chain_id: 8453, execution_rail: 'delegation',
+          passport: { attestation_uid: uid, chain_id: 84532 },
+        })
+      }
+      if (u.includes('/allowances')) {
+        return jsonResponse({
+          agent_id: 'agt_1', account_address: safeAddress, delegate_address: delegateAddress,
+          chain_id: 8453, allowances: [],
+        })
+      }
+      return jsonResponse({ task_budgets: [] })
+    })
+    const handlers = createToolHandlers(new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl }))
+    const result = await handlers.haven_get_agent({})
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect((result.data as { passport: unknown }).passport).toEqual({ attestationUid: uid, chainId: 84532 })
+  })
+
   it('#3772: haven_get_agent and haven_get_allowances carry supersededBy with the warning, null otherwise', async () => {
     const mark = { agent_id: '11111111-2222-4333-8444-555555555555', superseded_at: '2026-10-13T10:00:00.000Z' }
     const serve = (superseded: typeof mark | undefined) =>

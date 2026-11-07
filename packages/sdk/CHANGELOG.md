@@ -17,6 +17,17 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **The agent can read its own Agent Passport reference (#4721).**
+  `HavenAgent.passport` (raw `passport` on `GET /machine-payments/agent`) is
+  `{ attestationUid, chainId, verifyUrl? }` for an agent with an anchored
+  passport, and `null` otherwise: no passport, a pending or failed one, a
+  failed lookup, or an older backend that sends nothing. `getAgentSummary()`
+  and `haven_get_agent` carry it too. A malformed body maps to `null`, never to
+  a reference an agent would present. The field is **required** on the
+  `HavenAgent` type (`| null`), like `supersededBy`, so code that builds a
+  `HavenAgent` literal, test doubles for example, must add `passport: null`.
+  New type export: `HavenAgentPassport`.
+
 - **The parent purchase receipt is named for what it holds (#4577).**
   `HavenPaymentReceipt.parentReceiptId` (raw `parent_receipt_id`) carries the
   parent purchase receipt's `id` — the `machine_payment_evidence` row id of the

@@ -655,6 +655,7 @@ describe('HavenClient structural boundary', () => {
       'EvidenceReportOutcome', // #2970
       'HavenAgent',
       'HavenAgentAllowanceSummary',
+      'HavenAgentPassport', // #4721
       'HavenAgentReadiness',
       'HavenAgentSummary',
       'HavenAgentSupersession', // #3772

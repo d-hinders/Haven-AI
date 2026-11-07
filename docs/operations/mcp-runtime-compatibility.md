@@ -2536,9 +2536,9 @@ to call next in structured fields, and those fields are typed end to end
   reads two fields (`id`, `delegate_address`) from `GET
   /machine-payments/agent` — whose response carries `id`, `name`, `status`,
   `account_address`, `delegate_address`, `delegate_account_address`,
-  `chain_id` and `execution_rail` since #2914, plus `superseded_by` (#3772)
-  and `parent_sub_budgets` (#3330) since, **none of them a re-key
-  stage**. Widening the probe
+  `chain_id` and `execution_rail` since #2914, plus `superseded_by` (#3772),
+  `parent_sub_budgets` (#3330) and `passport` (#4721) since, **none of them a
+  re-key stage**. Widening the probe
   would not help, because the field does not exist on that endpoint to read.
   So "never started on the agent page" and "started, revoked,
   abandoned" look identical from the machine. The second is

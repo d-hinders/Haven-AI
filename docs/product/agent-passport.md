@@ -164,6 +164,14 @@ for.
   opt-in, so most agents have none. Read it as "no claim made" and apply
   whatever policy you would apply to any unknown counterparty.
 
+**To receive a passport reference with the payment**, advertise the
+`haven-passport` x402 extension in your 402. The payment then echoes it with
+the agent's `attestation_uid` and `chain_id` added. The two fields come from
+the agent, so treat them as a hint: resolve the passport for the address that
+actually paid (`GET /passport/verify?address=<payer>`) against a Haven verifier
+you pin. The developer detail is in
+[the passport schema doc](../architecture/11-agent-passport-schema.md).
+
 What a passport does not do is replace your own controls. It narrows uncertainty
 about governance. It does not remove it, and it is silent on the other questions
 you would normally ask.
@@ -193,11 +201,12 @@ something only once the reader checks the attester against Haven's address,
 which Haven does not publish yet (see *Availability*). Live standing — revoked or
 not — comes from Haven, because the chain lags and revocation has to be
 immediate. The goal is that an agent carries a pointer to its own passport
-alongside a payment, so a merchant **verifies** rather than **discovers**. Today
-the pointer appears only in Haven's erc7710 settle response, and no client
-forwards it to the merchant. The x402 extension that puts it in the payment
-itself is being built (#4722), and it will not cover the default hosted+signer
-EIP-3009 path at first.
+alongside a payment, so a merchant **verifies** rather than **discovers**. A
+merchant that wants it asks for it: when its x402 402 advertises the
+`haven-passport` extension, the payment carries the passport's UID and chain id
+(#4722). That works on erc7710 payments and on EIP-3009 payments the SDK or
+local `@haven_ai/mcp` builds. The default hosted+signer EIP-3009 path does not
+carry it yet.
 
 No personal data is in the attestation; everything person-shaped stays behind
 the API. One trade-off is deliberate and worth stating plainly: the on-chain

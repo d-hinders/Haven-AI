@@ -474,6 +474,7 @@ describe('HavenClient structural boundary', () => {
       'HAVEN_CLIENT_HEADER', // #3303
       'HAVEN_CONNECTOR_CHANNEL',
       'HAVEN_MINIMUM_NODE_VERSION',
+      'HAVEN_PASSPORT_EXTENSION', // #4722
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
       'HOSTED_DISCOVERY_TIMEOUT_MS', // #3747
@@ -535,6 +536,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'addressFromKey',
+      'advertisesHavenPassport', // #4722
       'assertBoundDirectPaymentUserOp', // #3283
       'assertOwnTaskBudgetCloseUserOp', // #3329
       'assertOwnTaskChild', // #3329
@@ -608,6 +610,7 @@ describe('HavenClient structural boundary', () => {
       'verifyPaymentReceipt',
       'verifySettlementChild', // #3283
       'verifySignature',
+      'withHavenPassportExtension', // #4722: the one haven-passport merge rule (SDK + backend)
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
       'x402FacilitatorAddresses',
@@ -669,6 +672,7 @@ describe('HavenClient structural boundary', () => {
       'HavenClientConfig',
       'HavenClientUpdate', // #3303
       'HavenListScope',
+      'HavenPassportExtensionFields', // #4722
       'HavenPaymentReceipt',
       'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',

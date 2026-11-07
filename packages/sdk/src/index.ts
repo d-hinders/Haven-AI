@@ -196,6 +196,10 @@ export {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
+  HAVEN_PASSPORT_EXTENSION,
+  advertisesHavenPassport,
+  withHavenPassportExtension,
+  type HavenPassportExtensionFields,
   // #3727: the live header-name rule and the ready-made retry headers built
   // from it.
   x402PaymentHeaderNamesFor,

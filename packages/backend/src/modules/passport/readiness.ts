@@ -9,8 +9,9 @@
  * > **issuance on, verification off** — the deployment anchors real, revocable
  * > passports on-chain that **no merchant can verify**. `GET /passport/verify`
  * > and `GET /passport/issuer` 503, and on the EIP-3009 settlement path the
- * > verifier is the ONLY delivery mechanism (`x402-delivery.ts`), so a 3009
- * > merchant has no way to learn the passport exists at all.
+ * > verifier is the only way a merchant can CHECK a passport
+ * > (`x402-delivery.ts`). An advertised `haven-passport` extension (#4722) can
+ * > carry the UID, but it cannot be verified while the verifier is off.
  *
  * That state was live on dev for days (three anchored passports, #1151) and
  * nothing reported it: no health field, no boot warning, no runbook. It took an

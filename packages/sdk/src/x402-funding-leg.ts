@@ -19,9 +19,11 @@ import type {
   X402Receipt,
 } from './types.js'
 import {
+  advertisesHavenPassport,
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
+  type HavenPassportExtensionFields,
 } from './x402.js'
 import { paymentStateFromRaw, throwPaymentStateError } from './payment-state.js'
 import { deriveX402PaymentNonce } from './x402-nonce.js'
@@ -79,6 +81,15 @@ export interface FundingLegExpectation {
 }
 export type DataSigner = (signData: SignData, fundingExpectation: FundingLegExpectation) => Promise<string>
 export type AuthorizationStateAssertion = (label: string, raw: RawX402AuthorizeResponse) => void
+/** #4722: the agent's own anchored passport reference, or null (GET /machine-payments/agent). */
+export type AgentPassportReader = () => Promise<HavenPassportExtensionFields | null>
+
+/**
+ * #4722: the bound on the passport read before an advertised `haven-passport`
+ * extension is filled. The same 1500 ms the backend bounds its own lookup to.
+ * On timeout or error the envelope is byte-identical to a no-passport one.
+ */
+export const PASSPORT_READ_TIMEOUT_MS = 1500
 
 export interface X402FundingLegOptions {
   /** The agent's local delegate key. Required to mint an EIP-3009 header. */
@@ -92,6 +103,11 @@ export interface X402FundingLegOptions {
   post: PaymentPoster
   signForData: DataSigner
   assertSignableAuthorizationState: AuthorizationStateAssertion
+  /**
+   * #4722: reads the agent's passport reference for a merchant that
+   * advertises `haven-passport`. Optional: without it no reference is added.
+   */
+  readAgentPassport?: AgentPassportReader
 }
 
 export class X402FundingLeg {
@@ -102,6 +118,7 @@ export class X402FundingLeg {
   private readonly post: PaymentPoster
   private readonly signForData: DataSigner
   private readonly assertSignableAuthorizationState: AuthorizationStateAssertion
+  private readonly readAgentPassport: AgentPassportReader | undefined
 
   /**
    * Receipts keyed by idempotency key, held only as long as the underlying
@@ -122,6 +139,33 @@ export class X402FundingLeg {
     this.post = options.post
     this.signForData = options.signForData
     this.assertSignableAuthorizationState = options.assertSignableAuthorizationState
+    this.readAgentPassport = options.readAgentPassport
+  }
+
+  /**
+   * #4722 (epic #4718): the passport reference for THIS challenge, or null.
+   *
+   * Zero reads unless the merchant's v2 402 advertises `haven-passport`, so
+   * every other merchant sees no extra request and today's bytes. Bounded by
+   * `PASSPORT_READ_TIMEOUT_MS`; a timeout, an error or an agent with no
+   * anchored passport all answer null, and the envelope is then unchanged.
+   */
+  async passportForChallenge(paymentRequired: X402PaymentRequired): Promise<HavenPassportExtensionFields | null> {
+    if (!this.readAgentPassport) return null
+    if (paymentRequired.x402Version < 2 || !advertisesHavenPassport(paymentRequired.extensions)) return null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        this.readAgentPassport(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), PASSPORT_READ_TIMEOUT_MS)
+        }),
+      ])
+    } catch {
+      return null
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   // ── Receipt cache ────────────────────────────────────────────────
@@ -285,7 +329,19 @@ export class X402FundingLeg {
     // #3888: the header names the payment (derived nonce) so the merchant's
     // settlement stays attributable when the agent never reports it — and so
     // a resume of a settled payment re-signs the SAME nonce.
-    const paymentHeader = await this.createPaymentHeader(paymentRequired, option, raw.payment_id ?? state?.paymentId)
+    //
+    // #4722: the passport reference is read only on the FRESH path, where this
+    // header is minted before the funding leg is signed or executed, so the
+    // bounded read never widens a funded window. An executed replay re-mints
+    // after funding already ran, so it carries no reference (the merchant's
+    // advertised extension is still echoed verbatim, which is valid).
+    const passport = executedReplay ? null : await this.passportForChallenge(paymentRequired)
+    const paymentHeader = await this.createPaymentHeader(
+      paymentRequired,
+      option,
+      raw.payment_id ?? state?.paymentId,
+      passport,
+    )
 
     if (raw.success && raw.tx_hash) {
       const receipt = this.receiptFromAuthorization(paymentRequired, option, paymentHeader, raw)
@@ -356,6 +412,8 @@ export class X402FundingLeg {
     paymentRequired: X402PaymentRequired,
     option: X402PaymentOption,
     paymentId?: string,
+    /** #4722: added to an advertised `haven-passport` extension; never read here. */
+    passport: HavenPassportExtensionFields | null = null,
   ): Promise<string> {
     if (!this.delegateKey) {
       throw new HavenSigningError('delegateKey is required to sign x402 payment headers.')
@@ -386,7 +444,7 @@ export class X402FundingLeg {
     const payment = decodeBase64Json<{ payload: unknown }>(header)
     // #2361: the shared envelope carries the resource/extensions echoes —
     // see `x402V2PaymentEnvelope`'s comment for why they are load-bearing.
-    return encodeBase64Json(x402V2PaymentEnvelope(paymentRequired, option, payment.payload))
+    return encodeBase64Json(x402V2PaymentEnvelope(paymentRequired, option, payment.payload, { passport }))
   }
 
   // ── Receipt mapping ──────────────────────────────────────────────

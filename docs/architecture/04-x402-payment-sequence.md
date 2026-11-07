@@ -1617,14 +1617,19 @@ The flow is a two-call variant of `/x402/authorize`:
    an optional convenience `verify_url`) or `null`
    ([#976](https://github.com/d-hinders/Haven-AI/issues/976)),
    so the agent can PRESENT its passport rather than have the merchant discover
-   it. It is deliberately **outside** the `X-PAYMENT` payload: that payload is
-   parsed by a facilitator Haven does not control, and an unrecognised key is a
-   rejection risk. `null` whenever nothing is verifiable, and a lookup **error**
-   never fails the payment (it degrades to `null`; a lookup *hang* is a
-   different case, handled by ordering the lookup before the status `UPDATE`).
-   On the EIP-3009 path the reference cannot ride the
-   payment at all — see the delivery matrix in
-   [`11-agent-passport-schema.md`](11-agent-passport-schema.md).
+   it. It enters the `X-PAYMENT` payload **only** when the merchant's own 402
+   advertised the `haven-passport` x402 extension (#4722): the two fields are
+   then appended inside the echoed `extensions['haven-passport']` (inside its
+   `info` when present), never overwriting, and every other extension is echoed
+   byte-identical. A merchant that did not advertise the key gets today's
+   envelope, because that payload is parsed by a facilitator Haven does not
+   control and an unrecognised key is a rejection risk. `null` whenever nothing
+   is verifiable, and a lookup **error** never fails the payment (it degrades to
+   `null` and the header is unchanged; a lookup *hang* is a different case,
+   handled by ordering the lookup before the header is assembled and before the
+   status `UPDATE`). The SDK-built EIP-3009 envelope uses the same rule; the
+   hosted + signer EIP-3009 header does not carry it yet. See the delivery
+   matrix in [`11-agent-passport-schema.md`](11-agent-passport-schema.md).
 
 The intent moves to `submitted`. `POST /x402/:id/settle` is Base-only and is
 documented in the OpenAPI spec as the live delegation-rail settlement endpoint.

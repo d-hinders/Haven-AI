@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
+  - packages/sdk/src/x402.ts
   - packages/backend/src/db/migrations/048_agent_passports.ts
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
@@ -873,22 +874,66 @@ narrowness is the point:
 
 | Scheme | Reference rides the payment? | Delivery |
 |---|---|---|
-| **erc7710** (direct settlement) | Best-effort | `POST /x402/:id/settle` returns `passport: { attestation_uid, chain_id }`, optionally with `verify_url`. The agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
-| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **No** | The merchant sees a **standard** header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery **to the merchant**. The agent reads its own reference from its identity read, `GET /machine-payments/agent` → `passport` (#4721; `HavenAgent.passport` in the SDK, `haven_get_agent` in both MCP servers), and can hand it over out of band. |
+| **erc7710** (direct settlement) | **Yes, when the merchant asks** | Haven assembles the header. When the merchant's 402 advertised the `haven-passport` extension, the header's `extensions['haven-passport']` carries `attestation_uid` + `chain_id` (#4722). `POST /x402/:id/settle` also returns `passport: { attestation_uid, chain_id }`, optionally with `verify_url`, in Haven's own response. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
+| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **Yes, when the merchant asks, from the SDK or local `@haven_ai/mcp`** | When the merchant's 402 advertised `haven-passport`, the envelope the SDK builds carries the two fields (#4722). **The default hosted + `@haven_ai/signer` path does not yet**: its header is built by the signer, which needs a signer release. There, `GET /passport/verify?address=…` is the only delivery **to the merchant**. The agent reads its own reference from its identity read, `GET /machine-payments/agent` → `passport` (#4721; `HavenAgent.passport` in the SDK, `haven_get_agent` in both MCP servers). |
 
-**The 3009 row is why the verifier endpoint is primary, not a fallback.** The
-scheme with actual merchant adoption cannot carry the reference at all.
-Describing inline delivery as *the* mechanism would present the rarer path as
-if it were the common one.
+**The verifier endpoint stays primary, not a fallback.** The reference is
+agent-supplied metadata on every path, and the most common client path (hosted
++ signer) does not carry it yet. A merchant that resolves the payer address
+needs nothing from the agent at all.
 
-### The reference never goes in the X-PAYMENT header
+### The `haven-passport` x402 extension (#4722)
 
-x402 does not guarantee arbitrary-metadata passthrough. That header is parsed by
-a merchant **facilitator Haven does not control**, and an unrecognised key in
-the payload is a rejection risk — a failed payment traded for a nice-to-have. So
-the reference rides Haven's own response body and the agent decides what to do
-with it. A characterization test pins the header's exact key set against this
-temptation.
+x402 does not guarantee arbitrary-metadata passthrough. The payment header is
+parsed by a merchant **facilitator Haven does not control**, and an
+unrecognised key is a rejection risk: a failed payment traded for a
+nice-to-have. So the reference enters the header **only when the merchant asked
+for it**, through the x402 v2 extension mechanism the spec already requires
+every client to echo.
+
+**How a merchant asks.** Advertise the key in the 402's `extensions`:
+
+```json
+"extensions": { "haven-passport": { "info": {} } }
+```
+
+Any plain-object value works. Fields you put in `info` (or at the top level,
+when there is no `info`) are echoed back unchanged.
+
+**What arrives.** The payment's `extensions['haven-passport']` holds everything
+you advertised plus `attestation_uid` (32-byte hex) and `chain_id` (integer),
+inside `info` when you advertised one, otherwise at the top level. Every other
+extension is echoed byte-identical.
+
+**When it does not arrive.** No fields are added, and your advertised extension
+is echoed exactly as you sent it (except in the last case below, where the
+header carries no extensions at all), when:
+- the agent has no anchored passport, or the lookup fails or times out (1500 ms);
+- the advertised value is not a plain object, or its `info` is not one;
+- you already put `attestation_uid` or `chain_id` where the fields would go (the client never overwrites);
+- the client is the hosted + signer EIP-3009 path, or an older SDK;
+- the SDK re-mints a header after its funding leg already ran (an executed
+  replay, or `resumeAuthorizedX402`), so as never to widen a funded window;
+- on erc7710, the SDK did not forward the 402 to Haven (it does so only up to
+  64 KB), so the header carries no extensions at all, as before.
+
+One rule (`withHavenPassportExtension` in `packages/sdk/src/x402.ts`) builds it
+for the SDK's EIP-3009 envelope and the backend's erc7710 header alike. On the
+SDK path the reference is read only when the 402 advertises the key, and only
+before a fresh authorization is minted, never after a funding leg already ran.
+
+**Treat it as a hint, never as authority.** Both fields are agent-supplied: an
+agent can present another agent's public UID. Resolve the passport against a
+Haven verifier you pin, and bind the answer to the payer:
+`GET /passport/verify?address=<payer>` answers for the address that actually
+paid. Presenting the UID also lets you read the attestation's public `treasury`
+on EAS: the treasury → agents graph is public by design (see *What L0 attests*
+above). The extension sits outside the signed EIP-3009 authorization and outside
+the erc7710 `permissionContext`, so it changes no payment authority.
+
+Characterization tests pin the header's exact key set for a merchant that did
+not advertise the key, and byte identity for a stored challenge whose other
+extensions it echoes.
 
 ### `verify_url` is a convenience, not a root of trust
 

@@ -18,6 +18,7 @@ import {
   StoredAcceptedMismatchError,
 } from './x402-delegation.js'
 import { storedPaymentRequiredFromMetadata } from './sign-context.js'
+import { withHavenPassportExtension } from '@haven_ai/sdk'
 import { passportReferenceFor } from '../passport/index.js'
 import { markIntentSubmittedForSettlement } from '../../infra/repositories/x402-authorizations.js'
 import type { X402HandlerResult } from './types.js'
@@ -137,6 +138,39 @@ export async function settleX402(
     const storedChallenge = storedPaymentRequiredFromMetadata(intent.machine_metadata)
     const challengeResource = storedChallenge?.resource
     const challengeExtensions = storedChallenge?.extensions
+    // #976: the agent's own passport reference, so it can PRESENT rather
+    // than have the merchant DISCOVER. It goes in Haven's response always.
+    //
+    // #4722 (epic #4718): it ALSO goes inside the merchant-facing header, but
+    // only when the merchant's own 402 advertised the `haven-passport` x402
+    // extension, and only by the shared merge rule
+    // (`withHavenPassportExtension`): fields appended inside the advertised
+    // object, never overwriting, and the envelope byte-identical to today for
+    // every merchant that did not ask. The #976 fear (a facilitator Haven does
+    // not control rejecting an unknown key) does not apply to a key the
+    // merchant itself advertised, which the x402 v2 spec requires the client
+    // to echo. Extensions sit outside the erc7710 `permissionContext`, so the
+    // reference carries no authority. The stored challenge is only present
+    // when the SDK forwarded `machine_metadata.payment_required` (at most
+    // 64 KB); without it the header has no extensions at all, as before.
+    //
+    // Null when there is no anchored passport; a lookup ERROR is swallowed
+    // and yields null too, and then the header is unchanged.
+    //
+    // Computed BEFORE the header is assembled (so the header can carry it)
+    // and therefore before the UPDATE, and that ordering is the point (#976
+    // review). Between the UPDATE and this reply, `payment_header` is
+    // UNRECOVERABLE: it is emitted from this one place, and a retry hits
+    // the `status !== 'pending_signature'` guard above and 409s. There is
+    // no statement_timeout and no Fastify requestTimeout, so a wedged query
+    // in that window would strand a signed, submitted intent with no way to
+    // get its header. The reference needs nothing the UPDATE produces, so
+    // the window simply should not exist. A lookup error cannot fail the
+    // payment either way; a lookup HANG is what the ordering removes, and
+    // `passportReferenceFor` is bounded (1500 ms).
+    const passport = await passportReferenceFor(agent.id, { log })
+    const echoedExtensions = withHavenPassportExtension(challengeExtensions, passport)
+
     const accepted = {
       amount: intent.amount_raw,
       payTo: intent.to_address as `0x${string}`,
@@ -155,29 +189,12 @@ export async function settleX402(
         ...(challengeResource && typeof challengeResource === 'object' && !Array.isArray(challengeResource)
           ? { resource: challengeResource as Record<string, unknown> }
           : {}),
-        ...(challengeExtensions && typeof challengeExtensions === 'object' && !Array.isArray(challengeExtensions)
-          ? { extensions: challengeExtensions as Record<string, unknown> }
+        ...(echoedExtensions && typeof echoedExtensions === 'object' && !Array.isArray(echoedExtensions)
+          ? { extensions: echoedExtensions as Record<string, unknown> }
           : {}),
       },
     )
 
-    // #976: the agent's own passport reference, so it can PRESENT rather
-    // than have the merchant DISCOVER. Deliberately in Haven's response and
-    // NOT inside `payment_header` — that header is parsed by a merchant
-    // facilitator we do not control, and an unrecognised key is a rejection
-    // risk. Null when there is no anchored passport; a lookup ERROR is
-    // swallowed and yields null too.
-    //
-    // Computed BEFORE the UPDATE, and that ordering is the point (#976
-    // review). Between the UPDATE and this reply, `payment_header` is
-    // UNRECOVERABLE: it is emitted from this one place, and a retry hits
-    // the `status !== 'pending_signature'` guard above and 409s. There is
-    // no statement_timeout and no Fastify requestTimeout, so a wedged query
-    // in that window would strand a signed, submitted intent with no way to
-    // get its header. The reference needs nothing the UPDATE produces, so
-    // the window simply should not exist. A lookup error cannot fail the
-    // payment either way; a lookup HANG is what the ordering removes.
-    const passport = await passportReferenceFor(agent.id, { log })
 
     await markIntentSubmittedForSettlement(signature, id, agent.id)
     return {

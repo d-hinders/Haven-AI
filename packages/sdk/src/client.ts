@@ -318,6 +318,12 @@ export class HavenClient {
       signForData: (signData, fundingExpectation) => this.signForData(signData, undefined, fundingExpectation),
       assertSignableAuthorizationState: (label, raw) =>
         this.throwIfNonSignableAuthorizationState(label, raw),
+      // #4722: only consulted when a merchant's 402 advertises
+      // `haven-passport`; the read is bounded inside the funding leg.
+      readAgentPassport: async () => {
+        const passport = (await this.getAgent()).passport
+        return passport ? { attestation_uid: passport.attestationUid, chain_id: passport.chainId } : null
+      },
     })
     this.merchantCompletion = new MerchantCompletion({
       post: (path, body) => this.post(path, body),
@@ -1619,6 +1625,9 @@ export class HavenClient {
     // #3888: the resume re-signs the SAME derived nonce the original header
     // carried, so a settled payment's re-signed authorization is refused by
     // the merchant as already used instead of paying twice (#3475).
+    // #4722: no passport reference here. The funding leg already executed, so
+    // a passport read would only widen a funded window; an advertised
+    // `haven-passport` extension is still echoed verbatim.
     const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option, status.paymentId)
     const receipt = this.fundingLeg.receiptFromStatus(input.paymentRequired, option, paymentHeader, status)
     this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt, input.taskBudgetId)

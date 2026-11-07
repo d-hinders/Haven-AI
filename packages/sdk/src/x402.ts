@@ -369,6 +369,84 @@ export function x402PaymentHeaderNamesSent(paymentHeader: string): string {
   return x402PaymentHeaderNamesFor(paymentHeader).join(', ')
 }
 
+/** #4722: the x402 extension key a merchant advertises to ask for a Haven passport. */
+export const HAVEN_PASSPORT_EXTENSION = 'haven-passport'
+
+/** #4722: the two fields the client adds to an advertised `haven-passport` extension. */
+export interface HavenPassportExtensionFields {
+  attestation_uid: string
+  chain_id: number
+}
+
+const PASSPORT_UID_RE = /^0x[0-9a-fA-F]{64}$/
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/** #4722: whether a 402's `extensions` advertises `haven-passport` at all. */
+export function advertisesHavenPassport(extensions: unknown): boolean {
+  return isPlainRecord(extensions) && Object.prototype.hasOwnProperty.call(extensions, HAVEN_PASSPORT_EXTENSION)
+}
+
+/**
+ * #4722 (epic #4718): the ONE merge rule for the `haven-passport` x402
+ * extension, used by the SDK's EIP-3009 envelope and the backend's erc7710
+ * header alike, so the two paths cannot drift.
+ *
+ * x402 v2 lets a client append to an advertised extension but never delete or
+ * overwrite it, and merchants deep-compare the advertised value against the
+ * echo (`@x402/core`'s subset check; the demo merchant's
+ * `objectContainsSubset`). So the rule adds fields only where an addition is a
+ * superset of what was advertised:
+ *
+ * - the advertised `haven-passport` value must be a plain object; if it has an
+ *   `info` key, `info` must be a plain object too, and the fields go INSIDE
+ *   `info` (where `@x402/core` compares and a merchant reads); otherwise they
+ *   go at the top level of the value;
+ * - at the level where they would go, an existing `attestation_uid` or
+ *   `chain_id` means "add nothing": the client never overwrites;
+ * - anything else (`true`, a string, an array, `null`, a non-object `info`,
+ *   no advertisement, no passport, a malformed passport) returns `extensions`
+ *   UNCHANGED, the same reference, so the envelope is byte-identical to today.
+ *
+ * Every other extension keeps its key, position and value: only the
+ * `haven-passport` entry's value is replaced, in place.
+ *
+ * Authority is unchanged: extensions sit outside the signed EIP-3009
+ * authorization and outside the erc7710 `permissionContext`. The fields are
+ * agent-supplied metadata a merchant must resolve against a Haven verifier it
+ * already trusts, never authority.
+ */
+export function withHavenPassportExtension<T>(
+  extensions: T,
+  passport: HavenPassportExtensionFields | null | undefined,
+): T {
+  if (!passport) return extensions
+  if (typeof passport.attestation_uid !== 'string' || !PASSPORT_UID_RE.test(passport.attestation_uid)) return extensions
+  if (!Number.isSafeInteger(passport.chain_id) || passport.chain_id <= 0) return extensions
+  if (!advertisesHavenPassport(extensions)) return extensions
+  const record = extensions as unknown as Record<string, unknown>
+  const advertised = record[HAVEN_PASSPORT_EXTENSION]
+  if (!isPlainRecord(advertised)) return extensions
+  const inInfo = Object.prototype.hasOwnProperty.call(advertised, 'info')
+  const target = inInfo ? advertised.info : advertised
+  if (!isPlainRecord(target)) return extensions
+  if (
+    Object.prototype.hasOwnProperty.call(target, 'attestation_uid') ||
+    Object.prototype.hasOwnProperty.call(target, 'chain_id')
+  ) {
+    return extensions
+  }
+  const added = { ...target, attestation_uid: passport.attestation_uid, chain_id: passport.chain_id }
+  return {
+    ...record,
+    [HAVEN_PASSPORT_EXTENSION]: inInfo ? { ...advertised, info: added } : added,
+  } as unknown as T
+}
+
 /**
  * The x402 v2 payment envelope: `{x402Version, resource?, accepted, payload,
  * extensions?}` per the spec's PaymentPayload (§5.2.2).
@@ -392,9 +470,16 @@ export function x402V2PaymentEnvelope(
   paymentRequired: Pick<X402PaymentRequired, 'x402Version' | 'resource' | 'extensions'>,
   accepted: X402PaymentOption,
   payload: unknown,
+  /**
+   * #4722: the agent's own passport reference, added to a `haven-passport`
+   * extension the merchant advertised (see `withHavenPassportExtension`).
+   * Optional and additive: a caller that passes nothing (the signer, the
+   * public export) gets exactly the pre-#4722 bytes. Never looked up here.
+   */
+  options: { passport?: HavenPassportExtensionFields | null } = {},
 ): Record<string, unknown> {
   const resource = paymentRequired.resource
-  const extensions = paymentRequired.extensions
+  const extensions = withHavenPassportExtension(paymentRequired.extensions, options.passport ?? null)
   return {
     x402Version: paymentRequired.x402Version,
     ...(resource && typeof resource === 'object' && !Array.isArray(resource)

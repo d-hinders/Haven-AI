@@ -522,7 +522,14 @@ export default function DelegationSendModal({
             <div className="space-y-2 rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
               <p className="text-xs font-medium text-[var(--v2-ink-2)]">Save this address as a contact?</p>
               {saveState === 'saved' ? (
-                <p className="text-xs text-[var(--v2-ink-2)]">Saved as {savedName}</p>
+                <>
+                  <p className="text-xs text-[var(--v2-ink-2)]">Saved as {savedName}</p>
+                  {/* #4703: names are read per request, so the save shows at
+                      once on /transactions, the account tab and the dashboard. */}
+                  <p className="text-xs text-[var(--v2-ink-2)]">
+                    Past payments to this address now show this name.
+                  </p>
+                </>
               ) : saveState === 'already' ? (
                 <p className="text-xs text-[var(--v2-ink-2)]">Already saved</p>
               ) : (

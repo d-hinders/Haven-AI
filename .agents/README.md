@@ -36,4 +36,4 @@ full repo agent-skill validation, including wrappers and relative links.
 
 Claude slash commands for portable workflows should stay thin wrappers that
 route to these skills. Codex users can invoke the installed skills directly,
-for example `$haven-reset`, `$ship-next`, or `$quality-scan`.
+for example `$haven-reset`, `$ship-next`, `$review-issue`, or `$quality-scan`.

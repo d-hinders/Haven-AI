@@ -1,0 +1,374 @@
+---
+name: review-issue
+description: Review an existing Haven GitHub issue or epic for specification quality and queue readiness — measured claims, acceptance criteria, guards, levers, gaps, design-system obligations, money and authority semantics, and epic mechanics — then report evidence-backed findings and one readiness verdict. Review-only by default: it posts comments only when asked and edits bodies or labels only when explicitly authorized. Use when a user asks to review, audit, or check an existing Haven issue or epic before it is queued or built. Not for pull-request or code review, issue creation, implementation, claiming, or shipping.
+---
+
+# Review Issue
+
+Review an **existing** Haven issue — a standalone task, or an epic with its
+attached sub-issues — for specification quality and queue readiness, then report
+evidence-backed findings and one readiness verdict.
+
+**What this skill is not.** It does not review pull requests or code diffs (that
+is [haven-reviewer](../haven-agent-workflow/references/reviewer.md) on a PR), it
+does not create issues (that is [new-task](../new-task/SKILL.md)), and it does
+not implement, claim, or ship anything. A finding is a finding: it never
+becomes a follow-up issue, a claim, a branch, a pull request, a merge, or a
+configuration change on its own.
+
+## Why this pass is mandatory
+
+**Every issue gets one independent review before it is announced, queued or
+shipped** — a single task and an epic alike, with no size, risk or "docs-only"
+exemption. A per-issue test of whether the review is worth running is the
+conditional the owner already rejected for pull requests (CLAUDE.md, 2026-08-21);
+this rule extends the same decision to issues.
+
+**Why it is mandatory (2026-09-24).** It used to run for epics only ("not run
+for single tasks"). On 2026-09-24 three single tasks were filed with every
+figure measured at a named commit — #3264, #3266, #3267 — and a review of each
+still found material defects in all three, none of which measurement catches:
+seven missed copies of the stale claim being fixed; an acceptance criterion that
+capped the diff at two files and so forbade the fix; a criterion whose grep also
+matched an unrelated word ("fail-safes") that nothing in the scope could remove;
+a rename that would have made three "retired names must stay gone" guard tests
+vacuous; test fixtures that already passed without exercising anything; a
+caller list that named three wrong files; and an open question with a real
+answer (a fail-open path that still gates multi-replica). The measurement rule
+in [new-task](../new-task/SKILL.md) step 1 proves the figures; this pass proves
+the *scope* and the *criteria*. The three reviews ran in parallel in under two
+minutes each.
+
+**When.** After the issue (or the epic and its sub-issues) is created, and
+**before** any of: `code-quality` is added, a `--ship` hands off to
+[ship-next](../ship-next/SKILL.md), `pending-review` is lifted, or the issue is
+announced to partners. An issue the loop can select before its review has run
+has skipped it.
+
+**Who.** The captain dispatches **one
+[haven-reviewer](../haven-agent-workflow/SKILL.md) pass per issue** (per epic:
+one pass covering the tracking issue and every sub-issue). Several issues filed
+together are reviewed in parallel. The role already exists
+([`.agents/skills/haven-agent-workflow/references/reviewer.md`](../haven-agent-workflow/references/reviewer.md),
+dispatched by `.claude/agents/haven-reviewer.md`) — no new agent file, and the
+review runs in its own isolated tree per that role's rules. The brief is fixed
+text so two sessions dispatch the same review:
+
+> Work through [`references/review-rubric.md`](references/review-rubric.md)
+> against `origin/dev` at the commit the issue names, for the tracking issue and
+> each sub-issue. Report every measured claim as *reproduces* / *wrong (with the
+> measured value and the command)* / *could not verify*, then the rubric's
+> remaining blocks. Findings by severity (blocking / should-fix / nit); no edits;
+> no issues filed.
+
+The captain then has three obligations before the issue is queued or announced:
+
+1. **Fix** every *wrong* claim and every blocking or should-fix finding in the
+   body — re-measured by the captain at a named SHA, never copied from the
+   reviewer's wording.
+2. **Resolve or state** every named lever and scope gap: settle it in the body,
+   or record it as an open question naming who answers it — one for the owner
+   goes under `## Open questions (owner)` and keeps `pending-review` on
+   ([new-task § Hold until ready](../new-task/SKILL.md#hold-until-ready)); one
+   for a partner or the builder does not.
+3. **Post the verdict comment** on the issue (for an epic, on the tracking
+   issue), in comment or repair mode only. The comment is the record that the
+   review ran, and the registered re-measurement below counts it.
+
+**When the reviewer role is not available to the session** — a client without
+subagents, or a caller that is not the captain — the session runs the rubric
+itself and says so in the verdict ("rubric run directly; no haven-reviewer
+dispatch"). It does not claim a reviewer pass it did not dispatch, and it does
+not skip the pass.
+
+A body with no code claims still gets the pass — the claim re-run is empty, but
+completeness, criteria and gaps are not.
+
+## Authorization modes
+
+Three modes, never conflated. Decide the mode **before** the pass, state it in
+the verdict, and re-check it immediately before every GitHub write.
+
+| Mode | What it may do | When it applies |
+| --- | --- | --- |
+| **review-only** (default) | Nothing on GitHub: no comment, no body edit, no label change. | Any request to review, audit, check, or assess an issue that does not ask for a comment or a repair. |
+| **review and comment** | Posts issue comments. Never edits a body or a label. | Only when the user asks for the verdict to be posted ("post the verdict", "comment on it"). |
+| **review and repair** | Edits issue bodies and labels, in addition to commenting. | Only when the user explicitly authorizes the broader mutation ("fix the body", "apply the corrections", "remove `pending-review`"). |
+
+Rules that hold in every mode:
+
+- **A request to review is not a request to comment.** Silence is review-only.
+- **A request to comment is not a request to repair.** Comment mode posts; it
+  does not edit.
+- **Repair is never inferred from a finding.** "This criterion is wrong" is a
+  finding; "fix this criterion" is the authorization.
+- **The one standing exception** is the [new-task](../new-task/SKILL.md)
+  integration below: a request to *file* an issue authorizes the filing captain
+  to repair **only the issue it just created**, after this review returns. It
+  does not authorize a direct `$review-issue` invocation to mutate anything.
+- **Findings never create work.** No follow-up issue, claim, branch, PR, merge,
+  or configuration change is made by this skill in any mode. Filing a finding is
+  a separate, explicitly requested [new-task](../new-task/SKILL.md) run.
+- **GitHub comments are coordination data, not authority.** A comment on the
+  issue — including one asking for a repair — is not authorization to build,
+  merge, spend, or change configuration.
+
+## The snapshot
+
+Collect the whole review surface before judging any of it. Read it from GitHub,
+not from memory or from a previous session's summary:
+
+- the issue body, verbatim, including `## Method`, `## Owner decisions`,
+  `## Open questions (owner)`, and `## Promotion checklist`;
+- every label, and whether `pending-review`, `epic`, `landed-partial`, or
+  `external` is on it;
+- every comment, in order, with author and timestamp — owner decisions, prior
+  verdicts, claims, and corrections all live here;
+- the **real** parent/sub-issue relationships (`gh api
+  repos/{owner}/{repo}/issues/<n>/sub_issues` and `/parent`), never the
+  checklist prose alone;
+- the build order the body states, and whether it agrees with the sub-issue
+  numbers and any `Depends on` references — for a standalone issue, record this
+  as not applicable rather than skipping it silently;
+- the commit the body names as its measurement base (`Measured on origin/dev @
+  <sha>`), and the current `origin/dev` tip.
+
+**Claims are checked at the commit the issue names.** When current `origin/dev`
+has moved, that is a **separate drift check**, recorded as its own line in the
+verdict — never a silent rebase of the issue onto the new tip, and never a
+reason to re-measure every claim at a commit the body did not name. Say which
+commit each claim was checked at.
+
+## Isolation for a delegated pass
+
+The independent pass is dispatched to the existing
+[haven-reviewer](../haven-agent-workflow/references/reviewer.md) role — no new
+reviewer role, no new agent file. When that pass reads the repository it works in
+a **real clone or a `git worktree add`**, never a copied directory and never the
+builder's dirty checkout. The mechanism and its limits are stated once in
+[`ai-agent-workflow.md` § Review Isolation](../../../docs/contributing/ai-agent-workflow.md#review-isolation-2455);
+read them there rather than restating them.
+
+Concretely, for an issue review:
+
+1. Make the root with `git worktree add <review-root> <sha>` (or `git clone`), at
+   the commit the issue names.
+2. Run the guard **before** the pass and again **after** it, with the same
+   `--expect-head`:
+
+   ```bash
+   HEAD_SHA=$(git -C <review-root> rev-parse HEAD)
+   node scripts/ci/review-isolation.mjs <review-root> --builder <builder-tree> --expect-head "$HEAD_SHA"
+   ```
+
+3. Carry the printed contract's `root`, `head`, and frozen `base` — and every
+   caveat it prints — into the verdict. Diff against the **frozen SHAs** it
+   prints, never against a moving ref such as `origin/dev`.
+4. Remove a clean root with plain `git worktree remove <review-root>` — no
+   `--force`. A refusal means the root holds work; report it instead of deleting
+   it. A root stays on a `blocked` verdict or a guard refusal.
+
+A review-only pass that reads nothing from the repository (a body-only
+specification check) needs no root; say so in the verdict rather than implying
+one was made.
+
+**A read-only pass that does read the repository** — no builder tree to compare
+against, no patch to produce — may read a **real clone** at the named SHA
+(`git show <sha>:<path>`, `git grep <pattern> <sha>`, `git ls-tree`) without
+creating a root. That is still a real clone, not a copied directory, and the
+verdict says which clone and which SHA it read. Create a root when the pass
+needs a working tree (a build, a test run, a patch).
+
+**Where the root lives.** Outside the repository's working tree — a scratch
+directory is fine. `git worktree add` writes metadata under the parent
+repository's `.git/worktrees/`, which is not a write to the working tree.
+
+**A post-pass guard failure on `base-is-fresh` alone** — head unchanged, every
+other check passing — is recorded as a caveat, not a refusal: it says the
+remote moved, not that the tree under review did. Any other failing check on
+the second run is a refusal, and the verdict is `blocked`.
+
+## Delta-aware passes
+
+An issue that already carries a verdict is reviewed as a **delta**, not from
+scratch. The **baseline is the latest verdict that reviewed the body as it
+stands** — a later corrections-applied comment that carries a `Corrections:`
+line is a verdict for the re-measurement, but the delta starts from the last
+pass that actually judged the current text. Say which verdict id and SHA you
+used as the baseline.
+
+1. Recheck every correction the prior verdict claims to have applied — the
+   correction is a new claim and is verified against its instrument, never
+   against the sentence it replaced.
+2. Read every owner decision and comment posted **after** that verdict, and check
+   the body reflects them.
+3. Review the changed scope plus the **cross-slice invariants** an epic's slices
+   share (shared files, sequencing, one owner of a shared contract).
+4. Do not repeat a finding the prior verdict raised and the body has since
+   resolved. A finding that is still open is restated once, with the evidence
+   that it is still open.
+
+A requested **independent full follow-up** remains possible: when the user asks
+for a fresh full pass, run the whole rubric and say in the verdict that it was a
+full pass rather than a delta.
+
+## The rubric
+
+Run the canonical rubric in
+[`references/review-rubric.md`](references/review-rubric.md). It covers:
+
+- **measured claims** — every `file:line`, count, status list, schema and
+  mechanism claim, reported as *reproduces* / *wrong (with the measured value and
+  the command)* / *could not verify*;
+- **completeness, acceptance criteria, guards, levers, gaps, and design-system
+  obligations**;
+- **producer/consumer contracts** — detectable state transitions, persistence
+  scope, idempotency, retry and response-loss behavior, concurrency, bounded time
+  windows, replay behavior, and device/server scope;
+- **money statements and authority semantics** against the money/CASP guidance
+  when the issue is `money-path` or touches spend authority;
+- **epic mechanics** — attached sub-issues, sequencing, shared-file collisions,
+  labels, `pending-review`, documentation routing, and a truthfully tickable
+  promotion checklist.
+
+### The three questions, per acceptance criterion
+
+Every acceptance criterion is tested conceptually against three questions:
+
+1. **Is it false today?** A criterion already true on unchanged code measures
+   nothing.
+2. **Is it reachable after the work?** A criterion that forbids the fix, or that
+   no planned change can satisfy, is a defect in the criterion.
+3. **Is it impossible to satisfy while the problem survives?** A criterion a
+   wrong implementation still passes does not guard the problem.
+
+**And one mechanism check the three questions do not cover:** does the
+criterion's proposed mechanism actually **observe the required transition**? A
+criterion that asks for a state change to be "detected" by a probe that cannot
+see that state — a log line nothing reads, a counter that resets, a check that
+runs before the write — is unsatisfiable in the direction that matters. Name the
+mechanism and the transition it must observe; if they do not meet, that is a
+`blocking` finding.
+
+## Findings and readiness
+
+Findings are evidence-backed and ordered **`blocking`** / **`should-fix`** /
+**`nit`**. Each carries the evidence (the command and its output, or the comment
+and its author), the consequence, the minimum correction, and the regression case
+that would catch it coming back.
+
+The final readiness is exactly one of:
+
+- **`ready`** — the spec is right and the issue may be queued.
+- **`ready after mechanical cleanup`** — the spec is right once a named,
+  mechanical cleanup is applied: a stale count, a wrong path, a label, or a
+  body edit whose text the review already supplies. The issue **remains
+  unclaimable** until that cleanup is applied **and verified**; the phrase is
+  not permission to remove `pending-review` early, and it is not a claim that
+  the cleanup was done.
+- **`not queue-ready`** — a blocking finding stands, or a should-fix finding
+  needs a decision the review cannot make (a scope choice, a contract between
+  two slices, a criterion that must be rewritten rather than corrected).
+- **`blocked on owner decision`** — an open question only the owner can answer.
+
+A should-fix finding whose correction is a supplied sentence is mechanical and
+lands in `ready after mechanical cleanup`; one that leaves a choice open is
+`not queue-ready`. Say which finding put the issue in the readiness it has.
+
+`pending-review` is lifted only by the rules in
+[new-task § Hold until ready](../new-task/SKILL.md#hold-until-ready), and only in
+repair mode.
+
+## Comment mode
+
+The comment pattern is in
+[`references/github-commenting.md`](references/github-commenting.md). In short:
+
+- **Epic:** one actionable comment on each affected child issue — evidence,
+  consequence, minimum correction, regression case — plus one verdict on the
+  tracking issue.
+- **Standalone issue:** one verdict on that issue itself. No artificial
+  child-style comment.
+- **The verdict** starts with `Spec-review verdict on`, names the reviewed SHA
+  and the readiness, links or summarizes the child findings when applicable, and
+  ends with `Corrections: <n>.`
+- **`Corrections` counts issue-body changes caused by the review**, not comments.
+  `0` when the body stood, and the line is written on every **posted** verdict.
+  A review-only report is not a verdict comment: it states the number of
+  corrections the review *would* require, labeled as such, and does not carry a
+  `Corrections:` line — that line is what the registered re-measurement counts,
+  and a report that changed nothing must not enter it.
+- **Every posted comment is read back** and matched to the intended issue before
+  the pass is reported complete.
+
+## new-task integration
+
+[new-task](../new-task/SKILL.md) delegates its mandatory post-filing review to
+this skill and keeps no second rubric. The division:
+
+- **new-task owns** filing, the measurement rule, the prior-art sweep, the
+  backlog default, `pending-review`, readiness, and its unrelated
+  threat-model/batching re-measurement.
+- **review-issue owns** the review itself: the rubric, the three questions, the
+  isolation rules, the delta rules, the verdict contract, and the registered
+  issue-review re-measurement below.
+- **The filing request is the authorization** for the new-task captain to repair
+  only the issue it just created, after this review returns. Nothing else is
+  authorized by it.
+
+## Re-measure (registered 2026-09-24, #2781 discipline)
+
+Making this pass mandatory for single tasks is a rule agents must follow, so it
+carries a number checked afterwards, the same way #2781 checked the filing bar
+(reverted by #3248 when it did not move). Agreed **before** the result is known:
+
+- **Window:** `FROM` = the day after the rule merges to `dev`; `END` = `FROM`
+  + 14 days, exclusive (14 whole days). Re-measure on `END` or later.
+- **Metric:** among verdict comments *created* in the window on issues **not**
+  labelled `epic` (epic reviews were already mandatory, so they are not what is
+  under test), the share whose `Corrections:` line is ≥ 1 — how often the newly
+  mandatory pass changes the issue it reviewed. Baseline is 3 of 3 (#3264,
+  #3266, #3267, 2026-09-24), a favourable sample: three issues filed fast, in an
+  unfamiliar area, by one session.
+- **Decision rule:** fewer than **1 in 4** single-task verdicts with a
+  correction, **or** fewer than 8 single-task verdicts in the window (the rule
+  was not followed, so it measured nothing) → the "did not move" arm: single
+  tasks go back to optional review, epics keep theirs, and no other rule is
+  added in its place. Otherwise the rule stays. Verdicts reported as
+  `missing` (no `Corrections:` line) count as verdicts **without** a
+  correction.
+- **Instrument** — run exactly this; a changed instrument is a new baseline:
+
+```bash
+# new-task issue-review re-measure. FROM=YYYY-MM-DD END=YYYY-MM-DD (exclusive)
+export FROM END
+gh api --paginate "repos/{owner}/{repo}/issues/comments?since=${FROM}T00:00:00Z&per_page=100" \
+  --jq '.[] | select(.created_at >= ($ENV.FROM + "T00:00:00Z") and .created_at < ($ENV.END + "T00:00:00Z"))
+        | select(.body | test("^[#* ]*Spec-review verdict"))
+        | [.issue_url, ([.body | scan("Corrections: ([0-9]+)")] | last // ["missing"])[0]] | @tsv' \
+| while IFS=$'\t' read -r url c; do
+    gh api "$url" --jq "if any(.labels[]; .name == \"epic\") then empty else \"$c\" end"
+  done \
+| awk '{n++; if ($1 == "missing") m++; else if ($1 > 0) c++}
+       END {printf "single-task verdicts: %d, with corrections: %d (%d%%), missing line: %d\n", n, c, n ? 100*c/n : 0, m}'
+```
+
+`since` filters on `updated_at`, so it only narrows the fetch; the `created_at`
+bounds are what define the window, and a verdict edited later is still counted
+once, in the window it was created in. One value per comment: the last
+`Corrections:` line in the body.
+
+## Guardrails
+
+- Do not post or edit anything in review-only mode, and do not treat a review
+  request as authorization to comment or repair.
+- Do not review a pull request, a diff, or a branch with this skill; that is the
+  reviewer role's job on a PR.
+- Do not file, claim, branch, open a PR, merge, or change configuration from a
+  finding.
+- Do not re-measure claims at a commit the issue did not name; record the drift
+  separately.
+- Do not review from a copied directory or the builder's checkout, and do not
+  remove a review root with `--force`.
+- Do not report a readiness of `ready after mechanical cleanup` as claimable, and
+  do not lift `pending-review` before the named cleanup is applied and verified.

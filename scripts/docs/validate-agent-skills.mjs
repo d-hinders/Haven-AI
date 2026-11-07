@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 export const REQUIRED_SKILLS = [
   "new-task",
+  "review-issue",
   "ship-next",
   "haven-reset",
   "haven-agent-workflow",
@@ -34,12 +35,33 @@ export const ROLE_REFERENCES = {
 
 export const RESET_CLIENTS = ["claude-code", "codex"];
 
-const COMMAND_TARGETS = Object.fromEntries(
-  ["new-task", "ship-next", "haven-reset", "quality-scan", "release", "prove-red"].map((name) => [
+export const COMMAND_TARGETS = Object.fromEntries(
+  [
+    "new-task",
+    "review-issue",
+    "ship-next",
+    "haven-reset",
+    "quality-scan",
+    "release",
+    "prove-red",
+  ].map((name) => [
     `.claude/commands/${name}.md`,
     `.agents/skills/${name}/SKILL.md`,
   ]),
 );
+
+/**
+ * A Claude command adapter is a pointer, not a workflow (#4712).
+ *
+ * The target/read/follow checks prove a wrapper *routes* to the canonical
+ * skill; they say nothing about whether it also carries a second copy of the
+ * policy. These bounds make "thin" measurable: a wrapper body is a handful of
+ * lines of prose, with no headings and no fenced blocks. A wrapper that needs
+ * more than this is embedding the workflow, and the workflow belongs in the
+ * canonical skill.
+ */
+export const MAX_COMMAND_WRAPPER_BODY_LINES = 6;
+export const MAX_COMMAND_WRAPPER_BODY_CHARS = 700;
 
 const AGENT_TARGETS = Object.fromEntries(
   REQUIRED_ROLES.map((name) => [
@@ -226,6 +248,14 @@ function validateWrapperTarget(repoRoot, wrapperRelativePath, targetRelativePath
     : [`${wrapperRelativePath}: must link to canonical target ${targetRelativePath}`];
 }
 
+function commandWrapperBody(source) {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  if (lines[0] !== "---") return source;
+  const closingIndex = lines.indexOf("---", 1);
+  if (closingIndex === -1) return source;
+  return lines.slice(closingIndex + 1).join("\n");
+}
+
 function validateWrapperInstructions(repoRoot, wrapperRelativePath) {
   const wrapperPath = path.join(repoRoot, wrapperRelativePath);
   if (!isFile(wrapperPath)) return [];
@@ -242,6 +272,29 @@ function validateWrapperInstructions(repoRoot, wrapperRelativePath) {
   if (wrapperRelativePath.startsWith(".claude/commands/")) {
     if (!source.includes("$ARGUMENTS")) {
       errors.push(`${wrapperRelativePath}: command wrapper must forward $ARGUMENTS`);
+    }
+
+    const body = commandWrapperBody(source);
+    const bodyLines = body.split("\n").filter((line) => line.trim());
+    if (bodyLines.length > MAX_COMMAND_WRAPPER_BODY_LINES) {
+      errors.push(
+        `${wrapperRelativePath}: command wrapper body has ${bodyLines.length} non-empty lines (max ${MAX_COMMAND_WRAPPER_BODY_LINES}); a wrapper routes to the canonical skill, it does not carry the workflow`,
+      );
+    }
+    if (body.length > MAX_COMMAND_WRAPPER_BODY_CHARS) {
+      errors.push(
+        `${wrapperRelativePath}: command wrapper body is ${body.length} characters (max ${MAX_COMMAND_WRAPPER_BODY_CHARS}); a wrapper routes to the canonical skill, it does not carry the workflow`,
+      );
+    }
+    if (/^#{1,6}\s/m.test(body)) {
+      errors.push(
+        `${wrapperRelativePath}: command wrapper must not carry workflow headings; move the policy into the canonical skill`,
+      );
+    }
+    if (/^```/m.test(body)) {
+      errors.push(
+        `${wrapperRelativePath}: command wrapper must not carry fenced blocks; move the procedure into the canonical skill`,
+      );
     }
     if (wrapperRelativePath === ".claude/commands/ship-next.md") {
       if (!source.includes("/loop") || !/\b(?:one|exactly one)\b/i.test(source) || !/\bstop\b/i.test(source)) {

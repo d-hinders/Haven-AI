@@ -349,7 +349,7 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
         tone: 'neutral',
         badge: 'Budget reached',
         title: 'Scout reached its budget',
-        subtitle: 'Its budget stopped a payment in the last 7 days.',
+        subtitle: 'Its budget stopped a payment in the last 7 days. No money moved.',
         actionLabel: 'Review',
         // #4324: Review opens the agent's refused attempts (#4323).
         href: '/agents/a1?tab=activity&status=refused',
@@ -408,7 +408,7 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
         id: 'budget-usage:a1',
         kind: 'budget-usage',
         tone: 'neutral',
-        badge: 'Budget reached',
+        badge: 'Nearly spent',
         title: 'Scout has used 90% of its budget',
         subtitle: 'Its current budget period is nearly spent.',
         actionLabel: 'Review',

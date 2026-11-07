@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-11-04"
+last-verified: "2026-11-06"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1762,3 +1762,15 @@ exported signing primitives stay verbatim, for embedders; the checks are in
 > is not bumped.
 
 Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).
+
+> **#4703 (2026-11-06).** This diff touches
+> `packages/frontend/src/components/DelegationSendModal.tsx` in this document's
+> coverage list. The change is copy only, on the sent screen's save row: a
+> successful save now reads "Saved as <name>" over "Past payments to this
+> address now show this name." in its own element. Nothing about signing,
+> authority, custody or the prepare/submit split moves — the passkey ceremony,
+> the owner-signed delegation and the payment the dialog sends are untouched,
+> and the new sentence describes a contact name, not a spend permission. §5's
+> copy rules were re-read for it: the line claims no custody, no second
+> signature and no pending approval. The rest of this document was not re-read
+> for it.

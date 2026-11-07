@@ -4,8 +4,10 @@ status: current
 covers:
   - .agents/skills/haven-agent-workflow/**
   - .agents/skills/ship-next/**
+  - .agents/skills/review-issue/**
   - .claude/agents/**
   - .claude/commands/ship-next.md
+  - .claude/commands/review-issue.md
   - .github/pull_request_template.md
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
@@ -192,6 +194,11 @@ Portable project skills live under `.agents/skills/<name>/SKILL.md`. Run
 `npm run docs:check` to verify their metadata, references, portable-language
 boundary, and client-adapter targets.
 
+`review-issue` is the canonical issue-review workflow — the rubric, the three
+questions, the isolation and delta rules, the verdict contract, and the
+registered re-measurement live there. `new-task` delegates its mandatory
+post-filing pass to it rather than carrying a second copy.
+
 Skill catalogs are loaded at session start. After adding or changing a skill:
 
 - start a fresh Codex session rooted at the repository and invoke the skill by
@@ -203,7 +210,9 @@ Skill catalogs are loaded at session start. After adding or changing a skill:
 
 For example, ask `new-task` to report whether its default is backlog-only while
 explicitly forbidding issue creation. This checks discovery and argument
-forwarding without changing GitHub state.
+forwarding without changing GitHub state. For `review-issue`, ask it to review
+an existing issue in review-only mode and report which authorization mode it
+selected — it must post nothing.
 
 Example:
 

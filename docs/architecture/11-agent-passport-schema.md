@@ -875,7 +875,11 @@ asking the subject to vouch for itself.
 
 **Merchants: take `attestation_uid` + `chain_id` and resolve them against a
 verifier you already know** — your own pinned Haven base URL, or EAS on that
-chain directly. Those two fields are safe to accept from an agent precisely
+chain directly **together with the attester check**. The schema is registered
+with no resolver, so anyone can attest under its UID, and an attestation is
+Haven's only if its attester is Haven's. Haven does not publish its attester
+address yet, so the Haven verifier is the supported path today. Those two
+fields are safe to accept from an agent precisely
 because they are checkable against a source the agent does not control. The URL
 is not. Authority comes from the pinned issuer (`GET /passport/issuer`) and the
 receipt signature, never from where the link pointed.

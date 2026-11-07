@@ -5,7 +5,8 @@ covers:
   - packages/backend/src/modules/passport/readiness.ts
   - packages/backend/src/modules/passport/receipt.ts
   - packages/backend/src/routes/passport-verify.ts
-last-verified: "2026-09-04"
+  - packages/backend/src/modules/passport/__tests__/passport-sdk-cross-check.test.ts
+last-verified: "2026-11-07"
 ---
 
 # Passport verification setup

@@ -204,7 +204,9 @@ describe('AgentPassportCard (#1072)', () => {
     }))
     render(<AgentPassportCard agentId="agent-1" passportIssuable={false} />)
     expect(screen.queryByText('Issuance failed')).toBeNull()
-    expect(screen.getByText('Not available')).toBeTruthy()
+    // Neutral tone, never the danger tone (#4719 review r3, N1).
+    expect(screen.getByText('Not available').className).toContain('var(--v2-ink-2)')
+    expect(screen.getByText('Not available').className).not.toContain('var(--v2-danger)')
     expect(screen.getByText('Passports are not available for this wallet yet.')).toBeTruthy()
     expect(screen.queryByText(/verifier not configured/)).toBeNull()
   })

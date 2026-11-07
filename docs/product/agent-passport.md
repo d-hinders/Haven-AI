@@ -129,10 +129,12 @@ merchant can then verify. Each session account carries `passport_issuable`
 Everywhere else, the connect flow shows no checkbox, and the agent's Settings
 row says passports are not available for that wallet. Both agent-creation
 paths (`POST /agents` and connect-setup registration) record no passport for
-such an account, so no request sits `pending` that the deployment can never
-anchor. The explicit `POST /agents/:id/passport` also refuses with 503 while
-the verifier is off. A passport issued before this gate renders as it always
-did.
+such an account. The explicit `POST /agents/:id/passport` also refuses with 503
+while the verifier is off, and the retry sweep does not anchor a request
+recorded before this gate until the verifier is on. A passport anchored before
+this gate renders as it always did. A request that failed on a wallet that
+cannot issue reads **Not available** with that same reason line, not as an
+error.
 
 ## For merchants
 

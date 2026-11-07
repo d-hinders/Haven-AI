@@ -276,6 +276,28 @@ describe('anchoring', () => {
     expect(anchor).not.toHaveBeenCalled()
   })
 
+  // #4719 review r3 (S1): the verifier gate runs AFTER the idempotent return.
+  // `markFailed` has no status guard, so a gate hoisted above it would demote
+  // a live, anchored passport to `failed` while the verifier is off.
+  it('an anchored passport is returned unchanged while the verifier is off — never marked failed', async () => {
+    setReceiptSigningKey(null)
+    try {
+      let failedWrite = false
+      mockDb({
+        passport: { agent_id: AGENT, chain_id: 84532, status: 'anchored', attestation_uid: UID, attempts: 0 },
+        onUpdate: (sql) => { if (/failed/.test(sql)) failedWrite = true },
+      })
+      const anchor = vi.fn()
+      setAnchor(anchor)
+      const row = await issuePassport(AGENT, USER)
+      expect(row?.status).toBe('anchored')
+      expect(failedWrite).toBe(false)
+      expect(anchor).not.toHaveBeenCalled()
+    } finally {
+      setReceiptSigningKey('0x' + '4719'.repeat(16))
+    }
+  })
+
   it('builds a claim binding both addresses and the treasury', async () => {
     mockDb({ passport: { agent_id: AGENT, chain_id: 84532, status: 'pending', attempts: 0 } })
     const anchor = vi.fn(async () => ({ attestationUid: UID, txHash: '0x1' }))

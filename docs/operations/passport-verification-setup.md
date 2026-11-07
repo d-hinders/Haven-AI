@@ -97,7 +97,7 @@ Restart the service — the signer is installed at boot.
 
 Three places report it. The ops console's health page shows a warning when any
 chain is `issuance_only` (#4720). The boot log carries one warning naming the
-chain (below). And `GET /health/ops` reports it to an operator using
+chain(s) (below). And `GET /health/ops` reports it to an operator using
 `HAVEN_OPS_TOKEN`. The public
 `GET /health` deliberately carries only status, timestamp, and database health.
 The diagnostics contain booleans plus the already-published issuer address only
@@ -119,7 +119,7 @@ curl -s -H "X-Haven-Ops-Token: $HAVEN_OPS_TOKEN" \
 ```
 
 A non-empty `unverifiableChainIds` is the trap state, and the backend also logs
-one warning at boot naming the chain. Both are silent when the deployment is
+one warning at boot naming the chain(s). All three are silent when the deployment is
 `ready`, `unconfigured`, or `verification_only` — a warning that fires when
 things are fine is a warning people scroll past.
 

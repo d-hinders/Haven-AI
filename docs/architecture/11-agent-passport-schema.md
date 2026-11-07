@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
+  - packages/sdk/src/x402.ts
   - packages/backend/src/db/migrations/048_agent_passports.ts
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
@@ -905,7 +906,8 @@ inside `info` when you advertised one, otherwise at the top level. Every other
 extension is echoed byte-identical.
 
 **When it does not arrive.** No fields are added, and your advertised extension
-is echoed exactly as you sent it, when:
+is echoed exactly as you sent it (except in the last case below, where the
+header carries no extensions at all), when:
 - the agent has no anchored passport, or the lookup fails or times out (1500 ms);
 - the advertised value is not a plain object, or its `info` is not one;
 - you already put `attestation_uid` or `chain_id` where the fields would go (the client never overwrites);

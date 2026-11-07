@@ -64,6 +64,19 @@ vi.mock('../../db.js', () => ({
 
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
 
+// #4721 review: a holdable `computeHybridAccountAddress`, so the GET /agent
+// concurrency test can keep the delegate-account derivation (an unbounded
+// factory RPC in production) pending. Pass-through unless a test sets a hold.
+const hybridHold = vi.hoisted(() => ({ fn: null as null | (() => Promise<string>) }))
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
+  return {
+    ...actual,
+    computeHybridAccountAddress: (...args: Parameters<typeof actual.computeHybridAccountAddress>) =>
+      hybridHold.fn ? hybridHold.fn() : actual.computeHybridAccountAddress(...args),
+  }
+})
+
 // Fee recording at settlement must not consume a mocked DB call in these
 // sequence-based tests; neutralize it (the module is dark anyway).
 vi.mock('../../modules/fee/index.js', () => ({
@@ -513,48 +526,48 @@ describe('machine payment routes', () => {
   })
 
   it('GET /agent runs the passport lookup concurrently with the other identity reads (#4721)', async () => {
-    // Hold BOTH the passport lookup and the supersession read open, then
-    // prove each is issued while the other is still pending. A refactor that
-    // awaits the passport before the others, or after them, can only issue
-    // one of the two first — and this wait then times out.
-    let releasePassport: () => void = () => {}
-    let releaseSupersession: () => void = () => {}
-    const passportHeld = new Promise<void>((resolve) => {
-      releasePassport = resolve
-    })
-    const supersessionHeld = new Promise<void>((resolve) => {
-      releaseSupersession = resolve
-    })
-    primeDb(
-      AUTH,
-      [
-        /FROM agent_passports WHERE agent_id = \$1/,
-        async () => {
-          await passportHeld
-          return { rows: [] }
-        },
-      ],
-      [
-        /superseded_by_agent_id/,
-        async () => {
-          await supersessionHeld
-          return { rows: [] }
-        },
-      ],
-    )
-    const pending = app.inject({
-      method: 'GET',
-      url: '/machine-payments/agent',
-      headers: { authorization: 'Bearer sk_agent_test' },
-    })
-    await vi.waitFor(() => {
-      expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)).toBeDefined()
-      expect(findCall(/superseded_by_agent_id/)).toBeDefined()
-    })
-    releasePassport()
-    releaseSupersession()
-    const response = await pending
-    expect(response.statusCode).toBe(200)
+    // Hold ALL FOUR reads open — the delegate-account derivation (delegation
+    // rail, so it really runs), the sub-budget grants, the supersession read
+    // and the passport lookup — and require every one to be ISSUED before any
+    // is released. Any sequential placement awaits one read before starting
+    // another, so at least one is never issued while the first is held and
+    // this wait times out: the passport first or last, and equally a
+    // derivation or grants read awaited ahead of the other three (#4721
+    // review: a test holding only two reads let those partial orders pass).
+    const holds: Array<() => void> = []
+    const held = <T,>(value: T) =>
+      new Promise<T>((resolve) => {
+        holds.push(() => resolve(value))
+      })
+    let deriveStarted = false
+    hybridHold.fn = () => {
+      deriveStarted = true
+      return held('0x' + '77'.repeat(20))
+    }
+    try {
+      primeDb(
+        authAs({ ...AGENT, chain_id: 84532, execution_rail: 'delegation', account_type: 'delegator_hybrid' }),
+        [/FROM agent_sub_budgets b/, () => held({ rows: [] })],
+        [/superseded_by_agent_id/, () => held({ rows: [] })],
+        [/FROM agent_passports WHERE agent_id = \$1/, () => held({ rows: [] })],
+      )
+      const pending = app.inject({
+        method: 'GET',
+        url: '/machine-payments/agent',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      await vi.waitFor(() => {
+        expect(deriveStarted).toBe(true)
+        expect(findCall(/FROM agent_sub_budgets b/)).toBeDefined()
+        expect(findCall(/superseded_by_agent_id/)).toBeDefined()
+        expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)).toBeDefined()
+      })
+      for (const release of holds) release()
+      const response = await pending
+      expect(response.statusCode).toBe(200)
+    } finally {
+      hybridHold.fn = null
+    }
   })
 
   // ── #3772: superseded_by (warning only) ──────────────────────────────────

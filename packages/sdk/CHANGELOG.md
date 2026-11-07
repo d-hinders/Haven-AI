@@ -17,6 +17,38 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **A merchant can verify an agent's Agent Passport (#4723).** Two new
+  merchant-side functions on the main entry: `verifyPassportReceipt(body,
+  options)` — a pure verifier of a `GET /passport/verify` body against a
+  **pinned** issuer — and `checkPassport(options)` — a fetch-and-verify wrapper
+  with a 1500 ms timeout. Both return `{ ok, standing, reason, checked_at }`.
+  The reasons are the backend's own `verifyReceipt` vocabulary
+  (`not_signed_by_issuer`, `malformed_signature`, `expired`,
+  `unsupported_version`), the verifier's `found: false` answers
+  (`no_passport`, `unsupported_assurance_level`), `not_active`,
+  `subject_mismatch`, and `unavailable` (503, 429, timeout, network, non-JSON).
+  `checkPassport` never throws and never refuses anything.
+
+  The lookup is by **payer address**, never by the UID the payment carried: a
+  UID is public on EAS, so a UID-only lookup would let any payer present another
+  active agent's passport. The reference's `attestation_uid` is a hint,
+  cross-checked against the receipt's `evidenceUid`; the receipt's own `issuer`
+  field is never trusted. `rail` selects which bound address the payer must
+  match (`agentEoa` on EIP-3009, `smartAccount` on erc7710); omitted, either
+  matches.
+
+  New exports: `PASSPORT_RECEIPT_VERSION`, `PASSPORT_CHECK_TIMEOUT_MS`,
+  `canonicalizePassportReceipt`, `verifyPassportReceiptSignature`,
+  `verifyPassportReceipt`, `checkPassport`, and the types `PassportReceipt`,
+  `SignedPassportReceipt`, `PassportStanding`, `PassportAnchorState`,
+  `PassportControlSummary`, `PassportSignatureReason`,
+  `PassportSignatureVerification`, `PassportCheckReason`, `PassportCheckResult`,
+  `PassportVerifyBody`, `PassportReference`, `PassportVerifyOptions` and
+  `CheckPassportOptions`. The names are deliberately distinct from the PAYMENT
+  receipt's `RECEIPT_VERSION` / `ReceiptVerification`. The backend's
+  `canonicalize` and `verifyReceipt` now delegate to these, so there is one
+  canonicalizer rather than two that can drift.
+
 - **A merchant can ask for the agent's Agent Passport in the payment (#4722).**
   When a merchant's x402 v2 402 advertises the `haven-passport` extension, the
   EIP-3009 envelope the SDK builds adds `attestation_uid` and `chain_id` to it

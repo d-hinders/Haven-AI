@@ -66,7 +66,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-10-23"
+last-verified: "2026-11-07"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1630,6 +1630,22 @@ The flow is a two-call variant of `/x402/authorize`:
    status `UPDATE`). The SDK-built EIP-3009 envelope uses the same rule; the
    hosted + signer EIP-3009 header does not carry it yet. See the delivery
    matrix in [`11-agent-passport-schema.md`](11-agent-passport-schema.md).
+
+   **The merchant side of that reference (#4723).** A merchant that advertises
+   `haven-passport` can resolve the reference it receives. The demo merchant is
+   the first consumer: when both `MERCHANT_HAVEN_BASE_URL` and
+   `MERCHANT_PASSPORT_ISSUER` are set it advertises `haven-passport` as
+   `{ info: {} }` alongside `haven-demo`, and after settlement it looks the
+   passport up by **payer address** — never by the UID the payment carried,
+   which is public on EAS and would let any payer present another agent's
+   passport — verifies the receipt offline against the pinned issuer, and
+   reports `passport: { standing, checked_at }` (or `{ error }`, or `null` when
+   no reference was carried) in its purchase response. It is **advisory**: the
+   check runs after settlement, is cached per payment, and never refuses a
+   payment. The verifier is `@haven_ai/sdk`'s `checkPassport` /
+   `verifyPassportReceipt`, which is the same canonicalizer the backend signs
+   with. Note the echo window: the merchant refuses a payment whose extensions
+   omit an advertised key, so the env flip must not land mid-quote.
 
 The intent moves to `submitted`. `POST /x402/:id/settle` is Base-only and is
 documented in the OpenAPI spec as the live delegation-rail settlement endpoint.

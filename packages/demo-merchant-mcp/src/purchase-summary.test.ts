@@ -50,6 +50,7 @@ function fakeSettledPayment(overrides: Partial<SettledPayment> = {}): SettledPay
     paymentResponse: { success: true, payer: '0x2222222222222222222222222222222222222222', transaction: TX_HASH, network: 'eip155:8453', amount: PRODUCTS.storage_50gb.price_usdc.toString() },
     paymentResponseHeader: 'irrelevant',
     settlement: 'settled_onchain',
+    passportReference: null,
     ...overrides,
   }
 }
@@ -70,6 +71,7 @@ describe('buildPurchaseSummary (#1273) — display/reporting contract', () => {
       asset: 'USDC',
       network: expect.stringMatching(/^eip155:\d+$/),
       settlement_tx_hash: TX_HASH,
+      passport: null,
     })
   })
 

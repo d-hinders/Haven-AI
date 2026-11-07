@@ -274,6 +274,13 @@ jobs:
       - name: Build demo merchant
         run: npm run build -w packages/demo-merchant-mcp
 
+      # #4723: the package now imports @haven_ai/sdk at runtime, so a green
+      # tsup is not enough — the built entrypoint must resolve its workspace
+      # dependency and bind a socket. The script waits for the startup banner,
+      # which is printed inside `server.listen`'s callback.
+      - name: Smoke-test the built service
+        run: npm run smoke:start -w packages/demo-merchant-mcp
+
   core_checks:
     name: Core checks
     needs: changes

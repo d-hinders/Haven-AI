@@ -6,6 +6,34 @@ export { signHash,
 export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'
 export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 
+// #4723 (epic #4718): the merchant-side Agent Passport verifier. Named apart
+// from the PAYMENT receipt exports above (`RECEIPT_VERSION` is
+// `haven-receipt-1`; `ReceiptVerification` is the payment receipt's) so the two
+// vocabularies cannot be confused at a call site.
+export {
+  PASSPORT_RECEIPT_VERSION,
+  PASSPORT_CHECK_TIMEOUT_MS,
+  canonicalizePassportReceipt,
+  verifyPassportReceiptSignature,
+  verifyPassportReceipt,
+  checkPassport,
+} from './passport.js'
+export type {
+  PassportReceipt,
+  SignedPassportReceipt,
+  PassportStanding,
+  PassportAnchorState,
+  PassportControlSummary,
+  PassportSignatureReason,
+  PassportSignatureVerification,
+  PassportCheckReason,
+  PassportCheckResult,
+  PassportVerifyBody,
+  PassportReference,
+  PassportVerifyOptions,
+  CheckPassportOptions,
+} from './passport.js'
+
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
 export { catalogFundingLegExpected, type CatalogFundingLegHint } from './catalog-funding-leg.js'
 export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'

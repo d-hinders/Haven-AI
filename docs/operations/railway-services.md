@@ -53,6 +53,41 @@ The commands are relative to the repo root because both services run from it
 Dockerfile `CMD`. Neither process depends on its working directory: configuration comes from Railway
 service variables, and Demo-merchant reads no files from disk.
 
+### Demo-merchant builds the SDK first (#4723)
+
+The Demo-merchant build command stays `npm ci && npm run build -w
+packages/demo-merchant-mcp` — **do not change it in Railway.** Since #4723 the
+package imports `@haven_ai/sdk` at runtime (the merchant-side passport
+verifier), and its own `build`, `test` and `typecheck` scripts now build
+`packages/core` and `packages/sdk` first, the same way the backend's scripts
+do. So the Railway command is unchanged and the SDK is always built before the
+merchant that consumes it.
+
+`ci.yml`'s `demo_merchant_checks` job runs `npm run smoke:start -w
+packages/demo-merchant-mcp` after the build: it spawns the built
+`dist/index.js` with a throwaway config and waits for the startup banner, which
+is printed inside `server.listen`'s callback. A green `tsup` alone would not
+prove the emitted entrypoint can resolve its workspace dependency.
+
+**Operator step — the passport env flip.** The demo merchant advertises
+`haven-passport` only when BOTH of these are set on the service:
+
+| Variable | Value |
+|---|---|
+| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against (e.g. the dev backend's public URL) |
+| `MERCHANT_PASSPORT_ISSUER` | the issuer address from `GET /passport/issuer` on that deployment |
+
+With either missing it advertises only `haven-demo`, exactly as before. Set
+both **together, on a service that is not mid-quote**: the merchant's echo rule
+refuses a payment whose extensions do not contain every advertised key, so a
+402 quoted before the flip and paid after it is refused — and on the EIP-3009
+bridge that happens after funding, so the funds strand until a sweep. The
+window is one quote lifetime (`maxTimeoutSeconds`, 300 s).
+
+Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks this pin: the merchant will
+answer `not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER`
+is updated. See [secret-rotation.md](secret-rotation.md).
+
 ### Sleep
 
 A sleeping service (Railway "serverless") stops after about 10 minutes without

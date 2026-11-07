@@ -505,6 +505,8 @@ describe('HavenClient structural boundary', () => {
       'NEXT_TOOL_SERVER_NAMES', // #3101
       'NEXT_TOOL_SERVER_ROLES', // #3101
       'PACKED_USER_OPERATION_FIELDS', // #3271
+      'PASSPORT_CHECK_TIMEOUT_MS', // #4723
+      'PASSPORT_RECEIPT_VERSION', // #4723
       'RECEIPT_VERSION',
       'ROOT_AUTHORITY', // #3283
       'SDK_CLIENT_IDENTITY', // #3303
@@ -546,7 +548,9 @@ describe('HavenClient structural boundary', () => {
       'buildSweepAuthorizationMessage',
       'buildSweepTypedData',
       'buildX402ExpectedMessage',
+      'canonicalizePassportReceipt', // #4723: the ONE canonicalizer (SDK + backend)
       'catalogFundingLegExpected', // #3839
+      'checkPassport', // #4723: fetch-and-verify wrapper
       'compareNodeVersions',
       'composeDescription',
       'connectorRerunCommand',
@@ -607,6 +611,8 @@ describe('HavenClient structural boundary', () => {
       'toolDescriptions',
       'unsupportedNodeVersionMessage',
       'validateStandardX402PaymentHeader',
+      'verifyPassportReceipt', // #4723: the merchant-side pure verifier
+      'verifyPassportReceiptSignature', // #4723: the offline signature check
       'verifyPaymentReceipt',
       'verifySettlementChild', // #3283
       'verifySignature',
@@ -654,6 +660,7 @@ describe('HavenClient structural boundary', () => {
       'BudgetPrecheckResult',
       'CatalogFundingLegHint', // #3839
       'CatalogSubmissionAccepted',
+      'CheckPassportOptions', // #4723
       'ClaudeTool',
       'EvidenceReportOutcome', // #2970
       'HavenAgent',
@@ -688,6 +695,17 @@ describe('HavenClient structural boundary', () => {
       'NextStepTargets', // #3101
       'NextToolServerRole', // #3101
       'OpenAITool',
+      'PassportAnchorState', // #4723
+      'PassportCheckReason', // #4723
+      'PassportCheckResult', // #4723
+      'PassportControlSummary', // #4723
+      'PassportReceipt', // #4723
+      'PassportReference', // #4723
+      'PassportSignatureReason', // #4723
+      'PassportSignatureVerification', // #4723
+      'PassportStanding', // #4723
+      'PassportVerifyBody', // #4723
+      'PassportVerifyOptions', // #4723
       'PaymentFee',
       'PaymentIntent',
       'PaymentNextAction',
@@ -705,6 +723,7 @@ describe('HavenClient structural boundary', () => {
       'SettlementChildExpectation', // #3283
       'SharedToolKey',
       'SignData',
+      'SignedPassportReceipt', // #4723
       'SweepAuthorization',
       'SweepConfirmation', // #1756
       'SweepEip712Domain',

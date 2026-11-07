@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-11-04"
+last-verified: "2026-11-07"
 ---
 
 # Dev environment
@@ -796,6 +796,51 @@ tool for a one-off check against an arbitrary merchant (see its header for the
 
 Reference: `packages/demo-merchant-mcp/README.md` § *ERC-7710 Smart-Account
 Payments*.
+
+### Enabling the Agent Passport check on the dev demo-merchant
+
+The dev demo-merchant advertises **only `haven-demo`** by default. Since #4723
+it can also advertise `haven-passport` and report the agent's passport standing
+in its purchase response — advisory only, never a refusal. Like the ERC-7710
+rail, this is a **manual variable change** on the Railway demo-merchant service;
+the code deploys automatically and [`.env.dev.example`](../../.env.dev.example)
+documents variables rather than applying them.
+
+1. **Set both variables together** on the demo-merchant service:
+
+   ```
+   MERCHANT_HAVEN_BASE_URL=https://<dev backend public origin>
+   MERCHANT_PASSPORT_ISSUER=<issuer from GET /passport/issuer on that backend>
+   ```
+
+   With either missing the merchant advertises only `haven-demo` and reports
+   `passport: null` — exactly the pre-#4723 behaviour. A half-configured or
+   invalid value logs a warning and disables the check rather than taking the
+   merchant down.
+
+2. **Read the issuer from the deployment you are pointing at**, not from a
+   receipt: `curl -s "$API/passport/issuer" | jq -r .issuer`. It is the address
+   of `PASSPORT_RECEIPT_SIGNING_KEY`, and it must be the DEV backend's — a prod
+   issuer pinned on dev answers `not_signed_by_issuer` for every receipt. The
+   dev verifier must be on first (`PASSPORT_RECEIPT_SIGNING_KEY` set; see
+   [passport-verification-setup.md](passport-verification-setup.md)).
+
+3. **Set them together, and not mid-quote.** The merchant's echo rule refuses a
+   payment whose extensions do not contain every advertised key, so a 402
+   quoted before the flip and paid after it is refused — and on the EIP-3009
+   bridge that happens after funding, so the funds strand until a sweep. The
+   window is one quote lifetime (`maxTimeoutSeconds`, 300 s).
+
+4. **Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks the pin.** The merchant
+   answers `not_signed_by_issuer` for every receipt until
+   `MERCHANT_PASSPORT_ISSUER` is updated; treat rotation as a breaking change
+   ([secret-rotation.md](secret-rotation.md)).
+
+To turn it back **off**, unset either variable. The merchant advertises only
+`haven-demo` again, and a payment that still carries a reference reports
+`passport: null` rather than a stale answer.
+
+Reference: `packages/demo-merchant-mcp/README.md` § *Agent Passport check*.
 
 ### The `DEV` badge
 

@@ -86,7 +86,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-10-30"
+last-verified: "2026-11-07"
 ---
 
 > **No contract change (#4675, 2026-11-05): the agent runbook says signup is
@@ -1343,10 +1343,14 @@ was filed; the **manifests** were what disagreed. `mcp-server` and
 flag — `release-bump.mjs` and connect's `package-smoke.test.ts` — treated them
 as published and demanded exact internal pins. Both are now flagged private and
 use `"*"`, which is what a workspace-only consumer must use; `npm run
-lint:workspace-pins` enforces both directions of that rule on every PR. Nothing
-about the runtime floor, the version-skew contract, or the Supported Runtime
-Manifest below moves — the published set this section governs is unchanged at
-`sdk`, `signer`, `mcp`, `connect`, `cli`.
+lint:workspace-pins` enforces both directions of that rule on every PR. Since
+[#4723](https://github.com/d-hinders/Haven-AI/issues/4723) `demo-merchant-mcp`
+also consumes `@haven_ai/sdk` with a `"*"` pin (the merchant-side passport
+verifier), the same rule applied to a second internal dependency; its
+`build`/`test`/`typecheck` scripts build core and the SDK first, so the Railway
+build command is unchanged. Nothing about the runtime floor, the version-skew
+contract, or the Supported Runtime Manifest below moves — the published set this
+section governs is unchanged at `sdk`, `signer`, `mcp`, `connect`, `cli`.
 
 Enforcement now happens at three points, all refusing rather than warning:
 

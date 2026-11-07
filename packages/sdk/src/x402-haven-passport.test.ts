@@ -225,6 +225,24 @@ describe('funding leg — the passport read (#4722)', () => {
     await expect(replay.authorize(pr, OPTION, 'idem-2')).rejects.toBe(stop)
     expect(replayMint).toHaveBeenCalledWith(pr, OPTION, 'pay-2', null)
     expect(replayRead).not.toHaveBeenCalled()
+
+    // The approval-resume shape of an executed replay (#4722 review, R8):
+    // funding already ran there too, so no read either.
+    const approvalRead = vi.fn(async () => PASSPORT)
+    const approval = leg(approvalRead)
+    ;(approval as unknown as { post: unknown }).post = vi.fn(async () => ({
+      success: false,
+      payment_id: 'pay-3',
+      status: 'executed',
+      phase: 'funding_sent',
+      next_action: 'retry_original_x402_request',
+      chain_id: 84532,
+    }))
+    vi.spyOn(approval, 'delegateCanFund').mockResolvedValue(true)
+    const approvalMint = vi.spyOn(approval, 'createPaymentHeader').mockRejectedValue(stop)
+    await expect(approval.authorize(pr, OPTION, 'idem-3')).rejects.toBe(stop)
+    expect(approvalMint).toHaveBeenCalledWith(pr, OPTION, 'pay-3', null)
+    expect(approvalRead).not.toHaveBeenCalled()
   })
 })
 
@@ -240,5 +258,48 @@ describe('HavenClient wiring (#4722)', () => {
     expect(await internal.fundingLeg.readAgentPassport()).toEqual(PASSPORT)
     internal.getAgent = async () => ({ passport: null })
     expect(await internal.fundingLeg.readAgentPassport()).toBeNull()
+  })
+})
+
+describe('resumeAuthorizedX402 carries no passport (#4722 review)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // Spec-review finding 3: the resume re-mints AFTER the funding leg ran, so a
+  // passport read there would widen a funded window. The decision is "no
+  // reference on resume"; this pins it.
+  it('never reads the passport and mints without one, even for a merchant that advertises haven-passport', async () => {
+    const pr = challenge({ 'haven-passport': { info: {} } })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      payment_id: 'approval-4722',
+      kind: 'approval_request',
+      rail: 'x402',
+      status: 'executed',
+      phase: 'funding_sent',
+      next_action: 'retry_original_x402_request',
+      amount: '0.001',
+      token: 'USDC',
+      resource_url: pr.resource.url,
+      merchant_address: OPTION.payTo,
+      tx_hash: `0x${'ab'.repeat(32)}`,
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 84532,
+      message: 'Retry the original x402 request.',
+    }), { status: 200 }))
+    const { HavenClient } = await import('./client.js')
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example' })
+    const fundingLeg = (haven as unknown as { fundingLeg: X402FundingLeg & { readAgentPassport: unknown } }).fundingLeg
+    const read = vi.fn(async () => PASSPORT)
+    fundingLeg.readAgentPassport = read
+    const mint = vi.spyOn(fundingLeg, 'createPaymentHeader')
+
+    await haven.resumeAuthorizedX402({ paymentId: 'approval-4722', paymentRequired: pr, idempotencyKey: 'resume-4722' })
+
+    expect(read).not.toHaveBeenCalled()
+    expect(mint).toHaveBeenCalledTimes(1)
+    expect(mint.mock.calls[0][3] ?? null).toBeNull()
+    const header = JSON.parse(Buffer.from(await mint.mock.results[0].value, 'base64').toString('utf8'))
+    expect(JSON.stringify(header.extensions)).toBe(JSON.stringify(pr.extensions))
   })
 })

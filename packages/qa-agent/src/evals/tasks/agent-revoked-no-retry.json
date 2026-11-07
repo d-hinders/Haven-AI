@@ -23,7 +23,7 @@
   "source": {
     "kind": "issue",
     "ref": "4678",
-    "note": "A revoked key answers one identical 401 body whose hint is 'Run npx @haven_ai/connect@alpha to provision one' (middleware/agentAuth.ts); the MCP identity gate relays it as AGENT_IDENTITY_UNVERIFIED. This task may go RED for a product reason — the slice records the result and files the guidance question; it does not change the auth response."
+    "note": "A revoked key answers one identical 401 body (middleware/agentAuth.ts); the hosted MCP identity gate does not relay it but answers AGENT_IDENTITY_UNVERIFIED with its own text, which names the account owner and connecting a new agent (#4697, after the first live run scored 0/3 on the old 'reconnect' wording)."
   },
   "lanes": [
     "claude-code"

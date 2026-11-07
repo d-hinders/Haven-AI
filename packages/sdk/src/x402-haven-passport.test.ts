@@ -289,7 +289,11 @@ describe('resumeAuthorizedX402 carries no passport (#4722 review)', () => {
     }), { status: 200 }))
     const { HavenClient } = await import('./client.js')
     const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: 'https://haven.example' })
-    const fundingLeg = (haven as unknown as { fundingLeg: X402FundingLeg & { readAgentPassport: unknown } }).fundingLeg
+    // Structural, not `X402FundingLeg & …`: `readAgentPassport` is private on
+    // the class, so the intersection would collapse to `never`.
+    const fundingLeg = (haven as unknown as {
+      fundingLeg: { readAgentPassport: unknown; createPaymentHeader: X402FundingLeg['createPaymentHeader'] }
+    }).fundingLeg
     const read = vi.fn(async () => PASSPORT)
     fundingLeg.readAgentPassport = read
     const mint = vi.spyOn(fundingLeg, 'createPaymentHeader')

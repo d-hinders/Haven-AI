@@ -83,8 +83,12 @@ import type { Agent } from '@/hooks/useAgents'
 
 interface Props {
   agent: Agent
-  /** The agent's account; null while the user's accounts are still loading. */
-  account: { id: string; name: string } | null
+  /**
+   * The agent's account; null while the user's accounts are still loading.
+   * `passport_issuable` is the session payload's #4719 answer; the passport
+   * row offers issuance only when it is exactly `true`.
+   */
+  account: { id: string; name: string; passport_issuable?: boolean } | null
   isRevoked: boolean
   /** Revoked or archived — the ⋮ menu's credential gate, verbatim. */
   canManageCredentials: boolean
@@ -206,9 +210,16 @@ export default function AgentSettingsTab({
         />
 
         {/* 5. Agent Passport — `AgentPassportCard` renders the row itself;
-            the divided section carries its hairline. Its revoked-only gate
-            stands inside the component (archived is NOT gated there). */}
-        <AgentPassportCard agentId={agent.id} agentRevoked={isRevoked} />
+            the divided section carries its hairline. Its revoked and
+            not-issuable gates
+            stand inside the component (archived is NOT gated there). */}
+        <AgentPassportCard
+          agentId={agent.id}
+          agentRevoked={isRevoked}
+          // Null while the account loads, so the card renders neither the
+          // opt-in nor the "not available" reason yet (#4719 review).
+          passportIssuable={account ? account.passport_issuable === true : null}
+        />
       </SettingsSection>
 
       {/* The account-level item (#1089): a pointer to the account's Security

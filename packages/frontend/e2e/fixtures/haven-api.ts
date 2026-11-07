@@ -47,6 +47,9 @@ export const testSafe = {
   name: 'Operations',
   is_default: true,
   account_type: 'delegator_hybrid',
+  // #4719: the session payload's answer. Base mainnet is not a passport
+  // chain, so false is what the backend serves for this account.
+  passport_issuable: false,
   created_at: '2026-05-01T10:00:00.000Z',
 }
 

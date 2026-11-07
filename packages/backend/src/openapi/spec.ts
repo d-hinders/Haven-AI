@@ -867,19 +867,24 @@ const sessionAccountProperties = {
     description:
       'Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account.',
   },
+  passport_issuable: {
+    type: 'boolean',
+    description:
+      "Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true.",
+  },
 } as const
 
 /**
  * An account as the session payloads carry it. `sessionAccountPayload` STRIPS
  * owner_address and passkey_count — the raw signer inputs — and replaces them
- * with the two derived answers the UI actually needs. The deprecated alias
+ * with the derived answers the UI actually needs (#4719 added `passport_issuable`). The deprecated alias
  * schema went with #2914.
  */
 const sessionAccount = {
   type: 'object',
   required: [
     'id', 'account_address', 'chain_id', 'name', 'is_default', 'created_at',
-    'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
+    'account_type', 'value_bearing_chain', 'needs_backup_recommendation', 'passport_issuable',
   ],
   properties: { ...sessionAccountProperties },
 } as const
@@ -4101,7 +4106,7 @@ export const openapiSpec = {
         operationId: 'requestAgentPassport',
         summary: 'Opt an existing agent in to a passport.',
         description:
-          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. The rail refusal is ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
+          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. So is a deployment whose receipt verifier is off (#4719): a passport issued there could not be verified by any merchant. The rail refusal and the verifier refusal are ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -4140,7 +4145,7 @@ export const openapiSpec = {
             description:
               'Agent is revoked (terminal), or its account is on a retired rail — passports are issued on the delegation rail only (#2138).',
           },
-          '503': { ...errorResponse, description: 'Passport issuance is not configured on this deployment.' },
+          '503': { ...errorResponse, description: 'Passport issuance, or the receipt verifier (#4719), is not configured on this deployment.' },
         },
       },
     },
@@ -11736,7 +11741,8 @@ export const openapiSpec = {
           },
           issue_passport: {
             type: 'boolean',
-            description: 'Opt in to an L0 Agent Passport for the agent this setup creates. Default false.',
+            description:
+              'Opt in to an L0 Agent Passport for the agent this setup creates. Default false. Ignored, and no passport row is recorded, when the account is not `passport_issuable` (#4719).',
           },
           source: {
             type: 'string',
@@ -11920,7 +11926,7 @@ export const openapiSpec = {
           approval_url: { type: 'string', format: 'uri' },
           passport_requested: {
             type: 'boolean',
-            description: 'True when the setup opted in and its chain issues L0 passports.',
+            description: 'True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here.',
           },
         },
         additionalProperties: false,
@@ -12314,7 +12320,9 @@ export const openapiSpec = {
               /**
                * #1445: whether an Agent Passport attestation was requested for
                * this agent (#970). Always present on creation — false when the
-               * caller did not opt in, or the chain has no passport support.
+               * caller did not opt in, or this deployment cannot issue on the
+               * account's chain (#4719: no schema UID or no receipt verifier
+               * here counts too).
                * Governance metadata, never spend authority.
                */
               passport_requested: { type: 'boolean' },

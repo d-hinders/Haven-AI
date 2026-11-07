@@ -31,12 +31,20 @@
  * `markAnchored`, whose CAS refuses `IS NOT DISTINCT FROM null` — the row
  * stays non-anchored and the `anchored`/UID assertions fail.
  */
-import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi, afterAll } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import * as repo from '../../../infra/repositories/agent-passports.js'
 import { issuePassport, setAnchor, setAnchorLiveness, setAnchorRecovery } from '../issuance.js'
 import type { RecoveredAnchor } from '../issuance.js'
+import { setReceiptSigningKey } from '../receipt.js'
+// #4719: issuance refuses to anchor while the receipt verifier is off (no
+// passport no merchant can verify). These suites exercise the anchoring path,
+// so the verifier is on for them; the refusal itself is pinned in
+// passport-issuance.test.ts.
+beforeAll(() => setReceiptSigningKey('0x' + '4719'.repeat(16)))
+afterAll(() => setReceiptSigningKey(null))
+
 
 const CHAIN = 84532
 const RELAYER = '0x' + '11'.repeat(20)

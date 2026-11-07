@@ -1314,6 +1314,29 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(screen.getByTestId('agent-passport-row')).toBeInTheDocument()
   })
 
+  it('#4719: the Settings row offers "Issue a passport" only when the agent\'s session account is passport_issuable', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [{ ...SAFE, passport_issuable: true }] } })
+    const { unmount } = renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+    expect(within(screen.getByTestId('agent-passport-row')).getByRole('button', { name: /issue a passport/i })).toBeTruthy()
+    unmount()
+
+    mockUseAuth.mockReturnValue({ user: { accounts: [{ ...SAFE, passport_issuable: false }] } })
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+    const row = screen.getByTestId('agent-passport-row')
+    expect(within(row).queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    expect(within(row).getByText('Passports are not available for this wallet yet.')).toBeTruthy()
+  })
+
+  it('#4719: fails closed when the agent\'s account is not among the session accounts', () => {
+    mockUseAuth.mockReturnValue({ user: { accounts: [{ ...SAFE, id: 'some-other-account', passport_issuable: true }] } })
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+    const row = screen.getByTestId('agent-passport-row')
+    expect(within(row).queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    // #4719 review: an unresolved account is "not known yet", so the row does
+    // not flash the "not available" reason before the account arrives.
+    expect(within(row).queryByText('Passports are not available for this wallet yet.')).toBeNull()
+  })
+
   it('an ARCHIVED agent also loses the credential rows (#4228)', () => {
     const base = mockUseAgents()
     mockUseAgents.mockReturnValue({

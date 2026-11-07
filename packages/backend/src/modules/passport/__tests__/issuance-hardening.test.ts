@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, beforeAll, afterAll } from 'vitest'
 
 /**
  * #1043 — issuance hardening. Four defects from the adversarial review, each
@@ -30,6 +30,14 @@ import {
   setAnchorRecovery,
   ISSUANCE_ATTENTION_ATTEMPTS,
 } from '../issuance.js'
+import { setReceiptSigningKey } from '../receipt.js'
+// #4719: issuance refuses to anchor while the receipt verifier is off (no
+// passport no merchant can verify). These suites exercise the anchoring path,
+// so the verifier is on for them; the refusal itself is pinned in
+// passport-issuance.test.ts.
+beforeAll(() => setReceiptSigningKey('0x' + '4719'.repeat(16)))
+afterAll(() => setReceiptSigningKey(null))
+
 
 beforeEach(() => {
   mockQuery.mockReset()

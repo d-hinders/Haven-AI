@@ -32,6 +32,7 @@
 
 import { PASSPORT_CHAIN_IDS, isPassportConfigured } from './schema.js'
 import { isReceiptSigningConfigured, receiptIssuerAddress } from './receipt.js'
+import { isPassportIssuableAccount } from '../../domain/passport-issuance-rail.js'
 
 /**
  * The four states a passport-serving chain can be in. Named rather than left
@@ -158,4 +159,46 @@ export function logPassportReadiness(
       '(GET /passport/verify and /passport/issuer will 503). Set PASSPORT_RECEIPT_SIGNING_KEY — ' +
       'see docs/operations/passport-verification-setup.md',
   )
+}
+
+/**
+ * Whether THIS deployment can issue a passport on a chain that a merchant can
+ * then verify (#4719, epic #4718).
+ *
+ * All three must hold: the chain is a passport chain and its schema UID is
+ * registered here (`isPassportConfigured` answers both), and the receipt
+ * verifier is on. The last one is an owner decision (2026-11-06): a passport
+ * issued where `GET /passport/verify` answers 503 is the `issuance_only` trap
+ * #1151 found, an on-chain credential no merchant can check, so the dashboard
+ * does not offer one there.
+ *
+ * Never throws: every input is a set lookup or a config read.
+ */
+export function isPassportIssuableOnChain(
+  chainId: number | null | undefined,
+  inputs: Pick<PassportReadinessInputs, 'env' | 'verificationConfigured'> = {},
+): boolean {
+  // `receiptIssuerAddress()`, not `isReceiptSigningConfigured()`: a malformed
+  // key is "configured" but leaves `/passport/issuer` answering 503, so only a
+  // derivable issuer address means a merchant can verify (#4719 review).
+  const { env = process.env, verificationConfigured = receiptIssuerAddress() !== null } = inputs
+  if (chainId == null) return false
+  // `isPassportConfigured` is the passport-chain check too: it is false for
+  // any chain without a pinned EAS deployment (`getEasDeployment` throws), so
+  // a schema-UID env var for a non-passport chain cannot make it true.
+  return verificationConfigured && isPassportConfigured(chainId, env)
+}
+
+/**
+ * The account-level answer the session payload carries as `passport_issuable`
+ * (#4719): an issuable rail (the #2138 allowlist) on a chain this deployment
+ * can issue and verify on. The dashboard offers the opt-in only when this is
+ * true, so it never shows an action the backend will refuse.
+ */
+export function isPassportIssuableForAccount(
+  account: { chain_id: number | null; account_type: string | null; execution_rail?: string | null },
+  inputs: Pick<PassportReadinessInputs, 'env' | 'verificationConfigured'> = {},
+): boolean {
+  if (!isPassportIssuableAccount(account.execution_rail ?? null, account.account_type)) return false
+  return isPassportIssuableOnChain(account.chain_id, inputs)
 }

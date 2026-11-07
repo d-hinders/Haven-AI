@@ -126,6 +126,27 @@ merely *intended* to stay unreachable eventually gets reached.
   operator procedure is
   [Passport verification setup](../operations/passport-verification-setup.md).
 
+## Where the dashboard offers it
+
+The opt-in appears only where this deployment can issue a passport that a
+merchant can then verify. Each session account carries `passport_issuable`
+(#4719), computed by the backend. It is true only when all four hold:
+
+- the account is a delegation-rail account (`delegator_hybrid`, or `execution_rail` `delegation`);
+- its chain is a passport chain (Base Sepolia today);
+- the chain's schema UID is registered on this deployment;
+- the receipt verifier is on.
+
+Everywhere else, the connect flow shows no checkbox, and the agent's Settings
+row says passports are not available for that wallet. Both agent-creation
+paths (`POST /agents` and connect-setup registration) record no passport for
+such an account. The explicit `POST /agents/:id/passport` also refuses with 503
+while the verifier is off, and the retry sweep does not anchor a request
+recorded before this gate until the verifier is on. A passport anchored before
+this gate renders as it always did. A request that failed on a wallet that
+cannot issue reads **Not available** with that same reason line, not as an
+error.
+
 ## For merchants
 
 Where the deployment's verifier is on, you get a signed answer covering four

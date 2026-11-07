@@ -98,6 +98,8 @@ export {
 export {
   passportReadiness,
   logPassportReadiness,
+  isPassportIssuableOnChain,
+  isPassportIssuableForAccount,
   type PassportChainState,
   type PassportChainReadiness,
   type PassportReadiness,

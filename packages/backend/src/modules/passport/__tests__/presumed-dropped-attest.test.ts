@@ -29,12 +29,20 @@
  * The FIRST commit of this file characterizes today's behaviour, including the
  * duplicate mint, so the fix has something to invert.
  */
-import { beforeAll, beforeEach, afterEach, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, afterEach, expect, it, vi, afterAll } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import * as repo from '../../../infra/repositories/agent-passports.js'
 import { issuePassport, setAnchor, setAnchorLiveness, setAnchorRecovery } from '../issuance.js'
 import type { AnchorResult, RecoveredAnchor } from '../issuance.js'
+import { setReceiptSigningKey } from '../receipt.js'
+// #4719: issuance refuses to anchor while the receipt verifier is off (no
+// passport no merchant can verify). These suites exercise the anchoring path,
+// so the verifier is on for them; the refusal itself is pinned in
+// passport-issuance.test.ts.
+beforeAll(() => setReceiptSigningKey('0x' + '4719'.repeat(16)))
+afterAll(() => setReceiptSigningKey(null))
+
 
 const CHAIN = 84532
 const DELEGATE = '0x' + 'a'.repeat(40)

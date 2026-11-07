@@ -975,8 +975,16 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       can switch it off (#4435).
    5. **Agent Passport**: `AgentPassportCard` renders the row itself — the
       title and status badge, the one-line description, Issue a passport or
-      Try again, and the issued state's `dl` grid in the full-width slot. Its
-      own revoked-only gate stands — archived agents are not newly gated.
+      Try again, and the issued state's `dl` grid in the full-width slot. It
+      gates Issue a passport on two things: the agent is not revoked (archived
+      agents are not newly gated), and the account's `passport_issuable` is
+      true (#4719). On an account that cannot issue, the detail reads
+      "Passports are not available for this wallet yet." and a `failed` row
+      reads **Not available** in a neutral tone instead of the danger-tone
+      **Issuance failed**. While the account is still loading the row shows
+      neither the action nor the reason. `null` also covers an agent whose
+      account is not among the session accounts. That row stays fail-closed
+      (no action), and a `failed` row there keeps today's **Issuance failed**.
 
    Under **On {account name}**, a linked row, **Who can approve** ("Managed
    on {account}: it covers every agent on it"), to the account's Security &

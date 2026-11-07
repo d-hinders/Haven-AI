@@ -47,6 +47,13 @@ export interface SmartAccount {
   needs_backup_recommendation?: boolean | null
   /** #1205: same single home for chain classification (testnets are false). */
   value_bearing_chain?: boolean
+  /**
+   * #4719: server-computed — whether this deployment can issue this
+   * account's agents a passport a merchant can verify. The passport opt-in is
+   * shown only when this is exactly `true`; absent (an older backend) reads as
+   * not issuable, so the gate fails closed.
+   */
+  passport_issuable?: boolean
 }
 
 export interface User {

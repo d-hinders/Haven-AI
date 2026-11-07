@@ -1172,7 +1172,7 @@ export type paths = {
         put?: never;
         /**
          * Opt an existing agent in to a passport.
-         * @description Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. The rail refusal is ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.
+         * @description Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. So is a deployment whose receipt verifier is off (#4719): a passport issued there could not be verified by any merchant. The rail refusal and the verifier refusal are ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.
          */
         post: operations["requestAgentPassport"];
         delete?: never;
@@ -4943,7 +4943,7 @@ export type components = {
             /** @description Legacy local-MCP opt-in (#3032: sent by the dashboard, `useAgentConnectionSetup.ts`, whenever the owner picked local MCP). `true` with an explicit runtime outside Claude Code / Codex / Cowork is refused with 400; otherwise it records the preference. */
             local_mcp?: boolean;
             allowances?: components["schemas"]["AgentConnectionAllowanceInput"][];
-            /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. */
+            /** @description Opt in to an L0 Agent Passport for the agent this setup creates. Default false. Ignored, and no passport row is recorded, when the account is not `passport_issuable` (#4719). */
             issue_passport?: boolean;
             /** @description Discovery-source slug for connect attribution (#2302) — e.g. 402-page, registry, template, skill. Sanitized server-side; a malformed value is stored as null rather than refused. */
             source?: string;
@@ -5034,7 +5034,7 @@ export type components = {
             next_action: "return_to_haven_for_wallet_approval";
             /** Format: uri */
             approval_url: string;
-            /** @description True when the setup opted in and its chain issues L0 passports. */
+            /** @description True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here. */
             passport_requested?: boolean;
         };
         AgentConnectionSetupStatus: {
@@ -12516,7 +12516,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Passport issuance is not configured on this deployment. */
+            /** @description Passport issuance, or the receipt verifier (#4719), is not configured on this deployment. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -16424,6 +16424,8 @@ export interface operations {
                                 value_bearing_chain: boolean;
                                 /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                                 needs_backup_recommendation: boolean | null;
+                                /** @description Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true. */
+                                passport_issuable: boolean;
                             }[];
                         };
                     };
@@ -16523,6 +16525,8 @@ export interface operations {
                                 value_bearing_chain: boolean;
                                 /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                                 needs_backup_recommendation: boolean | null;
+                                /** @description Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true. */
+                                passport_issuable: boolean;
                             }[];
                         };
                     };
@@ -16615,6 +16619,8 @@ export interface operations {
                             value_bearing_chain: boolean;
                             /** @description Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account. */
                             needs_backup_recommendation: boolean | null;
+                            /** @description Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true. */
+                            passport_issuable: boolean;
                         }[];
                     };
                 };

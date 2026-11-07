@@ -272,8 +272,14 @@ Haven backend
 > counterparty. Same discipline as the #956 note below, which is careful not to
 > let a true narrow claim stand in for a broader one.
 >
-> The reference is deliberately NOT placed in the `X-PAYMENT` payload, so it
-> cannot alter the authenticated payment context or any leg's authority. Absent
+> Since #4722 the reference enters the `X-PAYMENT` payload only when the
+> merchant's 402 advertised the `haven-passport` x402 extension, and only inside
+> that echoed extension. Extensions sit outside the signed EIP-3009
+> authorization and outside the erc7710 `permissionContext`, so the reference
+> still cannot alter the authenticated payment context or any leg's authority:
+> it is agent-supplied metadata the merchant resolves against a verifier it
+> pins. A merchant that did not advertise the key receives a byte-identical
+> envelope. Absent
 > (`null`) is a normal answer, and a lookup **error** degrades to `null` rather
 > than affecting the payment. (The header itself is x402 v2-shaped since
 > #1064 — it additionally echoes the accepted requirements entry, which is

@@ -14,22 +14,22 @@
  *
  * | Scheme | Can the reference ride the payment? | Delivery |
  * |---|---|---|
- * | **erc7710** (direct settlement) | Best-effort | Haven's settle response carries it; the agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a bonus, not the mechanism. |
- * | **EIP-3009** (#946, the path with real merchant reach) | **No** | The merchant sees a STANDARD header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery to the merchant; the agent can read its own reference from `GET /machine-payments/agent` (#4721) and hand it over out of band. |
+ * | **erc7710** (direct settlement) | When the merchant asks | Haven's settle response carries it, and the header Haven assembles carries it inside an advertised `haven-passport` extension (#4722). The merchant already sees the delegation during redemption, so this is a bonus, not the mechanism. |
+ * | **EIP-3009** (#946, the path with real merchant reach) | When the merchant asks, SDK / local MCP only | The SDK-built envelope carries it inside an advertised `haven-passport` extension (#4722). The hosted + signer header does not yet (a signer release). There `GET /passport/verify?address=…` is the only delivery to the merchant; the agent can read its own reference from `GET /machine-payments/agent` (#4721). |
  *
- * The 3009 row is the strongest argument for the verifier endpoint being
- * PRIMARY rather than a fallback — the scheme with actual merchant adoption
- * cannot carry the reference at all. Anything that presents inline delivery as
- * the mechanism would be describing the rarer path as if it were the common one.
+ * The verifier endpoint stays PRIMARY rather than a fallback: the reference is
+ * agent-supplied on every path, and the most common client path does not carry
+ * it yet.
  *
- * ## Why this never touches the X-PAYMENT header
+ * ## The X-PAYMENT header carries it only when the merchant asked
  *
  * x402 does not guarantee arbitrary-metadata passthrough. The header is parsed
  * by a merchant FACILITATOR we do not control, and an unrecognised key in the
  * payload is a rejection risk — a failed payment traded for a nice-to-have.
- * So the reference rides HAVEN's own response body, where the agent reads it
- * and decides. `x402-delegation.test.ts` pins the header's key set against
- * exactly this temptation.
+ * So the reference enters the header only inside a `haven-passport` extension
+ * the merchant's own 402 advertised, by the one merge rule
+ * `withHavenPassportExtension` (`@haven_ai/sdk`). `x402-delegation.test.ts`
+ * pins the header's key set for a merchant that did not ask.
  */
 
 import * as repo from '../../infra/repositories/agent-passports.js'

@@ -33,9 +33,10 @@ four states — and one of them is a trap:
 | set | set | `ready` | Fully operational. |
 
 `issuance_only` is not cosmetic. On the **EIP-3009** settlement path — the one
-with actual merchant reach — `GET /passport/verify?address=…` is the *only*
-delivery mechanism (`modules/passport/x402-delivery.ts`), so a 3009 merchant has
-no way to learn a passport exists at all. On **erc7710**, settle responses still
+with actual merchant reach — `GET /passport/verify?address=…` is the only way a
+merchant can check a passport (`modules/passport/x402-delivery.ts`). An
+advertised `haven-passport` extension (#4722) can carry the UID, but the UID
+cannot be verified while the verifier is off. On **erc7710**, settle responses still
 carry `attestation_uid` + `chain_id`, but `verify_url` is silently omitted. The
 UID alone is not enough: an attestation under a schema with no resolver proves
 nothing until the merchant checks its attester against Haven's, and Haven does

@@ -17,6 +17,20 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **A merchant can ask for the agent's Agent Passport in the payment (#4722).**
+  When a merchant's x402 v2 402 advertises the `haven-passport` extension, the
+  EIP-3009 envelope the SDK builds adds `attestation_uid` and `chain_id` to it
+  (inside its `info` when present), never overwriting a field the merchant set.
+  Merchants that do not advertise the key receive exactly today's bytes, and the
+  agent's passport is read only for those that do, bounded to 1500 ms. New
+  exports: `withHavenPassportExtension` (the merge rule), `advertisesHavenPassport`,
+  `HAVEN_PASSPORT_EXTENSION` and the type `HavenPassportExtensionFields`.
+  `x402V2PaymentEnvelope` takes an optional fourth argument; three-argument
+  callers are unchanged. Reaching agents needs an `@haven_ai/sdk` +
+  `@haven_ai/mcp` release (mcp pins the SDK exactly); the hosted erc7710 path
+  gets it with the backend deploy, and the hosted + `@haven_ai/signer`
+  EIP-3009 path does not carry it yet.
+
 - **The agent can read its own Agent Passport reference (#4721).**
   `HavenAgent.passport` (raw `passport` on `GET /machine-payments/agent`) is
   `{ attestationUid, chainId, verifyUrl? }` for an agent with an anchored

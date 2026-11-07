@@ -901,7 +901,7 @@ page passes it and a preview deployment reads "Tracked".
 | not issued; account not `passport_issuable` (#4719): detail line "Passports are not available for this wallet yet.", no action | Not issued | `neutral` |
 | `failed` | Issuance failed | `danger` |
 | `failed`; account not `passport_issuable` (#4719, owner decision 2026-11-07): detail line "Passports are not available for this wallet yet.", no `last_error` text, no action | Not available | `neutral` |
-| account still loading (`passportIssuable` null) | per the row's status; no action and no reason line | — |
+| account still loading, or not among the session accounts (`passportIssuable` null) | per the row's status; no action and no reason line | — |
 | `pending` | Issuing… | `neutral` |
 | anchored, `revoked_onchain` | Revoked on-chain | `danger` |
 | `re_anchoring` | Updating on-chain | `neutral` |

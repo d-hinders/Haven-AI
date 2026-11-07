@@ -211,6 +211,20 @@ describe('AgentPassportCard (#1072)', () => {
     expect(screen.queryByText(/verifier not configured/)).toBeNull()
   })
 
+  it('a failed row whose account is unknown (null: loading or missing) keeps "Issuance failed" with its error', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'failed', assurance_level: 0, attestation_uid: null, chain_id: 84532,
+        tx_hash: null, attempts: 1, requested_at: '2026-06-02T10:00:00.000Z', anchored_at: null,
+        last_error: 'rpc timeout',
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={null} />)
+    expect(screen.getByText('Issuance failed')).toBeTruthy()
+    expect(screen.getByText('rpc timeout')).toBeTruthy()
+    expect(screen.queryByText('Not available')).toBeNull()
+  })
+
   it('a failed row on an issuable account still reads "Issuance failed" with its error', () => {
     mockUseAgentPassport.mockReturnValue(state({
       passport: {

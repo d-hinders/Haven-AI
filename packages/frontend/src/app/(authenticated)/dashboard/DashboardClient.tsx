@@ -595,6 +595,9 @@ export default function DashboardClient() {
  */
 export function formatUsdcArrival(atomic: string | null, decimals: number | null): string | null {
   if (atomic === null || decimals === null || atomic.trim() === '') return null
+  // A malformed decimals value is unknown too — and must not throw inside the
+  // effect that calls this (BigInt of a negative or fractional exponent).
+  if (!Number.isInteger(decimals) || decimals < 0) return null
   let value: bigint
   try {
     value = BigInt(atomic)

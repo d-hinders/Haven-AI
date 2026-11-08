@@ -1528,6 +1528,36 @@ describe('DashboardClient', () => {
       expect(mockToastSuccess).not.toHaveBeenCalled()
     })
 
+    it('with two accounts, only the one that went false → true toasts, named by its own id', () => {
+      const second = { ...ACCOUNT, accountId: 'acct-2' }
+      const twoAccounts = (a: [string, boolean], b: [string, boolean]) =>
+        mockBaseState([], {
+          accounts: [
+            { ...ACCOUNT, usdcBalanceAtomic: a[0], funded: a[1] },
+            { ...second, usdcBalanceAtomic: b[0], funded: b[1] },
+          ],
+        })
+      // The second account is listed FIRST in the session user's accounts, so
+      // an index-keyed map or a name lookup by position would pick the wrong one.
+      const sessionUser = {
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          accounts: [{ ...SAFE, id: 'acct-2', name: 'Savings' }, SAFE],
+        },
+      }
+      twoAccounts(['0', false], ['7000000', true])
+      mockUseAuth.mockReturnValue(sessionUser)
+      const { rerender } = render(<DashboardClient />)
+      twoAccounts(['3000000', true], ['7000000', true])
+      mockUseAuth.mockReturnValue(sessionUser)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).toHaveBeenCalledOnce()
+      expect(mockToastSuccess).toHaveBeenCalledWith('3.00 USDC arrived in Main account')
+    })
+
     it('never says the agents can spend now', () => {
       withAccount('0', false)
       const { rerender } = render(<DashboardClient />)

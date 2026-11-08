@@ -241,7 +241,13 @@ function ChecklistRow({ status, number, title, body, completedBody, cta, popOnCo
   const seenStatusRef = useRef<StepStatus>(status)
   const poppedRef = useRef(false)
   if (seenStatusRef.current !== status) {
-    poppedRef.current = popOnComplete && status === 'complete'
+    // Only a step the owner could still do — `active` or `available` — pops
+    // when it completes. `unknown → complete` is a balance read recovering
+    // for an account that was already funded, not something that just
+    // happened, so it shows the check without a pop (the funds toast's
+    // null → true rule, #4704 design review).
+    const wasOpen = seenStatusRef.current === 'active' || seenStatusRef.current === 'available'
+    poppedRef.current = popOnComplete && wasOpen && status === 'complete'
     seenStatusRef.current = status
   }
   const isActive = status === 'active'

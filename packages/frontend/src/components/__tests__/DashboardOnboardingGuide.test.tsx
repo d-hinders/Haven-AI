@@ -277,6 +277,24 @@ describe('guide steps play Step on a completion you watch (#4704)', () => {
     expect(document.querySelector('.animate-check-pop')).toBeNull()
   })
 
+  it('a balance read that recovers (unknown → complete) shows the check without a pop', () => {
+    setReducedMotion(false)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={null} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('unknown')
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('step 2 completing while watched pops too', () => {
+    setReducedMotion(false)
+    const props = { ...base, usdcFunded: true }
+    const { rerender } = render(<DashboardOnboardingGuide {...props} />)
+    rerender(<DashboardOnboardingGuide {...props} hasSetUpAgent={true} />)
+    expect(stepRow(2).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(2).querySelector('.animate-check-pop')).not.toBeNull()
+  })
+
   it('step 3 never pops: the first payment is its own card (#4707)', () => {
     setReducedMotion(false)
     const props = { ...base, usdcFunded: true, hasSetUpAgent: true }

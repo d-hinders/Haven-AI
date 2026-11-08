@@ -82,7 +82,10 @@ test.describe('first-run guide (#3818)', () => {
     // The milestone is its own surface (#4707) — found by its own heading.
     const milestone = milestoneCard(page)
     await expect(milestone.getByRole('heading', { name: 'Research agent made its first payment' })).toBeVisible()
-    await expect(milestone.getByText(/0\.05 to research\.example, just now\. You’re set up\./)).toBeVisible()
+    // The fixture's payment is dated 2026-09-01 and this spec runs on a real
+    // clock, so the card says the DATE — "just now" is for a recent row, and
+    // the rule is pinned in `lib/__tests__/first-agent-payment.test.ts`.
+    await expect(milestone.getByText(/0\.05 to research\.example, 1 September 2026\. You’re set up\./)).toBeVisible()
     await expect(milestone.getByRole('link', { name: 'View transaction' })).toHaveAttribute('href', '/transactions')
     // Needs attention is back to meaning what it says: no steps, no line.
     await expect(card(page).getByRole('heading', { name: 'Needs attention' })).toBeVisible()

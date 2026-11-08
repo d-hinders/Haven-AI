@@ -56,7 +56,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-05"
+last-verified: "2026-11-08"
 ---
 
 # Haven Screen Recipes
@@ -428,6 +428,13 @@ Structure (`ReceiveDialog`, the one receive dialog since #4094, cleaned by
 5. "Other ways to add money": `Get test USDC` (Circle's faucet) on a testnet
    account, and `Buy with card` on a mainnet account when the on-ramp is
    configured.
+6. "Watching for your deposit…" with the live dot while the dialog is open
+   on an address it shows (#4705). When that account's USDC rises, the dialog
+   becomes its arrived state: "25.00 USDC arrived", "It's in <account> on
+   <network>.", View transaction (the account's Activity) and Done — Peak and
+   a primary "Connect your first agent" for a user's first money where the
+   host offers it, Step otherwise. Rules in `design-system.md` § The Receive
+   dialog.
 
 Money and risk clarity (with one account the dialog shows no account card, so
 the network appears only in the network rule under the address and QR, and the

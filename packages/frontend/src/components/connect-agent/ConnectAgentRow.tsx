@@ -14,8 +14,14 @@
  *
  * The mark is the shared `Monogram` (`xs`, decorative), the same agent mark the
  * dashboard's `AgentRow` uses, so an agent looks the same wherever it appears.
+ * Once connected, a small success check sits on the mark's corner, so the row
+ * reads "done" at a glance and not only from its subtitle (owner review of the
+ * specimens on #4728, 2026-11-08). It is the AGENT's state, not a step: the
+ * checklist below still owns progress. Decorative — the subtitle is the text.
  */
 
+import { Check } from 'lucide-react'
+import { Icon } from '@/components/ui/Icon'
 import { Monogram } from '@/components/ui/Monogram'
 
 export type ConnectAgentRowState = 'waiting' | 'connected'
@@ -38,7 +44,18 @@ export function ConnectAgentRow({
 }) {
   return (
     <div className={`flex items-center gap-3 ${className}`.trim()}>
-      <Monogram name={name} size="xs" decorative />
+      <span className="relative inline-flex shrink-0">
+        <Monogram name={name} size="xs" decorative />
+        {state === 'connected' ? (
+          <span
+            data-testid="connect-agent-row-connected-mark"
+            aria-hidden="true"
+            className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--v2-success)] ring-2 ring-[var(--v2-bg)]"
+          >
+            <Icon icon={Check} className="h-3 w-3 text-[var(--v2-bg)]" strokeWidth={3} />
+          </span>
+        ) : null}
+      </span>
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-[var(--v2-ink)]">{name}</p>
         <p className="text-xs text-[var(--v2-ink-3)]">{STATUS_COPY[state]}</p>

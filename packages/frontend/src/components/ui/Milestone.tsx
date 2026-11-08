@@ -58,11 +58,14 @@ const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 
 /**
  * The bloom behind a Peak, in the token's channel form (§ 1, #1708): the
- * `-rgb` channels are what the Tailwind `brand` alias composes, so the glow
- * follows the palette instead of the hard-coded indigo this replaced.
+ * `-rgb` channels are what the Tailwind `success` alias composes, so the glow
+ * follows the palette. It is the SUCCESS colour, not brand: a Peak marks a
+ * real event that went right, its disc and check are success-toned, and an
+ * indigo halo around a green check read as two voices (owner review of the
+ * specimens on #4728, 2026-11-08).
  */
 const BLOOM_BACKGROUND =
-  'radial-gradient(circle, rgb(var(--v2-brand-rgb) / 0.35) 0%, rgb(var(--v2-brand-rgb) / 0.12) 45%, transparent 70%)'
+  'radial-gradient(circle, rgb(var(--v2-success-rgb) / 0.35) 0%, rgb(var(--v2-success-rgb) / 0.12) 45%, transparent 70%)'
 
 function subscribe(onChange: () => void): () => void {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}

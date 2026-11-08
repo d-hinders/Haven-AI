@@ -21,6 +21,17 @@ describe('ConnectAgentRow (#4702)', () => {
     expect(screen.queryByText('Listening for it…')).toBeNull()
   })
 
+  it('marks the connected state on the agent mark, and only the connected state (owner review on #4728)', () => {
+    const { rerender } = render(<ConnectAgentRow name="Research agent" state="waiting" />)
+    expect(screen.queryByTestId('connect-agent-row-connected-mark')).toBeNull()
+    rerender(<ConnectAgentRow name="Research agent" state="connected" />)
+    const mark = screen.getByTestId('connect-agent-row-connected-mark')
+    // Decorative: the subtitle carries the words, and the mark adds no text.
+    expect(mark.getAttribute('aria-hidden')).toBe('true')
+    expect(mark.textContent).toBe('')
+    expect(mark.className).toContain('bg-[var(--v2-success)]')
+  })
+
   it('owns no live region and no progress signal', () => {
     const { container } = render(<ConnectAgentRow name="Research agent" state="waiting" />)
     expect(screen.queryByRole('status')).toBeNull()

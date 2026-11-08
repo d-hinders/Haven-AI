@@ -2925,7 +2925,7 @@ fixed size of its own.
 
 | Strength | Motion | Plays |
 |---|---|---|
-| `peak` | `check-pop` 320ms + `v2-bloom` 1100ms | Once, for a first in your Haven life — the first time you see it, even if it happened while you were away |
+| `peak` | `check-pop` 320ms + `v2-bloom` 1100ms, the bloom in the success colour (`--v2-success-rgb`) | Once, for a first in your Haven life — the first time you see it, even if it happened while you were away |
 | `step` | `check-pop` 320ms only | Only on a change you watch happen; never on page load |
 | `live` | one soft brand-soft row fade, 1600ms; no check, no sound | Only on a row that arrives while the page is open |
 
@@ -3035,7 +3035,10 @@ Rules:
   one for the row within it. What the rule still forbids is a third signal — a
   ticker or badge restating either. The agent row above the list is not one: it
   says **who** you are waiting for, not how far along the flow is, and the
-  checklist still owns progress.
+  checklist still owns progress. Once the agent connects, a small success check
+  sits on the corner of its mark (decorative; the subtitle "Connected just now"
+  carries the words), so the row reads done at a glance. That is the agent's own
+  state, not a restated step.
 - **A row heading says what is happening now.** A working row names the work
   in flight, not the gate it leads to: while the connector finishes local
   setup, row 3 reads "Preparing the approval", and becomes "Review and approve"

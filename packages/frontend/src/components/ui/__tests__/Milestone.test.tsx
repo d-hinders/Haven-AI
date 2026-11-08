@@ -132,6 +132,20 @@ describe('Milestone (#4702)', () => {
     expect(bloom?.className).not.toMatch(/\bh-24\b|\bw-24\b/)
   })
 
+  it('the bloom is the success colour, never brand (owner review on #4728)', () => {
+    setReducedMotion(false)
+    const { container } = render(
+      <Milestone strength="peak">
+        {MARK}
+      </Milestone>,
+    )
+    const bloom = container.querySelector('.v2-animate-bloom') as HTMLElement | null
+    expect(bloom).toBeTruthy()
+    const background = bloom?.getAttribute('style') ?? ''
+    expect(background).toContain('var(--v2-success-rgb)')
+    expect(background).not.toContain('--v2-brand-rgb')
+  })
+
   it('owns no live region — the announcement stays with the caller', () => {
     setReducedMotion(false)
     render(

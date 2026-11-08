@@ -2589,8 +2589,9 @@ network warning. Showcased on `/design-system` → *Receive dialog*.
 
 **Receive notices the deposit (#4705).** Under the network rule, while the
 dialog is open on an address it shows, **"Watching for your deposit…"** sits
-with the pulsing live dot (§ 4's "live" indicator — `MoneyPanel`'s
-"Watching for incoming deposits…" line stays for after the dialog closes).
+with the pulsing live dot (§ 4's "live" indicator — the dashboard money
+card's own "Watching for incoming deposits…" line stays for after the dialog
+closes).
 The watch reads the selected account's USDC from the dashboard overview's
 per-account read (`overview.accounts[]`), never `useBalances`, and only while
 open: the first read after opening or after a picker switch seeds; a later

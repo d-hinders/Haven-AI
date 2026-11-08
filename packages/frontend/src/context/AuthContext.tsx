@@ -289,6 +289,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * The auth state, or `null` outside an `AuthProvider` — for a shared component
+ * that only needs the user as an optional input (#4705: `ReceiveDialog`'s
+ * first-money marker), so a host or a test without the provider still renders.
+ */
+export function useOptionalAuth(): AuthState | null {
+  return useContext(AuthContext)
+}
+
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext)
   if (!ctx) {

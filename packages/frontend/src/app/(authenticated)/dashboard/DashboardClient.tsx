@@ -28,6 +28,8 @@ import {
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
 import NeedsYou from './NeedsYou'
+import { formatUsdcArrival } from '@/lib/usdc-arrival'
+import { markFirstMoneySeen } from '@/lib/first-money'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
@@ -170,7 +172,14 @@ export default function DashboardClient() {
   // #4642: Send / Receive and the account question they ask first live in ONE
   // shared launcher, consumed here and by Contacts. The dashboard's behaviour
   // is unchanged; the launcher's own header records the null-chain fix.
-  const launcher = useMoneyActionLauncher({ accounts, onSent: refreshDashboardData })
+  // #4705: Receive's first-deposit primary opens Connect agent — offered only
+  // while there is no agent to connect yet (and the agent list has loaded).
+  const offerConnectFirstAgent = hasDelegationAccounts && !agentsLoading && agents.length === 0
+  const launcher = useMoneyActionLauncher({
+    accounts,
+    onSent: refreshDashboardData,
+    onConnectFirstAgent: offerConnectFirstAgent ? openConnectAgent : undefined,
+  })
   // #3818: "Hide for now" survives a reload. Stored per user WITH the number
   // of completed steps at the time; the guide comes back as soon as another
   // step completes. A per-device convenience in browser storage — not the
@@ -326,21 +335,34 @@ export default function DashboardClient() {
   // successful read, not money arriving. It does not say the agents can spend
   // now — before an agent exists that was false. Every update of an already
   // funded account stays quiet.
+  //
+  // #4705: money Receive covers is Receive's to announce — the toast stays
+  // silent while the dialog is open on that account, and for an arrival it
+  // already showed (`receiveCovers`, asked on every funded read so a stale
+  // announcement is consumed). Any funded read also records first money on
+  // this device (`lib/first-money.ts`), so a deposit seen here and then
+  // drained and refilled with Receive open is a Step there, never a Peak.
   const overviewAccounts = overview?.accounts
+  const receiveCovers = launcher.receiveCovers
   const previousFundedByAccountRef = useRef<Map<string, boolean | null> | null>(null)
   useEffect(() => {
     if (!overviewAccounts) return
+    if (user?.id && overviewAccounts.some((account) => account.funded === true)) {
+      markFirstMoneySeen(user.id)
+    }
     const previous = previousFundedByAccountRef.current
     const next = new Map<string, boolean | null>()
     for (const account of overviewAccounts) {
       next.set(account.accountId, account.funded)
+      const covered = account.funded === true && receiveCovers(account.accountId)
       if (previous?.get(account.accountId) !== false || account.funded !== true) continue
+      if (covered) continue
       const amount = formatUsdcArrival(account.usdcBalanceAtomic, account.usdcDecimals)
       if (!amount) continue
       toast.success(`${amount} USDC arrived in ${accountNames[account.accountId] ?? 'your account'}`)
     }
     previousFundedByAccountRef.current = next
-  }, [overviewAccounts, accountNames, toast])
+  }, [overviewAccounts, accountNames, toast, receiveCovers, user?.id])
   const attentionItems = useMemo(() => {
     if (!overview) return []
     return computeAttentionItems({
@@ -587,27 +609,6 @@ export default function DashboardClient() {
   )
 }
 
-/**
- * The arrived amount for the funds toast (#4704): the account's USDC balance
- * in whole tokens, at least two decimals ("25.00") and up to six, so a small
- * testnet deposit reads "0.0005" rather than "0.00". `null` when the balance
- * or its decimals are unknown or malformed — then no toast, never a guess.
- */
-export function formatUsdcArrival(atomic: string | null, decimals: number | null): string | null {
-  if (atomic === null || decimals === null || atomic.trim() === '') return null
-  // A malformed decimals value is unknown too — and must not throw inside the
-  // effect that calls this (BigInt of a negative or fractional exponent).
-  if (!Number.isInteger(decimals) || decimals < 0) return null
-  let value: bigint
-  try {
-    value = BigInt(atomic)
-  } catch {
-    return null
-  }
-  if (value <= 0n) return null
-  const scale = 10n ** BigInt(decimals)
-  const whole = value / scale
-  const fraction = (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
-  const shown = fraction.length >= 2 ? fraction.slice(0, 6) : fraction.padEnd(2, '0')
-  return `${whole.toLocaleString('en-US')}.${shown}`
-}
+// #4705: lifted to `lib/usdc-arrival.ts` (Receive's arrived state reads the
+// same amount); re-exported so the dashboard's callers and tests keep it.
+export { formatUsdcArrival }

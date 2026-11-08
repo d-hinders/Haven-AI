@@ -14,6 +14,8 @@ const mockUsePortfolio = vi.fn()
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
+  // #4705: ReceiveDialog reads the optional user for its first-money marker.
+  useOptionalAuth: () => mockUseAuth(),
 }))
 
 vi.mock('@/hooks/useAccounts', () => ({

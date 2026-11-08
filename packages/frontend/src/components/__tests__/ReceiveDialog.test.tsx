@@ -29,6 +29,13 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
   useEscapeToClose: vi.fn(),
 }))
 
+// #4705: the deposit watch reads the dashboard overview while the dialog is
+// open. No overview here — the watch's behaviour is
+// `ReceiveDialog.deposit.test.tsx`'s — so these tests stay off the network.
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => ({ data: null, loading: true, error: null, refetch: vi.fn() }),
+}))
+
 import ReceiveDialog from '@/components/ReceiveDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
 

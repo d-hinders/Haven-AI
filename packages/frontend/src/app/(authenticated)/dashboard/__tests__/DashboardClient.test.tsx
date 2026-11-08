@@ -1486,6 +1486,8 @@ describe('DashboardClient', () => {
       expect(formatUsdcArrival('abc', 6)).toBeNull()
       expect(formatUsdcArrival('0', 6)).toBeNull()
       // A malformed exponent must not throw inside the toast effect.
+      expect(() => formatUsdcArrival('25000000', -1)).not.toThrow()
+      expect(() => formatUsdcArrival('25000000', 1.5)).not.toThrow()
       expect(formatUsdcArrival('25000000', -1)).toBeNull()
       expect(formatUsdcArrival('25000000', 1.5)).toBeNull()
     })

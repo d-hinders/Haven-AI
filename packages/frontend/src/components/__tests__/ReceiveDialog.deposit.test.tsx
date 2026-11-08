@@ -25,6 +25,7 @@ type OverviewAccount = {
   usdcBalanceAtomic: string | null
   usdcDecimals: number | null
   funded: boolean | null
+  usdcBalanceFreshness?: { status: 'stale'; asOf: string } | { status: 'unavailable' }
 }
 const overview = vi.hoisted(() => ({ accounts: null as OverviewAccount[] | null }))
 vi.mock('@/hooks/useDashboardOverview', () => ({
@@ -161,6 +162,19 @@ describe('ReceiveDialog — the deposit watch (#4705)', () => {
     expect(arrivedTitle()).toBeNull()
   })
 
+  // #4705 review (S2): reads can come from replicas with different caches; a
+  // last-known figure is old, so it must never read as a rise.
+  it('a stale read changes nothing: a stale higher figure after a fresh lower one is not an arrival', () => {
+    setOverview(row(MAIN.id, '100000000'))
+    const { poll } = mount()
+    poll(row(MAIN.id, '90000000'))
+    poll({ ...row(MAIN.id, '100000000'), usdcBalanceFreshness: { status: 'stale', asOf: '2026-11-08T00:00:00Z' } })
+    expect(arrivedTitle()).toBeNull()
+    // …and a real deposit after it still fires, from the last FRESH value.
+    poll(row(MAIN.id, '95000000'))
+    expect(screen.getByText('5.00 USDC arrived')).toBeInTheDocument()
+  })
+
   it('an overview that has not loaded yet seeds nothing', () => {
     const { poll } = mount()
     poll(row(MAIN.id, '25000000'))
@@ -274,6 +288,16 @@ describe('ReceiveDialog — Peak for first money, Step after (#4705)', () => {
     expect(screen.queryByRole('button', { name: 'Connect your first agent' })).toBeNull()
   })
 
+  it('money that landed on another account while open was seen first: Step', () => {
+    setOverview(row(MAIN.id, '0'), row(SAVINGS.id, '0'))
+    const { poll } = mount({ onConnectFirstAgent: vi.fn() })
+    poll(row(MAIN.id, '0'), row(SAVINGS.id, '7000000'))
+    poll(row(MAIN.id, '25000000'), row(SAVINGS.id, '7000000'))
+    expect(screen.getByText('25.00 USDC arrived')).toBeInTheDocument()
+    expect(hasBloom()).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Connect your first agent' })).toBeNull()
+  })
+
   it('an unknown account at open is not "first": Step', () => {
     setOverview(row(MAIN.id, '0'), row(SAVINGS.id, null))
     const { poll } = mount()
@@ -327,6 +351,22 @@ describe('ReceiveDialog — the arrived state actions (#4705)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View transaction' }))
     expect(onClose).toHaveBeenCalledOnce()
     expect(mockPush).toHaveBeenCalledWith(`/accounts/${MAIN.id}?tab=activity`)
+  })
+
+  it('focus that was in the replaced address block moves to the primary', () => {
+    setOverview(row(MAIN.id, '25000000'))
+    const { poll } = mount()
+    screen.getByRole('button', { name: 'Copy address' }).focus()
+    poll(row(MAIN.id, '30000000'))
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus()
+  })
+
+  it('focus the person put elsewhere in the dialog stays there', () => {
+    setOverview(row(MAIN.id, '25000000'))
+    const { poll } = mount()
+    screen.getByRole('button', { name: 'Close' }).focus()
+    poll(row(MAIN.id, '30000000'))
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
   })
 
   it('Done closes the dialog, and reopening watches again', () => {

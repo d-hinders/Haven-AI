@@ -45,7 +45,7 @@ export default function DashboardClient() {
   const { toast } = useToast()
   const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
-  const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
+  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
   const {
     balances,
     loading: balancesLoading,
@@ -173,8 +173,9 @@ export default function DashboardClient() {
   // shared launcher, consumed here and by Contacts. The dashboard's behaviour
   // is unchanged; the launcher's own header records the null-chain fix.
   // #4705: Receive's first-deposit primary opens Connect agent — offered only
-  // while there is no agent to connect yet (and the agent list has loaded).
-  const offerConnectFirstAgent = hasDelegationAccounts && !agentsLoading && agents.length === 0
+  // while there is no agent to connect yet (and the agent list has loaded —
+  // a failed read is not "no agents").
+  const offerConnectFirstAgent = hasDelegationAccounts && !agentsLoading && !agentsError && agents.length === 0
   const launcher = useMoneyActionLauncher({
     accounts,
     onSent: refreshDashboardData,

@@ -1657,6 +1657,14 @@ describe('DashboardClient', () => {
       first.unmount()
 
       withAccount('0', false)
+      const second = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.queryByText('offers-connect-first-agent')).not.toBeInTheDocument()
+      second.unmount()
+
+      // A failed agents read is not "no agents".
+      withAccount('0', false)
+      mockUseAgents.mockReturnValue({ agents: [], loading: false, error: 'Failed to load agents', refetch: vi.fn() })
       render(<DashboardClient />)
       fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
       expect(screen.queryByText('offers-connect-first-agent')).not.toBeInTheDocument()

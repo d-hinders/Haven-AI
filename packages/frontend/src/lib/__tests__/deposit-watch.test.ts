@@ -28,6 +28,16 @@ describe('observeDeposit (#4705)', () => {
     expect(state.lastKnownAtomic).toBe(10n)
   })
 
+  it('a read marked stale or unavailable changes nothing, like null', () => {
+    let state: DepositWatchState = INITIAL_DEPOSIT_WATCH
+    state = observeDeposit(state, 'a', '90').state
+    const stale = observeDeposit(state, 'a', '100', { status: 'stale' })
+    expect(stale.arrivedAtomic).toBeNull()
+    expect(stale.state.lastKnownAtomic).toBe(90n)
+    const unavailable = observeDeposit(INITIAL_DEPOSIT_WATCH, 'a', '0', { status: 'unavailable' })
+    expect(unavailable.state.lastKnownAtomic).toBeNull()
+  })
+
   it('a drop lowers the stored value, so a later deposit fires for its own amount', () => {
     expect(run([['a', '50'], ['a', '20'], ['a', '30']]).arrivals).toEqual([null, null, 10n])
   })

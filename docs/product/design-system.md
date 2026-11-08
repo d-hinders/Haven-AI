@@ -2617,7 +2617,17 @@ screen with the **arrived state**, a `DialogResult` with `announce`
   agent**, stacked with the primary on top below `sm`.
 
 The dashboard's funds toast (#4704) stays silent for money the open dialog
-is watching, or has already announced.
+is watching, or has already announced. Accepted residual: the dialog polls
+the overview on its own, so when the dashboard's poll sees a deposit first
+and the dialog is closed before its own poll does (up to ~10 s), neither
+announces it — the money card's figures still change.
+
+**Only fresh reads count.** A balance the overview serves as last-known
+(`usdcBalanceFreshness: stale`) is ignored like `null`: it neither seeds, nor
+lowers, nor rises, so an old figure coming back can never read as money
+arriving. And Peak needs this account's money to be the first on any of the
+user's accounts at the moment it lands, not only at open: money already seen
+on another account makes it a Step.
 
 ### Modal (`ui/Modal`)
 
@@ -2985,8 +2995,10 @@ extends the pattern first.
 
 **Where each is used.** Peak: onboarding's "You're in", in success colours and
 with exactly two motions — its wrapper carries no `v2-animate-step-rise`, or
-Peak would silently gain a third motion on that one screen. Step:
-`DialogResult`'s success state, and the dashboard setup guide's steps 1 and 2
+Peak would silently gain a third motion on that one screen; and Receive's
+arrived state for a user's first money on this device (#4705, through
+`DialogResult strength="peak"`). Step: `DialogResult`'s success state (Receive's
+later deposits among them), and the dashboard setup guide's steps 1 and 2
 when one completes while the guide is open (#4704) — a step already complete
 on load just shows its check, and step 3 never pops, because the guide is
 replaced as soon as it completes and the first agent payment is #4707's card.

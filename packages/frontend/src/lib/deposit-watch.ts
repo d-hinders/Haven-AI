@@ -11,7 +11,7 @@
  * - A later non-null read ABOVE it is an arrival, for the difference.
  * - A read BELOW it lowers the stored value, so a later deposit still fires
  *   for its own amount.
- * - `null` (or a malformed read) changes nothing.
+ * - `null`, a malformed read, or a read marked stale changes nothing.
  *
  * Accepted residual (the spec): an agent paying in the same ~10 s poll as a
  * deposit understates the arrived amount.
@@ -37,8 +37,15 @@ export function observeDeposit(
   state: DepositWatchState,
   accountId: string,
   usdcBalanceAtomic: string | null | undefined,
+  /**
+   * The overview's per-account freshness marker. Present only on a balance
+   * served as last-known (`stale`) or never read (`unavailable`): an old
+   * figure, so it is treated like `null` and changes nothing — a stale 100
+   * after a fresh 90 must never read as 10 arriving (#4705 review).
+   */
+  freshness?: { status: string } | null,
 ): { state: DepositWatchState; arrivedAtomic: bigint | null } {
-  const read = parseAtomic(usdcBalanceAtomic)
+  const read = freshness ? null : parseAtomic(usdcBalanceAtomic)
   if (state.accountId !== accountId) {
     // A different account: start over, seeding from this read if it is known.
     return { state: { accountId, lastKnownAtomic: read }, arrivedAtomic: null }

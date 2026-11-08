@@ -540,6 +540,15 @@ function ReceiveArrived({
 }) {
   const router = useRouter()
   const offerConnect = arrival.strength === 'peak' && onConnectFirstAgent !== undefined
+  // The arrived state replaces the address block, so focus that was in it
+  // (Copy address) would fall to <body> inside an aria-modal dialog. Move it
+  // to the primary then — and only then: focus elsewhere in the dialog (the
+  // Close button) stays where the person put it.
+  const primaryRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const active = document.activeElement
+    if (active === null || active === document.body) primaryRef.current?.focus()
+  }, [])
 
   function viewTransaction() {
     onClose()
@@ -571,10 +580,12 @@ function ReceiveArrived({
           <Button variant="ghost" onClick={onClose}>
             Done
           </Button>
-          <Button onClick={connectFirstAgent}>Connect your first agent</Button>
+          <Button ref={primaryRef} onClick={connectFirstAgent}>
+            Connect your first agent
+          </Button>
         </DialogActions>
       ) : (
-        <Button className="w-full" onClick={onClose}>
+        <Button ref={primaryRef} className="w-full" onClick={onClose}>
           Done
         </Button>
       )}

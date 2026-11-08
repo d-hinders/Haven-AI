@@ -65,7 +65,12 @@ export function ReceiveDepositWatch({
     const account = accounts.find((candidate) => candidate.accountId === accountId)
     // An account the overview does not list has no read: nothing to watch.
     if (!account) return
-    const { state, arrivedAtomic } = observeDeposit(watchRef.current, accountId, account.usdcBalanceAtomic)
+    const { state, arrivedAtomic } = observeDeposit(
+      watchRef.current,
+      accountId,
+      account.usdcBalanceAtomic,
+      account.usdcBalanceFreshness,
+    )
     watchRef.current = state
     if (arrivedAtomic === null) return
     const amount = formatUsdcArrival(arrivedAtomic.toString(), account.usdcDecimals)
@@ -74,7 +79,12 @@ export function ReceiveDepositWatch({
     if (!amount) return
     // No separate mark for Peak: the read that shows the arrival reads the
     // account as funded, and that already set the marker above.
-    const peak = firstRef.current === true
+    // …and Peak needs this to be the only money in sight: money that landed
+    // on another account while this dialog was open was seen first (and the
+    // dashboard may already have toasted it).
+    const peak =
+      firstRef.current === true &&
+      accounts.every((candidate) => candidate.accountId === accountId || candidate.funded !== true)
     onArrivedRef.current({ accountId, amount, strength: peak ? 'peak' : 'step' })
   }, [accounts, accountId, userId])
 

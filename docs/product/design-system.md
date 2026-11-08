@@ -2587,6 +2587,37 @@ the wrong network are usually unrecoverable, so the dialog refuses to guess.
 A resolved chain with no address yet gets the same honest retry without the
 network warning. Showcased on `/design-system` → *Receive dialog*.
 
+**Receive notices the deposit (#4705).** Under the network rule, while the
+dialog is open on an address it shows, **"Watching for your deposit…"** sits
+with the pulsing live dot (§ 4's "live" indicator — `MoneyPanel`'s
+"Watching for incoming deposits…" line stays for after the dialog closes).
+The watch reads the selected account's USDC from the dashboard overview's
+per-account read (`overview.accounts[]`), never `useBalances`, and only while
+open: the first read after opening or after a picker switch seeds; a later
+read above it is an arrival, for the difference; a drop lowers the stored
+value; `null` (unknown) changes nothing. An arrival replaces the address
+screen with the **arrived state**, a `DialogResult` with `announce`
+(`role="status"`, since this overlay moves no focus there):
+
+- Title **"25.00 USDC arrived"**, description *"It's in `<account>` on
+  `<network>`."*, and a tertiary **View transaction** under it — the
+  account's Activity tab (`/accounts/<id>?tab=activity`), never a row link:
+  the dialog holds no hash, and the explorer-derived row can lag the chain
+  read, so it never dead-ends.
+- The mark plays **Peak** for the user's first money on this device — every
+  account read `funded === false` at open and no first-money marker is set
+  (`lib/first-money.ts`; any funded read anywhere sets it, so money first
+  seen with Receive closed makes a later refill a Step) — and **Step**
+  otherwise. Each plays once; reduced motion shows the final state.
+- **The action row.** This overlay has no `Modal` footer, so the row lives in
+  the body: one full-width **Done**, or — on a first deposit where the host
+  passes `onConnectFirstAgent` (the dashboard does, while no agent exists) —
+  `DialogActions` with **Done** (ghost) and the primary **Connect your first
+  agent**, stacked with the primary on top below `sm`.
+
+The dashboard's funds toast (#4704) stays silent for money the open dialog
+is watching, or has already announced.
+
 ### Modal (`ui/Modal`)
 
 `ui/Modal` is the shared dialog shell — twenty-four product files import it
@@ -2908,6 +2939,9 @@ the call site. `announce` adds `role="status"` for the callers that do not
 already move focus to the outcome region (`EditAgentModal`,
 `EditBudgetModal`); `FundMerchantModal` and `DelegationSendModal` focus their
 step region on the change, so they leave it off rather than announce twice.
+`ReceiveDialog`'s arrived state (#4705) is the first Peak caller and announces
+too; it is a hand-built overlay with no `Modal` footer, so its action row sits
+in the body (§ The Receive dialog).
 
 The busy state uses the shared `Spinner`, whose rotation is gated behind
 `motion-safe:` — the hand-rolled `animate-spin` rings it replaces had no gate

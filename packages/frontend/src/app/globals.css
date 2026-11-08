@@ -255,7 +255,8 @@
   scrollbar-color: rgba(82, 95, 127, 0.22) transparent;
 }
 
-/* Copy-to-clipboard checkmark spring */
+/* Milestone's check spring (#4702). `ui/Milestone` is the only consumer: the
+   copy button's 1.5s confirmation shares the name but not this class. */
 @keyframes check-pop {
   0%   { transform: scale(0.4); opacity: 0; }
   55%  { transform: scale(1.25); opacity: 1; }
@@ -427,9 +428,10 @@
 }
 
 /*
- * Onboarding success bloom — a single soft radial glow that grows once and
- * fades behind the check-pop circle on the wizard's "you're in" screen.
- * Plays only on first paint of the success state.
+ * Milestone Peak's bloom (#4702) — a single soft radial glow that grows once
+ * and fades behind the check. `ui/Milestone` owns the class, and the glow's
+ * size comes from the child it wraps, so a 48px dialog disc and a 56px
+ * onboarding disc bloom at their own scale. Plays once, on the moment.
  */
 @keyframes v2-bloom {
   0%   { opacity: 0; transform: scale(0.55); }
@@ -440,6 +442,23 @@
 @media (prefers-reduced-motion: no-preference) {
   .v2-animate-bloom {
     animation: v2-bloom 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/*
+ * Milestone Live (#4702) — a row that arrives while the page is open fades in
+ * from a soft brand-soft wash over 1600ms. No check, no sound: the row's own
+ * content is the news. `ui/Milestone` owns the class; nothing consumes it yet
+ * beyond the `/design-system` specimen (#4708 is its first product use).
+ */
+@keyframes v2-live-row {
+  from { opacity: 0; background-color: var(--v2-brand-soft); }
+  to   { opacity: 1; background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-live {
+    animation: v2-live-row 1600ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }
 

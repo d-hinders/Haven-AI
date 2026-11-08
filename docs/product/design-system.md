@@ -6,6 +6,8 @@ covers:
   - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
+  - packages/frontend/src/components/connect-agent/ConnectAgentRow.tsx
+  - packages/frontend/src/app/onboarding/OnboardingClient.tsx
   - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/BudgetGrantAction.tsx
   - packages/frontend/src/components/EditBudgetModal.tsx
@@ -124,7 +126,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-05
+last-verified: 2026-11-06
 ---
 
 # Haven Design System
@@ -2894,8 +2896,18 @@ Stop old budget).
 | State | Mark | Tone |
 |---|---|---|
 | `busy` | `Spinner` (#4563), `md`, named by the title | neutral |
-| `success` | lucide `Check`, 24px, in a 48px circle | `--v2-success` |
+| `success` | lucide `Check`, 24px, in a 48px circle, playing `Milestone` Step | `--v2-success` |
 | `error` | lucide `X`, 20px, in a 40px circle | `--v2-danger` |
+
+The success mark plays `Milestone` **Step** (#4702): the check pops once and
+nothing else moves. Busy and error do not animate. `DialogResult` takes `play`
+(a specimen passes `false` until its Replay control) and `strength` — Step by
+default, Peak for a first-in-your-Haven-life moment (#4705) — and its four
+callers mount it fresh on success, so success plays on mount with no prop at
+the call site. `announce` adds `role="status"` for the callers that do not
+already move focus to the outcome region (`EditAgentModal`,
+`EditBudgetModal`); `FundMerchantModal` and `DelegationSendModal` focus their
+step region on the change, so they leave it off rather than announce twice.
 
 The busy state uses the shared `Spinner`, whose rotation is gated behind
 `motion-safe:` — the hand-rolled `animate-spin` rings it replaces had no gate
@@ -2904,6 +2916,47 @@ reader hears the sentence once, from the status region, rather than reading a
 decorative glyph. Tone is the state's, never the caller's: a caller that needs
 a different tone is describing a different state, not recolouring this one.
 Showcased on `/design-system` → *DialogResult*.
+
+### Milestone (`ui/Milestone`, #4702)
+
+One pattern for a moment worth noticing, at three strengths, so the app has one
+voice and no page invents its own effect. It **wraps its child**, so the size
+stays the caller's: `DialogResult`'s 48px disc, onboarding's 56px disc,
+`ConnectSteps`' row marks and the guide's `StatusCircle` all use the same
+component, and the bloom scales to whatever it wraps instead of carrying a
+fixed size of its own.
+
+| Strength | Motion | Plays |
+|---|---|---|
+| `peak` | `check-pop` 320ms + `v2-bloom` 1100ms, the bloom in the success colour (`--v2-success-rgb`) | Once, for a first in your Haven life — the first time you see it, even if it happened while you were away |
+| `step` | `check-pop` 320ms only | Only on a change you watch happen; never on page load |
+| `live` | one soft brand-soft row fade, 1600ms; no check, no sound | Only on a row that arrives while the page is open |
+
+**The API.** `<Milestone strength="peak" | "step" | "live" play={boolean}>`.
+`play` defaults to `true`; `false` renders the child static. A slice decides
+when to play — the pattern owns what playing looks like. `DialogResult` takes
+`play` and `strength` and passes them through (see § Dialog result states), and
+`/design-system` passes `play={false}` until its Replay control, so the page
+never animates on first paint.
+
+**Rules.** Real events only: money moments wait for on-chain confirmation.
+Once per event: replaying a page never replays a moment. Reduced motion shows
+the final state straight away and keeps the screen-reader announcement — the
+component does not opt in to the class at all under
+`prefers-reduced-motion: reduce` (the `ThemeToggle` idiom), and `globals.css`
+keeps its media-query gate as the second half. Never in the way: no delay,
+blocked click, sound or confetti. Nothing one-off: a page needing a new effect
+extends the pattern first.
+
+**Where each is used.** Peak: onboarding's "You're in", in success colours and
+with exactly two motions — its wrapper carries no `v2-animate-step-rise`, or
+Peak would silently gain a third motion on that one screen. Step:
+`DialogResult`'s success state. Live: nothing yet beyond the `/design-system`
+specimen; #4708 is its first product use.
+
+**It owns no live region.** The announcement stays with the caller:
+`OnboardingClient`'s `role="status"` stays, and `DialogResult` takes `announce`
+for the callers that do not already move focus to the outcome region.
 
 ### Wizard progress (`StepProgress`)
 
@@ -2983,7 +3036,12 @@ Rules:
   the band there swapped one progress model for another mid-flow. Two
   `aria-current="step"` items on step 3 are intended: one for the wizard step,
   one for the row within it. What the rule still forbids is a third signal — a
-  ticker or badge restating either.
+  ticker or badge restating either. The agent row above the list is not one: it
+  says **who** you are waiting for, not how far along the flow is, and the
+  checklist still owns progress. Once the agent connects, a small success check
+  sits on the corner of its mark (decorative; the subtitle "Connected just now"
+  carries the words), so the row reads done at a glance. That is the agent's own
+  state, not a restated step.
 - **A row heading says what is happening now.** A working row names the work
   in flight, not the gate it leads to: while the connector finishes local
   setup, row 3 reads "Preparing the approval", and becomes "Review and approve"
@@ -3011,9 +3069,19 @@ Rules:
 - Once the step is finished (budget approved) the band reads all-done
   (`currentStep={totalSteps}`), not Connect in progress over a success screen.
 
+**The agent row above the list (#4702).** `ConnectAgentRow` names the agent you
+are waiting for: a `Monogram` (`xs`, decorative — the same agent mark the
+dashboard's `AgentRow` uses), the name, and one status line — "Listening for
+it…" while the connector runs, "Connected just now" once it lands. It is
+presentational and owns no live region; the caller announces the change once,
+alongside the row that changed. It never restates a step: the checklist below is
+the progress. Showcased on `/design-system` → *Connect agent row*.
+
 It is local to `components/connect-agent/` because every production caller is
 part of the same connect flow; a second product use is the trigger to promote it to `components/ui/`. Its
 `/design-system` specimen is the "ConnectSteps" section, after `StepProgress`.
+The agent row is local for the same reason, and its specimen is the "Connect
+agent row" section beside it.
 
 ### Local hint marker (#1952)
 
@@ -3843,7 +3911,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 ## 4. Motion
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
-- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards, and the slow `v2-step-halo` on one active user-turn marker inside a dialog.
+- **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards, the slow `v2-step-halo` on one active user-turn marker inside a dialog, and **`Milestone`** (#4702) — Peak's `check-pop` + `v2-bloom` on a first in your Haven life, Step's `check-pop` on a change you watch happen, and Live's 1600ms brand-soft row fade on a row that arrives while the page is open. Each plays once per event, and the first-paint ban below still holds for everything else.
 - **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, the how-it-works cards (step 3's terminal printing its lines among them) and the accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — the developers band's **402-session transcript** (#3684), its lines revealing one step at a time to the full transcript, on the same in-view-and-visible gate — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology — the two terminals, step 3's connector terminal and the developers transcript, stay real content: their reveals are opacity-only, so the full text is readable at every moment), and confirms with text and a check icon in the success colour — never a pill or a button.
 - **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, multiple step halos on one screen, a step halo outside a dialog, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
 

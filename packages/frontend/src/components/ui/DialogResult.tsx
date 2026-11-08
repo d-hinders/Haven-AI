@@ -24,12 +24,25 @@
  * Tone is the state's, never the caller's: success is `--v2-success`, failure
  * `--v2-danger`, and busy is neutral. A caller that needs a different tone is
  * describing a different state, not recolouring this one.
+ *
+ * The success mark plays `Milestone` Step (#4702): the check pops once, and
+ * nothing else moves. Busy and error do not animate. `play` is the specimen's
+ * switch — `/design-system` passes `false` until its Replay control — and
+ * `strength` lets a first-in-your-Haven-life moment ask for Peak (#4705)
+ * without a second component.
+ *
+ * `announce` adds `role="status"` for the callers that do not already move
+ * focus to the outcome region (`EditAgentModal`, `EditBudgetModal`).
+ * `FundMerchantModal` and `DelegationSendModal` focus their step region on the
+ * change, so they leave it off rather than announce twice. The busy state is
+ * never wrapped: its `Spinner` already carries the title as a status region.
  */
 
 import type { ReactNode } from 'react'
 import { Check, X } from 'lucide-react'
 import { Spinner } from '@haven_ai/ui/Spinner'
 import { Icon } from './Icon'
+import { Milestone } from './Milestone'
 
 export type DialogResultState = 'busy' | 'success' | 'error'
 
@@ -46,20 +59,40 @@ interface Props {
    */
   children?: ReactNode
   className?: string
+  /** Play the success mark's Step motion. Default `true`; a specimen passes `false`. */
+  play?: boolean
+  /** The success mark's strength. Step by default; Peak for a first-in-your-Haven-life moment. */
+  strength?: 'step' | 'peak'
+  /** Announce the outcome with `role="status"` — only where the caller does not already move focus there. */
+  announce?: boolean
 }
 
-export function DialogResult({ state, title, description, children, className = '' }: Props) {
+export function DialogResult({
+  state,
+  title,
+  description,
+  children,
+  className = '',
+  play = true,
+  strength = 'step',
+  announce = false,
+}: Props) {
   return (
-    <div className={`space-y-3 py-2 text-center ${className}`.trim()}>
+    <div
+      className={`space-y-3 py-2 text-center ${className}`.trim()}
+      role={announce && state !== 'busy' ? 'status' : undefined}
+    >
       <div className="flex justify-center">
         {state === 'busy' ? (
           <span className="flex h-10 w-10 items-center justify-center">
             <Spinner size="md" label={title} />
           </span>
         ) : state === 'success' ? (
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
-            <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
-          </span>
+          <Milestone strength={strength} play={play}>
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--v2-success-soft)]">
+              <Icon icon={Check} className="h-6 w-6 text-[var(--v2-success)]" />
+            </span>
+          </Milestone>
         ) : (
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--v2-danger-soft)]">
             <Icon icon={X} className="h-5 w-5 text-[var(--v2-danger)]" />

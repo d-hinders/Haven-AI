@@ -765,6 +765,7 @@ export default function EditBudgetModal({
             <DialogResult
               state="success"
               title="Budget updated"
+              announce
               description={
                 outcome?.ok && outcome.earlierLimits
                   ? // #3933 round 4: an earlier attempt landed first, with the
@@ -782,6 +783,7 @@ export default function EditBudgetModal({
           {step === 'error' && outcome && !outcome.ok && (
             <DialogResult
               state="error"
+              announce
               title={
                 outcome.reason === 'revoke_unfinished'
                   ? earlierLimits

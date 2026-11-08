@@ -35,6 +35,7 @@ import { Card } from '@/components/ui/Card'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Select } from '@/components/ui/Select'
 import { RouteLoading } from '@/components/ui/RouteLoading'
+import { Milestone } from '@/components/ui/Milestone'
 import HybridEnrollFlow from './HybridEnrollFlow'
 
 type Phase = 'create' | 'success'
@@ -270,27 +271,19 @@ export default function OnboardingClient() {
           )}
 
           {phase === 'success' && (
-            <div key="success" className="v2-animate-step-rise">
-              {/* Check-bloom moment — a brand-soft disc with a check that
-                  pops in, surrounded by a single soft radial bloom that
-                  grows and fades behind it. Plays once on mount. */}
-              <div className="relative mb-6 flex justify-center">
-                <div
-                  aria-hidden="true"
-                  className="v2-animate-bloom pointer-events-none absolute inset-0 flex items-center justify-center"
-                >
-                  <div
-                    className="h-24 w-24 rounded-full"
-                    style={{
-                      background:
-                        'radial-gradient(circle, rgba(99,102,241,0.35) 0%, rgba(99,102,241,0.12) 45%, transparent 70%)',
-                    }}
-                  />
-                </div>
-                <div className="animate-check-pop relative flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-brand-soft)] ring-1 ring-inset ring-brand/25 shadow-button">
-                  {/* Heavier stroke: the 56px success bloom check reads too light at 1.5. */}
-                  <Icon icon={Check} className="h-7 w-7 text-[var(--v2-brand)]" strokeWidth={2.4} />
-                </div>
+            <div key="success" data-testid="onboarding-success">
+              {/* Peak (#4702) — the one moment in onboarding that is a first in
+                  your Haven life. Exactly two motions: the check's pop and the
+                  bloom behind it. The wrapper deliberately carries no
+                  `v2-animate-step-rise`; a third motion here would be Peak
+                  gaining an effect no other Peak has. */}
+              <div className="mb-6 flex justify-center">
+                <Milestone strength="peak">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--v2-success-soft)] ring-1 ring-inset ring-success/25 shadow-button">
+                    {/* Heavier stroke: the 56px success bloom check reads too light at 1.5. */}
+                    <Icon icon={Check} className="h-7 w-7 text-[var(--v2-success)]" strokeWidth={2.4} />
+                  </div>
+                </Milestone>
               </div>
 
               <div className="text-center" role="status">

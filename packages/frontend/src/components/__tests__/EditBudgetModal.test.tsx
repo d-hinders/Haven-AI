@@ -466,7 +466,12 @@ describe('EditBudgetModal (#3166) — wiring pins', () => {
       resolveEdit?.({ ok: true, newDelegationHash: '0x' + 'be'.repeat(32), oldDelegationRevoked: true })
     })
     await waitFor(() => expect(screen.getByText('Budget updated')).toBeInTheDocument())
-    expect(screen.queryByRole('status')).toBeNull()
+    // #4702: the success screen announces the outcome itself — EditBudgetModal
+    // does not move focus to it — so the busy region is replaced, not left
+    // behind. One status region, and it says what happened.
+    const done = screen.getByRole('status')
+    expect(done.textContent).toContain('Budget updated')
+    expect(done.textContent).not.toContain('Waiting for your approval…')
   })
 })
 

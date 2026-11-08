@@ -100,10 +100,15 @@ export function Milestone({ strength, play = true, children, className = '' }: P
   if (strength === 'live') {
     // A row is block-level and keeps its own width; the fade is the wrapper's
     // own background, so the row's content is never re-laid-out.
+    //
+    // The wrapper is a `div`, not a `span` (#4708): its first product use
+    // wraps `TransactionActivityRow`, which is a grid `div` carrying `p`/`dl`
+    // children — flow content a `span` may not contain. `block` already made
+    // the element behave as a block, so the swap changes no painted pixel.
     return (
-      <span className={`relative block ${animating ? 'v2-animate-live' : ''} ${className}`.trim()}>
+      <div className={`relative block ${animating ? 'v2-animate-live' : ''} ${className}`.trim()}>
         {children}
-      </span>
+      </div>
     )
   }
 

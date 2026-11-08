@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { Milestone } from '@/components/ui/Milestone'
 import { Amount, type AmountCurrency } from './Amount'
 import { DirectionMark } from './DirectionMark'
 import { ExternalLink } from 'lucide-react'
@@ -34,6 +35,7 @@ export function TransactionActivityRow({
   fiat,
   onOpen,
   insetDivider = false,
+  live = false,
 }: {
   title: string
   description?: ReactNode
@@ -105,6 +107,20 @@ export function TransactionActivityRow({
    * groups themselves keep their full-width `--v2-border` separation.
    */
   insetDivider?: boolean
+  /**
+   * Play `Milestone` Live on this row (#4708, epic #4701): one soft
+   * brand-soft fade, 1600ms, no check and no sound. Opt-in, because only two
+   * lists know when a row ARRIVED while the page was open — `/transactions`
+   * and the dashboard's Transactions card, both through the shared
+   * `lib/live-rows` comparison. Every other caller (`AccountActivityTab`,
+   * `AgentActivityTab`, `/design-system`) omits it and renders exactly as
+   * before.
+   *
+   * The caller decides WHEN; the pattern owns what playing looks like, and
+   * `Milestone` does not opt in to the class at all under
+   * `prefers-reduced-motion: reduce`.
+   */
+  live?: boolean
 }) {
   const isCompact = density === 'compact'
   // Compact density pins the row to 72px so the dashboard's agents and
@@ -190,7 +206,7 @@ export function TransactionActivityRow({
         },
       }
     : {}
-  return (
+  const row = (
     <div
       {...interactiveProps}
       data-inset-divider={insetDivider ? '' : undefined}
@@ -275,6 +291,13 @@ export function TransactionActivityRow({
       </div>
     </div>
   )
+
+  // #4708: opt-in Live. The caller decides WHEN a row arrived while the page
+  // was open (the shared `lib/live-rows` comparison); the pattern owns what
+  // playing looks like. Omitted — every caller but `/transactions` and the
+  // dashboard's Transactions card — the row is byte-identical to before, and
+  // `Milestone` itself drops the class under `prefers-reduced-motion: reduce`.
+  return live ? <Milestone strength="live">{row}</Milestone> : row
 }
 
 /**

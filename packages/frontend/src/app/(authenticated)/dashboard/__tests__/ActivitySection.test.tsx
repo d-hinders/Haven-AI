@@ -36,8 +36,8 @@ function group(overrides: Partial<ActivityGroup> = {}): ActivityGroup {
   }
 }
 
-function renderSection(overrides: Partial<Parameters<typeof ActivitySection>[0]> = {}) {
-  return render(
+function sectionElement(overrides: Partial<Parameters<typeof ActivitySection>[0]> = {}) {
+  return (
     <ActivitySection
       activity={[]}
       accountCount={1}
@@ -46,8 +46,12 @@ function renderSection(overrides: Partial<Parameters<typeof ActivitySection>[0]>
       unavailable={false}
       onRetry={() => {}}
       {...overrides}
-    />,
+    />
   )
+}
+
+function renderSection(overrides: Partial<Parameters<typeof ActivitySection>[0]> = {}) {
+  return render(sectionElement(overrides))
 }
 
 describe('ActivitySection badges only when something is off (#3897)', () => {
@@ -516,3 +520,121 @@ function formatDayKey(date: Date): string {
     day: '2-digit',
   }).format(date)
 }
+
+/**
+ * #4708: Live rows on the dashboard's Transactions card.
+ *
+ * These are GROUPS, not rows — a second payment to the same merchant on the
+ * same day raises `count` and adds no row, so a group plays when it is new OR
+ * its `latestAt` advanced. The fixture is deliberately the group shape; the
+ * `/transactions` fixture (rows with a stable identity) lives in
+ * `lib/__tests__/live-rows.test.ts` and `hooks/__tests__/useTransactionsFeed.test.ts`.
+ *
+ * The suite-wide `matchMedia` stub answers `reduce`, so every case that
+ * expects a play sets no-preference explicitly.
+ */
+function setReducedMotion(reduce: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: reduce && query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+}
+
+describe('ActivitySection Live rows (#4708)', () => {
+  afterEach(() => {
+    // Restore the suite-wide stub so a later file is not left on no-preference.
+    setReducedMotion(true)
+  })
+
+  /** A group on a given minute of the frozen day, with its own resource. */
+  const at = (minute: number, overrides: Partial<ActivityGroup> = {}) =>
+    group({
+      x402ResourceUrl: `https://r${minute}.example/x`,
+      latestAt: `2026-11-08T10:${String(minute).padStart(2, '0')}:00.000Z`,
+      ...overrides,
+    })
+
+  it('plays nothing on the first load', () => {
+    setReducedMotion(false)
+    const { container } = renderSection({ activity: [at(0), at(1)] })
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+  })
+
+  it('plays a new confirmed group once, then it is an ordinary row', () => {
+    setReducedMotion(false)
+    const { container, rerender } = renderSection({ activity: [at(0)] })
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+
+    rerender(sectionElement({ activity: [at(0), at(1)] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(1)
+
+    // The next poll sees the same groups and plays nothing.
+    rerender(sectionElement({ activity: [at(0), at(1)] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+  })
+
+  it('does not play a new pending or failed group', () => {
+    setReducedMotion(false)
+    const { container, rerender } = renderSection({ activity: [at(0)] })
+    rerender(sectionElement({ activity: [at(0), at(1, { status: 'pending' })] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+
+    rerender(sectionElement({ activity: [at(0), at(1, { status: 'failed' })] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+  })
+
+  it('plays a pending group that confirms, once — the key carries the outcome', () => {
+    setReducedMotion(false)
+    const { container, rerender } = renderSection({ activity: [at(0, { status: 'pending' })] })
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+
+    rerender(sectionElement({ activity: [at(0, { status: 'confirmed' })] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(1)
+
+    rerender(sectionElement({ activity: [at(0, { status: 'confirmed' })] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+  })
+
+  it('plays a second payment in an existing group — count rises, latestAt advances, the key does not change', () => {
+    setReducedMotion(false)
+    const { container, rerender } = renderSection({ activity: [at(0)] })
+    rerender(
+      sectionElement({
+        activity: [at(0, { count: 2, sumAtomic: '25000000', latestAt: '2026-11-08T10:05:00.000Z' })],
+      }),
+    )
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(1)
+    expect(screen.getByText('×2')).toBeInTheDocument()
+  })
+
+  it('caps one poll at the newest three groups', () => {
+    setReducedMotion(false)
+    const { container, rerender } = renderSection({ activity: [at(0)] })
+    rerender(sectionElement({ activity: [at(0), at(1), at(2), at(3), at(4)] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(3)
+  })
+
+  it('plays nothing under prefers-reduced-motion: reduce', () => {
+    setReducedMotion(true)
+    const { container, rerender } = renderSection({ activity: [at(0)] })
+    rerender(sectionElement({ activity: [at(0), at(1)] }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+  })
+
+  it('seeds nothing while the card is a skeleton, so the first real poll is silent', () => {
+    setReducedMotion(false)
+    const { container, rerender } = renderSection({ activity: [], loading: true })
+    rerender(sectionElement({ activity: [at(0), at(1)], loading: false }))
+    expect(container.querySelectorAll('.v2-animate-live')).toHaveLength(0)
+  })
+})

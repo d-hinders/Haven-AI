@@ -2357,6 +2357,21 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   the same hairline — so a day still reads stronger than a row. Every day-grouped list draws it: the
   account and agent Activity tabs, the agent Tool calls tab, `/transactions` and the
   dashboard's Transactions card.
+- **Live rows ([#4708](https://github.com/d-hinders/Haven-AI/issues/4708), epic
+  [#4701](https://github.com/d-hinders/Haven-AI/issues/4701)):** `live` (optional) plays
+  `Milestone` Live — one soft brand-soft fade, 1600ms, no check and no sound — on a row
+  that arrived while the page was open, then it is an ordinary row. Opt-in, because only
+  two lists know when a row arrived: `/transactions` and the dashboard's Transactions
+  card, both through the shared `lib/live-rows` comparison. The two shapes differ, so
+  each supplies its own key and mark — a `/transactions` row keeps its
+  `accountId:hash:type` identity when it confirms, so the snapshot maps identity to
+  outcome and a pending row that confirms plays once; a dashboard group carries the
+  outcome in its key and plays when it is new or its `latestAt` advanced (a second
+  payment to the same merchant raises `count` and adds no row). Nothing plays on load,
+  on "load more", on a manual refresh or on a filter or search change; at most three
+  rows play from one poll, the newest; and under `prefers-reduced-motion: reduce` the
+  class is not applied at all. The account and agent Activity tabs and `/design-system`
+  omit the prop and render exactly as before.
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
@@ -3005,8 +3020,8 @@ later deposits among them), and the dashboard setup guide's steps 1 and 2
 when one completes while the guide is open (#4704) — a step already complete
 on load just shows its check, and step 3 never pops, because the guide is
 replaced as soon as it completes and the first agent payment is #4707's card.
-Live: nothing yet beyond the `/design-system` specimen; #4708 is its first
-product use.
+Live: `/transactions` and the dashboard's Transactions card, on a row that arrives
+while the page is open (#4708) — the row plays once, then it is an ordinary row.
 
 **It owns no live region.** The announcement stays with the caller:
 `OnboardingClient`'s `role="status"` stays, and `DialogResult` takes `announce`

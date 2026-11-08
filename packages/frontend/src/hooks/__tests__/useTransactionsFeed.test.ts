@@ -12,7 +12,11 @@ vi.mock('@/lib/api', () => ({
 import { transactionFeedQuery, transactionFilterParams, useTransactionsFeed } from '@/hooks/useTransactionsFeed'
 import type { AggregatedTransaction, TransactionsFeedResponse } from '@/types/transactions'
 
-function tx(hash: string, accountId: string): AggregatedTransaction {
+function tx(
+  hash: string,
+  accountId: string,
+  overrides: Partial<AggregatedTransaction> = {},
+): AggregatedTransaction {
   return {
     hash,
     type: 'native',
@@ -30,6 +34,7 @@ function tx(hash: string, accountId: string): AggregatedTransaction {
     accountId,
     accountAddress: '0x1111111111111111111111111111111111111111',
     accountName: 'Base wallet',
+    ...overrides,
   }
 }
 
@@ -228,5 +233,175 @@ describe('the own-transfer fold on the request (#4266)', () => {
   it('sends nothing when the caller does not ask — the per-account ledger', () => {
     expect(transactionFilterParams({ accountId: 'safe-1' }).has('foldOwnTransfers')).toBe(false)
     expect(transactionFeedQuery({ accountId: 'safe-1' }, 0, 25)).not.toContain('foldOwnTransfers')
+  })
+})
+
+/**
+ * #4708: Live rows on `/transactions`.
+ *
+ * The fixture is the ROW shape — a stable `accountId:hash:type` identity that
+ * survives confirmation — which is why the snapshot maps identity → outcome.
+ * The dashboard's group fixture lives in
+ * `app/(authenticated)/dashboard/__tests__/ActivitySection.test.tsx`.
+ */
+describe('useTransactionsFeed Live rows (#4708)', () => {
+  beforeEach(() => {
+    mockApiGet.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /** A row that is still in flight — `confirming_merchant` is the backend's pending. */
+  const pending = (hash: string) => tx(hash, 'safe-1', { paymentFlowStatus: 'confirming_merchant' })
+
+  it('plays nothing on the first load', async () => {
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+  })
+
+  it('plays a new confirmed row on a silent poll, once', async () => {
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockResolvedValueOnce(response([tx('0xb', 'safe-1'), tx('0xa', 'safe-1')]))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect([...result.current.liveKeys]).toEqual(['safe-1:0xb:native'])
+
+    // The next tick sees the same rows and plays nothing.
+    mockApiGet.mockResolvedValueOnce(response([tx('0xb', 'safe-1'), tx('0xa', 'safe-1')]))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+  })
+
+  it('does not play a new pending or failed row', async () => {
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockResolvedValueOnce(response([pending('0xp'), tx('0xa', 'safe-1')]))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+
+    mockApiGet.mockResolvedValueOnce(
+      response([tx('0xf', 'safe-1', { isError: true }), pending('0xp'), tx('0xa', 'safe-1')]),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+  })
+
+  it('plays a pending row that confirms, once — its identity never changed', async () => {
+    mockApiGet.mockResolvedValueOnce(response([pending('0xp')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+
+    mockApiGet.mockResolvedValueOnce(response([tx('0xp', 'safe-1')]))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect([...result.current.liveKeys]).toEqual(['safe-1:0xp:native'])
+
+    mockApiGet.mockResolvedValueOnce(response([tx('0xp', 'safe-1')]))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+  })
+
+  it('plays nothing on "load more", and the snapshot restarts from what is on screen', async () => {
+    mockApiGet.mockResolvedValueOnce({ ...response([tx('0xa', 'safe-1')]), hasMore: true })
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockResolvedValueOnce({ ...response([tx('0xb', 'safe-1')]), offset: 1 })
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+
+    // The next silent poll still sees a genuinely new row.
+    mockApiGet.mockResolvedValueOnce(
+      response([tx('0xc', 'safe-1'), tx('0xb', 'safe-1'), tx('0xa', 'safe-1')]),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect([...result.current.liveKeys]).toEqual(['safe-1:0xc:native'])
+  })
+
+  it('plays nothing on a manual refresh', async () => {
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockResolvedValueOnce(response([tx('0xb', 'safe-1'), tx('0xa', 'safe-1')]))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+  })
+
+  it('plays nothing when a filter changes', async () => {
+    mockApiGet.mockResolvedValueOnce(response([tx('0xa', 'safe-1')]))
+    const { result, rerender } = renderHook(
+      ({ accountId }) => useTransactionsFeed({ accountId }),
+      { initialProps: { accountId: 'safe-1' } },
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    mockApiGet.mockResolvedValueOnce(response([tx('0xb', 'safe-2')]))
+    rerender({ accountId: 'safe-2' })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.liveKeys.size).toBe(0)
+  })
+
+  it('caps one poll at the newest three rows', async () => {
+    mockApiGet.mockResolvedValueOnce(response([]))
+    const { result } = renderHook(() => useTransactionsFeed({}))
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    const arrivals = [0, 1, 2, 3, 4].map((n) =>
+      tx(`0x${n}`, 'safe-1', { timestamp: 1_778_240_999 + n }),
+    )
+    mockApiGet.mockResolvedValueOnce(response(arrivals))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000)
+    })
+    expect(result.current.liveKeys.size).toBe(3)
+    expect([...result.current.liveKeys].sort()).toEqual(
+      ['safe-1:0x2:native', 'safe-1:0x3:native', 'safe-1:0x4:native'].sort(),
+    )
   })
 })

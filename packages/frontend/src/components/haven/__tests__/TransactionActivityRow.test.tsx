@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
@@ -293,5 +293,70 @@ describe('TransactionActivityRowSkeleton (#4568)', () => {
       expect(block.className).toContain('animate-pulse')
       expect(block.className).toContain('bg-[var(--v2-surface-2)]')
     }
+  })
+})
+
+/**
+ * #4708: the row gains the means to play Live, opt-in. The caller decides
+ * WHEN (the shared `lib/live-rows` comparison); the row only forwards it to
+ * `Milestone`, which owns what playing looks like and drops the class under
+ * `prefers-reduced-motion: reduce`.
+ *
+ * The suite-wide stub answers `reduce`, so both answers are exercised
+ * explicitly — the point is that the class is absent under `reduce`, and that
+ * is only visible if the no-preference case is rendered too.
+ */
+function setReducedMotion(reduce: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: reduce && query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+}
+
+afterEach(() => {
+  // Restore the suite-wide stub so a later file is not left on no-preference.
+  setReducedMotion(true)
+})
+
+describe('TransactionActivityRow Live (#4708)', () => {
+  it('plays the row fade when live is set and motion is allowed', () => {
+    setReducedMotion(false)
+    const { container } = renderRow({ live: true })
+    expect(container.querySelector('.v2-animate-live')).not.toBeNull()
+  })
+
+  it('plays nothing under prefers-reduced-motion: reduce — the class is absent', () => {
+    setReducedMotion(true)
+    const { container } = renderRow({ live: true })
+    expect(container.querySelector('.v2-animate-live')).toBeNull()
+    // The row itself still renders, in its final state.
+    expect(screen.getByText('api.vendor.com')).toBeInTheDocument()
+  })
+
+  it('is opt-in: a row without the prop never plays, even with motion allowed', () => {
+    setReducedMotion(false)
+    const { container } = renderRow()
+    expect(container.querySelector('.v2-animate-live')).toBeNull()
+  })
+
+  it('keeps the row a block-level element — the wrapper is a div, not a span', () => {
+    setReducedMotion(false)
+    const { container } = renderRow({ live: true })
+    const wrapper = container.firstElementChild as HTMLElement
+    expect(wrapper.tagName).toBe('DIV')
+    expect(wrapper.className).toContain('relative')
+    expect(wrapper.className).toContain('block')
+    // The row's own grid is inside it, unchanged.
+    expect(wrapper.firstElementChild?.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
   })
 })

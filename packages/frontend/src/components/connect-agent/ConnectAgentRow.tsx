@@ -50,7 +50,7 @@ export function ConnectAgentRow({
           <span
             data-testid="connect-agent-row-connected-mark"
             aria-hidden="true"
-            className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--v2-success)] ring-2 ring-[var(--v2-bg)]"
+            className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--v2-success)] ring-2 ring-[var(--v2-bg)]"
           >
             <Icon icon={Check} className="h-3 w-3 text-[var(--v2-bg)]" strokeWidth={3} />
           </span>

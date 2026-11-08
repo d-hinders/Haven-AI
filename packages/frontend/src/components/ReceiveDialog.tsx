@@ -384,10 +384,10 @@ export default function ReceiveDialog({
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">{networkRule}</p>
               )}
 
-              {/* #4705: keyed on the account, so a picker switch starts a
-                  fresh watch that seeds from the new account's balance. */}
+              {/* #4705: a picker switch reseeds the watch from the new
+                  account's balance (`lib/deposit-watch.ts`) — never an
+                  arrival. */}
               <ReceiveDepositWatch
-                key={selectedAccount.id}
                 accountId={selectedAccount.id}
                 userId={userId}
                 onArrived={handleArrived}

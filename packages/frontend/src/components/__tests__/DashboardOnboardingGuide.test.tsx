@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
@@ -211,24 +211,9 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
   })
 })
 
-describe('SetupCompleteLine (#3818)', () => {
-  it('is one line with a dismiss', async () => {
-    const onDismiss = vi.fn()
-    render(<SetupCompleteLine onDismiss={onDismiss} />)
-    expect(document.body.textContent).toContain('You’re set up')
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(onDismiss).toHaveBeenCalledTimes(1)
-  })
-
-  it('sits on the full-bleed rows\' icon slot and title column: a 32px slot, gap-3, no inset of its own (#3902)', () => {
-    const { container } = render(<SetupCompleteLine onDismiss={() => {}} />)
-    const line = container.firstElementChild as HTMLElement
-    expect(line.className).not.toMatch(/(^|\s)p[xl]-/)
-    const sentence = line.querySelector('p') as HTMLElement
-    expect(sentence.className).toMatch(/(^|\s)gap-3(\s|$)/)
-    expect((sentence.firstElementChild as HTMLElement).className).toMatch(/(^|\s)w-8(\s|$)/)
-  })
-})
+// #4707: `SetupCompleteLine` is gone — the first agent payment is its own card
+// (`components/FirstAgentPaymentCard`), tested in its own suite. The guide's
+// finished state is no longer a branch of this component.
 
 // #4704: a guide step plays Milestone Step only when it completes while the
 // guide is open. The global setup stub answers `reduce`, so these cases set

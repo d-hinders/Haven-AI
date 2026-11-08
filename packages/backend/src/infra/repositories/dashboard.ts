@@ -193,6 +193,122 @@ export async function hasFirstAgentPayment(
   return Boolean(result.rows[0]?.has_first_agent_payment)
 }
 
+// ── The first agent payment, named (#4707) ───────────────────────────────────
+
+/**
+ * The row behind `GET /dashboard/first-agent-payment` (#4707).
+ *
+ * `HAS_FIRST_AGENT_PAYMENT_SQL` above answers yes/no and stays exactly as it
+ * is. This statement answers WHICH payment, and it is deliberately stricter,
+ * because the card it feeds claims a real event ("your agent paid a merchant")
+ * rather than a milestone reached.
+ *
+ * What it excludes, and why each exclusion is load-bearing:
+ *
+ * - **Not confirmed, or no `tx_hash`** — nothing moved. Same two facts the
+ *   boolean read uses.
+ * - **`funded_but_unsettled`** — an open
+ *   `merchant_retry_rejected_after_payment` reconciliation event means the
+ *   merchant was asked after the funding leg and refused. The money left the
+ *   account and the merchant did not take it; naming that as a payment would
+ *   be false. Same predicate `FIND_INTENT_STATUS_ROW_SQL` computes.
+ * - **The EIP-3009 merchant leg not yet proven** — a confirmed EIP-3009 row
+ *   can mean the delegate was funded and the merchant has not pulled yet
+ *   (`isFundedX402AwaitingMerchantLeg`, `modules/payments/agent-payment-status.ts`).
+ *   The card requires POSITIVE proof of the merchant leg — a recorded,
+ *   on-chain-verified `machine_metadata.merchant_settlement_tx_hash`, or a
+ *   `machine_payment_evidence` row recording the merchant's answer — using the
+ *   same facts that predicate reads. It is stricter than "not awaiting": a row
+ *   still inside the merchant-report grace window is also unproven, and the
+ *   card must not claim it. Every other rail (erc7710, direct, mpp) has no
+ *   separate merchant pull, so confirmation IS the payment there.
+ * - **Retired-rail agents** — `DELEGATION_RAIL_JOIN`, the same filter every
+ *   other dashboard agent read carries. A legacy Safe agent is never named.
+ * - **Other users' rows** — `pi.user_id = $1`, the tenant scope.
+ *
+ * Ordering is `confirmed_at` ASC (the EARLIEST qualifying payment — "its first
+ * payment"), with `id` as a deterministic tiebreak for rows confirmed in the
+ * same instant.
+ *
+ * Counterparty identity is `COALESCE(merchant_address, x402_merchant_address,
+ * to_address)` — the same expression `DASHBOARD_MERCHANTS_SQL` uses. It is
+ * returned as a lookup key only; the route resolves a display name from it and
+ * the raw address never reaches the wire.
+ *
+ * No migration: `payment_intents` has no index including `user_id`, and this
+ * statement is a single per-user scan bounded by `LIMIT 1`. The PR records the
+ * `EXPLAIN` the real-DB test captures.
+ */
+export const FIND_FIRST_AGENT_PAYMENT_SQL = `SELECT pi.id, pi.agent_id, a.name AS agent_name,
+           pi.token_symbol, pi.amount_human, pi.amount_raw, pi.chain_id, pi.confirmed_at,
+           pi.usd_value, pi.eur_value, pi.sek_value,
+           COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address) AS merchant_address,
+           pi.x402_resource_url
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      -- The same tenant scope on the joined table: implied by the payment's
+      -- own user_id for well-formed data, and it is what lets the planner
+      -- reach idx_agents_user_id instead of scanning every agent.
+      AND a.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.tx_hash IS NOT NULL
+      AND pi.confirmed_at IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM machine_payment_reconciliation_events mpre
+        WHERE mpre.payment_intent_id = pi.id
+          AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+          AND mpre.status = 'open'
+      )
+      AND (
+        COALESCE(pi.payment_rail, pi.source, 'direct') <> 'x402'
+        OR pi.machine_metadata->>'settlement_scheme' IS DISTINCT FROM 'eip3009'
+        OR pi.machine_metadata->>'merchant_settlement_tx_hash' IS NOT NULL
+        OR EXISTS (
+          SELECT 1 FROM machine_payment_evidence mpe
+          WHERE mpe.payment_intent_id = pi.id
+            AND mpe.proof_status IN ('merchant_response_observed', 'protocol_receipt_attached')
+        )
+      )
+    ORDER BY pi.confirmed_at ASC, pi.id ASC
+    LIMIT 1`
+
+export interface FirstAgentPaymentRow {
+  id: string
+  agent_id: string
+  agent_name: string
+  token_symbol: string
+  /** The token amount as stored — the card's figure when fiat would read $0.00. */
+  amount_human: string
+  amount_raw: string | null
+  chain_id: number
+  /** pg returns TIMESTAMPTZ as a Date. */
+  confirmed_at: Date
+  /** Booked fiat at settle time; NULL when the row was never priced. */
+  usd_value: string | null
+  eur_value: string | null
+  sek_value: string | null
+  /** Lookup key for the display name — never rendered. */
+  merchant_address: string | null
+  x402_resource_url: string | null
+}
+
+/**
+ * The earliest qualifying first agent payment, or `null` when there is none.
+ *
+ * `userId` is REQUIRED — tenant scope. `null` is the honest answer for a user
+ * whose only confirmed payment is still awaiting its merchant leg; the caller
+ * renders nothing rather than a weaker claim.
+ */
+export async function findFirstAgentPayment(
+  userId: string,
+  db: Executor = pool,
+): Promise<FirstAgentPaymentRow | null> {
+  const result = await db.query<FirstAgentPaymentRow>(FIND_FIRST_AGENT_PAYMENT_SQL, [userId])
+  return result.rows[0] ?? null
+}
+
 // ── Allowances ───────────────────────────────────────────────────────────────
 // #2020: `LIST_DASHBOARD_ALLOWANCES_SQL` / `listDashboardAllowances` are gone —
 // the dashboard shows the active delegation set for delegation-rail agents and

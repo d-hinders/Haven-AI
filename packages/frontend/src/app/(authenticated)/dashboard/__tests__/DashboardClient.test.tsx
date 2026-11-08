@@ -68,6 +68,19 @@ vi.mock('@/hooks/useAttentionDismissals', () => ({
 }))
 
 
+// #4707: the first-agent-payment read is a hook with its own suite — here the
+// dashboard tests pin the WIRING (the card renders only when a row came back,
+// and only while the setup facts say it should). Reset in beforeEach.
+const mockFirstAgentPaymentState: { payment: unknown } = { payment: null }
+vi.mock('@/hooks/useFirstAgentPayment', () => ({
+  useFirstAgentPayment: () => ({
+    payment: mockFirstAgentPaymentState.payment,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}))
+
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
   // #3818: the mock prints the inputs the dashboard derives, so the wiring
   // (USDC state, set-up agent, the named pending agent, hide) is assertable
@@ -91,7 +104,25 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
       {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
     </div>
   ),
-  SetupCompleteLine: () => <span>Setup complete line</span>,
+}))
+
+// #4707: the milestone card is its own component with its own suite; here the
+// mock prints the row it was handed and offers the dismiss, so the dashboard's
+// wiring is assertable without importing the real card.
+vi.mock('@/components/FirstAgentPaymentCard', () => ({
+  default: ({
+    payment,
+    onDismiss,
+  }: {
+    payment: { agentName: string }
+    onDismiss: () => void
+  }) => (
+    <div>
+      <span>First agent payment card</span>
+      <span>{`first-payment-${payment.agentName}`}</span>
+      <button onClick={onDismiss}>Dismiss first payment</button>
+    </div>
+  ),
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
@@ -289,6 +320,7 @@ describe('DashboardClient', () => {
   beforeEach(() => {
     mockBudgetRemainingState.data = null
     mockBudgetRemainingState.loading = false
+    mockFirstAgentPaymentState.payment = null
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -744,6 +776,23 @@ describe('DashboardClient', () => {
       accounts: [FUNDED_ACCOUNT],
       onboardingProgress: { hasFirstAgentPayment: true },
     })
+    // #4707: the qualifying row the card names. Without it the card renders
+    // nothing, which is the honest answer for a payment whose merchant leg is
+    // not proven.
+    mockFirstAgentPaymentState.payment = {
+      id: 'payment-1',
+      agentName: 'Research agent',
+      amountHuman: '0.05',
+      amountRaw: '50000',
+      tokenSymbol: 'USDC',
+      chainId: 8453,
+      confirmedAt: '2026-11-08T12:00:00.000Z',
+      usdValue: 0.05,
+      eurValue: 0.046,
+      sekValue: 0.54,
+      merchantName: null,
+      x402ResourceUrl: 'https://research.example/paper',
+    }
   }
 
   it('holds the empty card back while budget reads load, then shows the achievement once they are known (#3902)', () => {
@@ -771,21 +820,32 @@ describe('DashboardClient', () => {
     expect(screen.getByRole('heading', { level: 3, name: "You're all caught up" })).toBeInTheDocument()
   })
 
-  it('shows one "You\'re set up" line, not the steps, once all three are done', () => {
+  it('shows the first-agent-payment card, not the steps, once all three are done (#4707)', () => {
     mockCompletedSetup()
     render(<DashboardClient />)
-    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+    expect(screen.getByText('First agent payment card')).toBeInTheDocument()
+    expect(screen.getByText('first-payment-Research agent')).toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing for the card when the qualifying row has not come back (#4707)', () => {
+    // `hasFirstAgentPayment` is true — the merchant leg is not proven yet, so
+    // the read answers null. No card, no success copy, no Peak.
+    mockCompletedSetup()
+    mockFirstAgentPaymentState.payment = null
+    render(<DashboardClient />)
+    expect(screen.queryByText('First agent payment card')).not.toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
   it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
     // The pre-#3818 banner's key is read as is: an owner who dismissed the
-    // old banner does not see the new line either.
+    // old banner does not see the new card either.
     window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
     mockCompletedSetup()
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-    expect(screen.queryByText('Setup complete line')).not.toBeInTheDocument()
+    expect(screen.queryByText('First agent payment card')).not.toBeInTheDocument()
   })
 
   it('does not show the guide before first-payment progress is known', () => {
@@ -804,9 +864,23 @@ describe('DashboardClient', () => {
       accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }],
       onboardingProgress: { hasFirstAgentPayment: true },
     })
+    mockFirstAgentPaymentState.payment = {
+      id: 'payment-1',
+      agentName: 'Research agent',
+      amountHuman: '0.05',
+      amountRaw: '50000',
+      tokenSymbol: 'USDC',
+      chainId: 8453,
+      confirmedAt: '2026-11-08T12:00:00.000Z',
+      usdValue: 0.05,
+      eurValue: 0.046,
+      sekValue: 0.54,
+      merchantName: null,
+      x402ResourceUrl: 'https://research.example/paper',
+    }
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+    expect(screen.getByText('First agent payment card')).toBeInTheDocument()
   })
 
   it('a balance-read error mid-setup does not collapse the page into the focused view (#3818 review)', () => {

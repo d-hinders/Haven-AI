@@ -899,6 +899,40 @@ export const dashboardOverview = {
 }
 
 /**
+ * `GET /dashboard/first-agent-payment` (#4707) — the one payment the
+ * first-agent-payment card names.
+ *
+ * The default is a ROW, because the shared overview fixture's story is a user
+ * who HAS made their first payment (`onboardingProgress.hasFirstAgentPayment:
+ * true`): the card is what that state now looks like, so the dashboard
+ * baselines move where the old "You're set up" line moved and nowhere else.
+ *
+ * `confirmedAt` sits two minutes before the visual harness's frozen clock
+ * (2026-09-01T12:00Z), so the card reads "just now" and Peak plays there; under
+ * a real clock it reads its date and plays no Peak — the same card, and the
+ * honest answer for a payment that is not recent.
+ *
+ * Specs that need the unsettled, null, error or 404 states serve their own
+ * route (see `support/first-run-states.ts`).
+ */
+export const dashboardFirstAgentPayment = {
+  payment: {
+    id: '44444444-4444-4444-8444-444444444444',
+    agentName: testAgent.name,
+    amountHuman: '0.05',
+    amountRaw: '50000',
+    tokenSymbol: 'USDC',
+    chainId: 8453,
+    confirmedAt: '2026-09-01T11:58:00.000Z',
+    usdValue: 0.05,
+    eurValue: 0.046,
+    sekValue: 0.54,
+    merchantName: null,
+    x402ResourceUrl: 'https://research.example/paper',
+  },
+}
+
+/**
  * `GET /dashboard/budget-remaining` (#3804) — the cached, display-only
  * budget-remaining read. THREE rows: two KNOWN (fromChain, amounts
  * populated, a sub-budget attribution line) wired to the overview fixture's
@@ -1204,6 +1238,16 @@ export async function mockHavenApi(page: Page) {
     // fails every dashboard-rendering spec.
     if (method === 'GET' && path === '/dashboard/budget-remaining') {
       await fulfillJson(route, dashboardBudgetRemaining)
+      return
+    }
+
+    // #4707: `DashboardClient` mounts `useFirstAgentPayment` once the setup
+    // facts say the first payment happened. The default is the row the shared
+    // overview fixture's story implies; without a handler here the read falls
+    // through to `fulfillUnmockedRoute` → 599 and `unexpectedBrowserErrors`
+    // fails every dashboard-rendering spec.
+    if (method === 'GET' && path === '/dashboard/first-agent-payment') {
+      await fulfillJson(route, dashboardFirstAgentPayment)
       return
     }
 

@@ -95,8 +95,11 @@ interface Props {
 /**
  * The first-run steps (#3818). Rendered INSIDE the "Needs attention" card while
  * setup is in progress (the guide is that card), so it draws no card of its
- * own; `NeedsYou` lists the rule items that still apply below it. The
- * finished state is `SetupCompleteLine`, not a branch of this component.
+ * own; `NeedsYou` lists the rule items that still apply below it.
+ *
+ * The finished state is NOT a branch of this component: since #4707 the first
+ * agent payment gets its own card (`components/FirstAgentPaymentCard`), and
+ * "Needs attention" goes back to meaning what it says.
  */
 export default function DashboardOnboardingGuide({
   usdcFunded,
@@ -195,37 +198,6 @@ export default function DashboardOnboardingGuide({
         <ChecklistRow {...step2} />
         <ChecklistRow {...step3} />
       </ol>
-    </div>
-  )
-}
-
-/**
- * The finished state (#3818): one line, not a banner. It shows from the first
- * agent payment on, whatever happens after (USDC spent, a budget expiring) —
- * so it claims only that fact; the Needs attention rules below it speak for now.
- * Dismissal is the caller's (`haven-onboarding-complete-dismissed:<userId>`,
- * read as before so an owner who dismissed the old banner does not see this
- * again).
- */
-export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    // The 20px check sits centred in a 32px slot with `gap-3` — the
-    // full-bleed rows' icon slot and gap — so inside the card's 20px inset
-    // the check shares their icon axis and the sentence starts on their title
-    // column (#3902; it was `px-4` while the rows were inset, #3897). Dismiss
-    // ends at the rows' action column.
-    <div className="flex items-center justify-between gap-3 v2-animate-fade-in">
-      <p className="flex items-center gap-3 text-sm text-[var(--v2-ink)]">
-        <span aria-hidden="true" className="inline-flex w-8 flex-shrink-0 justify-center">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--v2-success)] text-[var(--v2-ink-on-brand)]">
-            <Icon icon={Check} className="h-3 w-3" />
-          </span>
-        </span>
-        You&rsquo;re set up — your first agent payment went through.
-      </p>
-      <Button variant="tertiary" size="sm" onClick={onDismiss}>
-        Dismiss
-      </Button>
     </div>
   )
 }

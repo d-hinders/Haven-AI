@@ -7,7 +7,7 @@
  * (loading true → false → true) and assert the DOM is IDENTICAL across it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { WaitingForConnector } from '../WaitingForConnector'
 import { TerminalSetupState } from '../SetupStates'
 import { ConnectStepShell } from '../ConnectStepShell'
@@ -840,5 +840,82 @@ describe('TerminalSetupState badge (#1377 review finding)', () => {
     expect(getByText('Expired')).toBeTruthy()
     // The old derivation rendered the nonsense word "prompt" here.
     expect(() => getByText('prompt')).toThrow()
+  })
+})
+
+/**
+ * #4706: the agent row above the waiting checklist, and the Step a done row
+ * plays when it opts in.
+ */
+describe('the agent row above the waiting checklist (#4706)', () => {
+  function renderWaitingWithName(agentName: string) {
+    return (
+      <WaitingForConnector
+        setup={SETUP}
+        runtime="claude-code"
+        copied={null}
+        promptCopied={false}
+        keyMadeInBrowser={false}
+        onCopy={() => {}}
+        manualCredential={null}
+        manualCredentialAcknowledged={false}
+        manualCreating={false}
+        manualError={null}
+        onCreateManualCredential={() => {}}
+        onContinueAfterManualCredential={() => {}}
+        loading={false}
+        error={null}
+        connectionStage="starting"
+        expiresAt={EXPIRES_AT}
+        onCancel={() => {}}
+        agentName={agentName}
+      />
+    )
+  }
+
+  it('names the agent and says it is listening, above the checklist', () => {
+    const { container } = render(renderWaitingWithName('Research agent'))
+    expect(container.textContent).toContain('Research agent')
+    expect(container.textContent).toContain('Listening for it…')
+    const row = screen.getByText('Listening for it…').closest('div') as HTMLElement
+    const list = container.querySelector('ol[aria-label="Connection steps"]') as HTMLElement
+    // The row comes BEFORE the checklist in document order.
+    expect(row.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('leaves the row out when no name is known — never an empty name', () => {
+    const { container } = render(renderWaiting(false, 'starting'))
+    expect(container.textContent).not.toContain('Listening for it…')
+  })
+})
+
+describe('ConnectSteps plays Milestone Step only when a row opts in (#4706)', () => {
+  function setReducedMotion(reduce: boolean) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: reduce && query === '(prefers-reduced-motion: reduce)',
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    })
+  }
+
+  afterEach(() => setReducedMotion(true))
+
+  it('a done row with play renders the check-pop class; the default does not', () => {
+    setReducedMotion(false)
+    const { container, rerender } = render(
+      <ConnectSteps rows={[{ id: 'done', state: 'done', title: 'Done row' }]} />,
+    )
+    expect(container.querySelector('.animate-check-pop')).toBeNull()
+    rerender(<ConnectSteps rows={[{ id: 'done', state: 'done', title: 'Done row', play: true }]} />)
+    expect(container.querySelector('.animate-check-pop')).not.toBeNull()
   })
 })

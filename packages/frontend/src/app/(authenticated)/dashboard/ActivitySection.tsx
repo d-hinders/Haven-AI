@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { shouldMarkApprox, type ApiSchema } from '@haven_ai/core'
 import { ArrowLeftRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
@@ -11,10 +11,20 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TransactionActivityDayHeader, TransactionActivityRow, TransactionActivityRowSkeleton, TransactionMovement, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { cutsItsDay, dayKeyInZone, formatClockTime } from '@/lib/format'
+import {
+  ACTIVITY_GROUP_LIVE_OPTIONS,
+  activityGroupLiveKey,
+  liveRowKeys,
+  sameLiveKeys,
+  type LiveRowSnapshot,
+} from '@/lib/live-rows'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
 
 /** One grouped-activity row from `GET /dashboard/overview` (#3824). */
 type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
+
+/** One shared empty set, so a poll that plays nothing does not re-render. */
+const EMPTY_LIVE_KEYS: ReadonlySet<string> = new Set()
 
 /**
  * The dashboard's merchant-first activity list (#3810, epic #3801).
@@ -101,6 +111,23 @@ export function ActivitySection({
   const hasWindowOnlyActivity =
     hasOlderActivity === true && typeof activityWindowDays === 'number'
   const windowEmptyTitle = `No activity in the last ${activityWindowDays} days`
+
+  // #4708: which groups arrived while the page was open. The snapshot is the
+  // last poll's `group key → latestAt`; the comparison is `lib/live-rows`,
+  // shared with `/transactions`. The first non-loading render only SEEDS the
+  // snapshot — a page load plays nothing — and a group plays when it is new
+  // or its `latestAt` advanced (a second payment to the same merchant).
+  const [liveKeys, setLiveKeys] = useState<ReadonlySet<string>>(EMPTY_LIVE_KEYS)
+  const liveSnapshotRef = useRef<LiveRowSnapshot | null>(null)
+  useEffect(() => {
+    // While the card is a skeleton or an error there is no list to compare
+    // against; seeding from either would make the first real poll look new.
+    if (loading || unavailable) return
+    const { keys, snapshot } = liveRowKeys(activity, liveSnapshotRef.current, ACTIVITY_GROUP_LIVE_OPTIONS)
+    liveSnapshotRef.current = snapshot
+    setLiveKeys((current) => (sameLiveKeys(current, keys) ? current : keys))
+  }, [activity, loading, unavailable])
+
   return (
     <div data-testid="dashboard-activity" className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
@@ -175,6 +202,7 @@ export function ActivitySection({
           activity={activity}
           accountCount={accountCount}
           activityWindowStart={activityWindowStart}
+          liveKeys={liveKeys}
         />
       )}
     </div>
@@ -203,10 +231,13 @@ function ActivityRows({
   activity,
   accountCount,
   activityWindowStart,
+  liveKeys,
 }: {
   activity: ActivityGroup[]
   accountCount: number
   activityWindowStart?: string
+  /** #4708: the group keys that arrived while the page was open. */
+  liveKeys: ReadonlySet<string>
 }) {
   const partialDayKey = useMemo(() => {
     if (activityWindowStart == null || !cutsItsDay(activityWindowStart)) return null
@@ -242,7 +273,12 @@ function ActivityRows({
             const groupKey = `${group.latestAt}-${group.to}-${group.tokenSymbol}-${index}`
             return (
               <Link key={groupKey} href="/transactions" className="block">
-                <ActivityRow group={group} accountCount={accountCount} insetDivider={index > 0} />
+                <ActivityRow
+                  group={group}
+                  accountCount={accountCount}
+                  insetDivider={index > 0}
+                  live={liveKeys.has(activityGroupLiveKey(group))}
+                />
               </Link>
             )
           })}
@@ -256,11 +292,14 @@ function ActivityRow({
   group,
   accountCount,
   insetDivider,
+  live,
 }: {
   group: ActivityGroup
   accountCount: number
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
+  /** #4708: this group arrived while the page was open — play Milestone Live. */
+  live: boolean
 }) {
   // The group carries the counterparty fields of its NEWEST member (#3824)
   // plus the name the backend resolved for that counterparty. No chain-scoped
@@ -347,6 +386,7 @@ function ActivityRow({
       direction={ownTransfer ? 'move' : group.direction}
       density="compact"
       insetDivider={insetDivider}
+      live={live}
     />
   )
 }

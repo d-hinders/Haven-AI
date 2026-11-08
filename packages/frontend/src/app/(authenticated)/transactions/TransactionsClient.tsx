@@ -14,6 +14,7 @@ import {
   useTransactionsFeed,
 } from '@/hooks/useTransactionsFeed'
 import { useUnfilteredTransactionTotal } from '@/hooks/useUnfilteredTransactionTotal'
+import { transactionLiveKey } from '@/lib/live-rows'
 import { buildTransactionScopeSubtitle } from '@/lib/transaction-scope'
 import {
   transactionChainName,
@@ -160,6 +161,7 @@ export default function TransactionsClient() {
     partialFailure,
     failedAccountIds,
     truncated,
+    liveKeys,
     loadMore,
     refresh,
   } = useTransactionsFeed(filters, TRANSACTIONS_PAGE_SIZE)
@@ -512,6 +514,9 @@ export default function TransactionsClient() {
                       showAccount={showAccountOnRows}
                       onOpen={() => setSelectedTx(tx)}
                       insetDivider={index > 0}
+                      // #4708: the identity is the React key without its
+                      // `index` — the index is a tiebreaker, not identity.
+                      live={liveKeys.has(transactionLiveKey(tx))}
                     />
                   ))}
                 </div>

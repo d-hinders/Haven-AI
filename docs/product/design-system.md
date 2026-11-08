@@ -7,6 +7,7 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/components/connect-agent/ConnectAgentRow.tsx
+  - packages/frontend/src/components/connect-agent/ConnectStep.tsx
   - packages/frontend/src/app/onboarding/OnboardingClient.tsx
   - packages/frontend/src/components/ui/DialogActions.tsx
   - packages/frontend/src/components/BudgetGrantAction.tsx
@@ -2356,6 +2357,21 @@ into one "×N" row; a full ledger needs one row per transaction, and gets it:
   the same hairline — so a day still reads stronger than a row. Every day-grouped list draws it: the
   account and agent Activity tabs, the agent Tool calls tab, `/transactions` and the
   dashboard's Transactions card.
+- **Live rows ([#4708](https://github.com/d-hinders/Haven-AI/issues/4708), epic
+  [#4701](https://github.com/d-hinders/Haven-AI/issues/4701)):** `live` (optional) plays
+  `Milestone` Live — one soft brand-soft fade, 1600ms, no check and no sound — on a row
+  that arrived while the page was open, then it is an ordinary row. Opt-in, because only
+  two lists know when a row arrived: `/transactions` and the dashboard's Transactions
+  card, both through the shared `lib/live-rows` comparison. The two shapes differ, so
+  each supplies its own key and mark — a `/transactions` row keeps its
+  `accountId:hash:type` identity when it confirms, so the snapshot maps identity to
+  outcome and a pending row that confirms plays once; a dashboard group carries the
+  outcome in its key and plays when it is new or its `latestAt` advanced (a second
+  payment to the same merchant raises `count` and adds no row). Nothing plays on load,
+  on "load more", on a manual refresh or on a filter or search change; at most three
+  rows play from one poll, the newest; and under `prefers-reduced-motion: reduce` the
+  class is not applied at all. The account and agent Activity tabs and `/design-system`
+  omit the prop and render exactly as before.
 
 ### Direction marks — `DirectionMark` ([#4197](https://github.com/d-hinders/Haven-AI/issues/4197))
 
@@ -3000,12 +3016,16 @@ with exactly two motions — its wrapper carries no `v2-animate-step-rise`, or
 Peak would silently gain a third motion on that one screen; and Receive's
 arrived state for a user's first money on this device (#4705, through
 `DialogResult strength="peak"`). Step: `DialogResult`'s success state (Receive's
-later deposits among them), and the dashboard setup guide's steps 1 and 2
+later deposits among them), the dashboard setup guide's steps 1 and 2
 when one completes while the guide is open (#4704) — a step already complete
 on load just shows its check, and step 3 never pops, because the guide is
-replaced as soon as it completes and the first agent payment is #4707's card.
-Live: nothing yet beyond the `/design-system` specimen; #4708 is its first
-product use.
+replaced as soon as it completes and the first agent payment is #4707's card —
+and `ConnectSteps`' rows when one goes done while the user watches (#4706): the
+connect row that reaches "connected" and the approve row that reaches "Budget
+approved" pop once, across the shell's sub-state remounts, while a session
+resumed from a hand-off link shows the static check.
+Live: `/transactions` and the dashboard's Transactions card, on a row that arrives
+while the page is open (#4708) — the row plays once, then it is an ordinary row.
 
 **It owns no live region.** The announcement stays with the caller:
 `OnboardingClient`'s `role="status"` stays, and `DialogResult` takes `announce`
@@ -3109,6 +3129,13 @@ Rules:
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can
   overwrite.
+- **A row that goes done while the user watches plays `Milestone` Step once**
+  (#4706). The flag lives ABOVE `ConnectStepShell`'s key, because the shell
+  remounts its body on every sub-state change — a mount cannot mean "just
+  happened" (the live path is itself a remount). It is seeded from the first
+  status seen, so a session resumed from a hand-off link (#2522) or an
+  already-connected first status shows the static check. The `/design-system`
+  showcase passes no `play`, so it never animates on first paint.
 - Live status inside a row goes in an `aria-live="polite"` region with a
   reserved height, so a status change swaps words without moving the rows below.
 - The frame around it (`ConnectStepShell`) **sizes to its content** and
@@ -3129,6 +3156,12 @@ it…" while the connector runs, "Connected just now" once it lands. It is
 presentational and owns no live region; the caller announces the change once,
 alongside the row that changed. It never restates a step: the checklist below is
 the progress. Showcased on `/design-system` → *Connect agent row*.
+
+The waiting screen renders it above its checklist; once connected, `ConnectStep`
+renders it above the connected checklist and row 2 reads "{name} connected"
+(falling back to "Agent connected" when no name is known). One `aria-live`
+region in `ConnectStep` carries the change, so the row and the checklist row do
+not announce twice (#4706).
 
 It is local to `components/connect-agent/` because every production caller is
 part of the same connect flow; a second product use is the trigger to promote it to `components/ui/`. Its

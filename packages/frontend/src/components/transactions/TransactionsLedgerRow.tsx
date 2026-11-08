@@ -38,6 +38,7 @@ export default function TransactionsLedgerRow({
   showAccount,
   onOpen,
   insetDivider,
+  live = false,
 }: {
   tx: AggregatedTransaction
   resolveAddress: (address: string) => string | null
@@ -47,6 +48,12 @@ export default function TransactionsLedgerRow({
   onOpen: () => void
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
+  /**
+   * #4708: this row arrived while the page was open, so it plays `Milestone`
+   * Live once. The caller owns the comparison (`lib/live-rows`); the row only
+   * forwards it.
+   */
+  live?: boolean
 }) {
   const badge = transactionRowBadge(tx)
   const fiat = transactionFiat(tx, 'row')
@@ -67,6 +74,7 @@ export default function TransactionsLedgerRow({
     density: 'compact' as const,
     onOpen,
     insetDivider,
+    live,
   }
 
   if (tx.ownTransfer) {

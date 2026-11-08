@@ -44,13 +44,21 @@ export function ConnectAgentRow({
 }) {
   return (
     <div className={`flex items-center gap-3 ${className}`.trim()}>
-      <span className="relative inline-flex shrink-0">
+      {/* #4706: the connected check sits 4px outside the mark and carries a
+          2px ring, so the wrapper carries 6px of padding and an equal negative
+          margin and clips at the padding box. The badge is positioned against
+          the wrapper's PADDING box (2px in from its edge), which puts it back
+          on the mark's corner while keeping it inside the box the wrapper
+          measures — without this the badge grows the wrapper's scroll box,
+          which the connect dialog's overflow gate measures. The negative margin
+          keeps the row's layout unchanged. */}
+      <span className="relative inline-flex shrink-0 overflow-clip p-1.5 -m-1.5">
         <Monogram name={name} size="xs" decorative />
         {state === 'connected' ? (
           <span
             data-testid="connect-agent-row-connected-mark"
             aria-hidden="true"
-            className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--v2-success)] ring-2 ring-[var(--v2-bg)]"
+            className="absolute bottom-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--v2-success)] ring-2 ring-[var(--v2-bg)]"
           >
             <Icon icon={Check} className="h-3 w-3 text-[var(--v2-bg)]" strokeWidth={3} />
           </span>

@@ -534,6 +534,125 @@ export async function listDashboardSpendGroups(
 }
 
 /**
+ * The "Since your last visit" figures (#4709, epic #4701): the user's
+ * confirmed agent payments with `confirmed_at` in `(after, through]`, grouped
+ * by (agent, token, chain) so the route can price NULL-booked rows at today's
+ * rate exactly as the 7-day block does.
+ *
+ * The window is HALF-OPEN ON THE LEFT and CLOSED ON THE RIGHT — the opposite
+ * of the 7/30-day statements above, and deliberately so: `after` is the
+ * PREVIOUS entry's instant and `through` this entry's, so a payment confirmed
+ * exactly on a boundary is counted in exactly one of two consecutive windows
+ * (it belongs to the window whose `through` it is).
+ *
+ * Everything else is #3803's definition, unchanged: `status = 'confirmed'`,
+ * delegation-rail agents only, chain-scoped to $4 (the same `spend.scope` the
+ * 7-day figures use), and the #3755 netting applied through
+ * `spendNetFactorSql` against the sweeps submitted in the SAME window. A
+ * payment confirmed after `through` belongs to the next entry.
+ */
+export const DASHBOARD_SINCE_GROUPS_SQL = `WITH legs AS (
+    SELECT pi.agent_id,
+           a.name AS agent_name,
+           LOWER(pi.token_address) AS token_key,
+           COALESCE(pi.chain_id, 0) AS chain_key,
+           CASE WHEN pi.amount_raw ~ '^[0-9]+$' THEN pi.amount_raw::numeric END AS atomic,
+           COALESCE(pi.amount_human, '0')::numeric AS amount_human,
+           pi.usd_value,
+           pi.eur_value,
+           pi.sek_value
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.confirmed_at > $2
+      AND pi.confirmed_at <= $3
+      AND COALESCE(pi.chain_id, 0) = ANY($4)
+  ), swept AS (
+    SELECT ds.agent_id,
+           LOWER(ds.token_address) AS token_key,
+           ds.chain_id AS chain_key,
+           SUM(ds.value_atomic) AS swept_window
+    FROM delegate_sweeps ds
+    WHERE ds.user_id = $1
+      AND ds.status = 'submitted'
+      AND ds.tx_hash IS NOT NULL
+      AND COALESCE(ds.submitted_at, ds.created_at) > $2
+      AND COALESCE(ds.submitted_at, ds.created_at) <= $3
+      AND COALESCE(ds.chain_id, 0) = ANY($4)
+    GROUP BY ds.agent_id, LOWER(ds.token_address), ds.chain_id
+  ), grouped AS (
+    SELECT l.agent_id, l.agent_name, l.token_key, l.chain_key,
+           SUM(l.atomic) AS atomic_w,
+           SUM(COALESCE(l.usd_value, 0)) AS usd_w,
+           SUM(COALESCE(l.eur_value, 0)) AS eur_w,
+           SUM(COALESCE(l.sek_value, 0)) AS sek_w,
+           SUM(CASE WHEN l.usd_value IS NULL THEN l.amount_human ELSE 0 END) AS fb_usd_w,
+           SUM(CASE WHEN l.eur_value IS NULL THEN l.amount_human ELSE 0 END) AS fb_eur_w,
+           SUM(CASE WHEN l.sek_value IS NULL THEN l.amount_human ELSE 0 END) AS fb_sek_w,
+           COUNT(*) AS legs_w
+    FROM legs l
+    GROUP BY l.agent_id, l.agent_name, l.token_key, l.chain_key
+  )
+  SELECT g.agent_id,
+         g.agent_name,
+         g.token_key,
+         g.chain_key,
+         COALESCE(g.usd_w, 0)::text AS gross_usd,
+         (COALESCE(g.usd_w, 0) * ${spendNetFactorSql('g.atomic_w', 's.swept_window')})::numeric(20, 6)::text AS net_usd,
+         COALESCE(g.eur_w, 0)::text AS gross_eur,
+         (COALESCE(g.eur_w, 0) * ${spendNetFactorSql('g.atomic_w', 's.swept_window')})::numeric(20, 6)::text AS net_eur,
+         COALESCE(g.sek_w, 0)::text AS gross_sek,
+         (COALESCE(g.sek_w, 0) * ${spendNetFactorSql('g.atomic_w', 's.swept_window')})::numeric(20, 6)::text AS net_sek,
+         COALESCE(g.fb_usd_w, 0)::text AS fb_usd,
+         COALESCE(g.fb_eur_w, 0)::text AS fb_eur,
+         COALESCE(g.fb_sek_w, 0)::text AS fb_sek,
+         g.legs_w::text AS payments
+  FROM grouped g
+  LEFT JOIN swept s
+    ON s.agent_id = g.agent_id
+   AND s.token_key = g.token_key
+   AND s.chain_key = g.chain_key`
+
+export interface DashboardSinceGroupRow {
+  agent_id: string
+  agent_name: string
+  token_key: string
+  chain_key: number
+  gross_usd: string
+  net_usd: string
+  gross_eur: string
+  net_eur: string
+  gross_sek: string
+  net_sek: string
+  fb_usd: string
+  fb_eur: string
+  fb_sek: string
+  payments: string
+}
+
+/**
+ * `userId` is REQUIRED. `chainIds` is the same testnet-scope chain set the
+ * 7-day figures use; `after`/`through` are ISO timestamps, `(after, through]`.
+ */
+export async function listDashboardSinceGroups(
+  userId: string,
+  chainIds: number[],
+  after: string,
+  through: string,
+  db: Executor = pool,
+): Promise<DashboardSinceGroupRow[]> {
+  const result = await db.query<DashboardSinceGroupRow>(DASHBOARD_SINCE_GROUPS_SQL, [
+    userId,
+    after,
+    through,
+    chainIds,
+  ])
+  return result.rows
+}
+
+/**
  * Merchant identity = the x402 resource HOST, else the recipient address
  * (#3803) — never a display label. One statement returns the user-level
  * DISTINCT merchant counts for both windows (a sum of per-agent counts would

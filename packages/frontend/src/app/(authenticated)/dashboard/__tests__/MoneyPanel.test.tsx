@@ -16,7 +16,11 @@ import { describe, expect, it, vi } from 'vitest'
 
 import MoneyPanel from '../MoneyPanel'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
-import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
+import type {
+  DashboardAgentPreview,
+  DashboardOverviewResponse,
+  DashboardSinceResponse,
+} from '@/types/dashboard'
 
 const baseProps = {
   loading: false,
@@ -472,5 +476,65 @@ describe('MoneyPanel — the legend dots are the chart SeriesSwatch (#4426)', ()
     )
     expect(other, 'no "2 other agents" row').toBeDefined()
     expectSquareSwatch(other!, 'var(--v2-ink-3)')
+  })
+})
+
+describe('MoneyPanel — "Since your last visit" (#4709)', () => {
+  const sinceFigures = (overrides: Partial<DashboardSinceResponse> = {}): DashboardSinceResponse => ({
+    after: '2026-11-02T10:00:00.000Z',
+    through: '2026-11-03T10:00:00.000Z',
+    timeWord: 'Since yesterday',
+    currency: 'USD',
+    payments: 3,
+    net: 4.2,
+    agents: [{ id: 'a1', name: 'Research agent', netSpend: 4.2, payments: 3 }],
+    ...overrides,
+  })
+
+  it('renders the line ABOVE the 7-day sentence, in the header subtitle', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({ d30NetUsd: 0, agents: [] })}
+        since={sinceFigures()}
+        sincePrevious="2026-11-02T10:00:00.000Z"
+      />,
+    )
+
+    const header = screen.getByRole('heading', { name: 'Dashboard' }).closest('header')!
+    const subtitle = header.querySelector('p')!
+    const lines = Array.from(subtitle.querySelectorAll('span.block')).map((span) => span.textContent)
+    expect(lines[0]).toBe('Since yesterday, Research agent made 3 payments for $4.20.')
+    expect(lines[1]).toBe('No agent payments in the last 7 days.')
+  })
+
+  it('shows no line on a first ever visit (no previous marker)', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({ d30NetUsd: 0, agents: [] })}
+        since={sinceFigures()}
+        sincePrevious={null}
+      />,
+    )
+
+    const header = screen.getByRole('heading', { name: 'Dashboard' }).closest('header')!
+    expect(header.textContent).not.toContain('Since ')
+    expect(header.textContent).toContain('No agent payments in the last 7 days.')
+  })
+
+  it('shows no line when the figures are absent (nothing since, or a failed read)', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={overview({ d30NetUsd: 0, agents: [] })}
+        since={null}
+        sincePrevious="2026-11-02T10:00:00.000Z"
+      />,
+    )
+
+    const header = screen.getByRole('heading', { name: 'Dashboard' }).closest('header')!
+    expect(header.textContent).not.toContain('Since ')
+    expect(header.textContent).toContain('No agent payments in the last 7 days.')
   })
 })

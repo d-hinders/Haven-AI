@@ -4807,6 +4807,38 @@ export const openapiSpec = {
         },
       },
     },
+    // #4709 (epic #4701 decision 4): the "Since your last visit" marker. The
+    // client generates `entry_id` and stores it BEFORE calling, so a retry
+    // after a lost response returns the same window instead of erasing it.
+    '/user/visits': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'openUserVisit',
+        summary: 'Open (or re-open) one visit entry and return its window.',
+        description:
+          'One atomic write under the row lock. The window a "Since your last visit" line describes is `(previous, current]`: `previous` is the instant the PREVIOUS entry opened (null on the first ever visit) and `current` this one. The same `entry_id` returns the same bounds without moving the marker; a different id opens a new entry, and `current` never goes backwards. Two near-simultaneous entries get consecutive windows that do not overlap. Display-only: this marker is never read by a payment path.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UserVisitInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The entry’s window.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/UserVisitResponse' } },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account no longer exists.' },
+        },
+      },
+    },
     // #2847 (epic #1440): the /user/owners directory is deleted. It probed
     // each linked account's owners over the Safe ABI and answered
     // { owners: [], partialFailure: true } on every delegation account, and
@@ -9232,6 +9264,52 @@ export const openapiSpec = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardOverviewResponse' } } },
           },
           '400': { ...errorResponse, description: 'Invalid `tz` — not an IANA zone name.' },
+          '401': errorResponse,
+        },
+      },
+    },
+    // #4709 (epic #4701 decision 4): the figures behind the "Since your last
+    // visit" line. The window is `(after, through]` — the bounds
+    // `POST /user/visits` returned — so a payment confirmed exactly on a
+    // boundary is counted in exactly one of two consecutive windows.
+    '/dashboard/since': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardSince',
+        summary: 'Confirmed agent payments in one visit window, grouped by agent.',
+        description:
+          'The user’s confirmed agent payments with `confirmed_at` in `(after, through]`, grouped by agent, on the same NET definition and `spend.scope` as the 7-day figures, in the display currency — so the line cannot disagree with the sentence below it. A payment confirmed after `through` belongs to the next entry. Display-only: nothing here is read by a payment path.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          {
+            name: 'after',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', format: 'date-time' },
+            description: 'The PREVIOUS entry’s instant (exclusive lower bound), from `POST /user/visits`.',
+          },
+          {
+            name: 'through',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', format: 'date-time' },
+            description: 'This entry’s instant (inclusive upper bound), from `POST /user/visits`.',
+          },
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'IANA time-zone name the client renders the time word in. Defaults to UTC; an invalid zone is refused with 400.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The window’s figures.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DashboardSinceResponse' } },
+            },
+          },
+          '400': { ...errorResponse, description: 'Missing or malformed `after`/`through`, `after` not before `through`, or an invalid `tz`.' },
           '401': errorResponse,
         },
       },
@@ -14160,6 +14238,65 @@ export const openapiSpec = {
           funded: { type: ['boolean', 'null'], description: "The account's own USDC > 0. Null when the balance is unknown — never derived from a 0." },
           needs_backup_recommendation: { type: 'boolean', description: 'Per account (the session payload answered only accounts[0] before #3803).' },
           usdcPace7dAtomic: { type: 'string', description: 'Σ confirmed − min(swept, confirmed) per (agent, token, chain) over the last 7 days, for this account\u2019s agents on this chain in the registry USDC. Swept = delegate_sweeps status submitted with a tx_hash.' },
+        },
+        additionalProperties: false,
+      },
+      // #4709 (epic #4701 decision 4): the "Since your last visit" marker and
+      // the figures behind its line. Display-only — never read by a payment
+      // path.
+      UserVisitInput: {
+        type: 'object',
+        required: ['entry_id'],
+        properties: {
+          entry_id: { ...uuid, description: 'The client-generated entry id, stored in `sessionStorage` BEFORE the call so a retry re-opens the same entry.' },
+        },
+        additionalProperties: false,
+      },
+      UserVisitResponse: {
+        type: 'object',
+        required: ['previous', 'current'],
+        properties: {
+          previous: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'The PREVIOUS entry’s instant — the exclusive lower bound of the window. Null on the first ever visit.',
+          },
+          current: {
+            ...isoDateTime,
+            description: 'This entry’s instant — the inclusive upper bound of the window. Never goes backwards.',
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardSinceAgent: {
+        type: 'object',
+        required: ['id', 'name', 'netSpend', 'payments'],
+        properties: {
+          id: uuid,
+          name: { type: 'string' },
+          netSpend: { type: 'number', description: 'The agent’s NET spend in the window, in the display currency (#3803’s definition with the #3755 netting).' },
+          payments: { type: 'integer', description: 'Confirmed payments the agent made in the window.' },
+        },
+        additionalProperties: false,
+      },
+      DashboardSinceResponse: {
+        type: 'object',
+        required: ['after', 'through', 'timeWord', 'currency', 'payments', 'net', 'agents'],
+        properties: {
+          after: { ...isoDateTime, description: 'The window’s exclusive lower bound, echoed from the request.' },
+          through: { ...isoDateTime, description: 'The window’s inclusive upper bound, echoed from the request.' },
+          timeWord: {
+            type: 'string',
+            description: 'The fixed “Since …” word, spoken in the request’s `tz`: “Since earlier today”, “Since yesterday”, “Since Tuesday” (within six local days), or a date past six days (“Since 3 November”). The sentence around it is assembled from fixed templates in the frontend.',
+          },
+          currency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: 'The display currency `net` and every agent’s `netSpend` are struck in.' },
+          payments: { type: 'integer', description: 'Confirmed payments in the window, across every agent.' },
+          net: { type: 'number', description: 'The window’s NET spend in the display currency.' },
+          agents: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DashboardSinceAgent' },
+            description: 'Agents with at least one confirmed payment in the window, largest net spend first.',
+          },
         },
         additionalProperties: false,
       },

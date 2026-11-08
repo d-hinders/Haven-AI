@@ -6,6 +6,7 @@ import { usePreferences } from '@/hooks/usePreferences'
 import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
+import { useLastVisit } from '@/hooks/useLastVisit'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
@@ -53,6 +54,10 @@ export default function DashboardClient() {
     refetch: refetchAggregatedBalances,
   } = useAggregatedBalances()
   const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } = useDashboardOverview()
+  // #4709: the "Since your last visit" window and its figures. One entry per
+  // tab, opened once; a reload or a return from another page reads the stored
+  // bounds and makes no call.
+  const lastVisit = useLastVisit(user?.id ?? null)
 
   const hasAnyBalance = balances.some((balance) => {
     try {
@@ -487,6 +492,11 @@ export default function DashboardClient() {
       onReceive={() => launcher.openAction('receive')}
       onSend={() => launcher.openAction('send')}
       countUpUserId={user?.id ?? null}
+      // #4709: the "Since your last visit" line — the window's figures and the
+      // previous entry's instant (null on a first ever visit, which shows no
+      // line).
+      since={lastVisit.figures}
+      sincePrevious={lastVisit.bounds?.previous ?? null}
       // #4167: the ONE primary-button rule — Send primary once any account
       // holds USDC (`usdcFunded`), Receive primary with Send disabled when
       // known empty, Send primary while the read is loading or failed.

@@ -141,6 +141,82 @@ export async function updateCurrencyPreference(
   return result.rows[0] ?? null
 }
 
+// ── Visits (#4709) ───────────────────────────────────────────────────────────
+//
+// The "Since your last visit" marker (migration 124, epic #4701 decision 4).
+// It lives on the SERVER so a phone and a laptop agree, and it is written by
+// ONE atomic statement so two devices cannot interleave into overlapping
+// windows.
+//
+// The window a line describes is `(previous, current]`. `previous` is the
+// instant the PREVIOUS entry opened, `current` the instant this one did — so a
+// payment confirmed exactly on a boundary belongs to exactly one window.
+//
+// Retry safety: the client generates `entryId` and stores it BEFORE calling.
+// A retry carrying the same id returns the stored bounds and does NOT move the
+// marker; a different id opens a new entry. The accepted residual (stated on
+// #4709) is that a retry arriving after ANOTHER device opened a new entry is
+// treated as a new entry — the lost window's line is not shown, and nothing is
+// counted twice.
+//
+// `current` never goes backwards: `GREATEST(COALESCE(visit_current_at, NOW()),
+// NOW())` keeps a future marker (clock skew) where it is rather than rewinding
+// the window.
+
+export interface UserVisitRow {
+  /** The previous entry's instant; NULL on the first ever visit. */
+  previous: Date | null
+  /** This entry's instant. */
+  current: Date
+}
+
+/**
+ * One statement, one row lock. The `locked` CTE takes the row lock with
+ * `FOR UPDATE`; a concurrent entry blocks there and, under READ COMMITTED,
+ * re-reads the committed row, so the second device's `previous` is the first
+ * device's `current` — consecutive windows that do not overlap.
+ *
+ * `moved` writes only when the entry id differs. When it matches, the second
+ * branch of the UNION returns the stored bounds from the SAME locked read, so
+ * a retry cannot observe a marker another device moved between two round
+ * trips.
+ */
+export const OPEN_USER_VISIT_SQL = `WITH locked AS (
+    SELECT id, visit_current_at, visit_previous_at, visit_entry_id
+      FROM users
+     WHERE id = $1
+     FOR UPDATE
+  ), moved AS (
+    UPDATE users u
+       SET visit_previous_at = l.visit_current_at,
+           visit_current_at = GREATEST(COALESCE(l.visit_current_at, NOW()), NOW()),
+           visit_entry_id = $2,
+           updated_at = NOW()
+      FROM locked l
+     WHERE u.id = l.id
+       AND l.visit_entry_id IS DISTINCT FROM $2
+    RETURNING u.visit_previous_at AS previous, u.visit_current_at AS current
+  )
+  SELECT previous, current FROM moved
+  UNION ALL
+  SELECT l.visit_previous_at AS previous, l.visit_current_at AS current
+    FROM locked l
+   WHERE l.visit_entry_id IS NOT DISTINCT FROM $2`
+
+/**
+ * Open (or re-open) one visit entry. `userId` is REQUIRED — it is the row
+ * scope of the UPDATE. Returns `null` only when no user row matched, which
+ * means the account was deleted while a valid token for it was in flight.
+ */
+export async function openUserVisit(
+  entryId: string,
+  userId: string,
+  db: Executor = pool,
+): Promise<UserVisitRow | null> {
+  const result = await db.query<UserVisitRow>(OPEN_USER_VISIT_SQL, [userId, entryId])
+  return result.rows[0] ?? null
+}
+
 // ── Credentials & signup (#1180) ─────────────────────────────────────────────
 //
 // The one place in this module where `email` — not `id` — is the lookup key.

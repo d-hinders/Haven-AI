@@ -5,7 +5,8 @@ import { formatFiatDisplay, SUB_CENT_THRESHOLD } from '@/lib/format'
  *
  * FIXED TEMPLATES, never model-written: the sentence is assembled from the
  * overview's own 7-day figures, and every branch here has a unit test that
- * asserts the EXACT sentence. Three rules bind the wording:
+ * asserts the EXACT sentence. Four rules bind the wording — the 7-day sentence
+ * and #4709's "Since your last visit" line alike:
  *
  * 1. **At most two agents and one merchant are named.** A spread-out week
  *    reads as a count ("3 agents spent …"), a dominant agent is named beside
@@ -163,4 +164,82 @@ export function buildDashboardSummary(input: DashboardSummaryInput): string {
     sentence = `${sentence} ${budgetStopClause(input.budgetStops)}`
   }
   return sentence
+}
+
+// ── "Since your last visit" (#4709, epic #4701 decision 4) ──────────────────
+//
+// One line under the dashboard heading, only when something happened since the
+// previous entry. The marker lives on the server (`POST /user/visits`), so a
+// phone and a laptop agree; the figures come from `GET /dashboard/since` over
+// the window `(previous, current]`.
+//
+// The time word is one of a FIXED set, spoken in the user's timezone and
+// computed by the server (`modules/dashboard/since-window.ts`) because the
+// route already receives the zone: "Since earlier today", "Since yesterday",
+// "Since Tuesday" (within six days), and a date past six days ("Since 3
+// November"). Rules 1–4 above bind the rest: at most two agents are named, a
+// spread-out window reads as a count, a total under a cent reads as a count,
+// and no raw address is ever named (agent names only).
+
+export interface SinceLastVisitAgent {
+  id: string
+  name: string
+  /** The agent's NET spend in the window, already in the display currency. */
+  netSpend: number
+  /** Confirmed payments the agent made in the window. */
+  payments: number
+}
+
+export interface SinceLastVisitInput {
+  currency: DashboardSummaryCurrency
+  /** The previous entry's instant (ISO), or null on the first ever visit. */
+  previous: string | null
+  /** The fixed "Since …" word, from `GET /dashboard/since`. */
+  timeWord: string
+  /** Confirmed payments in the window, across every agent. */
+  payments: number
+  /** The window's NET spend in the display currency. */
+  netSpend: number
+  /** Agents with at least one confirmed payment in the window. */
+  agents: SinceLastVisitAgent[]
+}
+
+/**
+ * The one line under the dashboard heading, or `null` when there is nothing to
+ * say: a first ever visit (no previous marker), nothing since, or no payments
+ * at all. Every branch's exact output is pinned by
+ * `lib/__tests__/dashboard-summary.test.ts`.
+ */
+export function buildSinceLastVisitSummary(input: SinceLastVisitInput): string | null {
+  if (input.previous === null) return null
+  if (input.payments === 0) return null
+
+  const spenders = input.agents
+    .filter((agent) => agent.payments > 0)
+    .sort((a, b) => b.netSpend - a.netSpend || a.name.localeCompare(b.name))
+
+  const made = `${input.payments} ${input.payments === 1 ? 'payment' : 'payments'}`
+  // Rule 3: a total under a cent would print "$0.00" — say how many payments
+  // were made instead. A net at or below zero (sweeps outran the window's
+  // payments) reads the same way: a negative figure is not a spend.
+  const money =
+    input.netSpend >= SUB_CENT_THRESHOLD
+      ? ` for ${formatFiatDisplay(input.netSpend, input.currency)}`
+      : ''
+
+  let who: string
+  if (spenders.length === 0) {
+    // Defensive: payments > 0 always leaves at least one spending agent on the
+    // wire. If a future wire change breaks that, say the true thing — a count
+    // — rather than naming a phantom agent.
+    who = 'agents'
+  } else if (spenders.length === 1) {
+    who = spenders[0].name
+  } else if (spenders.length === 2) {
+    who = `${spenders[0].name} and ${spenders[1].name}`
+  } else {
+    who = `${spenders.length} agents`
+  }
+
+  return `${input.timeWord}, ${who} made ${made}${money}.`
 }

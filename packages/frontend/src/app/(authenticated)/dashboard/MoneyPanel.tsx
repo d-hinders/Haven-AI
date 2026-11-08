@@ -47,9 +47,14 @@ import { formatFiat, currencyLocale, SUB_CENT_THRESHOLD } from '@/lib/format'
 import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import {
   buildDashboardSummary,
+  buildSinceLastVisitSummary,
   type DashboardSummaryAgent,
 } from '@/lib/dashboard-summary'
-import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
+import type {
+  DashboardAgentPreview,
+  DashboardOverviewResponse,
+  DashboardSinceResponse,
+} from '@/types/dashboard'
 
 const SPARKLINE_DAYS = 30
 
@@ -212,6 +217,16 @@ export interface MoneyPanelProps {
    * Absent: no entrance, the balance shows straight away.
    */
   countUpUserId?: string | null
+  /**
+   * #4709: the "Since your last visit" window's figures, or null when there is
+   * nothing to show (a first ever visit, nothing since, or a failed read).
+   */
+  since?: DashboardSinceResponse | null
+  /**
+   * #4709: the PREVIOUS entry's instant (ISO), or null on a first ever visit.
+   * The line is built from this and `since`; both absent means no line.
+   */
+  sincePrevious?: string | null
 }
 
 export default function MoneyPanel({
@@ -238,6 +253,8 @@ export default function MoneyPanel({
   onReceive,
   onSend,
   countUpUserId = null,
+  since = null,
+  sincePrevious = null,
 }: MoneyPanelProps) {
   // #4704: the balance counts up on this tab's entrance only (owner decision 3
   // on #4701) — a new tab, a phone launch, or after signing back in. A reload,
@@ -282,6 +299,27 @@ export default function MoneyPanel({
         topMerchant: spend?.topMerchant7d ?? null,
       })
     : null
+
+  // #4709: the "Since your last visit" line, ABOVE the 7-day sentence. Null
+  // when there is nothing to say — a first ever visit (no previous marker),
+  // nothing since, or a failed read — so the header reads exactly as it did
+  // before. The time word is spoken in the user's own zone.
+  const sinceLine =
+    since && sincePrevious !== null
+      ? buildSinceLastVisitSummary({
+          currency: since.currency,
+          previous: sincePrevious,
+          timeWord: since.timeWord,
+          payments: since.payments,
+          netSpend: since.net,
+          agents: since.agents.map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            netSpend: agent.netSpend,
+            payments: agent.payments,
+          })),
+        })
+      : null
 
   const sparkPoints = spend?.balance_by_day
     ? balanceSparkPoints(spend.balance_by_day, currency)
@@ -477,7 +515,20 @@ export default function MoneyPanel({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" subtitle={summary ?? undefined} />
+      <PageHeader
+        title="Dashboard"
+        subtitle={
+          sinceLine || summary ? (
+            <>
+              {/* #4709: the "Since your last visit" line sits ABOVE the 7-day
+                  sentence, in the same type. `block` spans keep them on their
+                  own lines inside PageHeader's subtitle paragraph. */}
+              {sinceLine ? <span className="block">{sinceLine}</span> : null}
+              {summary ? <span className="block">{summary}</span> : null}
+            </>
+          ) : undefined
+        }
+      />
 
       {/*
         #3897: ONE money card, as the mockup draws it — `raised`, the page's

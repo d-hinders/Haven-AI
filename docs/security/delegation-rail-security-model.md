@@ -1774,3 +1774,20 @@ Historical verification records for this document are kept in the [archive](../a
 > copy rules were re-read for it: the line claims no custody, no second
 > signature and no pending approval. The rest of this document was not re-read
 > for it.
+
+> **#4709 (2026-11-08).** This diff touches `packages/backend/src/routes/user.ts`
+> and `packages/backend/src/infra/repositories/dashboard.ts` in this document's
+> coverage list. It adds the "Since your last visit" marker (migration 124:
+> three nullable `users` columns) and two display-only reads: `POST
+> /user/visits` opens one visit entry with a single atomic `UPDATE … RETURNING`
+> under the row lock, and `GET /dashboard/since` returns the user's confirmed
+> agent payments in `(previous, current]` on the same NET definition and
+> `spend.scope` as the 7-day figures. **The marker is never read by a payment
+> path.** It records when a person opened the dashboard; it changes no
+> delegation, budget, allowance, signer, credential or settlement fact, and it
+> grants no authority — the two routes are authenticated reads/writes of the
+> caller's own row, tenant-scoped by the JWT subject. The new statement takes
+> the existing `DELEGATION_RAIL_JOIN` and `spendNetFactorSql` fragments rather
+> than a fourth copy of either, so the rail filter and the #3755 netting are
+> the same ones §8 already describes. The rest of this document was not re-read
+> for it, and `last-verified` is not bumped.

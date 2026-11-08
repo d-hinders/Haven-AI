@@ -571,7 +571,10 @@ Isolation rules that are non-negotiable for a payments product:
   `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
-  table). New modules are born ENFORCED with their own `enforcedModules`
+  table). #4709's `POST /user/visits` and `GET /dashboard/since` are the latest
+  rows: both live in modules already enforced (`routes/user.ts`,
+  `routes/dashboard.ts`), so the table gained two rows and no module entered
+  shadow. New modules are born ENFORCED with their own `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
   prefix) followed the #3167 precedent exactly, and #3329's two new modules
   did the same — the owner-auth `routes/agent-task-budgets.ts` (one GET under

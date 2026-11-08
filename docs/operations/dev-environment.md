@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-11-07"
+last-verified: "2026-11-08"
 ---
 
 # Dev environment

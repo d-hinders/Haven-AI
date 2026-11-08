@@ -26,7 +26,7 @@
  * a caller disable its own Send affordance when NO account can sign.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Address } from 'viem'
 import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
 import ReceiveDialog from '@/components/ReceiveDialog'
@@ -54,6 +54,14 @@ export interface MoneyActionLauncher {
   selectedAccount: SmartAccount | null
   /** True when at least one account can sign a send (address AND chain). */
   canSend: boolean
+  /**
+   * #4705: true when Receive has this account's money covered — it is open
+   * on the account, or it already showed an arrival there that the caller has
+   * not yet consumed. Calling it consumes that arrival. The dashboard asks it
+   * on every funded read, so its funds toast (#4704) stays silent for money
+   * the dialog announced, even when the dashboard's own poll sees it later.
+   */
+  receiveCovers: (accountId: string) => boolean
   /** The picker, Receive and Send mounts. Render once per page. */
   dialogs: ReactNode
 }
@@ -61,10 +69,17 @@ export interface MoneyActionLauncher {
 export function useMoneyActionLauncher({
   accounts,
   onSent,
+  onConnectFirstAgent,
 }: {
   accounts: SmartAccount[]
   /** Called after a send settles — the dashboard refreshes its figures. */
   onSent?: () => void
+  /**
+   * #4705: passed to Receive as its first-deposit primary, "Connect your
+   * first agent". Pass it only when this page can open Connect agent and no
+   * agent exists yet.
+   */
+  onConnectFirstAgent?: () => void
 }): MoneyActionLauncher {
   const defaultAccount = useMemo(() => resolveDefaultAccount(accounts), [accounts])
 
@@ -139,6 +154,22 @@ export function useMoneyActionLauncher({
     setReceiveOpen(true)
   }, [])
 
+  // #4705: what Receive is showing, and the arrivals it announced. Refs, not
+  // state: the dashboard reads them from its overview effect, and a change
+  // here must not re-run that effect.
+  const receiveShowingRef = useRef<string | null>(null)
+  const receiveAnnouncedRef = useRef<Set<string>>(new Set())
+  const handleReceiveShowing = useCallback((accountId: string | null) => {
+    receiveShowingRef.current = accountId
+  }, [])
+  const handleReceiveArrived = useCallback((accountId: string) => {
+    receiveAnnouncedRef.current.add(accountId)
+  }, [])
+  const receiveCovers = useCallback((accountId: string) => {
+    const announced = receiveAnnouncedRef.current.delete(accountId)
+    return announced || receiveShowingRef.current === accountId
+  }, [])
+
   const closeSend = useCallback(() => {
     setSendOpen(false)
     setSendRecipient(undefined)
@@ -161,6 +192,9 @@ export function useMoneyActionLauncher({
         // wrong pre-pick is one switch away; one account renders no card.
         accounts={accounts}
         onClose={() => setReceiveOpen(false)}
+        onConnectFirstAgent={onConnectFirstAgent}
+        onShowingAccountChange={handleReceiveShowing}
+        onArrived={handleReceiveArrived}
       />
 
       {/*
@@ -190,6 +224,7 @@ export function useMoneyActionLauncher({
     requiresOtherDevice,
     selectedAccount,
     canSend,
+    receiveCovers,
     dialogs,
   }
 }

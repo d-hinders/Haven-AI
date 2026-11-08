@@ -143,6 +143,9 @@ const VARIANTS: readonly Variant[] = [
       await expect(dialog.getByAltText('QR code for Operations on Base Sepolia')).toBeVisible()
       // The variant's point: the onramp is hidden DESPITE the configured id.
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(0)
+      // #4705: the dialog watches for the deposit while open (the live dot is
+      // an infinite animation, which the capture cancels to its first frame).
+      await expect(dialog.getByText('Watching for your deposit…')).toHaveCount(1)
     },
   },
   {
@@ -154,6 +157,7 @@ const VARIANTS: readonly Variant[] = [
       await expect(dialog.getByAltText('QR code for Operations on Base')).toBeVisible()
       // And the faucet is gone with the testnet — not stacked under the onramp.
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(0)
+      await expect(dialog.getByText('Watching for your deposit…')).toHaveCount(1)
     },
   },
   {
@@ -164,6 +168,8 @@ const VARIANTS: readonly Variant[] = [
       await expect(dialog.getByText(UNRESOLVED_SENTENCE)).toHaveCount(1)
       await expect(dialog.getByRole('button', { name: ONRAMP_BUTTON })).toHaveCount(0)
       await expect(dialog.getByText(FAUCET_HEADING)).toHaveCount(0)
+      // No address, no watch (#4705): a refused network shows no arrival.
+      await expect(dialog.getByText('Watching for your deposit…')).toHaveCount(0)
     },
   },
 ]

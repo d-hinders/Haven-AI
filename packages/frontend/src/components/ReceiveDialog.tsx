@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import QRCode from 'qrcode'
 import { CreditCard, Droplet, X } from 'lucide-react'
 import { resolveChainOrNull } from '@/lib/chains'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import type { SmartAccount } from '@/context/AuthContext'
+import { useOptionalAuth, type SmartAccount } from '@/context/AuthContext'
 import { getFaucetUrl } from '@haven_ai/core'
 import { isTestnetChain } from '@/lib/marketplace'
 import { Button } from '@/components/ui/Button'
@@ -17,6 +18,9 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { useToast } from '@/components/ui/Toast'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { Icon } from '@/components/ui/Icon'
+import { DialogResult } from '@/components/ui/DialogResult'
+import { DialogActions } from '@/components/ui/DialogActions'
+import { ReceiveDepositWatch, type ReceiveArrival } from '@/components/ReceiveDepositWatch'
 
 const ONRAMP_APP_ID = process.env.NEXT_PUBLIC_COINBASE_ONRAMP_APP_ID
 
@@ -67,6 +71,20 @@ function buildOnrampUrl(accountAddress: string, chainShortName: string): string 
  * closed on an unregistered id (it checks `isRegisteredChain` before it ever
  * calls `getFaucetUrl`, which itself throws on one), so this never needs a
  * try/catch to stay safe.
+ *
+ * #4705: Receive notices the deposit. While it is open on an account it can
+ * show an address for, `ReceiveDepositWatch` says "Watching for your
+ * deposit…" with the live dot and watches that account's USDC on the
+ * dashboard overview; when it rises the dialog becomes its arrived state, a
+ * `DialogResult` announced through `role="status"` — Peak for the user's
+ * first money on this device, Step otherwise. The arrived state's actions:
+ * **View transaction** (the account's Activity tab — the dialog holds no
+ * hash, and the explorer-derived row can lag the chain read, so it never
+ * deep-links a row it may not have yet) and **Done**; on a first deposit a
+ * host that can connect an agent passes `onConnectFirstAgent`, and the
+ * primary becomes **Connect your first agent**. This overlay has no `Modal`
+ * footer, so the row is `DialogActions` in the body (primary on top below
+ * `sm`), or one full-width Done when there is one action.
  */
 export interface ReceiveDialogProps {
   open: boolean
@@ -78,10 +96,36 @@ export interface ReceiveDialogProps {
    */
   accounts?: SmartAccount[]
   onClose: () => void
+  /**
+   * #4705: offered as the primary of a FIRST deposit's arrived state. Only a
+   * host that can open Connect agent, and has no agent yet, passes it; the
+   * dialog closes first, then calls it.
+   */
+  onConnectFirstAgent?: () => void
+  /**
+   * #4705: the account the open dialog is showing (the picker can switch
+   * it), or `null` when closed — so the dashboard's funds toast (#4704) stays
+   * silent for money this dialog is already watching.
+   */
+  onShowingAccountChange?: (accountId: string | null) => void
+  /** #4705: called once when the arrived state shows, with its account. */
+  onArrived?: (accountId: string) => void
 }
 
-export default function ReceiveDialog({ open, account, accounts, onClose }: ReceiveDialogProps) {
+export default function ReceiveDialog({
+  open,
+  account,
+  accounts,
+  onClose,
+  onConnectFirstAgent,
+  onShowingAccountChange,
+  onArrived,
+}: ReceiveDialogProps) {
   const { toast } = useToast()
+  const userId = useOptionalAuth()?.user?.id ?? null
+  // #4705: the deposit the watch saw. Cleared on close, so the next open
+  // watches again from the balance it finds then.
+  const [arrival, setArrival] = useState<ReceiveArrival | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, open)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -102,8 +146,27 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
     if (!open) {
       setPickerId(null)
       setQrDataUrl(null)
+      setArrival(null)
     }
   }, [open])
+
+  const showingAccountId = open ? selectedAccount?.id ?? null : null
+  const onShowingAccountChangeRef = useRef(onShowingAccountChange)
+  onShowingAccountChangeRef.current = onShowingAccountChange
+  useEffect(() => {
+    onShowingAccountChangeRef.current?.(showingAccountId)
+  }, [showingAccountId])
+  useEffect(
+    () => () => {
+      onShowingAccountChangeRef.current?.(null)
+    },
+    [],
+  )
+
+  function handleArrived(next: ReceiveArrival) {
+    setArrival(next)
+    onArrived?.(next.accountId)
+  }
 
   // #1852 note, carried over with an edit: no chain guard here, deliberately.
   // The QR is suppressed in the unresolved state by the `chainConfig` branch
@@ -206,7 +269,17 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
             account card renders at all: the dialog is about that account by
             construction, and the QR's alt text still names it.
           */}
-          {showPicker ? (
+          {arrival && chainConfig ? (
+            <ReceiveArrived
+              arrival={arrival}
+              accountName={selectedAccount.name}
+              chainName={chainConfig.name}
+              onClose={onClose}
+              onConnectFirstAgent={onConnectFirstAgent}
+            />
+          ) : null}
+
+          {!arrival && showPicker ? (
             <Card hover={false} className="p-4">
               <label
                 htmlFor="receive-account-picker"
@@ -248,7 +321,7 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
             unrecoverable. So the address, the copy button, the QR toggle and
             the explorer link all go.
           */}
-          {chainConfig && accountAddress ? (
+          {arrival ? null : chainConfig && accountAddress ? (
             <>
               <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4">
                 <p className="text-xs font-medium text-[var(--v2-ink-3)]">Haven wallet address</p>
@@ -310,6 +383,15 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
               {networkRule && (
                 <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">{networkRule}</p>
               )}
+
+              {/* #4705: a picker switch reseeds the watch from the new
+                  account's balance (`lib/deposit-watch.ts`) — never an
+                  arrival. */}
+              <ReceiveDepositWatch
+                accountId={selectedAccount.id}
+                userId={userId}
+                onArrived={handleArrived}
+              />
 
               {(isTestnet || onrampAvailable) && (
                 <div className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-4">
@@ -434,6 +516,79 @@ export default function ReceiveDialog({ open, account, accounts, onClose }: Rece
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The arrived state (#4705). `DialogResult` owns the centred block and
+ * announces it (`role="status"`: this overlay moves no focus to it). The
+ * actions are the dialog's own, per `DialogActions` — see the docblock above.
+ */
+function ReceiveArrived({
+  arrival,
+  accountName,
+  chainName,
+  onClose,
+  onConnectFirstAgent,
+}: {
+  arrival: ReceiveArrival
+  accountName: string
+  chainName: string
+  onClose: () => void
+  onConnectFirstAgent?: () => void
+}) {
+  const router = useRouter()
+  const offerConnect = arrival.strength === 'peak' && onConnectFirstAgent !== undefined
+  // The arrived state replaces the address block, so focus that was in it
+  // (Copy address) would fall to <body> inside an aria-modal dialog. Move it
+  // to the primary then — and only then: focus elsewhere in the dialog (the
+  // Close button) stays where the person put it.
+  const primaryRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const active = document.activeElement
+    if (active === null || active === document.body) primaryRef.current?.focus()
+  }, [])
+
+  function viewTransaction() {
+    onClose()
+    router.push(`/accounts/${arrival.accountId}?tab=activity`)
+  }
+
+  function connectFirstAgent() {
+    onClose()
+    onConnectFirstAgent?.()
+  }
+
+  return (
+    <div className="space-y-5">
+      <DialogResult
+        state="success"
+        announce
+        strength={arrival.strength}
+        title={`${arrival.amount} USDC arrived`}
+        description={`It's in ${accountName} on ${chainName}.`}
+      >
+        <p>
+          <Button variant="tertiary" size="sm" onClick={viewTransaction}>
+            View transaction
+          </Button>
+        </p>
+      </DialogResult>
+      {offerConnect ? (
+        <DialogActions>
+          <Button variant="ghost" onClick={onClose}>
+            Done
+          </Button>
+          <Button ref={primaryRef} onClick={connectFirstAgent}>
+            Connect your first agent
+          </Button>
+        </DialogActions>
+      ) : (
+        <Button ref={primaryRef} className="w-full" onClick={onClose}>
+          Done
+        </Button>
+      )}
     </div>
   )
 }

@@ -129,10 +129,42 @@ vi.mock('@/components/DashboardActionPickerModal', () => ({
 
 // The one Receive dialog (#4094): a marker, so the wiring tests can tell
 // "opened for the chosen account" from "not mounted".
-vi.mock('@/components/ReceiveDialog', () => ({
-  default: ({ open, account }: { open: boolean; account: { name?: string } | null }) =>
-    open ? <div data-testid="receive-dialog">{account?.name ?? ''}</div> : null,
-}))
+// #4705: it also reports the account it shows (as the real dialog does, on
+// open and on close), offers an "Announce arrival" button standing in for the
+// watch seeing a deposit, and prints whether the host offered Connect.
+vi.mock('@/components/ReceiveDialog', async () => {
+  const { useEffect } = await import('react')
+  return {
+    default: function MockReceiveDialog({
+      open,
+      account,
+      onConnectFirstAgent,
+      onShowingAccountChange,
+      onArrived,
+      onClose,
+    }: {
+      open: boolean
+      account: { id?: string; name?: string } | null
+      onClose: () => void
+      onConnectFirstAgent?: () => void
+      onShowingAccountChange?: (accountId: string | null) => void
+      onArrived?: (accountId: string) => void
+    }) {
+      const showing = open ? account?.id ?? null : null
+      useEffect(() => {
+        onShowingAccountChange?.(showing)
+      }, [showing, onShowingAccountChange])
+      return open ? (
+        <div data-testid="receive-dialog">
+          {account?.name ?? ''}
+          {onConnectFirstAgent ? <span>offers-connect-first-agent</span> : null}
+          <button onClick={() => account?.id && onArrived?.(account.id)}>Announce arrival</button>
+          <button onClick={onClose}>Close receive</button>
+        </div>
+      ) : null
+    },
+  }
+})
 
 // The dashboard's Send is the delegation rail's owner-send (#4094): a marker
 // carrying the account it would sign for, so the tests can pin WHICH account
@@ -1575,6 +1607,78 @@ describe('DashboardClient', () => {
       rerender(<DashboardClient />)
       expect(mockToastSuccess).toHaveBeenCalledOnce()
       expect(mockToastSuccess).toHaveBeenCalledWith('3.00 USDC arrived in Main account')
+    })
+
+    // #4705: money Receive covers is Receive's to announce.
+    it('stays silent while Receive is open on that account', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.getByTestId('receive-dialog')).toBeInTheDocument()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
+
+    it('stays silent for an arrival Receive already showed, when the dashboard sees it after close', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Announce arrival' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Close receive' }))
+      expect(screen.queryByTestId('receive-dialog')).not.toBeInTheDocument()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
+
+    it('an announcement is consumed: a later drain and refill with Receive closed toasts', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Announce arrival' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Close receive' }))
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      withAccount('0', false)
+      rerender(<DashboardClient />)
+      withAccount('5000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).toHaveBeenCalledOnce()
+      expect(mockToastSuccess).toHaveBeenCalledWith('5.00 USDC arrived in Main account')
+    })
+
+    it('Receive offers Connect your first agent only while no agent exists', () => {
+      withAccount('0', false)
+      mockUseAgents.mockReturnValue({ agents: [], loading: false, refetch: vi.fn() })
+      const first = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.getByText('offers-connect-first-agent')).toBeInTheDocument()
+      first.unmount()
+
+      withAccount('0', false)
+      const second = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.queryByText('offers-connect-first-agent')).not.toBeInTheDocument()
+      second.unmount()
+
+      // A failed agents read is not "no agents".
+      withAccount('0', false)
+      mockUseAgents.mockReturnValue({ agents: [], loading: false, error: 'Failed to load agents', refetch: vi.fn() })
+      render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.queryByText('offers-connect-first-agent')).not.toBeInTheDocument()
+    })
+
+    it('any funded read records first money on this device (#4705)', () => {
+      window.localStorage.removeItem('haven-first-money-seen:user-1')
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      expect(window.localStorage.getItem('haven-first-money-seen:user-1')).toBeNull()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(window.localStorage.getItem('haven-first-money-seen:user-1')).toBe('1')
+      window.localStorage.removeItem('haven-first-money-seen:user-1')
     })
 
     it('never says the agents can spend now', () => {

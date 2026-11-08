@@ -13,7 +13,8 @@ const {
   mockUsePreferences: vi.fn(),
 }))
 
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth() }))
+// #4705: ReceiveDialog reads the optional user for its first-money marker.
+vi.mock('@/context/AuthContext', () => ({ useAuth: () => mockUseAuth(), useOptionalAuth: () => mockUseAuth() }))
 vi.mock('@/hooks/useAccounts', () => ({ useAccounts: () => mockUseAccounts() }))
 vi.mock('@/hooks/useAgents', () => ({ useAgents: () => mockUseAgents() }))
 vi.mock('@/hooks/usePreferences', () => ({ usePreferences: () => mockUsePreferences() }))

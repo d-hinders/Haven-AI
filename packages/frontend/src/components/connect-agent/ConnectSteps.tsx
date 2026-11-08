@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import { Check } from 'lucide-react'
 import { Icon } from '../ui/Icon'
+import { Milestone } from '@/components/ui/Milestone'
 import { Spinner } from '@haven_ai/ui/Spinner'
 import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS } from '@/components/ui/StepProgress'
 
@@ -23,7 +24,8 @@ import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS }
  * → approve checklist rather than a general-purpose progress primitive.
  *
  * Marker states — one disc size and StepProgress's tokens, no numerals:
- * - `done`    — success-soft disc with a check;
+ * - `done`    — success-soft disc with a check; plays `Milestone` Step when
+ *               the row opts in with `play` (#4706);
  * - `active`  — the shared ink-2 ring with no fill or dot: the user's move;
  * - `working` — the shared spinner in ink-2 inside a border disc,
  *               for a row whose outcome is in flight and needs nothing from
@@ -39,6 +41,13 @@ export interface ConnectStepRow {
   /** Right-aligned control on the heading line (e.g. "Copy again"). */
   aside?: ReactNode
   children?: ReactNode
+  /**
+   * #4706: play `Milestone` Step on this row's done mark. Only a row that goes
+   * done while the user is watching opts in — a row already done when the
+   * session first saw the flow renders the static check. Default `false`, so
+   * the `/design-system` showcase never animates on first paint.
+   */
+  play?: boolean
   /**
    * Below the `sm` breakpoint, render `children` at the list's full width
    * instead of indented under the heading. For a row whose body is a whole
@@ -70,7 +79,7 @@ const STATE_LABEL: Record<ConnectStepRowState, string | null> = {
   pending: 'Not started',
 }
 
-function Marker({ state, halo }: { state: ConnectStepRowState; halo: boolean }) {
+function Marker({ state, halo, play }: { state: ConnectStepRowState; halo: boolean; play: boolean }) {
   // One disc for every state, so the marker column stays a straight edge (the
   // working spinner used to sit bare and ragged it). The tokens are
   // StepProgress's on purpose: the header band and this list are one
@@ -78,10 +87,15 @@ function Marker({ state, halo }: { state: ConnectStepRowState; halo: boolean }) 
   // Decorative: the row heading carries the state in words.
   const base = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-full sm:h-8 sm:w-8'
   if (state === 'done') {
+    // #4706: the done mark is the one place this list plays `Milestone` Step.
+    // `play` is decided above `ConnectStepShell`'s key (the shell remounts its
+    // body on every sub-state change, so a mount cannot mean "just happened").
     return (
-      <span aria-hidden="true" className={`${base} ${DONE_STEP_DISC_CLASS}`}>
-        <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} />
-      </span>
+      <Milestone strength="step" play={play}>
+        <span aria-hidden="true" className={`${base} ${DONE_STEP_DISC_CLASS}`}>
+          <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} />
+        </span>
+      </Milestone>
     )
   }
   if (state === 'working') {
@@ -123,8 +137,17 @@ export function ConnectSteps({ rows, halo = false }: { rows: ConnectStepRow[]; h
             aria-current={row.state === 'active' ? 'step' : undefined}
           >
             <div className="flex gap-3.5">
-              <div className="flex flex-col items-center gap-1.5">
-                <Marker state={row.state} halo={halo && row.state === 'active'} />
+              {/* #4706: the marker column carries 8px of padding and an equal
+                  negative margin, and clips at the padding box. The padding
+                  box is therefore 16px larger than the disc on each axis, which
+                  is exactly the room `Milestone` Step's 1.25× check-pop and the
+                  active row's 8px halo need — so neither is clipped, and
+                  neither grows the column's scroll box (the e2e dialog-overflow
+                  gate measures every box). The negative margin keeps the disc,
+                  the connector line and the text column exactly where they
+                  were. */}
+              <div className="flex flex-col items-center gap-1.5 overflow-clip p-2 -m-2">
+                <Marker state={row.state} halo={halo && row.state === 'active'} play={row.play ?? false} />
                 {!last && <span aria-hidden="true" className="w-px flex-1 bg-[var(--v2-border)]" />}
               </div>
               {/* The row spacing sits on THIS column, not the <li>: padding on

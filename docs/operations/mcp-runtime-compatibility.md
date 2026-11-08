@@ -89,6 +89,16 @@ covers:
 last-verified: "2026-11-07"
 ---
 
+> **No contract change (#4706, 2026-11-08): the connect flow names the agent
+> and offers a read-only check.** `WaitingForConnector.tsx` and `setup-copy.ts`
+> are on this contract's cover list. The waiting screen gains the agent row
+> above its checklist (presentational: the name and "Listening for it…", then
+> "Connected just now"; it owns no live region), and `setup-copy.ts` gains the
+> "Say hello" prompt the done state copies. No runtime-status copy, setup
+> command, upgrade hint, runtime detection or connector behaviour moves;
+> `runtime-status-copy.test.ts` is untouched. `last-verified` is not
+> re-stamped: this block is the scope.
+
 > **No contract change (#4675, 2026-11-05): the agent runbook says signup is
 > passkey-only.** `packages/sdk/src/agent-guidance.ts` is on this contract's
 > cover list. Its account step and signup hand-off script said signup offers

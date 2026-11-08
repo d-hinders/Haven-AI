@@ -108,6 +108,9 @@ vi.mock('@/hooks/useTransactionsFeed', async () => ({
     partialFailure: feedState.partialFailure,
     truncated: feedState.truncated,
     failedAccountIds: [],
+    // #4708: the Live-row identities. Empty here — this file is about the
+    // export and the URL, and the Live comparison has its own tests.
+    liveKeys: new Set<string>(),
     loadMore: feedState.loadMore,
     refresh: feedState.refresh,
   }),

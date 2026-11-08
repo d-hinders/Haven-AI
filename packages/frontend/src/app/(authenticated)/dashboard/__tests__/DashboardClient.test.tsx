@@ -168,7 +168,7 @@ vi.mock('@/components/ui/Toast', async () => {
   }
 })
 
-import DashboardClient from '../DashboardClient'
+import DashboardClient, { formatUsdcArrival } from '../DashboardClient'
 import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
 
 const SAFE = {
@@ -1476,6 +1476,21 @@ describe('DashboardClient', () => {
     })
   })
 
+  describe('formatUsdcArrival (#4704)', () => {
+    it('formats whole tokens with at least two decimals and reads malformed input as unknown', () => {
+      expect(formatUsdcArrival('25000000', 6)).toBe('25.00')
+      expect(formatUsdcArrival('500', 6)).toBe('0.0005')
+      expect(formatUsdcArrival('1234567890000', 6)).toBe('1,234,567.89')
+      expect(formatUsdcArrival(null, 6)).toBeNull()
+      expect(formatUsdcArrival('25000000', null)).toBeNull()
+      expect(formatUsdcArrival('abc', 6)).toBeNull()
+      expect(formatUsdcArrival('0', 6)).toBeNull()
+      // A malformed exponent must not throw inside the toast effect.
+      expect(formatUsdcArrival('25000000', -1)).toBeNull()
+      expect(formatUsdcArrival('25000000', 1.5)).toBeNull()
+    })
+  })
+
   // #4704: "You're in" has just said it, so the dashboard no longer repeats
   // a welcome toast — and no "just onboarded" flag exists to read.
   describe('no welcome toast on arrival (#4704)', () => {
@@ -1530,15 +1545,17 @@ describe('DashboardClient', () => {
 
     it('with two accounts, only the one that went false → true toasts, named by its own id', () => {
       const second = { ...ACCOUNT, accountId: 'acct-2' }
-      const twoAccounts = (a: [string, boolean], b: [string, boolean]) =>
-        mockBaseState([], {
-          accounts: [
-            { ...ACCOUNT, usdcBalanceAtomic: a[0], funded: a[1] },
-            { ...second, usdcBalanceAtomic: b[0], funded: b[1] },
-          ],
-        })
+      // `reversed` swaps the overview's account order between renders, so a
+      // funded-map keyed by position would compare the wrong accounts.
+      const twoAccounts = (a: [string, boolean], b: [string, boolean], reversed = false) => {
+        const rows = [
+          { ...ACCOUNT, usdcBalanceAtomic: a[0], funded: a[1] },
+          { ...second, usdcBalanceAtomic: b[0], funded: b[1] },
+        ]
+        mockBaseState([], { accounts: reversed ? rows.reverse() : rows })
+      }
       // The second account is listed FIRST in the session user's accounts, so
-      // an index-keyed map or a name lookup by position would pick the wrong one.
+      // a name lookup by position would name the wrong one.
       const sessionUser = {
         user: {
           id: 'user-1',
@@ -1551,7 +1568,7 @@ describe('DashboardClient', () => {
       twoAccounts(['0', false], ['7000000', true])
       mockUseAuth.mockReturnValue(sessionUser)
       const { rerender } = render(<DashboardClient />)
-      twoAccounts(['3000000', true], ['7000000', true])
+      twoAccounts(['3000000', true], ['7000000', true], true)
       mockUseAuth.mockReturnValue(sessionUser)
       rerender(<DashboardClient />)
       expect(mockToastSuccess).toHaveBeenCalledOnce()

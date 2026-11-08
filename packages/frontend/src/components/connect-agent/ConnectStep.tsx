@@ -132,14 +132,17 @@ export function ConnectStep({
     // previous sub-state would replay on the remount. Clear first.
     setPlayingRows((prev) => (prev.size === 0 && playable.length === 0 ? prev : new Set(playable)))
     if (playTimerRef.current !== null) window.clearTimeout(playTimerRef.current)
-    if (playable.length === 0) return
-    if (playable.includes('paste')) {
+    // The announcement is the change, not the play: the manual path's row 2
+    // still goes done ("Credentials saved") and is announced once, even though
+    // its check does not pop.
+    if (justDone.includes('paste')) {
       setAnnouncement(
         manualPath ? 'Credentials saved' : agentName ? `${agentName} connected` : 'Agent connected',
       )
-    } else if (playable.includes('approve')) {
+    } else if (justDone.includes('approve')) {
       setAnnouncement('Budget approved')
     }
+    if (playable.length === 0) return
     playTimerRef.current = window.setTimeout(() => {
       setPlayingRows(new Set())
       playTimerRef.current = null

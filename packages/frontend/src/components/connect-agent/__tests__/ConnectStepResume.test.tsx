@@ -520,6 +520,36 @@ describe('ConnectStep agent row and Step (#4706)', () => {
     }
   })
 
+  it('announces "Credentials saved" on the manual path without playing the check', () => {
+    vi.useFakeTimers()
+    try {
+      const manualStatus = { ...STATUS, install_status: { manual_credential_fallback: true } }
+      const waiting = resumedFlow({
+        setup: { setup_id: STATUS.setup_id, expires_at: STATUS.expires_at },
+        resumed: false,
+        setupStatus: { ...manualStatus, status: 'awaiting_connection' },
+        connectView: { kind: 'waiting_for_connector' },
+      })
+      const { container, rerender } = render(<ConnectStep flow={waiting} />)
+      rerender(
+        <ConnectStep
+          flow={resumedFlow({
+            setup: { setup_id: STATUS.setup_id, expires_at: STATUS.expires_at },
+            resumed: false,
+            setupStatus: { ...manualStatus, status: 'awaiting_wallet_approval' },
+            connectView: { kind: 'delegation_approval', agentId: 'agent-1' },
+          })}
+        />,
+      )
+      expect(liveRegion(container)?.textContent).toBe('Credentials saved')
+      // The manual path's row 2 was already done in the waiting screen, so its
+      // check does not pop.
+      expect(container.querySelector('.animate-check-pop')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('holds #3832: the done state carries no success disc above the grant line', () => {
     const { container } = render(
       <ConnectStep

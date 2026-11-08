@@ -298,6 +298,16 @@ describe('ReceiveDialog — Peak for first money, Step after (#4705)', () => {
     expect(screen.queryByRole('button', { name: 'Connect your first agent' })).toBeNull()
   })
 
+  it('another account funded and drained again while open still makes the next deposit Step', () => {
+    setOverview(row(MAIN.id, '0'), row(SAVINGS.id, '0'))
+    const { poll } = mount({ onConnectFirstAgent: vi.fn() })
+    poll(row(MAIN.id, '0'), row(SAVINGS.id, '7000000'))
+    poll(row(MAIN.id, '0'), row(SAVINGS.id, '0'))
+    poll(row(MAIN.id, '25000000'), row(SAVINGS.id, '0'))
+    expect(screen.getByText('25.00 USDC arrived')).toBeInTheDocument()
+    expect(hasBloom()).toBe(false)
+  })
+
   it('an unknown account at open is not "first": Step', () => {
     setOverview(row(MAIN.id, '0'), row(SAVINGS.id, null))
     const { poll } = mount()

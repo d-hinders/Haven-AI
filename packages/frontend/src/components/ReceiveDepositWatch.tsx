@@ -45,6 +45,10 @@ export function ReceiveDepositWatch({
   const { data } = useDashboardOverview()
   const watchRef = useRef(INITIAL_DEPOSIT_WATCH)
   const firstRef = useRef<boolean | null>(null)
+  // Another account read as funded at any point while open — even if it was
+  // drained again before this account's money landed — means this money is
+  // not the first in sight.
+  const sawOtherFundedRef = useRef(false)
   const onArrivedRef = useRef(onArrived)
   onArrivedRef.current = onArrived
 
@@ -60,6 +64,10 @@ export function ReceiveDepositWatch({
     }
     if (userId !== null && accounts.some((candidate) => candidate.funded === true)) {
       markFirstMoneySeen(userId)
+    }
+
+    if (accounts.some((candidate) => candidate.accountId !== accountId && candidate.funded === true)) {
+      sawOtherFundedRef.current = true
     }
 
     const account = accounts.find((candidate) => candidate.accountId === accountId)
@@ -82,9 +90,7 @@ export function ReceiveDepositWatch({
     // …and Peak needs this to be the only money in sight: money that landed
     // on another account while this dialog was open was seen first (and the
     // dashboard may already have toasted it).
-    const peak =
-      firstRef.current === true &&
-      accounts.every((candidate) => candidate.accountId === accountId || candidate.funded !== true)
+    const peak = firstRef.current === true && !sawOtherFundedRef.current
     onArrivedRef.current({ accountId, amount, strength: peak ? 'peak' : 'step' })
   }, [accounts, accountId, userId])
 

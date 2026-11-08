@@ -2624,8 +2624,11 @@ announces it — the money card's figures still change.
 
 **Only fresh reads count.** A balance the overview serves as last-known
 (`usdcBalanceFreshness: stale`) is ignored like `null`: it neither seeds, nor
-lowers, nor rises, so an old figure coming back can never read as money
-arriving. And Peak needs this account's money to be the first on any of the
+lowers, nor rises: a balance marked stale or unavailable cannot read as
+money arriving. Accepted residual: an old figure the overview serves
+UNMARKED — a per-replica cache entry up to 60 s old when several backend
+replicas run, or a lagging fallback RPC node answering after the primary
+failed — can still come back after a fresher, lower one and read as a rise. And Peak needs this account's money to be the first on any of the
 user's accounts at the moment it lands, not only at open: money already seen
 on another account makes it a Step.
 

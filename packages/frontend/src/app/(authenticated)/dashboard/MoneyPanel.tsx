@@ -207,6 +207,11 @@ export interface MoneyPanelProps {
   receiveSecondary?: boolean
   onReceive: () => void
   onSend: () => void
+  /**
+   * The signed-in user the balance count-up's entry latch is keyed on (#4704).
+   * Absent: no entrance, the balance shows straight away.
+   */
+  countUpUserId?: string | null
 }
 
 export default function MoneyPanel({
@@ -232,11 +237,17 @@ export default function MoneyPanel({
   usdcFunded = null,
   onReceive,
   onSend,
+  countUpUserId = null,
 }: MoneyPanelProps) {
-  // Animate the balance from 0 → totalFiat on first paint after data loads.
-  // Subsequent changes (currency switches, polled refresh) snap instantly.
-  // Respects prefers-reduced-motion via the hook.
-  const animatedTotal = useCountUp(totalFiat, { enabled: !loading && !unavailable })
+  // #4704: the balance counts up on this tab's entrance only (owner decision 3
+  // on #4701) — a new tab, a phone launch, or after signing back in. A reload,
+  // a return from another page and any update while open show the number
+  // straight away, and so does reduced motion. The decision waits for the
+  // first loaded balance, never a loading placeholder.
+  const animatedTotal = useCountUp(totalFiat, {
+    enabled: !loading && !unavailable,
+    userId: countUpUserId,
+  })
 
   // #4167's primary-button rule: Send primary once funded (and while the
   // state is unknown — null never reads as empty); Receive primary and Send

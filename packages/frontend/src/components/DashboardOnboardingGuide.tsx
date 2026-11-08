@@ -1,9 +1,10 @@
 'use client'
 
-import { useId, type ReactNode } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Check } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Milestone } from '@/components/ui/Milestone'
 import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS } from '@/components/ui/StepProgress'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
@@ -33,6 +34,12 @@ interface StepProps {
   body: string
   completedBody: string
   cta?: StepCta
+  /**
+   * #4704: play Milestone Step when this step completes while it is watched.
+   * Steps 1 and 2 only: the guide is replaced as soon as step 3 completes, and
+   * the first agent payment is #4707's card.
+   */
+  popOnComplete?: boolean
 }
 
 /** The most recently connected agent still waiting for setup, and how many more are. */
@@ -132,6 +139,7 @@ export default function DashboardOnboardingGuide({
     // so the done line states the fact, not a capability (#3818 design review).
     completedBody: 'Your account holds USDC.',
     cta: usdcFunded === false ? { label: 'Add funds', onClick: onAddFunds } : undefined,
+    popOnComplete: true,
   }
 
   // Connecting before funding stays allowed (owner decision 2026-10-09): the
@@ -158,6 +166,7 @@ export default function DashboardOnboardingGuide({
       : 'Connect an agent and approve a budget it can spend from.',
     completedBody: 'An agent is connected with a budget.',
     cta: step2Cta,
+    popOnComplete: true,
   }
 
   const step3: StepProps = {
@@ -221,7 +230,26 @@ export function SetupCompleteLine({ onDismiss }: { onDismiss: () => void }) {
   )
 }
 
-function ChecklistRow({ status, number, title, body, completedBody, cta }: StepProps) {
+function ChecklistRow({ status, number, title, body, completedBody, cta, popOnComplete = false }: StepProps) {
+  // #4704: Milestone Step plays only on a completion this row WATCHED — the
+  // status changing to `complete` while mounted. The first render records the
+  // status it found, so a step that is already complete on load (a reload, a
+  // return to the dashboard, the /design-system specimens) just shows its
+  // check. Kept in refs and decided during render, so the check is never drawn
+  // once statically before it pops; a StrictMode double render sees the
+  // status already recorded and decides the same way.
+  const seenStatusRef = useRef<StepStatus>(status)
+  const poppedRef = useRef(false)
+  if (seenStatusRef.current !== status) {
+    // Only a step the owner could still do — `active` or `available` — pops
+    // when it completes. `unknown → complete` is a balance read recovering
+    // for an account that was already funded, not something that just
+    // happened, so it shows the check without a pop (the funds toast's
+    // null → true rule, #4704 design review).
+    const wasOpen = seenStatusRef.current === 'active' || seenStatusRef.current === 'available'
+    poppedRef.current = popOnComplete && wasOpen && status === 'complete'
+    seenStatusRef.current = status
+  }
   const isActive = status === 'active'
   const isComplete = status === 'complete'
   const isLocked = status === 'locked'
@@ -242,7 +270,7 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
       className={`flex flex-col gap-3 px-4 py-3 ${rowClass}`}
     >
       <div className="flex min-w-0 items-start gap-3">
-        <StatusCircle status={status} number={number} />
+        <StatusCircle status={status} number={number} pop={poppedRef.current} />
         <div className="min-w-0">
           <p
             className={`text-sm font-medium ${
@@ -276,15 +304,17 @@ function ChecklistRow({ status, number, title, body, completedBody, cta }: StepP
   )
 }
 
-function StatusCircle({ status, number }: { status: StepStatus; number: number }) {
+function StatusCircle({ status, number, pop = false }: { status: StepStatus; number: number; pop?: boolean }) {
   if (status === 'complete') {
     return (
-      <span
-        aria-hidden="true"
-        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${DONE_STEP_DISC_CLASS}`}
-      >
-        <CheckIcon />
-      </span>
+      <Milestone strength="step" play={pop} className="flex-shrink-0">
+        <span
+          aria-hidden="true"
+          className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${DONE_STEP_DISC_CLASS}`}
+        >
+          <CheckIcon />
+        </span>
+      </Milestone>
     )
   }
   if (status === 'active') {

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
@@ -227,5 +227,88 @@ describe('SetupCompleteLine (#3818)', () => {
     const sentence = line.querySelector('p') as HTMLElement
     expect(sentence.className).toMatch(/(^|\s)gap-3(\s|$)/)
     expect((sentence.firstElementChild as HTMLElement).className).toMatch(/(^|\s)w-8(\s|$)/)
+  })
+})
+
+// #4704: a guide step plays Milestone Step only when it completes while the
+// guide is open. The global setup stub answers `reduce`, so these cases set
+// no-preference explicitly — under `reduce` Milestone never opts in at all.
+describe('guide steps play Step on a completion you watch (#4704)', () => {
+  function setReducedMotion(reduce: boolean) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: reduce && query === '(prefers-reduced-motion: reduce)',
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    })
+  }
+  const base = {
+    hasSetUpAgent: false,
+    hasFirstAgentPayment: false,
+    onAddFunds: vi.fn(),
+    onAddAgent: vi.fn(),
+    onShowAgentUsage: vi.fn(),
+  }
+  const stepRow = (n: number) => document.querySelectorAll('li[data-status]')[n - 1] as HTMLElement
+
+  afterEach(() => setReducedMotion(true))
+
+  it('a step that completes while watched pops', () => {
+    setReducedMotion(false)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={false} />)
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).not.toBeNull()
+  })
+
+  it('a step already complete when the guide opens (a reload) just shows its check', () => {
+    setReducedMotion(false)
+    render(<DashboardOnboardingGuide {...base} usdcFunded={true} hasSetUpAgent={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(document.querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('a balance read that recovers (unknown → complete) shows the check without a pop', () => {
+    setReducedMotion(false)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={null} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('unknown')
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('step 2 completing while watched pops too', () => {
+    setReducedMotion(false)
+    const props = { ...base, usdcFunded: true }
+    const { rerender } = render(<DashboardOnboardingGuide {...props} />)
+    rerender(<DashboardOnboardingGuide {...props} hasSetUpAgent={true} />)
+    expect(stepRow(2).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(2).querySelector('.animate-check-pop')).not.toBeNull()
+  })
+
+  it('step 3 never pops: the first payment is its own card (#4707)', () => {
+    setReducedMotion(false)
+    const props = { ...base, usdcFunded: true, hasSetUpAgent: true }
+    const { rerender } = render(<DashboardOnboardingGuide {...props} />)
+    rerender(<DashboardOnboardingGuide {...props} hasFirstAgentPayment={true} />)
+    expect(stepRow(3).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(3).querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('under reduced motion the completed step shows its check with no pop', () => {
+    setReducedMotion(true)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={false} />)
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
   })
 })

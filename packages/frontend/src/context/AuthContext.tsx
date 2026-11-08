@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { api, type ListPasskeysResponse } from '@/lib/api'
 import { LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
+import { clearEntryLatches } from '@/lib/entry-latch'
 import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
@@ -197,6 +198,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         // Token invalid or expired
         localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+        // #4704: an expired session is a sign-out too — the next sign-in is an entrance.
+        clearEntryLatches()
         setToken(null)
         setPasskeys([])
       })
@@ -255,6 +258,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // #3719 retired the global active account; the key is no longer written,
     // but a browser that ran an earlier build may still hold one.
     localStorage.removeItem(LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY)
+    // #4704: signing back in is an entrance again (the balance counts up).
+    clearEntryLatches()
     setToken(null)
     setUser(null)
     setPasskeys([])

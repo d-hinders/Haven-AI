@@ -43,21 +43,6 @@ type Phase = 'create' | 'success'
 /** How long the success state holds before handing off to the dashboard. */
 export const SUCCESS_REDIRECT_MS = 2000
 
-/**
- * Capture the "just onboarded" moment so the dashboard can fire its welcome
- * toast / hero fade exactly once on first arrival. Session-scoped so a normal
- * refresh of the dashboard later in the session doesn't re-fire.
- */
-function markJustOnboarded() {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem('haven-just-onboarded', '1')
-  } catch {
-    // sessionStorage can throw in private mode — fall back to a dashboard
-    // arrival without the celebration. No user-facing impact.
-  }
-}
-
 export default function OnboardingClient() {
   const { user, loading, updateUser, refreshUser, logout } = useAuth()
   const router = useRouter()
@@ -117,7 +102,8 @@ export default function OnboardingClient() {
   }, [loading, phase, router, user, nextPath])
 
   const goToDashboard = useCallback(() => {
-    markJustOnboarded()
+    // #4704: no "just onboarded" flag any more — "You're in" has just said it,
+    // so the dashboard no longer repeats it in a welcome toast.
     router.push(nextPath ?? '/dashboard')
   }, [router, nextPath])
 

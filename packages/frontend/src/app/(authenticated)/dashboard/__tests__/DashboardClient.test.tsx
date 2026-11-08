@@ -1476,43 +1476,67 @@ describe('DashboardClient', () => {
     })
   })
 
-  describe('first-arrival welcome toast', () => {
-    it('fires a welcome toast and clears the flag when arriving from onboarding', () => {
+  // #4704: "You're in" has just said it, so the dashboard no longer repeats
+  // a welcome toast — and no "just onboarded" flag exists to read.
+  describe('no welcome toast on arrival (#4704)', () => {
+    it('does not toast a welcome, even when a stale pre-#4704 flag is in the session', () => {
       window.sessionStorage.setItem('haven-just-onboarded', '1')
-
       render(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalledWith(expect.stringContaining('Welcome to Haven'))
+      window.sessionStorage.removeItem('haven-just-onboarded')
+    })
+  })
 
+  // #4704: the funds toast is true — one account's own USDC going from
+  // known-empty to funded, with the amount and the account named.
+  describe('funds toast (#4704)', () => {
+    const ACCOUNT = {
+      accountId: 'safe-1',
+      chainId: 8453,
+      isTestnet: false,
+      usdcDecimals: 6,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '0',
+    }
+    function withAccount(usdcBalanceAtomic: string | null, funded: boolean | null) {
+      mockBaseState([], { accounts: [{ ...ACCOUNT, usdcBalanceAtomic, funded }] })
+    }
+
+    it('fires on false → true with the amount and the account', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
       expect(mockToastSuccess).toHaveBeenCalledOnce()
-      expect(mockToastSuccess).toHaveBeenCalledWith(
-        'Welcome to Haven, Ada — your account is live.',
-      )
-      // Flag is consumed so a refresh later in the session does NOT re-fire.
-      expect(window.sessionStorage.getItem('haven-just-onboarded')).toBeNull()
+      expect(mockToastSuccess).toHaveBeenCalledWith('25.00 USDC arrived in Main account')
     })
 
-    it('does not fire the welcome toast on a normal dashboard render', () => {
-      // No session flag set.
-      render(<DashboardClient />)
-
-      expect(mockToastSuccess).not.toHaveBeenCalledWith(
-        expect.stringContaining('Welcome to Haven'),
-      )
+    it('does not fire on null → true: the first successful read is not money arriving', () => {
+      withAccount(null, null)
+      const { rerender } = render(<DashboardClient />)
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
     })
 
-    it('falls back silently when sessionStorage is unavailable', () => {
-      // Simulate private-browsing-style failure on read.
-      const getSpy = vi
-        .spyOn(window.sessionStorage.__proto__, 'getItem')
-        .mockImplementation(() => {
-          throw new Error('sessionStorage disabled')
-        })
+    it('does not fire on first load of an already funded account, nor on a later top-up', () => {
+      withAccount('25000000', true)
+      const { rerender } = render(<DashboardClient />)
+      withAccount('40000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
 
-      expect(() => render(<DashboardClient />)).not.toThrow()
-      expect(mockToastSuccess).not.toHaveBeenCalledWith(
-        expect.stringContaining('Welcome to Haven'),
-      )
-
-      getSpy.mockRestore()
+    it('never says the agents can spend now', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      withAccount('500', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).toHaveBeenCalledWith('0.0005 USDC arrived in Main account')
+      for (const call of mockToastSuccess.mock.calls) {
+        expect(String(call[0])).not.toMatch(/can spend now/i)
+      }
     })
   })
 })

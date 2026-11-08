@@ -735,7 +735,9 @@ test.describe('product-route visual regression', () => {
         // `animations: 'disabled'` below settles CSS animations and transitions.
         // It does NOT touch a JS `requestAnimationFrame` loop driving React
         // state, and `/dashboard` has one: `useCountUp` animates the Total
-        // balance figure over 600 ms on mount. What actually settles that is
+        // balance figure over 600 ms on this tab's ENTRANCE (#4704 — each
+        // capture is a fresh browser context, so a fresh sessionStorage, so
+        // every capture is an entrance and counts). What actually settles that is
         // `toHaveScreenshot`'s own stabilisation — it re-captures until two
         // consecutive raw frames match — so this is a real dependency on an
         // implicit mechanism rather than on anything asserted here. Named

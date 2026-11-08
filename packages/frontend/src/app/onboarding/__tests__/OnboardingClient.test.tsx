@@ -218,7 +218,7 @@ describe('OnboardingClient (#1162)', () => {
     expect(screen.getByRole('status').textContent).toContain("You're in")
   })
 
-  it('auto-advances to the dashboard, marking just-onboarded before navigating', async () => {
+  it('auto-advances to the dashboard', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     render(<OnboardingClient />)
     await completeCreation()
@@ -230,7 +230,6 @@ describe('OnboardingClient (#1162)', () => {
     })
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/dashboard'))
-    expect(window.sessionStorage.getItem('haven-just-onboarded')).toBe('1')
   })
 
   it('navigates immediately when the user does not want to wait', async () => {
@@ -240,7 +239,6 @@ describe('OnboardingClient (#1162)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go to dashboard' }))
 
     expect(mockPush).toHaveBeenCalledWith('/dashboard')
-    expect(window.sessionStorage.getItem('haven-just-onboarded')).toBe('1')
   })
 
   it('surfaces a passkey-unsupported failure without offering a wallet fallback', async () => {

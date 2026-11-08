@@ -8,7 +8,6 @@ import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
-import { displayName } from '@/lib/user'
 import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
@@ -110,8 +109,9 @@ export default function DashboardClient() {
   // shared rules module — the same per-account USDC (#3803) and agent list the
   // "Needs attention" rules read, so the guide and the card cannot disagree. Step 1
   // is USDC on the account (agents spend USDC; ETH dust does not count), step 2
-  // an agent that can actually pay. `hasFunds` above stays as it is: the hero,
-  // the funded toast and the focused view read it.
+  // an agent that can actually pay. `hasFunds` above stays as it is: the hero
+  // and the focused view read it (#4704 moved the funds toast onto the
+  // per-account `funded` read below).
   const createdAtById = useMemo(
     () => Object.fromEntries(agents.map((agent) => [agent.id, agent.created_at])),
     [agents],
@@ -226,45 +226,6 @@ export default function DashboardClient() {
   const setupHidden =
     setupHideState.hiddenAtCount !== null && completedCount <= setupHideState.hiddenAtCount
 
-  // Celebrate the first-fund moment: when hasFunds flips false → true, fire
-  // a success toast. Only after data is ready, to avoid firing on initial
-  // mount before the balances hook has resolved.
-  const previousFundedRef = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (!dataReady) return
-    if (previousFundedRef.current === false && hasFunds) {
-      toast.success('Funds received — your agents can spend now')
-    }
-    previousFundedRef.current = hasFunds
-  }, [dataReady, hasFunds, toast])
-
-  // First arrival from the onboarding wizard — fire a single welcome toast
-  // so the moment of arrival nods to the achievement without shouting. The
-  // session flag is set by the wizard's "Go to dashboard" CTA and cleared
-  // here so a refresh later in the same session doesn't re-fire.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!user) return
-    let justOnboarded = false
-    try {
-      justOnboarded = window.sessionStorage.getItem('haven-just-onboarded') === '1'
-      if (justOnboarded) {
-        window.sessionStorage.removeItem('haven-just-onboarded')
-      }
-    } catch {
-      // sessionStorage can throw in private mode — bail out silently. No
-      // user-facing impact, the dashboard still renders.
-      return
-    }
-    if (!justOnboarded) return
-    const firstName = displayName(user).split(' ')[0]
-    toast.success(`Welcome to Haven, ${firstName} — your account is live.`)
-    // Intentionally fire once per session. The dependency array is empty
-    // because we want this effect to run only on first mount after
-    // arriving from onboarding; user identity is captured in the closure.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const selectedActionAccount = launcher.selectedAccount
   const requiresOtherDevice = launcher.requiresOtherDevice
   // The per-account balance/details reads existed only to populate `SendModal`,
@@ -357,6 +318,29 @@ export default function DashboardClient() {
     () => Object.fromEntries(accounts.map((account) => [account.id, account.name])),
     [accounts],
   )
+
+  // #4704: the funds toast tells the truth. It fires when ONE account's own
+  // USDC goes from known-empty to funded (`funded` false → true on the
+  // overview's per-account read, #3803) and names the amount and the account.
+  // `null` is unknown (#3295) and never fires: null → true is the first
+  // successful read, not money arriving. It does not say the agents can spend
+  // now — before an agent exists that was false. Every update of an already
+  // funded account stays quiet.
+  const overviewAccounts = overview?.accounts
+  const previousFundedByAccountRef = useRef<Map<string, boolean | null> | null>(null)
+  useEffect(() => {
+    if (!overviewAccounts) return
+    const previous = previousFundedByAccountRef.current
+    const next = new Map<string, boolean | null>()
+    for (const account of overviewAccounts) {
+      next.set(account.accountId, account.funded)
+      if (previous?.get(account.accountId) !== false || account.funded !== true) continue
+      const amount = formatUsdcArrival(account.usdcBalanceAtomic, account.usdcDecimals)
+      if (!amount) continue
+      toast.success(`${amount} USDC arrived in ${accountNames[account.accountId] ?? 'your account'}`)
+    }
+    previousFundedByAccountRef.current = next
+  }, [overviewAccounts, accountNames, toast])
   const attentionItems = useMemo(() => {
     if (!overview) return []
     return computeAttentionItems({
@@ -479,6 +463,7 @@ export default function DashboardClient() {
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
       onReceive={() => launcher.openAction('receive')}
       onSend={() => launcher.openAction('send')}
+      countUpUserId={user?.id ?? null}
       // #4167: the ONE primary-button rule — Send primary once any account
       // holds USDC (`usdcFunded`), Receive primary with Send disabled when
       // known empty, Send primary while the read is loading or failed.
@@ -600,4 +585,26 @@ export default function DashboardClient() {
       />
     </div>
   )
+}
+
+/**
+ * The arrived amount for the funds toast (#4704): the account's USDC balance
+ * in whole tokens, at least two decimals ("25.00") and up to six, so a small
+ * testnet deposit reads "0.0005" rather than "0.00". `null` when the balance
+ * or its decimals are unknown or malformed — then no toast, never a guess.
+ */
+export function formatUsdcArrival(atomic: string | null, decimals: number | null): string | null {
+  if (atomic === null || decimals === null || atomic.trim() === '') return null
+  let value: bigint
+  try {
+    value = BigInt(atomic)
+  } catch {
+    return null
+  }
+  if (value <= 0n) return null
+  const scale = 10n ** BigInt(decimals)
+  const whole = value / scale
+  const fraction = (value % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
+  const shown = fraction.length >= 2 ? fraction.slice(0, 6) : fraction.padEnd(2, '0')
+  return `${whole.toLocaleString('en-US')}.${shown}`
 }

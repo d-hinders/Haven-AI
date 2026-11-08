@@ -2951,8 +2951,12 @@ extends the pattern first.
 **Where each is used.** Peak: onboarding's "You're in", in success colours and
 with exactly two motions — its wrapper carries no `v2-animate-step-rise`, or
 Peak would silently gain a third motion on that one screen. Step:
-`DialogResult`'s success state. Live: nothing yet beyond the `/design-system`
-specimen; #4708 is its first product use.
+`DialogResult`'s success state, and the dashboard setup guide's steps 1 and 2
+when one completes while the guide is open (#4704) — a step already complete
+on load just shows its check, and step 3 never pops, because the guide is
+replaced as soon as it completes and the first agent payment is #4707's card.
+Live: nothing yet beyond the `/design-system` specimen; #4708 is its first
+product use.
 
 **It owns no live region.** The announcement stays with the caller:
 `OnboardingClient`'s `role="status"` stays, and `DialogResult` takes `announce`
@@ -3912,6 +3916,7 @@ The public website (epic [#3572](https://github.com/d-hinders/Haven-AI/issues/35
 
 - **No entrance animations on first paint.** Respect `prefers-reduced-motion`.
 - **Allowed:** hover transitions (≤200ms), toast enter/exit transitions, the pulsing brand dot in eyebrow pills and "live" indicators, hover lift on cards, the slow `v2-step-halo` on one active user-turn marker inside a dialog, and **`Milestone`** (#4702) — Peak's `check-pop` + `v2-bloom` on a first in your Haven life, Step's `check-pop` on a change you watch happen, and Live's 1600ms brand-soft row fade on a row that arrives while the page is open. Each plays once per event, and the first-paint ban below still holds for everything else.
+- **Allowed: the dashboard balance count-up, on entrance only** (#4704; owner decision 3 on #4701). The balance counts up the first time it appears after Haven opens in a tab, launches on a phone, or after signing out and back in. A reload, a return from another page, and any balance change while the page is open show the number straight away, and a balance that first loads as zero uses up the entrance, so funding later shows straight away too. "Has this tab had its entrance?" is the entry latch (`lib/entry-latch.ts`), per tab and per user in `sessionStorage`, one key per consumer; sign-out clears it. Reduced motion shows the final number from the first render. Accepted residual: switching back to an installed phone app usually does not reload it, so the count-up there seems to happen only sometimes.
 - **Allowed on the public site** (`components/marketing/site/**`, #3575): in-view animation loops **inside a product frame or mini card** — the home page's hero payment loop, the how-it-works cards (step 3's terminal printing its lines among them) and the accounting feed, each cycling the mockup's choreography only while its region is in view and the tab is visible, resetting to the section's settled state between cycles — the developers band's **402-session transcript** (#3684), its lines revealing one step at a time to the full transcript, on the same in-view-and-visible gate — and the enforcement receipt's **row-by-row assembly, replaying on each entry**. A public-site loop shows its settled state under `prefers-reduced-motion: reduce`, never shifts layout, never announces (no live region, no inserted or removed text; the animated frames are hidden from assistive technology — the two terminals, step 3's connector terminal and the developers transcript, stay real content: their reveals are opacity-only, so the full text is readable at every moment), and confirms with text and a check icon in the success colour — never a pill or a button.
 - **Banned everywhere:** staggered fade‑ups, page‑level animated blobs, shimmer on text, parallax, multiple step halos on one screen, a step halo outside a dialog, and entrance animation on first paint outside the allowances above — nothing animates on first paint above the fold except inside the hero product frame.
 

@@ -3058,7 +3058,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="StepChecklist"
-        description="The Step status checklist primitive both lists render through (#4744). Numbered where the list is the counter — the dashboard's Get started steps — and unnumbered under a StepProgress band. The row action sits at the row's right from sm up and under the text below it; a locked step is quiet by token (ink-2 heading, ink-3 copy), never by opacity."
+        description="The Step status checklist primitive both lists render through (#4744). Numbered where the list is the counter — the dashboard's Get started steps — and unnumbered under a StepProgress band. The row action sits at the row's right from sm up, and under the text below sm; a locked step is quiet by token (ink-2 heading, ink-3 copy), never by opacity."
         testId="ds-step-checklist"
       >
         <div className="max-w-2xl">

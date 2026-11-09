@@ -266,7 +266,9 @@ export default function NeedsYou({
             the card keeps its one `h2`. Only when both show — alone, the
             items are the card and need no caption. */}
         {guide && count > 0 ? (
-          <p className="px-5 pt-3 text-xs font-medium text-[var(--v2-ink-3)]">Also needs you</p>
+          // -mb-1 groups the caption with the rows it heads: the first row's own
+          // py-3 otherwise left it nearer the rule above (#4744 design review).
+          <p className="-mb-1 px-5 pt-4 text-xs font-medium text-[var(--v2-ink-3)]">Also needs you</p>
         ) : null}
         <AttentionList
           items={listItems}

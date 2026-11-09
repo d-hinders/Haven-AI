@@ -1239,12 +1239,14 @@ export function onboardingDiscovery(
  */
 const HUMAN_STEP_KEYWORDS: Record<string, string | RegExp> = {
   signup_and_passkey: 'passkey',
-  // `fund` anywhere (as before), OR "add" followed by "USDC" within one
-  // sentence fragment. Run 42585633954 trial 2 named the step as "Add USDC to
-  // the account" and scored a false 2/3 (#4713, owner decision 2026-11-09).
-  // Narrow on purpose: USDC alone, or an "add" too far from it, is not the
-  // funding step.
-  fund: /fund|\badd\b[^.\n]{0,20}\busdc\b/i,
+  // `fund` anywhere (as before), OR "add" directly followed by "USDC", with at
+  // most an amount or "some" between them. Run 42585633954 trial 2 named the
+  // step as "Add USDC to the account" and scored a false 2/3 (#4713, owner
+  // decision 2026-11-09). Narrow on purpose: USDC alone is not the funding
+  // step, and neither is "add a 25 USDC budget" — that is the budget step,
+  // and crediting it would hide exactly the dropped-funding reply this grader
+  // exists to catch.
+  fund: /fund|\badd\s+(?:some\s+|\$?[\d.,]+\s+)?usdc\b/i,
   approve_budget: 'budget',
 }
 

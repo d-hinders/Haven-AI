@@ -1306,11 +1306,21 @@ describe('onboarding_first_reply — score 2 is out of the manifest three', () =
     expect(r.pass).toBe(true)
   })
 
-  it('does not credit USDC without an add or fund step, nor an "add" far from it', () => {
+  it('credits "add <amount> USDC" and "add some USDC" as the funding step (#4713)', () => {
+    for (const funding of ['Add 2.50 USDC to your account.', 'Add some USDC to the account.']) {
+      const r = onboardingFirstReply(log([], `Create your account with a passkey. ${funding} Then approve the budget.`), { steps, threshold: 3 })
+      expect(r.score, funding).toBe(3)
+    }
+  })
+
+  it('does not credit USDC without an add or fund step, nor an "add" that is not next to it', () => {
     for (const reply of [
       // USDC named, but no step that puts it in the account.
       'Create your account with a passkey, then approve a 250 USDC budget.',
-      // "add" and "USDC" in one sentence, but more than 20 characters apart.
+      // "add … USDC" that is the BUDGET step, worded the way the runbook's
+      // own hand-off words it (haven-reviewer S1 on PR #4743).
+      'Create your account with a passkey, then add a 25 USDC/day budget.',
+      // "add" and "USDC" in one sentence, but words apart.
       'Add your passkey to the account first, then approve a USDC budget.',
       // "add" and "USDC" adjacent across a sentence boundary.
       'Create a passkey and approve the budget, then add. USDC settles payments.',

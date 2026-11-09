@@ -367,7 +367,7 @@ file.
 
 | Score | Grader | Reading | Passes at |
 |---|---|---|---|
-| 1. Discovery | `onboarding_discovery` | Band 0–3: the **shortest advertised route** the agent actually used. **Band 3 credits any of the three hooks** `scripts/qa/discovery-reach.mjs:51-58` recognises — the `rel="alternate"` link, the visible sentence, the footer link (all three point at `/llms.txt` today). Band 2 = via `robots.txt`/`sitemap.xml`; band 1 = a guessed path; 0 = never reached. | 3 |
+| 1. Discovery | `onboarding_discovery` | Band 0–3: the **shortest advertised route** the agent actually used. **Band 3 is a first hop, after the landing page, that is in the task's `hooks` list** — `/llms.txt` in `onboarding-cold-setup.json`. The landing page names `/llms.txt` in five places: the `rel="alternate"` link and the hero sentence, two of the hooks `scripts/qa/discovery-reach.mjs:51-58` recognises, plus How it works' Step 3 sentence and its terminal's first line (#4713) and the developers band's `/llms.txt` entry, none of which that script reads. Its third hook, the footer's *For agents* link, points at `/for-agents`, as the header's does, so an agent that follows either first scores band 1 if it then reaches the runbook, and 0 if it does not. Band 2 = via `robots.txt`/`sitemap.xml`; band 1 = a guessed path; 0 = never reached. | 3 |
 | 2. First reply | `onboarding_first_reply` | How many of the manifest's `human_only_steps` the first reply names: `signup_and_passkey`, `fund`, `approve_budget` (`capability-manifest.ts` `HUMAN_ONLY_STEPS`). **Out of three**, not the old rubric's four: credential rotation is not a setup step, and grading against the manifest means the score follows the product (2026-09-28 report, finding 5). | 3 of 3 |
 | 3. Tool calls to the hand-off | `onboarding_tool_calls` | Calls from the start of the run to the first `login` that started (in the subcommand position, and not `--help` or `--version`; a refused or failed one counts only when the final message relays the device link, because the runbook's plain `login` reports an error at the tool's timeout after printing it) or, with none, to a final message linking `/signup` on the landing host (`handoffPath`). Doing neither fails: the agent never handed off. It counts to `login` on one route and to the end of the run on the other. Lower is better; the number is only meaningful as a diff against the previous run. | ≤ 12 |
 | 4a. `haven login` | `onboarding_login_command` | Did the agent run the device-login command? Accepts **both** `npx <pkg> login …` (the manifest's `one_liner`) and `npx -y <pkg> login …` (what the 2026-09-28 agent ran), so it cannot go falsely red. **Reported, not required.** | 0 |
@@ -410,8 +410,9 @@ sub-agents of the orchestrator's model. The rubric is stated for the pinned
 model, and the report records the model the stream actually reported.
 
 **The live red:** the acceptance asks for a live red with all three hooks
-removed on a preview or local target (they all point at `/llms.txt`,
-`discovery-surfaces.test.ts`). That run needs the owner-approved `agent-evals`
+removed on a preview or local target (`discovery-surfaces.test.ts` pins
+that the footer's hook, and at least one of the other two, reaches the
+runbook). That run needs the owner-approved `agent-evals`
 environment and a spend, so this slice ships the **recorded-log red** instead:
 `graders.test.ts` proves discovery falls to band 1 on a log that requested
 `/for-agents.md` first, and band 0 when it never arrived. The live red is

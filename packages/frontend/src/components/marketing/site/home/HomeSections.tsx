@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { SiteCtaRow } from '../blocks'
+import { SiteCtaRow, SiteInlineLink } from '../blocks'
 import { SiteSection, SITE_TYPE } from '../SiteSection'
 import { Header } from '../Header'
 import { Footer } from '../Footer'
@@ -37,9 +37,15 @@ import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
  *   terminal is a short storytelling script that keeps the connector
  *   command's published prefix (#3644) — the mockup's bare one-liner exits
  *   with an argument error before anything runs
- *   (`packages/connect/src/args.ts:256`).
+ *   (`packages/connect/src/args.ts:285`).
  * - Step 1's account wording replaces the mockup's account-kind phrase that
  *   `docs/product/copy-guidelines.md` bans; the sentence keeps its meaning.
+ * - Step 1 names the funding step, and Step 3 and its terminal's first line
+ *   point an agent at `/llms.txt` (#4713; owner answers of 2026-11-09,
+ *   https://github.com/d-hinders/Haven-AI/issues/4713#issuecomment-6734961163,
+ *   against mockup version `1791292014-abae`). A cold agent reading this page
+ *   through a summarising fetch kept these steps and lost the hero's pointer,
+ *   so it never reached the runbook and told its user a setup with no funding.
  * - The spending-limits band says the budget message in plain words, with no
  *   chain or mechanism vocabulary (#3676 decision 3). That decision covers
  *   this band only; How it works keeps its own security section. The band's
@@ -137,7 +143,8 @@ export function HomeHowItWorks() {
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 1</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Create your account with a passkey</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
-            One passkey prompt creates an account only you control. No seed phrase, no credit card.
+            One passkey prompt creates an account only you control. No seed phrase, no credit card. Then
+            add funds in USDC.
           </p>
           <div aria-hidden="true" className="mt-2 flex min-w-0 flex-1 flex-col">
             <AnimatedPasskeyMiniCard />
@@ -159,7 +166,12 @@ export function HomeHowItWorks() {
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 3</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Connect any agent</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
-            One command wires in Claude, Codex, Cursor or any other agent harness.
+            One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this
+            for its user starts at{' '}
+            <SiteInlineLink href="/llms.txt" ground="tint" plain>
+              /llms.txt
+            </SiteInlineLink>
+            .
           </p>
           <div className="mt-2 flex min-w-0 flex-1 flex-col">
             <AnimatedConnectorTerminal />

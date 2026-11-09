@@ -52,7 +52,12 @@ describe('Developers page', () => {
 
   it('links /releases for versions', () => {
     render(<DevelopersPage />)
-    expect(screen.getByRole('link', { name: '/releases' })).toHaveAttribute('href', '/releases')
+    const link = screen.getByRole('link', { name: '/releases' })
+    expect(link).toHaveAttribute('href', '/releases')
+    // It sits on the tint #packages section, so its focus ring is offset on
+    // --v2-surface, not white (#4713 design review).
+    expect(link.closest('section')).toHaveAttribute('data-site-ground', 'tint')
+    expect(link.className).toContain('focus-visible:ring-offset-[var(--v2-surface)]')
   })
 
   it('shows the connector command with --api, as the runbook publishes it', () => {

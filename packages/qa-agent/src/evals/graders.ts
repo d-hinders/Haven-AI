@@ -1237,9 +1237,16 @@ export function onboardingDiscovery(
  * setup step, and grading against the manifest means the score follows the
  * product (2026-09-28 report, finding 5).
  */
-const HUMAN_STEP_KEYWORDS: Record<string, string> = {
+const HUMAN_STEP_KEYWORDS: Record<string, string | RegExp> = {
   signup_and_passkey: 'passkey',
-  fund: 'fund',
+  // `fund` anywhere (as before), OR "add" directly followed by "USDC", with at
+  // most an amount or "some" between them. Run 42585633954 trial 2 named the
+  // step as "Add USDC to the account" and scored a false 2/3 (#4713, owner
+  // decision 2026-11-09). Narrow on purpose: USDC alone is not the funding
+  // step, and neither is "add a 25 USDC budget" — that is the budget step,
+  // and crediting it would hide exactly the dropped-funding reply this grader
+  // exists to catch.
+  fund: /fund|\badd\s+(?:some\s+|\$?[\d.,]+\s+)?usdc\b/i,
   approve_budget: 'budget',
 }
 
@@ -1276,7 +1283,7 @@ export function onboardingFirstReply(
       // grader. Refuse instead.
       return { pass: false, score: 0, scoreMax: steps.length, detail: `unknown human-only step ${JSON.stringify(step)} — the grader knows ${Object.keys(HUMAN_STEP_KEYWORDS).join(', ')}; extend it deliberately` }
     }
-    if (haystack.includes(keyword)) named.push(step)
+    if (typeof keyword === 'string' ? haystack.includes(keyword) : keyword.test(message)) named.push(step)
     else missing.push(step)
   }
   return {

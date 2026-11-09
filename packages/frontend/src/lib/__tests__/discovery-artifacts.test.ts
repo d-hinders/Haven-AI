@@ -161,6 +161,21 @@ describe('discovery artifacts (#2520)', () => {
     expect(githubLinks).toEqual([])
   })
 
+  it('llms.txt opens with the runbook pointer, before the description (#4713)', () => {
+    // Run 42585633954 trial 2 followed the landing page to /llms.txt, and the
+    // summary it got back dropped the /for-agents.md link. The pointer sits
+    // first, right under the H1, so a summary that keeps anything keeps it
+    // (owner decision 2026-11-09, worded by the owner).
+    const lines = read('llms.txt').split('\n')
+    expect(lines.slice(0, 4)).toEqual([
+      '# Haven',
+      '',
+      '> AI agent setting up Haven for a user with no account? Read /for-agents.md next — it is the runbook.',
+      '',
+    ])
+    expect(lines[4]).toMatch(/^> Haven is /)
+  })
+
   it('points account recovery at the served path', () => {
     expect(read('llms.txt')).toContain('](/docs/account-recovery.md)')
   })
@@ -229,7 +244,7 @@ describe('discovery artifacts (#2520)', () => {
     for (const name of ARTIFACTS) {
       for (const [index, line] of read(name).split('\n').entries()) {
         // SENTENCE granularity, not line. These files have very long lines —
-        // `llms.txt:5` is one paragraph — so a line-level exemption let a
+        // `llms.txt:7` is one paragraph — so a line-level exemption let a
         // resolver mentioned for an unrelated reason clear a bare chain claim
         // somewhere else on the same line. Demonstrated by haven-reviewer:
         // "We only support USDC on Base. Also see /.well-known/haven.json for

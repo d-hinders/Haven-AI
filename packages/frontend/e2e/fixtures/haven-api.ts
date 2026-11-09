@@ -1349,6 +1349,14 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #4710: the dashboard's "still connecting" read. Empty by default — the
+    // row's own component tests cover it, and a 404 here would log a console
+    // error on every dashboard page.
+    if (method === 'GET' && path === '/agent-connection-setups/pending') {
+      await fulfillJson(route, { setups: [] })
+      return
+    }
+
     if (method === 'POST' && path === '/agent-connection-setups') {
       connectAgent2SetupCreated = true
       await fulfillJson(route, {

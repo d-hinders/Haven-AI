@@ -30,9 +30,12 @@ import {
 } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
+import { usePendingConnectionSetups } from '@/hooks/usePendingConnectionSetups'
 import NeedsYou from './NeedsYou'
 import { formatUsdcArrival } from '@/lib/usdc-arrival'
 import { markFirstMoneySeen } from '@/lib/first-money'
+import { api } from '@/lib/api'
+import { startAgainSetup, type SetupStatusResponse, type StartAgainPrefill } from '@/lib/start-again'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
@@ -60,6 +63,10 @@ export default function DashboardClient() {
   // tab, opened once; a reload or a return from another page reads the stored
   // bounds and makes no call.
   const lastVisit = useLastVisit(user?.id ?? null)
+  // #4710: setups still awaiting a connector — the "still connecting" row.
+  // Its own read: the overview is about agents and accounts, and a setup has
+  // no agent yet.
+  const { data: pendingSetups, refetch: refetchPendingSetups } = usePendingConnectionSetups()
 
   const hasAnyBalance = balances.some((balance) => {
     try {
@@ -175,6 +182,10 @@ export default function DashboardClient() {
   // what is here: nothing dead-ends.
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
+  // #4710: "Start again" on a still-connecting row seeds the connect flow
+  // with the old setup's inputs. Cleared when the dialog closes, so the
+  // ordinary "Connect agent" button opens a blank flow.
+  const [startAgainPrefill, setStartAgainPrefill] = useState<StartAgainPrefill | null>(null)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
   // #4642: Send / Receive and the account question they ask first live in ONE
   // shared launcher, consumed here and by Contacts. The dashboard's behaviour
@@ -385,6 +396,7 @@ export default function DashboardClient() {
     return computeAttentionItems({
       overview,
       budgetRemaining: budgetRemaining ?? null,
+      pendingSetups: pendingSetups ?? null,
       accountNames,
       acknowledgements,
       dismissedIds: sessionDismissedIds,
@@ -393,7 +405,7 @@ export default function DashboardClient() {
       // The zero-USDC warning waits while step 1 is open: the step says it.
       holdBackLowBalance: showSetupSteps && usdcFunded !== true,
     })
-  }, [overview, budgetRemaining, accountNames, acknowledgements, sessionDismissedIds, showSetupSteps, usdcFunded])
+  }, [overview, budgetRemaining, pendingSetups, accountNames, acknowledgements, sessionDismissedIds, showSetupSteps, usdcFunded])
   // #3902: what the card says with no items — decided from measured facts,
   // never from the list being empty, and held back while the budget reads
   // load (an unknown read must not become "agents have room").
@@ -442,11 +454,47 @@ export default function DashboardClient() {
     refetchAgents()
     refetchAggregatedBalances()
     refetchSelectedBalances()
+    refetchPendingSetups()
   }
 
   function openConnectAgent() {
     if (!hasDelegationAccounts) return
     setConnectAgentOpen(true)
+  }
+
+  /**
+   * #4710: "Start again" on a still-connecting row.
+   *
+   * The order is the safety property (`lib/start-again.ts`): read the setup
+   * first, cancel only while it is still `awaiting_connection`, and create
+   * nothing when it has moved on or the cancel answers 409 — open that setup
+   * through the resume link instead. On success the old setup is cancelled
+   * and the flow reopens on step 1 with its name, budget and wallet, so the
+   * user reviews both opt-in checkboxes before a new prompt exists.
+   */
+  async function handleStartAgain(setupId: string) {
+    try {
+      const outcome = await startAgainSetup(setupId, {
+        readSetup: (id) =>
+          api.get<SetupStatusResponse>(`/agent-connection-setups/${encodeURIComponent(id)}`),
+        cancelSetup: (id) =>
+          api.post(`/agent-connection-setups/${encodeURIComponent(id)}/cancel`, {}),
+      })
+      if (outcome.kind === 'resume') {
+        // A full navigation, not a router push: the resume link is the
+        // existing `/agents?setup=<id>` entry point (#2522), and the agents
+        // page owns opening the modal from it.
+        window.location.assign(`/agents?setup=${encodeURIComponent(setupId)}`)
+        return
+      }
+      setStartAgainPrefill(outcome.prefill)
+      setConnectAgentOpen(true)
+      refetchPendingSetups()
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'We could not start this setup again.',
+      )
+    }
   }
 
   // The hide and dismiss buttons unmount themselves; focus moves to the
@@ -568,6 +616,7 @@ export default function DashboardClient() {
       onRetry={refetchOverview}
       onDismiss={handleDismissAttention}
       onAddFunds={launcher.openReceiveForAccount}
+      onStartAgain={handleStartAgain}
     />
   ) : null
 
@@ -623,8 +672,10 @@ export default function DashboardClient() {
         open={connectAgentOpen}
         onClose={() => {
           setConnectAgentOpen(false)
+          setStartAgainPrefill(null)
         }}
         accountId={defaultAccount?.id ?? null}
+        prefill={startAgainPrefill}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}

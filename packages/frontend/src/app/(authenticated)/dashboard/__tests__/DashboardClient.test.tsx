@@ -67,6 +67,36 @@ vi.mock('@/hooks/useAttentionDismissals', () => ({
   useAttentionDismissals: () => mockUseAttentionDismissals(),
 }))
 
+// #4710: the still-connecting row's own read. Per-test state, reset in
+// beforeEach; `null` is UNKNOWN and fires nothing.
+const mockPendingSetupsState: { data: unknown } = { data: null }
+const mockRefetchPendingSetups = vi.fn()
+vi.mock('@/hooks/usePendingConnectionSetups', () => ({
+  usePendingConnectionSetups: () => ({
+    data: mockPendingSetupsState.data,
+    loading: false,
+    error: null,
+    refetch: mockRefetchPendingSetups,
+  }),
+}))
+
+// #4710: "Start again" reads the setup and cancels it through the API client.
+const mockApiGet = vi.fn()
+const mockApiPost = vi.fn()
+vi.mock('@/lib/api', () => ({
+  api: {
+    get: (...args: unknown[]) => mockApiGet(...args),
+    post: (...args: unknown[]) => mockApiPost(...args),
+  },
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  },
+}))
+
 
 // #4707: the first-agent-payment read is a hook with its own suite — here the
 // dashboard tests pin the WIRING (the card renders only when a row came back,
@@ -126,7 +156,15 @@ vi.mock('@/components/FirstAgentPaymentCard', () => ({
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
-  default: () => null,
+  // #4710: the mock prints the prefill it was handed, so "Start again" wiring
+  // (the flow opens with the old setup's inputs) is assertable here without
+  // rendering the real dialog.
+  default: ({ open, prefill }: { open: boolean; prefill?: { name: string } | null }) =>
+    open ? (
+      <div data-testid="connect-modal">
+        <span>{`prefill-${prefill?.name ?? 'none'}`}</span>
+      </div>
+    ) : null,
 }))
 
 // #4094: the picker mock prints its action and account count and offers a
@@ -321,6 +359,7 @@ describe('DashboardClient', () => {
     mockBudgetRemainingState.data = null
     mockBudgetRemainingState.loading = false
     mockFirstAgentPaymentState.payment = null
+    mockPendingSetupsState.data = null
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -1763,6 +1802,97 @@ describe('DashboardClient', () => {
       expect(mockToastSuccess).toHaveBeenCalledWith('0.0005 USDC arrived in Main account')
       for (const call of mockToastSuccess.mock.calls) {
         expect(String(call[0])).not.toMatch(/can spend now/i)
+      }
+    })
+  })
+
+  /**
+   * #4710: closing the connect dialog before the agent registers leaves a
+   * "still connecting" row. It shows during the first-run guide too — that is
+   * when a new user is most likely to have closed the dialog — and its two
+   * actions are Open (the resume link) and Start again (cancel + reopen
+   * prefilled, creating nothing until the user submits).
+   */
+  describe('still connecting (#4710)', () => {
+    const SETUP_ID = '11111111-1111-1111-1111-111111111111'
+    const PENDING = {
+      setup_id: SETUP_ID,
+      name: 'Research agent',
+      expires_at: '2099-01-01T00:00:00.000Z',
+    }
+
+    function setupStatus(status: string) {
+      return {
+        setup_id: SETUP_ID,
+        status,
+        agent: { name: 'Research agent', description: null },
+        haven_wallet: {
+          id: SAFE.id,
+          name: SAFE.name,
+          address: SAFE.account_address,
+          chain_id: SAFE.chain_id,
+          network: 'Base',
+        },
+        agent_budget: [
+          {
+            token_address: '0x0000000000000000000000000000000000000000',
+            token_symbol: 'USDC',
+            allowance_amount: '10000000',
+            reset_period_min: 1440,
+          },
+        ],
+      }
+    }
+
+    it('shows the row during the first-run guide', () => {
+      mockPendingSetupsState.data = [PENDING]
+      render(<DashboardClient />)
+      expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+      expect(screen.getByText('Research agent is still connecting')).toBeInTheDocument()
+    })
+
+    it('Start again reads the setup, cancels it, and opens the flow prefilled — no create POST', async () => {
+      const user = userEvent.setup()
+      mockPendingSetupsState.data = [PENDING]
+      mockApiGet.mockResolvedValue(setupStatus('awaiting_connection'))
+      mockApiPost.mockResolvedValue({ success: true })
+
+      render(<DashboardClient />)
+      await user.click(screen.getByRole('button', { name: 'Start again' }))
+
+      expect(mockApiGet).toHaveBeenCalledWith(`/agent-connection-setups/${SETUP_ID}`)
+      expect(mockApiPost).toHaveBeenCalledWith(
+        `/agent-connection-setups/${SETUP_ID}/cancel`,
+        {},
+      )
+      // The replacement is created only when the user submits the reopened
+      // flow — Start again itself never POSTs a second setup.
+      expect(
+        mockApiPost.mock.calls.some(([path]) => path === '/agent-connection-setups'),
+      ).toBe(false)
+      expect(screen.getByTestId('connect-modal')).toHaveTextContent('prefill-Research agent')
+    })
+
+    it('creates nothing when the setup has moved on — it opens the resume link instead', async () => {
+      const user = userEvent.setup()
+      mockPendingSetupsState.data = [PENDING]
+      mockApiGet.mockResolvedValue(setupStatus('connected_local'))
+      const assign = vi.fn()
+      const original = window.location
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...original, assign },
+      })
+
+      try {
+        render(<DashboardClient />)
+        await user.click(screen.getByRole('button', { name: 'Start again' }))
+
+        expect(mockApiPost).not.toHaveBeenCalled()
+        expect(assign).toHaveBeenCalledWith(`/agents?setup=${SETUP_ID}`)
+        expect(screen.queryByTestId('connect-modal')).not.toBeInTheDocument()
+      } finally {
+        Object.defineProperty(window, 'location', { configurable: true, value: original })
       }
     })
   })

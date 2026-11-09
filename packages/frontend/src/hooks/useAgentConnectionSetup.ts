@@ -46,6 +46,20 @@ export type CreateSetupResponse = ApiSchema<'CreateAgentConnectionSetupResponse'
 type ResolveSetupResponse = ApiSchema<'ResolveAgentConnectionSetupResponse'>
 type RegisterSetupResponse = ApiSchema<'RegisterAgentConnectionSetupResponse'>
 
+/**
+ * #4710: the inputs "Start again" seeds the flow with, from `GET /:setupId`.
+ * The old setup is already cancelled; this produces a NEW prompt.
+ */
+export interface ConnectSetupPrefill {
+  name: string
+  description: string | null
+  /** The Haven wallet the old setup was created against. */
+  accountId: string
+  /** Human-decimal budget amount for the policy step's input ('' when none). */
+  amount: string
+  resetPeriodMin: number
+}
+
 export interface ManualCredential {
   /** The prose prompt (the pre-#2482 rendering, kept for agent workspaces). */
   prompt: string
@@ -65,6 +79,17 @@ export interface UseAgentConnectionSetupOptions {
   onSetupUpdated?: (info?: { delegateAddress?: string | null }) => void
   /** See ConnectAgentModal's prop of the same name. */
   starterAllowance?: boolean
+  /**
+   * #4710: reopen the flow on step 1 with an existing setup's inputs, for
+   * "Start again" on the dashboard's still-connecting row. The old setup has
+   * already been cancelled by the caller; this only seeds the form, so the
+   * user reviews both opt-in checkboxes before a new prompt exists.
+   *
+   * `issue_passport` and `localMcp` are deliberately NOT part of the prefill:
+   * `GET /:setupId` does not return them, both start false on any new connect,
+   * and both are opt-in.
+   */
+  prefill?: ConnectSetupPrefill | null
   /**
    * Resume an EXISTING setup instead of creating a new one (#2522).
    *
@@ -346,6 +371,7 @@ export function useAgentConnectionSetup({
   accountId: propAccountId,
   onSetupUpdated,
   starterAllowance = false,
+  prefill = null,
   resumeSetupId = null,
   escapeToClose = true,
 }: UseAgentConnectionSetupOptions) {
@@ -483,6 +509,29 @@ export function useAgentConnectionSetup({
     }
     prevOpenRef.current = open
   }, [open])
+
+  /**
+   * #4710: "Start again" seeds the form ONCE per open. Declared after the
+   * open-reset effect above so it wins the wallet selection on the same
+   * render. The flow opens on step 1, not the waiting screen, so both opt-in
+   * checkboxes are on screen before a new prompt exists; `issue_passport` and
+   * `localMcp` keep their false defaults.
+   */
+  const [prefillApplied, setPrefillApplied] = useState(false)
+  useEffect(() => {
+    if (!open) {
+      setPrefillApplied(false)
+      return
+    }
+    if (!prefill || prefillApplied) return
+    setPrefillApplied(true)
+    setName(prefill.name)
+    setDescription(prefill.description ?? '')
+    setSelectedAccountId(prefill.accountId)
+    setAddAmount(prefill.amount)
+    setAddReset(prefill.resetPeriodMin)
+    setStep('details')
+  }, [open, prefill, prefillApplied])
 
   useEffect(() => {
     if (!open) return

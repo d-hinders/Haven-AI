@@ -7053,6 +7053,27 @@ export const openapiSpec = {
         },
       },
     },
+    '/agent-connection-setups/pending': {
+      get: {
+        tags: ['Connect Agent 2'],
+        operationId: 'listPendingAgentConnectionSetups',
+        summary: "List the signed-in user's setups still awaiting a connector.",
+        description:
+          'Returns the setups that are still `awaiting_connection` and unexpired, newest first, so the dashboard can offer a way back into a connect dialog that was closed before the agent registered (#4710). Tenant-scoped to the authenticated user. The projection carries no setup token, token hash, challenge or prompt — the prompt exists only in the create response. Setups created by the CLI (`source: "cli"`) are excluded: a CLI run has no dialog to have closed.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The user’s unexpired setups still awaiting a connector.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PendingAgentConnectionSetupsResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
     '/agent-connection-setups/{setupId}': {
       get: {
         tags: ['Connect Agent 2'],
@@ -12022,6 +12043,27 @@ export const openapiSpec = {
           passport_requested: {
             type: 'boolean',
             description: 'True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here.',
+          },
+        },
+        additionalProperties: false,
+      },
+      PendingAgentConnectionSetup: {
+        type: 'object',
+        required: ['setup_id', 'name', 'expires_at'],
+        properties: {
+          setup_id: uuid,
+          name: { type: 'string' },
+          expires_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      PendingAgentConnectionSetupsResponse: {
+        type: 'object',
+        required: ['setups'],
+        properties: {
+          setups: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PendingAgentConnectionSetup' },
           },
         },
         additionalProperties: false,

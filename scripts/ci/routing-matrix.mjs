@@ -341,8 +341,8 @@ export const ROUTING_MATRIX = [
       'frontend, so none of those tests ran: #2713 edited this file and left the CLI copy stale, ' +
       'and dev did not even go red — cli_checks was skipped, so the stale copy was carried until ' +
       'an unrelated backend PR (#2719) regenerated it. lint:runbook-parity covers the two ' +
-      'full-text copies from every job that owns the source; the ' +
-      'partial one is not readable back, so frontend is ROUTED rather than checked. That is the ' +
+      'full-text copies and, since #3596, the nine step files from every job that owns the ' +
+      'source; the partial one is not readable back, so frontend is ROUTED rather than checked. That is the ' +
       'reason both jobs are here, and why removing either silently uncovers a pin test.',
   },
   {
@@ -397,8 +397,8 @@ export const ROUTING_MATRIX = [
     ],
     kind: CONTRACT,
     why:
-      'The served runbook (#2743) — a GENERATED artifact that happens to be Markdown, so the ' +
-      'DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
+      'The served runbook (#2743) — a hand-kept, byte-pinned copy that happens to be Markdown, ' +
+      'so the DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
       'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and its NON-MARKDOWN ' +
       'siblings in public/ routed `frontend` — the other Markdown file there, 402.md, was ' +
       'swallowed too, which is why DOC_EXCEPTIONS also carries a general arm for the ' +

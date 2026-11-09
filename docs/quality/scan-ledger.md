@@ -2716,20 +2716,25 @@ lifecycle that stayed in the route closures, which no prior entry measured.
 
 **Structural finding (pending owner decision):**
 - S1 — the direct-payment lifecycle is orchestrated inside route closures in
-  the backend's `routes/payments.ts`, and boundary rules 2 and 5 (routes call
-  module entry points only) have never been enabled. `POST /payments` is one
-  closure of 481 lines and `POST /payments/:id/sign` one of 542 — 1,023 of the
+  the backend's `routes/payments.ts`, and boundary rule 5 (routes import
+  module entry points only) has never been enabled. `POST /payments` is one
+  closure of 478 lines and `POST /payments/:id/sign` one of 530 — 1,008 of the
   file's 1,572 lines; the sign closure awaits 17 distinct functions. The x402
-  route is 210 lines over a 17-file module and the MPP route 397 over 16. The
+  route is 210 lines over a 17-file module and the MPP route 397 over 16,
+  both split by epic #980 (#996, #997), which did not list this route. The
   file measured 898 lines before 2026-09-15 and 1,561 before 2026-10-15. Same
   shape in `routes/agent-delegations.ts` (1,389 lines, an 8-statement
   `pg-only-in-infra` waiver), `routes/agent-rekey.ts` (1,276) and
   `routes/agent-connection-setups.ts` (1,556). Across the 50 route files:
-  90 repository imports, 71 module imports, 33 rail imports. Cost: seven
-  issues 2026-09-30 → 2026-10-29 naming the direct entrypoint (#3494, #3500,
-  #3503, #3564, #3609, #4354, #4533), classified by title and label only.
+  90 repository imports, 71 module imports, 33 rail imports. Incident
+  clustering, not causation: seven issues 2026-09-30 → 2026-10-29 on the
+  direct entrypoint (#3494, #3500, #3503, #3564, #3609, #4354, #4533),
+  classified by title and label only; #4354 runs the other way and #3609's
+  fix spanned payments, x402 and MCP. The cost criterion is the weakest leg.
   Five slices proposed: create flow, sign state machine, grant lifecycle,
-  rekey stages, a shrink-only ratchet. Slices 1 and 2 are money-path.
+  rekey stages, a shrink-only ratchet. Slices 1–4 are money-path.
+  *Corrected in review (`569cbd792`):* first recorded rules 2 and 5, closures
+  of 481 / 542 / 1,023, "Cost", and slices 1 and 2 only.
 
 **Improvement candidates (one PR each), pending owner decision:**
 - C1 — `no-circular` runs on 2 of 13 packages (the dependency lint's
@@ -2737,7 +2742,8 @@ lifecycle that stayed in the route closures, which no prior entry measured.
   the SDK's `merchant-answer.ts` ↔ `merchant-completion.ts`, and 0 in the
   other ten.
 - C2 — the backend's `src/index.ts` hand-wires 10 `setInterval` jobs (9
-  leader-gated) and their wiring is asserted by regex over the file's source
+  leader-gated; an eleventh registers itself in `startRetrySweep`) and their
+  wiring is asserted by regex over the file's source
   (`catalog-ingest-monitor-wired.test.ts`, `anchor-seams-wired.test.ts`), the
   technique #4411 showed can go blind; the file took 51 of 1,229 first-parent
   landings since 2026-09-01.
@@ -2748,17 +2754,18 @@ lifecycle that stayed in the route closures, which no prior entry measured.
   disagreement on a stored row was shown.
 
 **Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
-- sizing → examined → `git ls-files <pkg> | … | xargs cat | wc -l` → backend
-  127,901 source / 165,727 test; frontend 88,737 / 114,343; the other
-  packages in the report's table.
+- sizing → partial → largest non-test files by `wc -l` only; no per-package
+  total is recorded (the run's ad-hoc count is not the manifest's sizing
+  instrument). *Corrected in review:* totals first recorded here were removed.
 - backend boundaries → examined → `npm run lint:deps` → 0 violations across
   522 files, 15 waived edges, inline-SQL gauge 35 at ceiling 35.
 - cycles outside backend/core → examined → one-rule `depcruise` probe per
   package → 1 (`sdk`) / 0 in ten.
 - cross-package duplication → partial → backend function-name duplicates only
-  (47 names); local vs hosted MCP vs signer tool definitions not compared.
-- frontend architecture → partial → sizing, cycle probe (0), fetch-site
-  census (22 files: hooks 13, lib 4, components 3, app 2).
+  (46 names); local vs hosted MCP vs signer tool definitions not compared.
+- frontend architecture → partial → largest files and cycle probe (0);
+  data-access sites not examined. *Corrected in review:* a fetch-site census
+  first recorded here did not reproduce and was removed.
 - churn → examined → first-parent landings since 2026-09-01 per production
   file → 1,229 landings.
 - incident clustering → partial → seven direct-payment issues, title and

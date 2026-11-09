@@ -40,29 +40,30 @@ unless a `cd` is shown.
   (config and loop under *C1*) → 0 cycles in `frontend`, `mcp-server`, `mcp`,
   `connect`, `signer`, `cli`, `qa-agent`, `ops`, `ui`, `demo-merchant-mcp`;
   1 in `sdk`.
-- Frontend network access is concentrated: files calling `apiFetch(` /
-  `fetch(` under `packages/frontend/src` by top directory → hooks 13, lib 4,
-  components 3, app 2.
 
 The backend import graph is governed and clean. What follows is about what the
 graph rules do not see: where orchestration lives *inside* a permitted edge.
 
 ## Structural finding
 
-### S1 — the direct-payment lifecycle is orchestrated inside route closures; the two rules that would forbid it have never been enabled
+### S1 — the direct-payment lifecycle is orchestrated inside route closures; the rule that would forbid it has never been enabled
 
 `docs/architecture/10-module-boundaries.md` sets the target as "thin fastify
-routes: validate -> call module -> serialize" and records rules 2 and 5 (the
-ones that bind routes to module entry points) as not enforced, awaiting a
-`http/` directory. x402 and MPP reached that shape; the direct rail and the
-owner-authority routes did not.
+routes: validate -> call module -> serialize" and records rule 5 (a route
+imports module entry points only) as not enforced, awaiting a `http/`
+directory. x402 and MPP reached that shape through epic #980 (closed), which
+split `routes/x402.ts` (#996), `routes/machine-payments.ts` (#997) and
+`routes/transactions.ts` (#992) into modules. `routes/payments.ts` was not on
+that list, and neither were the owner-authority routes.
 
 Measured:
 
 - `grep -nE "^\s*app\.(get|post|put|patch|delete)" packages/backend/src/routes/payments.ts`
   → registrations at lines 412, 893, 1435, 1454, 1493, 1538, 1552. `POST /`
-  is one closure of 481 lines (412–892) and `POST /:id/sign` one of 542
-  (893–1434): 1,023 of the file's 1,572 lines.
+  is one closure of 478 lines (412–889) and `POST /:id/sign` one of 530
+  (893–1422): 1,008 of the file's 1,572 lines. *Corrected in review:* first
+  recorded as 481 / 542 / 1,023, measured registration to registration, which
+  counted the next route's doc comment.
 - The sign closure is the submit state machine, inline:
   `sed -n 893,1434p packages/backend/src/routes/payments.ts | grep -oE "await [a-zA-Z_]+\(" | sort -u | wc -l`
   → 17 distinct awaited functions (claim, submit, confirm, fail,
@@ -88,15 +89,23 @@ Measured:
   route files; `safeDetails` in seven files (five routes, two rails), all
   seven bodies byte-identical one-line wrappers.
 
-Demonstrated cost: seven issues between 2026-09-30 and 2026-10-29 name the
-direct-payment entrypoint — #3494, #3500, #3503, #3564, #3609, #4354, #4533 —
-five of them in three days (09-30 → 10-02), four labelled `money-path` and
-`bug`. Two state the asymmetry in their titles: #3503 ("POST /payments has no
-remaining-budget pre-check") and #4533 ("direct payments … are never fed —
-only x402 payments are"). The file grew 898 → 1,561 lines across that window.
+Incident clustering (not causation): seven issues between 2026-09-30 and
+2026-10-29 concern the direct-payment entrypoint — #3494, #3500, #3503,
+#3564, #3609, #4354, #4533 — five of them in three days (09-30 → 10-02), four
+labelled `money-path` and `bug`. Two state an asymmetry in their titles:
+#3503 ("POST /payments has no remaining-budget pre-check") and #4533 ("direct
+payments … are never fed — only x402 payments are"). Two cut against a simple
+reading: in #4354 the direct route was the only place that emitted the event
+and the module-shaped rails lacked it, and #3609's fix landed across
+payments, x402 and MCP, so that class was not direct-only. The file grew
+898 → 1,561 lines across the window. The cluster shows the direct route is a
+defect hotspot; it does not show the closure shape caused the defects.
 *Classification is from titles and labels; the fix PRs were not read.*
+**This is the weakest leg of the strict bar** (criterion 3, demonstrated
+cost): the owner may judge S1 a set of candidates, not a structural finding.
+*Corrected in review:* first headed "Demonstrated cost".
 
-Relation to prior work: the 2026-10-03 S1 (epic #3615) took one question —
+Relation to prior work: epic #980 is the direct precedent (above). The 2026-10-03 S1 (epic #3615) took one question —
 budget scope — out of these closures into a module. This finding is the
 remainder: the lifecycle itself. It is not a re-surface of #3615's claim, but
 it is adjacent, and the owner may judge it the same debt.
@@ -117,8 +126,10 @@ Proposed slices, disjoint by file, each behaviour-preserving:
 5. A shrink-only ratchet (per-route handler length, or rule 5 enabled
    file-by-file) so the shape cannot grow back.
 
-Slices 1 and 2 touch `routes/payments.ts`, which the money-path matcher
-classifies `money-path` (below) — they are owner-gated, not autonomous work.
+Slices 1–4 are all owner-gated: the money-path matcher (control `sweep.ts` →
+`money-path`) classifies `routes/payments.ts`, `routes/agent-delegations.ts`
+and `routes/agent-rekey.ts` as `money-path`. *Corrected in review:* first
+recorded slices 1 and 2 only.
 
 ## Improvement candidates (one PR each)
 
@@ -151,16 +162,18 @@ classifies `money-path` (below) — they are owner-gated, not autonomous work.
 ### C2 — background jobs are hand-wired in the composition root and proven by regex over its source
 
 - **Evidence.** `git grep -c "setInterval(" HEAD -- packages/backend/src/index.ts`
-  → 10; `runIfLeader(` → 9. Each block repeats try / `runIfLeader` / log /
+  → 10; `runIfLeader(` → 9; an eleventh job, the accounting retry sweep,
+  registers its own leader-locked interval inside `startRetrySweep`. Each block repeats try / `runIfLeader` / log /
   `void run()` / `setInterval(...).unref()` (lines 646–1064 of 1,071).
   Because importing `index.ts` boots the server, wiring is asserted by reading
-  the file as text: 3 backend test files `readFileSync` it by path
-  (`non-custody.invariants.test.ts`, `catalog-ingest-monitor-wired.test.ts`,
-  `anchor-seams-wired.test.ts`), the last two regex-matching wiring. That technique failed once on record: #4411
-  (2026-10-25) — a `/*` inside a line comment made the stripper swallow
+  the file as text: 5 backend test files read it (4 with `readFileSync`:
+  `non-custody.invariants.test.ts`, `catalog-ingest-monitor-wired.test.ts`,
+  `anchor-seams-wired.test.ts`, `retired-rail-routing.guard.test.ts`; 1 with
+  `readFile`: `request-validation.test.ts`), two of them regex-matching job
+  wiring. *Corrected in review:* first recorded as 3. That technique failed once on record: #4411
+  (2026-10-25, closed) — a `/*` inside a line comment made the stripper swallow
   `index.ts` lines 599–633, so a guard could pass on changed code.
-  `index.ts` is the fifth most-touched production file since 2026-09-01:
-  51 of 1,229 first-parent landings.
+  `index.ts` took 51 of 1,229 first-parent landings since 2026-09-01.
 - **Benefit.** A job table (`name`, lock key or "per-replica", interval,
   `run`) is importable, so "is job X leader-gated and scheduled" becomes a
   value assertion, not a source scan; a new job is one row.
@@ -169,7 +182,7 @@ classifies `money-path` (below) — they are owner-gated, not autonomous work.
 - **Verified at scan.** Counts above. Routing: `index.ts` → `code backend`.
   Money-path: `off`. Tracking: no open issue found for a job registry.
   Mutation recipe *unrun* — the table does not exist yet.
-- **Still needed.** Every tick keeps its lock key, interval, first-run
+- **Still needed.** The table covers `startRetrySweep` too. Every tick keeps its lock key, interval, first-run
   behaviour and the relayer monitor's deliberate per-replica exemption.
 
 ### C3 — `machine_metadata` is an untyped JSON column re-parsed by private helpers; `settlementSchemeOf` exists four times with three bodies
@@ -181,10 +194,12 @@ classifies `money-path` (below) — they are owner-gated, not autonomous work.
   `grep -rnE "^(export )?(async )?function settlementSchemeOf\b"` → 4
   definitions (`x402/intent-by-key.ts`, `x402/settlement-observed.ts`,
   `payments/agent-payment-status.ts`, `mpp/budget-precheck.ts`); whitespace-
-  stripped body hashes → 3 distinct. One falls back to the stored settlement
-  state's shape, two return any string, and parity is held by a comment:
-  "parsed the way `settlement-observed.ts` does". 31 production files
-  reference `machine_metadata`.
+  stripped body hashes → 3 distinct. One definition narrows to the two scheme
+  literals and falls back to the stored settlement state's shape; the other
+  three return any string (two of them share a body), and parity is held by a comment:
+  "parsed the way `settlement-observed.ts` does". `git grep -l machine_metadata 49747fac3 -- packages/backend/src ':!**/__tests__/**' ':!**/*.test.ts' | wc -l`
+  → 39 files. *Corrected in review:* first recorded as 31, from a narrower
+  path set.
 - **Benefit.** One typed reader for the column removes a class of drift on a
   field that selects the settlement scheme. No defect is claimed: the three
   bodies were not shown to disagree on any stored row.
@@ -202,11 +217,11 @@ classifies `money-path` (below) — they are owner-gated, not autonomous work.
 ## Considered, not established
 
 - `design-system/page.tsx`: 5,837 lines, touched by 147 of 1,229 landings
-  since 2026-09-01 — the most-touched file in the repo. No conflict count or
+  since 2026-09-01 — third, behind the generated `core/src/api-types.ts` and
+  `backend/src/openapi/spec.ts` (204 each). No conflict count or
   incident was measured, so this is a figure, not a candidate.
-- `db/migrations/index.ts`: a hand-kept registry of 125 migrations, 49
-  landings. A number-collision cost was not established (a commit-message
-  grep for "renumber" matched 8 commits, unread).
+- `db/migrations/index.ts`: a hand-kept registry of 124 migrations, 49
+  landings. A number-collision cost was not established.
 - `sdk/src/types.ts` (3,381 lines, 72 landings) sits beside the generated
   `core/src/api-types.ts`: prior finding (epics #1442, #3028), excluded.
 - `mcp-server/src/tools/contracts.ts` (58 landings): prior finding (epic
@@ -214,18 +229,20 @@ classifies `money-path` (below) — they are owner-gated, not autonomous work.
 
 ## Coverage record
 
-- Sizing → examined → per-package source / test lines by `git ls-files … |
-  xargs cat | wc -l`; largest files by `wc -l`.
+- Sizing → partial → largest non-test files by `wc -l`. Per-package
+  source / test totals are not recorded here: the run's ad-hoc count is a
+  different instrument from the manifest's `sizing-source-test-lines` row and
+  must not be compared with it.
 - Backend layering → examined → `npm run lint:deps`, per-route import counts,
   handler boundaries in the four largest routes. Handlers under 200 lines
   were not read.
 - Cycles outside backend/core → examined → the probe above, 11 packages.
 - Cross-package duplication → partial → backend function-name duplicates
-  only (47 names defined in more than one non-test file, `up` and `down`
+  only (46 names defined in more than one non-test file, `up` and `down`
   of the migrations among them); `mcp` vs `mcp-server` vs `signer` tool definitions
   not compared.
-- Frontend architecture → partial → sizing, cycle probe and fetch-site census
-  only; component composition not read.
+- Frontend architecture → partial → largest files and the cycle probe only;
+  component composition and data-access sites not examined.
 - Churn → examined → first-parent landings since 2026-09-01 per production
   file (1,229 landings).
 - Incident clustering → partial → the seven direct-payment issues, by title

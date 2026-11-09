@@ -243,8 +243,11 @@ export function StepChecklist({ rows, halo = false, numbered = false, headingAs 
                   active row's 8px halo need — so neither is clipped, and
                   neither grows the column's scroll box (the e2e dialog-overflow
                   gate measures every box). The negative margin keeps the disc,
-                  the connector and the text column exactly where they were. */}
-              <div className="flex flex-col items-center gap-1.5 overflow-clip p-2 -m-2">
+                  the connector and the text column exactly where they were.
+                  #4744: no gap around the connector — it runs disc to disc, so
+                  a heading-only row (12px between discs) still draws a line,
+                  not a dot. */}
+              <div className="flex flex-col items-center overflow-clip p-2 -m-2">
                 <Marker
                   state={row.state}
                   halo={halo && row.state === 'active'}
@@ -255,7 +258,7 @@ export function StepChecklist({ rows, halo = false, numbered = false, headingAs 
                   <span
                     aria-hidden="true"
                     data-step-connector={row.state === 'done' ? 'done' : 'open'}
-                    className={`${STEP_CONNECTOR_CLASS} mb-1.5 ${row.state === 'done' ? CONNECTOR_TONE.done : CONNECTOR_TONE.other}`}
+                    className={`${STEP_CONNECTOR_CLASS} ${row.state === 'done' ? CONNECTOR_TONE.done : CONNECTOR_TONE.other}`}
                   />
                 )}
               </div>

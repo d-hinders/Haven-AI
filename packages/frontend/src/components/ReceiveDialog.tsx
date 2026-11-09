@@ -550,7 +550,7 @@ function ReceiveArrived({
     if (active === null || active === document.body) primaryRef.current?.focus()
   }, [])
 
-  function viewTransaction() {
+  function viewActivity() {
     onClose()
     router.push(`/accounts/${arrival.accountId}?tab=activity`)
   }
@@ -570,7 +570,7 @@ function ReceiveArrived({
         description={`It's in ${accountName} on ${chainName}.`}
       >
         <p>
-          <Button variant="tertiary" size="sm" onClick={viewTransaction}>
+          <Button variant="tertiary" size="sm" onClick={viewActivity}>
             View in Activity
           </Button>
         </p>

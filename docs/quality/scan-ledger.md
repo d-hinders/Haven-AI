@@ -2696,3 +2696,85 @@ without a re-run against the new base and turned the required docs job red
 on `dev`: #4613's test pins the record-doc census at 25 and the record's own
 bullet about #2938 carries "re-verification" on its opening line (26). The pin moves to 26 in
 the PR carrying this entry (#4617), with the reason beside it.
+
+## 2026-11-09 — architecture (scoped; owner request 2026-11-09, "architectural improvements")
+
+Full report: `docs/bug-reports/quality-scan-2026-11-09-architecture.md` (it
+carries the commands and file:line evidence). Measured at `49747fac3` (the
+branch tip, an ancestor of `origin/dev`) by one agent, `npm ci
+--ignore-scripts`, nothing built, no suite run, no database; the clone arrived
+shallow and was deepened to 2026-08-01 before any history figure. A scoped
+scan: `docs/quality/scan-baselines.json` is not updated. GitHub read-only; no
+live Haven call.
+
+**Excluded this run:** every prior finding and candidate. The hand-written SDK
+types beside the generated wire types (epics #1442, #3028) and the hosted
+tool-contract file (epic #2806) both rank in this run's churn table and are
+not re-surfaced. S1 is adjacent to the 2026-10-03 S1 (epic #3615), which took
+the budget-scope question out of the payment entrypoints; S1 here is the
+lifecycle that stayed in the route closures, which no prior entry measured.
+
+**Structural finding (pending owner decision):**
+- S1 — the direct-payment lifecycle is orchestrated inside route closures in
+  the backend's `routes/payments.ts`, and boundary rules 2 and 5 (routes call
+  module entry points only) have never been enabled. `POST /payments` is one
+  closure of 481 lines and `POST /payments/:id/sign` one of 542 — 1,023 of the
+  file's 1,572 lines; the sign closure awaits 17 distinct functions. The x402
+  route is 210 lines over a 17-file module and the MPP route 397 over 16. The
+  file measured 898 lines before 2026-09-15 and 1,561 before 2026-10-15. Same
+  shape in `routes/agent-delegations.ts` (1,389 lines, an 8-statement
+  `pg-only-in-infra` waiver), `routes/agent-rekey.ts` (1,276) and
+  `routes/agent-connection-setups.ts` (1,556). Across the 50 route files:
+  90 repository imports, 71 module imports, 33 rail imports. Cost: seven
+  issues 2026-09-30 → 2026-10-29 naming the direct entrypoint (#3494, #3500,
+  #3503, #3564, #3609, #4354, #4533), classified by title and label only.
+  Five slices proposed: create flow, sign state machine, grant lifecycle,
+  rekey stages, a shrink-only ratchet. Slices 1 and 2 are money-path.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — `no-circular` runs on 2 of 13 packages (the dependency lint's
+  `SCAN_ROOTS`); a one-rule probe over the other eleven finds 1 runtime cycle,
+  the SDK's `merchant-answer.ts` ↔ `merchant-completion.ts`, and 0 in the
+  other ten.
+- C2 — the backend's `src/index.ts` hand-wires 10 `setInterval` jobs (9
+  leader-gated) and their wiring is asserted by regex over the file's source
+  (`catalog-ingest-monitor-wired.test.ts`, `anchor-seams-wired.test.ts`), the
+  technique #4411 showed can go blind; the file took 51 of 1,229 first-parent
+  landings since 2026-09-01.
+- C3 — `machine_metadata` is re-parsed by 8 private helpers and
+  `settlementSchemeOf` is defined in 4 backend files with 3 distinct bodies
+  (`x402/intent-by-key.ts`, `x402/settlement-observed.ts`,
+  `payments/agent-payment-status.ts`, `mpp/budget-precheck.ts`). No
+  disagreement on a stored row was shown.
+
+**Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
+- sizing → examined → `git ls-files <pkg> | … | xargs cat | wc -l` → backend
+  127,901 source / 165,727 test; frontend 88,737 / 114,343; the other
+  packages in the report's table.
+- backend boundaries → examined → `npm run lint:deps` → 0 violations across
+  522 files, 15 waived edges, inline-SQL gauge 35 at ceiling 35.
+- cycles outside backend/core → examined → one-rule `depcruise` probe per
+  package → 1 (`sdk`) / 0 in ten.
+- cross-package duplication → partial → backend function-name duplicates only
+  (47 names); local vs hosted MCP vs signer tool definitions not compared.
+- frontend architecture → partial → sizing, cycle probe (0), fetch-site
+  census (22 files: hooks 13, lib 4, components 3, app 2).
+- churn → examined → first-parent landings since 2026-09-01 per production
+  file → 1,229 landings.
+- incident clustering → partial → seven direct-payment issues, title and
+  label only.
+- workflow archaeology → not examined → out of scope.
+- block 1 → not examined → scope is architecture.
+- block 2 → not examined → scope is architecture.
+- block 3 → not examined → scope is architecture.
+- block 4 → not examined → scope is architecture.
+- block 5 → not examined → scope is architecture.
+- block 6 → not examined → scope is architecture.
+- block 8 → not examined → needs the backend suite's database and builds;
+  scope is architecture.
+- block 9 → not examined → needs the backend suite's database and builds;
+  scope is architecture.
+- weekly re-measurement (#4635 at `f03f90102`) → read → no flagged, failed or
+  refused row.
+
+**Disposition: pending owner decision** (S1, C1, C2, C3).

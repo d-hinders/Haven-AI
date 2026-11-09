@@ -28,6 +28,10 @@ name: QA — purge throwaway identities (dev)
 #   5. Retention is validated as an integer from 1 to 365 before connecting.
 #      `0`, negative and malformed values are refused; there is no zero-day
 #      override.
+#   6. Both inputs travel as `env:` values read as quoted shell variables,
+#      never inlined into `run:` (#4740) — see the purge step. Listed last,
+#      it acts first: an inlined value would run while bash parses the
+#      script, before guard 5 or the dry-run default (guard 4) is reached.
 #
 # ## What it deletes, and what it keeps
 #
@@ -103,9 +107,19 @@ jobs:
           QA_PURGE_ALLOWED_PORT: ${{ vars.QA_PURGE_ALLOWED_PORT }}
           QA_PURGE_ALLOWED_DATABASE: ${{ vars.QA_PURGE_ALLOWED_DATABASE }}
           QA_PURGE_ALLOWED_SYSTEM_IDENTIFIER: ${{ vars.QA_PURGE_ALLOWED_SYSTEM_IDENTIFIER }}
+          # #4740: the inputs travel as env values and are read as quoted shell
+          # variables. An `${{ inputs.* }}` expression inside `run:` is pasted
+          # into the script before bash parses it, so a crafted retention_days
+          # would run as shell beside the credential above, before the script's
+          # own validator sees it — or simply carry `--apply` into the argv
+          # with dry_run=true. parseRetentionDays stays the one validator;
+          # only the exact string `false` turns on --apply, anything else is a
+          # dry run. Guarded by scripts/ci/qa-purge-throwaways-workflow.test.mjs.
+          PURGE_RETENTION_DAYS: ${{ inputs.retention_days }}
+          PURGE_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          args=(--retention-days "${{ inputs.retention_days }}")
-          if [ "${{ inputs.dry_run }}" = "false" ]; then
+          args=(--retention-days "$PURGE_RETENTION_DAYS")
+          if [ "$PURGE_DRY_RUN" = "false" ]; then
             args+=(--apply)
           fi
           npm run -s qa:purge-throwaways -w packages/backend -- "${args[@]}"

@@ -1779,9 +1779,8 @@ cancel, "not now" — the escape hatch beside a committing action, never the com
 itself. Live at many product call sites plus the `/design-system` showcase — among them
 `ConfirmDialog`'s cancel, `ProfileNameEditor`'s cancel edit (Settings → General,
 #4358) and the dashboard's "Hide for
-now" (in the "Needs attention" card's header since #3897; the guide
-renders inside that card, and its finished state is a one-line `SetupCompleteLine` with
-its own tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
+now" (in the "Needs attention" card's header since #3897; the guide renders inside that card, and
+the finished state is its own first-agent-payment card (#4707) with a tertiary Dismiss). (It was eight until [#1989](https://github.com/d-hinders/Haven-AI/issues/1989)
 deleted `settings/ManageApprovers`, which held three of them.):
 - `bg-transparent text-[var(--v2-ink-2)] hover:bg-[var(--v2-surface)] hover:text-[var(--v2-ink)]`
 - focus ring `focus-visible:ring-brand/80`

@@ -325,6 +325,7 @@ import {
   UPDATE_USER_WALLET_ADDRESS_SQL,
 } from '../src/infra/repositories/users.js'
 import {
+  FIND_FIRST_AGENT_PAYMENT_SQL,
   FIND_PORTFOLIO_SNAPSHOTS_SQL,
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
@@ -521,6 +522,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_ACCOUNTS_SQL },
   { name: 'dashboard: agent preview (account join)', sql: LIST_DASHBOARD_AGENTS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
+  // #4707: the card's own read — the qualifying row, not just yes/no.
+  { name: 'dashboard: first agent payment, named', sql: FIND_FIRST_AGENT_PAYMENT_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },

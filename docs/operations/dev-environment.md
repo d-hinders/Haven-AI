@@ -599,6 +599,13 @@ Isolation rules that are non-negotiable for a payments product:
   (#3196) was exactly that for a morning; the gate reads bare registrations
   as prefix `''` now.
 
+  **A route added to an EXISTING module inherits that module's mode.** #4707's
+  `GET /dashboard/first-agent-payment` went into `routes/dashboard.ts`, which
+  is still shadowed, so it needed no `enforcedModules` entry — only the
+  regenerated `route-modules.generated.ts` row (`GET
+  /dashboard/first-agent-payment` → `routes/dashboard.ts`). The born-enforced
+  rule above applies to a NEW module, not to a new operation in an old one.
+
   **How to take a shadow reading (#3208).** Not from `/health/ops` alone:
   its `request_validation` counters are in-process — they start at `since`
   (the plugin install) and dev redeploys on every merge, so the 2026-09-21

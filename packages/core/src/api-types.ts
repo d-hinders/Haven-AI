@@ -3541,6 +3541,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/dashboard/first-agent-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The first agent payment the dashboard names, or null.
+         * @description The earliest QUALIFYING agent payment for the user, or `payment: null`. Qualifying means: confirmed with a tx_hash, on the delegation rail, not funded-but-unsettled (no open merchant_retry_rejected_after_payment event), and — for an EIP-3009 x402 row — the merchant leg is PROVEN (a recorded on-chain-verified settlement hash, or a recorded merchant answer). A confirmed EIP-3009 row whose merchant has not pulled yet is excluded, because the card claims a real event. The counterparty is named through the existing rules: contact name, else receipt-merchant name, else the x402 resource host; a raw address is never returned. Read-only: it moves no money and grants no authority.
+         */
+        get: operations["getDashboardFirstAgentPayment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/balances/{accountAddress}": {
         parameters: {
             query?: never;
@@ -6825,6 +6845,36 @@ export type components = {
         };
         DashboardBudgetRemainingResponse: {
             budgets: components["schemas"]["DashboardBudgetRemainingEntry"][];
+        };
+        DashboardFirstAgentPaymentResponse: {
+            payment: components["schemas"]["DashboardFirstAgentPayment"] | null;
+        };
+        DashboardFirstAgentPayment: {
+            /** Format: uuid */
+            id: string;
+            /** @description The agent that made the payment — the card's heading. */
+            agentName: string;
+            /** @description The token amount as stored. The card renders this (with `tokenSymbol`) whenever the booked fiat figure would read 0.00 — a sub-cent payment never reads "$0.00" (#3897 rule 3). */
+            amountHuman: string;
+            /** @description The atomic amount, when the row carries one. */
+            amountRaw: string | null;
+            tokenSymbol: string;
+            chainId: number;
+            /**
+             * Format: date-time
+             * @description When the funding leg confirmed. The card says "just now" for a recent row and the date for an older one.
+             */
+            confirmedAt: string;
+            /** @description Booked USD at settle time; null when the row was never priced. */
+            usdValue: number | null;
+            /** @description Booked EUR at settle time; null when the row was never priced. */
+            eurValue: number | null;
+            /** @description Booked SEK at settle time; null when the row was never priced. */
+            sekValue: number | null;
+            /** @description Contact name, else receipt-merchant name, for the counterparty. Null when neither exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4). */
+            merchantName: string | null;
+            /** @description The x402 resource URL, whose HOST is the last displayable counterparty name. Null on a non-x402 payment. */
+            x402ResourceUrl: string | null;
         };
         /** @description Reported whether or not it is recoverable — nothing about a stranded residual fails quietly. */
         AgentRekeyResidual: {
@@ -23208,6 +23258,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardBudgetRemainingResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getDashboardFirstAgentPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The first qualifying agent payment, or null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardFirstAgentPaymentResponse"];
                 };
             };
             /** @description Error response */

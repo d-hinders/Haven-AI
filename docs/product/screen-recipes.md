@@ -101,11 +101,14 @@ Structure (#3818):
    highlight is its marker's ink-2 ring, not a tinted row (#4638). Connecting
    an agent stays available before funding, at secondary weight and without the
    highlight; step 3 stays locked until an agent can pay.
-4. The steps own the card only until the first agent payment. After it, one
-   `You're set up` line takes their place until dismissed (the dismissal persists
-   per user), and the steps never return: USDC spent to zero, an expired budget
-   or an unreadable balance belongs to the Needs attention rules from then on. "Hide
-   for now" persists across reloads, until another step completes.
+4. The steps own the card only until the first agent payment. After it, the
+   first payment gets its OWN card — the agent, the amount, the counterparty and
+   when, with Peak once per device and a Dismiss that persists per user — and
+   the steps never return: USDC spent to zero, an expired budget or an
+   unreadable balance belongs to the Needs attention rules from then on. With
+   the steps gone, "Needs attention" means what it says and shows its empty
+   state when nothing else applies. "Hide for now" persists across reloads,
+   until another step completes.
 5. Before the first agent payment, the money panel's spending block says what it
    will show instead of three zero tiles.
 

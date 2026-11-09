@@ -1298,6 +1298,29 @@ export const FIXTURE_OVERVIEW = {
   activityWindowStart: new Date((T0 - 7 * 86_400) * 1000).toISOString(),
 }
 
+// #4707: the first-agent-payment card's own read. The overview fixture says
+// `hasFirstAgentPayment: true`, so the row is what that state now looks like —
+// the card replaces the old "You're set up" line inside Needs attention.
+// `confirmedAt` sits two minutes before T0, so a capture with the frozen clock
+// reads "just now"; under a real clock it reads its date. Either way the card
+// is the same surface.
+export const FIXTURE_FIRST_AGENT_PAYMENT = {
+  payment: {
+    id: '44444444-4444-4444-8444-444444444444',
+    agentName: 'Research agent',
+    amountHuman: '0.05',
+    amountRaw: '50000',
+    tokenSymbol: 'USDC',
+    chainId: 84532,
+    confirmedAt: new Date((T0 - 120) * 1000).toISOString(),
+    usdValue: 0.05,
+    eurValue: 0.046,
+    sekValue: 0.54,
+    merchantName: null,
+    x402ResourceUrl: 'https://research.example/paper',
+  },
+}
+
 // #3804: the cached budget-remaining read. One KNOWN row (chain-backed,
 // sub-budget attribution) and one UNKNOWN row (`remaining_*` null) — the
 // unknown row photographs as "unavailable", never "0 left" and never the
@@ -2078,6 +2101,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname === '/dashboard/budget-remaining') return FIXTURE_BUDGET_REMAINING
+  if (pathname === '/dashboard/first-agent-payment') return FIXTURE_FIRST_AGENT_PAYMENT
   // #3813's server-saved "Needs attention" dismissals — read on every dashboard
   // render. Without this key the generic fallback answered an object with no
   // `dismissals` array and the dashboard hit its error boundary (#3897).

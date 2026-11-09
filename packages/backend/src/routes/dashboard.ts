@@ -1,8 +1,9 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, FastifyRequest } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChainData, shouldMarkApprox, tokenPeg } from '@haven_ai/core'
 import {
   countFailedIntents7d,
+  findFirstAgentPayment,
   findPortfolioSnapshots,
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
@@ -72,6 +73,49 @@ interface FiatFlags {
   usd: boolean
   eur: boolean
   sek: boolean
+}
+
+// ── #4707: the first agent payment, named ────────────────────────────────────
+
+/**
+ * `GET /dashboard/first-agent-payment` — the one payment the first-agent-payment
+ * card names, or `null`.
+ *
+ * A separate route rather than an overview field: the overview polls every
+ * 10 s, `onboardingProgress` is `additionalProperties: false`, and no
+ * `payment_intents` index includes `user_id`. This read is asked for only
+ * while `hasFirstAgentPayment` is true and the card is not dismissed, and it
+ * stops as soon as a row comes back.
+ *
+ * `null` is a real answer, not an error: the user's only confirmed payment may
+ * still be awaiting its merchant leg (see `FIND_FIRST_AGENT_PAYMENT_SQL`), and
+ * the client renders nothing rather than a weaker claim.
+ */
+export interface FirstAgentPaymentResponse {
+  payment: {
+    id: string
+    /** The agent's name — the card's heading. */
+    agentName: string
+    /** The token amount as stored; the card's figure when fiat would read $0.00. */
+    amountHuman: string
+    amountRaw: string | null
+    tokenSymbol: string
+    chainId: number
+    /** ISO instant the funding leg confirmed — the card's "just now" / date. */
+    confirmedAt: string
+    /** Booked fiat at settle time, in each bucket; null when never priced. */
+    usdValue: number | null
+    eurValue: number | null
+    sekValue: number | null
+    /**
+     * Contact name, else receipt-merchant name, for the counterparty. Null when
+     * neither exists — the client then falls back to the x402 resource host and
+     * renders no name at all rather than an address (#3810 rule 4).
+     */
+    merchantName: string | null
+    /** The x402 resource URL, whose HOST is the last displayable name. */
+    x402ResourceUrl: string | null
+  } | null
 }
 
 export function emptySpendWindow(): SpendWindowFigures {
@@ -878,6 +922,46 @@ export default async function dashboardRoutes(
       // partial when this instant cuts its own local day, so the boundary is
       // the server's, never a client clock re-derivation.
       activityWindowStart: from7Iso,
+    }
+  })
+
+  // #4707: the first agent payment, named. A small route of its own rather
+  // than an overview field — see `FirstAgentPaymentResponse`.
+  app.get('/first-agent-payment', async (request): Promise<FirstAgentPaymentResponse> => {
+    const { sub } = request.user as { sub: string }
+
+    const row = await findFirstAgentPayment(sub)
+    if (!row) return { payment: null }
+
+    // Counterparty naming, the same two sources the overview's merchant slot
+    // reads: contacts win, then merchant receipts. The raw address is a lookup
+    // key only — it never reaches the wire (#3810 rule 4).
+    let merchantName: string | null = null
+    if (row.merchant_address) {
+      const key = row.merchant_address.toLowerCase()
+      const contacts = await listContactsForUser(sub)
+      merchantName = contacts.find((c) => c.address.toLowerCase() === key)?.name ?? null
+      if (merchantName === null) {
+        const receiptNames = await listReceiptMerchantNamesForUser(sub, [row.merchant_address])
+        merchantName = receiptNames.get(key) ?? null
+      }
+    }
+
+    return {
+      payment: {
+        id: row.id,
+        agentName: row.agent_name,
+        amountHuman: row.amount_human,
+        amountRaw: row.amount_raw,
+        tokenSymbol: row.token_symbol,
+        chainId: row.chain_id,
+        confirmedAt: row.confirmed_at.toISOString(),
+        usdValue: row.usd_value == null ? null : Number(row.usd_value),
+        eurValue: row.eur_value == null ? null : Number(row.eur_value),
+        sekValue: row.sek_value == null ? null : Number(row.sek_value),
+        merchantName,
+        x402ResourceUrl: row.x402_resource_url,
+      },
     }
   })
 }

@@ -241,7 +241,7 @@ export function DevelopersPage() {
           </div>
           <p className="mt-4 text-[13.5px] text-[var(--v2-ink-2)]">
             Versions and update commands:{' '}
-            <SiteInlineLink href="/releases">/releases</SiteInlineLink>
+            <SiteInlineLink href="/releases" ground="tint">/releases</SiteInlineLink>
             .
           </p>
           <div className="mt-6">

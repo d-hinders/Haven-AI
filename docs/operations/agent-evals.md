@@ -411,7 +411,8 @@ model, and the report records the model the stream actually reported.
 
 **The live red:** the acceptance asks for a live red with all three hooks
 removed on a preview or local target (`discovery-surfaces.test.ts` pins
-that each reaches the runbook). That run needs the owner-approved `agent-evals`
+that the footer's hook, and at least one of the other two, reaches the
+runbook). That run needs the owner-approved `agent-evals`
 environment and a spend, so this slice ships the **recorded-log red** instead:
 `graders.test.ts` proves discovery falls to band 1 on a log that requested
 `/for-agents.md` first, and band 0 when it never arrived. The live red is

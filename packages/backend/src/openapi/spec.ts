@@ -9332,6 +9332,23 @@ export const openapiSpec = {
         },
       },
     },
+    '/dashboard/first-agent-payment': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardFirstAgentPayment',
+        summary: 'The first agent payment the dashboard names, or null.',
+        description:
+          'The earliest QUALIFYING agent payment for the user, or `payment: null`. Qualifying means: confirmed with a tx_hash, on the delegation rail, not funded-but-unsettled (no open merchant_retry_rejected_after_payment event), and — for an EIP-3009 x402 row — the merchant leg is PROVEN (a recorded on-chain-verified settlement hash, or a recorded merchant answer). A confirmed EIP-3009 row whose merchant has not pulled yet is excluded, because the card claims a real event. The counterparty is named through the existing rules: contact name, else receipt-merchant name, else the x402 resource host; a raw address is never returned. Read-only: it moves no money and grants no authority.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The first qualifying agent payment, or null.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardFirstAgentPaymentResponse' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
     '/balances/{accountAddress}': {
       get: {
         tags: ['Dashboard'],
@@ -14591,6 +14608,75 @@ export const openapiSpec = {
           budgets: {
             type: 'array',
             items: { $ref: '#/components/schemas/DashboardBudgetRemainingEntry' },
+          },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * #4707: the one payment the first-agent-payment card names.
+       *
+       * `payment` is `null` when the user has no QUALIFYING payment — not only
+       * when they have never paid. A confirmed EIP-3009 row whose merchant leg
+       * is not yet proven (no recorded settlement hash, no merchant answer) is
+       * excluded, because the card claims a real event. The client renders
+       * nothing for `null`, never a weaker claim.
+       */
+      DashboardFirstAgentPaymentResponse: {
+        type: 'object',
+        required: ['payment'],
+        properties: {
+          payment: {
+            oneOf: [
+              { $ref: '#/components/schemas/DashboardFirstAgentPayment' },
+              { type: 'null' },
+            ],
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardFirstAgentPayment: {
+        type: 'object',
+        required: [
+          'id',
+          'agentName',
+          'amountHuman',
+          'amountRaw',
+          'tokenSymbol',
+          'chainId',
+          'confirmedAt',
+          'usdValue',
+          'eurValue',
+          'sekValue',
+          'merchantName',
+          'x402ResourceUrl',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          agentName: { type: 'string', description: 'The agent that made the payment — the card\'s heading.' },
+          amountHuman: {
+            type: 'string',
+            description:
+              'The token amount as stored. The card renders this (with `tokenSymbol`) whenever the booked fiat figure would read 0.00 — a sub-cent payment never reads "$0.00" (#3897 rule 3).',
+          },
+          amountRaw: { type: ['string', 'null'], description: 'The atomic amount, when the row carries one.' },
+          tokenSymbol: { type: 'string' },
+          chainId: { type: 'integer' },
+          confirmedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'When the funding leg confirmed. The card says "just now" for a recent row and the date for an older one.',
+          },
+          usdValue: { type: ['number', 'null'], description: 'Booked USD at settle time; null when the row was never priced.' },
+          eurValue: { type: ['number', 'null'], description: 'Booked EUR at settle time; null when the row was never priced.' },
+          sekValue: { type: ['number', 'null'], description: 'Booked SEK at settle time; null when the row was never priced.' },
+          merchantName: {
+            type: ['string', 'null'],
+            description:
+              'Contact name, else receipt-merchant name, for the counterparty. Null when neither exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4).',
+          },
+          x402ResourceUrl: {
+            type: ['string', 'null'],
+            description: 'The x402 resource URL, whose HOST is the last displayable counterparty name. Null on a non-x402 payment.',
           },
         },
         additionalProperties: false,

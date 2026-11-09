@@ -101,11 +101,14 @@ Structure (#3818):
    highlight is its marker's ink-2 ring, not a tinted row (#4638). Connecting
    an agent stays available before funding, at secondary weight and without the
    highlight; step 3 stays locked until an agent can pay.
-4. The steps own the card only until the first agent payment. After it, one
-   `You're set up` line takes their place until dismissed (the dismissal persists
-   per user), and the steps never return: USDC spent to zero, an expired budget
-   or an unreadable balance belongs to the Needs attention rules from then on. "Hide
-   for now" persists across reloads, until another step completes.
+4. The steps own the card only until the first agent payment. After it, the
+   first payment gets its OWN card — the agent, the amount, the counterparty and
+   when, with Peak once per device and a Dismiss that persists per user — and
+   the steps never return: USDC spent to zero, an expired budget or an
+   unreadable balance belongs to the Needs attention rules from then on. With
+   the steps gone, "Needs attention" means what it says and shows its empty
+   state when nothing else applies. "Hide for now" persists across reloads,
+   until another step completes.
 5. Before the first agent payment, the money panel's spending block says what it
    will show instead of three zero tiles.
 
@@ -303,7 +306,11 @@ approve — that is both the instructions and the progress within that step,
    on the connector path only, since the manual path makes the key in the
    browser.
 2. Wait for the local connector to generate the signing key and API key, then
-   register the public signing address and proof with Haven. If it cannot
+   register the public signing address and proof with Haven. While waiting, the
+   agent row above the checklist names the agent and says "Listening for it…";
+   once it connects, the row says "Connected just now" and row 2 reads
+   "{name} connected" (falling back to "Agent connected" when no name is
+   known). If it cannot
    connect after the bounded wait — or runs on a server or hosted backend, where
    the connector cannot run at all — the server-credential disclosure (#2482;
    no warning gate, one click) may create the one-time credential in the browser; the user saves it in the
@@ -326,7 +333,13 @@ approve — that is both the instructions and the progress within that step,
 4. Ask the user to grant the agent budget in the modal; that signature activates
    the delegation agent.
 5. Finish with `Done` plus a compact runtime-specific activation step and a
-   read-only `haven_get_agent` / `haven_get_allowances` confirmation. Make clear
+   read-only `haven_get_agent` / `haven_get_allowances` confirmation: **Say
+   hello to it**, the prompt `What's your Haven budget?` with a Copy button,
+   and the line "Ask it this. It answers with its live budget, and nothing is
+   spent." It sits after the restart callout, because desktop runtimes only
+   load Haven tools after a restart, and it renders on the connector path only
+   — the manual-credential path hands out env lines and has no connector to
+   say hello to. Make clear
    that approval, not restarting, unlocks Haven tools; never require a payment
    to confirm setup.
 

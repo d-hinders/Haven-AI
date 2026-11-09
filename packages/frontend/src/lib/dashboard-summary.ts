@@ -76,18 +76,32 @@ export interface DashboardSummaryInput {
 export function merchantDisplayName(
   merchant: DashboardSummaryMerchant,
 ): string | null {
-  if (merchant.merchantName) return merchant.merchantName
-  if (merchant.x402ResourceUrl) {
-    try {
-      return new URL(merchant.x402ResourceUrl).host
-    } catch {
-      // An unparseable resource URL has no name to show — fall through.
-    }
-  }
+  const named = merchantNameFromParts(merchant)
+  if (named !== null) return named
   // `key` is the host when the merchant is an x402 resource and the recipient
   // address otherwise. A hex address renders as no name at all.
   if (!merchant.key.startsWith('0x') && merchant.key.includes('.')) {
     return merchant.key
+  }
+  return null
+}
+
+/**
+ * The two displayable-name sources, in order: the resolved contact/receipt
+ * name, then the x402 resource HOST (#4707 reuses this for the first-payment
+ * card, whose wire shape carries no `key`). A bare address is never a name.
+ */
+export function merchantNameFromParts(parts: {
+  merchantName: string | null
+  x402ResourceUrl: string | null
+}): string | null {
+  if (parts.merchantName) return parts.merchantName
+  if (parts.x402ResourceUrl) {
+    try {
+      return new URL(parts.x402ResourceUrl).host
+    } catch {
+      // An unparseable resource URL has no name to show — fall through.
+    }
   }
   return null
 }

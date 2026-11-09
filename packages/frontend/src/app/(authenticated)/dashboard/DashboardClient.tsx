@@ -7,9 +7,11 @@ import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
 import { useLastVisit } from '@/hooks/useLastVisit'
+import { useFirstAgentPayment } from '@/hooks/useFirstAgentPayment'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
-import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import FirstAgentPaymentCard from '@/components/FirstAgentPaymentCard'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
 import { useMoneyActionLauncher } from '@/components/MoneyActionLauncher'
@@ -303,10 +305,19 @@ export default function DashboardClient() {
     completeDismissalReady &&
     setupHideReady &&
     !requiresOtherDevice
-  // #3818: while setup is in progress the guide IS the "Needs attention" card; once
-  // done, one "You're set up" line takes its place until dismissed.
+  // #3818: while setup is in progress the guide IS the "Needs attention" card.
+  // #4707: once done, the milestone is its OWN card — "Needs attention" goes
+  // back to meaning what it says, and shows its existing empty state when
+  // nothing else applies.
   const showSetupSteps = setupGuideEligible && !allOnboardingComplete && !setupHidden
-  const showSetupComplete = setupGuideEligible && allOnboardingComplete && !completeDismissed
+  // The card takes over `showSetupComplete`'s conditions unchanged: the setup
+  // facts are ready, every step is done, and the owner has not dismissed it.
+  const showFirstAgentPaymentCard =
+    setupGuideEligible && allOnboardingComplete && !completeDismissed
+  // #4707: the qualifying row is the ONLY thing that can claim success.
+  // `hasFirstAgentPayment` can be true while the merchant is still unpaid, so
+  // it only says when to look; the read stops as soon as a row comes back.
+  const { payment: firstAgentPayment } = useFirstAgentPayment(showFirstAgentPaymentCard)
 
   // ── #3808: the "Needs attention" items ─────────────────────────────────────────
   // One definition: `lib/dashboard-attention.ts` — the same rules #3809 (badges)
@@ -412,6 +423,19 @@ export default function DashboardClient() {
   )
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
+
+  // #4707: the milestone card, its own surface. It renders only when the
+  // qualifying row has come back — loading, an error, a 404 from an older
+  // backend and a `null` row all render nothing, and write no Peak marker.
+  const firstAgentPaymentCard =
+    showFirstAgentPaymentCard && firstAgentPayment && user?.id ? (
+      <FirstAgentPaymentCard
+        payment={firstAgentPayment}
+        currency={currency}
+        userId={user.id}
+        onDismiss={dismissCompleteBanner}
+      />
+    ) : null
 
   function refreshDashboardData() {
     refetchOverview()
@@ -538,8 +562,6 @@ export default function DashboardClient() {
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
           />
-        ) : showSetupComplete ? (
-          <SetupCompleteLine onDismiss={dismissCompleteBanner} />
         ) : null
       }
       hasOverviewError={Boolean(overviewError)}
@@ -592,6 +614,7 @@ export default function DashboardClient() {
           the row is the only place the agent is named. */}
       <div className="space-y-6">
         {moneyPanel}
+        {firstAgentPaymentCard}
         {attentionPanel}
         {isFocusedView ? null : activityGrid}
       </div>

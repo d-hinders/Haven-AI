@@ -90,7 +90,8 @@ import type { Agent } from '@/hooks/useAgents'
 import { Combobox, type ComboboxGroup } from '@/components/ui/Combobox'
 import { RecipientField, type Recipient } from '@/components/RecipientField'
 import type { Contact } from '@/hooks/useContacts'
-import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import FirstAgentPaymentCard from '@/components/FirstAgentPaymentCard'
 
 import { WalletPopover } from '@/components/WalletButton'
 import {
@@ -3299,7 +3300,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="First-run setup"
-        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action keeps its task wording, Add funds (owner decision on #4094), and opens the one Receive dialog, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return — one You're set up line takes their place until dismissed, and the Needs attention rules speak for anything that changes later."
+        description="While setup is in progress the guide IS the Needs attention card (titled Get started), with the rule items that still apply listed below it. Step 1 completes on any USDC on an account — other tokens never count — and reads as unknown, with no funding action, when the USDC read is unavailable; its action keeps its task wording, Add funds (owner decision on #4094), and opens the one Receive dialog, which carries the test-network faucet. Step 2 completes only on an agent that can pay (active or paused, with a usable budget) and names the newest agent still waiting for setup; it can be done before funding, at secondary weight. Step 3 unlocks on the same rule. Hide for now survives a reload until another step completes. The guide never shows an address. The steps own the card only until the first agent payment; from then on they never return, and the first payment gets its own card (#4707) — the agent, the amount, the counterparty and when, with Peak once per device — while the Needs attention rules speak for anything that changes later."
       >
         <div className="max-w-3xl space-y-4">
           {/* A new account: no USDC yet, nothing connected. */}
@@ -3336,10 +3337,27 @@ export default function DesignSystemPage() {
               onShowAgentUsage={() => undefined}
             />
           </div>
-          {/* All three done. */}
-          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
-            <SetupCompleteLine onDismiss={() => undefined} />
-          </div>
+          {/* All three done: the milestone is its OWN card (#4707), not a line
+              inside Needs attention. */}
+          <FirstAgentPaymentCard
+            payment={{
+              id: '00000000-0000-4000-8000-000000000001',
+              agentName: 'Research agent',
+              amountHuman: '0.05',
+              amountRaw: '50000',
+              tokenSymbol: 'USDC',
+              chainId: 8453,
+              confirmedAt: '2026-11-08T12:00:00.000Z',
+              usdValue: 0.05,
+              eurValue: 0.046,
+              sekValue: 0.54,
+              merchantName: null,
+              x402ResourceUrl: 'https://research.example/paper',
+            }}
+            currency="USD"
+            userId="design-system"
+            onDismiss={() => undefined}
+          />
         </div>
       </Section>
 

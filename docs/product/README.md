@@ -95,8 +95,11 @@ user dismisses setup.
 
 On the dashboard today, the setup steps are the "Needs attention" card, titled
 "Get started" with an "N of 3 done" count, until the first agent payment. "Hide
-for now" hides them in that browser until another step completes; after the
-first payment one dismissible "You're set up" line takes their place. Only the
+for now" hides them in that browser until another step completes. After the
+first payment the steps never return, and the payment gets its own card — the
+agent, the amount, the counterparty and when, with Peak once per device — while
+"Needs attention" goes back to meaning what it says and shows its empty state
+when nothing else applies. Only the
 active step carries a primary button; connecting an agent early is offered at
 secondary weight. While the steps show and the USDC step is not done, the card
 holds back its low-balance and zero-USDC items. When every account is also

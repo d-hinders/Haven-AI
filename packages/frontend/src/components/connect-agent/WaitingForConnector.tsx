@@ -11,6 +11,7 @@ import { ChevronRight, Clipboard, Lock } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { CODE_PREVIEW_CLASS, CopyBlock } from './CopyBlock'
+import { ConnectAgentRow } from './ConnectAgentRow'
 import { ConnectSteps, type ConnectStepRow } from './ConnectSteps'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { InlineErrorNote } from './SetupNotices'
@@ -36,6 +37,7 @@ export function WaitingForConnector({
   onCancel,
   nestedCopyBlocks = false,
   halo = false,
+  agentName = '',
 }: {
   setup: CreateSetupResponse
   runtime: string
@@ -74,6 +76,12 @@ export function WaitingForConnector({
   nestedCopyBlocks?: boolean
   /** Dialog-only attention cue; omitted for inline and showcase renderings. */
   halo?: boolean
+  /**
+   * #4706: the agent's name, so the waiting screen says WHO it is waiting for
+   * above the checklist. Empty when no name is known — the row is then left
+   * out rather than printing an empty name.
+   */
+  agentName?: string
 }) {
   // Which rendering of the manual credential is shown — .env by default;
   // selecting the format is pure presentation, so it stays local to this
@@ -248,6 +256,11 @@ export function WaitingForConnector({
 
   return (
     <>
+      {/* #4706: who you are waiting for, above the checklist — so the screen
+          reads as waiting for someone, not as a checklist. Presentational and
+          owns no live region; `ConnectStep` announces the change once. */}
+      {agentName.trim() && <ConnectAgentRow name={agentName.trim()} state="waiting" />}
+
       <ConnectSteps rows={promptRows} halo={halo} />
 
       {/* #3832: the one trust fact a cautious user needs before pasting,

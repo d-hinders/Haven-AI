@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-11-06"
+last-verified: "2026-11-08"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -1206,6 +1206,17 @@ not-yet-prepared state can never be valid); and idempotent replays resume
 with the ORIGINAL reconstructed signing payload rather than re-running
 estimations — the stored intent, not a fresh prepare, is the source of truth
 for what the agent signs.
+
+**The dashboard's first-payment card reads these same facts, read-only
+(#4707).** `GET /dashboard/first-agent-payment` names the user's earliest
+qualifying agent payment, and "qualifying" for an EIP-3009 row means the
+merchant leg is PROVEN — a recorded, on-chain-verified
+`merchant_settlement_tx_hash`, or a `machine_payment_evidence` row recording
+the merchant's answer — the same two facts `isFundedX402AwaitingMerchantLeg`
+reads. A confirmed row whose merchant has not pulled yet is excluded, so the
+card cannot claim a payment the merchant never took. The read is a per-user
+`SELECT … LIMIT 1` through `DELEGATION_RAIL_JOIN`; it writes nothing, signs
+nothing, and grants no authority. Re-verified for this document on 2026-11-08.
 
 ### 8.1 The settlement child — verified signer, honest bearer semantics (#1061)
 

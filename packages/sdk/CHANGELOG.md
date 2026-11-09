@@ -114,6 +114,13 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   later-signer wording ("signs with their passkey or wallet") is unchanged.
   Wording only; no update needed.
 
+- **The agent runbook's "If something breaks" section starts with the
+  release-record link (#4746).** It now opens "Client out of date? What
+  changed: [/releases](/releases).", where the link used to end the paragraph.
+  A summarising fetch that kept only the paragraph's opening dropped the link,
+  and the agent never reached `/releases`. `AGENT_CLIENT_UPDATE_SENTENCE` is
+  unchanged. Wording only; no update needed.
+
 ## 0.13.0-alpha.0 — 2026-10-30
 
 ### Added

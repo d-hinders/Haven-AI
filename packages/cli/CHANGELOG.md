@@ -23,6 +23,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   and a wallet joins an existing account's signer set later. Wording only; no
   update needed.
 
+- **`haven guide`'s runbook puts the release-record link first under "If
+  something breaks" (#4746).** Its copy of the agent runbook, regenerated from
+  the SDK runbook, opens that section with "Client out of date? What changed:
+  [/releases](/releases).", where the link used to end the paragraph. Wording
+  only; no update needed.
+
 - **`haven contacts add` and `haven contacts remove` now refuse under any session
   (exit 4).** Add and remove saved contacts in the dashboard: a contact is a name the
   owner trusts when paying, and an agent drives this CLI. `haven contacts list` still

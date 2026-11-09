@@ -129,8 +129,13 @@ describe('haven guide text (#2525)', () => {
     // passkey-only: a wallet joins an existing account's signer set later, and
     // the runbook's later-signer wording ("signs with their passkey or wallet")
     // stays. Lands at 12240/12137.
-    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(12240)
-    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(12137)
+    // #4746: +20 bytes / +20 units — § If something breaks opens with "Client
+    // out of date? What changed: [/releases](/releases)." instead of ending on
+    // "What changed: [/releases](/releases)." (all ASCII), so a summarising
+    // fetch that keeps only the paragraph's opening keeps the pointer.
+    // Lands at 12260/12157.
+    expect(Buffer.byteLength(HAVEN_AGENT_RUNBOOK_MD, 'utf8')).toBe(12260)
+    expect(HAVEN_AGENT_RUNBOOK_MD.length).toBe(12157)
   })
 
   it('names the command that actually prints the revoke hash (#3892)', () => {

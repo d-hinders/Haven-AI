@@ -89,6 +89,17 @@ covers:
 last-verified: "2026-11-09"
 ---
 
+> **No contract change (#4746, 2026-11-09): the runbook's release-record link
+> moves to the start of "If something breaks".** `packages/sdk/src/agent-guidance.ts`
+> is on this contract's cover list. The section's paragraph ended with "What
+> changed: [/releases](/releases)."; it now opens with "Client out of date? What
+> changed: [/releases](/releases)." and is otherwise unchanged.
+> `AGENT_CLIENT_UPDATE_SENTENCE`, the `upgrade_command` instruction it carries,
+> and the `client_update` wire shape are all untouched. No tool name, argument,
+> input schema, strict-input list, expected-context version, consent hash,
+> `tools-list.snapshot.json` entry or `next-arguments-corpus.json` row changes.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **No contract change (#4706, 2026-11-08): the connect flow names the agent
 > and offers a read-only check.** `WaitingForConnector.tsx` and `setup-copy.ts`
 > are on this contract's cover list. The waiting screen gains the agent row

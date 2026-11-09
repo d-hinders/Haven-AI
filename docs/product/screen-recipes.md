@@ -98,8 +98,8 @@ Structure (#3818):
    (another agent waiting for setup, a recommended backup signer once funded)
    below them in the same card, under an "Also needs you" caption (#4744) so
    the first item does not read as a fourth step. Never a second card beside
-   it. The steps are the Step status checklist (`ui/StepChecklist`), joined by
-   its connector, each action at the row's right from `sm` up. An agent step 2
+   it. The steps are the design system's Step status checklist, joined by its
+   connector, each action at the row's right from `sm` up. An agent step 2
    names is not listed again below it, and its "and N more" counts only the
    waiting agents no row names.
 3. Only the next step is highlighted and carries the primary action. The

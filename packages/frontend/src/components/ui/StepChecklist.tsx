@@ -216,14 +216,14 @@ export function StepChecklist({ rows, halo = false, numbered = false, headingAs 
             {row.aside}
           </div>
         )
-        const headingBlock = row.description ? (
-          <div className="min-w-0" data-step-text="">
+        // `sm:flex-1` beside an action, so a heading line's `aside` still sits
+        // at the text block's right edge rather than against the title.
+        const headingBlock = (
+          <div className={`min-w-0 ${row.action ? 'sm:flex-1' : ''}`} data-step-text="">
             {headingLine}
-            <p className={`mt-0.5 text-xs leading-relaxed ${descriptionTone(row)}`}>{row.description}</p>
-          </div>
-        ) : (
-          <div className="min-w-0" data-step-text="">
-            {headingLine}
+            {row.description ? (
+              <p className={`mt-0.5 text-xs leading-relaxed ${descriptionTone(row)}`}>{row.description}</p>
+            ) : null}
           </div>
         )
         return (

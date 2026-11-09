@@ -132,6 +132,8 @@ test.describe('first-run guide (#3818)', () => {
         const mid = action.y + action.height / 2
         expect(mid).toBeGreaterThanOrEqual(text.y)
         expect(mid).toBeLessThanOrEqual(text.y + text.height)
+        // Centred against heading plus copy, not top-aligned inside its span.
+        expect(Math.abs(mid - (text.y + text.height / 2))).toBeLessThanOrEqual(2)
         expect(action.x).toBeGreaterThanOrEqual(text.x + text.width)
       } else {
         expect(action.y).toBeGreaterThanOrEqual(text.y + text.height)

@@ -1010,6 +1010,39 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Alpha is waiting to be set up')).toBeInTheDocument()
   })
 
+  it('a waiting agent whose row was dismissed is named by step 2\'s "and 1 more" instead (#4744)', () => {
+    const pending = (id: string, name: string): DashboardAgentPreview => ({
+      ...setUpAgentPreview(),
+      id,
+      name,
+      status: 'pending_approval',
+      budgets: [],
+    })
+    // Alpha's "Needs setup" was dismissed for good (#3813), so no row names it.
+    mockUseAttentionDismissals.mockReturnValue({
+      acknowledgements: new Map([
+        ['needs-setup:agent-a', { acknowledgedAt: '2026-10-09T00:00:00.000Z', acknowledgedPeriodEnd: null }],
+      ]),
+      dismiss: mockDismissOnServer,
+    })
+    mockBaseState([pending('agent-a', 'Alpha'), pending('agent-b', 'Beta')], {
+      accounts: [FUNDED_ACCOUNT],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-a', name: 'Alpha', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-b', name: 'Beta', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.queryByText('Alpha is waiting to be set up')).not.toBeInTheDocument()
+    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
+  })
+
   it('step 2\'s agent whose budget ENDED: no "Budget ended" row in the card; step 2 carries the date (#4744)', () => {
     const ended: DashboardAgentPreview = {
       ...setUpAgentPreview(),

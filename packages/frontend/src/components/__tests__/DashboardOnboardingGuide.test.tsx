@@ -197,9 +197,21 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
     expect(document.body.textContent).not.toContain('Set up an agent first')
   })
 
-  it('without a set-up agent step 3 stays locked', () => {
+  it('an agent whose budget ENDED: step 2 says when, since the card drops its "Budget ended" row (#4744)', () => {
+    renderGuide({
+      usdcFunded: true,
+      pendingAgent: { id: 'b', name: 'Bot', moreCount: 0, awaiting: 'budget', budgetEndedOn: '2 Nov 2026' },
+    })
+    expect(screen.getByText('Finish setting up Bot')).toBeInTheDocument()
+    expect(screen.getByText('Its budget ended 2 Nov 2026. Set a new one so it can pay.')).toBeInTheDocument()
+    expect(screen.queryByText('Set a budget so it can pay.')).not.toBeInTheDocument()
+  })
+
+  it('without a set-up agent step 3 stays locked, and says what unlocks it (#4744, N1)', () => {
     renderGuide({ usdcFunded: true, pendingAgent: { id: 'a', name: 'A', moreCount: 0, awaiting: 'approval' as const } })
-    expect(document.body.textContent).toContain('Set up an agent first to unlock this step.')
+    // The old copy was wrong whenever an agent existed and only needed a budget.
+    expect(screen.getByText('Unlocks when an agent has a budget.')).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('Set up an agent first')
     expect(screen.queryByRole('button', { name: 'Show me how' })).not.toBeInTheDocument()
   })
 
@@ -295,5 +307,53 @@ describe('guide steps play Step on a completion you watch (#4704)', () => {
     rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
     expect(stepRow(1).getAttribute('data-status')).toBe('complete')
     expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+  })
+})
+
+describe('the guide is the shared Step status checklist (#4744)', () => {
+  it('renders through StepChecklist: numbered markers, one connector per gap, a list label', () => {
+    const { container } = renderGuide({ usdcFunded: false })
+    const list = container.querySelector('ol')!
+    expect(list).toHaveAttribute('aria-labelledby')
+    const rows = [...list.querySelectorAll(':scope > li')]
+    expect(rows.map((li) => li.getAttribute('data-step-state'))).toEqual(['active', 'pending', 'pending'])
+    // Numbered: the list is the card's counter (screen-recipes, First-Run item 2).
+    expect(rows.map((li) => li.querySelector('[aria-hidden="true"]')!.textContent)).toEqual(['1', '2', '3'])
+    expect(container.querySelectorAll('[data-step-connector]')).toHaveLength(2)
+  })
+
+  it('a locked step is quiet by TOKEN, never by opacity — and a done step\'s heading is ink-3', () => {
+    const { container } = renderGuide({ usdcFunded: true })
+    const locked = container.querySelector('li[data-status="locked"]') as HTMLElement
+    // On the rendered row and everything in it, so an opacity moved into the
+    // primitive fails this too.
+    for (const el of [locked, ...locked.querySelectorAll<HTMLElement>('*')]) {
+      expect(el.getAttribute('class') ?? '').not.toMatch(/(^|\s)opacity-/)
+    }
+    expect(screen.getByText('Make your first agent payment').closest('p')).toHaveClass('text-[var(--v2-ink-2)]')
+    expect(screen.getByText('Unlocks when an agent has a budget.')).toHaveClass('text-[var(--v2-ink-3)]')
+    expect(screen.getByText('Add USDC to your account').closest('p')).toHaveClass('text-[var(--v2-ink-3)]')
+    // An open-but-not-next step reads at full ink: actionable, not dimmed (#3818).
+    expect(screen.getByText('Connect your first agent').closest('p')).toHaveClass('text-[var(--v2-ink)]')
+  })
+
+  it('states each step to assistive tech, except an unreadable one', () => {
+    const { container } = renderGuide({ usdcFunded: null })
+    const headings = [...container.querySelectorAll('ol > li')].map((li) => li.querySelector('p')!.textContent)
+    // Step 1 is `unknown`: no "Not started" — the balance could not be read.
+    expect(headings).toEqual([
+      'Add USDC to your account',
+      'Not started: Connect your first agent',
+      'Not started: Make your first agent payment',
+    ])
+  })
+
+  it('the step action sits in the row action slot, not under the heading block', () => {
+    const { container } = renderGuide({ usdcFunded: false })
+    const active = container.querySelector('li[data-status="active"]')!
+    const slot = active.querySelector('[data-step-action]')!
+    expect(slot).toContainElement(screen.getByRole('button', { name: 'Add funds' }))
+    expect(slot.parentElement!.className).toContain('sm:flex-row')
+    expect(active.querySelector('[data-step-text]')).not.toContainElement(slot as HTMLElement)
   })
 })

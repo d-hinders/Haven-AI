@@ -16,7 +16,7 @@ import WalletButton from '../WalletButton'
 import { Button } from '../ui/Button'
 import { AgentRulesSummary } from '../haven'
 import { ConnectionVerificationFooter } from './ConnectionVerificationFooter'
-import { ROW_FOOTER_OUTDENT_CLASS } from './ConnectSteps'
+import { ROW_FOOTER_OUTDENT_CLASS } from '@/components/ui/StepChecklist'
 import { WarningCallout } from './SetupNotices'
 
 /**

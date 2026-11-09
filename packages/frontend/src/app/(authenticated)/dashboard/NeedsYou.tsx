@@ -261,6 +261,13 @@ export default function NeedsYou({
           the heading — an unmounted list runs no effect, and focus would
           drop to <body> with the vanished X. */}
       <div className={count > 0 && (hasOverviewError || guide) ? 'border-t border-[var(--v2-border)]' : ''}>
+        {/* #4744: under the numbered steps, the first item read as step 4. A
+            caption, not a heading and not the brand-coloured Eyebrow role:
+            the card keeps its one `h2`. Only when both show — alone, the
+            items are the card and need no caption. */}
+        {guide && count > 0 ? (
+          <p className="px-5 pt-3 text-xs font-medium text-[var(--v2-ink-3)]">Also needs you</p>
+        ) : null}
         <AttentionList
           items={listItems}
           headingId={headingId}

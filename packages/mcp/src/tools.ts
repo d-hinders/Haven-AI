@@ -739,8 +739,8 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
                         'no Haven tool follows: the quoted price does not match the stated ' +
                         'expectation — the user decides before any payment',
                       reason:
-                        // #4754: the symbol, not the contract address (kept only for an
-                        // unrecognised token, where `decimals: null`).
+                        // #4754: the symbol, not the contract address. Only reachable with
+                        // `decimals !== null`; the address arm is a defensive fallback.
                         `The merchant's quoted price (${data.amount} ${data.decimals !== null ? data.token : data.asset}) does not match ` +
                         `the expected price (${args.expected_amount as string}) stated with this quote. ` +
                         'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +

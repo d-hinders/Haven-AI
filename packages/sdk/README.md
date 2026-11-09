@@ -435,7 +435,7 @@ x402 tool-window failures:
 | `funded_but_unsettled` | The EIP-3009 bridge's funding leg confirmed, but the merchant leg has not settled: either the merchant rejected the retry (`nextAction: sweep_stranded_funds`) or no merchant response was ever recorded (`nextAction: retry_original_x402_request`). Follow `nextAction`. | no |
 | `delivered_unverified` | **#3420: terminal.** The merchant delivered, but the settlement window and the sweep's last attribution chance have both passed with no verified on-chain evidence. Polling cannot change this; the only remedy is reporting a real settlement hash (`haven_report_settlement_evidence`). | yes |
 
-The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with the payment header (`PAYMENT-SIGNATURE`, plus `X-PAYMENT` on this bridged path) (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
+The merchant settlement leg of x402 (and the MPP retry) is the agent's own request to the merchant — it does not have a Haven `phase`. The payment is `funding_sent` until the agent retries with the payment header (`PAYMENT-SIGNATURE`, plus `X-PAYMENT` only for an x402 v1 payload) (x402) or the MPP proof header; from Haven's perspective the payment becomes `executed` only after the agent successfully resumes.
 
 ### `nextAction` reference
 
@@ -560,6 +560,8 @@ For manual HTTP stacks, use `resumeAuthorizedX402()` to get the merchant header
 without retrying the request for you:
 
 ```typescript
+import { x402RetryHeadersFor } from '@haven_ai/sdk'
+
 const receipt = await haven.resumeAuthorizedX402({
   paymentId: status.paymentId,
   paymentRequired,

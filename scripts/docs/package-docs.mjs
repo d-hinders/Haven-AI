@@ -127,6 +127,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #3632: the networks table and the four EURe/gnosisscan examples (two
     // pay() samples, the Claude tool sample, the error-handling sample)
     // re-read against core chains.ts and src/tools.ts. Scope: those lines.
+    // #4754: the header-name rule re-read against src/x402.ts
+    // `x402PaymentHeaderNamesFor` (an x402 v2 payload → PAYMENT-SIGNATURE
+    // alone; v1 → both): the x402 scheme paragraph, the authorizeX402 comment,
+    // the bridged-leg bullet, the funding_sent paragraph, the MCP/SSE
+    // paragraph, and the two resume samples (now `x402RetryHeadersFor`, with
+    // its import). Scope: those lines; the date is not moved.
     'last-verified': '2026-10-24',
   },
   {
@@ -238,6 +244,10 @@ export const GOVERNED_PACKAGE_DOCS = [
     // now named) and a new "Every success result names its next step" paragraph,
     // verified against tools.ts, next-step.ts and no-funding-leg.ts. Nothing
     // else in the README re-verified.
+    // #4754: the EIP-3009 bridge sequence's retry line re-read against
+    // src/tools.ts `retry_headers` (built by the SDK's
+    // `x402PaymentHeaderNamesFor`: v2 → PAYMENT-SIGNATURE alone). Scope: that
+    // line; the date is not moved.
     'last-verified': '2026-10-26',
   },
   {
@@ -479,6 +489,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     // `createHostedHavenClient` still throws on a delegate key; the Run
     // endpoints are as written (`POST /v1` Bearer-authenticated, `GET
     // /healthz` unauthenticated per http.ts).
+    // #4754: the paid-MCP sequence's tools/call line re-read against the SDK's
+    // `deliverPayment` → `x402PaymentHeaderNamesFor` (v2 → PAYMENT-SIGNATURE
+    // alone; v1 → both). Scope: that line; the date is not moved.
     'last-verified': '2026-10-24',
   },
   {

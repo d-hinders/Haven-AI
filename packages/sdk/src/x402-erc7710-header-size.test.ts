@@ -330,6 +330,11 @@ describe('#4754 — the header names follow x402Version', () => {
     expect(x402PaymentHeaderNamesFor(encodeBase64Json(payload))).toEqual(expected)
   })
 
+  it('a non-finite x402Version (raw JSON 1e999 → Infinity) falls back to BOTH names', () => {
+    const raw = Buffer.from('{"x402Version":1e999,"accepted":{"scheme":"exact","network":"eip155:8453"}}', 'utf8').toString('base64')
+    expect(x402PaymentHeaderNamesFor(raw)).toEqual(BOTH)
+  })
+
   it('an erc7710 payload keeps the v2 name alone even without a readable version (#2341)', () => {
     const decoded = JSON.parse(Buffer.from(erc7710Header(), 'base64').toString('utf8')) as Record<string, unknown>
     delete decoded.x402Version

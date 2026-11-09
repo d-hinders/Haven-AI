@@ -1342,7 +1342,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'haven_sign_x402 (named in the guidance) returns payment_header INLINE with the',
   'signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
-  'setting exactly the headers its retry_headers names — PAYMENT-SIGNATURE (v2), plus X-PAYMENT (v1) only for an x402 v1 challenge.',
+  'setting exactly its retry_headers (PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1).',
   'Haven never sends the paid request or holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
   'PAYMENT_WINDOW_EXPIRED re-run this tool with the same arguments (request mode: the same',

@@ -1063,9 +1063,10 @@ export function createPlainHttpX402Handlers(
                   safeToContinue: false,
                   reason:
                     (priceDiffers
-                      // #4754: the symbol, not the contract address — the address stays
-                      // only when the token is unrecognised (`decimals: null` marks
-                      // `token` as an unverified fallback label).
+                      // #4754: the symbol, not the contract address. This reason is only
+                      // built when `decimals !== null` (the expected-amount compare needs
+                      // them), so the address arm is a defensive fallback that today
+                      // never runs — `token` is an unverified label when decimals are null.
                       ? `The merchant's quoted price (${quote.amount} ${quote.decimals !== null ? quote.token : quote.asset}) does not match ` +
                         `the expected price (${args.expected_amount as string}) stated with this quote. `
                       : '') +

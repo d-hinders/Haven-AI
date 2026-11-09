@@ -154,7 +154,7 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
 export const DOC_EXCEPTIONS = Object.freeze([
   { patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] },
   // packages/frontend/public/ is SERVED CONTENT, not documentation. Markdown
-  // there is a build artifact an agent fetches over HTTP, but `*.md` above
+  // there is a committed file an agent fetches over HTTP, but `*.md` above
   // crosses `/` (see globToRegExp), so it swallowed the whole directory: an
   // edit to a served .md routed NOTHING, not even `code`, while every
   // non-Markdown sibling in the same directory routed `frontend`. Both arms

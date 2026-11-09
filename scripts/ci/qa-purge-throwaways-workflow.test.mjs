@@ -29,15 +29,21 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const workflow = readFileSync(path.join(ROOT, '.github/workflows/qa-purge-throwaways.yml'), 'utf8')
 
-/** The live (non-comment) lines of the workflow, in order. */
-const live = workflow.split('\n').filter((line) => !/^\s*#/.test(line))
+// The RAW lines, comments included. A `#` line inside a `run: |` block is a
+// bash comment, not a YAML one, and GitHub still pastes `${{ }}` into it — a
+// value with a newline ends the comment and the rest runs as shell. So no
+// line is dropped before the run: block is cut out (#4740 review, cell R7);
+// YAML comments are skipped only where a parser below reads YAML keys.
+const lines = workflow.split('\n')
+const isYamlComment = (line) => /^\s*#/.test(line)
+const indentOf = (line) => line.match(/^\s*/)[0].length
 
-/** Every step of the one job, as its live lines. */
+/** Every step of the one job, as its raw lines. */
 const steps = (() => {
-  const jobSteps = live.findIndex((line) => /^\s{4}steps:\s*$/.test(line))
+  const jobSteps = lines.findIndex((line) => /^\s{4}steps:\s*$/.test(line))
   assert.notEqual(jobSteps, -1, 'qa-purge-throwaways.yml has no job steps: — update this guard')
   const out = []
-  for (const line of live.slice(jobSteps + 1)) {
+  for (const line of lines.slice(jobSteps + 1)) {
     if (/^\s{6}- /.test(line)) out.push([line])
     else if (out.length) out[out.length - 1].push(line)
   }
@@ -46,12 +52,31 @@ const steps = (() => {
 
 const purgeStep = steps.find((s) => s.some((line) => /^\s{6}- name: Purge throwaway QA identities\s*$/.test(line)))
 
+/**
+ * A step's `run:` value as raw lines: the `run:` line itself, then every line
+ * indented deeper than the `run` key (blank lines included). Comment lines
+ * inside count — they are script. A YAML comment after the block, at the key's
+ * indent or less, ends it.
+ */
+function runLines(step) {
+  const runIdx = step.findIndex((line) => /^\s+(- )?run:/.test(line) && !isYamlComment(line))
+  if (runIdx === -1) return null
+  const keyIndent = step[runIdx].indexOf('run:')
+  const out = [step[runIdx]]
+  for (const line of step.slice(runIdx + 1)) {
+    if (line.trim() !== '' && indentOf(line) <= keyIndent) break
+    out.push(line)
+  }
+  return out
+}
+
 /** The body of a step's `run: |` block, de-indented. */
 function runBody(step) {
-  const runIdx = step.findIndex((line) => /^\s+run: \|\s*$/.test(line))
-  assert.notEqual(runIdx, -1, 'the purge step has no `run: |` block — update this guard')
-  const body = step.slice(runIdx + 1)
-  const indent = Math.min(...body.filter((l) => l.trim()).map((l) => l.match(/^\s*/)[0].length))
+  const block = runLines(step)
+  assert.ok(block && /run: \|\s*$/.test(block[0]), 'the purge step has no `run: |` block — update this guard')
+  const body = block.slice(1)
+  while (body.length && body[body.length - 1].trim() === '') body.pop()
+  const indent = Math.min(...body.filter((l) => l.trim()).map(indentOf))
   return body.map((l) => l.slice(indent)).join('\n')
 }
 
@@ -61,6 +86,7 @@ function envOf(step) {
   assert.notEqual(envIdx, -1, 'the purge step has no env: block — update this guard')
   const env = {}
   for (const line of step.slice(envIdx + 1)) {
+    if (isYamlComment(line) || line.trim() === '') continue
     const m = line.match(/^\s{10}([A-Z0-9_]+):\s*(.*)$/)
     if (!m) break
     env[m[1]] = m[2].trim()
@@ -119,10 +145,10 @@ test('the purge step exists and is the one that holds the database credential', 
 test('no run: block inlines an input — each travels through an env var', () => {
   let runBlocks = 0
   for (const step of steps) {
-    const runIdx = step.findIndex((line) => /^\s+(- )?run:/.test(line))
-    if (runIdx === -1) continue
+    const block = runLines(step)
+    if (!block) continue
     runBlocks += 1
-    const body = step.slice(runIdx).join('\n')
+    const body = block.join('\n')
     assert.ok(!/\binputs\s*[.[]/i.test(body), `a run: block inlines an input (shell injection beside the credential): ${step[0].trim()}`)
     // Stricter: no expression at all. `${{ env.X }}` or `${{ inputs['x'] }}`
     // is pasted into the script exactly like `${{ inputs.x }}`; a run: block

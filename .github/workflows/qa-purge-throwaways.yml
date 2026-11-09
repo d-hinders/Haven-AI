@@ -29,7 +29,9 @@ name: QA — purge throwaway identities (dev)
 #      `0`, negative and malformed values are refused; there is no zero-day
 #      override.
 #   6. Both inputs travel as `env:` values read as quoted shell variables,
-#      never inlined into `run:` (#4740) — see the purge step.
+#      never inlined into `run:` (#4740) — see the purge step. Listed last,
+#      it acts first: an inlined value would run while bash parses the
+#      script, before guard 5 or the dry-run default (guard 4) is reached.
 #
 # ## What it deletes, and what it keeps
 #

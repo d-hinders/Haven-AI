@@ -2832,41 +2832,48 @@ files (epic #2806), the budget-scope keys on both surfaces (epic #3615) and
 the doubled post-funding merchant decision in the SDK (2026-10-19 C3) are not
 re-surfaced. S1 revisits a question the 2026-08-18 entry refused ("local/
 hosted MCP tool mirroring (already parity-tested)") on evidence that
-post-dates it: the #2312 incident class and the per-key pins that followed.
+post-dates it, and sits beside the 2026-09-17 F1 (epic #3105), whose slice 5
+pinned handoff parity — the arguments an agent copies from a response — and
+not the two surfaces' input contracts tool by tool. **Withdrawn in review:**
+a candidate on the local MCP package and the money-path perimeter. The
+2026-09-17 C1 raised it and #3098 decided it (the package is pinned doc-only
+by the perimeter's own test); the draft's "no recorded decision" was false.
 
 **Structural finding (pending owner decision):**
 - S1 — one agent surface is implemented twice with no shared contract, and
   the nets cover the hosted side. Local 20 tools, hosted 29, 19 shared names;
-  8 of the 19 have different input keys or required sets and 10 different
-  descriptions; 46 of the 55 first-parent landings on the local package since
+  8 of the 19 have different input key sets or required sets (types not
+  compared) and 10 different descriptions; 46 of the 55 first-parent landings on the local package since
   2026-09-01 also touched the hosted one. The tools/list snapshot, contract
   fingerprint, next-arguments corpus and refusal census exist for the hosted
   package only, and the QA agent does not depend on the local package. Cost:
-  #2312, #2348, #2349, #2353, #3411, each closed with a per-key pin; the
-  architecture doc records the `haven_send` idempotency-key case as "Total
-  loss". The decision under it is the local package's support level
-  (first-class, deliberately smaller, or frozen). Four slices proposed: a
-  parity manifest, one typed-refusal table, a local tools/list snapshot, the
-  perimeter entry.
+  #2348, with #2312 as the class it was found through, closed with per-key
+  pins; the architecture doc records the `haven_send` idempotency-key case as
+  "Total loss". *Corrected in review:* #2349, #2353 and #3411 were first
+  cited too and are not divergence incidents. The decision under it is the local package's support level
+  (first-class, deliberately smaller, or frozen). Three slices proposed: a
+  parity manifest, one typed-refusal table, a local tools/list snapshot.
 
 **Improvement candidates (one PR each), pending owner decision:**
-- C1 — the local MCP's error mapper answers a typed backend refusal
-  generically: by execution with a stubbed SDK client, ten backend error
-  codes gave a typed code on the hosted mapper for 9 and the omitted-reason
-  field for 10, and on the local `haven_send` handler the generic API error,
-  stop-and-tell-user and no omitted-reason field for all 10.
-- C2 — the local MCP package, which loads the delegate key and signs
-  in-process, matches no money-path glob, while the signer package and the
-  hosted MCP source do; the globs file records no decision to leave it out.
-- C3 — delegate-key credential loading and consent are written twice (local
-  MCP and signer): 128 matching lines of the signer's 233-line credentials
-  file, 92 of its 208-line consent file; no behavioural difference shown.
+- C1 — the local MCP's error mapper answers a typed backend refusal with a
+  generic code and no reason field: by execution with a stubbed SDK client,
+  ten backend error codes gave a typed code on the hosted mapper for 9 and
+  the omitted-reason field for 10, and on the local `haven_send` handler the
+  generic API error and no omitted-reason field for all 10. The step itself
+  is passed through from the backend body when present. *Corrected in
+  review:* a claimed step divergence on the two budget codes was an artifact
+  of the stub body. Residue of epic #3105 slice 4 on the error path.
+- C2 — delegate-key credential loading and consent are written twice (local
+  MCP and signer): 128 matching lines (110 non-blank) of the signer's
+  233-line credentials file, 92 (81 non-blank) of its 208-line consent file;
+  no behavioural difference shown.
 
 **Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
 - tool sets → examined → the local tool keys and the hosted snapshot's keys →
   20 / 29 / 19 shared.
 - contract comparison → examined → built local zod shapes against the hosted
-  snapshot → 11 equal / 8 different input contracts; 9 equal descriptions.
+  snapshot → 11 equal / 8 different key-and-required sets; 9 equal
+  descriptions.
   Output shapes not compared.
 - error mapping → partial → ten codes by execution through one local handler;
   the full block 8 recording not run.
@@ -2880,9 +2887,10 @@ post-dates it: the #2312 incident class and the per-key pins that followed.
 - block 3 → not examined → out of scope.
 - block 4 → not examined → out of scope.
 - block 5 → not examined → out of scope.
-- block 6 → partial → one perimeter check (C2); gate allowlists not walked.
+- block 6 → partial → one perimeter check, which found the #3098 decision;
+  gate allowlists not walked.
 - block 8 → partial → ten synthetic codes against both mappers; needs the
   backend suite's database for the recorded set.
 - block 9 → not examined → needs the backend suite's database and builds.
 
-**Disposition: pending owner decision** (S1, C1, C2, C3).
+**Disposition: pending owner decision** (S1, C1, C2).

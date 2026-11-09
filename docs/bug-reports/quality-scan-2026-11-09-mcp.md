@@ -18,6 +18,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/mcp/src/server.ts
   - scripts/ci/money-path.test.mjs
+  - packages/backend/src/modules/budget-scope/refusal-body.ts
 last-verified: "2026-11-09"
 ---
 
@@ -48,7 +49,8 @@ figures come from short scripts the report describes in words; they are marked.
   `haven_report_delivery_quality`, `haven_report_settlement_evidence`,
   `haven_report_x402_outcome`, `haven_settle_mcp_tool`).
 - Size: `packages/mcp/src/tools.ts` 1,547 lines holds all 20 local tools;
-  `packages/mcp-server/src` is 14,704 non-test lines.
+  `packages/mcp-server/src` is 13,546 lines of non-test `.ts`
+  (`test-support/` and the two JSON data files left out).
 - Publication: `npm view @haven_ai/mcp dist-tags` → `latest` and `alpha` both
   `0.13.0-alpha.0`. The local package is what a bare `npx @haven_ai/mcp`
   installs.
@@ -68,12 +70,14 @@ Measured:
   snapshot's `inputSchema` → 11 equal, 8 different: `haven_pay_mcp_tool`
   (hosted adds `max_amount`, `max_amount_human`, `include_signing_payload`),
   `haven_pay_x402_quote` (local requires `quote`; hosted takes `url`,
-  `payment_required`, caps and five more, none required),
+  `payment_required`, two caps and four more, none required; local also
+  takes `sub_budget_id`),
   `haven_quote_x402`, `haven_resume_x402_payment`, `haven_send`,
   `haven_submit`, `haven_sweep_delegate`, `haven_verify_receipt`
   (`receipt` required locally, not hosted). Some differences are by design
   (the local process signs, so it needs no signing payload). None is
-  declared as by-design anywhere a test reads.
+  declared as by-design anywhere a test reads. "Contract" here means the
+  key set and the `required` set; value types were not compared.
 - **Same name, different description: 10 of 19.** *(script)* The local
   `toolDescriptions[name]` equals the snapshot's `description` for 9.
 - **They change together by hand.** `git log --since=2026-09-01 --first-parent --oneline 49747fac3 -- packages/mcp/src | wc -l`
@@ -93,25 +97,37 @@ Measured:
   the package's own name, `@haven_ai/sdk` and `@haven_ai/signer`; no
   `@haven_ai/mcp`.
 
-Demonstrated cost. The repo has paid for this divergence one key at a time:
-#2312 (2026-08-31, twenty hosted tools silently stripped undeclared
-arguments), #2348 (2026-09-01, "the four tools where the local MCP teaches a
-different argument name"), #2349, #2353, and #3411 (2026-09-28, the legacy
-`idempotencyKey` spelling). `docs/architecture/08-local-vs-hosted-mcp.md`
-records the worst case in its own table: for `haven_send` the local spelling
-on the hosted surface was a "Total loss" — the payment went out with no
-idempotency key, so a retry was a second payment. The remedy each time was a
-per-key pin in `packages/mcp-server/src/strict-tool-input.test.ts`, which
-imports the local schemas to check the keys named so far
+Demonstrated cost. #2348 (2026-09-01) is the incident itself: "the four
+tools where the local MCP teaches a different argument name".
+`docs/architecture/08-local-vs-hosted-mcp.md:282` records its worst case: for
+`haven_send` the local spelling on the hosted surface was a "Total loss" —
+the payment went out with no idempotency key, so the backend's replay
+contract never engaged. #2312 (2026-08-31) is how the class was found: twenty
+hosted tools silently stripped undeclared arguments, which is what made a
+wrong-surface spelling invisible. The remedy was a per-key pin:
+`packages/mcp-server/src/strict-tool-input.test.ts` imports the local schemas
+to check the keys named so far
 (`git grep -c "localToolSchemas" 49747fac3 -- packages/mcp-server/src/strict-tool-input.test.ts`
-→ 7 lines). A difference nobody has named yet is checked by nothing. C1
-below is one, found by this scan.
+→ 7 lines). A difference nobody has named is checked by nothing.
+*Corrected in review:* the first draft also cited #2349, #2353 and #3411 as
+incidents closed by a per-key pin. #2349 is a hosted strictness batch, #2353
+was fixed in skill text, and #3411 is the planned removal of a legacy
+spelling; none is a divergence incident.
 
-Relation to prior work: the 2026-08-18 entry refused "local/hosted MCP tool
-mirroring" as "already parity-tested". That was before #2312; the parity
-tests it meant cover descriptions and the keys later incidents named. The
-2026-10-03 S1 (epic #3615) covered the budget-scope keys on both surfaces.
-Neither measured the contract as a whole.
+Relation to prior work, closest first:
+
+- **2026-09-17 F1 (epic #3105, closed)** made every handoff name its tool and
+  spell its arguments. Its slice 5 (#3104) is "cross-surface handoff parity":
+  every argument an agent can *copy from one response* is accepted by the tool
+  it is pointed at. That pins the handoff path. It does not compare the two
+  surfaces' input contracts tool by tool, which is what the 8-of-19 figure
+  measures and what slice A below would pin.
+- The 2026-09-13 and 2026-09-21 agent-surface entries scoped both MCPs and the
+  signer by live exercise; neither compared the two tool lists.
+- The 2026-10-03 S1 (epic #3615) covered the budget-scope keys on both
+  surfaces.
+- The 2026-08-18 entry refused "local/hosted MCP tool mirroring" as "already
+  parity-tested" — before #2312.
 
 How it changes work: 84% of local changes are also hosted changes, made
 twice. A manifest of declared differences turns "did I update both?" from
@@ -125,11 +141,12 @@ different remedy:
 1. *First-class.* Both surfaces share a contract source and both get the
    nets (slices A–D below).
 2. *Supported, deliberately smaller.* Keep two implementations, but declare
-   every difference (slice A) and close the money-relevant gaps (C1, C2).
+   every difference (slice A) and close the refusal gap (C1).
 3. *Frozen or retired.* Stop adding to it; the remedy is a deprecation
    notice and a pin, not parity work.
 
-Proposed slices, disjoint by file:
+Proposed slices, disjoint by file (three; a fourth, the money-path
+perimeter, was withdrawn in review — see *Considered, already decided*):
 
 - **A. A parity manifest.** One test that, for every shared tool name, lists
   each difference in input keys, `required` and description with a one-line
@@ -138,11 +155,10 @@ Proposed slices, disjoint by file:
 - **B. One table of typed backend refusals in the SDK**, used by both
   mappers (C1).
 - **C. A `tools/list` snapshot for the local package**, as the hosted one has.
-- **D. The local package on the money-path perimeter** (C2).
 
 ## Improvement candidates (one PR each)
 
-### C1 — the local MCP answers a typed backend refusal generically, without the next-step fields the convention requires
+### C1 — the local MCP answers a typed backend refusal with a generic code and no reason field
 
 - **Evidence (observed by execution, with a stubbed SDK client).** *(script)*
   Ten backend `error_code` values were each thrown as a `HavenApiError`
@@ -153,74 +169,51 @@ Proposed slices, disjoint by file:
   `RAIL_UNAVAILABLE_FOR_CHAIN`, `ACCOUNT_VALIDATION_FAILED`,
   `SIGNATURE_REJECTED`, `ONCHAIN_EXECUTION_FAILED`; `insufficient_balance`
   stays `API_ERROR`) and `next_tool_omitted_reason` on 10 of 10. Local:
-  `API_ERROR` for 10 of 10, `next_action: stop_and_tell_user` for 10 of 10,
-  `next_tool_omitted_reason` on 0 of 10, with the raw backend body passed
-  through. For `delegation_budget_exceeded` and `delegation_expired` the two
-  surfaces give different steps: hosted `fund_account_or_raise_allowance`,
-  local `stop_and_tell_user`.
+  `API_ERROR` for 10 of 10 and `next_tool_omitted_reason` on 0 of 10, with
+  the raw backend body passed through. The local mapper never reads
+  `error_code` (`packages/mcp/src/tools.ts:1484-1500`).
   The local package has no test naming the code:
   `git grep -cE "delegation_budget_exceeded|DELEGATION_BUDGET_EXCEEDED" 49747fac3 -- packages/mcp/src`
   → 0 files; the same over `packages/mcp-server/src` → 34 lines.
-- **What was not shown.** The stub bypasses the SDK client's own request
-  path, so this is the handler's answer to that error object, not an
-  end-to-end purchase. The body shape `{ error, error_code }` is the one the
-  hosted mapper recognised.
+- **What was not shown.** The stub's body was `{ error, error_code }` only.
+  The local mapper passes the backend's own `next_action` through when the
+  body carries one, and the real budget refusals do
+  (`packages/backend/src/modules/budget-scope/refusal-body.ts:176`), so on
+  real traffic the *step* for those is the same on both surfaces. The gap is
+  the generic code and the missing reason field, not the step. The stub also
+  bypasses the SDK client's request path: this is the handler's answer to
+  that error object, not an end-to-end purchase.
+  *Corrected in review:* the first draft claimed the two surfaces give
+  different steps for `delegation_budget_exceeded` and `delegation_expired`.
+  That was an artifact of the stub body and is withdrawn.
+- **Relation to prior work.** Epic #3105 slice 4 (#3103, closed) made the
+  local runtime's `next_action` sites name a tool. This is the residue on
+  the error path: a refusal with no following tool carries no
+  `next_tool_omitted_reason`.
 - **Benefit.** `CLAUDE.md` requires every MCP payment-flow response to name
   its next tool or say why none follows. `lint:next-steps` scans
   `packages/mcp/src/tools.ts` for literal sites, so it cannot see what a
-  mapper produces at runtime. An over-budget agent on the local MCP is told
-  to stop, with no reason field, where the hosted one is told the budget is
-  spent and what the owner can do.
-- **Scope.** Move the typed-refusal table (code → typed code, step, reason)
-  to the SDK; both mappers read it. Or, smaller: teach the local mapper the
-  codes. One PR. `packages/mcp-server/src/tools/support/errors.ts` is
-  money-path, so owner-gated.
+  mapper produces at runtime.
+- **Scope.** Move the typed-refusal table (code → typed code, reason) to the
+  SDK; both mappers read it. Or, smaller: teach the local mapper the codes.
+  One PR. `packages/mcp-server/src/tools/support/errors.ts` is money-path,
+  so owner-gated.
 - **Verified at scan.** The probe above. Routing: `packages/mcp/src/tools.ts`
   → `code connect mcp mcp_server`; `errors.ts` → `code mcp_server`.
   Money-path: `packages/mcp/src/tools.ts` → `off`; `errors.ts` →
-  `money-path`; control `sweep.ts` → `money-path`. Tracking: no open issue
-  titled for the local MCP. Mutation recipe *unrun* — the shared table does
-  not exist.
-- **Still needed.** Run block 8's recorded backend errors through the local
-  mapper too, so the comparison covers every recorded code, not ten.
+  `money-path`; control `packages/backend/src/rails/sweep.ts` →
+  `money-path`. Tracking: no open issue found. Mutation recipe *unrun* —
+  the shared table does not exist.
+- **Still needed.** Run block 8's recorded backend errors, with their real
+  bodies, through the local mapper, so the comparison covers every recorded
+  code and body shape, not ten synthetic ones.
 
-### C2 — the package that loads the delegate key and signs in-process is off the money-path perimeter
-
-- **Evidence.** The matcher (control first):
-  `packages/backend/src/rails/sweep.ts` → `money-path`;
-  `packages/mcp/src/tools.ts` → `off`; `packages/mcp/src/credentials.ts` →
-  `off`; `packages/signer/src/credentials.ts` → `money-path`;
-  `packages/mcp-server/src/tools/support/errors.ts` → `money-path`.
-  `git show 49747fac3:.github/money-path-globs.json | grep -nE '"packages/(mcp|mcp-server|signer)[/"*]'`
-  → `packages/mcp-server/src/**` and `packages/signer/**`; nothing for
-  `packages/mcp`. The file's own rationale for the signer reads "the
-  edge-signer package that actually holds the delegate key"; the local MCP
-  holds it too (`packages/mcp/src/credentials.ts` reads `delegate_key`,
-  `packages/mcp/src/server.ts:85` passes it on). No note in the file records
-  a decision to leave the package out. 55 landings touched
-  `packages/mcp/src` since 2026-09-01.
-- **Benefit.** A change to how the local package loads the key or builds a
-  payment currently gets no `money-path` label, no money playbook and no
-  QA-freshness count unless it also touches a listed file (at least 46
-  of the 55 did: they also touched `packages/mcp-server/src`).
-- **Scope.** A perimeter decision, so the owner's: add `packages/mcp/src/**`
-  to `globs` or to `controlGlobs`, with the labeler and perimeter-reference
-  entries. No QA leg drives the local package (S1), so a runtime glob would
-  ask for a QA run that does not exercise it; `controlGlobs` — label and
-  human review, no QA re-run — fits what exists. One PR.
-- **Verified at scan.** Matcher output above. Routing for
-  `.github/money-path-globs.json` not run. Prior art:
-  `gh api search/issues … money-path-globs "packages/mcp"` → no issue about
-  this package; #4122 is the SDK precedent. Mutation recipe *unrun*.
-- **Still needed.** `node --test scripts/ci/money-path.test.mjs` green with
-  the three lists agreeing.
-
-### C3 — delegate-key credential loading and consent are written twice, in the local MCP and the signer
+### C2 — delegate-key credential loading and consent are written twice, in the local MCP and the signer
 
 - **Evidence.** *(script)* Line-level matching (`difflib`) of
   `packages/mcp/src/credentials.ts` (446 lines) against
-  `packages/signer/src/credentials.ts` (233) → 128 matching lines; of
-  `consent.ts` (377 vs 208) → 92. Three exported functions carry the same
+  `packages/signer/src/credentials.ts` (233) → 128 matching lines (110 non-blank); of
+  `consent.ts` (377 vs 208) → 92 (81 non-blank). Three exported functions carry the same
   name in both — `readAccountAddressField`, `readAccountAddressEnv`,
   `warnIfCredentialFilePermissive`; whitespace-stripped body hashes: the
   second equal, the other two different. Read side by side, the two
@@ -237,6 +230,24 @@ Proposed slices, disjoint by file:
   mcp_server`. Mutation recipe *unrun*.
 - **Still needed.** A characterization test over the credential-file shapes
   both loaders accept, before either is replaced.
+
+## Considered, already decided
+
+- **The local MCP package and the money-path perimeter.** The matcher prints
+  `off` for `packages/mcp/src/tools.ts` and `packages/mcp/src/credentials.ts`
+  and `money-path` for `packages/signer/src/credentials.ts`. The first draft
+  reported this as a candidate with "no recorded decision". **That was
+  wrong, found in review:** the 2026-09-17 scan's C1 raised the perimeter
+  question, #3098 (closed 2026-09-17) decided it, the globs file records it
+  ("client packages the deployed harness never runs; widening them is an
+  owner decision"), and `scripts/ci/money-path.test.mjs:719` pins
+  `packages/mcp/src/**` as doc-only "the local MCP runtime, runs in the
+  agent's process — see #3098". It is a prior decision with nothing
+  measurably worse since, so it is not a candidate. One observation for the
+  owner, not a finding: the recorded reason is about what the QA harness
+  runs; it does not mention that this package loads the delegate key
+  (`packages/mcp/src/server.ts:85`), which is the reason the same file gives
+  for listing the signer.
 
 ## Coverage record
 
@@ -255,4 +266,4 @@ Proposed slices, disjoint by file:
   2026-09-10 finding (epic #2806) covers that file family; excluded.
 - Live behaviour → not examined → no live call.
 - Blocks 1, 2, 3, 4, 5, 9 → not examined → out of scope. Block 6 → partial
-  (C2). Block 8 → partial (C1, ten synthetic codes, local side only new).
+  (one perimeter check, which found a prior decision). Block 8 → partial (C1, ten synthetic codes, local side only new).

@@ -522,9 +522,9 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * added — 29 holds. Shrink-only from here.
  *
  * **Re-derived — round 33, #4754 (2026-11-09).** `haven_pay_x402_quote`'s
- * header sentence changed from "PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless
- * erc7710" (62 bytes) to "exactly its retry_headers (PAYMENT-SIGNATURE;
- * X-PAYMENT too only for x402 v1)" (86 bytes): +24, 31,805 UTF-8 bytes — 7
+ * header fragment changed from "setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1)
+ * unless erc7710." (62 bytes) to "setting exactly its retry_headers
+ * (PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1)." (86 bytes): +24, 31,805 UTF-8 bytes — 7
  * under the round-29 pin, so the cap does not move. A first draft at +68
  * crossed it and was cut; PAYMENT-SIGNATURE stays named for the #2330 guard.
  * No tool was added — 29 holds. Shrink-only from here.

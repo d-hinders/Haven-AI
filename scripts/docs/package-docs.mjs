@@ -132,8 +132,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // alone; v1 → both): the x402 scheme paragraph, the authorizeX402 comment,
     // the bridged-leg bullet, the funding_sent paragraph, the MCP/SSE
     // paragraph, and the two resume samples (now `x402RetryHeadersFor`, with
-    // its import). Scope: those lines; the date is not moved.
-    'last-verified': '2026-10-24',
+    // its import). Scope: those lines; the rest of the README was NOT re-verified.
+    'last-verified': '2026-11-09',
   },
   {
     doc: 'packages/signer/README.md',
@@ -247,8 +247,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // #4754: the EIP-3009 bridge sequence's retry line re-read against
     // src/tools.ts `retry_headers` (built by the SDK's
     // `x402PaymentHeaderNamesFor`: v2 → PAYMENT-SIGNATURE alone). Scope: that
-    // line; the date is not moved.
-    'last-verified': '2026-10-26',
+    // line; the rest of the README was NOT re-verified.
+    'last-verified': '2026-11-09',
   },
   {
     doc: 'packages/mcp/README.md',
@@ -491,8 +491,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // /healthz` unauthenticated per http.ts).
     // #4754: the paid-MCP sequence's tools/call line re-read against the SDK's
     // `deliverPayment` → `x402PaymentHeaderNamesFor` (v2 → PAYMENT-SIGNATURE
-    // alone; v1 → both). Scope: that line; the date is not moved.
-    'last-verified': '2026-10-24',
+    // alone; v1 → both). Scope: that line; the rest of the README was NOT re-verified.
+    'last-verified': '2026-11-09',
   },
   {
     // The private operations console (#3515). Its README documents the env

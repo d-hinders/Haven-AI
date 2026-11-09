@@ -1,7 +1,7 @@
 import { Header } from '../Header'
 import { Footer } from '../Footer'
 import { SiteSection, SITE_TYPE } from '../SiteSection'
-import { CodePrompt, SiteCode, SiteCopy, SiteCtaRow, SiteHero, SiteLede } from '../blocks'
+import { CodePrompt, SiteCode, SiteCopy, SiteCtaRow, SiteHero, SiteInlineLink, SiteLede } from '../blocks'
 import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 
 /**
@@ -197,12 +197,9 @@ export function ForAgentsPage() {
             </p>
             <p className="mt-2.5 text-[16px] leading-[1.65] text-[var(--v2-ink-2)]">
               Your user has no Haven account yet? Send them{' '}
-              <a
-                href="/signup?next=/agents&via=agent"
-                className="rounded-[4px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
-              >
+              <SiteInlineLink href="/signup?next=/agents&via=agent" plain>
                 /signup?next=/agents&amp;via=agent
-              </a>{' '}
+              </SiteInlineLink>{' '}
               — the runbook&apos;s own hand-off link.
             </p>
             <ol className="mt-2.5 grid list-decimal gap-2 pl-[22px]">
@@ -285,12 +282,9 @@ export function ForAgentsPage() {
             </blockquote>
             <p className="mt-2.5 text-[16px] leading-[1.65] text-[var(--v2-ink-2)]">
               One script per hand-off is in{' '}
-              <a
-                href="/for-agents.md"
-                className="rounded-[4px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
-              >
+              <SiteInlineLink href="/for-agents.md" plain>
                 /for-agents.md
-              </a>
+              </SiteInlineLink>
               , the canonical runbook.
             </p>
 

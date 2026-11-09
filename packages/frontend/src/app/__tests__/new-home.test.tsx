@@ -57,9 +57,45 @@ describe('the new home page (#3574)', () => {
 
   it('keeps the agent sentence and the /llms.txt link in server-rendered output', () => {
     const { container } = render(<NewSiteHome />)
-    expect(container.textContent).toContain('If you are an AI agent reading this for your user')
-    const link = container.querySelector('a[href="/llms.txt"]')
-    expect(link, 'the /llms.txt link').not.toBeNull()
+    // Scoped to the hero (#4713): How it works links /llms.txt too, so a
+    // page-wide query would stay green with the hero's link deleted.
+    const hero = container.querySelector('section#hero')
+    expect(hero, 'section#hero').not.toBeNull()
+    expect(hero!.textContent).toContain('If you are an AI agent reading this for your user')
+    const link = hero!.querySelector('a[href="/llms.txt"]')
+    expect(link, 'the hero’s /llms.txt link').not.toBeNull()
+  })
+
+  /** The section's paragraphs, whitespace collapsed (JSX wraps them across source lines). */
+  function howParagraphs(container: HTMLElement): HTMLParagraphElement[] {
+    const how = container.querySelector('section#how')
+    expect(how, 'section#how').not.toBeNull()
+    return Array.from(how!.querySelectorAll('p'))
+  }
+  const flat = (node: Element) => (node.textContent ?? '').replace(/\s+/g, ' ').trim()
+
+  it('step 1 names the funding step, whole (#4713, owner answer 2(a))', () => {
+    const { container } = render(<NewSiteHome />)
+    // Pinned whole: a bare "fund" would pass on the custody line elsewhere.
+    expect(howParagraphs(container).map(flat)).toContain(
+      'One passkey prompt creates an account only you control. No seed phrase, no credit card. Then add funds in USDC.',
+    )
+  })
+
+  it('step 3 points an agent at /llms.txt with a real link (#4713, owner answer 1(c))', () => {
+    const { container } = render(<NewSiteHome />)
+    const step3 = howParagraphs(container).find((p) =>
+      flat(p).startsWith('One command wires in Claude, Codex, Cursor'),
+    )
+    expect(step3, 'the step 3 paragraph').toBeDefined()
+    expect(flat(step3!)).toBe(
+      'One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this for its user starts at /llms.txt.',
+    )
+    const link = step3!.querySelector('a[href="/llms.txt"]')
+    expect(link, 'the step 3 /llms.txt link').not.toBeNull()
+    expect(link!.textContent).toBe('/llms.txt')
+    // Real page content, not a decorative region: reachable by AT and keyboard.
+    expect(link!.closest('[aria-hidden="true"]')).toBeNull()
   })
 
   it('has no placeholder href and no founders CTA (decisions 8 and “no dead links”)', () => {
@@ -153,7 +189,13 @@ describe('the new home page (#3574)', () => {
     // trailing `…` for the flags left out (#3644).
     const command = terminal!.querySelector('[data-terminal-command]')?.textContent ?? ''
     expect(command).toBe(CONNECTOR_TERMINAL.command)
-    expect(command.startsWith('npx -y @haven_ai/connect@alpha ')).toBe(true)
+    // The literal, whole (#4713, owner answer 3: keep `@alpha`): the line
+    // above compares the fixture with itself.
+    expect(command).toBe('npx -y @haven_ai/connect@alpha …')
+    // The first line points an agent at the runbook rather than inviting it
+    // to run the command (#4713, owner answer 1(c)).
+    const firstLine = terminal!.querySelector('pre > span')?.textContent ?? ''
+    expect(firstLine).toBe('# agents: start at /llms.txt')
     // The mockup's bare one-liner stays out: it exits with an argument error.
     expect(command).not.toMatch(/npx @haven_ai\/connect(?![-@\w])/)
     // No real-looking setup token on a marketing page.

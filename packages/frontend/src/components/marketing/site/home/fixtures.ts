@@ -89,16 +89,19 @@ export const ACCOUNTING_FEED = [
  *   "stays verbatim wherever it appears"), with the `@alpha` dist-tag; the
  *   trailing `…` marks the flags left out. The mockup's bare
  *   `npx @haven_ai/connect` stays out: it throws "Missing --setup" before
- *   anything runs (`packages/connect/src/args.ts:256`).
+ *   anything runs (`packages/connect/src/args.ts:285`).
  * - The output lines are illustrative and tell the real order: the key is
  *   made on the agent's machine, the agent connects, the user approves the
  *   budget in Haven. "Key", never "signing key" (copy-guidelines vocabulary).
+ * - The first line points an agent at `/llms.txt` (#4713, owner answers of
+ *   2026-11-09) rather than inviting it to run the command: a summary that
+ *   drops the `…` hands an agent a command that stops at "Missing --setup".
  * - Every line, comments included, is at most 38 characters, so none wraps
  *   at 1280 (a column holds about 41 at 12.5px mono); narrower, the
  *   terminal wraps rather than scrolls.
  */
 export const CONNECTOR_TERMINAL = {
-  comment: '# in your agent\'s terminal',
+  comment: '# agents: start at /llms.txt',
   command: 'npx -y @haven_ai/connect@alpha …',
   output: [
     '✓ Key created on this machine',

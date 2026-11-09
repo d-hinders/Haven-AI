@@ -38,6 +38,8 @@ covers:
   - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
+  - packages/frontend/src/lib/dashboard-attention.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx

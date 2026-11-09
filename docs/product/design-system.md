@@ -7,6 +7,7 @@ covers:
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
   - packages/frontend/src/components/ui/StepChecklist.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
   - packages/frontend/src/components/connect-agent/ConnectAgentRow.tsx
   - packages/frontend/src/components/connect-agent/ConnectStep.tsx
   - packages/frontend/src/app/onboarding/OnboardingClient.tsx
@@ -3110,11 +3111,13 @@ the marker column is a straight edge:
 step — the guide's `available` and `unknown` steps (#3818): not highlighted, not
 dimmed. A step that is not open yet (the guide's `locked` step 3) is quiet **by
 token, never by opacity**: `opacity-60` put its copy at 2.43:1 on white, where
-`--v2-ink-3` alone measures 5.32:1.
+`--v2-ink-3` alone measures 5.32:1 (`#5d6c85` on `#ffffff`, WCAG relative
+luminance, measured 2026-11-09 at `12e6dd60`).
 
 **The connector.** A 2px line (`w-0.5`) runs down the marker column from each
-disc to the next, inside the column's motion room (below), so a heading-only
-row draws one as well as a row with a body; none runs under the last disc. It
+disc to the next, inside the marker column's 8px padding (the room
+Milestone's check-pop and the active halo need), so a heading-only row draws one
+as well as a row with a body; none runs under the last disc. It
 is **static** — no transition, and not `.v2-progress-line`, whose `scaleX`
 fill is the horizontal band's motion. A segment describes the step above it:
 below a done disc it takes the band's filled tint, `--v2-success` at 45% over

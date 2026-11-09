@@ -108,7 +108,7 @@ export function ConnectStep({
   const playTimerRef = useRef<number | null>(null)
   const [playingRows, setPlayingRows] = useState<ReadonlySet<string>>(new Set())
   // ONE live region for the whole step: the agent row and the checklist row
-  // both change when the agent connects, and § ConnectSteps asks for one
+  // both change when the agent connects, and § Step status checklist asks for one
   // announcement per change, not two.
   const [announcement, setAnnouncement] = useState('')
 
@@ -218,7 +218,7 @@ export function ConnectStep({
   return (
     <>
       {/* #4706: ONE live region for the step. The agent row and the checklist
-          row both change when the agent connects; § ConnectSteps asks for one
+          row both change when the agent connects; § Step status checklist asks for one
           announcement per change, not two. It sits OUTSIDE the shell's keyed
           body so a sub-state change does not remount it (a fresh live region
           announces nothing). */}

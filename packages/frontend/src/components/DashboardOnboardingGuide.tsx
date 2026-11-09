@@ -39,7 +39,7 @@ interface StepProps {
   popOnComplete?: boolean
 }
 
-/** The most recently connected agent still waiting for setup, and how many more are. */
+/** The most recently connected agent still waiting for setup, and how many other waiting agents the card names nowhere else. */
 export interface PendingSetupAgent {
   id: string
   name: string

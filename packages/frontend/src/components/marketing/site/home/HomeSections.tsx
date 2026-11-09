@@ -168,7 +168,7 @@ export function HomeHowItWorks() {
           <p className="text-[15px] text-[var(--v2-ink-2)]">
             One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this
             for its user starts at{' '}
-            <SiteInlineLink href="/llms.txt" ground="surface" plain>
+            <SiteInlineLink href="/llms.txt" ground="tint" plain>
               /llms.txt
             </SiteInlineLink>
             .

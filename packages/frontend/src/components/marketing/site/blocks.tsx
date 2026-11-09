@@ -2,7 +2,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { TrailingArrow } from '@/components/marketing/TrailingArrow'
 import { SITE_FONT_VARIABLES } from './fonts'
-import { SITE_TYPE, SITE_WRAP } from './SiteSection'
+import { SITE_TYPE, SITE_WRAP, type SiteGround } from './SiteSection'
 
 /**
  * Building blocks the redesigned public pages share (#3576, epic #3572), each
@@ -134,8 +134,8 @@ export function SiteTextLink({ href, children }: { href: string; children: React
 
 /**
  * A link inside running text, on a themed ground: brand ink, a brand focus
- * ring, no arrow. `ground` names the surface the link sits on, so the ring's
- * offset matches it — `bg` for a white section, `surface` for a tint one.
+ * ring, no arrow. `ground` is the `SiteSection` ground the link sits on, so
+ * the ring's offset matches it: `--v2-bg` on white, `--v2-surface` on tint.
  *
  * A route renders through `next/link`. A static public file (`/llms.txt`,
  * `/for-agents.md`) or a hand-off an agent copies whole passes `plain` and
@@ -146,16 +146,16 @@ export function SiteTextLink({ href, children }: { href: string; children: React
 export function SiteInlineLink({
   href,
   children,
-  ground = 'bg',
+  ground = 'white',
   plain = false,
 }: {
   href: string
   children: ReactNode
-  ground?: 'bg' | 'surface'
+  ground?: Extract<SiteGround, 'white' | 'tint'>
   plain?: boolean
 }) {
   const className = `rounded-[4px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 ${
-    ground === 'surface' ? 'focus-visible:ring-offset-[var(--v2-surface)]' : 'focus-visible:ring-offset-[var(--v2-bg)]'
+    ground === 'tint' ? 'focus-visible:ring-offset-[var(--v2-surface)]' : 'focus-visible:ring-offset-[var(--v2-bg)]'
   }`
   return plain ? (
     <a href={href} className={className}>

@@ -94,8 +94,10 @@ export const ACCOUNTING_FEED = [
  *   made on the agent's machine, the agent connects, the user approves the
  *   budget in Haven. "Key", never "signing key" (copy-guidelines vocabulary).
  * - The first line points an agent at `/llms.txt` (#4713, owner answers of
- *   2026-11-09) rather than inviting it to run the command: a summary that
- *   drops the `…` hands an agent a command that stops at "Missing --setup".
+ *   2026-11-09,
+ *   https://github.com/d-hinders/Haven-AI/issues/4713#issuecomment-6734961163)
+ *   rather than inviting it to run the command: a summary that drops the `…`
+ *   hands an agent a command that stops at "Missing --setup".
  * - Every line, comments included, is at most 38 characters, so none wraps
  *   at 1280 (a column holds about 41 at 12.5px mono); narrower, the
  *   terminal wraps rather than scrolls.

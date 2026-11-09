@@ -96,6 +96,8 @@ describe('the new home page (#3574)', () => {
     expect(link!.textContent).toBe('/llms.txt')
     // Real page content, not a decorative region: reachable by AT and keyboard.
     expect(link!.closest('[aria-hidden="true"]')).toBeNull()
+    // How it works is the tint ground, so the focus ring is offset on it.
+    expect(link!.className).toContain('focus-visible:ring-offset-[var(--v2-surface)]')
   })
 
   it('has no placeholder href and no founders CTA (decisions 8 and “no dead links”)', () => {

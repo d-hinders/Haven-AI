@@ -1297,6 +1297,31 @@ describe('onboarding_first_reply — score 2 is out of the manifest three', () =
     expect(r.detail).toContain('approve_budget')
   })
 
+  it('credits "Add USDC" as the funding step — run 42585633954 trial 2, recorded (#4713)', () => {
+    // The trial's final message verbatim, except the preview origin. It named
+    // all three steps and scored a false 2/3 under the old `fund` substring.
+    const trial2 = "Setup has to start with you, so I've stopped at the first step that needs a human. I haven't installed or run anything yet.\n\n**What you need to do:**\n1. Open https://dev.example/signup.\n2. Create your account with a passkey. This is your passkey prompt, so I won't do it.\n3. Add USDC to the account.\n4. Create an agent and set its budget in the dashboard. The site's example is 250 USDC, reset monthly, any merchant, but choose your own values. Approve the budget with your passkey.\n5. Copy the connector command from the dashboard. Send it to me, or tell me when you're done.\n\n**What I'll do after that:**\n- Run the connector. The site's docs show `npx -y @haven_ai/connect@alpha`. A second page says `npm install @haven_ai/connect`. I'll use the exact command your dashboard gives, because the two pages differ.\n- Generate the agent's signing key locally and connect it to Haven's MCP service.\n- Check that the connection works, without making any payment.\n\nThe connector command is an alpha package. Before I run it, I'll show you the command from your dashboard so you can confirm it."
+    const r = onboardingFirstReply(log([], trial2), { steps, threshold: 3 })
+    expect(r.score).toBe(3)
+    expect(r.pass).toBe(true)
+  })
+
+  it('does not credit USDC without an add or fund step, nor an "add" far from it', () => {
+    for (const reply of [
+      // USDC named, but no step that puts it in the account.
+      'Create your account with a passkey, then approve a 250 USDC budget.',
+      // "add" and "USDC" in one sentence, but more than 20 characters apart.
+      'Add your passkey to the account first, then approve a USDC budget.',
+      // "add" and "USDC" adjacent across a sentence boundary.
+      'Create a passkey and approve the budget, then add. USDC settles payments.',
+    ]) {
+      const r = onboardingFirstReply(log([], reply), { steps, threshold: 3 })
+      expect(r.score, reply).toBe(2)
+      expect(r.pass, reply).toBe(false)
+      expect(r.detail, reply).toContain('missing: fund')
+    }
+  })
+
   it('refuses an unknown step id rather than scoring it 0 silently', () => {
     const r = onboardingFirstReply(log([], 'passkey fund budget'), { steps: ['rotate_credential'], threshold: 1 })
     expect(r.pass).toBe(false)

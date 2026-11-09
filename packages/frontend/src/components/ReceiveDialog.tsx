@@ -78,7 +78,7 @@ function buildOnrampUrl(accountAddress: string, chainShortName: string): string 
  * dashboard overview; when it rises the dialog becomes its arrived state, a
  * `DialogResult` announced through `role="status"` — Peak for the user's
  * first money on this device, Step otherwise. The arrived state's actions:
- * **View transaction** (the account's Activity tab — the dialog holds no
+ * **View in Activity** (the account's Activity tab — the dialog holds no
  * hash, and the explorer-derived row can lag the chain read, so it never
  * deep-links a row it may not have yet) and **Done**; on a first deposit a
  * host that can connect an agent passes `onConnectFirstAgent`, and the
@@ -571,7 +571,7 @@ function ReceiveArrived({
       >
         <p>
           <Button variant="tertiary" size="sm" onClick={viewTransaction}>
-            View transaction
+            View in Activity
           </Button>
         </p>
       </DialogResult>

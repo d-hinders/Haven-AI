@@ -242,7 +242,7 @@ export function ConnectStep({
         {connectView?.kind === 'waiting_for_connector' && !setup && (
           <SetupStatusState
             title="Not connected yet"
-            body="Nothing to approve until the agent runs its connector command. That command is in the session where this setup was created, and you do not need it here."
+            body="If you already pasted the setup prompt into your agent, this screen moves on to budget approval as soon as it connects. If you no longer have the prompt, close this and choose Start again on the dashboard."
             tone="neutral"
             primaryLabel="Close"
             onPrimary={flow.handleClose}

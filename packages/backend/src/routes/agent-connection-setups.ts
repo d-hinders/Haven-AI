@@ -668,6 +668,37 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     },
   )
 
+  // ── GET /pending — the dashboard's "still connecting" row (#4710) ──
+  //
+  // Closing the connect dialog before the agent registers used to leave no way
+  // back in the app: setups were readable only by id, and the prompt exists
+  // only in the create response. This read lists the signed-in user's setups
+  // that are still awaiting a connector and unexpired, so the dashboard can
+  // offer Open (the existing resume link) and Start again.
+  //
+  // Tenant scope is the authenticated `sub`, never a caller-supplied id. The
+  // projection is deliberately narrow — id, name, deadline — and carries no
+  // token, hash, challenge or prompt. `source = 'cli'` is excluded in the
+  // repository: a CLI run has no dialog to have closed.
+  //
+  // Registered as a STATIC path beside `/:setupId`; Fastify's router prefers
+  // the static segment, so `pending` is never read as a setup id.
+  app.get(
+    '/pending',
+    { onRequest: [authMiddleware] },
+    async (request) => {
+      const { sub } = request.user as { sub: string }
+      const rows = await setups.listPendingSetupsForUser(sub)
+      return {
+        setups: rows.map((row) => ({
+          setup_id: row.id,
+          name: row.name,
+          expires_at: row.setup_token_expires_at,
+        })),
+      }
+    },
+  )
+
   app.get<{ Params: { setupId: string } }>(
     '/:setupId',
     { onRequest: [authMiddleware] },

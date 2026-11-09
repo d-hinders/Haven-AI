@@ -12,6 +12,7 @@ import {
   type AttentionAcknowledgement,
   type DashboardBudgetRemaining,
   type DashboardOverview,
+  type PendingConnectionSetup,
 } from '../dashboard-attention'
 
 /**
@@ -1321,5 +1322,102 @@ describe('computeAttentionItems — budget ending and budget ended (#4353)', () 
     ])
     expect(items.map((item) => item.kind)).toEqual(['needs-setup'])
     expect(items[0].agentId).toBe('a2')
+  })
+})
+
+/**
+ * #4710: the "still connecting" row. Closing the connect dialog before the
+ * agent registers used to leave no way back in the app; the row is that way
+ * back, and it must end on its own (30 minutes, register or cancel) rather
+ * than be dismissed.
+ */
+describe('computeAttentionItems — still connecting (#4710)', () => {
+  const NOW = Date.parse('2026-11-09T13:00:00.000Z')
+
+  function pending(overrides: Partial<PendingConnectionSetup> = {}): PendingConnectionSetup {
+    return {
+      setup_id: '11111111-1111-1111-1111-111111111111',
+      name: 'Research agent',
+      expires_at: '2026-11-09T13:30:00.000Z',
+      ...overrides,
+    }
+  }
+
+  function run(pendingSetups: PendingConnectionSetup[] | null) {
+    return computeAttentionItems({
+      overview: makeOverview([], []),
+      budgetRemaining: EMPTY_BUDGETS,
+      pendingSetups,
+      nowMs: NOW,
+    })
+  }
+
+  it('renders the exact row text, with the deadline in the user’s timezone', () => {
+    const setup = pending()
+    const items = run([setup])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      id: `connection-pending:${setup.setup_id}`,
+      kind: 'connection-pending',
+      tone: 'brand',
+      badge: 'Connecting',
+      title: 'Research agent is still connecting',
+      actionLabel: 'Open',
+      href: `/agents?setup=${setup.setup_id}`,
+      setupId: setup.setup_id,
+    })
+    // The clock is the runtime zone's, formatted the app's way (en-GB, 24h).
+    const clock = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(setup.expires_at))
+    expect(items[0].subtitle).toBe(`Your setup prompt works until ${clock}.`)
+  })
+
+  it('is not dismissible — it ends on its own within 30 minutes, or on register or cancel', () => {
+    expect(DISMISSIBLE_ATTENTION_KINDS.has('connection-pending')).toBe(false)
+  })
+
+  it('renders one row per setup', () => {
+    const items = run([
+      pending({ setup_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Research agent' }),
+      pending({ setup_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Ops agent' }),
+    ])
+    expect(items.map((item) => item.title)).toEqual([
+      'Research agent is still connecting',
+      'Ops agent is still connecting',
+    ])
+  })
+
+  it('never claims the setup will finish on its own', () => {
+    const [item] = run([pending()])
+    expect(`${item.title} ${item.subtitle}`).not.toMatch(/will connect|finishes|completes|soon/i)
+  })
+
+  it('drops a setup whose deadline has passed, even from a stale response', () => {
+    expect(run([pending({ expires_at: '2026-11-09T12:59:59.000Z' })])).toEqual([])
+  })
+
+  it('fires nothing on an unknown read (null) or an unparseable deadline', () => {
+    expect(run(null)).toEqual([])
+    expect(run([pending({ expires_at: 'not-a-date' })])).toEqual([])
+  })
+
+  it('sits after the needs-setup items and before low balance', () => {
+    const items = computeAttentionItems({
+      overview: makeOverview(
+        [{ id: 'a1', name: 'Scout', status: 'pending_approval', setupStatus: 'awaiting_connection' }],
+        [{ accountId: 'acct-1', usdcBalanceAtomic: '1000000', usdcPace7dAtomic: '5000000' }],
+      ),
+      budgetRemaining: EMPTY_BUDGETS,
+      pendingSetups: [pending()],
+      nowMs: NOW,
+    })
+    expect(items.map((item) => item.kind)).toEqual([
+      'needs-setup',
+      'connection-pending',
+      'low-balance',
+    ])
   })
 })

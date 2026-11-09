@@ -362,3 +362,72 @@ describe('NeedsYou', () => {
     expect(onAddFunds).toHaveBeenCalledWith('acct-1')
   })
 })
+
+/**
+ * #4710: the still-connecting row offers TWO actions — Open (the existing
+ * resume link) and Start again (cancel + reopen prefilled) — and no dismiss
+ * control, because it ends on its own within 30 minutes, or on register or
+ * cancel.
+ */
+describe('NeedsYou — still connecting (#4710)', () => {
+  const SETUP_ID = '11111111-1111-1111-1111-111111111111'
+  const CONNECTING = item({
+    id: `connection-pending:${SETUP_ID}`,
+    kind: 'connection-pending',
+    tone: 'brand',
+    badge: 'Connecting',
+    title: 'Research agent is still connecting',
+    subtitle: 'Your setup prompt works until 14:30.',
+    actionLabel: 'Open',
+    href: `/agents?setup=${SETUP_ID}`,
+    setupId: SETUP_ID,
+  })
+
+  it('renders Open as the resume link and Start again as a button', () => {
+    render(
+      <NeedsYou
+        items={[CONNECTING]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        onStartAgain={() => {}}
+      />,
+    )
+    expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute(
+      'href',
+      `/agents?setup=${SETUP_ID}`,
+    )
+    expect(screen.getByRole('button', { name: 'Start again' })).toBeInTheDocument()
+  })
+
+  it('hands the setup id to Start again', async () => {
+    const user = userEvent.setup()
+    const onStartAgain = vi.fn()
+    render(
+      <NeedsYou
+        items={[CONNECTING]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        onStartAgain={onStartAgain}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Start again' }))
+    expect(onStartAgain).toHaveBeenCalledWith(SETUP_ID)
+  })
+
+  it('offers no dismiss control', () => {
+    render(
+      <NeedsYou
+        items={[CONNECTING]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        onStartAgain={() => {}}
+      />,
+    )
+    expect(
+      screen.queryByTestId(`attention-dismiss-connection-pending:${SETUP_ID}`),
+    ).not.toBeInTheDocument()
+  })
+})

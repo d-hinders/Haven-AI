@@ -1043,6 +1043,47 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('lists the signed-in user’s pending setups with no credential fields (#4710)', async () => {
+    const app = await buildApp()
+    const pending = {
+      id: '11111111-1111-1111-1111-111111111111',
+      name: 'Research agent',
+      setup_token_expires_at: '2099-01-01T00:00:00.000Z',
+    }
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("s.source IS DISTINCT FROM 'cli'")) {
+        return { rows: [pending] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/agent-connection-setups/pending',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      setups: [
+        {
+          setup_id: pending.id,
+          name: 'Research agent',
+          expires_at: pending.setup_token_expires_at,
+        },
+      ],
+    })
+    // Tenant scope is the authenticated `sub`, never a caller-supplied id.
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("s.source IS DISTINCT FROM 'cli'"),
+    )
+    expect(call?.[1]).toEqual(['user-1'])
+    // The projection carries no token, hash, challenge or prompt.
+    expect(JSON.stringify(response.json())).not.toMatch(
+      /setup_token|token_hash|challenge|prompt|api_key/i,
+    )
+    await app.close()
+  })
+
   it('records the manual credential fallback as approval-ready without activating the agent', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
@@ -2670,6 +2711,9 @@ describe('data access characterization (#985)', () => {
     ['setup not found under the lock', {}, 401, null],
     ['setup already consumed', {}, 409, { ...SETUP, setup_token_consumed_at: '2026-01-01T00:00:00.000Z' }],
     ['setup no longer awaiting connection', {}, 409, { ...SETUP, status: 'connected_local' }],
+    // #4710 accepted residual: an old prompt pasted after "Start again" gets
+    // the raw 409, and /register refuses it BEFORE any agent row is written.
+    ['setup cancelled by Start again', {}, 409, { ...SETUP, status: 'cancelled' }],
     ['expired setup token', {}, 410, { ...SETUP, setup_token_expires_at: '2000-01-01T00:00:00.000Z' }],
     ['invalid challenge', { challenge_id: 'wrong' }, 400, SETUP],
     ['malformed signing address', { delegate_address: 'not-an-address' }, 400, SETUP],

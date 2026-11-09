@@ -86,7 +86,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-07"
+last-verified: "2026-11-09"
 ---
 
 > **No contract change (#4706, 2026-11-08): the connect flow names the agent

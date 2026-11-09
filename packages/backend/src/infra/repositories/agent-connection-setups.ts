@@ -156,6 +156,38 @@ export const FIND_SETUP_BY_AGENT_API_KEY_SQL = `SELECT s.id, s.user_id, s.agent_
      WHERE s.id = $1 AND a.api_key_hash = $2 AND a.status IN ($3, $4, $5)
      LIMIT 1`
 
+/**
+ * #4710: the signed-in user's setups that are still waiting for a connector
+ * and have not expired — the dashboard's "still connecting" row.
+ *
+ * Deliberately NARROW: the row needs a name, an id and a deadline, and this
+ * read must never carry the setup token, its hash, the challenge, or the
+ * prompt (the prompt exists only in the create response). `source = 'cli'`
+ * is excluded because a CLI run has no browser dialog to have closed, so the
+ * row would be noise there; `source` is not exclusive, so a browser setup
+ * that arrived with `?src=cli` is excluded too — an accepted edge that only
+ * loses this convenience (#4710).
+ *
+ * `status = 'awaiting_connection'` already excludes cancelled, registered and
+ * failed setups; the two expiry predicates mirror `/resolve`'s, so a setup
+ * whose token or challenge has lapsed is not offered as resumable.
+ */
+export const LIST_PENDING_SETUPS_FOR_USER_SQL = `SELECT s.id, s.name, s.setup_token_expires_at
+     FROM agent_connection_setups s
+     WHERE s.user_id = $1
+       AND s.status = 'awaiting_connection'
+       AND s.setup_token_consumed_at IS NULL
+       AND s.setup_token_expires_at > NOW()
+       AND s.challenge_expires_at > NOW()
+       AND s.source IS DISTINCT FROM 'cli'
+     ORDER BY s.created_at DESC`
+
+export interface PendingSetupRow {
+  id: string
+  name: string
+  setup_token_expires_at: string
+}
+
 export const FIND_USER_ACCOUNT_BY_ID_SQL = `SELECT id, account_address, name, chain_id, account_type
        FROM smart_accounts
        WHERE id = $1 AND user_id = $2
@@ -270,6 +302,19 @@ export async function listSetupAllowances(
   db: Executor = pool,
 ): Promise<AllowanceRow[]> {
   const result = await db.query<AllowanceRow>(LIST_SETUP_ALLOWANCES_SQL, [setupId])
+  return result.rows
+}
+
+/**
+ * #4710: the user's unexpired setups still awaiting a connector, newest
+ * first. `userId` is REQUIRED — this is the tenant scope, and the route never
+ * passes a caller-supplied id.
+ */
+export async function listPendingSetupsForUser(
+  userId: string,
+  db: Executor = pool,
+): Promise<PendingSetupRow[]> {
+  const result = await db.query<PendingSetupRow>(LIST_PENDING_SETUPS_FOR_USER_SQL, [userId])
   return result.rows
 }
 

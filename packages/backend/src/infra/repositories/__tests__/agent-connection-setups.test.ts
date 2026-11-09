@@ -19,6 +19,8 @@ import {
   insertPendingAgent,
   insertSetupWithAllowances,
   inTransaction,
+  LIST_PENDING_SETUPS_FOR_USER_SQL,
+  listPendingSetupsForUser,
   listSetupAllowances,
   lockSetupByTokenHash,
   markSetupRegistered,
@@ -708,5 +710,110 @@ describeDb('revoke accepts pending_approval (#3544, real DB)', () => {
       [agentId],
     )
     expect(key.rows[0].api_key_prefix).not.toBeNull()
+  })
+})
+
+/**
+ * #4710: the dashboard's "still connecting" read.
+ *
+ * The row exists because closing the connect dialog before the agent
+ * registers used to leave no way back in the app. The read must be
+ * tenant-scoped, must exclude every setup that is no longer resumable
+ * (expired, cancelled, registered, consumed), must exclude CLI runs, and must
+ * carry no credential material — the prompt exists only in the create
+ * response, and the token hash is the credential.
+ */
+describeDb('listPendingSetupsForUser (#4710)', () => {
+  beforeAll(async () => {
+    await initDbHarness()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+  })
+
+  async function seedSetup(
+    userId: string,
+    accountId: string,
+    overrides: Partial<NewSetup> = {},
+  ): Promise<NewSetup> {
+    const setup = newSetup(userId, accountId, overrides)
+    await insertSetupWithAllowances(setup, [USDC_ALLOWANCE])
+    return setup
+  }
+
+  it('returns the user’s unexpired awaiting setups, newest first, with no credential columns', async () => {
+    const { userId, accountId } = await seedUserAndSafe()
+    const older = await seedSetup(userId, accountId, { name: 'Older agent' })
+    const newer = await seedSetup(userId, accountId, { name: 'Newer agent' })
+    await db.query(`UPDATE agent_connection_setups SET created_at = NOW() - INTERVAL '5 minutes' WHERE id = $1`, [
+      older.id,
+    ])
+
+    const rows = await listPendingSetupsForUser(userId)
+
+    expect(rows.map((row) => row.id)).toEqual([newer.id, older.id])
+    expect(rows.map((row) => row.name)).toEqual(['Newer agent', 'Older agent'])
+    // The projection is the whole contract: no token, hash, challenge or
+    // prompt can leak through a column nobody selected.
+    expect(Object.keys(rows[0]).sort()).toEqual(['id', 'name', 'setup_token_expires_at'])
+  })
+
+  it('excludes expired, cancelled, registered and consumed setups', async () => {
+    const { userId, accountId } = await seedUserAndSafe()
+    const live = await seedSetup(userId, accountId, { name: 'Live' })
+    const expired = await seedSetup(userId, accountId, { name: 'Expired' })
+    const cancelled = await seedSetup(userId, accountId, { name: 'Cancelled' })
+    const registered = await seedSetup(userId, accountId, { name: 'Registered' })
+    const consumed = await seedSetup(userId, accountId, { name: 'Consumed' })
+
+    await db.query(
+      `UPDATE agent_connection_setups SET setup_token_expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1`,
+      [expired.id],
+    )
+    await db.query(`UPDATE agent_connection_setups SET status = 'cancelled' WHERE id = $1`, [
+      cancelled.id,
+    ])
+    await db.query(`UPDATE agent_connection_setups SET status = 'connected_local' WHERE id = $1`, [
+      registered.id,
+    ])
+    await db.query(
+      `UPDATE agent_connection_setups SET setup_token_consumed_at = NOW() WHERE id = $1`,
+      [consumed.id],
+    )
+
+    const rows = await listPendingSetupsForUser(userId)
+    expect(rows.map((row) => row.id)).toEqual([live.id])
+  })
+
+  it('excludes CLI runs, and a browser setup that arrived with ?src=cli (accepted edge)', async () => {
+    const { userId, accountId } = await seedUserAndSafe()
+    const organic = await seedSetup(userId, accountId, { name: 'Organic', source: null })
+    const tagged = await seedSetup(userId, accountId, { name: 'Tagged', source: '402-page' })
+    // `source` is not exclusive: the browser's `?src=` accepts any valid slug,
+    // so a browser setup can carry `cli` too. It loses this convenience — an
+    // accepted edge, recorded here rather than special-cased.
+    await seedSetup(userId, accountId, { name: 'CLI', source: 'cli' })
+
+    const rows = await listPendingSetupsForUser(userId)
+    expect(rows.map((row) => row.id).sort()).toEqual([organic.id, tagged.id].sort())
+  })
+
+  it('is tenant-scoped: another user’s setup never appears', async () => {
+    const mine = await seedUserAndSafe()
+    const theirs = await seedUserAndSafe()
+    const mineSetup = await seedSetup(mine.userId, mine.accountId, { name: 'Mine' })
+    await seedSetup(theirs.userId, theirs.accountId, { name: 'Theirs' })
+
+    const rows = await listPendingSetupsForUser(mine.userId)
+    expect(rows.map((row) => row.id)).toEqual([mineSetup.id])
+  })
+
+  it('the exported SQL is the one the schema smoke test can PREPARE', () => {
+    // The repository convention: SQL lives in an exported constant so
+    // `scripts/db-schema-smoke.ts` can PREPARE it against the real schema.
+    expect(LIST_PENDING_SETUPS_FOR_USER_SQL).toContain('FROM agent_connection_setups')
+    expect(LIST_PENDING_SETUPS_FOR_USER_SQL).toContain('s.user_id = $1')
+    expect(LIST_PENDING_SETUPS_FOR_USER_SQL).toContain("s.source IS DISTINCT FROM 'cli'")
   })
 })

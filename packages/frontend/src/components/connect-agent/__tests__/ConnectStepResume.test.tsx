@@ -86,10 +86,16 @@ describe('ConnectStep resumed from a hand-off link (#2522)', () => {
     expect(container).not.toBeEmptyDOMElement()
   })
 
-  it('awaiting_connection: says there is nothing to approve yet, and offers no connector command', () => {
+  it('awaiting_connection: says what to do if the prompt was lost, and offers no connector command', () => {
     render(<ConnectStep flow={resumedFlow()} />)
     expect(screen.getByText(/Not connected yet/i)).toBeInTheDocument()
-    expect(screen.getByText(/Nothing to approve until the agent runs its connector command/i)).toBeInTheDocument()
+    // #4710: Open (this resume link) moves into budget approval live when the
+    // agent connects, which serves "I already pasted it"; if the prompt is
+    // gone, the dashboard's Start again is the way back.
+    expect(
+      screen.getByText(/moves on to budget approval as soon as it connects/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/choose Start again on the dashboard/i)).toBeInTheDocument()
     // The setup token is a create-time secret and this path has none. Handing
     // the approver a connector command would be handing them somebody else's
     // terminal step.

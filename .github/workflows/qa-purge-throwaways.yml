@@ -109,7 +109,8 @@ jobs:
           # variables. An `${{ inputs.* }}` expression inside `run:` is pasted
           # into the script before bash parses it, so a crafted retention_days
           # would run as shell beside the credential above, before the script's
-          # own validator sees it. parseRetentionDays stays the one validator;
+          # own validator sees it — or simply carry `--apply` into the argv
+          # with dry_run=true. parseRetentionDays stays the one validator;
           # only the exact string `false` turns on --apply, anything else is a
           # dry run. Guarded by scripts/ci/qa-purge-throwaways-workflow.test.mjs.
           PURGE_RETENTION_DAYS: ${{ inputs.retention_days }}

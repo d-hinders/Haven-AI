@@ -1183,14 +1183,18 @@ so a future restricting reference to `users` or `agents` turns it red.
    variables, never as `${{ inputs.* }}` inside `run:` (#4740). An inlined
    expression is pasted into the script before bash parses it, so a crafted
    `retention_days` would run as shell beside the credential, before guard 5
-   sees it. Only the exact string `false` adds `--apply`.
+   sees it — or, with no shell command at all, put `--apply` into the
+   arguments and defeat guard 4. Only the exact string `false` adds `--apply`.
    `scripts/ci/qa-purge-throwaways-workflow.test.mjs` runs the step's real
    `run:` body under bash and fails on an inlined input.
 
 ### Operator steps (once, then per run)
 
-1. Create the GitHub environment `qa-purge-dev` (Settings → Environments) and
-   add the three maintainers as required reviewers.
+1. Create the GitHub environment `qa-purge-dev` (Settings → Environments),
+   add the three maintainers as required reviewers, and restrict its
+   deployment branches to `dev`. Guard 1's ref check is a step in the workflow,
+   and a dispatch from another branch runs that branch's copy of it; the
+   branch policy is what holds there.
 2. Add the environment **secret** `QA_PURGE_DATABASE_URL`: the dev database
    connection string, using the post-rotation credential from epic #4484.
 3. Add the environment **variables** for the allowlisted tuple:

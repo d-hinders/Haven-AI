@@ -124,6 +124,10 @@ test('no run: block inlines an input — each travels through an env var', () =>
     runBlocks += 1
     const body = step.slice(runIdx).join('\n')
     assert.ok(!/\binputs\s*[.[]/i.test(body), `a run: block inlines an input (shell injection beside the credential): ${step[0].trim()}`)
+    // Stricter: no expression at all. `${{ env.X }}` or `${{ inputs['x'] }}`
+    // is pasted into the script exactly like `${{ inputs.x }}`; a run: block
+    // here reads values as shell variables only.
+    assert.ok(!body.includes('${{'), `a run: block contains a \${{ }} expression (read it as a shell variable instead): ${step[0].trim()}`)
   }
   assert.ok(runBlocks >= 3, `found ${runBlocks} run: blocks — the step parser no longer sees this workflow; update this guard`)
 })
@@ -137,6 +141,9 @@ test('both inputs reach the purge step as env values', () => {
 test('a crafted retention_days reaches npm as ONE argument and runs nothing', () => {
   for (const crafted of [
     '7"; echo pwned; "',
+    // Argument injection, no shell command needed: under the inline form this
+    // put `--apply` into argv with dry_run=true, and the purge deleted for real.
+    '7" --apply "',
     // Closes the array, runs a command, reopens it: executes under the inline form.
     '7"); touch "$PWNED_MARKER"; echo pwned; args=(--retention-days "7',
     '$(touch "$PWNED_MARKER")',

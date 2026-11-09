@@ -1586,9 +1586,10 @@ local runtime changes, and the advertised JSON Schema is byte-identical either
 way (`additionalProperties: false` in both cases, which is what the permissive
 behaviour had been contradicting).
 
-**The merchant payment header name is NOT a skew axis (#2289).** Since #2289 the
-SDK sets both `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT` (v1) to the same
-value on every merchant retry.
+**The merchant payment header name is NOT a skew axis (#2289).** Since #4754 the
+SDK sends an x402 v2 payload under `PAYMENT-SIGNATURE` alone and a v1 payload
+under both `PAYMENT-SIGNATURE` and `X-PAYMENT` (#2289 had set both on every
+retry; #2341 narrowed erc7710 first).
 
 > **#2330 — the same defect, one level up, and why it is still not a skew axis.**
 > #2289 fixed the retry the SDK *performs*. It did not fix the retry Haven
@@ -1600,8 +1601,11 @@ value on every merchant retry.
 > makes every such instruction name both names and guards the property.
 > **Superseded in part by #2341:** on the erc7710 scheme the instruction now
 > names `PAYMENT-SIGNATURE` ALONE, because that header carries a delegation
-> chain and duplicating it is refused with HTTP 431. Both names remain correct,
-> and remain the instruction, on the EIP-3009 bridge. This is
+> chain and duplicating it is refused with HTTP 431. **Superseded again by
+> #4754:** the instruction is now "set exactly `retry_headers`" —
+> `PAYMENT-SIGNATURE` alone for any x402 v2 payload, `X-PAYMENT` too only for
+> v1 — because the #2361 extensions echo made a doubled EIP-3009 header answer
+> 431 after funding. This is
 > still not a version-skew axis: it is a description-only change, no tool is
 > added, removed or renamed, and an older runtime simply carries older guidance
 > text rather than failing closed against a newer backend. That choice is made entirely inside whichever
@@ -1620,9 +1624,12 @@ a skew diagnosis. Nothing in the table above applies to it.
 `x402PaymentHeaderNamesFor` rule — and the hosted `haven_submit` returns it on
 the erc7710 path beside the header it assembles. This IS an installed-signer
 lever: `retry_headers` reaches agents only after a `@haven_ai/signer` release
-and connector refresh. Until then every agent follows the existing prose
-("set BOTH PAYMENT-SIGNATURE and X-PAYMENT", "PAYMENT-SIGNATURE only on
-erc7710"), which stays correct. The field is additive — nothing keys on its
+and connector refresh. #4754 moved the rule itself (v2 → `PAYMENT-SIGNATURE`
+alone): the hosted prose now says "set exactly `retry_headers`", which stays
+correct against an old signer too — an installed signer keeps returning both
+names for a v2 EIP-3009 payload until a `@haven_ai/signer` release reaches it
+through a `@haven_ai/connect` release that bumps `runtime-manifest.ts`'s
+`signerVersion`. The field is additive — nothing keys on its
 presence, and the name-selection rule it encodes is the same rule the wire path
 already applies, so there is no combination of signer, hosted server and
 backend that fails closed on it. The plain-HTTP outcome fold

@@ -321,9 +321,10 @@ describe('#3118 native MCP profile — payment delivery in params._meta', () => 
     await transport.deliverPayment(mcpUrl, { method: 'POST', body: toolCall(2) }, paymentHeader)
     const sent = fetch.mock.calls[0][1]!
     const headers = new Headers(sent.headers)
-    // EIP-3009 envelope: both header names, as before #3118.
+    // x402 v2 EIP-3009 envelope: the v2 header name alone since #4754 (both
+    // names before it), plus the _meta form #3118 added.
     expect(headers.get('PAYMENT-SIGNATURE')).toBe(paymentHeader)
-    expect(headers.get('X-PAYMENT')).toBe(paymentHeader)
+    expect(headers.get('X-PAYMENT')).toBeNull()
     expect(JSON.parse(sent.body as string).params._meta[MCP_X402_PAYMENT_META_KEY]).toEqual(paymentEnvelope)
   })
 })

@@ -2512,7 +2512,8 @@ export interface X402Erc7710Settlement {
    * Pass verbatim as the `PAYMENT-SIGNATURE` header on the merchant retry —
    * that name ALONE. erc7710 is always x402 v2, and this header carries the
    * delegation chain, so also sending the legacy `X-PAYMENT` overflows the
-   * merchant's header limit (HTTP 431, #2341).
+   * merchant's header limit (HTTP 431, #2341). Since #4754 every x402 v2
+   * payload follows the same one-name rule.
    */
   paymentHeader: string
   /** The merchant address the child delegation is pinned to. */

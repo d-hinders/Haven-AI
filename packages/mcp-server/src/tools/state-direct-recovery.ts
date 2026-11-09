@@ -360,7 +360,8 @@ function submitFollowUpHandoff(
       reason:
         'Funding confirmed. Retry the ORIGINAL merchant request yourself with ' +
         'the payment_header your local signer returned (haven_sign_x402 builds it with the signature; if you ' +
-        'signed with haven_sign, build it now with haven_x402_sign_header) as PAYMENT-SIGNATURE, and X-PAYMENT; then call ' +
+        'signed with haven_sign, build it now with haven_x402_sign_header), setting exactly the headers the signer named in ' +
+        'retry_headers (PAYMENT-SIGNATURE; X-PAYMENT too only for an x402 v1 challenge); then call ' +
         'haven_report_x402_outcome with payment_id, outcome and merchant_status, plus that same payment_header ' +
         'with any settlement evidence — a reported settlement is recorded only with it. On a rejection, pass ' +
         "the merchant's body as merchant_body so its reason is recorded.",
@@ -379,8 +380,8 @@ function submitFollowUpHandoff(
         'signed with haven_sign, build it now with haven_x402_sign_header). If this payment came from haven_pay_mcp_tool or ' +
         'haven_prepare_catalog_purchase, call haven_complete_mcp_tool with payment_id and that ' +
         'payment_header. If it came from haven_pay_x402_quote, retry ' +
-        'the ORIGINAL merchant request yourself with it (PAYMENT-SIGNATURE, and ' +
-        'X-PAYMENT), then call haven_report_x402_outcome, passing that same payment_header. Never do both.',
+        'the ORIGINAL merchant request yourself with it (the signer\'s retry_headers: PAYMENT-SIGNATURE, plus ' +
+        'X-PAYMENT only for an x402 v1 challenge), then call haven_report_x402_outcome, passing that same payment_header. Never do both.',
     }
   }
   return {

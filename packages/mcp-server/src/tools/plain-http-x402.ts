@@ -1063,7 +1063,10 @@ export function createPlainHttpX402Handlers(
                   safeToContinue: false,
                   reason:
                     (priceDiffers
-                      ? `The merchant's quoted price (${quote.amount} ${quote.asset}) does not match ` +
+                      // #4754: the symbol, not the contract address — the address stays
+                      // only when the token is unrecognised (`decimals: null` marks
+                      // `token` as an unverified fallback label).
+                      ? `The merchant's quoted price (${quote.amount} ${quote.decimals !== null ? quote.token : quote.asset}) does not match ` +
                         `the expected price (${args.expected_amount as string}) stated with this quote. `
                       : '') +
                     (overBudget && budget

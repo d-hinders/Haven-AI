@@ -147,7 +147,7 @@ export const x402Erc7710Settle: Scenario = {
       return fail(`settle failed (${settle.status}): ${JSON.stringify(settle.data).slice(0, 200)}`)
     }
 
-    // ── 5. Merchant retry, both header names — merchant redeems on-chain ────
+    // ── 5. Merchant retry, PAYMENT-SIGNATURE alone — merchant redeems on-chain ─
     const paid = await fetch(mcpUrl, {
       method: 'POST',
       headers: {

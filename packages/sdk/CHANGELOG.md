@@ -2,7 +2,12 @@
 
 Release headers are written by the release bump (`npm run release:bump`), never by
 hand — true since the changelog-heading gap, and stated here only because it was asserted for a long
-time while being false. The bump rewrites the `## Unreleased` heading below into
+time while being false. The bump rewrites the `## Unreleased
+
+### Fixed
+
+- **An x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone, on either scheme (#4754).** `x402PaymentHeaderNamesFor` now decides by the payload's `x402Version`: v2 → `PAYMENT-SIGNATURE` only; v1 (and an unreadable header) → both `PAYMENT-SIGNATURE` and `X-PAYMENT`, as before. EIP-3009 used to get both names, but the #2361 extensions echo had grown that header to 5–6.5 KB, and a merchant answered HTTP 431 to a doubled one after the funding leg confirmed. `haven.fetch()`, `deliverPayment`, `x402RetryHeadersFor` and `x402PaymentHeaderNamesSent` all follow the rule, and the evidence record's `paymentProofHeaderName` reads `PAYMENT-SIGNATURE` for a v2 EIP-3009 payment. New `x402PaymentHeaderSchemeOf(paymentHeader)` reads the scheme from the payload; the #3427 tax declaration and the paid-delivery refusal text use it instead of counting header names. Owner decision 2026-11-09: a merchant that issues a v2 challenge but reads only `X-PAYMENT` is the accepted residual. Release lever: this SDK release, and a `@haven_ai/connect` release that bumps `runtime-manifest.ts` so `--doctor` installs it. No update needed to keep paying, but the update removes the 431 on large-extension merchants.
+` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 

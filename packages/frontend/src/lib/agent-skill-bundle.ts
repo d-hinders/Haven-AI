@@ -387,8 +387,9 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   it receives, so the challenge never passes through you.
 - **The retry repeats the request.** YOU send the paid request: the same
   method, body and \`Content-Type\` to \`retry_url\`, plus the
-  \`payment_header\` (as \`PAYMENT-SIGNATURE\`, and also \`X-PAYMENT\` on
-  EIP-3009). A retry without the body fails after the funding leg has already
+  \`payment_header\` under exactly the headers the signer's \`retry_headers\`
+  names (\`PAYMENT-SIGNATURE\`; \`X-PAYMENT\` too only for an x402 v1
+  challenge). A retry without the body fails after the funding leg has already
   moved money.
 - **If you pass \`payment_required\` instead, copy it verbatim.** Hand the
   merchant's \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\`

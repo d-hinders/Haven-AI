@@ -2,7 +2,12 @@
 
 Release headers are written by the release bump (`npm run release:bump`), never by
 hand — true since the changelog-heading gap, and stated here only because it was asserted for a long
-time while being false. The bump rewrites the `## Unreleased` heading below into
+time while being false. The bump rewrites the `## Unreleased
+
+### Fixed
+
+- **Paid retries follow the SDK's x402-version header rule (#4754),** through `haven.fetch` → `deliverPayment`: an x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone, and a v1 one under both names. The `expected_amount` stop reason on `haven_quote_x402` now names the token symbol (`0.001 USDC`) instead of the asset contract address, keeping the address only for an unrecognised token. No update needed.
+` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 

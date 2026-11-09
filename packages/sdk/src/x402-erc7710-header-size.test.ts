@@ -1,13 +1,18 @@
 /**
- * #2341 — erc7710 sends the v2 header name ALONE, and the request stays under
- * the merchant's header-size limit.
+ * #2341 / #4754 — an x402 v2 payload sends the v2 header name ALONE, and the
+ * request stays under the merchant's header-size limit.
  *
- * ## What this exists to catch
+ * **#4754 (owner decision 2026-11-09)** extended the #2341 rule below from
+ * erc7710 to every v2 payload. The #2361 extensions echo had grown EIP-3009
+ * headers to 5–6.5 KB, and Anchor answered HTTP 431 to one sent under both
+ * names after funding. Only an x402 v1 payload (no `accepted`, no echo) keeps
+ * both names now; the second describe block pins the version table.
+ *
+ * ## What this exists to catch (the #2341 history)
  *
  * #2289 fixed a real outage by setting both wire names on every merchant
- * retry. On the EIP-3009 bridge that is right and must not change: the header
- * is a signature plus a six-field authorization, duplicating it costs nothing,
- * and lenient v1-only merchants exist.
+ * retry. On the EIP-3009 bridge that looked free at the time: the header was
+ * a signature plus a six-field authorization.
  *
  * On erc7710 it broke everything. That header carries the whole
  * `[child, budget]` delegation chain plus the UserOperation — kilobytes — so
@@ -50,6 +55,8 @@ import {
   x402PaymentHeaderNamesFor,
   x402RetryHeadersFor,
   x402PaymentHeaderNamesSent,
+  x402PaymentHeaderSchemeOf,
+  x402V2PaymentEnvelope,
 } from './x402.js'
 
 const URL_ = 'https://merchant.test/mcp'
@@ -123,7 +130,10 @@ function erc7710Header(): string {
   })
 }
 
-/** The EIP-3009 shape: small, and still gets BOTH names. */
+/**
+ * The x402 v2 EIP-3009 shape. Since #4754 it gets `PAYMENT-SIGNATURE` alone:
+ * every v2 payload does, whatever its scheme.
+ */
 function eip3009Header(): string {
   return encodeBase64Json({
     x402Version: 2,
@@ -146,6 +156,26 @@ function eip3009Header(): string {
   })
 }
 
+/**
+ * The x402 v1 shape — the library's v1 encoding, which the SDK and the signer
+ * return as-is when the challenge is `x402Version < 2`. No `accepted`, no
+ * extensions echo; keeps BOTH names (#4754).
+ */
+function v1Header(): string {
+  return encodeBase64Json({
+    x402Version: 1,
+    scheme: 'exact',
+    network: 'base',
+    payload: {
+      signature: sig,
+      authorization: {
+        from: addr, to: addr, value: '10000',
+        validAfter: '0', validBefore: '99999999999', nonce: `0x${'bb'.repeat(32)}`,
+      },
+    },
+  })
+}
+
 describe('#2341 — erc7710 sends the v2 name alone', () => {
   it('an erc7710 delivery carries PAYMENT-SIGNATURE and NOT the legacy alias', async () => {
     const { transport, seen } = transportWithCapture()
@@ -160,7 +190,7 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     ).toBeNull()
   })
 
-  it('an EIP-3009 delivery still carries BOTH — the #2289 fix is untouched', async () => {
+  it('an x402 v2 EIP-3009 delivery carries PAYMENT-SIGNATURE alone (#4754); a v1 delivery keeps BOTH', async () => {
     const { transport, seen } = transportWithCapture()
     const header = eip3009Header()
     await transport.deliverPayment(URL_, undefined, header)
@@ -168,9 +198,17 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     expect(seen[0].get(X402_PAYMENT_HEADER_NAME)).toBe(header)
     expect(
       seen[0].get(X402_LEGACY_PAYMENT_HEADER_NAME),
-      'lenient v1-only merchants are real and this is the path the #2288 ' +
-        'CoinGecko purchase used. Narrowing this would trade one outage for another.',
-    ).toBe(header)
+      'owner decision 2026-11-09 (#4754): a v2 payload goes out under the v2 name ' +
+        'alone — the #2361 extensions echo made doubling it answer HTTP 431 after funding.',
+    ).toBeNull()
+
+    const v1 = v1Header()
+    await transport.deliverPayment(URL_, undefined, v1)
+    expect(seen[1].get(X402_PAYMENT_HEADER_NAME)).toBe(v1)
+    expect(
+      seen[1].get(X402_LEGACY_PAYMENT_HEADER_NAME),
+      'a v1 payload keeps the legacy name — lenient v1 merchants read only X-PAYMENT.',
+    ).toBe(v1)
   })
 
   it('the erc7710 request carries the header ONCE, saving kilobytes off the block', async () => {
@@ -242,7 +280,8 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     // The audit trail is derived from the same decision, so it cannot claim a
     // legacy header that never went on the wire.
     expect(x402PaymentHeaderNamesSent(erc7710Header())).toBe(X402_PAYMENT_HEADER_NAME)
-    expect(x402PaymentHeaderNamesSent(eip3009Header())).toBe(
+    expect(x402PaymentHeaderNamesSent(eip3009Header())).toBe(X402_PAYMENT_HEADER_NAME)
+    expect(x402PaymentHeaderNamesSent(v1Header())).toBe(
       `${X402_PAYMENT_HEADER_NAME}, ${X402_LEGACY_PAYMENT_HEADER_NAME}`,
     )
   })
@@ -255,7 +294,10 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     })
     expect(x402RetryHeadersFor(eip3009Header())).toEqual({
       [X402_PAYMENT_HEADER_NAME]: eip3009Header(),
-      [X402_LEGACY_PAYMENT_HEADER_NAME]: eip3009Header(),
+    })
+    expect(x402RetryHeadersFor(v1Header())).toEqual({
+      [X402_PAYMENT_HEADER_NAME]: v1Header(),
+      [X402_LEGACY_PAYMENT_HEADER_NAME]: v1Header(),
     })
     // Derived from the same function the request path uses, not a copy of it:
     // the keys ARE the rule's answer for the same payload.
@@ -265,5 +307,76 @@ describe('#2341 — erc7710 sends the v2 name alone', () => {
     expect(Object.keys(x402RetryHeadersFor(eip3009Header()))).toEqual(
       x402PaymentHeaderNamesFor(eip3009Header()),
     )
+    expect(Object.keys(x402RetryHeadersFor(v1Header()))).toEqual(
+      x402PaymentHeaderNamesFor(v1Header()),
+    )
+  })
+})
+
+const BOTH = [X402_PAYMENT_HEADER_NAME, X402_LEGACY_PAYMENT_HEADER_NAME]
+const V2_ONLY = [X402_PAYMENT_HEADER_NAME]
+
+describe('#4754 — the header names follow x402Version', () => {
+  it.each([
+    ['x402Version 2, EIP-3009 accepted', { x402Version: 2, accepted: { scheme: 'exact', network: 'eip155:8453' } }, V2_ONLY],
+    ['x402Version 3 (a later v2+ version)', { x402Version: 3, accepted: { scheme: 'exact', network: 'eip155:8453' } }, V2_ONLY],
+    ['x402Version 2 with no accepted', { x402Version: 2, payload: {} }, V2_ONLY],
+    ['x402Version 2 with an array accepted', { x402Version: 2, accepted: [] }, V2_ONLY],
+    ['x402Version 1', { x402Version: 1, scheme: 'exact', network: 'base', payload: {} }, BOTH],
+    ['no x402Version', { accepted: { scheme: 'exact', network: 'eip155:8453' } }, BOTH],
+    ['a string x402Version', { x402Version: '2', accepted: { scheme: 'exact', network: 'eip155:8453' } }, BOTH],
+    ['a non-finite x402Version', { x402Version: null, payload: {} }, BOTH],
+  ])('%s', (_label, payload, expected) => {
+    expect(x402PaymentHeaderNamesFor(encodeBase64Json(payload))).toEqual(expected)
+  })
+
+  it('an erc7710 payload keeps the v2 name alone even without a readable version (#2341)', () => {
+    const decoded = JSON.parse(Buffer.from(erc7710Header(), 'base64').toString('utf8')) as Record<string, unknown>
+    delete decoded.x402Version
+    expect(x402PaymentHeaderNamesFor(encodeBase64Json(decoded))).toEqual(V2_ONLY)
+  })
+
+  it('a real v2 EIP-3009 header whose challenge echoes a ≥5 KB bazaar block goes on the wire ONCE', async () => {
+    // Built through the real envelope, so the #2361 extensions echo is what
+    // makes it large — the mechanism behind the 2026-11-09 Anchor 431.
+    const bazaar = {
+      info: {
+        input: { type: 'http', method: 'POST', bodyType: 'json', body: { chain: 'ethereum', calldata_hex: `0x${'ab'.repeat(68)}` } },
+        output: { type: 'json', example: { rows: Array.from({ length: 40 }, (_, i) => ({ id: `row-${i}`, name: `pool ${i}`, value: `${i}`.repeat(20) })) } },
+      },
+      schema: { type: 'object', description: 'x'.repeat(800) },
+    }
+    const accepted = {
+      scheme: 'exact', network: 'eip155:8453', amount: '1000', payTo: addr, maxTimeoutSeconds: 300,
+      asset: addr, extra: { name: 'USD Coin', version: '2' },
+    }
+    const envelope = x402V2PaymentEnvelope(
+      { x402Version: 2, resource: { url: 'https://merchant.test/v1/decode' }, extensions: { bazaar } } as never,
+      accepted as never,
+      {
+        signature: sig,
+        authorization: { from: addr, to: addr, value: '1000', validAfter: '0', validBefore: '99999999999', nonce: `0x${'cc'.repeat(32)}` },
+      },
+    )
+    const header = encodeBase64Json(envelope)
+    // Non-vacuity: the fixture must be in the size class that answered 431.
+    expect(header.length).toBeGreaterThan(5_000)
+
+    const { transport, seen } = transportWithCapture()
+    await transport.deliverPayment(URL_, { headers: { 'Content-Type': 'application/json' } }, header)
+    let carrying = 0
+    seen[0].forEach((value) => { if (value === header) carrying += 1 })
+    expect(carrying, 'a v2 EIP-3009 header carried twice is the #4754 HTTP 431').toBe(1)
+    expect(Object.keys(x402RetryHeadersFor(header))).toEqual(V2_ONLY)
+  })
+
+  it('x402PaymentHeaderSchemeOf reads the scheme from the payload, never from the name count', () => {
+    expect(x402PaymentHeaderSchemeOf(erc7710Header())).toBe('erc7710')
+    // One name on the wire, still EIP-3009 — the inference #4754 removed.
+    expect(x402PaymentHeaderNamesFor(eip3009Header())).toEqual(V2_ONLY)
+    expect(x402PaymentHeaderSchemeOf(eip3009Header())).toBe('eip3009')
+    // No readable accepted reads as EIP-3009, the pre-#4754 answer.
+    expect(x402PaymentHeaderSchemeOf(v1Header())).toBe('eip3009')
+    expect(x402PaymentHeaderSchemeOf('not-base64-json')).toBe('eip3009')
   })
 })

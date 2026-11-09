@@ -739,7 +739,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
                         'no Haven tool follows: the quoted price does not match the stated ' +
                         'expectation — the user decides before any payment',
                       reason:
-                        `The merchant's quoted price (${data.amount} ${data.asset}) does not match ` +
+                        // #4754: the symbol, not the contract address (kept only for an
+                        // unrecognised token, where `decimals: null`).
+                        `The merchant's quoted price (${data.amount} ${data.decimals !== null ? data.token : data.asset}) does not match ` +
                         `the expected price (${args.expected_amount as string}) stated with this quote. ` +
                         'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
                         'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +

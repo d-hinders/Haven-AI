@@ -2,7 +2,12 @@
 
 Release headers are written by the release bump (`npm run release:bump`), never by
 hand — true since the changelog-heading gap, and stated here only because it was asserted for a long
-time while being false. The bump rewrites the `## Unreleased` heading below into
+time while being false. The bump rewrites the `## Unreleased
+
+### Fixed
+
+- **`retry_headers` names `PAYMENT-SIGNATURE` alone for an x402 v2 payload (#4754).** It follows the SDK's new version rule: EIP-3009 used to return both names, and a doubled header carrying a merchant's echoed extensions was refused with HTTP 431 after funding. A v1 payload still gets both names. The `haven_x402_sign_header` description says so. It reaches installed agents through this signer release plus a `@haven_ai/connect` release that bumps `signerVersion` in `runtime-manifest.ts`. No update needed to keep paying.
+` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 

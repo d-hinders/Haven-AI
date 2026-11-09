@@ -2,7 +2,12 @@
 
 Release headers are written by the release bump (`npm run release:bump`), never by
 hand — true since the changelog-heading gap, and stated here only because it was asserted for a long
-time while being false. The bump rewrites the `## Unreleased` heading below into
+time while being false. The bump rewrites the `## Unreleased
+
+### Changed
+
+- **The fix for #4754 reaches installed agents through `runtime-manifest.ts` (#4754).** The next connect release must bump `sdkVersion` and `signerVersion` to the releases that send an x402 v2 payment under `PAYMENT-SIGNATURE` alone; `--doctor` installs whatever those pin. Nothing in connect itself changes. No update needed.
+` heading below into
 `## <version> — <date>`; add entries under `## Unreleased` and leave the heading
 alone.
 

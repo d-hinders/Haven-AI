@@ -412,9 +412,9 @@ const X402_SIGN_HEADER_DESCRIPTION = [
   "on a plain-HTTP merchant, haven_submit with settlement_scheme 'erc7710' returns the header, and on an",
   'MCP merchant haven_settle_mcp_tool settles with no payment_header at all.',
   'Returns { payment_header, retry_headers, accepted }. On your retry set EVERY header named in',
-  'retry_headers to <payment_header> — the names come from the same rule the wire uses (both',
-  'PAYMENT-SIGNATURE (x402 v2) and X-PAYMENT (v1) on the EIP-3009 bridge; a strict v2 merchant reads',
-  'only the first).',
+  'retry_headers to <payment_header> — the names come from the same rule the wire uses',
+  '(PAYMENT-SIGNATURE alone for an x402 v2 payload; X-PAYMENT too only for a v1 one — a doubled v2',
+  'header can overflow the merchant\'s header limit with HTTP 431).',
   'Only call after haven_submit has confirmed the funding step (nextAction=none or',
   'the funding tx has a confirmed status). Next for paid MCP tools: call mcp__haven__haven_complete_mcp_tool.',
 ].join(' ')

@@ -19,7 +19,7 @@ import {
   X402_RETRY_REJECTED_STATUS,
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
-import { x402PaymentHeaderNamesSent, x402PaymentHeaderNamesFor } from './x402.js'
+import { x402PaymentHeaderNamesSent, x402PaymentHeaderSchemeOf } from './x402.js'
 import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
@@ -261,10 +261,12 @@ export class MerchantCompletion {
     }
 
     // #3427: the buyer-side tax declaration rides the PAID retry only, and
-    // only on the EIP-3009 scheme. The scheme test is the same one the wire
-    // already uses for the payment header names (`x402PaymentHeaderNamesFor`
-    // → `isErc7710Option` on the decoded `accepted` entry), so the two
-    // scheme decisions cannot drift apart. Resolution happens here — the one
+    // only on the EIP-3009 scheme. The scheme is read from the payload
+    // (`x402PaymentHeaderSchemeOf` → `isErc7710Option` on the decoded
+    // `accepted` entry, the same predicate the header-name rule uses), never
+    // from how many names the header goes out under: since #4754 a v2
+    // EIP-3009 payload is sent under ONE name, and counting names would read
+    // it as erc7710 and silently drop the declaration. Resolution happens here — the one
     // seam `fetch`, `payX402Quote` and `resumeX402Payment` all reach — with
     // a resolved `undefined` (not available / older backend / erc7710)
     // meaning the retry proceeds exactly as before. The header is attached
@@ -274,8 +276,7 @@ export class MerchantCompletion {
     // merchant, and nothing else reads them.
     let retryInit = initialInit
     if (this.getTaxDeclarationHeader && this.delegateKey) {
-      const scheme = x402PaymentHeaderNamesFor(receipt.paymentHeader)
-      const isEip3009 = scheme.length > 1
+      const isEip3009 = x402PaymentHeaderSchemeOf(receipt.paymentHeader) === 'eip3009'
       if (isEip3009) {
         // A refusal thrown by the builder (content not exactly the local
         // shape, an unnamable network, a bad key) propagates as the signing
@@ -631,7 +632,10 @@ export class MerchantCompletion {
     paymentHeader: string,
     hasBody: boolean,
   ): Promise<MerchantEgressRefusedError> {
-    const scheme = x402PaymentHeaderNamesFor(paymentHeader).length > 1 ? 'eip3009' : 'erc7710'
+    // #4754: read from the payload, not from the name count — a v2 EIP-3009
+    // payload now goes out under one name, and calling it erc7710 here would
+    // tell the agent there is no funding leg to sweep on a funded payment.
+    const scheme = x402PaymentHeaderSchemeOf(paymentHeader)
     const status = err.redirectStatus ?? 0
     await this.recordRetryRejected({
       rail: 'x402',

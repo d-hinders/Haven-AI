@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
-import { expectMatchesSpec } from '../../openapi/response-shape.js'
+import { expectMatchesSpec, expectRejectsOffSpec } from '../../openapi/response-shape.js'
+import { OPEN_USER_VISIT_SQL } from '../../infra/repositories/users.js'
 import { FastifyInstance } from 'fastify'
 
 const { mockQuery } = vi.hoisted(() => ({
@@ -267,6 +268,109 @@ describe('User routes', () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json().passkeys[0].account_address).toBeNull()
+    })
+  })
+
+  // --- POST /user/visits (#4709) ---
+  // The marker write itself — retry safety, the row lock, `current` never going
+  // backwards — is a claim about what POSTGRES does, proven on the real-DB
+  // harness in `infra/repositories/__tests__/user-visits.db.test.ts`. What this
+  // block pins is the ROUTE: the status codes, the wire shape, the 400 envelope
+  // the enforced module answers before the handler, and that the client's entry
+  // id and the caller's id reach the one statement.
+  describe('POST /user/visits', () => {
+    const ENTRY_UUID = '0f1e2d3c-4b5a-4968-8776-655443322110'
+    const CURRENT = '2026-11-09T10:00:00.000Z'
+
+    /** SQL-dispatched (mockImplementation), never positional (#1227 ratchet). */
+    function installVisitMock(row: { previous: Date | null; current: Date } | null) {
+      mockQuery.mockImplementation((sql: string) => {
+        if (!String(sql).includes('visit_entry_id')) {
+          throw new Error(`Unexpected query: ${sql}`)
+        }
+        return Promise.resolve({ rows: row ? [row] : [] })
+      })
+    }
+
+    function postVisit(token: string, payload: unknown) {
+      return app.inject({
+        method: 'POST',
+        url: '/user/visits',
+        headers: { authorization: `Bearer ${token}` },
+        payload: payload as Record<string, unknown>,
+      })
+    }
+
+    it('a first ever visit returns a null previous and the current instant, and writes the marker', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      installVisitMock({ previous: null, current: new Date(CURRENT) })
+
+      const response = await postVisit(token, { entry_id: ENTRY_UUID })
+
+      expect(response.statusCode).toBe(200)
+      const body = response.json()
+      expect(body).toEqual({ previous: null, current: CURRENT })
+      expectMatchesSpec('POST', '/user/visits', body)
+      // One atomic statement, scoped to the caller and carrying the client's
+      // entry id — the id is what makes a retry re-open the same entry.
+      expect(mockQuery).toHaveBeenCalledTimes(1)
+      expect(mockQuery).toHaveBeenCalledWith(OPEN_USER_VISIT_SQL, [USER_UUID, ENTRY_UUID])
+    })
+
+    it('a retry with the same entry_id returns the same bounds and does not move the marker', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      installVisitMock({ previous: null, current: new Date(CURRENT) })
+
+      const first = await postVisit(token, { entry_id: ENTRY_UUID })
+      const retry = await postVisit(token, { entry_id: ENTRY_UUID })
+
+      expect(first.statusCode).toBe(200)
+      expect(retry.statusCode).toBe(200)
+      expect(retry.json()).toEqual(first.json())
+      // The route forwards the SAME entry id on the retry — that is what makes
+      // the statement's retry branch return the stored bounds instead of moving
+      // the marker (proven against Postgres in user-visits.db.test.ts).
+      expect(mockQuery).toHaveBeenCalledTimes(2)
+      for (const call of mockQuery.mock.calls) {
+        expect(call[0]).toBe(OPEN_USER_VISIT_SQL)
+        expect(call[1]).toEqual([USER_UUID, ENTRY_UUID])
+      }
+    })
+
+    it('refuses a non-UUID entry_id with the enforced module’s 400 envelope', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+
+      await expectRejectsOffSpec(
+        app,
+        'POST /user/visits',
+        { entry_id: 'not-a-uuid' },
+        'body/entry_id',
+        { authorization: `Bearer ${token}` },
+      )
+      expect(mockQuery, 'the spec refused it before the handler').not.toHaveBeenCalled()
+    })
+
+    it('refuses a missing entry_id with the enforced module’s 400 envelope', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+
+      await expectRejectsOffSpec(
+        app,
+        'POST /user/visits',
+        {},
+        'body',
+        { authorization: `Bearer ${token}` },
+      )
+      expect(mockQuery, 'the spec refused it before the handler').not.toHaveBeenCalled()
+    })
+
+    it('answers 404 when the user row vanished while the token was in flight', async () => {
+      const token = signToken({ sub: USER_UUID, email: 'test@example.com' })
+      installVisitMock(null)
+
+      const response = await postVisit(token, { entry_id: ENTRY_UUID })
+
+      expect(response.statusCode).toBe(404)
+      expect(response.json()).toEqual({ error: 'User not found' })
     })
   })
 })

@@ -174,12 +174,12 @@ export function buildDashboardSummary(input: DashboardSummaryInput): string {
 // the window `(previous, current]`.
 //
 // The time word is one of a FIXED set, spoken in the user's timezone and
-// computed by the server (`modules/dashboard/since-window.ts`) because the
-// route already receives the zone: "Since earlier today", "Since yesterday",
-// "Since Tuesday" (within six days), and a date past six days ("Since 3
-// November"). Rules 1–4 above bind the rest: at most two agents are named, a
-// spread-out window reads as a count, a total under a cent reads as a count,
-// and no raw address is ever named (agent names only).
+// computed by the server (`packages/backend/src/modules/transactions/activity.ts`)
+// because the route already receives the zone: "Since earlier today", "Since
+// yesterday", "Since Tuesday" (within six days), and a date past six days
+// ("Since 3 November"). Rules 1–4 above bind the rest: at most two agents are
+// named, a spread-out window reads as a count, a total under a cent reads as a
+// count, and no raw address is ever named (agent names only).
 
 export interface SinceLastVisitAgent {
   id: string

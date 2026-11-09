@@ -34,7 +34,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-11-05"
+last-verified: "2026-11-09"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1178,6 +1178,13 @@ so a future restricting reference to `users` or `agents` turns it red.
 4. **Dry run is the default.** Deleting needs `dry_run: false` explicitly.
 5. Retention is validated as an integer from 1 to 365 before connecting. `0`,
    negative and malformed values are refused; there is no zero-day override.
+6. Both inputs reach the step as `env:` values and are read as quoted shell
+   variables, never as `${{ inputs.* }}` inside `run:` (#4740). An inlined
+   expression is pasted into the script before bash parses it, so a crafted
+   `retention_days` would run as shell beside the credential, before guard 5
+   sees it. Only the exact string `false` adds `--apply`.
+   `scripts/ci/qa-purge-throwaways-workflow.test.mjs` runs the step's real
+   `run:` body under bash and fails on an inlined input.
 
 ### Operator steps (once, then per run)
 

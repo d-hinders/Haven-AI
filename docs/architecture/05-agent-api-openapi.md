@@ -290,9 +290,9 @@ the OpenAPI surface should keep the two signatures distinct:
    **budget delegation** to fund the delegate wallet — it is not a Safe
    transfer, and this step applies only to the EIP-3009 bridge; erc7710 direct
    settlement has no funding leg at all.
-5. Retry the merchant request with the separately created payment proof, setting BOTH
-   `PAYMENT-SIGNATURE` (x402 v2) and `X-PAYMENT` (v1) to it — a strict v2 merchant reads
-   only the first.
+5. Retry the merchant request with the separately created payment proof under
+   `PAYMENT-SIGNATURE` (x402 v2) — alone for a v2 payload, plus `X-PAYMENT` (v1) only for a
+   v1 one (#4754); the SDK's `x402RetryHeadersFor` returns exactly those headers.
 
 Resume rehydration uses `GET /payments/{id}/resume_state`, followed by the same
 local merchant-proof and retry steps. The deprecated `/x402` alias currently

@@ -180,14 +180,16 @@ Source of truth:
 The SDK normalizes the merchant's 402 response into a `PaymentRequired` object.
 It accepts the v2 `PAYMENT-REQUIRED` header, the v1 `X-PAYMENT` challenge
 header, and a JSON-body fallback. When the delegate address is known, probes
-also send `x402-wallet`. On the EIP-3009 path the paid retry sets **both**
-payment header names to the same value — the v2 `PAYMENT-SIGNATURE` and the v1
-`X-PAYMENT` (#2289) — so a strict merchant on either version reads it. On
-erc7710 the retry sends `PAYMENT-SIGNATURE` **alone** (#2341): that header
-carries a whole delegation chain, and duplicating it under both names crossed
-Node's default 16 KB header ceiling and turned every erc7710 settlement into
-an HTTP 431. A successful merchant response may include `PAYMENT-RESPONSE`
-evidence.
+also send `x402-wallet`. The paid retry sends an x402 **v2** payload under
+`PAYMENT-SIGNATURE` **alone**, on either scheme, and a **v1** payload under both
+`PAYMENT-SIGNATURE` and `X-PAYMENT` (#4754, owner decision 2026-11-09; the rule
+is `x402PaymentHeaderNamesFor`). History: #2289 set both names on every retry;
+#2341 dropped the alias on erc7710, whose delegation-chain header crossed Node's
+default 16 KB ceiling when duplicated and turned every erc7710 settlement into
+an HTTP 431; #4754 dropped it on every v2 payload once the #2361 extensions
+echo had grown EIP-3009 headers to 5–6.5 KB — Anchor answered 431 to a doubled
+4,969-byte one after its funding leg confirmed. A successful merchant response
+may include `PAYMENT-RESPONSE` evidence.
 
 **Native MCP transport profile (#3118).** A merchant following the official
 x402 MCP transport specification (`x402-foundation/x402`,
@@ -347,7 +349,7 @@ sequenceDiagram
     AM->>Safe: Transfer within approved budget
     API-->>SDK: Funding transaction
     SDK->>SDK: Wait for at least one confirmation
-    SDK->>Resource: Retry with PAYMENT-SIGNATURE + X-PAYMENT
+    SDK->>Resource: Retry with PAYMENT-SIGNATURE (+ X-PAYMENT only for x402 v1)
     alt merchant accepts
       Resource-->>SDK: Success + optional PAYMENT-RESPONSE
       SDK-->>Agent: Merchant response
@@ -490,7 +492,7 @@ sequenceDiagram
     Agent->>MCP: haven_submit { payment_id, signature }
     MCP->>API: Relay funding signature
     API-->>MCP: funding status
-    Agent->>Resource: Retry retry_url with PAYMENT-SIGNATURE + X-PAYMENT
+    Agent->>Resource: Retry retry_url with the signer's retry_headers (PAYMENT-SIGNATURE; + X-PAYMENT only for x402 v1)
     Resource-->>Agent: 200 OK / merchant response
     Agent->>MCP: haven_report_x402_outcome { payment_id, outcome, merchant_status, payment_header }
   else outside the on-chain budget
@@ -1465,7 +1467,7 @@ now carries the same distinction the confirmation text already made.
 | Payment target | Recipient address from agent intent | Merchant `payTo` from HTTP 402 challenge |
 | Amount units | Human decimal string | Atomic amount from x402 option |
 | Agent action after funding | None for direct confirmed payment | Retry original merchant/resource request |
-| Header sent to merchant | None | EIP-3009: `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289); erc7710: `PAYMENT-SIGNATURE` alone (#2341) |
+| Header sent to merchant | None | x402 v2 (either scheme): `PAYMENT-SIGNATURE` alone (#2341 for erc7710, #4754 for EIP-3009); x402 v1: `PAYMENT-SIGNATURE` **and** `X-PAYMENT`, same value (#2289) |
 | Payment authority | Agent signature over the account's typed data, redeeming the owner-signed budget delegation; the caveat enforcers are the gate | Same for the funding leg; EIP-3009 signature for the merchant leg |
 | Restart recovery | Fetch payment status | Rehydrate stored x402 context by payment id (`getResumeState`); resume when status answers `retry_original_x402_request` (#2145) — see [Resuming An Authorized Payment](#resuming-an-authorized-payment) |
 | Recipient history hint | `recipient.class` (#3531), direct `/payments` only | Not present |

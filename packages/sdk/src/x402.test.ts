@@ -573,7 +573,7 @@ describe('x402 helpers', () => {
 
     const retryInit = fetchMock.mock.calls[5][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
-    const x402Header = retryHeaders.get('X-PAYMENT') ?? ''
+    const x402Header = retryHeaders.get('PAYMENT-SIGNATURE') ?? ''
     const payment = decodeHeader(x402Header)
 
     expect(retryHeaders.get('x402-wallet')).toBe(delegateAddress)
@@ -594,8 +594,13 @@ describe('x402 helpers', () => {
     // x402 v2 merchant reads PAYMENT-SIGNATURE and nothing else, so sending only
     // the v1 name means the header is never seen at all. If the May 10 reasoning
     // ever resurfaces, it has to be weighed against that.
-    expect(retryHeaders.get('PAYMENT-SIGNATURE')).toBe(x402Header)
+    //
+    // #4754 (owner decision 2026-11-09): this is an x402 v2 payload, so it now
+    // goes out under PAYMENT-SIGNATURE ALONE — the #2361 extensions echo made
+    // the doubled EIP-3009 header answer HTTP 431 after funding. Only a v1
+    // payload keeps the legacy name.
     expect(x402Header).not.toBe('')
+    expect(retryHeaders.get('X-PAYMENT')).toBeNull()
     expect(payment).toMatchObject({
       x402Version: 2,
       accepted,
@@ -651,7 +656,8 @@ describe('x402 helpers', () => {
       resourceUrl,
       merchantStatus: 200,
       selectedPayment: accepted,
-      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
+      // #4754: the record names exactly what went on the wire — one name for v2.
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
       protocolReceiptPayload: {
         success: true,
@@ -1371,7 +1377,9 @@ describe('x402 helpers', () => {
 
     const retryInit = fetchMock.mock.calls[3][1] as RequestInit
     const retryHeaders = new Headers(retryInit.headers)
-    expect(retryHeaders.get('X-PAYMENT')).toBeTruthy()
+    // #4754: a v2 payload goes out under PAYMENT-SIGNATURE alone.
+    expect(retryHeaders.get('PAYMENT-SIGNATURE')).toBeTruthy()
+    expect(retryHeaders.get('X-PAYMENT')).toBeNull()
     // #3764: the FUNDING evidence post is unchanged...
     const evidenceInit = fetchMock.mock.calls[4][1] as RequestInit
     expect(JSON.parse(evidenceInit.body as string)).toMatchObject({
@@ -1392,8 +1400,8 @@ describe('x402 helpers', () => {
       paymentId: 'approval-123',
       rail: 'x402',
       txHash: settlementTxHash,
-      paymentProofHeaderName: 'PAYMENT-SIGNATURE, X-PAYMENT',
-      paymentProofHeader: retryHeaders.get('X-PAYMENT'),
+      paymentProofHeaderName: 'PAYMENT-SIGNATURE',
+      paymentProofHeader: retryHeaders.get('PAYMENT-SIGNATURE'),
     })
   })
 
@@ -1463,7 +1471,9 @@ describe('x402 helpers', () => {
     expect(retryInit.method).toBe('POST')
     expect(retryInit.body).toBe(body)
     expect(retryHeaders.get('mcp-session-id')).toBe('session-123')
-    expect(retryHeaders.get('X-PAYMENT')).toBeTruthy()
+    // #4754: v2 payload → PAYMENT-SIGNATURE alone.
+    expect(retryHeaders.get('PAYMENT-SIGNATURE')).toBeTruthy()
+    expect(retryHeaders.get('X-PAYMENT')).toBeNull()
   })
 
   it('rejects x402 resume attempts that do not match the approved amount', async () => {

@@ -485,7 +485,7 @@ local:   haven_sign               -> funding signature + x402_binding; pass { pa
                                     include_signing_payload=true
 hosted:  haven_submit             -> fund delegated agent EOA from the account budget
 local:   haven_x402_sign_header   -> EIP-3009 payment header if binding matches
-agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
+agent:   retry merchant with exactly retry_headers (PAYMENT-SIGNATURE; + X-PAYMENT only for x402 v1)
 hosted:  haven_report_x402_outcome { payment_id, outcome, merchant_status, payment_header }
 ```
 

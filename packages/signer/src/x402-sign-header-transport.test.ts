@@ -114,11 +114,11 @@ describe('haven_x402_sign_header transport robustness', () => {
     expect(typeof (result.data as { payment_header: string }).payment_header).toBe('string')
     expect((result.data as { payment_header: string }).payment_header.length).toBeGreaterThan(0)
     // #3727: the ready-made retry headers ride the result — names from the
-    // SDK's live rule (both on the EIP-3009 bridge), values the header itself.
+    // SDK's live rule (#4754: the v2 name alone for this x402 v2 payload),
+    // values the header itself.
     const data = result.data as { payment_header: string; retry_headers: Record<string, string> }
     expect(data.retry_headers).toEqual({
       'PAYMENT-SIGNATURE': data.payment_header,
-      'X-PAYMENT': data.payment_header,
     })
   })
 
@@ -178,7 +178,6 @@ describe('haven_sign_x402 (one-shot funding + header signing)', () => {
     // never picks the header names from prose.
     expect(data.retry_headers).toEqual({
       'PAYMENT-SIGNATURE': data.payment_header,
-      'X-PAYMENT': data.payment_header,
     })
   })
 

@@ -147,7 +147,7 @@ export const x402Erc7710Settle: Scenario = {
       return fail(`settle failed (${settle.status}): ${JSON.stringify(settle.data).slice(0, 200)}`)
     }
 
-    // ── 5. Merchant retry, both header names — merchant redeems on-chain ────
+    // ── 5. Merchant retry, PAYMENT-SIGNATURE alone — merchant redeems on-chain ─
     const paid = await fetch(mcpUrl, {
       method: 'POST',
       headers: {
@@ -155,7 +155,7 @@ export const x402Erc7710Settle: Scenario = {
         // erc7710 is always x402 v2, and its header carries a whole
         // delegation chain — sending the v1 alias too pushed the request
         // past the merchant's header-size limit (HTTP 431, #2341). v2 name
-        // only here; the EIP-3009 scenarios still send both.
+        // only — since #4754 every x402 v2 payload goes out this way.
         'PAYMENT-SIGNATURE': settle.data.payment_header,
       },
       body: mcpBody(2),

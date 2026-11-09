@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- **Paid retries follow the SDK's x402-version header rule (#4754),** through `haven.fetch` → `deliverPayment`: an x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone, and a v1 one under both names. The `expected_amount` stop reason on `haven_quote_x402` now names the token symbol (`0.001 USDC`) instead of the asset contract address. No update needed.
+
 ## 0.13.0-alpha.0 — 2026-10-30
 
 ## 0.12.0-alpha.0 — 2026-10-29

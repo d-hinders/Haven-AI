@@ -1585,6 +1585,10 @@ describe('haven_quote_x402 #3967 — over-budget / expected_amount / denial stop
       }),
     )
     expect(result.data.price_differs_from_expected).toBe(true)
+    // #4754: the reason names the token symbol, never the contract address.
+    expect(result.data.reason).toContain(`(${result.data.amount} ${result.data.token}) does not match`)
+    expect(result.data.asset).toMatch(/^0x[0-9a-fA-F]{40}$/) // non-vacuity: the address exists to leak
+    expect(result.data.reason).not.toContain(result.data.asset)
     expect(result.data.safe_to_continue).toBe(false)
     expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
     expect(result.data.next_tool).toBeUndefined()

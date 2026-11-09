@@ -305,8 +305,10 @@ local:   haven_sign               -> funding signature + x402_binding; pass { pa
                                     include_signing_payload=true
 hosted:  haven_submit             -> funds account -> delegate EOA
 local:   haven_x402_sign_header   -> payment header only if binding matches
-agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
-         (both names are correct HERE — the bridged header is small)
+agent:   retry merchant with exactly the result's retry_headers:
+         PAYMENT-SIGNATURE alone for an x402 v2 payload (X-PAYMENT too only
+         for a v1 one) — the v2 header echoes the merchant's extensions and a
+         doubled one was refused with HTTP 431 after funding (#4754)
 ```
 
 On the bridge, pass `{ payment_id }` to the local `haven_sign` call and let the

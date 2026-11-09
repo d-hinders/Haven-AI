@@ -20,7 +20,9 @@ import {
 } from './release-manifest-doc.mjs'
 import {
   CHANGELOG_PACKAGES,
+  CHANGELOG_PREAMBLE_LINES,
   changelogHeadingViolations,
+  changelogPreambleViolations,
   hasUnreleasedHeading,
   releaseChangelog,
 } from './release-changelog.mjs'
@@ -2251,6 +2253,141 @@ test('changelog headings — no CHANGELOG reaches a tarball, so this is a repo-r
       `packages/${name} would publish its CHANGELOG — this premise no longer holds`,
     )
   }
+})
+
+// ── Package CHANGELOG preamble ───────────────────────────────────────────────
+//
+// #4756's first commit (`f8606fa28`) inserted four entries at the first textual
+// match of `## Unreleased` — which is inside the preamble sentence "The bump
+// rewrites the `## Unreleased` heading below into", not the heading. `docs:check`,
+// the strict coupling gate and these release tests were green on that commit,
+// and CI never ran on it. A reviewer found it by running `releaseChangelog()` by
+// hand: the release section would have carried no entry for the fix in any of
+// the four packages. Nothing asked WHERE an entry sits relative to the heading.
+
+/**
+ * The #4756 placement, reproduced: a `### Fixed` block and an entry inserted
+ * between the two halves of the preamble sentence.
+ *
+ * Built from the canonical template rather than copied from `f8606fa28` — that
+ * commit is reachable only through `refs/pull/4756/head`, so a fixture cannot
+ * read it from git, and a hand-transcribed copy would be free to drift from the
+ * placement it claims to reproduce. The split point is asserted, so a template
+ * edit that moves the sentence fails here instead of quietly weakening the
+ * control.
+ */
+function misplacedEntryChangelog(pkgName) {
+  const lines = [`# @haven_ai/${pkgName}`, ...CHANGELOG_PREAMBLE_LINES]
+  const split = lines.findIndex((line) => line.includes('The bump rewrites the `## Unreleased'))
+  assert.notEqual(split, -1, 'the fixture splits the preamble sentence; that sentence moved')
+  const marker = '`## Unreleased'
+  const at = lines[split].indexOf(marker)
+  assert.notEqual(at, -1, 'the fixture splits at the backticked heading mention; it moved')
+  return [
+    ...lines.slice(0, split),
+    lines[split].slice(0, at + 1),
+    '',
+    '### Fixed',
+    '',
+    '- **An x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone (#4754).** Detail.',
+    '` heading below into',
+    ...lines.slice(split + 1),
+    '## Unreleased',
+    '',
+  ].join('\n')
+}
+
+test('changelog preamble — the five real files carry the canonical preamble', async () => {
+  // The guard itself: it runs here, in CI, on every pull request, against the
+  // actual repository files. A check nobody runs against the real files is a
+  // formality, and this one is the only thing that notices an entry pasted into
+  // the preamble.
+  const files = {}
+  for (const name of CHANGELOG_PACKAGES) {
+    files[name] = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+  }
+  assert.deepEqual(changelogPreambleViolations(files), [])
+  assert.deepEqual(changelogPreambleViolations({}), [], 'a package absent from the map is not reported')
+})
+
+test('changelog preamble — lines 2–16 are one shared text across the five files', async () => {
+  // The measurement the gate rests on: the preamble is not five copies that
+  // happen to agree today, it is one text. Line 16 is the `## Unreleased`
+  // heading the preamble ends at, so it is part of the shared block even though
+  // it is not part of the preamble.
+  const blocks = []
+  for (const name of CHANGELOG_PACKAGES) {
+    const source = await readFile(join(ROOT, 'packages', name, 'CHANGELOG.md'), 'utf8')
+    blocks.push(source.split('\n').slice(1, 16))
+  }
+  for (const block of blocks) {
+    assert.deepEqual(block, [...CHANGELOG_PREAMBLE_LINES, '## Unreleased'])
+  }
+})
+
+test('changelog preamble — POSITIVE CONTROL: the #4756 placement is red', () => {
+  const violations = changelogPreambleViolations({ sdk: misplacedEntryChangelog('sdk') })
+  assert.ok(violations.length > 0, 'the check must be red on the placement that shipped green')
+  assert.ok(
+    violations.some((v) => v.includes('"### Fixed" is a subsection inside the preamble')),
+    `the subsection rule must name it: ${JSON.stringify(violations)}`,
+  )
+  assert.ok(
+    violations.some((v) => v.includes('is an entry inside the preamble')),
+    `the entry rule must name it: ${JSON.stringify(violations)}`,
+  )
+  assert.ok(
+    violations.some((v) => v.includes('differs from the canonical template')),
+    `the template rule must name it: ${JSON.stringify(violations)}`,
+  )
+})
+
+test('changelog preamble — every package in CHANGELOG_PACKAGES is covered', () => {
+  const broken = Object.fromEntries(
+    CHANGELOG_PACKAGES.map((name) => [name, misplacedEntryChangelog(name)]),
+  )
+  const violations = changelogPreambleViolations(broken)
+  for (const name of CHANGELOG_PACKAGES) {
+    assert.ok(
+      violations.some((v) => v.startsWith(`packages/${name}/CHANGELOG.md:`)),
+      `packages/${name} is not covered by the preamble check`,
+    )
+  }
+})
+
+test('changelog preamble — an altered preamble is red even with no entry in it', () => {
+  // The template rule, on its own: the preamble is instructions, and
+  // instructions that drift from the mechanism are how #2933 shipped a file
+  // asserting behaviour the code did not have.
+  const lines = [`# @haven_ai/sdk`, ...CHANGELOG_PREAMBLE_LINES]
+  const edited = lines.map((line) =>
+    line.startsWith('Release headers are written') ? line.replace('never by', 'sometimes by') : line,
+  )
+  const violations = changelogPreambleViolations({ sdk: [...edited, '## Unreleased', ''].join('\n') })
+  assert.equal(violations.length, 1, JSON.stringify(violations))
+  assert.match(violations[0], /differs from the canonical template at line 3/)
+})
+
+test('changelog preamble — a file with no ## Unreleased heading is still checked', () => {
+  // `releaseChangelog()` returns null rather than inventing a heading, so a
+  // package can go a release with no entry. The preamble is defined by the
+  // first `## ` line, not by `## Unreleased`, so the check still applies.
+  const intact = [`# @haven_ai/sdk`, ...CHANGELOG_PREAMBLE_LINES, '## 0.13.0-alpha.0 — 2026-10-01', '', '- shipped', ''].join('\n')
+  assert.deepEqual(changelogPreambleViolations({ sdk: intact }), [])
+
+  const altered = intact.replace('Mark a bullet', 'Mark a line')
+  assert.equal(changelogPreambleViolations({ sdk: altered }).length, 1)
+})
+
+test('changelog preamble — the module keeps ONE heading pattern, not two', async () => {
+  // The boundary is a prefix test on the same `## ` the Unreleased regex
+  // matches. A second heading regex would be free to disagree with the first,
+  // and the disagreement would show up as a gate that passes on the file the
+  // first one rejects.
+  const source = await readFile(join(ROOT, 'scripts', 'release-changelog.mjs'), 'utf8')
+  const patterns = source.match(/\/\^## [^/\n]*\//g) || []
+  assert.equal(patterns.length, 1, `expected one heading regex, found ${JSON.stringify(patterns)}`)
+  assert.ok(patterns[0].startsWith('/^## Unreleased'), patterns[0])
 })
 
 // ---------------------------------------------------------------------------

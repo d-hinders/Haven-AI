@@ -687,9 +687,10 @@ export const EXEMPT_PACKAGE_DOCS = {
     'its audience is a model mid-task, so front-matter would be noise it pays tokens for.',
   'packages/frontend/public/for-agents.md':
     'Agent-readable public artifact, served verbatim at /for-agents.md (#2523, epic #2519). It is '+
-    'NOT hand-maintained: the canonical string is `HAVEN_AGENT_RUNBOOK_MD` in '+
-    '`packages/sdk/src/agent-guidance.ts`, and a byte-equality test pins this file to it, so the '+
-    'thing that catches drift is that test rather than a doc gate. Its audience is a model '+
+    'a hand-kept byte copy of `HAVEN_AGENT_RUNBOOK_MD` in `packages/sdk/src/agent-guidance.ts`, '+
+    'never edited on its own: `for-agents-runbook.test.ts` and `sync-agent-guidance.mjs --check` '+
+    'both pin it byte for byte, so the thing that catches drift is those checks rather than a doc '+
+    'gate. Its audience is a model '+
     'mid-task, so front-matter would be tokens it pays for and cannot use.',
   ...Object.fromEntries(
     [

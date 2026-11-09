@@ -63,7 +63,9 @@ describe('StepChecklist connector (#4744)', () => {
     for (const segment of segments) {
       const done = segment!.getAttribute('data-step-connector') === 'done'
       expect(segment!.className.includes('var(--v2-success)')).toBe(done)
-      expect(segment!.className.includes('bg-[var(--v2-border-strong)]')).toBe(!done)
+      // #4747: the open segment is the pending ring's own colour, never heavier.
+      expect(segment!.className.includes('bg-[var(--v2-border)]')).toBe(!done)
+      expect(segment!.className).not.toContain('border-strong')
     }
   })
 })

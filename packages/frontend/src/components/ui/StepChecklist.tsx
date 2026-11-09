@@ -32,8 +32,9 @@ import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS }
  * `.v2-progress-line`, whose `scaleX` fill is a horizontal band's motion. A
  * segment describes the step ABOVE it: below a `done` marker it takes the
  * band's filled tint, `--v2-success` at 45% over `--v2-border`; every other
- * segment is `--v2-border-strong`. Steps completed out of order therefore
- * colour only the segments under the done ones.
+ * segment is `--v2-border`, the pending ring's own colour, so the line never
+ * reads heavier than the disc it ends on (#4747). Steps completed out of
+ * order therefore colour only the segments under the done ones.
  */
 export type StepChecklistState = 'done' | 'active' | 'working' | 'pending'
 
@@ -105,7 +106,7 @@ export const ROW_FOOTER_OUTDENT_CLASS = 'sm:-ml-[2.875rem]'
 export const STEP_CONNECTOR_CLASS = 'w-0.5 flex-1 rounded-full'
 const CONNECTOR_TONE = {
   done: 'bg-[color-mix(in_srgb,var(--v2-success)_45%,var(--v2-border))]',
-  other: 'bg-[var(--v2-border-strong)]',
+  other: 'bg-[var(--v2-border)]',
 } as const
 
 // Screen-reader state prefix for the row heading. None for `active`: that row

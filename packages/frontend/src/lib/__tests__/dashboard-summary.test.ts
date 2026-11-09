@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { formatFiat } from '../format'
 import {
   buildDashboardSummary,
+  buildSinceLastVisitSummary,
   merchantDisplayName,
   type DashboardSummaryInput,
+  type SinceLastVisitInput,
 } from '../dashboard-summary'
 
 function input(overrides: Partial<DashboardSummaryInput> = {}): DashboardSummaryInput {
@@ -341,5 +343,114 @@ describe('merchantDisplayName (#3807, #3810 counterparty rules)', () => {
     expect(
       merchantDisplayName({ key: '0xabc', x402ResourceUrl: null, to: '0xabc', merchantName: null }),
     ).toBeNull()
+  })
+})
+
+// ── #4709: "Since your last visit" ──────────────────────────────────────────
+
+function sinceInput(overrides: Partial<SinceLastVisitInput> = {}): SinceLastVisitInput {
+  return {
+    currency: 'USD',
+    previous: '2026-11-02T10:00:00.000Z',
+    timeWord: 'Since yesterday',
+    payments: 0,
+    netSpend: 0,
+    agents: [],
+    ...overrides,
+  }
+}
+
+const research = { id: 'r', name: 'Research agent', netSpend: 4.2, payments: 3 }
+const helper = { id: 'h', name: 'Helper', netSpend: 1.1, payments: 1 }
+const atlasSince = { id: 'a', name: 'Atlas', netSpend: 0.5, payments: 1 }
+
+describe('buildSinceLastVisitSummary (#4709) — the exact sentences', () => {
+  it('a first ever visit shows no line', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ previous: null, payments: 3, netSpend: 4.2, agents: [research] }),
+      ),
+    ).toBeNull()
+  })
+
+  it('nothing since shows no line', () => {
+    expect(buildSinceLastVisitSummary(sinceInput())).toBeNull()
+  })
+
+  it('one agent, several payments — the agent is named and the total is shown', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 3, netSpend: 4.2, agents: [research] }),
+      ),
+    ).toBe('Since yesterday, Research agent made 3 payments for $4.20.')
+  })
+
+  it('one payment reads as "1 payment"', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 1, netSpend: 4.2, agents: [{ ...research, payments: 1 }] }),
+      ),
+    ).toBe('Since yesterday, Research agent made 1 payment for $4.20.')
+  })
+
+  it('two agents are both named', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 4, netSpend: 5.3, agents: [research, helper] }),
+      ),
+    ).toBe('Since yesterday, Research agent and Helper made 4 payments for $5.30.')
+  })
+
+  it('three or more agents read as a count — at most two are ever named', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 5, netSpend: 5.8, agents: [research, helper, atlasSince] }),
+      ),
+    ).toBe('Since yesterday, 3 agents made 5 payments for $5.80.')
+  })
+
+  it('a total under a cent reads as a count, never as $0.00', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 3, netSpend: 0.004, agents: [{ ...research, netSpend: 0.004 }] }),
+      ),
+    ).toBe('Since yesterday, Research agent made 3 payments.')
+  })
+
+  it('a net at or below zero reads as a count — a negative figure is not a spend', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 2, netSpend: -1.5, agents: [{ ...research, netSpend: -1.5 }] }),
+      ),
+    ).toBe('Since yesterday, Research agent made 2 payments.')
+  })
+
+  it('renders in the display currency, not a hardcoded one', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ currency: 'SEK', payments: 3, netSpend: 44.2, agents: [{ ...research, netSpend: 44.2 }] }),
+      ),
+      // Read off the real formatter — sv-SE's separator bytes are the
+      // formatter's business, not the sentence's.
+    ).toBe(`Since yesterday, Research agent made 3 payments for ${formatFiat(44.2, 'SEK')}.`)
+  })
+
+  it('names the agents by net spend, largest first', () => {
+    expect(
+      buildSinceLastVisitSummary(
+        sinceInput({ payments: 2, netSpend: 5.3, agents: [helper, research] }),
+      ),
+    ).toBe('Since yesterday, Research agent and Helper made 2 payments for $5.30.')
+  })
+
+  it('never names a raw address — only agent names reach the sentence', () => {
+    const sentence = buildSinceLastVisitSummary(
+      sinceInput({
+        payments: 1,
+        netSpend: 1,
+        agents: [{ id: 'x', name: 'Research agent', netSpend: 1, payments: 1 }],
+      }),
+    )
+    expect(sentence).not.toMatch(/0x[0-9a-fA-F]{6,}/)
   })
 })

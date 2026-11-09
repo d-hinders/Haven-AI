@@ -5,6 +5,7 @@ import { retiredSafePathHandler } from './user-accounts-retired.js'
 import { DEFAULT_TRANSACTION_CURRENCY, type TransactionCurrency } from '../domain/transaction-currency.js'
 import {
   findCurrencyPreference,
+  openUserVisit,
   updateCurrencyPreference,
   updateUserName,
   updateUserWalletAddress,
@@ -278,5 +279,33 @@ export default async function userRoutes(app: FastifyInstance): Promise<void> {
 
     if (!dismissed) return reply.code(404).send({ error: 'Not found' })
     return reply.code(201).send(toWireDismissal(dismissed))
+  })
+
+  interface UserVisitBody {
+    /** The client-generated entry id, stored in `sessionStorage` BEFORE the call. */
+    entry_id: string
+  }
+
+  // POST /user/visits — open (or re-open) one visit entry (#4709, epic #4701
+  // decision 4). The marker lives on the SERVER so a phone and a laptop agree.
+  //
+  // One atomic `UPDATE … RETURNING` under the row lock returns
+  // `{ previous, current }`; the window a line describes is
+  // `(previous, current]`. The SAME `entry_id` returns the same bounds without
+  // moving the marker (a retry after a lost response), and `current` never
+  // goes backwards. Two near-simultaneous entries get consecutive windows
+  // that do not overlap. The accepted residual, stated on #4709: a retry that
+  // arrives after ANOTHER device opened a new entry is treated as a new entry,
+  // so the lost window's line is not shown — nothing is counted twice.
+  //
+  // Display-only: this marker is never read by a payment path.
+  app.post<{ Body: UserVisitBody }>('/visits', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const visit = await openUserVisit(request.body.entry_id, sub)
+    if (!visit) return reply.code(404).send({ error: 'User not found' })
+    return {
+      previous: visit.previous ? visit.previous.toISOString() : null,
+      current: visit.current.toISOString(),
+    }
   })
 }

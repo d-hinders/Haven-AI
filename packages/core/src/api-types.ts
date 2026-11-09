@@ -1590,6 +1590,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/user/visits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open (or re-open) one visit entry and return its window.
+         * @description One atomic write under the row lock. The window a "Since your last visit" line describes is `(previous, current]`: `previous` is the instant the PREVIOUS entry opened (null on the first ever visit) and `current` this one. The same `entry_id` returns the same bounds without moving the marker; a different id opens a new entry, and `current` never goes backwards. Two near-simultaneous entries get consecutive windows that do not overlap. Display-only: this marker is never read by a payment path.
+         */
+        post: operations["openUserVisit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/accounting/export": {
         parameters: {
             query?: never;
@@ -3533,6 +3553,26 @@ export type paths = {
         };
         /** Aggregated dashboard overview: totals, day change, spend windows, previews. */
         get: operations["getDashboardOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dashboard/since": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Confirmed agent payments in one visit window, grouped by agent.
+         * @description The user’s confirmed agent payments with `confirmed_at` in `(after, through]`, grouped by agent, on the same NET definition and `spend.scope` as the 7-day figures, in the display currency — so the line cannot disagree with the sentence below it. A payment confirmed after `through` belongs to the next entry. Display-only: nothing here is read by a payment path.
+         */
+        get: operations["getDashboardSince"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6685,6 +6725,59 @@ export type components = {
             needs_backup_recommendation: boolean;
             /** @description Σ confirmed − min(swept, confirmed) per (agent, token, chain) over the last 7 days, for this account’s agents on this chain in the registry USDC. Swept = delegate_sweeps status submitted with a tx_hash. */
             usdcPace7dAtomic: string;
+        };
+        UserVisitInput: {
+            /**
+             * Format: uuid
+             * @description The client-generated entry id, stored in `sessionStorage` BEFORE the call so a retry re-opens the same entry.
+             */
+            entry_id: string;
+        };
+        UserVisitResponse: {
+            /**
+             * Format: date-time
+             * @description The PREVIOUS entry’s instant — the exclusive lower bound of the window. Null on the first ever visit.
+             */
+            previous: string | null;
+            /**
+             * Format: date-time
+             * @description This entry’s instant — the inclusive upper bound of the window. Never goes backwards.
+             */
+            current: string;
+        };
+        DashboardSinceAgent: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description The agent’s NET spend in the window, in the display currency (#3803’s definition with the #3755 netting). */
+            netSpend: number;
+            /** @description Confirmed payments the agent made in the window. */
+            payments: number;
+        };
+        DashboardSinceResponse: {
+            /**
+             * Format: date-time
+             * @description The window’s exclusive lower bound, echoed from the request.
+             */
+            after: string;
+            /**
+             * Format: date-time
+             * @description The window’s inclusive upper bound, echoed from the request.
+             */
+            through: string;
+            /** @description The fixed “Since …” word, spoken in the request’s `tz`: “Since earlier today”, “Since yesterday”, “Since Tuesday” (within six local days), or a date past six days (“Since 3 November”). The sentence around it is assembled from fixed templates in the frontend. */
+            timeWord: string;
+            /**
+             * @description The display currency `net` and every agent’s `netSpend` are struck in.
+             * @enum {string}
+             */
+            currency: "SEK" | "USD" | "EUR";
+            /** @description Confirmed payments in the window, across every agent. */
+            payments: number;
+            /** @description The window’s NET spend in the display currency. */
+            net: number;
+            /** @description Agents with at least one confirmed payment in the window, largest net spend first. */
+            agents: components["schemas"]["DashboardSinceAgent"][];
         };
         DashboardOverviewResponse: {
             totals: {
@@ -14049,6 +14142,75 @@ export interface operations {
                 };
             };
             /** @description The account or agent does not exist or belongs to another user. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    openUserVisit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserVisitInput"];
+            };
+        };
+        responses: {
+            /** @description The entry’s window. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserVisitResponse"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account no longer exists. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -23276,6 +23438,63 @@ export interface operations {
                 };
             };
             /** @description Invalid `tz` — not an IANA zone name. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getDashboardSince: {
+        parameters: {
+            query: {
+                /** @description The PREVIOUS entry’s instant (exclusive lower bound), from `POST /user/visits`. */
+                after: string;
+                /** @description This entry’s instant (inclusive upper bound), from `POST /user/visits`. */
+                through: string;
+                /** @description IANA time-zone name the client renders the time word in. Defaults to UTC; an invalid zone is refused with 400. */
+                tz?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The window’s figures. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardSinceResponse"];
+                };
+            };
+            /** @description Missing or malformed `after`/`through`, `after` not before `through`, or an invalid `tz`. */
             400: {
                 headers: {
                     [name: string]: unknown;

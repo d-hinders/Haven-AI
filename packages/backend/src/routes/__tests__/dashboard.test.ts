@@ -5,6 +5,10 @@ import fastifyJwt from '@fastify/jwt'
 // dashboard's generated wire types promise — see the #1090 block below.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import type { DashboardActivityGroup } from '../../modules/transactions/activity.js'
+// #4709: the route asks the module for the fixed "Since …" word. Kept REAL
+// (like the freshness combiner above) so the word this file pins is the
+// production word; its own truth table lives in since-time-word.test.ts.
+import { sinceTimeWord } from '../../modules/transactions/activity.js'
 // The double below replaces only the FETCHING half of the accounts barrel;
 // the route also reads the pure freshness combiner from it (#3295), which
 // stays real so the marker math this file pins is the production math.
@@ -97,7 +101,12 @@ vi.mock('../../infra/prices.js', () => ({
   getTokenPrice: vi.fn(async () => ({ usd: 1, eur: 0.9, sek: 10 })),
 }))
 // #992: aggregation/enrichment/caching moved to src/modules/transactions/.
-vi.mock('../../modules/transactions/index.js', () => transactionMocks)
+vi.mock('../../modules/transactions/index.js', () => ({
+  ...transactionMocks,
+  // #4709: the route reads the fixed "Since …" word from this barrel; the real
+  // function is spread in above so the word is the production word.
+  sinceTimeWord,
+}))
 
 import dashboardRoutes from '../dashboard.js'
 
@@ -1055,4 +1064,204 @@ describe('dashboard writes the daily snapshot only from a clean read (#3296)', (
     expect(inserts).toHaveLength(1)
     return inserts[0][1]
   }
+})
+
+// #4709 — the "Since your last visit" figures route.
+//
+// The figures statement's own boundary, scope and netting proofs live on the
+// real-DB harness (`infra/repositories/__tests__/dashboard-since.db.test.ts`).
+// What this block pins is the ROUTE: the assembled wire shape, the three 400
+// refusals, and that the caller's `spend.scope` chain set reaches the
+// statement. Its own app (and its own `mockQuery` reset) so the call log this
+// block reads is only its own.
+describe('GET /dashboard/since (#4709)', () => {
+  let app: FastifyInstance
+  let token: string
+
+  const AFTER = '2026-11-01T10:00:00.000Z'
+  const THROUGH = '2026-11-02T10:00:00.000Z'
+  const USDC_8453 = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    token = app.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })
+  })
+  afterAll(async () => app.close())
+
+  beforeEach(() => {
+    mockQuery.mockReset()
+    transactionMocks.resolveTransactionCurrency.mockClear()
+    transactionMocks.isValidActivityTimeZone.mockClear()
+  })
+
+  /** One `DASHBOARD_SINCE_GROUPS_SQL` row; booked SEK values unless overridden. */
+  function sinceRow(overrides: Record<string, unknown> = {}) {
+    return {
+      agent_id: AGENT_UUID,
+      agent_name: 'Research agent',
+      token_key: USDC_8453,
+      chain_key: 8453,
+      gross_usd: '0',
+      net_usd: '0',
+      gross_eur: '0',
+      net_eur: '0',
+      gross_sek: '0',
+      net_sek: '0',
+      fb_usd: '0',
+      fb_eur: '0',
+      fb_sek: '0',
+      payments: '0',
+      ...overrides,
+    }
+  }
+
+  /** SQL-dispatched (mockImplementation), never positional (#1227 ratchet). */
+  function installSinceMock(opts: { accounts?: unknown[]; groups?: unknown[] } = {}) {
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes('FROM smart_accounts us') && sql.includes('GROUP BY us.id')) {
+        return Promise.resolve({ rows: opts.accounts ?? [SAFE] })
+      }
+      // The visit-window statement is the only one with `confirmed_at > $2`
+      // (the 7/30-day statements use `>= $2` and `< $4`).
+      if (sql.includes('pi.confirmed_at > $2')) {
+        return Promise.resolve({ rows: opts.groups ?? [] })
+      }
+      throw new Error(`Unexpected query: ${sql}`)
+    })
+  }
+
+  function sinceQuery(): unknown[] | undefined {
+    return mockQuery.mock.calls.find(([sql]) => String(sql).includes('pi.confirmed_at > $2'))
+  }
+
+  function getSince(query: string) {
+    return app.inject({
+      method: 'GET',
+      url: `/dashboard/since?${query}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+  }
+
+  it('returns the assembled window: echoed bounds, time word, currency, totals and agents sorted by net spend then name', async () => {
+    installSinceMock({
+      groups: [
+        sinceRow({ agent_id: AGENT_UUID, agent_name: 'Research agent', net_sek: '30', payments: '2' }),
+        sinceRow({
+          agent_id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+          agent_name: 'Helper',
+          net_sek: '50',
+          payments: '1',
+        }),
+        sinceRow({
+          agent_id: '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e',
+          agent_name: 'Zeta',
+          net_sek: '20',
+          payments: '1',
+        }),
+        sinceRow({
+          agent_id: '3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f',
+          agent_name: 'Alpha',
+          net_sek: '20',
+          payments: '1',
+        }),
+      ],
+    })
+
+    const response = await getSince(`after=${AFTER}&through=${THROUGH}&tz=Europe/Stockholm`)
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json()
+    expectMatchesSpec('GET', '/dashboard/since', body)
+    expect(body.after).toBe(AFTER)
+    expect(body.through).toBe(THROUGH)
+    // 11:00 local on consecutive days → the fixed "yesterday" word.
+    expect(body.timeWord).toBe('Since yesterday')
+    expect(body.currency).toBe('SEK')
+    expect(body.payments).toBe(5)
+    expect(body.net).toBe(120)
+    // Largest net spend first; the 20/20 tie breaks on name.
+    expect(
+      body.agents.map((agent: { name: string; netSpend: number; payments: number }) => [
+        agent.name,
+        agent.netSpend,
+        agent.payments,
+      ]),
+    ).toEqual([
+      ['Helper', 50, 1],
+      ['Research agent', 30, 2],
+      ['Alpha', 20, 1],
+      ['Zeta', 20, 1],
+    ])
+    // The statement ran over the caller's window and the mainnet scope.
+    expect(sinceQuery()?.[1]).toEqual(['user-1', AFTER, THROUGH, [8453]])
+  })
+
+  it.each([
+    ['equal', AFTER, AFTER],
+    ['reversed', THROUGH, AFTER],
+  ])('refuses %s bounds with 400', async (_label: string, after: string, through: string) => {
+    installSinceMock()
+
+    const response = await getSince(`after=${after}&through=${through}`)
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'after must be before through' })
+    expect(mockQuery, 'refused before any read').not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an unparseable after', `after=not-a-date&through=${THROUGH}`],
+    ['an unparseable through', `after=${AFTER}&through=not-a-date`],
+    ['a missing after', `through=${THROUGH}`],
+    ['a missing through', `after=${AFTER}`],
+  ])('refuses %s with 400', async (_label: string, query: string) => {
+    installSinceMock()
+
+    const response = await getSince(query)
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'after and through must be ISO timestamps' })
+    expect(mockQuery, 'refused before any read').not.toHaveBeenCalled()
+  })
+
+  it('refuses an unsupported tz with 400 and never echoes the raw value', async () => {
+    installSinceMock()
+    transactionMocks.isValidActivityTimeZone.mockReturnValueOnce(false)
+
+    const response = await getSince(`after=${AFTER}&through=${THROUGH}&tz=Mars/Olympus`)
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({ error: 'unsupported tz' })
+    expect(transactionMocks.isValidActivityTimeZone).toHaveBeenCalledWith('Mars/Olympus')
+    expect(JSON.stringify(response.json())).not.toContain('Mars/Olympus')
+    expect(mockQuery, 'refused before any read').not.toHaveBeenCalled()
+  })
+
+  it('passes the caller’s spend.scope chain set to the figures statement — a testnet row cannot count under a mainnet scope', async () => {
+    const testnetAccount = { ...SAFE, id: 'safe-testnet', chain_id: 84532 }
+    installSinceMock({
+      accounts: [SAFE, testnetAccount],
+      groups: [sinceRow({ net_sek: '7', payments: '1' })],
+    })
+
+    const response = await getSince(`after=${AFTER}&through=${THROUGH}`)
+
+    expect(response.statusCode).toBe(200)
+    // Mainnet accounts exist → the scope is mainnet-only; the testnet chain id
+    // never reaches the statement, so its rows cannot be counted.
+    expect(sinceQuery()?.[1]).toEqual(['user-1', AFTER, THROUGH, [8453]])
+    expect(response.json().net).toBe(7)
+  })
+
+  it('falls back to the testnet chain set when the caller has no mainnet account', async () => {
+    const testnetAccount = { ...SAFE, id: 'safe-testnet', chain_id: 84532 }
+    installSinceMock({ accounts: [testnetAccount] })
+
+    const response = await getSince(`after=${AFTER}&through=${THROUGH}`)
+
+    expect(response.statusCode).toBe(200)
+    expect(sinceQuery()?.[1]).toEqual(['user-1', AFTER, THROUGH, [84532]])
+  })
 })

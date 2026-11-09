@@ -573,3 +573,60 @@ export async function buildActivityFeed(
     windowStartIso: activityWindowStartIso(now),
   }
 }
+
+// ── "Since your last visit" time word (#4709) ───────────────────────────────
+
+const sinceWeekdayFormatters = new Map<string, Intl.DateTimeFormat>()
+const sinceDateFormatters = new Map<string, Intl.DateTimeFormat>()
+
+/** A calendar day as a whole number of days since the epoch (UTC arithmetic on a local key). */
+function sinceDayNumber(key: string): number {
+  const [year, month, day] = key.split('-').map(Number)
+  return Date.UTC(year, month - 1, day) / 86_400_000
+}
+
+function sinceWeekdayFormatter(tz: string): Intl.DateTimeFormat {
+  let formatter = sinceWeekdayFormatters.get(tz)
+  if (formatter == null) {
+    formatter = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'long' })
+    sinceWeekdayFormatters.set(tz, formatter)
+  }
+  return formatter
+}
+
+function sinceDateFormatter(tz: string): Intl.DateTimeFormat {
+  let formatter = sinceDateFormatters.get(tz)
+  if (formatter == null) {
+    formatter = new Intl.DateTimeFormat('en-GB', { timeZone: tz, day: 'numeric', month: 'long' })
+    sinceDateFormatters.set(tz, formatter)
+  }
+  return formatter
+}
+
+/**
+ * The fixed "Since …" word for a visit window (#4709, epic #4701 decision 4),
+ * spoken in `tz` — the zone the client sends on `GET /dashboard/since`:
+ *
+ *   - the same local day     → "Since earlier today"
+ *   - the previous local day → "Since yesterday"
+ *   - within six local days  → "Since Tuesday" (the weekday)
+ *   - past six local days    → "Since 3 November" (the date)
+ *
+ * It lives beside `localDayKey` because it is the same derivation: "yesterday"
+ * here means the same calendar day it means on the Activity card. The SENTENCE
+ * around it is assembled from fixed templates in the frontend
+ * (`lib/dashboard-summary.ts`), never model-written.
+ */
+export function sinceTimeWord(previousIso: string, currentIso: string, tz: string): string {
+  const previous = new Date(previousIso)
+  const current = new Date(currentIso)
+  const days =
+    sinceDayNumber(localDayKey(Math.floor(current.getTime() / 1000), tz)) -
+    sinceDayNumber(localDayKey(Math.floor(previous.getTime() / 1000), tz))
+  // Same local day — or, defensively, a previous instant the clock puts after
+  // this one: the window is empty either way, so the honest word is "today".
+  if (days <= 0) return 'Since earlier today'
+  if (days === 1) return 'Since yesterday'
+  if (days <= 6) return `Since ${sinceWeekdayFormatter(tz).format(previous)}`
+  return `Since ${sinceDateFormatter(tz).format(previous)}`
+}

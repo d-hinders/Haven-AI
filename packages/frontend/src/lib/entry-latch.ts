@@ -38,21 +38,48 @@ function latchKey(consumer: EntryConsumer, userId: string): string {
   return `${PREFIX}${consumer}:${userId}`
 }
 
-/** True when this tab has already had its entrance for this consumer and user. */
-export function hasEntered(consumer: EntryConsumer, userId: string): boolean {
-  if (typeof window === 'undefined') return true
+/** What this tab remembers about one consumer's entrance. */
+export interface EntryLatchState {
+  /** True when this tab has already had its entrance (or cannot remember). */
+  entered: boolean
+  /** The value stored with the entrance, or null when there is none. */
+  value: string | null
+}
+
+/**
+ * Read one consumer's latch. Storage that throws (private mode, a blocked
+ * origin) reads as `{ entered: true, value: null }`: an entrance animation is
+ * decoration, so when this tab cannot remember having played it, it does not
+ * play rather than risk playing on every visit.
+ *
+ * `value` is what lets a consumer remember more than "yes": #4709 stores its
+ * entry id and the window bounds under `last-visit`, so a reload or a return
+ * from another page keeps the line for the whole entry.
+ */
+export function readEntryState(consumer: EntryConsumer, userId: string): EntryLatchState {
+  if (typeof window === 'undefined') return { entered: true, value: null }
   try {
-    return window.sessionStorage.getItem(latchKey(consumer, userId)) === '1'
+    const value = window.sessionStorage.getItem(latchKey(consumer, userId))
+    return value === null ? { entered: false, value: null } : { entered: true, value }
   } catch {
-    return true
+    return { entered: true, value: null }
   }
 }
 
-/** Record that this tab has had its entrance for this consumer and user. */
-export function markEntered(consumer: EntryConsumer, userId: string): void {
+/** True when this tab has already had its entrance for this consumer and user. */
+export function hasEntered(consumer: EntryConsumer, userId: string): boolean {
+  return readEntryState(consumer, userId).entered
+}
+
+/**
+ * Record that this tab has had its entrance for this consumer and user.
+ * `value` defaults to `'1'` — the count-up's marker; #4709 passes its entry
+ * state as JSON.
+ */
+export function markEntered(consumer: EntryConsumer, userId: string, value = '1'): void {
   if (typeof window === 'undefined') return
   try {
-    window.sessionStorage.setItem(latchKey(consumer, userId), '1')
+    window.sessionStorage.setItem(latchKey(consumer, userId), value)
   } catch {
     // Unwritable storage: `hasEntered` already reads as entered.
   }

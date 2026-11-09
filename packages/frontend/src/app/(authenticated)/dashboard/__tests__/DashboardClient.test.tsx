@@ -1888,7 +1888,12 @@ describe('DashboardClient', () => {
         render(<DashboardClient />)
         await user.click(screen.getByRole('button', { name: 'Start again' }))
 
-        expect(mockApiPost).not.toHaveBeenCalled()
+        // #4709: the dashboard also POSTs `/user/visits` on mount, so this
+        // asserts the setup surface specifically — Start again creates no
+        // second setup.
+        expect(
+          mockApiPost.mock.calls.some(([path]) => path === '/agent-connection-setups'),
+        ).toBe(false)
         expect(assign).toHaveBeenCalledWith(`/agents?setup=${SETUP_ID}`)
         expect(screen.queryByTestId('connect-modal')).not.toBeInTheDocument()
       } finally {

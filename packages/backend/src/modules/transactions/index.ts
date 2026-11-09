@@ -54,6 +54,7 @@ export {
   isValidActivityTimeZone,
   localDayBounds,
   localDayKey,
+  sinceTimeWord,
   activityOutcome,
   ownAccountNameResolver,
   type ActivityFeed,

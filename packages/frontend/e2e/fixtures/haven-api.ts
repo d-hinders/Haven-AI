@@ -1230,6 +1230,30 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #4709: `DashboardClient` opens one visit entry per tab and then reads
+    // the window's figures. The shared fixture answers a FIRST EVER visit
+    // (`previous: null`) and an empty window, so no "Since your last visit"
+    // line renders and no existing dashboard baseline moves. A spec that wants
+    // the line overrides these two routes AFTER `mockHavenApi` (later routes
+    // win), the same overlay pattern the degraded-balance suite uses.
+    if (method === 'POST' && path === '/user/visits') {
+      await fulfillJson(route, { previous: null, current: '2026-09-01T12:00:00.000Z' })
+      return
+    }
+
+    if (method === 'GET' && path === '/dashboard/since') {
+      await fulfillJson(route, {
+        after: '2026-09-01T12:00:00.000Z',
+        through: '2026-09-01T12:00:00.000Z',
+        timeWord: 'Since earlier today',
+        currency: servedCurrencyPreference,
+        payments: 0,
+        net: 0,
+        agents: [],
+      })
+      return
+    }
+
     // #3808: `DashboardClient` mounts `useBudgetRemaining`, which reads
     // `GET /dashboard/budget-remaining` on every dashboard render. The
     // #3804 fixture default is the same two-row shape the API serves (one

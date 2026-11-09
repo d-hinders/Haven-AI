@@ -321,6 +321,7 @@ import {
   FIND_USER_ID_BY_EMAIL_SQL,
   FIND_USER_PROFILE_BY_ID_SQL,
   INSERT_USER_SQL,
+  OPEN_USER_VISIT_SQL,
   UPDATE_CURRENCY_PREFERENCE_SQL,
   UPDATE_USER_NAME_SQL,
   UPDATE_USER_WALLET_ADDRESS_SQL,
@@ -335,6 +336,7 @@ import {
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
   AGENT_LAST_PAYMENT_SQL,
   DASHBOARD_MERCHANTS_SQL,
+  DASHBOARD_SINCE_GROUPS_SQL,
   DASHBOARD_SPEND_GROUPS_SQL,
   FAILED_INTENTS_7D_SQL,
   PENDING_AGENT_SETUP_STATUSES_SQL,
@@ -496,6 +498,10 @@ const QUERIES: SmokeQuery[] = [
   // routes/user.ts.
   { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
   { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
+  // #4709: the visit marker's one atomic statement (row lock + retry-safe
+  // window). PREPARE proves the CTE, the `FOR UPDATE` and the UUID parameter
+  // resolve against the real schema.
+  { name: 'users: open a visit entry (row lock, retry-safe)', sql: OPEN_USER_VISIT_SQL },
   { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
   { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
   // Signup/login (#1180). IMPORTED — verbatim from routes/auth.ts. These are
@@ -535,6 +541,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: pending-agent setup statuses', sql: PENDING_AGENT_SETUP_STATUSES_SQL },
   { name: 'agents: received grants (chain-qualified)', sql: RECEIVED_GRANTS_FOR_AGENTS_SQL },
   { name: 'dashboard: 7/30-day spend groups (netting + pace)', sql: DASHBOARD_SPEND_GROUPS_SQL },
+  // #4709: the "Since your last visit" window — `(after, through]`, the same
+  // rail join and netting fragment as the 7/30-day statement above.
+  { name: 'dashboard: since-last-visit spend groups', sql: DASHBOARD_SINCE_GROUPS_SQL },
   { name: 'dashboard: distinct merchants + top merchant', sql: DASHBOARD_MERCHANTS_SQL },
   { name: 'dashboard: per-agent last payment', sql: AGENT_LAST_PAYMENT_SQL },
   { name: 'dashboard: refusal buckets by agent', sql: REFUSAL_BUCKETS_BY_AGENT_SQL },

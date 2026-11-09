@@ -2523,6 +2523,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agent-connection-setups/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the signed-in user's setups still awaiting a connector.
+         * @description Returns the setups that are still `awaiting_connection` and unexpired, newest first, so the dashboard can offer a way back into a connect dialog that was closed before the agent registered (#4710). Tenant-scoped to the authenticated user. The projection carries no setup token, token hash, challenge or prompt — the prompt exists only in the create response. Setups created by the CLI (`source: "cli"`) are excluded: a CLI run has no dialog to have closed.
+         */
+        get: operations["listPendingAgentConnectionSetups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-connection-setups/{setupId}": {
         parameters: {
             query?: never;
@@ -5056,6 +5076,16 @@ export type components = {
             approval_url: string;
             /** @description True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here. */
             passport_requested?: boolean;
+        };
+        PendingAgentConnectionSetup: {
+            /** Format: uuid */
+            setup_id: string;
+            name: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        PendingAgentConnectionSetupsResponse: {
+            setups: components["schemas"]["PendingAgentConnectionSetup"][];
         };
         AgentConnectionSetupStatus: {
             /** Format: uuid */
@@ -18308,6 +18338,41 @@ export interface operations {
             };
             /** @description Error response */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listPendingAgentConnectionSetups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The user’s unexpired setups still awaiting a connector. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingAgentConnectionSetupsResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

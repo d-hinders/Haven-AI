@@ -7,6 +7,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-balances.yml
   - .github/workflows/qa-purge-throwaways.yml
+  - scripts/ci/qa-purge-throwaways-workflow.test.mjs
   - packages/backend/scripts/purge-qa-throwaways.ts
   - packages/backend/src/infra/repositories/qa-throwaway-purge.ts
   - scripts/ci/qa-failure-issue.mjs

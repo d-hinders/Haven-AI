@@ -445,7 +445,7 @@ describe('pinned runbook copies route the jobs that verify them (#2743)', () => 
   // looser sentence is what made a one-file fix look like a directory-wide
   // one.
   //
-  // Derived from the generator's OWN list, so a third copy added to
+  // Derived from the generator's OWN list, so a new copy added to
   // GENERATED_COPIES fails here until it routes, rather than joining silently.
 
   const copies = GENERATED_COPIES.map((c) => path.relative(ROOT, c.file).split(path.sep).join('/'))

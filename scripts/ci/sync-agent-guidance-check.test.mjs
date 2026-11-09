@@ -109,6 +109,21 @@ const driftStep = () => write(STEP, `${read(STEP)}\nDRIFT\n`)
 
 const REGENERATE = 'node packages/cli/scripts/sync-agent-guidance.mjs'
 const RESTORE = `node packages/cli/scripts/sync-agent-guidance.mjs --print-runbook > ${FOR_AGENTS}`
+const RESTORE_LEAD = `${LABEL.forAgents} is stale, and this script does not write it. Restore it with:`
+const SIZE_NOTE =
+  '\nThen update any hand-asserted size figures the pin tests carry — a content\n' +
+  'change invalidates those too, so restoring the copies can still leave a pin test red.\n'
+
+/** The line above the restore command names the copy it restores, whole. */
+function assertRestoreLead(stderr) {
+  assert.ok(stderr.split('\n').includes(RESTORE_LEAD), `no exact restore lead line in:\n${stderr}`)
+}
+
+/** Every drift ends with the size note, once, whichever instructions came before it. */
+function assertSizeNote(stderr) {
+  assert.ok(stderr.endsWith(SIZE_NOTE), `stderr does not end with the size note:\n${stderr}`)
+  assert.equal(stderr.split('Then update any hand-asserted size figures').length, 2, stderr)
+}
 
 test('positive control: the mirror is checked, and an untouched mirror is green', () => {
   const { code, stdout, stderr } = run('--check')
@@ -125,8 +140,10 @@ test('only for-agents.md drifted: the instruction restores it, and does not say 
   const { code, stdout, stderr } = run('--check')
   assert.equal(code, 1, stderr)
   assert.ok(stderr.includes(`✗ ${LABEL.forAgents} has DRIFTED`), stderr)
+  assertRestoreLead(stderr)
   assert.equal(instructionAfter(stderr, 'Restore it with'), RESTORE)
   assert.ok(!stderr.includes('Regenerate with'), stderr)
+  assertSizeNote(stderr)
   for (const label of [LABEL.cli, LABEL.step, LABEL.otherStep]) {
     assert.ok(stdout.includes(`✓ ${label} matches`), `${label} should still be ✓`)
   }
@@ -145,6 +162,7 @@ test('only the CLI copy drifted: the instruction says regenerate, and never name
   assert.equal(instructionAfter(stderr, 'Regenerate with'), REGENERATE)
   assert.ok(!stderr.includes('for-agents.md'), stderr)
   assert.ok(!stderr.includes('Restore it with'), stderr)
+  assertSizeNote(stderr)
   for (const label of [LABEL.forAgents, LABEL.step]) {
     assert.ok(stdout.includes(`✓ ${label} matches`), `${label} should still be ✓`)
   }
@@ -161,6 +179,7 @@ test('only one step file drifted: the instruction says regenerate, and never nam
   assert.ok(stderr.includes(`✗ ${LABEL.step} has DRIFTED`), stderr)
   assert.equal(instructionAfter(stderr, 'Regenerate with'), REGENERATE)
   assert.ok(!stderr.includes('for-agents.md'), stderr)
+  assertSizeNote(stderr)
   for (const label of [LABEL.cli, LABEL.forAgents, LABEL.otherStep]) {
     assert.ok(stdout.includes(`✓ ${label} matches`), `${label} should still be ✓`)
   }
@@ -173,7 +192,9 @@ test('for-agents.md and a generated copy both drifted: both instructions, and fo
   assert.equal(code, 1, stderr)
   assert.ok(stderr.includes('\n1 generated copy/copies are stale. Regenerate with:\n'), stderr)
   assert.equal(instructionAfter(stderr, 'Regenerate with'), REGENERATE)
+  assertRestoreLead(stderr)
   assert.equal(instructionAfter(stderr, 'Restore it with'), RESTORE)
+  assertSizeNote(stderr)
   for (const label of [LABEL.cli, LABEL.otherStep]) {
     assert.ok(stdout.includes(`✓ ${label} matches`), `${label} should still be ✓`)
   }
@@ -191,13 +212,18 @@ test('for-agents.md and a generated copy both drifted: both instructions, and fo
 })
 
 test('--print-runbook prints the runbook alone and writes no file', () => {
+  // Drift one copy of each kind first: a write of the canonical bytes to a
+  // copy already IN sync leaves it unchanged, so only a drifted copy can show
+  // that this mode wrote it — for-agents.md above all, which #4748 excludes
+  // the script from ever writing.
   driftCli()
-  const staleCli = read(CLI_COPY)
+  driftForAgents()
+  driftStep()
+  const before = Object.fromEntries(MIRRORED.map((rel) => [rel, read(rel)]))
   const { code, stdout, stderr } = run('--print-runbook')
   assert.equal(code, 0, stderr)
   // The committed for-agents.md is the canonical runbook (the positive control
   // above checks it), so stdout must equal it byte for byte.
   assert.equal(stdout, readFileSync(path.join(REPO, FOR_AGENTS), 'utf8'))
-  // The write mode is the fallthrough; reaching it would have regenerated this.
-  assert.equal(read(CLI_COPY), staleCli)
+  for (const rel of MIRRORED) assert.equal(read(rel), before[rel], `${rel} was written`)
 })

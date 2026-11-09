@@ -18,8 +18,9 @@
  *   node packages/cli/scripts/sync-agent-guidance.mjs --print-runbook   # runbook to stdout
  *
  * `packages/frontend/public/for-agents.md` is the one copy this script
- * verifies but never writes (#3596, #4748): it is a hand-kept byte copy of
- * the runbook, and `--check` compares it like the others. Restore it with
+ * verifies but never writes (since #2727; recorded in #3596): it is a
+ * hand-kept byte copy of the runbook, and `--check` compares it like the
+ * others. Restore it with
  * `--print-runbook > packages/frontend/public/for-agents.md`, the command
  * `--check` prints when that copy drifts. `--print-runbook` writes the
  * evaluated runbook, nothing else, to stdout and touches no file.
@@ -248,7 +249,7 @@ if (invokedDirectly) {
     if (drifted.length > 0) {
       console.error(
         '\nThen update any hand-asserted size figures the pin tests carry — a content\n' +
-          'change invalidates those too, so restoring the copies alone does not go green.',
+          'change invalidates those too, so restoring the copies can still leave a pin test red.',
       )
       process.exitCode = 1
     }

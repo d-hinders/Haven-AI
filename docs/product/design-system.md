@@ -2616,7 +2616,7 @@ screen with the **arrived state**, a `DialogResult` with `announce`
 (`role="status"`, since this overlay moves no focus there):
 
 - Title **"25.00 USDC arrived"**, description *"It's in `<account>` on
-  `<network>`."*, and a tertiary **View transaction** under it — the
+  `<network>`."*, and a tertiary **View in Activity** under it — the
   account's Activity tab (`/accounts/<id>?tab=activity`), never a row link:
   the dialog holds no hash, and the explorer-derived row can lag the chain
   read, so it never dead-ends.

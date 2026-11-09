@@ -354,11 +354,11 @@ describe('ReceiveDialog — Peak for first money, Step after (#4705)', () => {
 })
 
 describe('ReceiveDialog — the arrived state actions (#4705)', () => {
-  it('View transaction goes to the account activity and closes the dialog', () => {
+  it('View in Activity goes to the account activity and closes the dialog', () => {
     setOverview(row(MAIN.id, '25000000'))
     const { poll, onClose } = mount()
     poll(row(MAIN.id, '30000000'))
-    fireEvent.click(screen.getByRole('button', { name: 'View transaction' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View in Activity' }))
     expect(onClose).toHaveBeenCalledOnce()
     expect(mockPush).toHaveBeenCalledWith(`/accounts/${MAIN.id}?tab=activity`)
   })

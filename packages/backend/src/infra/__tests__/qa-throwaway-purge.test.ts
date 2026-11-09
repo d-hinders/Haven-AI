@@ -60,6 +60,15 @@ describe('parseRetentionDays (#4679)', () => {
       expect(() => parseRetentionDays(raw as string | undefined), `raw=${String(raw)}`).toThrow(PurgeRefusal)
     }
   })
+
+  it('refuses a shell-crafted value whole — the workflow passes it as one argument (#4740)', () => {
+    // scripts/ci/qa-purge-throwaways-workflow.test.mjs proves the workflow
+    // hands these to the script as ONE argv entry with nothing executed; this
+    // pins that the validator then refuses them.
+    for (const raw of ['7"; echo pwned; "', '7"); touch x; args=(--retention-days "7', '$(id)', '7\n--apply']) {
+      expect(() => parseRetentionDays(raw), `raw=${JSON.stringify(raw)}`).toThrow(/whole number/)
+    }
+  })
 })
 
 describe('assertUrlMatchesTarget (#4679)', () => {

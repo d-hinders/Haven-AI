@@ -3032,7 +3032,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="ConnectSteps"
-        description="Connect-agent step-status checklist (StepChecklist, #4744): done, your turn, working, and not started. One marker column joined by a 2px static connector — success-tinted below a done marker, border-strong otherwise — beside heading-only rows and rows with a body. No numerals: the dialog's StepProgress band is the counter. The showcase stays static; the active halo belongs only to a live dialog."
+        description="Connect-agent step-status checklist (StepChecklist, #4744): done, your turn, working, and not started. One marker column joined by a 2px static connector — success-tinted below a done marker, the pending ring's border colour otherwise — beside heading-only rows and rows with a body. No numerals: the dialog's StepProgress band is the counter. The showcase stays static; the active halo belongs only to a live dialog."
       >
         {/* Plain testid wrapper, for the same reason as the StepProgress sample. */}
         <div className="max-w-sm" data-testid="ds-connect-steps">

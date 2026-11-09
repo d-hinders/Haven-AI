@@ -3121,7 +3121,9 @@ as well as a row with a body; none runs under the last disc. It
 is **static** — no transition, and not `.v2-progress-line`, whose `scaleX`
 fill is the horizontal band's motion. A segment describes the step above it:
 below a done disc it takes the band's filled tint, `--v2-success` at 45% over
-`--v2-border` (`color-mix`), and every other segment is `--v2-border-strong`.
+`--v2-border` (`color-mix`), and every other segment is `--v2-border`, the
+pending ring's own colour, so the line never reads heavier than the disc it
+ends on (#4747; a `--v2-border-strong` segment made the locked disc look faint).
 Steps completed out of order colour only the segments under the done ones.
 
 **The row action.** A row's `action` (the guide's "Add funds", "Finish setup")

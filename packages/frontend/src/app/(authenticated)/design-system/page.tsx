@@ -48,6 +48,7 @@ import TransactionDetailPanel from '@/components/transactions/TransactionDetailP
 import type { AggregatedTransaction } from '@/types/transactions'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { ConnectSteps } from '@/components/connect-agent/ConnectSteps'
+import { StepChecklist } from '@/components/ui/StepChecklist'
 import { ConnectAgentRow } from '@/components/connect-agent/ConnectAgentRow'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { SeriesSwatch, StackedBarChart } from '@/components/ui/StackedBarChart'
@@ -91,6 +92,7 @@ import { Combobox, type ComboboxGroup } from '@/components/ui/Combobox'
 import { RecipientField, type Recipient } from '@/components/RecipientField'
 import type { Contact } from '@/hooks/useContacts'
 import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import NeedsYou from '@/app/(authenticated)/dashboard/NeedsYou'
 import FirstAgentPaymentCard from '@/components/FirstAgentPaymentCard'
 
 import { WalletPopover } from '@/components/WalletButton'
@@ -3030,7 +3032,7 @@ export default function DesignSystemPage() {
 
       <Section
         title="ConnectSteps"
-        description="Connect-agent step-status checklist: done, your turn, working, and not started. The showcase stays static; the active halo belongs only to a live dialog."
+        description="Connect-agent step-status checklist (StepChecklist, #4744): done, your turn, working, and not started. One marker column joined by a 2px static connector — success-tinted below a done marker, border-strong otherwise — beside heading-only rows and rows with a body. No numerals: the dialog's StepProgress band is the counter. The showcase stays static; the active halo belongs only to a live dialog."
       >
         {/* Plain testid wrapper, for the same reason as the StepProgress sample. */}
         <div className="max-w-sm" data-testid="ds-connect-steps">
@@ -3038,9 +3040,48 @@ export default function DesignSystemPage() {
             <ConnectSteps
               rows={[
                 { id: 'done', state: 'done', title: 'Setup prompt copied' },
-                { id: 'active', state: 'active', title: 'Run the connector' },
+                {
+                  id: 'active',
+                  state: 'active',
+                  title: 'Run the connector',
+                  children: (
+                    <p className="text-sm text-[var(--v2-ink-2)]">Paste the prompt into your agent. This updates when it connects.</p>
+                  ),
+                },
                 { id: 'working', state: 'working', title: 'Preparing the approval' },
                 { id: 'pending', state: 'pending', title: 'Review and approve' },
+              ]}
+            />
+          </Card>
+        </div>
+      </Section>
+
+      <Section
+        title="StepChecklist"
+        description="The Step status checklist primitive both lists render through (#4744). Numbered where the list is the counter — the dashboard's Get started steps — and unnumbered under a StepProgress band. The row action sits at the row's right from sm up, and under the text below sm; a locked step is quiet by token (ink-2 heading, ink-3 copy), never by opacity."
+        testId="ds-step-checklist"
+      >
+        <div className="max-w-2xl">
+          <Card hover={false} className="p-5">
+            <StepChecklist
+              aria-label="Example steps"
+              headingAs="p"
+              numbered
+              rows={[
+                { id: 'one', state: 'done', number: 1, title: 'Add USDC to your account', description: 'Your account holds USDC.' },
+                {
+                  id: 'two',
+                  state: 'active',
+                  number: 2,
+                  title: 'Finish setting up Research agent',
+                  description: 'Approve its budget so it can pay.',
+                  action: (
+                    <Button size="sm" className="w-full sm:w-auto">
+                      Finish setup
+                    </Button>
+                  ),
+                },
+                { id: 'three', state: 'pending', number: 3, title: 'Make your first agent payment', description: 'Unlocks when an agent has a budget.' },
               ]}
             />
           </Card>
@@ -3314,16 +3355,48 @@ export default function DesignSystemPage() {
               onShowAgentUsage={() => undefined}
             />
           </div>
-          {/* Funded, an agent connected but waiting for its budget approval. */}
-          <div className="rounded-[14px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-5">
-            <DashboardOnboardingGuide
-              usdcFunded
-              hasSetUpAgent={false}
-              pendingAgent={{ id: 'agent-research', name: 'Research agent', moreCount: 1, awaiting: 'approval' }}
-              hasFirstAgentPayment={false}
-              onAddFunds={() => undefined}
-              onAddAgent={() => undefined}
-              onShowAgentUsage={() => undefined}
+          {/* Funded, an agent connected but waiting for its budget approval —
+              in the card itself, with a rule item below the steps, so the
+              "Also needs you" caption shows (#4744). Another waiting agent's
+              row names it, so step 2 says no "and 1 more". */}
+          <div data-testid="ds-first-run-card">
+            <NeedsYou
+              headingId="ds-first-run-heading"
+              title="Get started"
+              showCount={false}
+              titleMeta={<span className="text-xs text-[var(--v2-ink-3)] v2-tabular">1 of 3 done</span>}
+              titleAction={
+                <Button variant="tertiary" size="sm">
+                  Hide for now
+                </Button>
+              }
+              items={[
+                {
+                  id: 'budget-reached:agent-delegate',
+                  kind: 'budget-ended',
+                  tone: 'neutral',
+                  badge: 'Budget ended',
+                  title: "Delegate's budget ended 2 Nov 2026",
+                  subtitle: "It can't spend until you set a new budget.",
+                  actionLabel: 'Set budget',
+                  href: '#',
+                  agentId: 'agent-delegate',
+                },
+              ]}
+              hasOverviewError={false}
+              onRetry={() => undefined}
+              onDismiss={() => undefined}
+              guide={
+                <DashboardOnboardingGuide
+                  usdcFunded
+                  hasSetUpAgent={false}
+                  pendingAgent={{ id: 'agent-research', name: 'Research agent', moreCount: 0, awaiting: 'approval' }}
+                  hasFirstAgentPayment={false}
+                  onAddFunds={() => undefined}
+                  onAddAgent={() => undefined}
+                  onShowAgentUsage={() => undefined}
+                />
+              }
             />
           </div>
           {/* The USDC read is unavailable: step 1 says so, no funding action. */}

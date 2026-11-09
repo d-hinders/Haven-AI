@@ -356,11 +356,22 @@ export interface FirstRunSetupState {
   usdcFunded: boolean | null
   hasSetUpAgent: boolean
   /**
-   * The most recently connected agent awaiting "Finish setup", and how many
-   * more do. `awaiting` says which half is missing: the budget approval of a
-   * `pending_approval` agent, or a budget for an active agent with none.
+   * The most recently connected agent awaiting "Finish setup". `awaiting`
+   * says which half is missing: the budget approval of a `pending_approval`
+   * agent, or a budget for an active agent with none. `budgetEndedOn` (#4744)
+   * is the formatted end date when that agent's budget ENDED — the same
+   * condition and format as its "Budget ended" item, which the card drops
+   * for this agent.
    */
-  pendingAgent: { id: string; name: string; moreCount: number; awaiting: 'approval' | 'budget' } | null
+  pendingAgent: { id: string; name: string; awaiting: 'approval' | 'budget'; budgetEndedOn: string | null } | null
+  /**
+   * #4744: every agent awaiting "Finish setup", newest first (`pendingAgent`
+   * is the first). How many of the OTHERS step 2's "and N more" counts is
+   * decided against the attention items (`unnamedWaitingAgentCount`), which
+   * this function cannot see: the items depend on the guide showing, and the
+   * guide on this state.
+   */
+  awaitingAgentIds: string[]
 }
 
 /**
@@ -408,11 +419,47 @@ export function firstRunSetupState(
       ? {
           id: newest.id,
           name: newest.name,
-          moreCount: awaiting.length - 1,
           awaiting: newest.status === 'pending_approval' ? 'approval' : 'budget',
+          budgetEndedOn: agentBudgetEndedOn(newest),
         }
       : null,
+    awaitingAgentIds: awaiting.map((agent) => agent.id),
   }
+}
+
+/**
+ * #4353: the formatted end date of an active agent's ENDED budget — the
+ * condition under which the rules emit its "Budget ended" item instead of
+ * "has no budget" — or `null`.
+ */
+function agentBudgetEndedOn(agent: DashboardAgent): string | null {
+  if (agent.status !== 'active' || hasUsableBudget(agent)) return null
+  const endedAt = unixSeconds(agent.budgetEndedAt)
+  return endedAt === null ? null : formatSubBudgetDate(endedAt)
+}
+
+/**
+ * #4744: is this the setup item for `agentId` — its "Needs setup" or its
+ * "Budget ended" row? While the first-run guide shows with step 2 open, the
+ * card drops these for the agent step 2 names, so that agent is named once.
+ */
+export function isAgentSetupItem(item: AttentionRuleItem, agentId: string): boolean {
+  return item.agentId === agentId && (item.kind === 'needs-setup' || item.kind === 'budget-ended')
+}
+
+/**
+ * #4744: step 2's "and N more" — the waiting agents other than `namedAgentId`
+ * that have NO item in `items`. An agent with a row (shown, or behind
+ * "Show N more") is named by that row; only one with none — its "Needs setup"
+ * dismissed, say — would otherwise go unmentioned.
+ */
+export function unnamedWaitingAgentCount(
+  awaitingAgentIds: readonly string[],
+  namedAgentId: string,
+  items: readonly AttentionRuleItem[],
+): number {
+  const withRow = new Set(items.map((item) => item.agentId).filter((id): id is string => Boolean(id)))
+  return awaitingAgentIds.filter((id) => id !== namedAgentId && !withRow.has(id)).length
 }
 
 function accountLabel(

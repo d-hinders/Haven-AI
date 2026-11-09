@@ -112,4 +112,33 @@ test.describe('first-run guide (#3818)', () => {
     await page.reload()
     await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toBeVisible()
   })
+
+  // #4744: the step action sits at the row's right from `sm` up, centred
+  // against the step's text, and under it at full width below. jsdom does no
+  // layout and a baseline passes on tolerance, so the geometry is asserted.
+  for (const { width, side } of [
+    { width: 1280, side: true },
+    { width: 390, side: false },
+  ]) {
+    test(`step action placement at ${width}px (${side ? 'beside' : 'under'} the text)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/dashboard')
+      const row = card(page).locator('li[data-status="active"]')
+      const button = row.getByRole('button', { name: 'Add funds' })
+      await expect(button).toBeVisible()
+      const text = (await row.locator('[data-step-text]').boundingBox())!
+      const action = (await button.boundingBox())!
+      if (side) {
+        const mid = action.y + action.height / 2
+        expect(mid).toBeGreaterThanOrEqual(text.y)
+        expect(mid).toBeLessThanOrEqual(text.y + text.height)
+        // Centred against heading plus copy, not top-aligned inside its span.
+        expect(Math.abs(mid - (text.y + text.height / 2))).toBeLessThanOrEqual(2)
+        expect(action.x).toBeGreaterThanOrEqual(text.x + text.width)
+      } else {
+        expect(action.y).toBeGreaterThanOrEqual(text.y + text.height)
+        expect(Math.abs(action.width - text.width)).toBeLessThanOrEqual(1)
+      }
+    })
+  }
 })

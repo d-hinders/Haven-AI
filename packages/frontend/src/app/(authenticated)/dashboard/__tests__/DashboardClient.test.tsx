@@ -124,7 +124,7 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
     hasFirstAgentPayment: boolean
     usdcFunded: boolean | null
     hasSetUpAgent: boolean
-    pendingAgent?: { name: string; moreCount: number } | null
+    pendingAgent?: { name: string; moreCount: number; budgetEndedOn?: string | null } | null
   }) => (
     <div>
       <span>Onboarding guide</span>
@@ -132,6 +132,7 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
       <span>{`usdc-${String(usdcFunded)}`}</span>
       <span>{hasSetUpAgent ? 'agent-set-up' : 'agent-not-set-up'}</span>
       {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
+      {pendingAgent?.budgetEndedOn ? <span>{`ended-${pendingAgent.budgetEndedOn}`}</span> : null}
     </div>
   ),
 }))
@@ -1000,11 +1001,69 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     expect(screen.getByText('agent-not-set-up')).toBeInTheDocument()
-    // The newest waiting agent is the one step 2 names…
-    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
-    // …so its "Needs setup" row is not repeated; the other agent keeps its row.
+    // The newest waiting agent is the one step 2 names, with NO "and 1 more":
+    // Alpha's own row names it (#4744 — it used to read "Beta and 1 more"
+    // above "Alpha is waiting to be set up")…
+    expect(screen.getByText('pending-Beta-0')).toBeInTheDocument()
+    // …and Beta's "Needs setup" row is not repeated; Alpha keeps its row.
     expect(screen.queryByText('Beta is waiting to be set up')).not.toBeInTheDocument()
     expect(screen.getByText('Alpha is waiting to be set up')).toBeInTheDocument()
+  })
+
+  it('a waiting agent whose row was dismissed is named by step 2\'s "and 1 more" instead (#4744)', () => {
+    const pending = (id: string, name: string): DashboardAgentPreview => ({
+      ...setUpAgentPreview(),
+      id,
+      name,
+      status: 'pending_approval',
+      budgets: [],
+    })
+    // Alpha's "Needs setup" was dismissed for good (#3813), so no row names it.
+    mockUseAttentionDismissals.mockReturnValue({
+      acknowledgements: new Map([
+        ['needs-setup:agent-a', { acknowledgedAt: '2026-10-09T00:00:00.000Z', acknowledgedPeriodEnd: null }],
+      ]),
+      dismiss: mockDismissOnServer,
+    })
+    mockBaseState([pending('agent-a', 'Alpha'), pending('agent-b', 'Beta')], {
+      accounts: [FUNDED_ACCOUNT],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-a', name: 'Alpha', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-b', name: 'Beta', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.queryByText('Alpha is waiting to be set up')).not.toBeInTheDocument()
+    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
+  })
+
+  it('step 2\'s agent whose budget ENDED: no "Budget ended" row in the card; step 2 carries the date (#4744)', () => {
+    const ended: DashboardAgentPreview = {
+      ...setUpAgentPreview(),
+      id: 'agent-e',
+      name: 'Delegate',
+      status: 'active',
+      budgets: [],
+      budgetEndedAt: '2026-11-02T09:00:00.000Z',
+    }
+    mockBaseState([ended], { accounts: [FUNDED_ACCOUNT] })
+    mockUseAgents.mockReturnValue({
+      agents: [{ id: 'agent-e', name: 'Delegate', created_at: '2026-10-01T00:00:00Z' }],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByText('pending-Delegate-0')).toBeInTheDocument()
+    expect(screen.getByText('ended-2 Nov 2026')).toBeInTheDocument()
+    expect(screen.queryByText("Delegate's budget ended 2 Nov 2026")).not.toBeInTheDocument()
   })
 
   it('a completed step 2 names nobody; the waiting agent keeps its row — funded (#3976)', () => {

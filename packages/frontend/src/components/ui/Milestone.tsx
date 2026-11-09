@@ -16,8 +16,9 @@
  *
  * ## It wraps its child, so size stays the caller's
  *
- * `DialogResult`'s 48px disc, onboarding's 56px disc, `ConnectSteps`' row
- * marks and the guide's `StatusCircle` all use the same component. The bloom
+ * `DialogResult`'s 48px disc, onboarding's 56px disc and the Step status
+ * checklist's row marks (`StepChecklist`: `ConnectSteps` and the first-run
+ * guide) all use the same component. The bloom
  * is an `inset-0` layer behind the child, so it scales to whatever it wraps
  * instead of carrying a fixed 96px of its own.
  *

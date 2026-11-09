@@ -93,6 +93,24 @@ describe('NeedsYou', () => {
     expect(band.contains(screen.getByRole('button', { name: 'Hide for now' }))).toBe(true)
   })
 
+  it('#4744: captions the items "Also needs you" exactly when the guide and items both show', () => {
+    const base = { hasOverviewError: false, onRetry: () => {}, onDismiss: () => {} }
+    const one = [item({ id: 'i1', title: 'Scout reached its budget' })]
+    const { rerender } = render(<NeedsYou {...base} items={one} guide={<p>steps</p>} />)
+    const caption = screen.getByText('Also needs you')
+    // A caption, not a heading: the card keeps its one h2.
+    expect(caption.tagName).toBe('P')
+    expect(caption).toHaveClass('text-xs', 'font-medium', 'text-[var(--v2-ink-3)]')
+    // Above the first item, inside the divided block.
+    expect(caption.compareDocumentPosition(screen.getByText('Scout reached its budget')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(caption.closest('.border-t')).not.toBeNull()
+
+    rerender(<NeedsYou {...base} items={[]} guide={<p>steps</p>} />)
+    expect(screen.queryByText('Also needs you')).not.toBeInTheDocument()
+    rerender(<NeedsYou {...base} items={one} />)
+    expect(screen.queryByText('Also needs you')).not.toBeInTheDocument()
+  })
+
   // ── #3902: the title, the count badge and the empty state ────────────────
 
   it('titles the card "Needs attention", with the count beside the heading, not inside it', () => {

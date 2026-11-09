@@ -6,6 +6,8 @@ covers:
   - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
+  - packages/frontend/src/components/ui/StepChecklist.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
   - packages/frontend/src/components/connect-agent/ConnectAgentRow.tsx
   - packages/frontend/src/components/connect-agent/ConnectStep.tsx
   - packages/frontend/src/app/onboarding/OnboardingClient.tsx
@@ -2927,7 +2929,7 @@ shape (each screen owns its actions and their state), not a pattern for a new
 dialog. Three placements in that flow are decided rather than incidental:
 
 - **Approve.** The pair lives inside the checklist's last row, so it is pulled
-  out over the marker column (`ROW_FOOTER_OUTDENT_CLASS` in `ConnectSteps`)
+  out over the marker column (`ROW_FOOTER_OUTDENT_CLASS` in `ui/StepChecklist`)
   to the body edges instead of the text column.
 - **Waiting for the agent.** The forward action is the in-row "Copy setup
   prompt" primary — #3832's one allowed exception to the rule, kept, at 40px
@@ -2985,7 +2987,7 @@ Showcased on `/design-system` → *DialogResult*.
 One pattern for a moment worth noticing, at three strengths, so the app has one
 voice and no page invents its own effect. It **wraps its child**, so the size
 stays the caller's: `DialogResult`'s 48px disc, onboarding's 56px disc,
-`ConnectSteps`' row marks and the guide's `StatusCircle` all use the same
+the Step status checklist's row marks (`StepChecklist`) all use the same
 component, and the bloom scales to whatever it wraps instead of carrying a
 fixed size of its own.
 
@@ -3050,8 +3052,8 @@ which rendered visibly different beside it).
 
 **The marker states have one definition.** `ui/StepProgress` exports
 `ACTIVE_STEP_RING_CLASS`, `DONE_STEP_DISC_CLASS` and `PENDING_STEP_DISC_CLASS`, and
-`ConnectSteps`, `HowToBuyPanel` and the first-run guide take all three from there, so the
-four read as one stepper family. The ring is 1.5px (owner decision 2026-11-04: 2px read too
+`StepChecklist` (which `ConnectSteps` and the first-run guide render through) and
+`HowToBuyPanel` take all three from there, so the four read as one stepper family. The ring is 1.5px (owner decision 2026-11-04: 2px read too
 heavy beside the 1px rings around it). The first-run guide's done disc was a solid
 `--v2-success` until the same date, which made a finished step heavier than the current one. A browser rounds a border down to whole device pixels, so a 1x display
 draws it at 1px and the darker colour alone carries the difference; that is accepted.
@@ -3071,35 +3073,70 @@ and always-mounted or inline specimens never animate on first paint. The one
 `/design-system` example is the opened-on-demand Modal specimen, whose header
 band carries the halo so the motion can be seen there.
 
-### Step status checklist (`ConnectSteps`, #3832)
+### Step status checklist (`ui/StepChecklist`, #3832, #4744)
 
 A vertical list in which **each row is both an instruction and its status**:
-a disc, a section-tier heading, and the row's own body (a control, a line of
-copy, or a whole sub-flow) beneath it. Use it when one screen walks the user
-through a short sequence they act on in order and the screen itself observes
-the progress — today, step 3 of the Connect agent modal (copy → paste →
-approve), where the old Waiting → Connected → Approved ticker said where the
-user was without saying what to do.
+a disc, a heading, and the row's own body (a line of copy, a control, or a
+whole sub-flow) beneath it. Use it when one screen walks the user through a
+short sequence they act on in order and the screen itself observes the
+progress. One primitive, two consumers, one stepper family (#4744):
 
-**It reports progress within a step and never counts.** `StepProgress` counts
-the wizard's steps; this list says how far the current step has got. So its
-discs carry no numerals — a numbered column under a numbered band reads as a
-second stepper. The discs share `StepProgress`'s size (`h-7 w-7 sm:h-8 sm:w-8`)
-and tokens, so the two read as one progress language, a counter above and a
-status column below, and every state fills the same disc, so the marker column
-is a straight edge:
+- **`ConnectSteps`** — step 3 of the Connect agent modal (copy → paste →
+  approve), where the old Waiting → Connected → Approved ticker said where the
+  user was without saying what to do. Section-tier `h3` headings.
+- **The first-run guide** (`DashboardOnboardingGuide`) — the dashboard's Get
+  started steps. `p` headings, since the card's `h2` is its one heading.
 
-| State | Disc | Heading |
-|---|---|---|
-| done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` |
-| active | empty 1.5px `--v2-ink-2` ring; optional dialog-only halo | `--v2-ink` |
-| working | empty `--v2-border` disc, shared `Spinner` in `--v2-ink-2` | `--v2-ink` |
-| pending | empty `--v2-border` ring | `--v2-ink-2` |
+**Numerals: off under a `StepProgress` band, on where the list is the
+counter.** Inside the Connect agent modal the band counts the wizard's steps
+and this list says how far the current step has got, so its discs carry no
+numerals — a numbered column under a numbered band reads as a second stepper.
+The Get started steps have no band: the list is the counter, beside the card's
+"N of 3 done", so they are numbered (`numbered`, and each row's `number`). A
+done disc shows its check and a working disc its spinner, never a numeral.
+
+The discs share `StepProgress`'s size (`h-7 w-7 sm:h-8 sm:w-8`) and tokens, so
+the two read as one progress language, and every state fills the same disc, so
+the marker column is a straight edge:
+
+| State | Disc | Heading | Copy line |
+|---|---|---|---|
+| done | `--v2-success-soft` fill, `border-success/30`, lucide `Check` | `--v2-ink-3` | `--v2-ink-3` |
+| active | empty 1.5px `--v2-ink-2` ring; optional dialog-only halo | `--v2-ink` | `--v2-ink-2` |
+| working | empty `--v2-border` disc, shared `Spinner` in `--v2-ink-2` | `--v2-ink` | `--v2-ink-2` |
+| pending, `actionable` | empty `--v2-border` ring | `--v2-ink` | `--v2-ink-2` |
+| pending | empty `--v2-border` ring | `--v2-ink-2` | `--v2-ink-3` |
+
+`actionable` is a pending row the user can act on now but that is not the next
+step — the guide's `available` and `unknown` steps (#3818): not highlighted, not
+dimmed. A step that is not open yet (the guide's `locked` step 3) is quiet **by
+token, never by opacity**: `opacity-60` put its copy at 2.43:1 on white, where
+`--v2-ink-3` alone measures 5.32:1 (`#5d6c85` on `#ffffff`, WCAG relative
+luminance, measured 2026-11-09 at `12e6dd60`).
+
+**The connector.** A 2px line (`w-0.5`) runs down the marker column from each
+disc to the next, inside the marker column's 8px padding (the room
+Milestone's check-pop and the active halo need), so a heading-only row draws one
+as well as a row with a body; none runs under the last disc. It
+is **static** — no transition, and not `.v2-progress-line`, whose `scaleX`
+fill is the horizontal band's motion. A segment describes the step above it:
+below a done disc it takes the band's filled tint, `--v2-success` at 45% over
+`--v2-border` (`color-mix`), and every other segment is `--v2-border-strong`.
+Steps completed out of order colour only the segments under the done ones.
+
+**The row action.** A row's `action` (the guide's "Add funds", "Finish setup")
+sits at the row's right from `sm` up, centred against heading plus copy line,
+and under the text at the text column's full width below `sm`. The heading
+line's `aside` ("Copy again") is a different slot: it centres on the heading
+only and never stacks.
 
 The disc is `aria-hidden`; the row heading is the accessible content, with an
-`sr-only` "Done: " / "In progress: " / "Not started: " prefix. The active row —
+`sr-only` "Done: " / "In progress: " / "Not started: " prefix (a row may drop
+it — the guide's `unknown` step, whose state is not knowable). The active row —
 the one the user acts on — carries `aria-current="step"`; a working row is
-Haven's to finish, so it is not current.
+Haven's to finish, so it is not current. The consumer passes the list's label
+(`aria-label="Connection steps"`, or the guide's `aria-labelledby`) and any row
+attributes it selects on (the guide's `data-status`).
 
 Rules:
 - **One counter per flow** (owner review, 2026-10-16, superseding #1418's
@@ -3163,11 +3200,15 @@ renders it above the connected checklist and row 2 reads "{name} connected"
 region in `ConnectStep` carries the change, so the row and the checklist row do
 not announce twice (#4706).
 
-It is local to `components/connect-agent/` because every production caller is
-part of the same connect flow; a second product use is the trigger to promote it to `components/ui/`. Its
-`/design-system` specimen is the "ConnectSteps" section, after `StepProgress`.
-The agent row is local for the same reason, and its specimen is the "Connect
-agent row" section beside it.
+The checklist lived in `components/connect-agent/` while every caller was part
+of the connect flow; the first-run guide was its second product use, so #4744
+promoted it to `components/ui/StepChecklist`. `ConnectSteps` stays in
+`connect-agent/` as the flow's thin wrapper (its label and `h3` headings).
+Its `/design-system` specimens are the "ConnectSteps" section, after
+`StepProgress`, and the numbered "StepChecklist" section after it; the guide's
+own specimens are under "First-run setup". The agent row stays local to
+`connect-agent/`, because every caller is still part of that flow, and its
+specimen is the "Connect agent row" section.
 
 ### Local hint marker (#1952)
 

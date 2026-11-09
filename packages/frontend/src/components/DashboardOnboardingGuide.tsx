@@ -1,11 +1,8 @@
 'use client'
 
-import { useId, useRef, type ReactNode } from 'react'
+import { useId, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
-import { Check } from 'lucide-react'
-import { Icon } from '@/components/ui/Icon'
-import { Milestone } from '@/components/ui/Milestone'
-import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS } from '@/components/ui/StepProgress'
+import { StepChecklist, type StepChecklistRow, type StepChecklistState } from '@/components/ui/StepChecklist'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
@@ -42,13 +39,24 @@ interface StepProps {
   popOnComplete?: boolean
 }
 
-/** The most recently connected agent still waiting for setup, and how many more are. */
+/** The most recently connected agent still waiting for setup, and how many other waiting agents the card names nowhere else. */
 export interface PendingSetupAgent {
   id: string
   name: string
+  /**
+   * #4744: the OTHER waiting agents the card names nowhere else — each with
+   * no attention row of its own (a dismissed "Needs setup", say). An agent
+   * whose row the card lists is named there, so it is not counted twice.
+   */
   moreCount: number
   /** Which half is missing: a `pending_approval` agent's approval, or an active agent's budget. */
   awaiting: 'approval' | 'budget'
+  /**
+   * #4744: when this agent HAD a budget and it ended, the end date, formatted
+   * as the "Budget ended" row formats it. Step 2 says it, because the card
+   * drops that row for the agent step 2 names.
+   */
+  budgetEndedOn?: string | null
 }
 
 interface Props {
@@ -165,7 +173,9 @@ export default function DashboardOnboardingGuide({
     body: pendingAgent && !hasSetUpAgent
       ? pendingAgent.awaiting === 'approval'
         ? 'Approve its budget so it can pay.'
-        : 'Set a budget so it can pay.'
+        : pendingAgent.budgetEndedOn
+          ? `Its budget ended ${pendingAgent.budgetEndedOn}. Set a new one so it can pay.`
+          : 'Set a budget so it can pay.'
       : 'Connect an agent and approve a budget it can spend from.',
     completedBody: 'An agent is connected with a budget.',
     cta: step2Cta,
@@ -178,7 +188,7 @@ export default function DashboardOnboardingGuide({
     title: 'Make your first agent payment',
     body:
       step3Status === 'locked'
-        ? 'Set up an agent first to unlock this step.'
+        ? 'Unlocks when an agent has a budget.'
         : 'Ask your agent to buy something within its budget.',
     completedBody: 'Your first agent payment went through.',
     cta: activeStep === 3 ? { label: 'Show me how', onClick: onShowAgentUsage } : undefined,
@@ -193,124 +203,79 @@ export default function DashboardOnboardingGuide({
         Your first 3 steps
       </p>
 
-      <ol className="space-y-2" aria-labelledby={labelId}>
-        <ChecklistRow {...step1} />
-        <ChecklistRow {...step2} />
-        <ChecklistRow {...step3} />
-      </ol>
+      <GuideSteps labelId={labelId} steps={[step1, step2, step3]} />
     </div>
   )
 }
 
-function ChecklistRow({ status, number, title, body, completedBody, cta, popOnComplete = false }: StepProps) {
-  // #4704: Milestone Step plays only on a completion this row WATCHED — the
+/**
+ * #4744: the guide renders through the shared Step status checklist — the
+ * same list, markers and connector as the connect dialog's checklist, so the
+ * two read as one stepper family. Numbered, because here the list is the
+ * counter. The mapping (settled on #4744):
+ * - `complete` → `done`; `active` → `active`;
+ * - `available` and `unknown` → a `pending` marker with an `--v2-ink`
+ *   heading: they are open to the owner, not dimmed (#3818);
+ * - `locked` → a `pending` marker with an `--v2-ink-2` heading and
+ *   `--v2-ink-3` copy. No opacity: `opacity-60` put the locked copy at 2.43:1.
+ *
+ * The action sits at the row's right from `sm` up. #3818 stacked it under the
+ * text because the guide lived in the narrow aside column; the card is full
+ * width since #3897.
+ */
+function GuideSteps({ labelId, steps }: { labelId: string; steps: StepProps[] }) {
+  // #4704: Milestone Step plays only on a completion a row WATCHED — the
   // status changing to `complete` while mounted. The first render records the
   // status it found, so a step that is already complete on load (a reload, a
   // return to the dashboard, the /design-system specimens) just shows its
   // check. Kept in refs and decided during render, so the check is never drawn
   // once statically before it pops; a StrictMode double render sees the
   // status already recorded and decides the same way.
-  const seenStatusRef = useRef<StepStatus>(status)
-  const poppedRef = useRef(false)
-  if (seenStatusRef.current !== status) {
+  const seenStatusRef = useRef<StepStatus[]>(steps.map((step) => step.status))
+  const poppedRef = useRef<boolean[]>(steps.map(() => false))
+  steps.forEach((step, index) => {
+    const seen = seenStatusRef.current[index]
+    if (seen === step.status) return
     // Only a step the owner could still do — `active` or `available` — pops
     // when it completes. `unknown → complete` is a balance read recovering
     // for an account that was already funded, not something that just
     // happened, so it shows the check without a pop (the funds toast's
     // null → true rule, #4704 design review).
-    const wasOpen = seenStatusRef.current === 'active' || seenStatusRef.current === 'available'
-    poppedRef.current = popOnComplete && wasOpen && status === 'complete'
-    seenStatusRef.current = status
-  }
-  const isActive = status === 'active'
-  const isComplete = status === 'complete'
-  const isLocked = status === 'locked'
+    const wasOpen = seen === 'active' || seen === 'available'
+    poppedRef.current[index] = Boolean(step.popOnComplete) && wasOpen && step.status === 'complete'
+    seenStatusRef.current[index] = step.status
+  })
 
-  // `unknown` is not dimmed like `locked`: it is a state the owner should read.
-  const rowClass = isLocked
-      ? 'rounded-[10px] opacity-60'
-      : 'rounded-[10px]'
-
-  return (
-    // #3818: always stacked. The guide lived in the narrow aside column on
-    // desktop then, where a side-by-side action squeezed the step text into a
-    // column of single words; the card is full width since #3897, and the
-    // stacked row keeps one shape at every width.
-    <li
-      data-status={status}
-      aria-current={isActive ? 'step' : undefined}
-      className={`flex flex-col gap-3 px-4 py-3 ${rowClass}`}
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        <StatusCircle status={status} number={number} pop={poppedRef.current} />
-        <div className="min-w-0">
-          <p
-            className={`text-sm font-medium ${
-              isLocked ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'
-            }`}
-          >
-            {title}
-          </p>
-          <p
-            className={`mt-0.5 text-xs leading-relaxed ${
-              isLocked ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink-2)]'
-            }`}
-          >
-            {isComplete ? completedBody : body}
-          </p>
-        </div>
-      </div>
-      {cta ? (
-        <div className="pl-10">
-          <Button
-            {...(cta.href ? { href: cta.href } : { onClick: cta.onClick })}
-            variant={cta.secondary ? 'ghost' : 'primary'}
-            size="sm"
-            className="w-full sm:w-auto"
-          >
-            {cta.label}
-          </Button>
-        </div>
-      ) : null}
-    </li>
-  )
-}
-
-function StatusCircle({ status, number, pop = false }: { status: StepStatus; number: number; pop?: boolean }) {
-  if (status === 'complete') {
-    return (
-      <Milestone strength="step" play={pop} className="flex-shrink-0">
-        <span
-          aria-hidden="true"
-          className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${DONE_STEP_DISC_CLASS}`}
-        >
-          <CheckIcon />
-        </span>
-      </Milestone>
-    )
-  }
-  if (status === 'active') {
-    return (
-      <span
-        aria-hidden="true"
-        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${ACTIVE_STEP_RING_CLASS} text-xs font-medium text-[var(--v2-ink-2)] v2-tabular`}
+  const rows: StepChecklistRow[] = steps.map((step, index) => ({
+    id: `step-${step.number}`,
+    state: STATE_FOR_STATUS[step.status],
+    number: step.number,
+    title: step.title,
+    description: step.status === 'complete' ? step.completedBody : step.body,
+    actionable: step.status === 'available' || step.status === 'unknown',
+    // An unreadable balance is neither started nor not: say nothing.
+    stateLabel: step.status === 'unknown' ? null : undefined,
+    play: poppedRef.current[index],
+    rowAttributes: { 'data-status': step.status },
+    action: step.cta ? (
+      <Button
+        {...(step.cta.href ? { href: step.cta.href } : { onClick: step.cta.onClick })}
+        variant={step.cta.secondary ? 'ghost' : 'primary'}
+        size="sm"
+        className="w-full sm:w-auto"
       >
-        {number}
-      </span>
-    )
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${PENDING_STEP_DISC_CLASS} text-xs font-medium v2-tabular`}
-    >
-      {number}
-    </span>
-  )
+        {step.cta.label}
+      </Button>
+    ) : undefined,
+  }))
+
+  return <StepChecklist aria-labelledby={labelId} headingAs="p" numbered rows={rows} />
 }
 
-function CheckIcon(): ReactNode {
-  return (
-    <Icon icon={Check} className="h-3.5 w-3.5" strokeWidth={2} />
-  )
+const STATE_FOR_STATUS: Record<StepStatus, StepChecklistState> = {
+  complete: 'done',
+  active: 'active',
+  available: 'pending',
+  unknown: 'pending',
+  locked: 'pending',
 }

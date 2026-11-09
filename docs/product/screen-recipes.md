@@ -38,6 +38,8 @@ covers:
   - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
+  - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
+  - packages/frontend/src/lib/dashboard-attention.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
@@ -96,7 +98,12 @@ Structure (#3818):
 2. The setup steps ARE the "Needs attention" card while setup is in progress — titled
    `Get started`, three numbered steps, then the rule items that still apply
    (another agent waiting for setup, a recommended backup signer once funded)
-   below them in the same card. Never a second card beside it.
+   below them in the same card, under an "Also needs you" caption (#4744) so
+   the first item does not read as a fourth step. Never a second card beside
+   it. The steps are the design system's Step status checklist, joined by its
+   connector, each action at the row's right from `sm` up. An agent step 2
+   names is not listed again below it, and its "and N more" counts only the
+   waiting agents no row names.
 3. Only the next step is highlighted and carries the primary action. The
    highlight is its marker's ink-2 ring, not a tinted row (#4638). Connecting
    an agent stays available before funding, at secondary weight and without the

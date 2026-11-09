@@ -8,7 +8,10 @@ import {
   BUDGET_ENDING_LEAD_DAYS,
   DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
+  isAgentSetupItem,
   PAYMENTS_FAILED_DANGER_COUNT,
+  unnamedWaitingAgentCount,
+  type AttentionRuleItem,
   type AttentionAcknowledgement,
   type DashboardBudgetRemaining,
   type DashboardOverview,
@@ -921,7 +924,8 @@ describe('firstRunSetupState (#3818)', () => {
         makeOverview([{ id: 'p1', name: 'Pending', status: 'pending_approval' }], []),
       )
       expect(state.hasSetUpAgent).toBe(false)
-      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', moreCount: 0, awaiting: 'approval' })
+      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', awaiting: 'approval', budgetEndedOn: null })
+      expect(state.awaitingAgentIds).toEqual(['p1'])
     })
 
     it('an active agent without a usable budget does not complete it', () => {
@@ -955,7 +959,7 @@ describe('firstRunSetupState (#3818)', () => {
       expect(firstRunSetupState(overview).hasSetUpAgent).toBe(true)
     })
 
-    it('names the NEWEST waiting agent by GET /agents created_at, with "and N more"', () => {
+    it('names the NEWEST waiting agent by GET /agents created_at, and lists every waiting agent newest first', () => {
       const overview = makeOverview(
         [
           { id: 'old', name: 'Old', status: 'pending_approval' },
@@ -969,7 +973,10 @@ describe('firstRunSetupState (#3818)', () => {
         new: '2026-10-09T00:00:00Z',
         mid: '2026-10-05T00:00:00Z',
       })
-      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', moreCount: 2, awaiting: 'approval' })
+      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', awaiting: 'approval', budgetEndedOn: null })
+      // #4744: how many of the others step 2 counts is decided against the
+      // attention items (`unnamedWaitingAgentCount`), not here.
+      expect(state.awaitingAgentIds).toEqual(['new', 'mid', 'old'])
     })
 
     it('an agent missing from GET /agents is newer than that read, so it is the one named', () => {
@@ -986,6 +993,18 @@ describe('firstRunSetupState (#3818)', () => {
     it('an active agent without a budget is awaiting a budget, not an approval', () => {
       const state = firstRunSetupState(makeOverview([{ id: 'x', name: 'X', status: 'active' }], []))
       expect(state.pendingAgent?.awaiting).toBe('budget')
+    })
+
+    it('#4744: an active agent whose budget ENDED carries the end date, formatted as its "Budget ended" row', () => {
+      const ended = firstRunSetupState(
+        makeOverview([{ id: 'e', name: 'E', status: 'active', budgetEndedAt: '2026-10-20T09:30:00.000Z' }], []),
+      )
+      expect(ended.pendingAgent).toEqual({ id: 'e', name: 'E', awaiting: 'budget', budgetEndedOn: '20 Oct 2026' })
+      // Never had one, or an unreadable end: no date — the same rule as the item.
+      for (const budgetEndedAt of [null, undefined, 'garbage']) {
+        const state = firstRunSetupState(makeOverview([{ id: 'n', name: 'N', status: 'active', budgetEndedAt }], []))
+        expect(state.pendingAgent?.budgetEndedOn).toBeNull()
+      }
     })
 
     it('a pending agent whose setup expired or failed is not offered "Finish setup" (its row says Remove)', () => {
@@ -1419,5 +1438,42 @@ describe('computeAttentionItems — still connecting (#4710)', () => {
       'connection-pending',
       'low-balance',
     ])
+  })
+})
+
+describe('step 2 names each waiting agent once (#4744)', () => {
+  const item = (id: string, kind: AttentionRuleItem['kind'], agentId?: string): AttentionRuleItem => ({
+    id,
+    kind,
+    tone: 'neutral',
+    badge: 'x',
+    title: id,
+    ...(agentId ? { agentId } : {}),
+  })
+
+  it('isAgentSetupItem matches the agent\'s "Needs setup" and "Budget ended" rows only', () => {
+    expect(isAgentSetupItem(item('needs-setup:a', 'needs-setup', 'a'), 'a')).toBe(true)
+    expect(isAgentSetupItem(item('budget-reached:a', 'budget-ended', 'a'), 'a')).toBe(true)
+    // Another agent's row, and another kind for the same agent, stay.
+    expect(isAgentSetupItem(item('needs-setup:b', 'needs-setup', 'b'), 'a')).toBe(false)
+    expect(isAgentSetupItem(item('budget-reached:a', 'budget-reached', 'a'), 'a')).toBe(false)
+    expect(isAgentSetupItem(item('payments-failed:a', 'payments-failed', 'a'), 'a')).toBe(false)
+  })
+
+  it('two waiting agents whose rows both show: no suffix', () => {
+    const items = [item('needs-setup:a', 'needs-setup', 'a'), item('needs-setup:b', 'needs-setup', 'b')]
+    expect(unnamedWaitingAgentCount(['a', 'b'], 'a', items)).toBe(0)
+  })
+
+  it('the second agent\'s row dismissed: it counts as "1 more"', () => {
+    expect(unnamedWaitingAgentCount(['a', 'b'], 'a', [item('needs-setup:a', 'needs-setup', 'a')])).toBe(1)
+  })
+
+  it('a row behind "Show N more" still names its agent, and an item without an agent names nobody', () => {
+    const items = [
+      ...Array.from({ length: 5 }, (_, i) => item(`low-balance:${i}`, 'low-balance')),
+      item('budget-reached:b', 'budget-ended', 'b'),
+    ]
+    expect(unnamedWaitingAgentCount(['a', 'b', 'c'], 'a', items)).toBe(1)
   })
 })

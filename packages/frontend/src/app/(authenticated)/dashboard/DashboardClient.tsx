@@ -26,6 +26,8 @@ import {
   computeAttentionItems,
   DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
+  isAgentSetupItem,
+  unnamedWaitingAgentCount,
   type AttentionRuleItem,
 } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
@@ -422,16 +424,30 @@ export default function DashboardClient() {
     [overview, budgetRemaining, budgetRemainingLoading, acknowledgements],
   )
   // The agent step 2 names is not listed twice: while the steps show AND step
-  // 2 is open, its "Needs setup" row drops. Other waiting agents keep theirs.
-  // #3976: with step 2 complete, `stepTwoAgent` is null, so nothing is
-  // dropped and the waiting agent's row renders again (the guide no longer
-  // names it, either).
+  // 2 is open, its setup row drops — "Needs setup", or "Budget ended" when its
+  // budget ended (#4744; step 2's body then carries the date). Other waiting
+  // agents keep theirs. #3976: with step 2 complete, `stepTwoAgent` is null,
+  // so nothing is dropped and the waiting agent's row renders again (the
+  // guide no longer names it, either).
   const cardItems = useMemo(
     () =>
       showSetupSteps && stepTwoAgent
-        ? attentionItems.filter((item) => item.id !== `needs-setup:${stepTwoAgent.id}`)
+        ? attentionItems.filter((item) => !isAgentSetupItem(item, stepTwoAgent.id))
         : attentionItems,
     [attentionItems, showSetupSteps, stepTwoAgent],
+  )
+  // #4744: step 2's "and N more" counts only the waiting agents the card
+  // names nowhere else. Decided here, against the items: the items depend on
+  // the guide showing, so `firstRunSetupState` cannot see them.
+  const stepTwoGuideAgent = useMemo(
+    () =>
+      stepTwoAgent
+        ? {
+            ...stepTwoAgent,
+            moreCount: unnamedWaitingAgentCount(firstRun?.awaitingAgentIds ?? [], stepTwoAgent.id, attentionItems),
+          }
+        : null,
+    [stepTwoAgent, firstRun, attentionItems],
   )
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
@@ -603,7 +619,7 @@ export default function DashboardClient() {
           <DashboardOnboardingGuide
             usdcFunded={usdcFunded}
             hasSetUpAgent={hasSetUpAgent}
-            pendingAgent={stepTwoAgent}
+            pendingAgent={stepTwoGuideAgent}
             hasFirstAgentPayment={hasFirstAgentPayment}
             funding={fundingForOnboarding}
             onAddFunds={() => launcher.openAction('receive')}

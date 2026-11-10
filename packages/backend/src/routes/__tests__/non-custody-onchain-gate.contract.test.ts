@@ -301,7 +301,15 @@ const BANNED_MODULES = [
  *    the reminder that the normalization must learn `/index` first.
  */
 function paymentPathImports(): ImportFacts {
-  const files = ['../payments.ts', '../../modules/payments/create-payment.ts']
+  // #4760 moved the create flow out of the route; #4761 moved the sign
+  // submit state machine out too. The payment path is all three files now —
+  // leaving either module out would let a banned import land in the file the
+  // route actually calls.
+  const files = [
+    '../payments.ts',
+    '../../modules/payments/create-payment.ts',
+    '../../modules/payments/sign-payment.ts',
+  ]
   const facts = files.map((rel) =>
     parseImportFacts(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'), rel),
   )

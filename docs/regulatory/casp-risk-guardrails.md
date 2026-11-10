@@ -28,6 +28,7 @@ covers:
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/payments/submission-reconciler.ts
   - packages/backend/src/modules/payments/create-payment.ts
+  - packages/backend/src/modules/payments/sign-payment.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting.ts
@@ -1057,7 +1058,16 @@ shard (`agent-payment-status.ts` already did, through
 verbatim out of `routes/payments.ts`, same statuses, same bodies, same writes,
 same order of refusals — which joined `covers:` in the same PR for the same
 reason: the decision did not change, only where it lives, and a file-level
-glob follows the moved code (the #1892 accident-of-location rule). The addition #2300 made
+glob follows the moved code (the #1892 accident-of-location rule). #4761
+(slice 2) added a fifth, `modules/payments/sign-payment.ts` — the
+`POST /payments/:id/sign` submit state machine moved out of the same route
+verbatim: the retired-rail gates, the expiry flip, the misdirected-erc7710
+guard, the atomic claim, the delegation-rail submit, the sponsored-gas
+recording on each outcome, the confirm / fail / outcome-pending booking split
+and the classified failure bodies. Same statuses, same bodies, same writes in
+the same order, and the claim / submit / terminal-write order — the money-path
+invariant — is untouched; it joined `covers:` in the same PR on the same rule.
+The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what
 order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries

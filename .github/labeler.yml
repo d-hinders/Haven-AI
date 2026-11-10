@@ -71,6 +71,7 @@
           - "packages/backend/src/modules/payments/agent-payment-status.ts"
           - "packages/backend/src/modules/payments/create-payment.ts"
           - "packages/backend/src/modules/payments/direct-sign-context.ts"
+          - "packages/backend/src/modules/payments/sign-payment.ts"
           - "packages/backend/src/modules/payments/submission-reconciler.ts"
           - "packages/backend/src/modules/sub-budgets/**"
           - "packages/backend/src/modules/task-budgets/**"

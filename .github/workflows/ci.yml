@@ -35,6 +35,7 @@ jobs:
       demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
       core: ${{ steps.filter.outputs.core }}
       qa_agent: ${{ steps.filter.outputs.qa_agent }}
+      packages: ${{ steps.filter.outputs.packages }}
       full: ${{ steps.filter.outputs.full }}
 
     steps:
@@ -623,6 +624,38 @@ jobs:
 
       - name: Build backend
         run: npm run build -w packages/backend
+
+  packages_checks:
+    name: Package dependency cycles (#4763)
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Runtime import cycles across the eleven packages (#4763)
+        # Blocking and unwaivable, like `no-circular` everywhere else. Rule 7 of
+        # docs/architecture/10-module-boundaries.md was checked on backend and
+        # core only; this pass covers the other eleven packages under the
+        # owner's RUNTIME definition (type-only imports are not edges). It runs
+        # here, not in backend_checks, because a PR touching only frontend, ui,
+        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp or
+        # qa-agent never triggers that job — which is how the SDK's runtime
+        # cycle survived. Self-tested for the same reason as lint:deps above:
+        # a gate that cannot fire is worse than no gate.
+        run: |
+          npm run lint:dep-cycles
+          npm run lint:dep-cycles:test
 
   mcp_checks:
     name: MCP checks
@@ -1215,7 +1248,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, packages_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1251,6 +1284,14 @@ jobs:
 
           if [ "${{ needs.changes.outputs.backend }}" = "true" ] && [ "${{ needs.backend_checks.result }}" != "success" ]; then
             echo "Backend checks result: ${{ needs.backend_checks.result }}"
+            exit 1
+          fi
+
+          # The runtime import-cycle pass (#4763). Gated on `packages`, which
+          # every packages/* arm sets, so a frontend-only PR is checked here
+          # even though backend_checks never runs for it.
+          if [ "${{ needs.changes.outputs.packages }}" = "true" ] && [ "${{ needs.packages_checks.result }}" != "success" ]; then
+            echo "Package dependency cycles result: ${{ needs.packages_checks.result }}"
             exit 1
           fi
 

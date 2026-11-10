@@ -4,6 +4,7 @@ status: current
 covers:
   - .dependency-cruiser.cjs
   - scripts/dep-lint.mjs
+  - scripts/dep-cycles.mjs
   - scripts/lint-route-line-ceiling.mjs
   - packages/backend/route-line-ceiling.json
   - packages/core/src/**
@@ -129,7 +130,7 @@ severity and unconditional** (#999). Enforcement status:
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
 | 6. Cross-module imports go through `index.ts` | ✅ two arms, absolute: `no-deep-cross-module-import` (an import into `modules/<name>/` from outside `modules/`) and `no-deep-module-to-module-import` (one module importing another module's private file, #4379 — before it, the first arm's `from` excluded every `modules/` file, so 14 such imports were unchecked). Every `modules/**` directory — zero violations, 3 + 4 inline waivers (see below). `modules/dashboard/` (#3847) is the one directory without an `index.ts`, deliberately: #3804's owner decision makes `routes/dashboard-budget-remaining.ts` the only importer of its display-only budget-remaining cache, through one of the 3 `no-deep-cross-module-import` waivers, and `modules/dashboard/__tests__/budget-remaining-import-guard.test.ts` pins that no other file imports it | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today; `modules/budget-scope/` joined with #3616 (PR #3622) and `modules/dashboard/` with #3847) |
-| 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
+| 7. The graph is acyclic | ✅ `no-circular` — two passes, two definitions (#4763): `npm run lint:deps` over `packages/backend` and `packages/core` under the STRICT definition (type-only imports counted), and `npm run lint:dep-cycles` over the other eleven packages under the RUNTIME definition (type-only imports are not edges) | at zero on both — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
 `src/api-types.ts` is emitted from the backend's OpenAPI spec by
@@ -176,6 +177,41 @@ is the reviewed alternative. Unlike `no-circular`, both are waivable.
 
 Rule 7 is the one to defend hardest. The other six are conventions that can be
 relaxed with an argument; a cycle is a defect regardless of intent.
+
+### Rule 7 has two meanings, and both are enforced (#4763)
+
+The rule is checked on all thirteen packages, but not under one definition:
+
+- **`packages/backend` and `packages/core` — STRICT.** `npm run lint:deps`
+  (`scripts/dep-lint.mjs`) runs the repo's own ruleset, which sets
+  `tsPreCompilationDeps: true` (`.dependency-cruiser.cjs`): a **type-only
+  import is an edge**. Both trees are at zero.
+- **The other eleven — RUNTIME.** `npm run lint:dep-cycles`
+  (`scripts/dep-cycles.mjs`) runs a one-rule `no-circular` pass over each
+  package's `src` with `tsPreCompilationDeps: false`: a **type-only import is
+  not an edge**. It resolves each package's own `tsconfig.json` (so the
+  frontend's `@/` alias is a real edge) and reads `.tsx` as well as `.ts`. All
+  eleven are at zero.
+
+The split is an owner decision (2026-11-10, on
+[#4763](https://github.com/d-hinders/Haven-AI/issues/4763)): **runtime cycles
+only** outside backend and core. Before it, rule 7 was checked on two of the
+thirteen packages, and the eleven unchecked ones held one runtime cycle —
+`packages/sdk/src/merchant-answer.ts` ↔ `merchant-completion.ts`, two value
+imports pointing at each other — which #4763 broke by moving both receipt
+parsers into `merchant-answer.ts`.
+
+**The nine type-only cycles are known and deliberately unenforced.** Measured
+on `origin/dev` @ `49747fac3` with the same one-rule probe at
+`tsPreCompilationDeps: true`: `frontend` 5, `sdk` 2 (one of them the runtime
+cycle above), `connect` 1, `qa-agent` 1, `signer` 1 — ten in total, nine of
+them type-only. They are not defects under the owner's definition, and nothing
+grandfathers them: if one becomes a runtime cycle it fails the pass. Breaking
+them is separate work, not a waiver.
+
+Both passes are **unwaivable**: a `// dep-lint-exempt` comment does not silence
+`no-circular` in either, and `scripts/dep-cycles.test.mjs` pins that with a
+planted value cycle carrying the comment.
 
 ### Two rules that are security properties, not style
 
@@ -296,7 +332,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |
 | Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 15 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra`, 3 `no-deep-cross-module-import` and 4 `no-deep-module-to-module-import` (re-measured at #4379: "No dependency-boundary violations across 501 source files (15 import edge(s) waived)") |
-| Dependency cycles | **0** — `no-circular` is absolute and unwaivable |
+| Dependency cycles | **0** on both passes — `no-circular` is absolute and unwaivable. `npm run lint:deps` (backend + core, strict) and `npm run lint:dep-cycles` (the other eleven, runtime-only) both report zero; the nine type-only cycles outside backend/core are known and unenforced by the owner's decision (#4763) |
 
 The gauge exists because the retired baseline was a file-edge count, and that
 was a real limit: `pg-only-in-infra` fired once per file that imported `db.ts`,

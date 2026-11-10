@@ -42,10 +42,11 @@ const SIGNER_TOOLS = Object.keys(signerToolSchemas)
 
 /**
  * A tool name, on a word boundary on both sides: `mcp__haven__haven_submit`
- * reads as `haven_submit`, never as `haven__haven_submit`, and a name is never
- * cut short by a longer name that starts with it.
+ * reads as `haven_submit`, never as `haven__haven_submit`, a name is never
+ * cut short by a longer name that starts with it, and a trailing underscore
+ * (markdown italics, `_haven_send_`) does not hide the name.
  */
-const TOOL_NAME = /(?<![a-z0-9])haven_[a-z0-9]+(?:_[a-z0-9]+)*(?![a-z0-9_])/g
+const TOOL_NAME = /(?<![a-z0-9])haven_[a-z0-9]+(?:_[a-z0-9]+)*(?![a-z0-9]|_[a-z0-9])/g
 
 const referencesIn = (text: string): string[] => [...new Set(text.match(TOOL_NAME) ?? [])]
 
@@ -88,6 +89,8 @@ describe('#4796 — a tool description names only tools its own surface can call
       'haven_submit',
     ])
     expect(referencesIn('haven_pay_x402_quote is not haven_pay_x402')).toEqual(['haven_pay_x402_quote', 'haven_pay_x402'])
+    // A trailing underscore must not swallow the name (markdown italics).
+    expect(referencesIn('see _haven_check_funds_ and haven_send_.')).toEqual(['haven_check_funds', 'haven_send'])
     // And real descriptions do name other tools — the scan is not reading empty text.
     expect(referencesIn(SURFACES.hosted.descriptions.haven_send)).toContain('haven_get_allowances')
     expect(referencesIn(SURFACES.local.descriptions.haven_send)).toContain('haven_get_allowances')

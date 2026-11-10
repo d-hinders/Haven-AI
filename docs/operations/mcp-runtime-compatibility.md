@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts
   - scripts/ci/upgrade-hint-guard.test.mjs
   - packages/mcp-server/src/tools/**
+  - packages/mcp-server/src/description-tool-references.test.ts
   - packages/sdk/src/x402-erc7710.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
@@ -97,8 +98,9 @@ last-verified: "2026-11-09"
 > only) from `haven_send` and `haven_pay_mcp_tool`. `composeDescription` now
 > takes the surface, and those four descriptions are worded for the surface
 > that serves them: the hosted ones point at `haven_quote_x402`; the local ones
-> say the surface has no funds check, and do not offer `haven_get_allowances`
-> as one (a live budget is spend authority, not proof of a balance).
+> say the surface has no check of funds against an amount, and name
+> `haven_get_allowances` only for its `fundsCoverRemaining` flag, never as
+> such a check (a live budget is spend authority, not proof of a balance).
 > **What moves:** the four `description` strings, in the hosted golden
 > `packages/mcp-server/src/tools-list.snapshot.json` and the local golden
 > `packages/mcp/src/local-tool-contract.golden.json`; the hosted contract
@@ -109,7 +111,7 @@ last-verified: "2026-11-09"
 > description-only changes. A new test,
 > `packages/mcp-server/src/description-tool-references.test.ts`, fails when a
 > description on either surface names a tool that surface does not register,
-> a signer tool aside. `last-verified` is not re-stamped: this block is the
+> a signer tool or one allowlisted reference aside. `last-verified` is not re-stamped: this block is the
 > scope.
 
 > **No contract change (#4791, 2026-11-10): the local `tools/list` contract

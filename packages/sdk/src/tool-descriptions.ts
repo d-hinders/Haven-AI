@@ -255,12 +255,13 @@ export const toolDescriptions = {
       'Do NOT use for normal payments — use haven_pay_x402. ' +
       'Do NOT use to read balances only — use haven_get_allowances, or haven_check_funds for whether the account holds funds.',
     selectionGuidanceFor: {
-      // The local surface has no funds check, and a live budget is not proof
-      // that funds are held — so it must not be offered as one.
+      // The local surface has no check of funds against an amount, and a live
+      // budget is not proof that funds are held — so haven_get_allowances is
+      // named for the one signal it does carry (fundsCoverRemaining), no more.
       local:
         'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
         'Do NOT use for normal payments — use haven_pay_x402. ' +
-        'Do NOT use to read balances only: haven_get_allowances reports the budget, and this surface has no tool that checks whether the account holds funds.',
+        'Do NOT use to read balances only: haven_get_allowances reports the budget, and its fundsCoverRemaining: false flags a balance that cannot back it — no tool on this surface checks funds against an amount.',
     },
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating account (hardcoded destination). ' +
@@ -282,13 +283,14 @@ export const toolDescriptions = {
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
       'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
     selectionGuidanceFor: {
-      // The local surface has no funds check, and a live budget is not proof
-      // that funds are held — so it must not be offered as one.
+      // The local surface has no check of funds against an amount, and a live
+      // budget is not proof that funds are held — so haven_get_allowances is
+      // named for the one signal it does carry (fundsCoverRemaining), no more.
       local:
         'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
         'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
         'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
-        'This surface has no tool that checks whether funds are held before sending: a live budget is spend authority, not proof of a balance.',
+        'No tool on this surface checks funds against an amount before sending: a live budget is spend authority, not proof of a balance — haven_get_allowances\' fundsCoverRemaining: false flags a balance that cannot back the remaining budget.',
       // The hosted surface has no one-shot haven_pay_x402: an x402 endpoint
       // starts at haven_quote_x402 there.
       hosted:

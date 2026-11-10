@@ -2696,3 +2696,201 @@ without a re-run against the new base and turned the required docs job red
 on `dev`: #4613's test pins the record-doc census at 25 and the record's own
 bullet about #2938 carries "re-verification" on its opening line (26). The pin moves to 26 in
 the PR carrying this entry (#4617), with the reason beside it.
+
+## 2026-11-09 — architecture (scoped; owner request 2026-11-09, "architectural improvements")
+
+Full report: `docs/bug-reports/quality-scan-2026-11-09-architecture.md` (it
+carries the commands and file:line evidence). Measured at `49747fac3` (the
+branch tip, an ancestor of `origin/dev`) by one agent, `npm ci
+--ignore-scripts`, nothing built, no suite run, no database; the clone arrived
+shallow and was deepened to 2026-08-01 before any history figure. A scoped
+scan: `docs/quality/scan-baselines.json` is not updated. GitHub read-only; no
+live Haven call.
+
+**Excluded this run:** every prior finding and candidate. The hand-written SDK
+types beside the generated wire types (epics #1442, #3028) and the hosted
+tool-contract file (epic #2806) both rank in this run's churn table and are
+not re-surfaced. S1 is adjacent to the 2026-10-03 S1 (epic #3615), which took
+the budget-scope question out of the payment entrypoints; S1 here is the
+lifecycle that stayed in the route closures, which no prior entry measured.
+
+**Structural finding (pending owner decision):**
+- S1 — the direct-payment lifecycle is orchestrated inside route closures in
+  the backend's `routes/payments.ts`, and boundary rule 5 (routes import
+  module entry points only) has never been enabled. `POST /payments` is one
+  closure of 478 lines and `POST /payments/:id/sign` one of 530 — 1,008 of the
+  file's 1,572 lines; the sign closure awaits 17 distinct functions. The x402
+  route is 210 lines over a 17-file module and the MPP route 397 over 16,
+  both split by epic #980 (#996, #997), which did not list this route. The
+  file measured 898 lines before 2026-09-15 and 1,561 before 2026-10-15. Same
+  shape in `routes/agent-delegations.ts` (1,389 lines, an 8-statement
+  `pg-only-in-infra` waiver), `routes/agent-rekey.ts` (1,276) and
+  `routes/agent-connection-setups.ts` (1,556). Across the 50 route files:
+  90 repository imports, 71 module imports, 33 rail imports. Incident
+  clustering, not causation: seven issues 2026-09-30 → 2026-10-29 on the
+  direct entrypoint (#3494, #3500, #3503, #3564, #3609, #4354, #4533),
+  classified by title and label only; #4354 runs the other way and #3609's
+  fix spanned payments, x402 and MCP. The cost criterion is the weakest leg.
+  Five slices proposed: create flow, sign state machine, grant lifecycle,
+  rekey stages, a shrink-only ratchet. Slices 1–4 are money-path.
+  *Corrected in review (`569cbd792`):* first recorded rules 2 and 5, closures
+  of 481 / 542 / 1,023, "Cost", and slices 1 and 2 only.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — `no-circular` runs on 2 of 13 packages (the dependency lint's
+  `SCAN_ROOTS`); a one-rule probe over the other eleven finds 1 runtime cycle,
+  the SDK's `merchant-answer.ts` ↔ `merchant-completion.ts`, and 0 in the
+  other ten.
+- C2 — the backend's `src/index.ts` hand-wires 10 `setInterval` jobs (9
+  leader-gated; an eleventh registers itself in `startRetrySweep`) and their
+  wiring is asserted by regex over the file's source
+  (`catalog-ingest-monitor-wired.test.ts`, `anchor-seams-wired.test.ts`), the
+  technique #4411 showed can go blind; the file took 51 of 1,229 first-parent
+  landings since 2026-09-01.
+- C3 — `machine_metadata` is re-parsed by 8 private helpers and
+  `settlementSchemeOf` is defined in 4 backend files with 3 distinct bodies
+  (`x402/intent-by-key.ts`, `x402/settlement-observed.ts`,
+  `payments/agent-payment-status.ts`, `mpp/budget-precheck.ts`). No
+  disagreement on a stored row was shown.
+
+**Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
+- sizing → partial → largest non-test files by `wc -l` only; no per-package
+  total is recorded (the run's ad-hoc count is not the manifest's sizing
+  instrument). *Corrected in review:* totals first recorded here were removed.
+- backend boundaries → examined → `npm run lint:deps` → 0 violations across
+  522 files, 15 waived edges, inline-SQL gauge 35 at ceiling 35.
+- cycles outside backend/core → examined → one-rule `depcruise` probe per
+  package → 1 (`sdk`) / 0 in ten.
+- cross-package duplication → partial → backend function-name duplicates only
+  (46 names); local vs hosted MCP vs signer tool definitions not compared.
+- frontend architecture → partial → largest files and cycle probe (0);
+  data-access sites not examined. *Corrected in review:* a fetch-site census
+  first recorded here did not reproduce and was removed.
+- churn → examined → first-parent landings since 2026-09-01 per production
+  file → 1,229 landings.
+- incident clustering → partial → seven direct-payment issues, title and
+  label only.
+- workflow archaeology → not examined → out of scope.
+- block 1 → not examined → scope is architecture.
+- block 2 → not examined → scope is architecture.
+- block 3 → not examined → scope is architecture.
+- block 4 → not examined → scope is architecture.
+- block 5 → not examined → scope is architecture.
+- block 6 → not examined → scope is architecture.
+- block 8 → not examined → needs the backend suite's database and builds;
+  scope is architecture.
+- block 9 → not examined → needs the backend suite's database and builds;
+  scope is architecture.
+- weekly re-measurement (#4635 at `f03f90102`) → read → no flagged, failed or
+  refused row.
+
+**Disposition: pending owner decision** (S1, C1, C2, C3).
+
+**Disposition (owner, 2026-11-09): file all four.** The owner's words in the
+captain's session were "file all four as you suggest", the suggestion being:
+C1, C2 and C3 as standalone tasks, and S1 as an epic limited to the two
+closures in the direct-payment route plus a ratchet, with the three other
+large routes noted and unscheduled. Every issue went through new-task with an
+independent spec review; the four reviews required 42 body corrections in
+all, and none was ready as first filed.
+
+- S1 → epic [#4759](https://github.com/d-hinders/Haven-AI/issues/4759)
+  (`epic`, `area:backend`, `money-path`), slices #4760 (create flow), #4761
+  (sign state machine), #4762 (route line ceiling). Verdict `ready` after
+  repair, 16 corrections; `pending-review` lifted on all four. The review's
+  blocking finding: both moves would have taken the code off the money-path
+  perimeter.
+- C1 → [#4763](https://github.com/d-hinders/Haven-AI/issues/4763). **The
+  scan's C1 figure holds for runtime imports only**, found by the spec
+  review: the repo's rule counts type-only imports, and under it the eleven
+  unscanned packages hold 10 cycles in 5 packages, not 1. Verdict `blocked on
+  owner decision`, 9 corrections; `pending-review` stays on for one owner
+  question (runtime cycles only, or the full definition as an epic).
+- C2 → [#4764](https://github.com/d-hinders/Haven-AI/issues/4764). Verdict
+  `ready` after repair, 8 corrections; `pending-review` lifted. The review's
+  blocking finding: every criterion could pass while the catalog-ingest
+  monitor was rebuilt per tick.
+- C3 → [#4765](https://github.com/d-hinders/Haven-AI/issues/4765). **The
+  scan's C3 figures understate the class**, found by the spec review: 15
+  parse sites and 8 scheme reads (5 scheme readers), not 8 parsers and 4
+  definitions. Verdict `ready` after repair, 9 corrections; `pending-review`
+  lifted.
+
+## 2026-11-09 (run B) — the two MCPs (scoped; owner request 2026-11-09, "scan both MCPs")
+
+Full report: `docs/bug-reports/quality-scan-2026-11-09-mcp.md` (it carries the
+commands and file:line evidence). Scope: the published local MCP package, the
+hosted MCP, and what they share or duplicate, the signer included. Measured
+at `49747fac3` (equal to `origin/dev`) by one agent, `npm ci
+--ignore-scripts`, with core, the SDK, the local MCP, the signer and the
+hosted MCP built; no suite run, no database. A scoped scan: the baselines
+manifest is not updated. GitHub read-only apart from the filing above; one
+public npm registry read; no live Haven call.
+
+**Excluded this run:** every prior finding and candidate. The hosted tool
+files (epic #2806), the budget-scope keys on both surfaces (epic #3615) and
+the doubled post-funding merchant decision in the SDK (2026-10-19 C3) are not
+re-surfaced. S1 revisits a question the 2026-08-18 entry refused ("local/
+hosted MCP tool mirroring (already parity-tested)") on evidence that
+post-dates it, and sits beside the 2026-09-17 F1 (epic #3105), whose slice 5
+pinned handoff parity — the arguments an agent copies from a response — and
+not the two surfaces' input contracts tool by tool. **Withdrawn in review:**
+a candidate on the local MCP package and the money-path perimeter. The
+2026-09-17 C1 raised it and #3098 decided it (the package is pinned doc-only
+by the perimeter's own test); the draft's "no recorded decision" was false.
+
+**Structural finding (pending owner decision):**
+- S1 — one agent surface is implemented twice with no shared contract, and
+  the nets cover the hosted side. Local 20 tools, hosted 29, 19 shared names;
+  8 of the 19 have different input key sets or required sets (types not
+  compared) and 10 different descriptions; 46 of the 55 first-parent landings on the local package since
+  2026-09-01 also touched the hosted one. The tools/list snapshot, contract
+  fingerprint, next-arguments corpus and refusal census exist for the hosted
+  package only, and the QA agent does not depend on the local package. Cost:
+  #2348, with #2312 as the class it was found through, closed with per-key
+  pins; the architecture doc records the `haven_send` idempotency-key case as
+  "Total loss". *Corrected in review:* #2349, #2353 and #3411 were first
+  cited too and are not divergence incidents. The decision under it is the local package's support level
+  (first-class, deliberately smaller, or frozen). Three slices proposed: a
+  parity manifest, one typed-refusal table, a local tools/list snapshot.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the local MCP's error mapper answers a typed backend refusal with a
+  generic code and no reason field: by execution with a stubbed SDK client,
+  ten backend error codes gave a typed code on the hosted mapper for 9 and
+  the omitted-reason field for 10, and on the local `haven_send` handler the
+  generic API error and no omitted-reason field for all 10. The step itself
+  is passed through from the backend body when present. *Corrected in
+  review:* a claimed step divergence on the two budget codes was an artifact
+  of the stub body. Residue of epic #3105 slice 4 on the error path.
+- C2 — delegate-key credential loading and consent are written twice (local
+  MCP and signer): 128 matching lines (110 non-blank) of the signer's
+  233-line credentials file, 92 (81 non-blank) of its 208-line consent file;
+  no behavioural difference shown.
+
+**Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
+- tool sets → examined → the local tool keys and the hosted snapshot's keys →
+  20 / 29 / 19 shared.
+- contract comparison → examined → built local zod shapes against the hosted
+  snapshot → 11 equal / 8 different key-and-required sets; 9 equal
+  descriptions.
+  Output shapes not compared.
+- error mapping → partial → ten codes by execution through one local handler;
+  the full block 8 recording not run.
+- co-change → examined → first-parent landings since 2026-09-01 → 55 local,
+  46 of them also hosted; 150 hosted.
+- duplication with the signer → partial → credentials, consent and the three
+  error mappers.
+- hosted tool-file internals → not examined → prior finding, excluded.
+- block 1 → not examined → out of scope.
+- block 2 → not examined → out of scope.
+- block 3 → not examined → out of scope.
+- block 4 → not examined → out of scope.
+- block 5 → not examined → out of scope.
+- block 6 → partial → one perimeter check, which found the #3098 decision;
+  gate allowlists not walked.
+- block 8 → partial → ten synthetic codes against both mappers; needs the
+  backend suite's database for the recorded set.
+- block 9 → not examined → needs the backend suite's database and builds.
+
+**Disposition: pending owner decision** (S1, C1, C2).

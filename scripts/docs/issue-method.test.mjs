@@ -504,10 +504,20 @@ describe('against the fixture repository', () => {
   it('refuses a line whose git call outlives the timeout', async () => {
     const result = await runChecks(oneLine("git grep -c -e 'import' 249c77ca0 -- packages   # check: lines = 2"), {
       repo,
-      timeoutMs: 300,
-      exec: standIn('grep', 'setTimeout(() => {}, 30000)'),
+      timeoutMs: 3000,
+      exec: standIn('grep', 'setTimeout(() => {}, 60000)'),
     })
-    assert.deepEqual(statuses(result), ['refused (git did not finish in 0.3s)'])
+    assert.deepEqual(statuses(result), ['refused (git did not finish in 3s)'])
+  })
+
+  it('does not read a killed or failed ancestor check as "not an ancestor"', async () => {
+    const line = oneLine('git ls-tree 249c77ca0 -- docs   # check: exists')
+    const hung = await runChecks(line, { repo, timeoutMs: 3000, exec: standIn('merge-base', 'setTimeout(() => {}, 60000)') })
+    assert.deepEqual(statuses(hung), ['refused (git did not finish in 3s)'])
+    const failed = await runChecks(line, { repo, exec: standIn('merge-base', 'process.exit(128)') })
+    assert.deepEqual(statuses(failed), ['refused (git merge-base failed (exit 128))'])
+    const hungRef = await runChecks(line, { repo, timeoutMs: 3000, exec: standIn('rev-parse', 'setTimeout(() => {}, 60000)') })
+    assert.deepEqual(statuses(hungRef), ['refused (git did not finish in 3s)'])
   })
 
   it('refuses a line whose git call prints more than the cap', async () => {

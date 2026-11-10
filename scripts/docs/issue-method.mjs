@@ -523,9 +523,13 @@ async function resolveSha(ctx, sha, cache) {
     let sawRef = false
     for (const ref of ANCESTOR_REFS) {
       const exists = await git(ctx, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+      if (exists.failure) return { refusal: exists.failure }
       if (exists.code !== 0) continue
       sawRef = true
       const ancestor = await git(ctx, ['merge-base', '--is-ancestor', full, ref])
+      // 0 is an ancestor and 1 is not; a call that failed or was killed has answered neither.
+      if (ancestor.failure) return { refusal: ancestor.failure }
+      if (ancestor.code !== 0 && ancestor.code !== 1) return { refusal: `git merge-base failed (exit ${ancestor.code})` }
       if (ancestor.code === 0) return { full }
     }
     return {

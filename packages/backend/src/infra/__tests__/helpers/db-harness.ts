@@ -153,11 +153,16 @@ import {
 import {
   ciFailureMessage,
   decideDbMode,
+  decideRoleMode,
   probeDatabase,
+  probeRoleCapability,
   readDbModeInputs,
   resolveTestDatabaseUrl,
+  roleCiFailureMessage,
+  roleSkipMessage,
   SKIP_ACK_ENV,
   unacknowledgedFailureMessage,
+  type RoleMode,
 } from './db-availability.js'
 
 /**
@@ -178,9 +183,10 @@ export const WORKER_SCHEMA = workerSchemaName()
 // decision it feeds live in `db-availability.ts` (#1763), shared with
 // `vitest.global-setup.ts` so the run-level verdict and the per-file one can
 // never disagree.
+const dbInputs = readDbModeInputs()
 const mode = decideDbMode({
   available: await probeDatabase(resolveTestDatabaseUrl()),
-  ...readDbModeInputs(),
+  ...dbInputs,
 })
 
 // Kept here as well as in global setup, deliberately: this module is the last
@@ -200,6 +206,44 @@ if (mode === 'fail-unacknowledged') {
 }
 
 const dbAvailable = mode === 'run'
+
+/**
+ * The ops read-only role suite's capability decision (#4767).
+ *
+ * `ops-readonly-role.test.ts` (#3510) applies a script that issues `CREATE
+ * ROLE` and `ALTER ROLE`, so it needs a role that can create roles. The
+ * documented setup — `docker compose up -d postgres` — makes `haven` the
+ * `POSTGRES_USER` and therefore a superuser; a native/Homebrew server usually
+ * does not, and there the suite reddened 20 tests on every run for an
+ * environment reason, which is how a real red gets lost among known ones.
+ *
+ * The policy is `decideRoleMode` in `db-availability.ts`, the same shape as
+ * the database one: skip locally with a stated reason, FAIL in CI. Probed
+ * only when a database is reachable — with none, the database decision above
+ * already speaks for the whole run.
+ *
+ * Cost: one extra round trip per test FILE (every real-DB file imports this
+ * module), the same order as the availability probe above and far below the
+ * migration-head read each file already pays. It cannot be deferred to the
+ * one file that needs it: `describe` vs `describe.skip` is chosen at module
+ * evaluation, before any hook runs.
+ */
+const roleMode: RoleMode = dbAvailable
+  ? decideRoleMode({
+      canCreateRole: await probeRoleCapability(resolveTestDatabaseUrl()),
+      ci: dbInputs.ci,
+    })
+  : 'run'
+
+// Same direction as the `fail-ci` throw above, and for the same reason: CI's
+// compose service always has the capability, so a CI run that skipped this
+// suite would prove nothing about the grants that keep the ops console
+// read-only.
+if (roleMode === 'fail-ci') throw new Error(roleCiFailureMessage(resolveTestDatabaseUrl()))
+
+// The stated reason, printed with `OPS_ROLE_SKIP_MARKER` in front of it so
+// `scripts/ci/preflight.mjs` can list the skip apart from the green count.
+if (roleMode === 'skip') console.warn(roleSkipMessage(resolveTestDatabaseUrl()))
 
 // The end-of-run banner is global setup's job (#1763). This import-time line
 // stays only as an inline marker next to the first skipped file — it is the
@@ -221,6 +265,19 @@ if (!dbAvailable) {
 export const describeDb: typeof describe = dbAvailable
   ? describe
   : (describe.skip as typeof describe)
+
+/**
+ * `describe` when the database role can create roles, `describe.skip`
+ * otherwise (#4767). Wrap a real-DB suite that issues `CREATE ROLE` /
+ * `ALTER ROLE` in this instead of `describeDb`.
+ *
+ * Two conditions, not one: the suite needs a database AND a role that can
+ * create roles. With no database the database decision already skips the whole
+ * run, so this degrades to `describe.skip` too rather than running 20 tests
+ * that cannot connect.
+ */
+export const describeOpsRole: typeof describe =
+  dbAvailable && roleMode === 'run' ? describe : (describe.skip as typeof describe)
 
 /**
  * Root-level backstop for `assertWorkerSchemaAtHead()` (#2625).

@@ -33,12 +33,14 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { checkPackages } from '../check-dist-freshness.mjs'
 import {
   applyEdits,
   baselineProblem,
@@ -662,6 +664,19 @@ const WORKSPACE_CELLS = [
   baseCell({ id: 'B1', guard: 'twice doubles', test: 'packages/b/b.test.mjs', file: 'packages/b/src/b.mjs', edits: [{ find: 'n * 2', replace: 'n * 3' }], expect_red: ['twice doubles'] }),
 ]
 
+// #4769: a cell whose test lives in the SAME package as the mutated file runs
+// no build, so the restore's copy is the only thing that touches src/ — and a
+// copy stamps the file with the current time.
+const SAME_PACKAGE = {
+  ...WORKSPACE,
+  'packages/a/a.test.mjs': "import { test } from 'node:test'\nimport assert from 'node:assert/strict'\nimport { limit } from './src/index.mjs'\ntest('limit refuses zero', () => assert.equal(limit(0), false))\n",
+}
+const SAME_PACKAGE_CELL = baseCell({ id: 'S1', guard: 'limit refuses zero', test: 'packages/a/a.test.mjs', file: 'packages/a/src/index.mjs', expect_red: ['limit refuses zero'] })
+// A date far enough from "now" that a copy's fresh mtime cannot be mistaken for it.
+const OLD_MTIME = new Date('2026-01-01T00:00:00Z')
+const mtimeOf = (f) => statSync(f).mtimeMs
+const mtimeIsOld = (f) => Math.abs(mtimeOf(f) - OLD_MTIME.getTime()) < 1000
+
 describe('end to end in throwaway repos', { concurrency: true }, () => {
 describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, () => {
   test('control: a clean cell is caught, restored, and leaves nothing behind', async () => {
@@ -800,6 +815,56 @@ describe('end to end, one guardrail per incident (#4234)', { concurrency: 4 }, (
     assert.equal(rec.code, 0, rec.out)
     assert.equal(readFileSync(path.join(repo.wt, 'packages/a/dist/index.mjs'), 'utf8'), A_SRC)
     assert.ok(!existsSync(repo.journal))
+  })
+
+  test('#4769: a same-package cell leaves the package fresh — the restore puts the mtime back', async () => {
+    const repo = makeRepo(SAME_PACKAGE)
+    const src = path.join(repo.wt, 'packages/a/src/index.mjs')
+    utimesSync(src, OLD_MTIME, OLD_MTIME)
+    execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
+    assert.deepEqual((await checkPackages(['a'], repo.wt)).map((r) => r.state), ['fresh'], 'the fixture starts fresh: dist/ is newer than src/')
+    writeCells(repo, [SAME_PACKAGE_CELL])
+    const r = await run(repo, MUTATE)
+    assert.equal(r.code, 0, r.out)
+    const cell = result(repo).cells[0]
+    assert.equal(cell.class, 'caught')
+    assert.equal(cell.rebuilt, null, 'a same-package cell runs no build')
+    assert.ok(mtimeIsOld(src), `the mtime is the one recorded before the mutation, not the copy's: ${mtimeOf(src)} vs ${OLD_MTIME.getTime()}`)
+    assert.deepEqual((await checkPackages(['a'], repo.wt)).map((r) => r.state), ['fresh'], 'so the package does not read stale')
+  })
+
+  test('#4769: a failed post-restore rebuild leaves the package stale — the mtime is not put back before it', async () => {
+    const repo = makeRepo(WORKSPACE)
+    const src = path.join(repo.wt, 'packages/a/src/index.mjs')
+    utimesSync(src, OLD_MTIME, OLD_MTIME)
+    execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
+    writeCells(repo, [WORKSPACE_CELLS[0]])
+    const buildLog = path.join(repo.dir, 'build.log')
+    const r = await run(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog, PR_FIXTURE_FAIL_BUILD_AT: '3' } })
+    assert.equal(r.code, 3, r.out)
+    assert.match(r.out, /post-restore rebuild of packages\/a failed/)
+    const j = JSON.parse(readFileSync(repo.journal, 'utf8'))
+    assert.ok(Math.abs(j.fileMtimeMs - OLD_MTIME.getTime()) < 1000, `the journal records the mtime from before the mutation: ${j.fileMtimeMs}`)
+    assert.ok(!mtimeIsOld(src), 'the file keeps the copy\'s new mtime, so dist/ still reads stale')
+    assert.deepEqual((await checkPackages(['a'], repo.wt)).map((r) => r.state), ['stale'], 'an old src beside a mutant dist would read fresh')
+  })
+
+  test('#4769: a cell that rebuilt still rebuilds after the restore, and the mtime goes back after it', async () => {
+    const repo = makeRepo(WORKSPACE)
+    const src = path.join(repo.wt, 'packages/a/src/index.mjs')
+    utimesSync(src, OLD_MTIME, OLD_MTIME)
+    execFileSync('npm', ['run', 'build', '-w', 'packages/a'], { cwd: repo.wt, env: cleanEnv({}), stdio: 'ignore' })
+    writeCells(repo, [WORKSPACE_CELLS[0]])
+    const buildLog = path.join(repo.dir, 'build.log')
+    const r = await run(repo, MUTATE, { env: { PR_FIXTURE_BUILD_LOG: buildLog } })
+    assert.equal(r.code, 0, r.out)
+    assert.deepEqual(
+      readFileSync(buildLog, 'utf8').split('\n').filter(Boolean),
+      [sha(A_SRC), sha(A_SRC.replace('n > 0', 'n >= 0')), sha(A_SRC)],
+      'the post-restore rebuild ran',
+    )
+    assert.ok(mtimeIsOld(src), `the mtime goes back after the rebuild: ${mtimeOf(src)}`)
+    assert.deepEqual((await checkPackages(['a'], repo.wt)).map((r) => r.state), ['fresh'])
   })
 
   test('a test that writes into the tree is refused before anything is mutated', async () => {
@@ -1024,8 +1089,9 @@ describe('signals and recover', { concurrency: 4 }, () => {
     assert.ok(!existsSync(repo.journal))
   })
 
-  async function killedMidCell(opts) {
+  async function killedMidCell(opts, { mtime } = {}) {
     const repo = makeRepo({}, opts)
+    if (mtime) utimesSync(path.join(repo.wt, 'src/guard.mjs'), mtime, mtime)
     writeCells(repo, [baseCell()])
     const p = start(repo, MUTATE, { env: { PR_FIXTURE_HANG: releaseFile(repo) } })
     await waitFor(() => existsSync(repo.log) && readFileSync(repo.log, 'utf8').includes('mutant-started'), 'the mutant run')
@@ -1111,6 +1177,35 @@ describe('signals and recover', { concurrency: 4 }, () => {
     assert.equal(rec.code, 3, rec.out)
     assert.match(rec.out, /matches neither the journalled mutant nor the original.*nothing was overwritten/s)
     assert.equal(fileOf(repo), 'hand edit\n')
+  })
+
+  test('#4769: recover puts the mtime back when it copies the original over the mutant', async () => {
+    const repo = await killedMidCell({}, { mtime: OLD_MTIME })
+    const src = path.join(repo.wt, 'src/guard.mjs')
+    assert.ok(!mtimeIsOld(src), 'the mutant write gave the file a new mtime')
+    assert.ok(Math.abs(JSON.parse(readFileSync(repo.journal, 'utf8')).fileMtimeMs - OLD_MTIME.getTime()) < 1000, 'the journal records it')
+    const rec = await run(repo, ['recover'])
+    assert.equal(rec.code, 0, rec.out)
+    assert.ok(mtimeIsOld(src), `recover put the mtime back: ${mtimeOf(src)}`)
+    assert.equal(fileOf(repo), GUARD_SRC)
+  })
+
+  test('#4769: recover puts the mtime back on the branch that copies nothing, and tolerates a journal without one', async () => {
+    const repo = await killedMidCell({}, { mtime: OLD_MTIME })
+    const src = path.join(repo.wt, 'src/guard.mjs')
+    writeFileSync(src, GUARD_SRC) // the content already matches the original: recover copies nothing
+    const rec = await run(repo, ['recover'])
+    assert.equal(rec.code, 0, rec.out)
+    assert.match(rec.out, /already matches the original's sha256/)
+    assert.ok(mtimeIsOld(src), `the no-copy branch still puts the mtime back: ${mtimeOf(src)}`)
+
+    const older = await killedMidCell({}, { mtime: OLD_MTIME })
+    const j = JSON.parse(readFileSync(older.journal, 'utf8'))
+    delete j.fileMtimeMs
+    writeFileSync(older.journal, JSON.stringify(j, null, 2))
+    const rec2 = await run(older, ['recover'])
+    assert.equal(rec2.code, 0, rec2.out)
+    assert.equal(fileOf(older), GUARD_SRC, 'a journal written before #4769 is tolerated')
   })
 })
 

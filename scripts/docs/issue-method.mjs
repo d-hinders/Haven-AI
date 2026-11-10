@@ -44,12 +44,14 @@
 //
 // `lines = <n>` is the TOTAL of matching lines over all files (the sum of what
 // `git grep -c` prints per file); `files = <n>` is the number of files with a
-// match. A pathspec may carry the `:!` exclude prefix and no other magic. A
+// match. A pathspec may carry the `:!` exclude prefix, followed by a letter,
+// digit, `.`, `_` or `*`, and no other magic. A
 // free-text note may follow the expectation after a second ` # `.
 //
 // ## False zeros
 //
-// A zero proves nothing until the instrument has shown it can say yes. So:
+// A zero proves nothing until the instrument has shown it can reach the files
+// it claims to have searched. So:
 //
 // - A `lines = 0` or `files = 0` check must name a control, and the control is
 //   another checkable `git grep` line at the SAME SHA under the SAME pathspecs
@@ -60,23 +62,34 @@
 //
 //   With no control, a control that does not exist or was refused, a control
 //   over other pathspecs or another SHA, or a control that returns 0, the
-//   line is `unproven zero`.
+//   line is `unproven zero`. The control proves REACH only — that the
+//   pathspecs select files at that SHA. It does not prove the zero's pattern
+//   could have matched: a pattern that is wrong for its pattern type still
+//   reads as a proven zero, and that stays a reader's job.
 // - An `absent` check carries a built-in control: the path's parent directory
 //   must exist at the SHA. A typo in a directory name is otherwise
-//   indistinguishable from a file that is really gone.
+//   indistinguishable from a file that is really gone. A top-level path has
+//   no parent to check, and the verdict says so.
 //
 // A control is itself a checkable line: it `reproduces` when it returns
 // non-zero, and is listed apart when it does not.
 //
 // ## Refusals
 //
-// A field that begins with `-`; a path that is absolute or contains `..`; a
-// SHA that is not 7–40 hex characters, does not resolve to one commit, or is
-// not an ancestor of `origin/dev` or `origin/main` (read from the local
+// A field that begins with `-`; a path that is absolute, contains `..` or
+// (for `git show` and `git ls-tree`) ends in `/`; a SHA that is not 7–40 hex
+// characters, does not resolve to one commit whose id begins with those
+// characters, or is not an ancestor of `origin/dev` or `origin/main` (read from the local
 // remote-tracking refs — the runner never fetches); a pipe, a redirection, a
 // substitution, a second command, an environment assignment, a backslash
-// escape, an unquoted glob character; a tool other than `git`; a `git`
-// subcommand or flag outside the three forms.
+// escape, an unquoted glob character, a control character or whitespace other
+// than space and tab anywhere on the line; a tool other than `git`; a `git`
+// subcommand or flag outside the three forms. A body over 1 MB is a usage
+// error; a checkable line over 2000 characters, or past the 200th, is refused.
+//
+// The report prints each line as the body wrote it, with every control
+// character shown as an escape (`\x1b`), so a body cannot move the cursor or
+// repaint a verdict in the reader's terminal.
 //
 // ## Process hygiene
 //
@@ -110,6 +123,11 @@ export const GIT_TIMEOUT_MS = 20_000
 /** Bytes of stdout one `git` call may produce before the line is refused. */
 export const GIT_OUTPUT_CAP = 32 * 1024 * 1024
 const MAX_FIELD_LENGTH = 500
+/** A body larger than this is a usage error: GitHub's own limit is far below it. */
+export const MAX_BODY_BYTES = 1024 * 1024
+const MAX_LINE_LENGTH = 2000
+const MAX_CHECKABLE_LINES = 200
+const MAX_PATHSPECS = 50
 
 /** The only environment `git` sees. No token, no HOME, no inherited variable. */
 export const GIT_ENV = Object.freeze({
@@ -120,6 +138,7 @@ export const GIT_ENV = Object.freeze({
   GIT_TERMINAL_PROMPT: '0',
   GIT_OPTIONAL_LOCKS: '0',
   GIT_NO_LAZY_FETCH: '1',
+  GIT_NO_REPLACE_OBJECTS: '1',
 })
 
 /** Prepended to every vector: no pager, and no transport even if something asked. */
@@ -163,7 +182,7 @@ export function extractMethodLines(body) {
       fence = fenceMatch[1]
       continue
     }
-    const heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line)
+    const heading = /^(#{1,6})[ \t]+(\S.*)$/.exec(line.length > MAX_LINE_LENGTH ? '' : line.trimEnd())
     if (heading) {
       const level = heading[1].length
       if (/^method\b/i.test(heading[2])) methodLevel = level
@@ -196,6 +215,14 @@ const UNQUOTED_REFUSALS = new Map([
   ['!', 'an unquoted history character (quote the field)'],
 ])
 
+const ODD_WHITESPACE = /[\u0085\u00a0\u1680\u2000-\u200f\u2028-\u202f\u205f\u2060\u3000\ufeff]/
+
+/** Space and tab separate words. Every other control or whitespace character is refused. */
+function checkChar(ch) {
+  if ((ch < ' ' && ch !== '\t') || ch === '\x7f') refuse('a control character')
+  if (ODD_WHITESPACE.test(ch)) refuse('whitespace other than space and tab')
+}
+
 /**
  * Read one quoted or bare word starting at `text[start]`. Returns the word and
  * the index after it. Single quotes are literal. Double quotes are accepted
@@ -204,9 +231,9 @@ const UNQUOTED_REFUSALS = new Map([
 function readWord(text, start) {
   let i = start
   let word = ''
-  while (i < text.length && !/\s/.test(text[i])) {
+  while (i < text.length && text[i] !== ' ' && text[i] !== '\t') {
     const ch = text[i]
-    if (ch < ' ' || ch === '\x7f') refuse('a control character')
+    checkChar(ch)
     if (ch === "'") {
       const end = text.indexOf("'", i + 1)
       if (end === -1) refuse('an unterminated quote')
@@ -229,16 +256,18 @@ function readWord(text, start) {
       i++
     }
   }
-  for (const c of word) if (c < ' ' || c === '\x7f') refuse('a control character')
+  for (const c of word) checkChar(c)
   return { word, next: i }
 }
 
 /** Split a checkable line into its command words and the text of its comment. */
 export function tokenize(line) {
+  if (line.length > MAX_LINE_LENGTH) refuse(`a line longer than ${MAX_LINE_LENGTH} characters`)
+  for (const ch of line) checkChar(ch)
   const words = []
   let i = 0
   while (i < line.length) {
-    if (/\s/.test(line[i])) {
+    if (line[i] === ' ' || line[i] === '\t') {
       i++
       continue
     }
@@ -274,9 +303,18 @@ function checkPath(value, what) {
   if (value.startsWith(':')) refuse(`${what} magic other than the ":!" exclude prefix`)
 }
 
+/** A `git show` or `git ls-tree` path names one entry: `file/` lists nothing and would read as absent. */
+function checkEntryPath(value) {
+  checkPath(value, 'path')
+  if (value.endsWith('/')) refuse('a path that ends in "/"')
+}
+
 function checkPathspec(value) {
   checkField(value, 'pathspec')
-  checkPath(value.startsWith(':!') ? value.slice(2) : value, 'pathspec')
+  if (!value.startsWith(':!')) return checkPath(value, 'pathspec')
+  const rest = value.slice(2)
+  if (!/^[A-Za-z0-9._*]/.test(rest)) refuse('pathspec magic other than the ":!" exclude prefix')
+  checkPath(rest, 'pathspec')
 }
 
 function parseCommand(words) {
@@ -308,6 +346,7 @@ function parseCommand(words) {
     checkSha(sha)
     const pathspecs = rest.slice(i + 4)
     if (pathspecs.length === 0) refuse('no pathspec after --')
+    if (pathspecs.length > MAX_PATHSPECS) refuse(`more than ${MAX_PATHSPECS} pathspecs`)
     pathspecs.forEach(checkPathspec)
     if (flags.has('-c') === flags.has('-l')) refuse('a git grep line needs exactly one of -c (lines) or -l (files)')
     if (flags.has('-E') && flags.has('-F')) refuse('both -E and -F')
@@ -330,7 +369,7 @@ function parseCommand(words) {
     const sha = rest[0].slice(0, colon)
     const path = rest[0].slice(colon + 1)
     checkSha(sha)
-    checkPath(path, 'path')
+    checkEntryPath(path)
     return { kind: 'show', sha, path }
   }
 
@@ -338,7 +377,7 @@ function parseCommand(words) {
     if (rest.length !== 3 || rest[1] !== '--') refuse('a git ls-tree line that is not: git ls-tree <sha> -- <path>')
     if (rest[0].startsWith('-')) refuse(`a git ls-tree flag outside the check kinds (${rest[0]})`)
     checkSha(rest[0])
-    checkPath(rest[2], 'path')
+    checkEntryPath(rest[2])
     return { kind: 'ls-tree', sha: rest[0], path: rest[2] }
   }
 
@@ -383,6 +422,7 @@ function parseExpectation(comment, command) {
     if (quoted[0] !== "'" && quoted[0] !== '"') refuse('a literal that is not quoted')
     const read = readWord(quoted, 0)
     if (read.word === '') refuse('an empty literal')
+    if (read.word.includes('\ufffd')) refuse('a literal that contains U+FFFD')
     expectEnd(quoted.slice(read.next))
     return { type: 'contain', from, to, literal: read.word }
   }
@@ -408,7 +448,7 @@ export function parseCheckableLine(line) {
 
 /**
  * The runner's own argument vector for a parsed command at a resolved full
- * SHA. Every field from the body sits where `git` reads it as data: the
+ * SHA, without the prefix `git()` adds to every call. Every field from the body sits where `git` reads it as data: the
  * pattern after `-e`, pathspecs and paths after `--`, and the object name as
  * one `<full sha>:<path>` word that begins with the resolved SHA, never with
  * a field from the body.
@@ -416,7 +456,6 @@ export function parseCheckableLine(line) {
 export function buildGitArgs(command, fullSha) {
   if (command.kind === 'grep-lines' || command.kind === 'grep-files') {
     return [
-      ...GIT_PREFIX,
       'grep',
       '--no-color',
       '--no-recurse-submodules',
@@ -433,27 +472,32 @@ export function buildGitArgs(command, fullSha) {
     ]
   }
   if (command.kind === 'show') {
-    return [...GIT_PREFIX, 'show', '--no-textconv', '--no-ext-diff', `${fullSha}:${command.path}`]
+    return ['show', '--no-textconv', '--no-ext-diff', `${fullSha}:${command.path}`]
   }
   if (command.kind === 'ls-tree') {
-    return [...GIT_PREFIX, 'ls-tree', '-z', '--name-only', fullSha, '--', command.path]
+    return ['ls-tree', '-z', '--name-only', fullSha, '--', command.path]
   }
   throw new Error(`unknown command kind ${command.kind}`)
 }
 
 // ─── Running git ─────────────────────────────────────────────────────────────
 
-/** Resolves `{ code, stdout, stderr, failure }`; never rejects and never uses a shell. */
-function git(repo, args) {
+/**
+ * The one place `git` is started. `args` never carries the prefix: it is added
+ * here, so no call can go out without it. Resolves `{ code, stdout, stderr,
+ * failure }`; never rejects and never uses a shell. `ctx.exec` is `execFile`
+ * unless a test passes a recorder.
+ */
+function git(ctx, args) {
   return new Promise((resolvePromise) => {
-    execFile(
+    ctx.exec(
       'git',
-      args,
-      { cwd: repo, env: GIT_ENV, timeout: GIT_TIMEOUT_MS, maxBuffer: GIT_OUTPUT_CAP, encoding: 'utf8', windowsHide: true },
+      [...GIT_PREFIX, ...args],
+      { cwd: ctx.repo, env: GIT_ENV, timeout: ctx.timeoutMs, maxBuffer: ctx.outputCap, encoding: 'utf8', windowsHide: true },
       (error, stdout, stderr) => {
         let failure = null
         if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') failure = 'git printed more than the output cap'
-        else if (error?.killed) failure = `git did not finish in ${GIT_TIMEOUT_MS / 1000}s`
+        else if (error?.killed) failure = `git did not finish in ${ctx.timeoutMs / 1000}s`
         else if (error && typeof error.code !== 'number') failure = `git could not be started (${error.code ?? error.message})`
         resolvePromise({ code: error ? (typeof error.code === 'number' ? error.code : -1) : 0, stdout, stderr, failure })
       },
@@ -462,21 +506,22 @@ function git(repo, args) {
 }
 
 /** Resolve an abbreviated SHA to one commit that is in `origin/dev` or `origin/main`. */
-async function resolveSha(repo, sha, cache) {
+async function resolveSha(ctx, sha, cache) {
   if (cache.has(sha)) return cache.get(sha)
   const result = await (async () => {
-    const parsed = await git(repo, [...GIT_PREFIX, 'rev-parse', '--verify', '--quiet', `${sha}^{commit}`])
+    const parsed = await git(ctx, ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`])
     if (parsed.failure) return { refusal: parsed.failure }
     const full = parsed.stdout.trim()
-    if (parsed.code !== 0 || !/^[0-9a-f]{40,64}$/.test(full)) {
+    // `full.startsWith(sha)`: a branch or tag whose NAME is hex resolves too, and is not the SHA the line wrote.
+    if (parsed.code !== 0 || !/^[0-9a-f]{40,64}$/.test(full) || !full.startsWith(sha)) {
       return { refusal: `a SHA that does not resolve to one commit in this clone (${sha})` }
     }
     let sawRef = false
     for (const ref of ANCESTOR_REFS) {
-      const exists = await git(repo, [...GIT_PREFIX, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+      const exists = await git(ctx, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
       if (exists.code !== 0) continue
       sawRef = true
-      const ancestor = await git(repo, [...GIT_PREFIX, 'merge-base', '--is-ancestor', full, ref])
+      const ancestor = await git(ctx, ['merge-base', '--is-ancestor', full, ref])
       if (ancestor.code === 0) return { full }
     }
     return {
@@ -489,8 +534,8 @@ async function resolveSha(repo, sha, cache) {
   return result
 }
 
-async function runGrep(repo, command, fullSha) {
-  const out = await git(repo, buildGitArgs(command, fullSha))
+async function runGrep(ctx, command, fullSha) {
+  const out = await git(ctx, buildGitArgs(command, fullSha))
   if (out.failure) return { refusal: out.failure }
   if (out.code !== 0 && out.code !== 1) {
     return { refusal: `git grep failed (${out.stderr.trim().split('\n')[0].slice(0, 120) || `exit ${out.code}`})` }
@@ -501,8 +546,8 @@ async function runGrep(repo, command, fullSha) {
   return { got: total }
 }
 
-async function pathExists(repo, fullSha, path) {
-  const out = await git(repo, buildGitArgs({ kind: 'ls-tree', path }, fullSha))
+async function pathExists(ctx, fullSha, path) {
+  const out = await git(ctx, buildGitArgs({ kind: 'ls-tree', path }, fullSha))
   if (out.failure) return { refusal: out.failure }
   if (out.code !== 0) return { refusal: `git ls-tree failed (${out.stderr.trim().split('\n')[0].slice(0, 120) || `exit ${out.code}`})` }
   return { exists: out.stdout.length > 0 }
@@ -517,14 +562,16 @@ const samePathspecs = (a, b) => a.length === b.length && [...a].sort().every((p,
  * entry per checkable line: `{ lineNumber, text, status, detail, isControl }`
  * with `status` one of `reproduces`, `differs`, `refused`, `unproven zero`.
  */
-export async function runChecks(body, { repo = REPO_ROOT } = {}) {
+export async function runChecks(body, { repo = REPO_ROOT, exec = execFile, timeoutMs = GIT_TIMEOUT_MS, outputCap = GIT_OUTPUT_CAP } = {}) {
+  const ctx = { repo, exec, timeoutMs, outputCap }
   const lines = extractMethodLines(body)
   const freeForm = lines.filter((l) => !l.checkable).length
   const entries = lines
     .filter((l) => l.checkable)
-    .map((l) => {
+    .map((l, index) => {
       const entry = { lineNumber: l.lineNumber, text: l.text.trim(), status: null, detail: '', isControl: false }
       try {
+        if (index >= MAX_CHECKABLE_LINES) refuse(`more than ${MAX_CHECKABLE_LINES} checkable lines in one block`)
         entry.parsed = parseCheckableLine(l.text)
         entry.isControl = entry.parsed.expectation.type === 'control'
       } catch (err) {
@@ -542,7 +589,7 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
   // Resolve SHAs, then run controls before the checks that cite them.
   for (const entry of entries) {
     if (entry.status) continue
-    const resolved = await resolveSha(repo, entry.parsed.command.sha, shaCache)
+    const resolved = await resolveSha(ctx, entry.parsed.command.sha, shaCache)
     if (resolved.refusal) settle(entry, 'refused', resolved.refusal)
     else entry.fullSha = resolved.full
   }
@@ -561,7 +608,7 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
       settle(entry, 'refused', `a control name used twice (${entry.parsed.expectation.name})`)
       continue
     }
-    const ran = await runGrep(repo, entry.parsed.command, entry.fullSha)
+    const ran = await runGrep(ctx, entry.parsed.command, entry.fullSha)
     if (ran.refusal) settle(entry, 'refused', ran.refusal)
     else if (ran.got > 0) settle(entry, 'reproduces', `got ${ran.got}`)
     else settle(entry, 'differs', 'got 0')
@@ -572,7 +619,7 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
     const { command, expectation } = entry.parsed
 
     if (expectation.type === 'count') {
-      const ran = await runGrep(repo, command, entry.fullSha)
+      const ran = await runGrep(ctx, command, entry.fullSha)
       if (ran.refusal) settle(entry, 'refused', ran.refusal)
       else if (ran.got !== expectation.expected) settle(entry, 'differs', `got ${ran.got}`)
       else if (expectation.expected !== 0) settle(entry, 'reproduces')
@@ -591,20 +638,25 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
     }
 
     if (expectation.type === 'contain') {
-      const type = await git(repo, [...GIT_PREFIX, 'cat-file', '-t', `${entry.fullSha}:${command.path}`])
-      if (type.failure) {
-        settle(entry, 'refused', type.failure)
+      const listed = await pathExists(ctx, entry.fullSha, command.path)
+      if (listed.refusal) {
+        settle(entry, 'refused', listed.refusal)
         continue
       }
-      if (type.code !== 0) {
+      if (!listed.exists) {
         settle(entry, 'differs', 'got no such path at the SHA')
+        continue
+      }
+      const type = await git(ctx, ['cat-file', '-t', `${entry.fullSha}:${command.path}`])
+      if (type.failure || type.code !== 0) {
+        settle(entry, 'refused', type.failure ?? 'the file is in the tree but its content is not in this clone')
         continue
       }
       if (type.stdout.trim() !== 'blob') {
         settle(entry, 'refused', `a git show path that is a ${type.stdout.trim()}, not a file`)
         continue
       }
-      const out = await git(repo, buildGitArgs(command, entry.fullSha))
+      const out = await git(ctx, buildGitArgs(command, entry.fullSha))
       if (out.failure || out.code !== 0) {
         settle(entry, 'refused', out.failure ?? `git show failed (exit ${out.code})`)
         continue
@@ -622,7 +674,7 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
     }
 
     // exists / absent
-    const found = await pathExists(repo, entry.fullSha, command.path)
+    const found = await pathExists(ctx, entry.fullSha, command.path)
     if (found.refusal) {
       settle(entry, 'refused', found.refusal)
       continue
@@ -635,13 +687,12 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
       settle(entry, 'differs', 'got exists')
       continue
     }
-    const trimmed = command.path.replace(/\/+$/, '')
-    const parent = trimmed.includes('/') ? trimmed.slice(0, trimmed.lastIndexOf('/')) : null
+    const parent = command.path.includes('/') ? command.path.slice(0, command.path.lastIndexOf('/')) : null
     if (parent === null) {
-      settle(entry, 'reproduces', 'top-level path')
+      settle(entry, 'reproduces', 'top-level path: no parent to check')
       continue
     }
-    const parentFound = await pathExists(repo, entry.fullSha, parent)
+    const parentFound = await pathExists(ctx, entry.fullSha, parent)
     if (parentFound.refusal) settle(entry, 'refused', parentFound.refusal)
     else if (parentFound.exists) settle(entry, 'reproduces', `parent ${parent} exists`)
     else settle(entry, 'unproven zero', `parent directory ${parent} does not exist at the SHA`)
@@ -657,8 +708,19 @@ export async function runChecks(body, { repo = REPO_ROOT } = {}) {
 
 /** The verdict as the reader sees it: `differs (got 3)`, `refused (a pipe)`, … */
 export function verdict(entry) {
-  if (entry.status === 'reproduces') return 'reproduces'
-  return `${entry.status} (${entry.detail})`
+  return entry.detail === '' ? entry.status : `${entry.status} (${entry.detail})`
+}
+
+/**
+ * Body text as it may be printed: every control character, and the Unicode
+ * line and bidi controls, as a visible escape. A refused line is still shown,
+ * and it is the line most likely to carry one.
+ */
+export function printable(text) {
+  return String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, (ch) => {
+    const code = ch.codePointAt(0)
+    return code < 0x100 ? `\\x${code.toString(16).padStart(2, '0')}` : `\\u${code.toString(16).padStart(4, '0')}`
+  })
 }
 
 export function exitCodeFor(result) {
@@ -674,7 +736,7 @@ export function formatReport(result) {
     out.push(`issue-method: no checkable line in the Method block (${freeForm} free-form). Nothing was checked.`)
     return out.join('\n') + '\n'
   }
-  const row = (e) => `  L${e.lineNumber}  ${verdict(e)}\n        ${e.text}`
+  const row = (e) => `  L${e.lineNumber}  ${printable(verdict(e))}\n        ${printable(e.text)}`
   out.push('issue-method: checkable lines of the Method block', '')
   for (const e of entries) out.push(row(e))
   const failedControls = entries.filter((e) => e.isControl && e.status !== 'reproduces')
@@ -740,6 +802,10 @@ export async function main(argv) {
     body = args.bodyFile ? readFileSync(args.bodyFile, 'utf8') : await readIssueBody(args.issue, args.repo)
   } catch (err) {
     console.error(`issue-method: ${err.message}`)
+    return 2
+  }
+  if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) {
+    console.error(`issue-method: the body is larger than ${MAX_BODY_BYTES} bytes`)
     return 2
   }
   const result = await runChecks(body, { repo: args.repo })

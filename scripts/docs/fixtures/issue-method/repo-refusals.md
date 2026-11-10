@@ -7,6 +7,8 @@ git grep -c -e '-x' 249c77ca0 -- packages                         # check: lines
 git grep -c -e 'import' 249c77ca0 -- '--output=CANARY'            # check: lines = 1
 git ls-tree 249c77ca0 -- '-r'                                     # check: exists
 git ls-tree 249c77ca0 -- /etc/passwd                              # check: exists
+git ls-tree 249c77ca0 -- packages/a/src/index.ts/                 # check: absent
+git grep -c -e 'import' 249c77ca0 -- ':!^docs'                    # check: lines = 2
 git show 249c77ca0:/etc/passwd                                    # check: line 1 contains 'root'
 git show 249c77ca0:docs/../docs/notes.md                          # check: line 1 contains 'line one'
 git grep -c -e 'import' 249c77ca0 -- '../outside'                 # check: lines = 1

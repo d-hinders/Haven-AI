@@ -8,8 +8,8 @@
 // ones CI can fail on.
 
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, before, describe, it } from 'node:test'
@@ -17,6 +17,9 @@ import { fileURLToPath } from 'node:url'
 
 import {
   GIT_ENV,
+  GIT_OUTPUT_CAP,
+  GIT_TIMEOUT_MS,
+  MAX_BODY_BYTES,
   Refusal,
   buildGitArgs,
   exitCodeFor,
@@ -24,6 +27,7 @@ import {
   formatReport,
   parseArgs,
   parseCheckableLine,
+  printable,
   runChecks,
   verdict,
 } from './issue-method.mjs'
@@ -118,6 +122,37 @@ describe('extractMethodLines', () => {
     )
   })
 
+  it('closes a fence only on a bare run of the same character, at least as long', () => {
+    const body = ['## Method', '````', '~~~~', '```', '```` bash', 'x', '````', 'outside', '```', 'y', '```'].join('\n')
+    assert.deepEqual(
+      extractMethodLines(body).map((l) => l.text),
+      ['~~~~', '```', '```` bash', 'x', 'y'],
+    )
+  })
+
+  it('reads a CRLF body as it reads an LF one', () => {
+    const lf = extractMethodLines(fixture('repo-reproduces.md'))
+    const crlf = extractMethodLines(fixture('repo-reproduces.md').replace(/\n/g, '\r\n'))
+    assert.deepEqual(crlf, lf)
+  })
+
+  it('takes only a heading that begins with the word Method, and only a # after whitespace for a marker', () => {
+    for (const heading of ['## Methodology', '## The method', '##Method']) {
+      assert.deepEqual(extractMethodLines(`${heading}\n\`\`\`\nx\n\`\`\`\n`), [], heading)
+    }
+    assert.equal(extractMethodLines('## Method ##\n```\nx\n```\n').length, 1)
+    const [line] = extractMethodLines('# METHOD (commands)\n```\ngit ls-tree abcdef1 -- a#check: exists\n```\n')
+    assert.equal(line.checkable, false)
+  })
+
+  it('reads a hostile heading line in linear time', () => {
+    // A run of spaces followed by a character the tail cannot match: the old
+    // pattern took over a second at 1 600 spaces and grew with the cube.
+    const started = process.hrtime.bigint()
+    extractMethodLines(`# a${' '.repeat(1900)}x\n## Method\n`)
+    assert.ok(Number(process.hrtime.bigint() - started) / 1e6 < 1000, 'the heading regexp backtracks')
+  })
+
   it('finds nothing in a body with no Method heading', () => {
     assert.deepEqual(extractMethodLines('## Scope\n```bash\ngit ls-tree abcdef1 -- x   # check: exists\n```\n'), [])
   })
@@ -210,6 +245,34 @@ describe('the grammar', () => {
     ["git grep -c -e ' # check: lines = 1' 49747fac3 -- src", /marker sits inside a quoted field/],
     ["git grep -c -e 'a 49747fac3 -- src   # check: lines = 1", /unterminated quote/],
     ['   # check: exists', /no command before/],
+    // Review round 1 (#4771): every unquoted character, control characters, limits, names.
+    ...['(', ')', '{', '}', '~', '!', '?', '[', ']'].map((ch) => [`git grep -c -e a${ch}b 49747fac3 -- src   # check: lines = 1`, /substitution or subshell|unquoted/]),
+    ["git grep -c -e 'a\x1bb' 49747fac3 -- src   # check: lines = 1", /^a control character$/],
+    ["git grep -c -e 'a' 49747fac3 -- src   # check: lines = 1 # \x1b[2K", /^a control character$/],
+    ["git grep -c -e 'a' 49747fac3 -- src   # check: lines = 1 # a\rb", /^a control character$/],
+    ["git grep -c -e 'a'\u00a049747fac3 -- src   # check: lines = 1", /whitespace other than space and tab/],
+    ["git grep -c -e 'a' 49747fac3 -- src   # check: lines = 1 # x\u2028y", /whitespace other than space and tab/],
+    ['git grep -c -e "a\\b" 49747fac3 -- src   # check: lines = 1', /inside double quotes/],
+    ['git grep -c -e "a!b" 49747fac3 -- src   # check: lines = 1', /inside double quotes/],
+    [`git grep -c -e '${'a'.repeat(501)}' 49747fac3 -- src   # check: lines = 1`, /pattern longer than 500/],
+    [`git grep -c -e 'a' 49747fac3 -- src   # check: lines = 1 # ${'n'.repeat(2000)}`, /line longer than 2000/],
+    [`git grep -c -e 'a' 49747fac3 -- ${Array.from({ length: 51 }, (_, i) => `p${i}`).join(' ')}   # check: lines = 1`, /more than 50 pathspecs/],
+    ["git grep -c -e '' 49747fac3 -- src   # check: lines = 1", /an empty pattern/],
+    ["git grep -c -e 'a' 49747fac3 -- ''   # check: lines = 1", /an empty pathspec/],
+    ["git show 49747fac3:a   # check: line 1 contains ''", /an empty literal/],
+    ["git show 49747fac3:a   # check: line 1 contains '\ufffd'", /U\+FFFD/],
+    ["git grep -l -e 'a' 49747fac3 -- src   # control: a/b", /control name/],
+    ["git grep -c -e 'a' 49747fac3 -- src   # check: lines = 0; control: a/b", /control name/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!/abs'   # check: lines = 1", /magic other than/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!../x'   # check: lines = 1", /contains "\.\."/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!:(top)x'   # check: lines = 1", /magic other than/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!^docs'   # check: lines = 1", /magic other than/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!!src'   # check: lines = 1", /magic other than/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!x/..'   # check: lines = 1", /contains "\.\."/],
+    ["git show 49747fac3::x   # check: line 1 contains 'x'", /magic other than/],
+    ['git ls-tree 49747fac3 -- :x   # check: exists', /magic other than/],
+    ['git ls-tree 49747fac3 -- src/a.ts/   # check: absent', /ends in "\/"/],
+    ["git show 49747fac3:src/   # check: line 1 contains 'x'", /ends in "\/"/],
   ]
 
   for (const [line, reason] of REFUSALS) {
@@ -232,9 +295,6 @@ describe('buildGitArgs — the runner builds its own vector', () => {
   it('puts the pattern directly after -e and every pathspec after --', () => {
     const { command } = parseCheckableLine("git grep -c -w -i -E -e 'a|b' 49747fac3 -- 'x/**' ':!y'   # check: lines = 1")
     assert.deepEqual(buildGitArgs(command, 'f'.repeat(40)), [
-      '--no-pager',
-      '-c',
-      'protocol.allow=never',
       'grep',
       '--no-color',
       '--no-recurse-submodules',
@@ -254,38 +314,24 @@ describe('buildGitArgs — the runner builds its own vector', () => {
 
   it('reads a file and a tree entry at the full SHA, with the path as data', () => {
     const full = 'a'.repeat(40)
-    assert.deepEqual(buildGitArgs({ kind: 'show', path: 'a b.md' }, full), [
-      '--no-pager',
-      '-c',
-      'protocol.allow=never',
-      'show',
-      '--no-textconv',
-      '--no-ext-diff',
-      `${full}:a b.md`,
-    ])
-    assert.deepEqual(buildGitArgs({ kind: 'ls-tree', path: 'a' }, full), [
-      '--no-pager',
-      '-c',
-      'protocol.allow=never',
-      'ls-tree',
-      '-z',
-      '--name-only',
-      full,
-      '--',
-      'a',
-    ])
+    assert.deepEqual(buildGitArgs({ kind: 'show', path: 'a b.md' }, full), ['show', '--no-textconv', '--no-ext-diff', `${full}:a b.md`])
+    assert.deepEqual(buildGitArgs({ kind: 'ls-tree', path: 'a' }, full), ['ls-tree', '-z', '--name-only', full, '--', 'a'])
   })
 
   it('gives git a fixed environment: no token, no HOME, nothing inherited', () => {
-    assert.deepEqual(Object.keys(GIT_ENV).sort(), [
-      'GIT_CONFIG_GLOBAL',
-      'GIT_CONFIG_NOSYSTEM',
-      'GIT_NO_LAZY_FETCH',
-      'GIT_OPTIONAL_LOCKS',
-      'GIT_TERMINAL_PROMPT',
-      'LC_ALL',
-      'PATH',
-    ])
+    assert.deepEqual(
+      { ...GIT_ENV },
+      {
+        PATH: '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin',
+        LC_ALL: 'C',
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
+        GIT_NO_LAZY_FETCH: '1',
+        GIT_NO_REPLACE_OBJECTS: '1',
+      },
+    )
     assert.ok(Object.isFrozen(GIT_ENV))
   })
 })
@@ -327,7 +373,7 @@ describe('against the fixture repository', () => {
     const result = await runChecks(fixture('repo-unproven.md'), { repo })
     assert.deepEqual(statuses(result), [
       'differs (got 0)',
-      'reproduces',
+      'reproduces (got 2)',
       'refused (a SHA that is not an ancestor of origin/dev or origin/main (8d170cd8c))',
       'unproven zero (no control named)',
       'unproven zero (control "missing" is not a line in this block)',
@@ -346,13 +392,13 @@ describe('against the fixture repository', () => {
       "git grep -c -e 'FIXME' 249c77ca0 -- packages   # check: lines = 0; control: c",
       '```',
     ].join('\n')
-    assert.deepEqual(statuses(await runChecks(body, { repo })), ['reproduces', 'reproduces'], 'an abbreviation of the same commit is the same SHA')
+    assert.deepEqual(statuses(await runChecks(body, { repo })), ['reproduces (got 2)', 'reproduces (control "c" got 2)'], 'an abbreviation of the same commit is the same SHA')
     const other = mkdtempSync(join(scratch, 'two-'))
     const git = (...args) => execFileSync('git', args, { cwd: other, env: FIXTURE_GIT_ENV, encoding: 'utf8' }).trim()
     makeRepo(other, { originDev: false })
     git('update-ref', 'refs/remotes/origin/dev', SIDE_SHA)
     const twoShas = body.replace('249c77ca0 -- packages   # check', '8d170cd8c -- packages   # check')
-    assert.deepEqual(statuses(await runChecks(twoShas, { repo: other })), ['reproduces', 'unproven zero (control "c" reads another SHA)'])
+    assert.deepEqual(statuses(await runChecks(twoShas, { repo: other })), ['reproduces (got 2)', 'unproven zero (control "c" reads another SHA)'])
   })
 
   it('refuses a control name used twice, and every zero that cites it', async () => {
@@ -376,7 +422,7 @@ describe('against the fixture repository', () => {
     process.chdir(repo)
     try {
       const result = await runChecks(fixture('repo-refusals.md'), { repo })
-      assert.equal(result.entries.length, 44)
+      assert.equal(result.entries.length, 46)
       for (const entry of result.entries) assert.equal(entry.status, 'refused', `${entry.text} → ${verdict(entry)}`)
       assert.equal(exitCodeFor(result), 1)
       const reasons = new Set(result.entries.map((e) => e.detail))
@@ -399,6 +445,130 @@ describe('against the fixture repository', () => {
       assert.equal(existsSync(join(dir, 'CANARY')), false, `a refused line wrote CANARY into ${dir}`)
     }
     assert.deepEqual(readdirSync(repo).sort(), ['.git', 'docs', 'packages', 'side.txt'])
+  })
+
+  it('shows what stood behind a reproduced zero or absence, and that a top-level absence had no control', async () => {
+    const result = await runChecks(fixture('repo-reproduces.md'), { repo })
+    assert.deepEqual(
+      statuses(result).filter((v) => v !== 'reproduces'),
+      [
+        'reproduces (got 2)',
+        'reproduces (control "reach" got 2)',
+        'reproduces (parent packages/a/src exists)',
+        'reproduces (top-level path: no parent to check)',
+      ],
+    )
+  })
+
+  it('reproduces a CRLF body', async () => {
+    const result = await runChecks(fixture('repo-reproduces.md').replace(/\n/g, '\r\n'), { repo })
+    assert.equal(result.entries.length, 12)
+    assert.equal(exitCodeFor(result), 0)
+  })
+
+  it('starts nothing but git, each call with the prefix, the fixed environment, the timeout and the cap, and no shell', async () => {
+    const calls = []
+    const exec = (file, args, options, callback) => {
+      calls.push({ file, args, options })
+      return execFile(file, args, options, callback)
+    }
+    for (const name of ['repo-reproduces.md', 'repo-differs.md', 'repo-unproven.md', 'repo-refusals.md']) {
+      await runChecks(fixture(name), { repo, exec })
+    }
+    assert.ok(calls.length > 40)
+    const subcommands = new Set()
+    for (const { file, args, options } of calls) {
+      assert.equal(file, 'git')
+      assert.deepEqual(args.slice(0, 3), ['--no-pager', '-c', 'protocol.allow=never'])
+      subcommands.add(args[3])
+      assert.equal(options.env, GIT_ENV)
+      assert.equal(options.cwd, repo)
+      assert.equal(options.timeout, GIT_TIMEOUT_MS)
+      assert.equal(options.maxBuffer, GIT_OUTPUT_CAP)
+      assert.equal('shell' in options, false)
+    }
+    assert.deepEqual([...subcommands].sort(), ['cat-file', 'grep', 'ls-tree', 'merge-base', 'rev-parse', 'show'])
+    assert.ok(GIT_TIMEOUT_MS > 0 && GIT_TIMEOUT_MS <= 60_000)
+    assert.ok(GIT_OUTPUT_CAP > 0 && GIT_OUTPUT_CAP <= 64 * 1024 * 1024)
+  })
+
+  // A stand-in for one git subcommand: the real options go to a process that
+  // hangs, floods or fails, so the runner's own timeout and cap are what stop it.
+  const standIn = (subcommand, script) => (file, args, options, callback) =>
+    args[3] === subcommand ? execFile(process.execPath, ['-e', script], options, callback) : execFile(file, args, options, callback)
+  const oneLine = (line) => `## Method\n\`\`\`\n${line}\n\`\`\`\n`
+
+  it('refuses a line whose git call outlives the timeout', async () => {
+    const result = await runChecks(oneLine("git grep -c -e 'import' 249c77ca0 -- packages   # check: lines = 2"), {
+      repo,
+      timeoutMs: 300,
+      exec: standIn('grep', 'setTimeout(() => {}, 30000)'),
+    })
+    assert.deepEqual(statuses(result), ['refused (git did not finish in 0.3s)'])
+  })
+
+  it('refuses a line whose git call prints more than the cap', async () => {
+    const result = await runChecks(oneLine("git show 249c77ca0:docs/notes.md   # check: line 1 contains 'line one'"), {
+      repo,
+      outputCap: 64,
+      exec: standIn('show', "process.stdout.write('line one\\n'.repeat(100))"),
+    })
+    assert.deepEqual(statuses(result), ['refused (git printed more than the output cap)'])
+  })
+
+  it('refuses, and never reads as zero or absent, a git call that fails', async () => {
+    const fail = "process.stderr.write('fatal: boom\\n'); process.exit(128)"
+    const cases = [
+      ['grep', "git grep -c -e 'FIXME' 249c77ca0 -- packages   # check: lines = 0; control: c", 'refused (git grep failed (fatal: boom))'],
+      ['ls-tree', 'git ls-tree 249c77ca0 -- packages/a/src/gone.ts   # check: absent', 'refused (git ls-tree failed (fatal: boom))'],
+      ['show', "git show 249c77ca0:docs/notes.md   # check: line 1 contains 'line one'", 'refused (git show failed (exit 128))'],
+      ['cat-file', "git show 249c77ca0:docs/notes.md   # check: line 1 contains 'line one'", 'refused (the file is in the tree but its content is not in this clone)'],
+    ]
+    for (const [subcommand, line, expected] of cases) {
+      const result = await runChecks(oneLine(line), { repo, exec: standIn(subcommand, fail) })
+      assert.deepEqual(statuses(result), [expected], subcommand)
+    }
+    const real = await runChecks(oneLine("git grep -c -E -e '(' 249c77ca0 -- packages   # check: lines = 0; control: c"), { repo })
+    assert.match(statuses(real)[0], /^refused \(git grep failed \(/)
+  })
+
+  it('refuses git show of a directory instead of reading its listing as a file', async () => {
+    const result = await runChecks(oneLine("git show 249c77ca0:docs   # check: line 1 contains 'notes.md'"), { repo })
+    assert.deepEqual(statuses(result), ['refused (a git show path that is a tree, not a file)'])
+  })
+
+  it('does not take a branch whose name is hex for the SHA', async () => {
+    const other = mkdtempSync(join(scratch, 'hexref-'))
+    makeRepo(other, { originDev: true })
+    execFileSync('git', ['branch', '1234567', BASE_SHA], { cwd: other, env: FIXTURE_GIT_ENV })
+    const result = await runChecks(oneLine('git ls-tree 1234567 -- docs   # check: exists'), { repo: other })
+    assert.deepEqual(statuses(result), ['refused (a SHA that does not resolve to one commit in this clone (1234567))'])
+  })
+
+  it('refuses the checkable lines past the 200th', async () => {
+    const body = `## Method\n\`\`\`\n${'git ls-tree 249c77ca0 -- docs   # check: exists\n'.repeat(201)}\`\`\`\n`
+    const result = await runChecks(body, { repo })
+    assert.equal(result.entries.filter((e) => e.status === 'reproduces').length, 200)
+    assert.equal(verdict(result.entries[200]), 'refused (more than 200 checkable lines in one block)')
+  })
+
+  it('prints no control character from the body: a refused line is shown escaped', async () => {
+    const hostile = [
+      "git ls-tree 249c77ca0 -- docs   # check: exists # \x1b[1A\x1b[2K  L3  FORGED\x1b]0;title\x07",
+      'git ls-tree 249c77ca0 -- docs   # check: exists # a\rL9  reproduces',
+      'git ls-tree 249c77ca0 -- docs   # check: exists # \u202eright-to-left',
+    ].join('\n')
+    const result = await runChecks(`## Method\n\`\`\`\n${hostile}\n\`\`\`\n`, { repo })
+    assert.deepEqual(
+      result.entries.map((e) => e.status),
+      ['refused', 'refused', 'refused'],
+    )
+    const report = formatReport(result)
+    assert.doesNotMatch(report, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028-\u202e]/)
+    assert.match(report, /\\x1b\[1A\\x1b\[2K {2}L3 {2}FORGED\\x1b\]0;title\\x07/)
+    assert.match(report, /a\\x0dL9/)
+    assert.match(report, /\\u202eright-to-left/)
+    assert.equal(printable('a\tb\x7f\u0085\u2066'), 'a\\x09b\\x7f\\x85\\u2066')
   })
 
   it('refuses every SHA when the clone has no origin/dev or origin/main to check it against', async () => {
@@ -461,6 +631,30 @@ describe('the CLI', () => {
     assert.equal(parseArgs(['--issue', '4771']).issue, '4771')
   })
 
+  it('exits 2 on a body larger than the limit, before reading it', () => {
+    const body = join(scratch, 'huge.md')
+    writeFileSync(body, `## Method\n\`\`\`\ngit ls-tree 249c77ca0 -- docs   # check: exists\n\`\`\`\n${'x'.repeat(MAX_BODY_BYTES)}`)
+    const run = cli(['--body-file', body, '--repo', repo])
+    assert.equal(run.status, 2)
+    assert.match(run.stderr, /the body is larger than 1048576 bytes/)
+    assert.equal(run.stdout, '')
+  })
+
+  it('--issue makes exactly one gh call, a read of the body, and checks what it printed', () => {
+    const bin = join(scratch, 'fake-bin')
+    mkdirSync(bin)
+    const log = join(scratch, 'gh-calls.log')
+    writeFileSync(
+      join(bin, 'gh'),
+      `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a" >> '${log}'; done\nprintf -- '--\\n' >> '${log}'\ncat '${join(FIXTURES, 'repo-reproduces.md')}'\n`,
+    )
+    chmodSync(join(bin, 'gh'), 0o755)
+    const run = cli(['--issue', '4771', '--repo', repo], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } })
+    assert.equal(run.status, 0, run.stdout + run.stderr)
+    assert.match(run.stdout, /Summary: 12 checkable — 12 reproduce/)
+    assert.equal(readFileSync(log, 'utf8'), ['issue', 'view', '4771', '--json', 'body', '--jq', '.body', '--', ''].join('\n'))
+  })
+
   it('runs when started through a symlink (#4776)', () => {
     const link = join(scratch, 'link.mjs')
     execFileSync('ln', ['-s', SCRIPT, link])
@@ -482,9 +676,9 @@ describe('against this repository, where its history is present', () => {
       probe('merge-base', '--is-ancestor', '49747fac3', 'refs/remotes/origin/main'))
   const skip = present ? false : 'commit 49747fac3 or origin/dev is not in this checkout (a depth-1 CI clone); the repo-*.md twins cover it'
 
-  it('reproduces the checkable lines of #4771’s own Method block', { skip }, async () => {
+  it('reproduces #4771’s claims as transcribed into the runner’s syntax', { skip }, async () => {
     const result = await runChecks(fixture('real-4771.md'), { repo: REPO_ROOT })
-    assert.deepEqual(statuses(result), ['reproduces', 'reproduces', 'reproduces', 'reproduces'])
+    assert.deepEqual(statuses(result), ['reproduces', 'reproduces', 'reproduces', 'reproduces (parent scripts/docs exists)'])
     assert.equal(result.freeForm, 3)
     assert.equal(exitCodeFor(result), 0)
   })

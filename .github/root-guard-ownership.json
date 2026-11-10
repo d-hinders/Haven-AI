@@ -172,6 +172,26 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/lint-route-line-ceiling.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:route-lines"
+      ],
+      "reason": "The shrink-only line ceiling over backend route files larger than 400 lines (#4762, epic #4759 slice 3). It scans packages/backend/src/routes but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-route-line-ceiling.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:route-lines:test"
+      ],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/lint-next-steps.mjs",
       "jobs": [
         "backend",
@@ -218,7 +238,7 @@
         "lint:db-mocks",
         "lint:wire-types"
       ],
-      "reason": "The shared ratchet ENGINE, backing NINE gates as of #3131 (eight as of #3104, seven as of #3029, six as of #2747): the backend db-mock, retired-rail-prose and request-schema ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, scripts/docs/ui-gate-wording, the typed next-step ratchet (#3104), and the MCP\u2194CLI vocabulary guard (#3131). An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason multiple jobs are named here. ops joined in #3515: ops_checks runs lint:wire-types, whose SCAN_DIRS gained packages/ops/src/lib, so a ratchet weakening reachable from the console must run its job."
+      "reason": "The shared ratchet ENGINE, backing ELEVEN gates as of #4762 (ten as of #3924, nine as of #3131, eight as of #3104, seven as of #3029, six as of #2747): the backend db-mock, retired-rail-prose, request-schema and route-line-ceiling ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, scripts/docs/ui-gate-wording, the typed next-step ratchet (#3104), the MCP\u2194CLI vocabulary guard (#3131) and the budget-liveness census (#3924). An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason multiple jobs are named here. ops joined in #3515: ops_checks runs lint:wire-types, whose SCAN_DIRS gained packages/ops/src/lib, so a ratchet weakening reachable from the console must run its job."
     },
     {
       "path": "scripts/lib/ratchet.test.mjs",

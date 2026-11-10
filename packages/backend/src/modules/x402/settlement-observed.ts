@@ -44,6 +44,7 @@ import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
 import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import { MAX_SETTLEMENT_WINDOW_SECONDS } from './x402-delegation.js'
 import { CLOCK_SKEW_SECONDS } from '../../domain/x402-settlement-timing.js'
+import { settlementSchemeOf as settlementSchemeOfValue } from '../../domain/machine-metadata.js'
 
 // The clock-skew allowance between Postgres' `created_at` and the chain's
 // block timestamps is defined in `domain/x402-settlement-timing.ts` (#4379),
@@ -111,21 +112,8 @@ export type SettlementObservation =
   /** Refused. `retryable` distinguishes "ask again later" from a settled no. */
   | { outcome: 'unverified'; retryable: boolean; reason: string }
 
-function settlementSchemeOf(intent: ObservableSettlementIntent): string | null {
-  const raw = intent.machine_metadata
-  if (!raw) return null
-  let metadata: Record<string, unknown> | null = null
-  if (typeof raw === 'string') {
-    try {
-      metadata = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  } else {
-    metadata = raw
-  }
-  const scheme = metadata?.settlement_scheme
-  return typeof scheme === 'string' ? scheme : null
+export function settlementSchemeOf(intent: ObservableSettlementIntent): string | null {
+  return settlementSchemeOfValue(intent.machine_metadata)
 }
 
 /**

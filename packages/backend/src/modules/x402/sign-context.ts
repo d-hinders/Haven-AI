@@ -25,6 +25,7 @@ import {
 import { isFundedX402AwaitingMerchantLeg } from '../payments/index.js'
 import { rebuildDelegationSignContext } from './replay.js'
 import type { X402HandlerResult } from './types.js'
+import { machineMetadataOrNull } from '../../domain/machine-metadata.js'
 
 export async function getX402SignContext(
   agent: AgentContext,
@@ -174,14 +175,7 @@ function signContextResponse(
  * challenge's `resource`/`extensions` into the X-PAYMENT envelope.
  */
 export function storedPaymentRequiredFromMetadata(metadata: unknown): Record<string, unknown> | null {
-  let parsed: unknown = metadata
-  if (typeof metadata === 'string') {
-    try {
-      parsed = JSON.parse(metadata)
-    } catch {
-      return null
-    }
-  }
+  const parsed = machineMetadataOrNull(metadata)
   if (!parsed || typeof parsed !== 'object') return null
   const stored = (parsed as Record<string, unknown>).payment_required
   if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return null

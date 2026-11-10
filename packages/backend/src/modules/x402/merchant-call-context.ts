@@ -18,24 +18,12 @@
  * EIP-3009 header — the merchant's own facilitator).
  */
 import { findIntentForAgent, expirePendingIntent } from '../../infra/repositories/payment-intents.js'
+import { machineMetadataOrNull } from '../../domain/machine-metadata.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 
-function parseMachineMetadata(metadata: unknown): Record<string, unknown> | null {
-  if (!metadata) return null
-  if (typeof metadata === 'string') {
-    try {
-      return JSON.parse(metadata) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }
-  if (typeof metadata === 'object') return metadata as Record<string, unknown>
-  return null
-}
-
-function storedMcpCallContext(metadata: unknown): X402McpCallContextInput | null {
-  const parsed = parseMachineMetadata(metadata)
+export function storedMcpCallContext(metadata: unknown): X402McpCallContextInput | null {
+  const parsed = machineMetadataOrNull(metadata)
   const stored = parsed?.mcp_call_context
   if (!stored || typeof stored !== 'object') return null
   const candidate = stored as Record<string, unknown>

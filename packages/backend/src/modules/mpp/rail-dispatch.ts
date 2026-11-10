@@ -29,36 +29,16 @@ export function isMppRail(rail: string | null | undefined): boolean {
   return rail === 'mpp' || Boolean(rail?.startsWith('mpp_'))
 }
 
-interface MachineMetadata {
-  network?: unknown
-  description?: unknown
-}
-
 // #1987 (epic #1440): `MachineRailContext`, `machineRailFields` and
 // `approvalReasonFor` are gone with `modules/mpp/authorize.ts` — the legacy
 // MPP AllowanceModule orchestration was their ONLY consumer, and it had no
 // production caller left once #1328 stubbed `POST /machine-payments/authorize`
-// and #1986 410'd the rail beneath it. `isMppRail`, `metadataObject`,
-// `nullableString` and `isProtocolPaymentRail` STAY: they are read by
+// and #1986 410'd the rail beneath it. `isMppRail`, `nullableString` and
+// `isProtocolPaymentRail` STAY: they are read by
 // `modules/payments/agent-payment-status.ts`, which serves the payment-status
-// surface the epic keeps readable.
-
-export function metadataObject(value: unknown): MachineMetadata {
-  if (!value) return {}
-  if (typeof value === 'object' && !Array.isArray(value)) return value as MachineMetadata
-  if (typeof value !== 'string') return {}
-
-  try {
-    const parsed = JSON.parse(value)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as MachineMetadata
-    }
-  } catch {
-    return {}
-  }
-
-  return {}
-}
+// surface the epic keeps readable. `metadataObject` was listed here as read by
+// that file too, but it never was — the file has its own private copy — and it
+// had no callers at all, so #4765 deleted it.
 
 export function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null

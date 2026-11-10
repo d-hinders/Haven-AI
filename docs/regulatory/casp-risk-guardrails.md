@@ -20,6 +20,7 @@ covers:
   - packages/backend/src/routes/machine-payments-reconciliation-events.ts
   - packages/backend/src/modules/mpp/**
   - packages/backend/src/domain/payment-token.ts
+  - packages/backend/src/domain/machine-metadata.ts
   - packages/backend/src/domain/x402-settlement-timing.ts
   - packages/backend/src/domain/x402-sweep-window.ts
   - packages/backend/src/domain/redact-vendor-secrets.ts

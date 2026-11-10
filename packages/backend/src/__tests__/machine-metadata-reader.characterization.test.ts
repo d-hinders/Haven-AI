@@ -53,6 +53,13 @@ interface Row {
   name: string
   machineMetadata: unknown
   preparedUserOp?: unknown
+  /**
+   * The three gates `isEip3009BridgePayment` reads before the scheme. Absent
+   * means the confirmed x402 delegation shape every other row uses; a row that
+   * sets them pins the short-circuit (the scheme read must not run when a gate
+   * fails).
+   */
+  evidenceGates?: { status?: string; payment_rail?: string | null; execution_rail?: string | null }
 }
 
 const ROWS: Row[] = [
@@ -89,6 +96,15 @@ const ROWS: Row[] = [
     machineMetadata: {},
     preparedUserOp: { child: { delegation: '0xchild' }, budget: { delegation: '0xbudget' } },
   },
+  {
+    // The gate dimension: the same JSON text `null` that throws for a confirmed
+    // x402 delegation intent must short-circuit to false when any gate fails.
+    // All three are unmet here, so a scheme read hoisted anywhere above the last
+    // operand turns this cell red.
+    name: 'json-text-null-gates-unmet',
+    machineMetadata: 'null',
+    evidenceGates: { status: 'pending', payment_rail: 'mpp', execution_rail: 'direct' },
+  },
 ]
 
 /** A canonical, comparable rendering of whatever a call site reads. */
@@ -115,9 +131,9 @@ function cell(fn: () => unknown): string {
 /** The evidence-shaped intent `mpp/evidence.ts` reads its two fields off. */
 function evidenceIntent(row: Row) {
   return {
-    status: 'confirmed',
-    payment_rail: 'x402',
-    execution_rail: 'delegation',
+    status: row.evidenceGates?.status ?? 'confirmed',
+    payment_rail: row.evidenceGates?.payment_rail ?? 'x402',
+    execution_rail: row.evidenceGates?.execution_rail ?? 'delegation',
     machine_metadata: row.machineMetadata,
   } as never
 }
@@ -261,6 +277,26 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:133": "null",
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "throw:TypeError",
+    "mpp/evidence.ts:317": "throw:TypeError",
+    "payments/agent-payment-status.ts:302": "object{}",
+    "payments/agent-payment-status.ts:510": "null",
+    "payments/agent-payment-status.ts:520": "null",
+    "x402/eip3009-receipt-settlement.ts:150": "throw:TypeError",
+    "x402/eip3009-receipt-settlement.ts:517": "boolean:false",
+    "x402/eip3009-settlement-evidence.ts:106": "boolean:false",
+    "x402/helpers.ts:67": "null",
+    "x402/intent-by-key.ts:22": "null",
+    "x402/intent-by-key.ts:37": "null",
+    "x402/merchant-call-context.ts:28": "null",
+    "x402/merchant-call-context.ts:38": "null",
+    "x402/settle.ts:32": "null",
+    "x402/settlement-observed.ts:120": "null",
+    "x402/sign-context.ts:180": "null",
+  },
+  "json-text-null-gates-unmet": {
+    "mpp/budget-precheck.ts:133": "null",
+    "mpp/budget-precheck.ts:143": "null",
+    "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "throw:TypeError",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "null",

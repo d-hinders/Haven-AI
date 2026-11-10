@@ -290,14 +290,15 @@ function railForPayment(intent: MachinePaymentEvidenceSource): string | null {
  * the proof ladder runs here for it and nowhere else.
  */
 export function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
-  // Read before the gates, as the inline parse did: a JSON text that parses to
-  // a non-object throws here regardless of the intent's status or rail.
-  const scheme = settlementSchemeOfStrict(intent.machine_metadata)
+  // The scheme read is the last operand, exactly where the inline
+  // `metadata.settlement_scheme` dereference sat: a JSON text that parses to a
+  // non-object throws only once the three gates pass. Before that the chain
+  // short-circuits to false, as it always did.
   return (
     intent.status === 'confirmed' &&
     (intent.payment_rail ?? intent.source) === 'x402' &&
     intent.execution_rail === 'delegation' &&
-    scheme === 'eip3009'
+    settlementSchemeOfStrict(intent.machine_metadata) === 'eip3009'
   )
 }
 

@@ -576,6 +576,25 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the shared delegate-key credential-file handling is RUNTIME money-path — a change to it gates promotion (#4792)', () => {
+    // The #4120 shape, one package over. #4792 moved the account-address
+    // readers and the permission core OUT of packages/mcp/src/credentials.ts
+    // and packages/signer/src/credentials.ts into the new
+    // packages/sdk/src/credential-file.ts. packages/signer/** covered the
+    // signer's copy; the local MCP's copy was on no glob at all, so without
+    // this pin the move would have taken the permission core off the
+    // perimeter silently. Runtime, not control: both packages run it on every
+    // credential load, and the money-flow harness drives both. Mutation: move
+    // the glob to controlGlobs (or drop it) and this fails by name.
+    const f = 'packages/sdk/src/credential-file.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it is how the delegate-key ` +
+        'credential file is read, and both the local MCP and the edge signer run it (#4792)',
+    )
+  })
+
   test('the two catalog pay_to writers are CONTROL money-path — a change to either is labelled and owes the perimeter analysis (#4394)', () => {
     // Both files write merchant_catalog.pay_to, the value the server fills a
     // merchant-locked budget's recipient_address from
@@ -750,8 +769,10 @@ describe('money-path list stays in one piece', () => {
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
       // settlement-child), joined by the task/sub-budget guards (#3661), are
       // spend authority, merchant-completion (#4122) decides a funded
-      // payment's merchant outcome, and merchant-answer.ts (#4120) is the one
-      // shared copy of that decision; those ten files ARE on the runtime list.
+      // payment's merchant outcome, merchant-answer.ts (#4120) is the one
+      // shared copy of that decision, and credential-file.ts (#4792) is the
+      // one shared copy of how the delegate-key credential file is read; those
+      // eleven files ARE on the runtime list.
       // The rest is transport — client.ts among it, pinned off above.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
@@ -759,7 +780,7 @@ describe('money-path list stays in one piece', () => {
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards, merchant-completion.ts (#4122) and merchant-answer.ts (#4120) are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards, merchant-completion.ts (#4122), merchant-answer.ts (#4120) and credential-file.ts (#4792) are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

@@ -104,6 +104,7 @@
           - "packages/mcp-server/src/**"
           - "packages/frontend/src/hooks/useAgentRekey.ts"
           - "packages/frontend/src/lib/signer.ts"
+          - "packages/sdk/src/credential-file.ts"
           - "packages/sdk/src/delegate-account.ts"
           - "packages/sdk/src/direct-payment-guard.ts"
           - "packages/sdk/src/merchant-answer.ts"

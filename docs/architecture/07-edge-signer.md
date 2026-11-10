@@ -624,7 +624,11 @@ account is permanently out of scope.
   names `npx @haven_ai/connect --doctor` for the connector-wired case.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a credential file selected by `--credentials` / `HAVEN_CREDENTIALS`, with
-  a permissive-file warning.
+  a permissive-file warning. Since #4792 the mirror is literal — the
+  account-address readers and the permission check are one module in
+  `@haven_ai/sdk/edge` (`packages/sdk/src/credential-file.ts`), which both
+  packages import; only the log prefix (`haven-signer:` / `haven-mcp:`) and
+  each package's own loader stay local.
 - First-launch consent must match the current signer identity and tool set.
   Acknowledgement uses `HAVEN_SIGNER_ACK` or a local
   `<credentials>.signer-ack.json` sidecar. Re-acknowledgement after a tool-set

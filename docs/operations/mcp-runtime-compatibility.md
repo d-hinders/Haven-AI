@@ -86,7 +86,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-09"
+last-verified: "2026-11-11"
 ---
 
 > **No contract change (#4791, 2026-11-10): the local `tools/list` contract

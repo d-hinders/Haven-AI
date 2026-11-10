@@ -180,9 +180,11 @@ map; a new undeclared pair fails `lint:vocabulary`.
 
 **Same-named tools do not always spell their arguments the same way, and until
 #2312 the difference was invisible.** The local MCP used to take `idempotencyKey`
-where the hosted surface takes `idempotency_key`; #3411 closed that divergence —
-the local surface now takes only `idempotency_key`, and refuses `idempotencyKey`
-by name (see below). Local
+where the hosted surface takes `idempotency_key`; #3411 closed that **spelling**
+divergence — the local surface now takes only `idempotency_key`, and refuses
+`idempotencyKey` by name (see below). Which tools take the key at all still
+differs in one place: the hosted `haven_quote_x402` takes none, a difference
+declared in the parity manifest described further down. Local
 `haven_pay_x402_quote` takes `quote` where hosted takes `payment_required` (or,
 since [#3739](https://github.com/d-hinders/Haven-AI/issues/3739), the request
 itself — `url`, `method`, `headers`, `body` — from which it fetches the
@@ -225,7 +227,8 @@ permissive is a live caller that would break. The enumeration for the final
 twelve (SDK, `packages/mcp`, connect, the shipped skill text and its
 byte-pinned twin, the QA legs, e2e fixtures, docs, `.agents`) found none.
 
-One argument diverges on purpose: the local `haven_pay_x402_quote` and
+One **budget-scope** argument diverges on purpose (it is declared, with every
+other difference, in the parity manifest described further down): the local `haven_pay_x402_quote` and
 `haven_pay_x402` take `sub_budget_id`, and the hosted `haven_pay_x402_quote`
 does not. The hosted handler used to forward a `sub_budget_id` it never
 declared. Strict parsing refused the key first, so the forwarding never ran,
@@ -287,7 +290,7 @@ and the divergence table alone reads as though they were:
 |---|---|---|
 | `haven_send` | `idempotencyKey` | Total loss. `POST /payments` went out as `{token, amount, to}` with **no** `idempotency_key` field, so the backend's replay contract never engaged and a retry was a second spend. |
 | `haven_pay_mcp_tool` | `idempotencyKey` | Replay scope **replaced**, not merely lost: the SDK fell back to `buildX402IdempotencyKey`, a hash of the merchant quote over a 300 s bucket. It de-dupes two genuinely distinct purchases inside one bucket and fails to de-dupe a retry that crosses a bucket boundary. |
-| `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; `idempotencyKey` converged by #3411. |
+| `haven_quote_x402` | `body` (and `idempotencyKey`) | The hosted probe fired with an **empty** body, so the quote described a request the caller never made. A quote creates no payment, so the `idempotencyKey` half cost nothing directly. **`body` is converged since #2366**; the `idempotencyKey` spelling converged by #3411, and the hosted quote takes no idempotency key at all (a declared difference in the parity manifest). |
 | `haven_pay_x402_quote` | `idempotencyKey` only | Its headline crossover, `quote` for `payment_required`, **always failed loudly** — `payment_required` is required, so the call was refused with `-32602 … Required` and made zero Haven calls. Only `idempotencyKey` was silent. (Since #3739 `payment_required` is optional; `quote` still fails loudly, now as an undeclared key under the strict schema.) |
 
 Refusing is the on-ramp, not the destination, and **#2366 has now walked half of
@@ -359,6 +362,22 @@ Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools/contracts.ts` (re-exported by
 `packages/mcp-server/src/tools.ts`, the facade), and
 `packages/signer/src/tools.ts` as the source of truth.
+
+**Where a local/hosted contract difference is declared (#4789).** Every tool
+name both surfaces register, plus the one different-name pair (hosted
+`haven_pay`, local `haven_send`), is compared key by key in
+`packages/mcp-server/src/local-hosted-contract-parity.test.ts`. Its
+`PARITY_MANIFEST` lists each difference with a one-line reason, in five
+classes: a key only the local schema declares, a key only the hosted schema
+declares, a key required on one side only, a legacy key the local schema
+declares only so its handler can refuse it (`idempotencyKey`, proven by a
+call), and a differing description (pinned by a short hash of both texts). The
+test fails on a difference the manifest does not list and on a manifest entry
+that no longer matches one, and it lists the tools that exist on one surface
+only. A new divergence is therefore a reviewed line with a reason, not a
+per-key pin added after an incident. It replaces the budget-scope-only check
+that #3620 added to `strict-tool-input.test.ts`. Value types and
+strict-versus-permissive parsing are outside it.
 
 The five edge-signer tools are `haven_sign`, `haven_sign_siwx`,
 `haven_x402_sign_header`, `haven_sign_x402`, and `haven_sign_sweep_delegate`.

@@ -19,8 +19,10 @@
  * cover the missing extension. A file that always starts has no such case.
  *
  * The price is that importing this file runs the command. Import
- * `./lane-cancel-command.js` instead; a test in `scripts/ci` fails on any
- * import of this file.
+ * `./lane-cancel-command.js` instead. A test in `scripts/ci` fails on an
+ * import of this file written the ordinary way (a literal specifier on the
+ * line of its `from`, `import`, `import()` or `require()`); it does not see a
+ * computed specifier.
  */
 import { runCli } from './lane-cancel-command.js'
 

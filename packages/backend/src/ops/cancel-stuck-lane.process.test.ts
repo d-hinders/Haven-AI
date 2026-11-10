@@ -1,12 +1,13 @@
 /**
  * #4786: the operator tool, run the way an operator runs it — as built
- * JavaScript under plain `node` — and never with a row id.
+ * JavaScript under plain `node` — and never against the real action.
  *
  * With no row id (or one that is not a UUID) the tool prints its usage text
- * and returns 1 before it imports anything that reads configuration, so these
- * runs reach no database and no chain. The child environment carries no
- * backend configuration either: a run that got further would fail on the
- * first missing variable instead of doing anything.
+ * and returns 1 before it imports anything. With a row id it imports
+ * `../infra/outbound-lane-cancel.js`, and the scratch build has no such file
+ * unless a test writes a stub there: a run that got past the argument check
+ * fails on that import. The child environment carries no backend
+ * configuration either.
  *
  * The backend's unit tests run before its build in CI, so there is no `dist`
  * to start. Each `.ts` module in this directory is transpiled here instead,
@@ -77,6 +78,10 @@ function runNode(args: string[], cwd: string): Run {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr }
 }
 
+// Each case starts up to three node processes; vitest's default 5 s is too
+// little on a loaded machine, and the suite sets no test timeout of its own.
+const CASE_TIMEOUT_MS = 60_000
+
 function expectUsage(run: Run): void {
   expect(run.stderr.trimEnd()).toBe(USAGE)
   expect(run.stdout).toBe('')
@@ -107,11 +112,11 @@ describe('cancel-stuck-lane, as built JavaScript under plain node (#4786)', () =
     rmSync(base, { recursive: true, force: true })
   })
 
-  it('prints the usage text and exits 1 with no row id, by a relative path', () => {
+  it('prints the usage text and exits 1 with no row id, by a relative path', { timeout: CASE_TIMEOUT_MS }, () => {
     expectUsage(runNode([`ops/${ENTRY}.js`], plain))
   })
 
-  it('prints the usage text and exits 1 for an argument that is not a UUID', () => {
+  it('prints the usage text and exits 1 for an argument that is not a UUID', { timeout: CASE_TIMEOUT_MS }, () => {
     expectUsage(runNode([`ops/${ENTRY}.js`, 'not-a-row-id'], plain))
   })
 
@@ -119,17 +124,17 @@ describe('cancel-stuck-lane, as built JavaScript under plain node (#4786)', () =
   // compared its own URL with `process.argv[1]`, which node leaves unresolved
   // (a symlink), unencoded (a space) and without the extension the operator
   // left off.
-  it('starts without the .js extension', () => {
+  it('starts without the .js extension', { timeout: CASE_TIMEOUT_MS }, () => {
     expectUsage(runNode([`ops/${ENTRY}`], plain))
   })
 
-  it('starts by an absolute path through a symlink, with and without the extension', () => {
+  it('starts by an absolute path through a symlink, with and without the extension', { timeout: CASE_TIMEOUT_MS }, () => {
     expect(realpathSync(linked)).not.toBe(linked)
     expectUsage(runNode([path.join(linked, 'ops', `${ENTRY}.js`)], base))
     expectUsage(runNode([path.join(linked, 'ops', ENTRY)], base))
   })
 
-  it('starts from a directory whose real path has a space and a non-ASCII character', () => {
+  it('starts from a directory whose real path has a space and a non-ASCII character', { timeout: CASE_TIMEOUT_MS }, () => {
     expect(pathToFileURL(encoded).pathname).not.toBe(encoded)
     expectUsage(runNode([`ops/${ENTRY}.js`], encoded))
     expectUsage(runNode([`ops/${ENTRY}`], encoded))
@@ -140,9 +145,30 @@ describe('cancel-stuck-lane, as built JavaScript under plain node (#4786)', () =
   // a module that does not. If the start moves into that module, the `tsx`
   // wrapper (which imports it and calls `runCli()` itself) would run the
   // command twice.
-  it('does not start when the command module is only imported', () => {
+  it('does not start when the command module is only imported', { timeout: CASE_TIMEOUT_MS }, () => {
     const url = pathToFileURL(path.join(plain, 'ops', `${COMMAND}.js`)).href
     const run = runNode(['--input-type=module', '-e', `await import(${JSON.stringify(url)})`], plain)
     expect(run).toEqual({ status: 0, stdout: '', stderr: '' })
+  })
+
+  // The usage cases cannot tell whether the row id on the command line
+  // reaches the action: a tool that dropped it would print usage for every
+  // input. Here the action is a stub in a build of its own, which refuses and
+  // echoes the id it was given. Nothing real is imported.
+  it('hands the row id from the command line to the action', { timeout: CASE_TIMEOUT_MS }, () => {
+    const stubbed = path.join(base, 'stubbed')
+    buildOps(stubbed)
+    mkdirSync(path.join(stubbed, 'infra'))
+    writeFileSync(
+      path.join(stubbed, 'infra', 'outbound-lane-cancel.js'),
+      [
+        'export const productionLaneCancelDeps = async () => ({})',
+        "export const cancelStuckOutboundLane = async (id) => ({ outcome: 'refused', code: 'stub', detail: id })",
+        '',
+      ].join('\n'),
+    )
+    const id = '00000000-0000-4000-8000-000000000000'
+    const run = runNode([`ops/${ENTRY}.js`, id], stubbed)
+    expect(run).toEqual({ status: 1, stdout: '', stderr: `REFUSED (stub): ${id}\n` })
   })
 })

@@ -23,7 +23,7 @@
 // Since #4786 the guard also reads package source (`packages/*/src`), and one
 // tool there answers the question differently: the operator command
 // `cancel-stuck-lane` has no entry test at all. Its entry file always starts,
-// its code lives in a module beside it, and (4) a check here fails on any
+// its code lives in a module beside it, and (4) a check here fails on an
 // import of the entry file, because importing it would run the command.
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -537,6 +537,12 @@ describe('the structural guard: argv[1] is read only by the one entry test (#477
       for (const line of ALLOWED_LINES) assert.ok(code.has(line), `${file} does not carry: ${line}`)
     }
     assert.ok(scripts.has(TS_IN_SCAN), `${TS_IN_SCAN} is not in the scan`)
+    // Package source outside the one package a sentinel comes from: the
+    // excepted file, and the operator tool's entry file, which must be read to
+    // show it holds no read of argv[1] at all.
+    for (const file of [...Object.keys(FILE_EXCEPTIONS), `packages/backend/src/ops/${ENTRY_FILE}.ts`]) {
+      assert.ok(scripts.has(file), `${file} is not in the scan`)
+    }
   })
 })
 
@@ -547,6 +553,15 @@ describe('the structural guard: argv[1] is read only by the one entry test (#477
 // `packages/backend/src/ops/cancel-stuck-lane.ts` starts the command
 // unconditionally, so an import of it runs the command. Its code is in the
 // module beside it; that is what a test or a wrapper imports.
+//
+// What the check reads: a line where `from`, `import`, `import(` or
+// `require(` is followed by a quoted, literal specifier whose last segment is
+// the entry file's name. Not seen: a specifier on the line after its keyword,
+// a computed one (`path.join`, `new URL`, concatenation), one with a query
+// string, and a loader call under another name (`vi.importActual`). A line
+// that only quotes such an import, in a comment or a string, is reported too.
+// It narrows the search; the process test beside the tool is what proves the
+// code module stays inert.
 //
 // The name is assembled so that this file's own fixtures are not what the
 // scan finds.
@@ -605,6 +620,10 @@ describe('nothing imports the operator tool entry file (#4786)', () => {
     // wrapper that used to import it is among the files read.
     assert.ok(files.includes(`packages/backend/src/ops/${ENTRY_FILE}.ts`), 'the entry file is not tracked')
     assert.ok(files.includes('packages/backend/scripts/cancel-stuck-attest-lane.ts'), 'the wrapper is not in the scan')
+    assert.ok(
+      files.includes(`packages/backend/src/ops/${ENTRY_FILE}.process.test.ts`),
+      'test files are not in the scan: the tool\'s own test is missing from it',
+    )
     const failures = []
     for (const file of files) {
       const source = readFileSync(path.join(REPO, file), 'utf8')

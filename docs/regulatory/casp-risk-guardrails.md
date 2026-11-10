@@ -27,6 +27,7 @@ covers:
   - packages/backend/src/modules/payments/agent-payment-status.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/payments/submission-reconciler.ts
+  - packages/backend/src/modules/payments/create-payment.ts
   - packages/backend/src/routes/catalog.ts
   - packages/backend/src/routes/accounting-feed.ts
   - packages/backend/src/routes/accounting.ts
@@ -1051,7 +1052,12 @@ time. #3661 also added three `modules/payments/` files, `direct-sign-context.ts`
 `submission-reconciler.ts` and `agent-payment-status.ts`, which were NOT
 covered: they joined `covers:` in the same PR, so edits to them now owe a
 shard (`agent-payment-status.ts` already did, through
-`04-x402-payment-sequence.md`). The addition #2300 made
+`04-x402-payment-sequence.md`). #4760 (epic #4759 slice 1) added a fourth,
+`modules/payments/create-payment.ts` — the `POST /payments` create flow moved
+verbatim out of `routes/payments.ts`, same statuses, same bodies, same writes,
+same order of refusals — which joined `covers:` in the same PR for the same
+reason: the decision did not change, only where it lives, and a file-level
+glob follows the moved code (the #1892 accident-of-location rule). The addition #2300 made
 was `packages/mcp-server/src/**` — the hosted MCP tool surface, whose
 capability modules decide whether a funding userop is relayed and in what
 order (the completion capability, `src/tools/paid-mcp-completion.ts`, carries

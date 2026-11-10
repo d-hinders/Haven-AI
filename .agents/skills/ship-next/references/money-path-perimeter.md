@@ -107,14 +107,21 @@ not listed: it is GET only.
 payment (#3271). `submission-reconciler.ts` settles the terminal state of a
 submitted payment whose UserOp may have landed (#3564). `agent-payment-status.ts`
 holds `isFundedX402AwaitingMerchantLeg`, which decides whether x402 sign-context
-re-signs a confirmed payment; a wrong clause can pay a merchant twice. File-level
-on purpose: the rest of the module is the refusal record, receipts and
-prepare-failure reporting, pinned as off-list in `scripts/ci/money-path.test.mjs`
-(#3661).
+re-signs a confirmed payment; a wrong clause can pay a merchant twice.
+`create-payment.ts` is the `POST /payments` create flow itself (#4760, epic
+#4759 slice 1): the retired-rail gate, token and amount resolution, the
+idempotent replay, the budget-scope resolution and its two fail-open
+pre-checks, the delegation-rail prepare and the intent insert. It moved out of
+`routes/payments.ts` verbatim, so the decision it makes is the same one the
+route made — the #1892 accident-of-location rule again: where the create flow
+lives is not what makes it a spend decision. File-level on purpose: the rest of
+the module is the refusal record, receipts and prepare-failure reporting,
+pinned as off-list in `scripts/ci/money-path.test.mjs` (#3661).
 
 - `packages/backend/src/modules/payments/direct-sign-context.ts`
 - `packages/backend/src/modules/payments/submission-reconciler.ts`
 - `packages/backend/src/modules/payments/agent-payment-status.ts`
+- `packages/backend/src/modules/payments/create-payment.ts`
 
 ### The rail seam
 

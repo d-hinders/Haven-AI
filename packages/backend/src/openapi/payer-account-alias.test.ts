@@ -46,13 +46,15 @@ describe('#2914 — payer_account is the only name, safe is gone', () => {
     }
   })
 
-  it('routes/payments.ts (POST /payments idempotent replay): payer_account carries the account, and safe never appears', async () => {
+  it('modules/payments/create-payment.ts (POST /payments idempotent replay): payer_account carries the account, and safe never appears', async () => {
     // The legacy replay body sits behind the retired-rail 410 gate at the
     // route level (see routes/__tests__/payments.test.ts "POST /payments
     // idempotency"), so it cannot be reached by a request in the test
     // harness — the source assertion is the instrument here, the same one the
     // two x402 emitters get. A wrong value (e.g. the delegate address) fails.
-    const source = await readSource('../routes/payments.ts')
+    // #4760 moved the replay body out of `routes/payments.ts` into the
+    // payments module; the assertion follows the code.
+    const source = await readSource('../modules/payments/create-payment.ts')
     expect(source).not.toMatch(/\bsafe:\s*agent\.account_address/)
     const componentsBlocks =
       source.match(/components:\s*\{[^}]*payer_account:\s*agent\.account_address[^}]*\}/gs) ?? []

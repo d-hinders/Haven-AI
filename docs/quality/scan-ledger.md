@@ -2894,3 +2894,47 @@ by the perimeter's own test); the draft's "no recorded decision" was false.
 - block 9 → not examined → needs the backend suite's database and builds.
 
 **Disposition: pending owner decision** (S1, C1, C2).
+
+**Disposition upkeep (2026-11-10), run A (architecture):** the one open owner
+question on #4763 is answered — "runtime cycles only" — recorded on the issue
+under `## Owner decisions`, and `pending-review` is lifted. All seven issues
+of that run (#4759–#4765) are now unblocked. The scan PR is #4758, merged
+2026-11-10 as `51e66d281`.
+
+**Disposition (owner, 2026-11-10), run B (the two MCPs): file all three.** The
+owner's words were "file all three MCP findings". Every issue went through
+new-task with an independent spec review; the two reviews (the epic's with a
+delta re-review) required 31 body corrections, and none was ready as first
+filed.
+
+- S1 → epic [#4788](https://github.com/d-hinders/Haven-AI/issues/4788)
+  (`epic`, `area:mcp`, `area:docs`, `money-path`), slices #4789 (parity
+  manifest), #4790 (typed refusals on the local MCP), #4791 (local tools/list
+  snapshot). Verdict `ready` after repair, 19 corrections; `pending-review`
+  lifted on all four. The scan's support-level question (first-class,
+  deliberately smaller, or frozen) is recorded on the epic as unanswered and
+  holds nothing.
+- C1 → slice #4790 of that epic, not a standalone issue: it is one of the
+  epic's three remedies. **Its remedy changed in spec review.** The scan
+  proposed one refusal table in the SDK read by both mappers; the hosted
+  mapper has no single table (20 typed codes, 10 through branches with
+  body-dependent logic, the rest typed off the workspace-private core
+  package). The filed slice leaves the hosted mapper untouched, teaches the
+  local one the same answers and pins the two with a parity test over the
+  hosted suite's fixture bodies — the smaller remedy the scan also offered.
+- C2 → [#4792](https://github.com/d-hinders/Haven-AI/issues/4792) (`area:mcp`,
+  `area:sdk`, `money-path`). Verdict `ready` after repair, 12 corrections;
+  `pending-review` lifted. The review confirmed no behavioural difference
+  between the two copies and narrowed what moves.
+
+**A scan figure corrected by the epic's spec review:** S1's "8 of the 19
+shared tools have different input keys or required sets" is **7**, with no
+required-ness difference at all. The scan's comparison read required-ness
+from the zod type name on the local side and from the JSON-Schema `required`
+list on the hosted side, and so counted a tool whose one field is declared
+identically on both. Re-measured with one instrument on both sides (the zod
+`isOptional()` of each field of both registries) at `51e66d281` → 12 equal,
+7 different. The report and the entry above stay as written; this line is
+the correction. The other S1 figures were re-taken at `51e66d281` for the
+epic: 20 / 29 / 19 unchanged; co-change 48 of 57 (was 46 of 55 at
+`49747fac3`).

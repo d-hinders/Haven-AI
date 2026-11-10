@@ -80,7 +80,7 @@ Good split examples:
 - Confirm the PR target is `dev` (or `main` only for a `hotfix/*`).
 - Confirm migrations are uniquely ordered and named.
 - Confirm payment-related changes preserve the CASP guardrails: no Haven-held user or agent keys, no API-key-only payment authority, no off-chain-only spend control, no mutation of signed amount/token/recipient/route, and no unreviewed swap, ramp, fiat, card, merchant settlement, yield, or advice functionality.
-- Complete the PR template sections for changed surfaces, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
+- Complete the PR template sections for changed surfaces, the release lever, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
 - Include a merge-readiness section using the template below for non-trivial PRs.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches.
 - If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.

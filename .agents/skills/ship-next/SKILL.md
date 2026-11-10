@@ -760,6 +760,13 @@ with no replacement figure can qualify when all five commands pass.
 5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
 6. Fill the applicable sections of [the pull-request template](../../../.github/pull_request_template.md), including:
    - changed surfaces and workflow used;
+   - the **Release lever** line, filled from `npm run release:scope -- --base=<merge base> --head=HEAD`
+     — the merge base, not `origin/dev`, so the range is this pull request's own. The script prints
+     the line to paste: `next release train` naming the affected published packages, `deploy only`
+     naming the services, or `none`. It refuses rather than under-reporting — on an unbuilt package,
+     a missing sourcemap, or a shallow clone — and a refusal is not a reason to write `none`: build
+     the five published packages first (`npm run build -w packages/sdk -w packages/signer -w packages/mcp -w packages/connect -w packages/cli`)
+     and re-run. The line is advisory and gates nothing;
    - local checks and browser/headless verification;
    - intentionally excluded work;
    - generated-artifact and handoff impact;

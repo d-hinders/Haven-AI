@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/routes/payments.ts
+  - packages/backend/src/modules/payments/sign-payment.ts
   - packages/backend/src/infra/chain/relayer-reads.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/routes/agent-delegations.ts
@@ -30,7 +31,9 @@ for user approval and user-authorized Safe execution) — and **neither is
 reachable any more**; see the banner below and jump to the
 [delegation-rail branch](#delegation-rail-new-accounts) for the live flow.
 
-Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts) and
+Source of truth: [packages/backend/src/routes/payments.ts](../../packages/backend/src/routes/payments.ts),
+[packages/backend/src/modules/payments/sign-payment.ts](../../packages/backend/src/modules/payments/sign-payment.ts)
+(the `POST /payments/:id/sign` submit state machine since #4761) and
 [packages/backend/src/infra/chain/relayer-reads.ts](../../packages/backend/src/infra/chain/relayer-reads.ts)
 (the reads-only shared chain module — `rails/allowance-module.ts` before #2850 renamed it).
 

@@ -114,14 +114,22 @@ idempotent replay, the budget-scope resolution and its two fail-open
 pre-checks, the delegation-rail prepare and the intent insert. It moved out of
 `routes/payments.ts` verbatim, so the decision it makes is the same one the
 route made — the #1892 accident-of-location rule again: where the create flow
-lives is not what makes it a spend decision. File-level on purpose: the rest of
-the module is the refusal record, receipts and prepare-failure reporting,
-pinned as off-list in `scripts/ci/money-path.test.mjs` (#3661).
+lives is not what makes it a spend decision. `sign-payment.ts` is the
+`POST /payments/:id/sign` submit state machine (#4761, slice 2): the
+retired-rail gates, the expiry flip, the misdirected-erc7710 guard, the atomic
+claim, the delegation-rail submit, the sponsored-gas recording on each outcome,
+the confirm / fail / outcome-pending booking split and the classified failure
+bodies. It moved out of the same route verbatim, and the order of the claim,
+the submit and the terminal write — the money-path invariant — is untouched.
+File-level on purpose: the rest of the module is the refusal record, receipts
+and prepare-failure reporting, pinned as off-list in
+`scripts/ci/money-path.test.mjs` (#3661).
 
 - `packages/backend/src/modules/payments/direct-sign-context.ts`
 - `packages/backend/src/modules/payments/submission-reconciler.ts`
 - `packages/backend/src/modules/payments/agent-payment-status.ts`
 - `packages/backend/src/modules/payments/create-payment.ts`
+- `packages/backend/src/modules/payments/sign-payment.ts`
 
 ### The rail seam
 

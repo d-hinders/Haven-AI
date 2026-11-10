@@ -43,7 +43,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-10-26"
+last-verified: "2026-11-10"
 ---
 
 # Haven Agent API OpenAPI Contract

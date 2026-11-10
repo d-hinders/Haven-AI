@@ -31,7 +31,7 @@ covers:
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-11-02"
+last-verified: "2026-11-10"
 ---
 
 # Haven Product & UX Guide

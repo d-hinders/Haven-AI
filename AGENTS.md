@@ -29,7 +29,7 @@ covers:
   - .agents/skills/**
   - .claude/agents/**
   - .claude/commands/**
-last-verified: "2026-10-23"
+last-verified: "2026-11-10"
 ---
 
 # Haven Codex Instructions

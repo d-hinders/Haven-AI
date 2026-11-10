@@ -431,7 +431,9 @@ test('negative: a doc row dressed as a scan row still fails the ledger-SHA pin',
   m.rows.push({ ...m.docFigures[0] })
   const problems = checkShaMatchesLedger(m, ledger).join('\n')
   assert.match(problems, /ds-button-variant-distribution/)
-  assert.match(problems, /24cb5e65c/)
+  // The doc row's own sha, whatever the doc's editor last recorded it as — a
+  // literal here would go red on the very PR that is supposed to move it.
+  assert.match(problems, new RegExp(m.docFigures[0].sha))
   // And the schema pin still refuses it as a scan row (no block, no kind).
   assert.match(checkSchema(m).join('\n'), /missing "block"/)
 })

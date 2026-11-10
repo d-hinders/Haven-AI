@@ -9,7 +9,7 @@ covers:
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
   - packages/sdk/src/payment-mappers.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # CLI `--json` conventions

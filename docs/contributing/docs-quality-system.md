@@ -29,7 +29,7 @@ covers:
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
   - scripts/ci/operator-verify-close-guard.mjs
-last-verified: "2026-10-24"
+last-verified: "2026-11-10"
 ---
 
 # Documentation-quality system

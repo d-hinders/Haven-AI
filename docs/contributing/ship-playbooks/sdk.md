@@ -7,7 +7,7 @@ covers:
   - packages/mcp/**
   - packages/connect/**
   - packages/cli/**
-last-verified: "2026-10-24"
+last-verified: "2026-11-10"
 ---
 
 # SDK / API / credentials playbook

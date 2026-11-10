@@ -45,7 +45,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # Haven — Edge Signer
@@ -668,7 +668,7 @@ account is permanently out of scope.
   `sign_data.signature_scheme`: `eip712_userop` (payments) to
   `signUserOpTypedDataForDelegation`, `eip712_delegation` (x402 settlement)
   to `signSettlementDelegationTypedData` after `assertOwnSettlementChild`
-  (`packages/sdk/src/client.ts:668-697`). In the hosted topology this
+  (`packages/sdk/src/client.ts:674-702`). In the hosted topology this
   signer's `haven_sign` signs both: the `eip712_userop` typed data (by
   `payment_id` since #3271, under the #3272 allowlist; see Regular payment
   above) and the erc7710 settlement child, after `verifySettlementChild`

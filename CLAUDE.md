@@ -25,7 +25,7 @@ covers:
   - .claude/agents/**
   - .claude/commands/**
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-10-23"
+last-verified: "2026-11-10"
 ---
 
 # Haven — CLAUDE.md
@@ -381,11 +381,12 @@ in-the-moment "don't open a PR".
 **Skills.** `ship-next` ships one ready issue end to end; `new-task` files a
 one-liner as a backlog issue, and is the route for **every** issue an agent
 files — never a bare `gh issue create` — with a mandatory review on each;
-`release` ships one production release, with or without a version bump;
-`quality-scan` reports structural findings, bounded improvement candidates, and
-coverage limits, then stops for a decision; `prove-red` runs the mutation cells
-those workflows and reviewers require, with one tested runner instead of a
-hand rig.
+`review-issue` is that review, run against an existing issue or epic before it
+is queued; `release` ships one production release, with or without a version
+bump; `quality-scan` reports structural findings, bounded improvement
+candidates, and coverage limits, then stops for a decision; `prove-red` runs
+the mutation cells those workflows and reviewers require, with one tested
+runner instead of a hand rig.
 
 ### How shipping is governed (#1025)
 

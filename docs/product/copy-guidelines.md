@@ -32,7 +32,7 @@ covers:
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: 2026-10-25
+last-verified: "2026-11-10"
 ---
 
 # Haven UX Copy Guidelines

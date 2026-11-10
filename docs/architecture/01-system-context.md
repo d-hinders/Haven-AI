@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/ops/**
   - packages/backend/src/routes/ops.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # Haven — System Context

@@ -21,7 +21,7 @@ covers:
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-live.yml
   - .claude/commands/qa-explore-ui.md
-last-verified: "2026-11-02"
+last-verified: "2026-11-10"
 ---
 
 <!--

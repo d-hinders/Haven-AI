@@ -47,9 +47,6 @@
   "packages/backend/src/routes/__tests__/payments.test.ts": {
     "readable-but": 1
   },
-  "packages/backend/src/routes/payments.ts": {
-    "stays-readable": 1
-  },
   "packages/core/src/api-types.ts": {
     "remain-readable": 1
   },

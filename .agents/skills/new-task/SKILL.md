@@ -23,6 +23,13 @@ record a machine's observation, not an agent's judgement.
 1. Inspect the repository just enough to anchor the scope, likely files, and existing patterns. Use a read-only explorer role from [haven-agent-workflow](../haven-agent-workflow/SKILL.md) for non-trivial work.
 
    **Every code claim in the body is measured, not remembered.** Each `file:line` reference, count, status list, schema claim, or mechanism claim (what code writes, reads, returns, or refuses) is produced by a command the body quotes, at a named commit: the body carries a one-line `Measured on `origin/dev` @ `<sha>`` and, for each figure, either the command inline or a single fenced *Method* block at the end. A mechanism claim is verified by reading the statement that does the work (the `INSERT`, the `UPDATE`, the `return`), never the comment above it, and cites that line. A claim the writer could not verify is written as a question ("verify whether … holds"), never as a fact. This is the same discipline `ship-next` already binds PR bodies with (its *Numbers state their basis* rule requires every count re-derived from its instrument at a named commit); nothing else enforces it for issue bodies, and unverified claims are the largest class of partner corrections on filed epics.
+
+   **A claim a command can re-check is written so that it can (#4799).** Three kinds of claim go into a fenced *Method* block as a **checkable line**, in the syntax of [`scripts/docs/issue-method.mjs`](../../../scripts/docs/issue-method.mjs) — its header comment is the grammar, and this skill does not restate it:
+   - a count of matching lines, or of matching files, at a SHA under pathspecs;
+   - a line range of a file at a SHA containing a text;
+   - a path existing, or not, at a SHA.
+
+   The SHA is written in hex on the line (`${SHA}` is refused), and a zero names a control line that reaches the same pathspecs. Every other claim stays free-form and stays legal: a `gh` count, a live endpoint, a pipeline, a mechanism read by eye. The runner reads only fenced lines under the `Method` heading, so a Method block written as bullets with inline code is one it cannot see. § *Epics* carries a worked example.
 2. Classify every affected surface using `area:frontend`, `area:backend`, `area:sdk`, `area:mcp`, `area:docs`, and `money-path`. Confirm money-path classification against [ship-next](../ship-next/SKILL.md).
 3. Ask one or two focused questions when scope, acceptance, or surface is ambiguous. Always ask before defining acceptance for money movement, authentication, authorization, or schema work.
 
@@ -50,6 +57,7 @@ record a machine's observation, not an agent's judgement.
      for other issues.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
+   - **Method**: the commands behind the body's code claims, per step 1.
 
    Take the template's **body shape and its sizing rule** — "keep it small and
    self-contained, one PR's worth of work"; anything larger is an epic, below.
@@ -79,7 +87,7 @@ record a machine's observation, not an agent's judgement.
    spec, and do not mark the new issue as a duplicate of it. Write `Refs #<n>`
    and name it as external in the body; the new issue stands on what a
    maintainer asked for.
-6. Create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
+6. **Run the runner on the draft, then create the issue.** Save the draft body to a scratch file outside the repository and run `node scripts/docs/issue-method.mjs --body-file <draft>` from a checkout whose `origin/dev` is fetched from GitHub (the script reads the repository it sits in; `--repo <dir>` names another). Do not create the issue while any line is `differs`, `refused` or `unproven zero`: fix the claim or the line first. Exit 3 (no checkable line) is acceptable only when the body has no claim of the three kinds in step 1. A client with no local checkout cannot run it: say so in the body's Method block, and the spec review's run is then the first. Then create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
    **Create it with the `pending-review` label already on it** — in the create
    call itself, never added afterwards — and keep it there under § *Hold until
    ready* below. Other sessions and partner pipelines claim backlog issues within
@@ -265,11 +273,21 @@ encodes have to be applied by hand; that is what the rest of this section is for
 ## Method
 Measured on `origin/dev` @ `3d056b8f`.
 
-- "migration 084 renames every `safe_*` column":
-  `git show 3d056b8f -- packages/backend/migrations/084*`
-- "the refusals ledger has one writer":
-  `grep -rn "INSERT INTO payment_refusals" packages/backend/src | wc -l`
+```bash
+# "the refusals ledger has one writer", and where it is
+git grep -c -e 'INSERT INTO payment_refusals' 3d056b8f -- 'packages/backend/src/**'      # check: lines = 1
+git show 3d056b8f:packages/backend/src/infra/repositories/refusals.ts                     # check: lines 40-52 contain 'INSERT INTO payment_refusals'
+# "migration 084 exists and no migration still names safe_address"
+git ls-tree 3d056b8f -- packages/backend/migrations/084_rename_safe_columns.ts            # check: exists
+git grep -l -e 'ALTER TABLE' 3d056b8f -- 'packages/backend/migrations/**'                 # control: migrations
+git grep -c -w -e 'safe_address' 3d056b8f -- 'packages/backend/migrations/**'             # check: lines = 0; control: migrations
+# free-form: GitHub moves, so the runner does not check it
+gh issue list --label money-path --state open --json number --jq length                   # 14 on 2026-09-24
+```
 ````
+
+The paths and figures in the example are illustrative; its syntax is not, and a
+test keeps it parseable by the runner (`scripts/docs/issue-method-adoption.test.mjs`).
 
 - **Post one spec-review verdict comment on the epic before partners are
   pinged.** The [review-issue](../review-issue/SKILL.md) pass ends with the
@@ -381,6 +399,7 @@ red.
 - Do not fabricate requirements for money-path, authentication, authorization, or schema tasks.
 - Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and no issue — single task or epic — is queued, shipped or announced before its [review-issue](../review-issue/SKILL.md) pass and verdict comment.
 - Do not file an issue without `pending-review`, and do not lift it while an owner question is open (§ *Hold until ready*).
+- Do not create an issue whose draft the runner has not passed (step 6, which also says what a client with no local checkout does), and do not leave a count, a `file:line` or a path-existence claim at a SHA free-form when it fits one of the three checkable kinds (step 1).
 - Do not file around this skill. Every agent-filed issue goes through it; a bare `gh issue create` is only the mechanism of step 6.
 - Keep generated and hand-written loop issues interchangeable.
 - Prefer an editable, correctly shaped issue over speculative implementation detail.

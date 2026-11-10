@@ -44,7 +44,19 @@ for a standalone task. It:
   mechanical cleanup`, `not queue-ready`, or `blocked on owner decision`);
 - lists the corrections applied and the open questions, naming who answers each;
 - links or summarizes the child findings when the review covered an epic;
-- **ends** with `Corrections: <n>.`
+- **ends** with three lines, in this order:
+  `Claims: <checked> checked, <wrong> wrong.`,
+  `Runner: <checkable> checkable, <failed> not reproducing.`,
+  `Corrections: <n>.`
+
+`Claims` counts **claims re-run in the pass**, by the runner or by hand: a
+control line is not a claim, and a claim checked both ways counts once. Over
+several passes before one posted verdict it is the sum; a later delta verdict
+counts only its own pass. `Runner`
+is the runner's own summary on the snapshot body (`0 checkable, 0 not
+reproducing` when it found no checkable line). Both are defined in
+[§ Comment mode](../SKILL.md#comment-mode) and read by
+[§ Re-measure: checkable Method lines](../SKILL.md#re-measure-checkable-method-lines-registered-2026-11-10-4799).
 
 `Corrections` counts **issue-body changes caused by the review** — wrong claims
 fixed, scope gaps settled, criteria rewritten — not comments. It is `0` when the
@@ -62,6 +74,8 @@ only remaining edit.
 Child findings: #4101 (blocking, criterion cannot observe the transition),
 #4102 (should-fix, missing caller).
 Open questions: whether refusal caps belong on the ledger or the agent card.
+Claims: 9 checked, 1 wrong.
+Runner: 4 checkable, 0 not reproducing.
 Corrections: 1.
 ````
 

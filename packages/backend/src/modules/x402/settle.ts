@@ -23,20 +23,7 @@ import { passportReferenceFor } from '../passport/index.js'
 import { markIntentSubmittedForSettlement } from '../../infra/repositories/x402-authorizations.js'
 import type { X402HandlerResult } from './types.js'
 import { boundedErrorDetails } from '../payments/index.js'
-
-/** The row's recorded settlement scheme (`machine_metadata.settlement_scheme`), or null. */
-function settlementScheme(intent: { machine_metadata: Record<string, unknown> | string | null }): string | null {
-  let meta: unknown = intent.machine_metadata
-  if (typeof meta === 'string') {
-    try {
-      meta = JSON.parse(meta)
-    } catch {
-      return null
-    }
-  }
-  const scheme = meta && typeof meta === 'object' ? (meta as Record<string, unknown>).settlement_scheme : undefined
-  return typeof scheme === 'string' ? scheme : null
-}
+import { settlementSchemeOf } from '../../domain/machine-metadata.js'
 
 export async function settleX402(
   agent: AgentContext,
@@ -56,7 +43,7 @@ export async function settleX402(
   // `delegationReplay` answers on the authorize side (#3417). Only an erc7710
   // row qualifies: on an EIP-3009 funding row a confirmed tx_hash proves only
   // that the delegate was funded, and it keeps the plain 409 below.
-  if (intent.status === 'confirmed' && intent.tx_hash && settlementScheme(intent) === 'erc7710') {
+  if (intent.status === 'confirmed' && intent.tx_hash && settlementSchemeOf(intent.machine_metadata) === 'erc7710') {
     return {
       code: 409,
       body: {

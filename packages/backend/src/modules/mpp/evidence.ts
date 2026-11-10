@@ -41,6 +41,7 @@ import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
+import { machineMetadataObjectOrEmpty, settlementSchemeOfStrict } from '../../domain/machine-metadata.js'
 // dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 // dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
@@ -288,39 +289,22 @@ function railForPayment(intent: MachinePaymentEvidenceSource): string | null {
  * eip3009 settlement branch above (reported hash ≠ funding hash) never sees;
  * the proof ladder runs here for it and nowhere else.
  */
-function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
-  const raw = intent.machine_metadata
-  let metadata: Record<string, unknown> = {}
-  if (raw && typeof raw === 'string') {
-    try {
-      metadata = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      metadata = {}
-    }
-  } else if (raw && typeof raw === 'object') {
-    metadata = raw
-  }
+export function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
+  // The scheme read is the last operand, exactly where the inline
+  // `metadata.settlement_scheme` dereference sat: a JSON text that parses to a
+  // non-object throws only once the three gates pass. Before that the chain
+  // short-circuits to false, as it always did.
   return (
     intent.status === 'confirmed' &&
     (intent.payment_rail ?? intent.source) === 'x402' &&
     intent.execution_rail === 'delegation' &&
-    metadata.settlement_scheme === 'eip3009'
+    settlementSchemeOfStrict(intent.machine_metadata) === 'eip3009'
   )
 }
 
 /** The payment's persisted receipt-attribution verdict, when one is stored (#4319 limit 7). */
-function storedReceiptVerdict(intent: MachinePaymentEvidenceSource): string | null {
-  const raw = intent.machine_metadata
-  let metadata: Record<string, unknown> = {}
-  if (raw && typeof raw === 'string') {
-    try {
-      metadata = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      metadata = {}
-    }
-  } else if (raw && typeof raw === 'object') {
-    metadata = raw
-  }
+export function storedReceiptVerdict(intent: MachinePaymentEvidenceSource): string | null {
+  const metadata = machineMetadataObjectOrEmpty(intent.machine_metadata)
   const verdict = metadata.merchant_settlement_receipt_verdict
   return typeof verdict === 'string' ? verdict : null
 }

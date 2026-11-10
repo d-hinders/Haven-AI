@@ -1,5 +1,10 @@
 import { x402Description } from '../../domain/x402-description.js'
 import {
+  machineMetadataOrNull,
+  machineMetadataRecord,
+  settlementSchemeOf,
+} from '../../domain/machine-metadata.js'
+import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
   AgentPaymentRail,
@@ -281,33 +286,8 @@ export interface AgentMppResumeState {
   expiresAt: string
 }
 
-interface MachinePaymentMetadata {
-  network?: unknown
-  description?: unknown
-  protocol?: unknown
-  /** #1355: the verbatim 402 PaymentRequired; #3610 reads `resource.description` from it on older rows. */
-  payment_required?: unknown
-}
-
 function railFor(row: { payment_rail: string | null; source: string | null }): string {
   return row.payment_rail ?? row.source ?? AgentPaymentRail.Direct
-}
-
-function metadataObject(value: unknown): MachinePaymentMetadata {
-  if (!value) return {}
-  if (typeof value === 'object' && !Array.isArray(value)) return value as MachinePaymentMetadata
-  if (typeof value !== 'string') return {}
-
-  try {
-    const parsed = JSON.parse(value)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as MachinePaymentMetadata
-    }
-  } catch {
-    return {}
-  }
-
-  return {}
 }
 
 function nullableString(value: unknown): string | null {
@@ -339,7 +319,7 @@ function railContext(input: {
   /** #3494: the direct (non-x402/mpp) rail's own key, `payment_intents.send_idempotency_key`. */
   sendIdempotencyKey?: string | null
 }) {
-  const metadata = metadataObject(input.machineMetadata)
+  const metadata = machineMetadataRecord(input.machineMetadata)
 
   if (input.rail === AgentPaymentRail.X402) {
     // #3610: rows authorized before the description was persisted still carry
@@ -502,25 +482,6 @@ export {
   merchantReportGraceElapsed,
 } from '../../domain/merchant-report-grace.js'
 
-/** Parse `machine_metadata` the way `settlement-observed.ts` does, once, for both keys read off it below. */
-function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
-  if (!machineMetadata) return null
-  if (typeof machineMetadata === 'string') {
-    try {
-      return JSON.parse(machineMetadata) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }
-  return machineMetadata as Record<string, unknown>
-}
-
-/** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
-function settlementSchemeOf(machineMetadata: unknown): string | null {
-  const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
-  return typeof scheme === 'string' ? scheme : null
-}
-
 /**
  * #3475 follow-up (review round 1, N1): the WIRE-TYPED narrowing of
  * `settlementSchemeOf` above for `AgentPaymentStatus.settlement_scheme` —
@@ -530,6 +491,11 @@ function settlementSchemeOf(machineMetadata: unknown): string | null {
  * A stored value outside the declared enum (never written today, but not
  * schema-enforced at the column) maps to `null` here rather than escaping
  * the OpenAPI-declared type.
+ *
+ * #4765: this stays here rather than folding into the reader's
+ * `settlementSchemeOfNarrowed`. That variant narrows the COLUMN and carries the
+ * `{child, budget}` fallback `x402/intent-by-key.ts` needs; this narrows an
+ * already-read wire value and must not gain that fallback.
  */
 function narrowSettlementScheme(scheme: string | null): 'eip3009' | 'erc7710' | null {
   return scheme === 'eip3009' || scheme === 'erc7710' ? scheme : null
@@ -541,7 +507,7 @@ function narrowSettlementScheme(scheme: string | null): 'eip3009' | 'erc7710' | 
  * Null on rows authorized before #2960 and on the legacy rail.
  */
 function delegateAccountAddressOf(machineMetadata: unknown): string | null {
-  const value = parsedMachineMetadata(machineMetadata)?.delegate_account_address
+  const value = machineMetadataOrNull(machineMetadata)?.delegate_account_address
   return typeof value === 'string' ? value : null
 }
 
@@ -553,7 +519,7 @@ function delegateAccountAddressOf(machineMetadata: unknown): string | null {
  * nothing is recorded (or the stored value is not a string).
  */
 function recordedMerchantSettlementTxHash(machineMetadata: unknown): string | null {
-  const value = parsedMachineMetadata(machineMetadata)?.merchant_settlement_tx_hash
+  const value = machineMetadataOrNull(machineMetadata)?.merchant_settlement_tx_hash
   return typeof value === 'string' ? value : null
 }
 

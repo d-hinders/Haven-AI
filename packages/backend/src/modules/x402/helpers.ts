@@ -8,6 +8,7 @@ import { getIntentStatus } from '../../infra/repositories/payment-intents.js'
 import { getX402HourlyUsage } from '../../infra/repositories/x402-authorizations.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { AgentPaymentNextAction, AgentPaymentPhase, AgentPaymentRail } from '../../domain/agent-payment-taxonomy.js'
+import { machineMetadataOrNull } from '../../domain/machine-metadata.js'
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 const DECIMAL_ATOMIC_AMOUNT_RE = /^[0-9]+$/
@@ -60,16 +61,7 @@ export async function currentPaymentIntentStatus(id: string, agent: AgentContext
 }
 
 export function x402MetadataNetwork(metadata: unknown): string | null {
-  if (!metadata) return null
-  const parsed = typeof metadata === 'string'
-    ? (() => {
-        try {
-          return JSON.parse(metadata) as unknown
-        } catch {
-          return null
-        }
-      })()
-    : metadata
+  const parsed = machineMetadataOrNull(metadata)
   if (!parsed || typeof parsed !== 'object') return null
   const network = (parsed as { network?: unknown }).network
   return typeof network === 'string' ? network : null

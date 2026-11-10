@@ -13,6 +13,7 @@
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-authorizations.js'
 import { x402MetadataNetwork } from './helpers.js'
+import { settlementSchemeOfNarrowed } from '../../domain/machine-metadata.js'
 import type { X402HandlerResult } from './types.js'
 
 export function parseObject(value: unknown): Record<string, unknown> | null {
@@ -32,13 +33,13 @@ export function parseObject(value: unknown): Record<string, unknown> | null {
  * `machine_metadata.settlement_scheme` first (written at authorize on both
  * legs); rows without it fall back to the stored settlement state's shape —
  * an erc7710 `{child, budget}` pair. Anything else is unknown (null).
+ *
+ * #4765: the read itself is the reader's `settlementSchemeOfNarrowed`; this
+ * file keeps `parseObject` for `prepared_user_op`, which is the same
+ * JSONB-object shape but not this column.
  */
-export function settlementSchemeOf(row: Record<string, unknown>): 'erc7710' | 'eip3009' | null {
-  const scheme = parseObject(row.machine_metadata)?.settlement_scheme
-  if (scheme === 'erc7710' || scheme === 'eip3009') return scheme
-  const state = parseObject(row.prepared_user_op)
-  if (state?.child && state?.budget) return 'erc7710'
-  return null
+function settlementSchemeOf(row: Record<string, unknown>): 'erc7710' | 'eip3009' | null {
+  return settlementSchemeOfNarrowed(row.machine_metadata, parseObject(row.prepared_user_op))
 }
 
 function toIso(value: unknown): string | null {

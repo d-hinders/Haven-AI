@@ -8,12 +8,13 @@
  * EIP-3009 bridge) was read on eight code lines by five differently-shaped
  * readers. Their parity was held by comment.
  *
- * This table is step 1 of the issue: it records, for each input shape, WHAT
- * EACH CALL SITE READS TODAY — the value its expression evaluates to, or the
- * error it throws. It is a characterization, not a specification: every cell
- * below was recorded from the pre-refactor code, and step 2 (one reader file)
- * must reproduce the same column for the same row. A cell that would change is
- * a behaviour change and is not allowed in this PR.
+ * This table is the issue's step 1: it records, for each input shape, WHAT
+ * EACH CALL SITE READS — the value its expression evaluates to, or the error
+ * it throws. Every cell was recorded from the pre-refactor code, and step 2
+ * (one reader file) reproduces the same column for the same row: the probes
+ * below are now each call site's post-refactor expression, and the expected
+ * column is unchanged. A cell that would change is a behaviour change and is
+ * not allowed in this PR.
  *
  * Rows are the input shapes the issue names — an object, null, undefined, a
  * JSON string of an object, malformed JSON, the JSON texts `null` and `5`, the
@@ -24,7 +25,9 @@
  * Columns are the fifteen parse sites and the eight scheme reads. Where a
  * parse site's only consumer is a scheme read, the column is that read; where
  * the consumer compares the field to a literal, the column is the comparison's
- * boolean, because that is what the call site observes.
+ * boolean, because that is what the call site observes. `mpp/rail-dispatch.ts`'s
+ * `metadataObject` had no callers and is deleted by step 2, so its column is
+ * gone; every other column keeps the value it recorded before the refactor.
  *
  * Three cells throw today, all on the JSON text `null`: `mpp/evidence.ts`'s
  * two inline parses dereference the parsed value without a guard, and
@@ -33,29 +36,17 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  parsedMachineMetadata as budgetPrecheckParsedMachineMetadata,
-  settlementSchemeOf as budgetPrecheckSettlementSchemeOf,
-} from '../modules/mpp/budget-precheck.js'
+  machineMetadataObject,
+  machineMetadataObjectOrEmpty,
+  machineMetadataOrNull,
+  machineMetadataRecord,
+  settlementSchemeOf,
+  settlementSchemeOfNarrowed,
+} from '../domain/machine-metadata.js'
 import { isEip3009BridgePayment, storedReceiptVerdict } from '../modules/mpp/evidence.js'
-import { metadataObject as railDispatchMetadataObject } from '../modules/mpp/rail-dispatch.js'
-import {
-  metadataObject as agentStatusMetadataObject,
-  parsedMachineMetadata as agentStatusParsedMachineMetadata,
-  settlementSchemeOf as agentStatusSettlementSchemeOf,
-} from '../modules/payments/agent-payment-status.js'
-import {
-  metadataOf as receiptMetadataOf,
-  metadataRecord as receiptMetadataRecord,
-} from '../modules/x402/eip3009-receipt-settlement.js'
-import { metadataOf as evidenceMetadataOf } from '../modules/x402/eip3009-settlement-evidence.js'
 import { x402MetadataNetwork } from '../modules/x402/helpers.js'
-import { parseObject, settlementSchemeOf as intentByKeySettlementSchemeOf } from '../modules/x402/intent-by-key.js'
-import {
-  parseMachineMetadata as merchantCallContextParseMachineMetadata,
-  storedMcpCallContext,
-} from '../modules/x402/merchant-call-context.js'
-import { settlementScheme as settleSettlementScheme } from '../modules/x402/settle.js'
-import { settlementSchemeOf as observedSettlementSchemeOf } from '../modules/x402/settlement-observed.js'
+import { parseObject } from '../modules/x402/intent-by-key.js'
+import { storedMcpCallContext } from '../modules/x402/merchant-call-context.js'
 import { storedPaymentRequiredFromMetadata } from '../modules/x402/sign-context.js'
 
 interface Row {
@@ -132,39 +123,35 @@ function evidenceIntent(row: Row) {
 }
 
 const COLUMNS: Array<{ site: string; probe: (row: Row) => unknown }> = [
-  { site: 'mpp/budget-precheck.ts:133', probe: (r) => budgetPrecheckParsedMachineMetadata(r.machineMetadata) },
-  { site: 'mpp/budget-precheck.ts:143', probe: (r) => budgetPrecheckSettlementSchemeOf(r.machineMetadata) },
+  { site: 'mpp/budget-precheck.ts:133', probe: (r) => machineMetadataOrNull(r.machineMetadata) },
+  { site: 'mpp/budget-precheck.ts:143', probe: (r) => settlementSchemeOf(r.machineMetadata) },
   { site: 'mpp/evidence.ts:296', probe: (r) => isEip3009BridgePayment(evidenceIntent(r)) },
   { site: 'mpp/evidence.ts:317', probe: (r) => storedReceiptVerdict(evidenceIntent(r)) },
-  { site: 'mpp/rail-dispatch.ts:52', probe: (r) => railDispatchMetadataObject(r.machineMetadata) },
-  { site: 'payments/agent-payment-status.ts:302', probe: (r) => agentStatusMetadataObject(r.machineMetadata) },
-  { site: 'payments/agent-payment-status.ts:510', probe: (r) => agentStatusParsedMachineMetadata(r.machineMetadata) },
-  { site: 'payments/agent-payment-status.ts:520', probe: (r) => agentStatusSettlementSchemeOf(r.machineMetadata) },
+  { site: 'payments/agent-payment-status.ts:302', probe: (r) => machineMetadataRecord(r.machineMetadata) },
+  { site: 'payments/agent-payment-status.ts:510', probe: (r) => machineMetadataOrNull(r.machineMetadata) },
+  { site: 'payments/agent-payment-status.ts:520', probe: (r) => settlementSchemeOf(r.machineMetadata) },
   {
     site: 'x402/eip3009-receipt-settlement.ts:150',
-    probe: (r) => receiptMetadataOf({ machine_metadata: r.machineMetadata } as never).merchant_settlement_tx_hash,
+    probe: (r) => machineMetadataObjectOrEmpty(r.machineMetadata).merchant_settlement_tx_hash,
   },
   {
     site: 'x402/eip3009-receipt-settlement.ts:517',
-    probe: (r) => receiptMetadataRecord({ machine_metadata: r.machineMetadata } as never)?.settlement_scheme === 'eip3009',
+    probe: (r) => settlementSchemeOf(r.machineMetadata) === 'eip3009',
   },
   {
     site: 'x402/eip3009-settlement-evidence.ts:106',
-    probe: (r) => evidenceMetadataOf({ machine_metadata: r.machineMetadata } as never)?.settlement_scheme === 'eip3009',
+    probe: (r) => settlementSchemeOf(r.machineMetadata) === 'eip3009',
   },
   { site: 'x402/helpers.ts:67', probe: (r) => x402MetadataNetwork(r.machineMetadata) },
-  { site: 'x402/intent-by-key.ts:22', probe: (r) => parseObject(r.machineMetadata) },
+  { site: 'x402/intent-by-key.ts:22', probe: (r) => machineMetadataObject(r.machineMetadata) },
   {
     site: 'x402/intent-by-key.ts:37',
-    probe: (r) => intentByKeySettlementSchemeOf({ machine_metadata: r.machineMetadata, prepared_user_op: r.preparedUserOp }),
+    probe: (r) => settlementSchemeOfNarrowed(r.machineMetadata, parseObject(r.preparedUserOp)),
   },
-  { site: 'x402/merchant-call-context.ts:28', probe: (r) => merchantCallContextParseMachineMetadata(r.machineMetadata) },
+  { site: 'x402/merchant-call-context.ts:28', probe: (r) => machineMetadataOrNull(r.machineMetadata) },
   { site: 'x402/merchant-call-context.ts:38', probe: (r) => storedMcpCallContext(r.machineMetadata) },
-  { site: 'x402/settle.ts:32', probe: (r) => settleSettlementScheme({ machine_metadata: r.machineMetadata } as never) },
-  {
-    site: 'x402/settlement-observed.ts:120',
-    probe: (r) => observedSettlementSchemeOf({ machine_metadata: r.machineMetadata } as never),
-  },
+  { site: 'x402/settle.ts:32', probe: (r) => settlementSchemeOf(r.machineMetadata) },
+  { site: 'x402/settlement-observed.ts:120', probe: (r) => settlementSchemeOf(r.machineMetadata) },
   { site: 'x402/sign-context.ts:180', probe: (r) => storedPaymentRequiredFromMetadata(r.machineMetadata) },
 ]
 
@@ -175,7 +162,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "string:erc7710",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "string:verified",
-    "mpp/rail-dispatch.ts:52": "object{mcp_call_context,merchant_settlement_receipt_verdict,merchant_settlement_tx_hash,network,payment_required,settlement_scheme}",
     "payments/agent-payment-status.ts:302": "object{mcp_call_context,merchant_settlement_receipt_verdict,merchant_settlement_tx_hash,network,payment_required,settlement_scheme}",
     "payments/agent-payment-status.ts:510": "object{mcp_call_context,merchant_settlement_receipt_verdict,merchant_settlement_tx_hash,network,payment_required,settlement_scheme}",
     "payments/agent-payment-status.ts:520": "string:erc7710",
@@ -196,7 +182,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "null",
     "payments/agent-payment-status.ts:520": "null",
@@ -217,7 +202,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "null",
     "payments/agent-payment-status.ts:520": "null",
@@ -238,7 +222,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "string:eip3009",
     "mpp/evidence.ts:296": "boolean:true",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{network,settlement_scheme}",
     "payments/agent-payment-status.ts:302": "object{network,settlement_scheme}",
     "payments/agent-payment-status.ts:510": "object{network,settlement_scheme}",
     "payments/agent-payment-status.ts:520": "string:eip3009",
@@ -259,7 +242,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "null",
     "payments/agent-payment-status.ts:520": "null",
@@ -280,7 +262,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "throw:TypeError",
     "mpp/evidence.ts:317": "throw:TypeError",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "null",
     "payments/agent-payment-status.ts:520": "null",
@@ -301,7 +282,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "number:5",
     "payments/agent-payment-status.ts:520": "null",
@@ -322,7 +302,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "string:null",
     "payments/agent-payment-status.ts:520": "null",
@@ -343,7 +322,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "string:5",
     "payments/agent-payment-status.ts:520": "null",
@@ -364,7 +342,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "array",
     "payments/agent-payment-status.ts:520": "null",
@@ -385,7 +362,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{network}",
     "payments/agent-payment-status.ts:302": "object{network}",
     "payments/agent-payment-status.ts:510": "object{network}",
     "payments/agent-payment-status.ts:520": "null",
@@ -406,7 +382,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:302": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:510": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:520": "null",
@@ -427,7 +402,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "string:erc7710",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:302": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:510": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:520": "string:erc7710",
@@ -448,7 +422,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "string:eip3009",
     "mpp/evidence.ts:296": "boolean:true",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:302": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:510": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:520": "string:eip3009",
@@ -469,7 +442,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "string:erc4337",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:302": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:510": "object{settlement_scheme}",
     "payments/agent-payment-status.ts:520": "string:erc4337",
@@ -490,7 +462,6 @@ const EXPECTED: Record<string, Record<string, string>> = {
     "mpp/budget-precheck.ts:143": "null",
     "mpp/evidence.ts:296": "boolean:false",
     "mpp/evidence.ts:317": "null",
-    "mpp/rail-dispatch.ts:52": "object{}",
     "payments/agent-payment-status.ts:302": "object{}",
     "payments/agent-payment-status.ts:510": "object{}",
     "payments/agent-payment-status.ts:520": "null",

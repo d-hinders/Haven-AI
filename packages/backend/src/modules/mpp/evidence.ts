@@ -41,6 +41,7 @@ import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { quoteFee, recordSettledFee } from '../fee/index.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { isProtocolPaymentRail } from './rail-dispatch.js'
+import { machineMetadataObjectOrEmpty, settlementSchemeOfStrict } from '../../domain/machine-metadata.js'
 // dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
 import { observeErc7710Settlement } from '../x402/settlement-observed.js'
 // dep-lint-exempt: the x402 barrel re-exports settlement-sweeper.ts, which imports the mpp barrel (and so this file), so importing through it closes an mpp ↔ x402 cycle; this x402 leaf imports nothing from mpp (#4379)
@@ -289,38 +290,20 @@ function railForPayment(intent: MachinePaymentEvidenceSource): string | null {
  * the proof ladder runs here for it and nowhere else.
  */
 export function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
-  const raw = intent.machine_metadata
-  let metadata: Record<string, unknown> = {}
-  if (raw && typeof raw === 'string') {
-    try {
-      metadata = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      metadata = {}
-    }
-  } else if (raw && typeof raw === 'object') {
-    metadata = raw
-  }
+  // Read before the gates, as the inline parse did: a JSON text that parses to
+  // a non-object throws here regardless of the intent's status or rail.
+  const scheme = settlementSchemeOfStrict(intent.machine_metadata)
   return (
     intent.status === 'confirmed' &&
     (intent.payment_rail ?? intent.source) === 'x402' &&
     intent.execution_rail === 'delegation' &&
-    metadata.settlement_scheme === 'eip3009'
+    scheme === 'eip3009'
   )
 }
 
 /** The payment's persisted receipt-attribution verdict, when one is stored (#4319 limit 7). */
 export function storedReceiptVerdict(intent: MachinePaymentEvidenceSource): string | null {
-  const raw = intent.machine_metadata
-  let metadata: Record<string, unknown> = {}
-  if (raw && typeof raw === 'string') {
-    try {
-      metadata = JSON.parse(raw) as Record<string, unknown>
-    } catch {
-      metadata = {}
-    }
-  } else if (raw && typeof raw === 'object') {
-    metadata = raw
-  }
+  const metadata = machineMetadataObjectOrEmpty(intent.machine_metadata)
   const verdict = metadata.merchant_settlement_receipt_verdict
   return typeof verdict === 'string' ? verdict : null
 }

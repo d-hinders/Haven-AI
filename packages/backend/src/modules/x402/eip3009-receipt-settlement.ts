@@ -74,6 +74,7 @@ import { verifySettlementTransferTx } from '../../infra/chain/settlement-transfe
 import { isZeroSettlementTxHash } from '@haven_ai/sdk'
 import { deriveX402PaymentNonce } from '@haven_ai/sdk/edge'
 import { config } from '../../config.js'
+import { machineMetadataObjectOrEmpty, settlementSchemeOf } from '../../domain/machine-metadata.js'
 import { CLOCK_SKEW_SECONDS } from './settlement-observed.js'
 import { observeEip3009MerchantSettlement, type Eip3009SettlementIntent } from './eip3009-settlement-evidence.js'
 import {
@@ -141,16 +142,6 @@ export function receiptPayloadTransaction(payload: unknown): string | null {
       ? (parsed as { transaction?: unknown }).transaction
       : null
   return typeof tx === 'string' && tx ? tx : null
-}
-
-export function metadataOf(row: SiblingX402DelegationRow): Record<string, unknown> {
-  if (!row.machine_metadata) return {}
-  if (typeof row.machine_metadata !== 'string') return row.machine_metadata
-  try {
-    return JSON.parse(row.machine_metadata) as Record<string, unknown>
-  } catch {
-    return {}
-  }
 }
 
 /** The chain reads Tier 2 needs; injectable so tests can serve a fixture chain. */
@@ -431,7 +422,7 @@ export async function observeEip3009ReceiptSettlement(
     // is a definitive "not provably settled"; an UNREADABLE recorded hash is
     // "could not ask" and stays retryable.
     if (siblingBlock <= candidateBlock) {
-      const recordedHash = metadataOf(sibling).merchant_settlement_tx_hash
+      const recordedHash = machineMetadataObjectOrEmpty(sibling.machine_metadata).merchant_settlement_tx_hash
       if (typeof recordedHash !== 'string') {
         await persistVerdict('refused_ambiguous')
         return refused(
@@ -505,19 +496,8 @@ function isFundedEip3009Shaped(intent: Eip3009SettlementIntent, candidateTxHash:
     intent.tx_hash.toLowerCase() !== candidateTxHash.toLowerCase() &&
     (intent.payment_rail ?? intent.source) === 'x402' &&
     intent.execution_rail === 'delegation' &&
-    metadataRecord(intent)?.settlement_scheme === 'eip3009'
+    settlementSchemeOf(intent.machine_metadata) === 'eip3009'
   )
-}
-
-export function metadataRecord(intent: Eip3009SettlementIntent): Record<string, unknown> {
-  const raw = intent.machine_metadata
-  if (!raw) return {}
-  if (typeof raw !== 'string') return raw
-  try {
-    return JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    return {}
-  }
 }
 
 // ── Tier 1 from the stored header (arrival + backfill) ──────────────────────

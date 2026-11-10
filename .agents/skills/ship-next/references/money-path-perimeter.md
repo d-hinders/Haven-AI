@@ -61,6 +61,13 @@ was `rails/allowance-module.ts` until #2850 renamed it to `infra/chain/relayer-r
 the AllowanceModule filename was the last false claim the retired rail left behind.
 The `domain/machine-payment-lifecycle.ts` entry guards the backend re-export shim;
 the code itself lives in `packages/core` (see below, #1905).
+`domain/machine-metadata.ts` is the one reader for
+`payment_intents.machine_metadata` (#4765): fifteen parse sites and eight
+`settlement_scheme` reads across twelve `modules/` files now go through it, and
+`settlement_scheme` selects erc7710 vs the EIP-3009 bridge. The decision moved
+out of `modules/x402/**` and `modules/mpp/**` (both listed whole) into a pure
+`domain/` file, so the glob follows it in the same PR — the #1892
+accident-of-location rule.
 The two `domain/x402-*` entries hold the settlement path's window constants:
 `x402-settlement-timing.ts` (the 600 s settlement-child expiry clamp and the 120 s
 clock skew, moved out of `modules/x402/` by #4379 so a payments file could read
@@ -71,6 +78,7 @@ list before #4379.
 - `packages/backend/src/modules/x402/**`
 - `packages/backend/src/modules/mpp/**`
 - `packages/backend/src/domain/payment-token.ts`
+- `packages/backend/src/domain/machine-metadata.ts`
 - `packages/backend/src/domain/machine-payment-lifecycle.ts`
 - `packages/backend/src/domain/x402-settlement-timing.ts`
 - `packages/backend/src/domain/x402-sweep-window.ts`

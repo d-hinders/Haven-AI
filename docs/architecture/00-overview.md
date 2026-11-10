@@ -69,7 +69,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-11-02"
+last-verified: "2026-11-10"
 ---
 
 # Haven — Architecture Overview

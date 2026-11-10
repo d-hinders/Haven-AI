@@ -5,7 +5,7 @@ covers:
   - docs/regulatory/casp-changelog/**
   - scripts/docs/coupling-gate.mjs
   - scripts/release-bump.mjs
-last-verified: "2026-11-02"
+last-verified: "2026-11-10"
 ---
 
 # CASP verification log — sharded entries (#1366)
@@ -63,7 +63,7 @@ also edits.
   (frozen as of 2026-08-12). Its `last-verified` now reflects genuine
   re-verification of the BODY claims (for example a pass the weekly docs
   audit asks for: `docs-audit.yml` runs on Mondays and keeps one tracking
-  issue, #4605 at present), not per-PR bumps.
+  issue, #4752 at present), not per-PR bumps.
 
 ## Once merged, a shard is immutable
 

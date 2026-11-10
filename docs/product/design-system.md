@@ -1817,10 +1817,11 @@ revoke/remove, delete contact):
   (`packages/ui/tailwind.preset.js`) and would work there too. The mixed spelling in one class string is the tell — where the
   two forms sit side by side, the one with a modifier is the one that has to be semantic.
 
-**Distribution, with the command that produced it.** Ghost dominates: 191 ghost, 31 tertiary,
-8 primary, 4 danger — 234 literal occurrences, from `packages/frontend` (measured
-2026-11-03 at `1344f3a83`; 182 / 30 / 8 / 5 = 225 on 2026-10-25 at `fb2da6b92`; re-measured
-weekly as row `ds-button-variant-distribution` in `docs/quality/scan-baselines.json`):
+**Distribution, with the command that produced it.** Ghost dominates: 205 ghost, 33 tertiary,
+8 primary, 4 danger — 250 literal occurrences, from `packages/frontend` (measured
+2026-11-10 at `3d4874a70`; 191 / 31 / 8 / 4 = 234 on 2026-11-03 at `1344f3a83`; 182 / 30 / 8 / 5 = 225
+on 2026-10-25 at `fb2da6b92`; re-measured weekly as row `ds-button-variant-distribution` in
+`docs/quality/scan-baselines.json`):
 
 ```bash
 grep -rhoE 'variant="(primary|ghost|tertiary|danger)"' src --include='*.tsx' | sort | uniq -c

@@ -96,13 +96,16 @@ describe('passport anchor seams are wired in index.ts', () => {
   it('the stripper keeps real code: the registerConnector region survives (#4411)', () => {
     // A statement from the exact stretch the old regex pair swallowed (the
     // window between the `/accounting/connections/*` line comment and the
-    // CATALOG_INGEST_INTERVAL_MS jsdoc). If any stripper ever eats a region
-    // of index.ts again, this goes red before the wiring assertions can
-    // read a false silence.
+    // catalog-interval jsdoc). If any stripper ever eats a region of
+    // index.ts again, this goes red before the wiring assertions can read a
+    // false silence.
     expect(CODE).toMatch(/registerConnector\(new AccountedConnector\(\)\)/)
     expect(CODE).toMatch(/registerConnector\(new FortnoxConnector\(\)\)/)
     expect(CODE).toMatch(/await app\.register\(accountingConnectionsRoutes/)
-    expect(CODE).toMatch(/const CATALOG_INGEST_INTERVAL_MS\s*=/)
+    // The far end of that window. This replaced the `CATALOG_INGEST_INTERVAL_MS`
+    // pin when that constant moved to `background-jobs.ts` (#4764) — the
+    // control is moved, not weakened.
+    expect(CODE).toMatch(/await runMigrations\(\)/)
   })
 
   it('the helper itself can fail — a seam that is NOT wired reads as false', () => {

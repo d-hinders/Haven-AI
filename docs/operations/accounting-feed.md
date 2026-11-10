@@ -23,6 +23,7 @@ covers:
   - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/config.ts
   - packages/backend/src/index.ts
+  - packages/backend/src/background-jobs.ts
   - packages/backend/src/modules/agents/entitlements.ts
   - packages/backend/src/modules/transactions/accounting.ts
   - packages/backend/src/modules/x402/settlement-sweeper.ts
@@ -632,8 +633,8 @@ the feed went live.
 
 ## Background retry sweep
 
-`startRetrySweep` (`modules/accounting/retry-sweep.ts`, registered in
-`src/index.ts`, `unref()`ed, leader-locked on
+`startRetrySweep` (`modules/accounting/retry-sweep.ts`, called from
+`src/background-jobs.ts`, `unref()`ed, leader-locked on
 `LEADER_LOCK_KEYS.accountingRetrySweep`). Cadence
 `HAVEN_ACCOUNTING_RETRY_SWEEP_INTERVAL_MS`; the first tick runs at boot; a
 tick still running when the next fires is skipped in-process. **Inert** when

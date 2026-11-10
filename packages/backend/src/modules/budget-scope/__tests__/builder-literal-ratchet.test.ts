@@ -10,9 +10,11 @@
  * backend source only:
  *
  * - in the module (`modules/budget-scope/refusal-body.ts`), and
- * - in `routes/payments.ts`'s sign-leg revert 502. #3618 deliberately left
- *   that one alone: it is decided after the chain reverted, not by a
- *   pre-check, and it reads nothing from the resolver.
+ * - in `modules/payments/sign-payment.ts`'s sign-leg revert 502. #3618
+ *   deliberately left that one alone: it is decided after the chain reverted,
+ *   not by a pre-check, and it reads nothing from the resolver. #4761 moved
+ *   the sign route's body out of `routes/payments.ts` into that module
+ *   verbatim, so the allowed site moved with it.
  *
  * A source scan, not a behaviour test, on purpose: a new hand-built site
  * reddens here whether or not any test reaches its branch. `openapi/` is
@@ -44,7 +46,7 @@ const EXPIRED_LITERAL = 'this budget ended on ${'
 /** Every allowed site, with its exact count. A stale entry fails too. */
 const ALLOWED: Record<string, number> = {
   'modules/budget-scope/refusal-body.ts': 2,
-  'routes/payments.ts': 1,
+  'modules/payments/sign-payment.ts': 1,
 }
 
 /** #4458: the expired-prose literal's allowed sites, with exact counts. */
@@ -99,11 +101,13 @@ describe('delegation_budget_exceeded has one builder (#3620)', () => {
   })
 
   it('the one /payments site is the sign-leg revert 502, not a pre-check', () => {
-    const source = readFileSync(join(SRC, 'routes/payments.ts'), 'utf8')
+    // #4761: the sign route's body lives in modules/payments/sign-payment.ts
+    // now, and its reply-free decided response is `decided(502, …)`.
+    const source = readFileSync(join(SRC, 'modules/payments/sign-payment.ts'), 'utf8')
     const at = source.indexOf(LITERAL)
     const window = source.slice(Math.max(0, at - 1500), at)
     expect(window).toContain('isPeriodBudgetRevert(err)')
-    expect(window).toContain('reply.code(502)')
+    expect(window).toContain('decided(502')
   })
 })
 

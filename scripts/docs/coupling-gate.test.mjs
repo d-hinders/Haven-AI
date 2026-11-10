@@ -1007,7 +1007,9 @@ import {
   copyFileSync as copyFile4612,
   readFileSync as readFile4612,
   writeFileSync as writeFile4612,
+  realpathSync as realpath4612,
   rmSync as rm4612,
+  symlinkSync as symlink4612,
 } from 'node:fs'
 import { tmpdir as tmpdir4612 } from 'node:os'
 import { dirname as dirname4612, join as join4612 } from 'node:path'
@@ -1057,8 +1059,16 @@ function git4612(dir, args) {
   return exec4612('git', args, { cwd: dir, encoding: 'utf8' })
 }
 
-function makeFixtureRepo() {
-  const dir = mkdtemp4612(join4612(tmpdir4612(), 'coupling-4612-'))
+function makeFixtureRepo(baseDir = tmpdir4612()) {
+  // realpathSync: on macOS `os.tmpdir()` is `/var/folders/…`, a symlink to
+  // `/private/var/folders/…`. `runFixtureGate` below runs the copied gate by
+  // its ABSOLUTE path, and the gate's entry guard compares
+  // `fileURLToPath(import.meta.url)` — which Node resolves through the symlink
+  // — with `process.argv[1]`, which does not. A fixture dir reached through a
+  // symlink therefore makes the gate exit 0 having done nothing: a false pass
+  // shaped like a clean run (#4767). Same mechanism, same fix, as
+  // `scripts/release-scope.test.mjs` documents for #2721.
+  const dir = realpath4612(mkdtemp4612(join4612(baseDir, 'coupling-4612-')))
   for (const rel of FIXTURE_FILES) {
     const dest = join4612(dir, rel)
     mkdir4612(dirname4612(dest), { recursive: true })
@@ -1285,5 +1295,41 @@ test4612('#4612: a trailer naming a doc the PR does not implicate is ignored and
     assert4612.match(comment, /Commit trailers that cleared nothing/)
     assert4612.match(comment, /this PR does not implicate it/)
   })
+})
+
+test4612('#4767 REGRESSION: the fixture still runs the gate when its temp dir is reached through a symlink', () => {
+  // The case the realpathSync in `makeFixtureRepo` exists for, built here
+  // rather than assumed from the host: macOS reaches `os.tmpdir()` through
+  // `/var/folders/…` → `/private/var/folders/…`, and on such a machine the
+  // gate's entry guard is false, so it exits 0 having done nothing. Remove the
+  // realpathSync and this goes red on Linux too, which is the point — a
+  // regression case that only fires on the machine that found the bug is a
+  // case nobody runs.
+  const realBase = mkdtemp4612(join4612(tmpdir4612(), 'coupling-4767-real-'))
+  const linkBase = join4612(realBase, 'link')
+  symlink4612(realBase, linkBase, 'dir')
+  try {
+    const fx = makeFixtureRepo(linkBase)
+    try {
+      assert4612.equal(
+        fx.dir,
+        realpath4612(fx.dir),
+        'the fixture dir must be canonical — a symlinked path makes the gate a silent no-op',
+      )
+      // A behavioural line the gate must BLOCK on. If the guard fails open the
+      // gate exits 0 with no output, so both assertions below go red.
+      appendLine(fx, 'packages/backend/src/domain/user-signers.ts', '// behavioural change')
+      commitFixture(fx, 'feat: user signers change')
+
+      const { status, output } = runFixtureGate(fx)
+      assert4612.equal(status, 1, `the gate must actually run and block:\n${output}`)
+      assert4612.match(output, /BLOCKING/)
+      assert4612.match(output, /delegation-rail-security-model/)
+    } finally {
+      rm4612(fx.dir, { recursive: true, force: true })
+    }
+  } finally {
+    rm4612(realBase, { recursive: true, force: true })
+  }
 })
 

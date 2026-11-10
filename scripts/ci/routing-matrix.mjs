@@ -498,6 +498,18 @@ export const ROUTING_MATRIX = [
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
   },
   {
+    files: ['scripts/lint-route-line-ceiling.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only line ceiling over backend route files larger than 400 lines (#4762, epic #4759 slice 3); it lives under scripts/ but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-route-line-ceiling.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
     files: ['scripts/test-support/guard-cli.mjs'],
     expect: [],
     kind: CONTRACT,
@@ -612,8 +624,8 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'frontend', 'ops'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs TEN gates as of #3924 (nine as of #3131, ' +
-      'eight as of #3104, ' +
+      'The shared ratchet engine backs ELEVEN gates as of #4762 (ten as of #3924, ' +
+      'nine as of #3131, eight as of #3104, ' +
       'backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
       'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
@@ -621,8 +633,10 @@ export const ROUTING_MATRIX = [
       'scripts/docs/ui-gate-wording.mjs, the request-schema ratchet ' +
       '(scripts/lint-request-schemas.mjs, #3029), the typed next-step ratchet ' +
       '(scripts/lint-next-steps.mjs, #3104) — which this row missed, leaving it stale a ' +
-      'THIRD time until #3131 swept it — and the MCP-CLI vocabulary guard ' +
-      '(scripts/ci/vocabulary-divergence.mjs, #3131). All nine share one `updateRefusals`; the count is ' +
+      'THIRD time until #3131 swept it — the MCP-CLI vocabulary guard ' +
+      '(scripts/ci/vocabulary-divergence.mjs, #3131), the budget-liveness census ' +
+      '(scripts/lint-budget-liveness.mjs, #3924) and the route-line ceiling ' +
+      '(scripts/lint-route-line-ceiling.mjs, #4762). All eleven share one `updateRefusals`; the count is ' +
       'pinned by scripts/lib/ratchet.test.mjs rather than trusted, because this row has now ' +
       'been stale three times. Weakening the module must run every surface whose gates import it; ' +
       'routing it to one would leave the others unguarded. ops joined in #3515 (its ops_checks ' +

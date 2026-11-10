@@ -4,6 +4,8 @@ status: current
 covers:
   - .dependency-cruiser.cjs
   - scripts/dep-lint.mjs
+  - scripts/lint-route-line-ceiling.mjs
+  - packages/backend/route-line-ceiling.json
   - packages/core/src/**
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
@@ -12,7 +14,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-11-02"
+last-verified: "2026-11-10"
 ---
 
 # Module Boundaries
@@ -262,6 +264,22 @@ another file's cleanup. `node scripts/dep-lint.mjs --update-ceiling` locks in
 a shrink — it refuses to raise the total or any file, so growth and
 redistribution alike mean hand-editing the JSON and defending that in the PR.
 
+A second shrink-only ceiling covers **route file size**. `npm run lint:route-lines`
+(`scripts/lint-route-line-ceiling.mjs`, built on the repo's shared ratchet engine)
+fails when a non-test `.ts` file directly under
+`packages/backend/src/routes/` grows past its committed line count in
+`packages/backend/route-line-ceiling.json`. A route file at or under **400
+lines** counts as zero and needs no entry, so a new small route passes with no
+ceremony and a file that shrinks under the threshold drops out of the baseline
+on `npm run lint:route-lines:update`; a file over the threshold counts as its
+line count, and a file over it with no entry fails. `--update` lowers entries
+and refuses to raise or add one, so growth — and a net-additive fix to a large
+route, a security fix included — means hand-editing the JSON and defending that
+in the PR, exactly as for the call-site ceiling above. The gate exists because
+slices 1 and 2 of epic [#4759](https://github.com/d-hinders/Haven-AI/issues/4759)
+(#4760, #4761) took `routes/payments.ts` from 1572 lines to 291 and nothing
+stopped it growing back.
+
 If a rule turns out to be **wrong** rather than merely unmet — the tree is right
 and the rule is too strict — change the rule and say why. Bending working code
 to satisfy a bad rule is worse than having no rule.
@@ -273,7 +291,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Signal | Achieved |
 |---|---|
 | `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` except `modules/dashboard/` (#3847), which deliberately has none: its one file, the display-only budget-remaining cache, is reached only through the waived import in `routes/dashboard-budget-remaining.ts` (#3804) |
-| Largest route | `routes/payments.ts`, 1572 lines, then `routes/agent-connection-setups.ts` at 1525 and `routes/agent-delegations.ts` at 1389 (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997; re-measured 2026-11-02 with `wc -l packages/backend/src/routes/*.ts` — further route slimming is post-epic work) |
+| Largest route | `routes/agent-connection-setups.ts`, 1556 lines, then `routes/agent-delegations.ts` at 1389 and `routes/agent-rekey.ts` at 1276 (`routes/payments.ts` fell from 1572 to 291 when slices 1 and 2 of epic #4759 moved the payments lifecycle into `modules/payments/`; `routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997; re-measured 2026-11-10 with `wc -l packages/backend/src/routes/*.ts` — further route slimming is post-epic work, and the shrink-only ceiling above now holds the gain) |
 | Inline SQL call sites | 35 `.query(` call sites across 9 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`npm run lint:deps`; re-measured 2026-10-25 by the weekly docs audit, #4418) and capped by the shrink-only ceiling, now also 35 (#1166; `packages/backend/dep-lint-callsite-ceiling.json`, 9 per-file entries). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) and later moves account for the rest; the ceiling was locked down from 58 to 35 by #4044 |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |

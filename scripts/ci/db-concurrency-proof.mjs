@@ -179,10 +179,27 @@ export function render({ ok, problems, cases }, required = REQUIRED_PROOF_CASES)
   return lines.join('\n')
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// first: Node resolves symlinks for a module's own URL and leaves
+// `process.argv[1]` as typed, so an unresolved comparison answered "not the
+// entry point" through any symlink, and the script exited 0 without running
+// (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // CLI wrapper. All IO here; `evaluate` above stays pure and unit-testable.
 // ---------------------------------------------------------------------------
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+if (isEntryPoint()) {
   const reportPath = process.argv[2]
   if (!reportPath) {
     console.error('usage: db-concurrency-proof.mjs <vitest-json-report>')

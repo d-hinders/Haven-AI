@@ -37,7 +37,7 @@
 // environment variables must not be silent about which question it answered.
 // This is the same false green the docs coupling gate hit (#1076) and fixed
 // (#1077); scripts/docs/coupling-gate.mjs has carried the union since.
-import { readFileSync, writeFileSync, appendFileSync, realpathSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -440,26 +440,27 @@ function main() {
   }
 }
 
-// Resolve symlinks, falling back to the raw path. The fallback matters: this
-// runs at module load, OUTSIDE the try/catch below, so a throw here would
-// crash the advisory run that promises exit 0.
-const resolved = (p) => {
+// True only when this file is the process's entry point, so importing it (a
+// self-test) never runs the CLI. Both paths are resolved first: Node resolves
+// symlinks for a module's own URL and leaves `process.argv[1]` as typed, so an
+// unresolved comparison answered "not the entry point" through any symlink —
+// main() never ran, and the process exited 0 in SILENCE. Under --strict that
+// is a fail-OPEN: the gate passes a diff it never read (#4776). The catch
+// matters too: this runs at module load, OUTSIDE the try/catch below, so a
+// throw here would crash the advisory run that promises exit 0.
+function isEntryPoint() {
+  if (!process.argv[1]) return false
   try {
-    return realpathSync(p)
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
   } catch {
-    return p
+    return false
   }
 }
 
 // Run as CLI only when invoked directly, not when imported by tests.
-//
-// Both sides are realpath-resolved before comparing. `import.meta.url` is
-// already resolved by the module loader but `process.argv[1]` is not, so a
-// path reaching this file through a symlink made the comparison false — main()
-// never ran, and the process exited 0 in SILENCE. Under --strict that is a
-// fail-OPEN: the gate passes a diff it never read. Not reachable from a runner
-// workspace, but a gate must not have that shape at all.
-if (process.argv[1] && resolved(fileURLToPath(import.meta.url)) === resolved(process.argv[1])) {
+if (isEntryPoint()) {
   try {
     main()
   } catch (err) {

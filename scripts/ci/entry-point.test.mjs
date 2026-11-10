@@ -21,8 +21,18 @@
 //      GitHub.
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { realpathSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -52,6 +62,8 @@ function childEnv() {
   for (const name of DROPPED_ENV) delete env[name]
   return env
 }
+
+const urlOf = (script) => pathToFileURL(path.join(REPO, script)).href
 
 /** Run `node <args…>` in `cwd` and return its exit status and combined output. */
 function runNode(args, cwd = REPO) {
@@ -137,14 +149,216 @@ describe('the entry test on the ordinary paths (#4776)', () => {
       assert.equal(status, rep.status)
     })
 
-    test(`${rep.script} does not run main() when it is imported`, () => {
-      // The specifier goes into the source, never onto the command line: an
-      // argument after `-e` becomes `process.argv[1]`, which is the one input
-      // the entry test reads.
-      const url = pathToFileURL(path.join(REPO, rep.script)).href
-      const { status, out } = runNode(['--input-type=module', '-e', `await import(${JSON.stringify(url)})`])
-      assert.equal(out, '', 'an import must print nothing')
-      assert.equal(status, 0)
+    test(`${rep.script} does not run main() when another file imports it`, () => {
+      // The way a self-test or a build config loads it: `process.argv[1]` is
+      // a real file, just not this one.
+      const dir = mkdtempSync(path.join(tmpdir(), 'entry-point-'))
+      try {
+        const importer = path.join(dir, 'importer.mjs')
+        writeFileSync(importer, `await import(${JSON.stringify(urlOf(rep.script))})\n`)
+        const { status, out } = runNode([importer])
+        assert.equal(out, '', 'an import must print nothing')
+        assert.equal(status, 0)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
     })
   }
+
+  // `node -e <code> <arg>` puts <arg> in `process.argv[1]`, which makes it the
+  // way to hand the entry test an input no real invocation produces.
+  const CONTROL_GATE = 'scripts/docs/coupling-gate.mjs'
+  const importInline = (...argv) =>
+    runNode(['--input-type=module', '-e', `await import(${JSON.stringify(urlOf(CONTROL_GATE))})`, ...argv])
+
+  test('an argv[1] that does not resolve is "not the entry point", without a throw', () => {
+    const { status, out } = importInline(path.join(REPO, 'no', 'such', 'file.mjs'))
+    assert.equal(out, '')
+    assert.equal(status, 0)
+  })
+
+  test('no argv[1] at all is "not the entry point", without a throw', () => {
+    const { status, out } = importInline()
+    assert.equal(out, '')
+    assert.equal(status, 0)
+  })
+})
+
+describe('through a symlink, every representative still runs main() (#4776)', () => {
+  // The test makes its own symlink, so it does not depend on the machine's
+  // temp directory being one (macOS) or not (the Linux runners).
+  for (const rep of REPRESENTATIVES) {
+    test(`${rep.script} (was form ${rep.was})`, () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'entry-point-'))
+      try {
+        const link = path.join(dir, 'repo')
+        symlinkSync(REPO, link, 'dir')
+        const viaLink = path.join(link, rep.script)
+        assert.notEqual(realpathSync(viaLink), viaLink, 'the fixture path must go through a symlink')
+        const { status, out } = runNode([viaLink, ...rep.args])
+        assert.match(
+          out,
+          rep.ran,
+          `main() did not run through the symlink (exit ${status}); output was ${JSON.stringify(out.slice(0, 200))}`,
+        )
+        assert.equal(status, rep.status)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+  }
+})
+
+describe('from a directory whose real path needs percent-encoding (#4776)', () => {
+  // The symlink case cannot prove this one: the repository's own path has no
+  // space in it. So a script is copied to a directory that has one, and a
+  // non-ASCII letter, in its RESOLVED path. `db-concurrency-proof.mjs` imports
+  // nothing of ours and prints its usage when given no report, which makes it
+  // a self-contained witness. It compared `import.meta.url` with
+  // `file://${argv[1]}` before, the form that failed here even by relative path.
+  const SCRIPT = 'scripts/ci/db-concurrency-proof.mjs'
+
+  function withCopy(fn) {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), 'entry-point-')))
+    const root = path.join(base, 'entry point é')
+    try {
+      mkdirSync(path.join(root, path.dirname(SCRIPT)), { recursive: true })
+      cpSync(path.join(REPO, SCRIPT), path.join(root, SCRIPT))
+      assert.equal(realpathSync(root), root, 'the fixture root must already be a resolved path')
+      assert.notEqual(pathToFileURL(root).pathname, root, 'the fixture root must need percent-encoding')
+      fn(root)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  }
+
+  test('by a relative path', () => {
+    withCopy((root) => {
+      const { status, out } = runNode([SCRIPT], root)
+      assert.match(out, /usage: db-concurrency-proof\.mjs/, `main() did not run; output was ${JSON.stringify(out)}`)
+      assert.equal(status, 2)
+    })
+  })
+
+  test('by an absolute path', () => {
+    withCopy((root) => {
+      const { status, out } = runNode([path.join(root, SCRIPT)], REPO)
+      assert.match(out, /usage: db-concurrency-proof\.mjs/, `main() did not run; output was ${JSON.stringify(out)}`)
+      assert.equal(status, 2)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The structural guard
+// ---------------------------------------------------------------------------
+
+// The only two things a script may do with `argv[1]`: hand it to
+// `realpathSync`, or ask whether it is there at all.
+const ALLOWED_ARGV1_USES = [
+  /realpathSync\(\s*process\.argv\[1\]\s*\)/g,
+  /!process\.argv\[1\]/g,
+  /Boolean\(\s*process\.argv\[1\]\s*\)/g,
+  /process\.argv\[1\]\s*&&/g,
+]
+const ARGV1 = /argv\s*\[\s*1\s*\]|argv\.at\(\s*1\s*\)/
+
+/**
+ * Lines of `source` that read `argv[1]` in any way other than the allowed two.
+ *
+ * Whole-line comments are skipped. A trailing comment is not stripped: the
+ * old `file://${…}` form contains `//`, and stripping from there would hide
+ * the very line this exists to find.
+ *
+ * Known limit: an entry test built from a destructured or aliased
+ * `process.argv` is not seen.
+ */
+function entryTestViolations(source) {
+  const violations = []
+  source.split('\n').forEach((text, index) => {
+    const trimmed = text.trim()
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return
+    let rest = text
+    for (const allowed of ALLOWED_ARGV1_USES) rest = rest.replace(allowed, '')
+    if (ARGV1.test(rest)) violations.push({ line: index + 1, text: trimmed })
+  })
+  return violations
+}
+
+/** Every tracked script the guard covers: not a test, not package source. */
+function trackedScripts() {
+  return execFileSync('git', ['ls-files', '-z', '--', '*.mjs', '*.js', '*.cjs', '*.ts'], {
+    cwd: REPO,
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter(Boolean)
+    .filter((file) => !/\.test\./.test(file))
+    .filter((file) => !/^packages\/[^/]+\/src\//.test(file))
+}
+
+const CANONICAL = `function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+if (isEntryPoint()) main()`
+
+// Each retired form, as one line of code.
+const RETIRED_FORMS = {
+  A: 'if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()',
+  'A, operands swapped': 'if (process.argv[1] === fileURLToPath(import.meta.url)) main()',
+  B: 'if (import.meta.url === `file://${process.argv[1]}`) main()',
+  C: 'if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()',
+  D: 'if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()',
+  F: "if (process.argv[1] && process.argv[1].endsWith('gate.mjs')) main()",
+  'argv.at(1)': 'if (import.meta.url === pathToFileURL(process.argv.at(1)).href) main()',
+}
+
+describe('the structural guard: no script compares argv[1] unresolved (#4776)', () => {
+  for (const [form, line] of Object.entries(RETIRED_FORMS)) {
+    test(`form ${form} is flagged`, () => {
+      assert.deepEqual(entryTestViolations(`const x = 1\n${line}\n`), [{ line: 2, text: line }])
+    })
+  }
+
+  test('the canonical form is not flagged', () => {
+    assert.deepEqual(entryTestViolations(CANONICAL), [])
+  })
+
+  test('the realpath variant that compares URLs is not flagged', () => {
+    const line =
+      'isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href'
+    assert.deepEqual(entryTestViolations(line), [])
+  })
+
+  test('a comment that quotes a retired form is skipped; the same text as code is not', () => {
+    const quoted = RETIRED_FORMS.B
+    assert.deepEqual(entryTestViolations(`// ${quoted}\n * ${quoted}\n/* ${quoted} */\n`), [])
+    assert.equal(entryTestViolations(`  ${quoted}\n`).length, 1)
+  })
+
+  test('no tracked script outside packages/*/src reads argv[1] any other way', () => {
+    const scripts = trackedScripts()
+    const failures = []
+    let withEntryTest = 0
+    for (const file of scripts) {
+      const source = readFileSync(path.join(REPO, file), 'utf8')
+      if (/realpathSync\(\s*process\.argv\[1\]\s*\)/.test(source)) withEntryTest += 1
+      for (const v of entryTestViolations(source)) failures.push(`${file}:${v.line}: ${v.text}`)
+    }
+    // The scan must have read the scripts it is about before its silence
+    // counts: 71 carried an entry test when this guard was written.
+    assert.ok(withEntryTest >= 60, `only ${withEntryTest} of ${scripts.length} scanned files carry the entry test`)
+    assert.deepEqual(
+      failures,
+      [],
+      'resolve process.argv[1] with realpathSync before comparing it (see isEntryPoint in any script)',
+    )
+  })
 })

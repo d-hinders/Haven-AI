@@ -67,10 +67,12 @@ const sourcemap = (sources) => JSON.stringify({ version: 3, sources, mappings: '
  * is how a refusal is removed to prove the assertion against it can go red.
  */
 function runScope({ base = {}, changes = {}, remove = [], args = [], mutate = null } = {}) {
-  // realpathSync: on macOS mktemp is reached through a symlink, so a script that
-  // self-guards on `import.meta.url === file://${argv[1]}` would never run main()
-  // and would exit 0 having done nothing — a false pass shaped like a clean run
-  // (#2721 measured exactly this).
+  // realpathSync: on macOS mktemp is reached through a symlink. Until #4776 the
+  // script compared its resolved URL with the unresolved path it was invoked
+  // by, so it never ran main() from such a tree and exited 0 having done
+  // nothing — a false pass shaped like a clean run (#2721 measured exactly
+  // this). The script resolves both paths now; the call stays so that `root`
+  // is the path the script computes for itself.
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'release-scope-')))
   try {
     mkdirSync(join(root, 'scripts'), { recursive: true })

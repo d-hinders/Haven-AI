@@ -24,7 +24,6 @@
 
 import { readFile, writeFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import {
   REPO_ROOT,
@@ -968,8 +967,25 @@ async function main() {
   }
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// first: Node resolves symlinks for a module's own URL and leaves
+// `process.argv[1]` as typed, so an unresolved comparison answered "not the
+// entry point" through any symlink, and the script exited 0 without running
+// (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // Run as CLI only when invoked directly, not when imported by tests.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isEntryPoint()) {
   main().catch((err) => {
     // Advisory posture: log and exit 0 so it can never block a PR. In
     // --strict mode the gate IS blocking, so a crash must fail closed — a

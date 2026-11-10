@@ -1097,9 +1097,9 @@ export async function prepareClose({ ev, gh, repo, channelIssue = CHANNEL_ISSUE 
 const isMain = (() => {
   if (!process.argv[1]) return false
   try {
-    // realpath both sides: /tmp is a symlink on macOS and the plain
-    // `file://${argv[1]}` comparison other CI scripts use silently answered
-    // "not main" there — a script that prints nothing and exits 0.
+    // realpath both sides: /tmp is a symlink on macOS, and an unresolved
+    // comparison silently answers "not main" there — a script that prints
+    // nothing and exits 0. Every script resolves both sides since #4776.
     const { realpathSync } = process.getBuiltinModule('node:fs')
     const { fileURLToPath } = process.getBuiltinModule('node:url')
     return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))

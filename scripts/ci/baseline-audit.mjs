@@ -386,7 +386,24 @@ function main() {
   process.exitCode = result.exitCode
 }
 
-if (process.argv[1] && process.argv[1].endsWith('baseline-audit.mjs')) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// first: Node resolves symlinks for a module's own URL and leaves
+// `process.argv[1]` as typed, so an unresolved comparison answered "not the
+// entry point" through any symlink, and the script exited 0 without running
+// (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   try {
     main()
   } catch (err) {

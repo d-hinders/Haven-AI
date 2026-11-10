@@ -653,8 +653,13 @@ npm run release:scope -- --json                          # for a script, not a h
 Prints the commits and the numbers they reference — **issue and pull-request
 numbers alike**, since a squash subject carries its own PR number and the script
 does not read the closing-keyword graph — which of the published
-packages are affected, and the **shipped delta** — the files that actually reach
-a tarball, with their line counts and the reason each one ships.
+packages are affected, the **shipped delta** — the files that actually reach
+a tarball, with their line counts and the reason each one ships — and the
+**deploy surfaces** the files outside a published package reach, read from the
+workspace list and each package's own `package.json` (#4770). It ends with the
+`Release lever:` line a pull request carries: the next release train naming the
+affected published packages, deploy only naming the services, or none. That line
+is advisory and gates nothing.
 
 **Why it is measured rather than reasoned about.** All five packages build with
 `tsup`, which *bundles* from a declared entry point, so `src/foo.ts →

@@ -90,7 +90,8 @@ const LOCAL_ONLY_TOOLS: Reasons = {
 }
 
 const HOSTED_ONLY_NO_COUNTERPART =
-  'Hosted-only tool; the local package has no counterpart (kept deliberately smaller: owner decision 2026-11-10 on epic #4788).'
+  'Hosted-only tool; the local package has no counterpart. It is kept deliberately smaller: owner decision 2026-11-10, ' +
+  'https://github.com/d-hinders/Haven-AI/issues/4788#issuecomment-6769233650.'
 
 const HOSTED_ONLY_TOOLS: Reasons = {
   haven_check_funds: HOSTED_ONLY_NO_COUNTERPART,
@@ -140,7 +141,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
       local: '8d6a9dedf88c',
       hosted: 'e86bdff11c81',
       reason:
-        'The local text covers relaying a task-budget, sub-budget or payment signature; the hosted text covers a payment signature and documents settlement_scheme.',
+        'The local text opens with the three ids a signature can belong to; the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up.',
     },
   },
   'haven_pay_mcp_tool↔haven_pay_mcp_tool': {
@@ -171,7 +172,8 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
   },
   'haven_pay_x402_quote↔haven_pay_x402_quote': {
     localOnly: {
-      quote: 'The local tool pays the quote object haven_quote_x402 returned; the hosted tool restates the request instead.',
+      quote:
+        'The local tool pays the quote object haven_quote_x402 returned; the hosted tool takes payment_required or the restated request instead.',
       sub_budget_id:
         'Owner decision 2 on epic #3615 (https://github.com/d-hinders/Haven-AI/issues/3615): the hosted forwarding was ' +
         'deleted rather than the argument declared (#3617); a sub-agent pays x402 through the local MCP.',
@@ -181,7 +183,8 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
       method: 'The hosted tool restates the quoted request; it does not accept a quote object.',
       headers: 'The hosted tool restates the quoted request; it does not accept a quote object.',
       body: 'The hosted tool restates the quoted request; it does not accept a quote object.',
-      payment_required: 'The hosted tool is handed the 402 body the quote returned; the local quote object carries it.',
+      payment_required:
+        'Optional on hosted: the 402 body, for payment_required mode; request mode re-fetches it (#3739). The local quote object carries it.',
       max_amount: 'The hosted tool takes a pre-funding price cap in atomic units; the local quote object fixes the price.',
       max_amount_human: 'The hosted tool takes a pre-funding price cap in whole tokens; the local quote object fixes the price.',
       include_signing_payload: KEYLESS_SIGNING_PAYLOAD,
@@ -346,6 +349,20 @@ describe('#4789 — local ↔ hosted contract parity: every difference is declar
       ).toEqual(declared(key))
     })
   }
+
+  it('no manifest entry is empty: an entry declares at least one difference', () => {
+    // An entry emptied when two surfaces converge would otherwise sit there
+    // asserting nothing. Delete it instead.
+    for (const [key, entry] of Object.entries(PARITY_MANIFEST)) {
+      const size =
+        Object.keys(entry.localOnly ?? {}).length +
+        Object.keys(entry.hostedOnly ?? {}).length +
+        Object.keys(entry.requiredness ?? {}).length +
+        Object.keys(entry.legacyRefused ?? {}).length +
+        (entry.description ? 1 : 0)
+      expect(size, key).toBeGreaterThan(0)
+    }
+  })
 
   it('every declared difference carries a real reason', () => {
     const reasons: Array<[where: string, reason: string]> = []

@@ -196,7 +196,14 @@ export async function scanPackage(pkg, { root = REPO_ROOT } = {}) {
   }
 }
 
-/** Scan every package this pass polices, in name order. */
+/**
+ * Scan every package this pass polices, in name order.
+ *
+ * SEQUENTIAL on purpose: `scanPackage` changes the process working directory
+ * for the duration of its cruise (see the header), so two scans must never
+ * overlap. A `Promise.all` here would have them fight over the cwd and resolve
+ * one package's aliases against another's tsconfig.
+ */
 export async function scanAll({ packages = CYCLE_SCAN_PACKAGES, root = REPO_ROOT } = {}) {
   const results = []
   for (const pkg of packages) results.push(await scanPackage(pkg, { root }))

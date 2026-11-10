@@ -5,6 +5,8 @@ covers:
   - .dependency-cruiser.cjs
   - scripts/dep-lint.mjs
   - scripts/dep-cycles.mjs
+  - scripts/dep-cycles.test.mjs
+  - packages/sdk/src/merchant-answer.ts
   - scripts/lint-route-line-ceiling.mjs
   - packages/backend/route-line-ceiling.json
   - packages/core/src/**

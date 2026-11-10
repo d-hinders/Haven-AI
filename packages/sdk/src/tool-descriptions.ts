@@ -261,7 +261,7 @@ export const toolDescriptions = {
       local:
         'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
         'Do NOT use for normal payments — use haven_pay_x402. ' +
-        'Do NOT use to read balances only: haven_get_allowances reports the budget, and its fundsCoverRemaining: false flags a balance that cannot back it — no tool on this surface checks funds against an amount.',
+        'Do NOT use to read balances only: haven_get_allowances reports the budget, and its fundsCoverRemaining: false flags an account balance that cannot back it — no tool on this surface checks funds against an amount.',
     },
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating account (hardcoded destination). ' +

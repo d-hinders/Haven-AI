@@ -123,7 +123,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
       local: 'cdecc99b6a33',
       hosted: 'b484fd5fde05',
       reason:
-        '#4796: each text names only tools its own surface has — the local one says no tool there checks funds against an amount (naming haven_get_allowances only for fundsCoverRemaining) and keeps haven_pay_x402, the hosted one points at haven_quote_x402 and haven_check_funds.',
+        '#4796: each text names only tools its own surface has — the local one says no tool there checks funds against an amount (on funds, naming haven_get_allowances only for fundsCoverRemaining) and keeps haven_pay_x402, the hosted one points at haven_quote_x402 and haven_check_funds.',
     },
   },
   'haven_sweep_delegate↔haven_sweep_delegate': {
@@ -132,7 +132,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
       signature: 'The hosted sweep is keyless: the signature comes back from the edge signer and is relayed in.',
     },
     description: {
-      local: 'aabd95328e22',
+      local: 'b702163e8c18',
       hosted: 'de1f44567c0a',
       reason:
         'The hosted text describes two keyless phases (the authorization out, the signature back in); the local text describes one call.',

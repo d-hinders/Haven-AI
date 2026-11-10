@@ -534,8 +534,7 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * `haven_send` (once) and `haven_pay_mcp_tool` (twice) now name
  * `haven_quote_x402`, the hosted x402 entry point: three names, +2 bytes
  * each, +6. 31,811 UTF-8 bytes — 1 under the round-29 pin, so the cap is
- * LOWERED to it (31,812 → 31,811): the pin is never raised, and is lowered
- * whenever it can be. No tool was added — 29 holds. Shrink-only from here.
+ * LOWERED to the measured value (31,812 → 31,811), as #4796 asks. No tool was added — 29 holds. Shrink-only from here.
  */
 const MAX_TOTAL_BYTES = 31_811
 // Mean pin: round 34 (#4796 block above): 31,811 / 29 = 1096.9310…, pinned

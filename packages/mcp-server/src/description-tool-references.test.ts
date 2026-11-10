@@ -42,11 +42,12 @@ const SIGNER_TOOLS = Object.keys(signerToolSchemas)
 
 /**
  * A tool name, on a word boundary on both sides: `mcp__haven__haven_submit`
- * reads as `haven_submit`, never as `haven__haven_submit`, a name is never
- * cut short by a longer name that starts with it, and a trailing underscore
- * (markdown italics, `_haven_send_`) does not hide the name.
+ * reads as `haven_submit`, never as `haven__haven_submit`. The greedy body
+ * takes every `_segment`, so a name is never cut short by a longer name that
+ * starts with it, and a trailing underscore (markdown italics,
+ * `_haven_send_`) is left outside the name instead of hiding it.
  */
-const TOOL_NAME = /(?<![a-z0-9])haven_[a-z0-9]+(?:_[a-z0-9]+)*(?![a-z0-9]|_[a-z0-9])/g
+const TOOL_NAME = /(?<![a-z0-9])haven_[a-z0-9]+(?:_[a-z0-9]+)*/g
 
 const referencesIn = (text: string): string[] => [...new Set(text.match(TOOL_NAME) ?? [])]
 

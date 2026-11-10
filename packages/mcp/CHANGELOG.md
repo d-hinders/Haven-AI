@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
-- **`haven_send` and `haven_sweep_delegate` no longer point at a tool this package does not have (#4796).** Both descriptions told the agent to use `haven_check_funds`, which only the hosted MCP registers. They now say what is true here: no tool on this surface checks funds against an amount, and `haven_get_allowances`' `fundsCoverRemaining: false` is the one signal that a balance cannot back the remaining budget. `haven_send` adds that a live budget is spend authority, not proof of a balance. Description text only — no tool, argument or behaviour changes. No update needed.
+- **`haven_send` and `haven_sweep_delegate` no longer point at a tool this package does not have (#4796).** Both descriptions told the agent to use `haven_check_funds`, which only the hosted MCP registers. They now say what is true here: no tool on this surface checks funds against an amount, and `haven_get_allowances`' `fundsCoverRemaining: false` is the signal that the account's balance cannot back the remaining budget. `haven_send` adds that a live budget is spend authority, not proof of a balance. Description text only — no tool, argument or behaviour changes. No update needed.
 - **Paid retries follow the SDK's x402-version header rule (#4754),** through `haven.fetch` → `deliverPayment`: an x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone, and a v1 one under both names. The `expected_amount` stop reason on `haven_quote_x402` now names the token symbol (`0.001 USDC`) instead of the asset contract address. No update needed.
 
 ## 0.13.0-alpha.0 — 2026-10-30

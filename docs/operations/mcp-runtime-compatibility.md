@@ -98,8 +98,8 @@ last-verified: "2026-11-09"
 > only) from `haven_send` and `haven_pay_mcp_tool`. `composeDescription` now
 > takes the surface, and those four descriptions are worded for the surface
 > that serves them: the hosted ones point at `haven_quote_x402`; the local ones
-> say the surface has no check of funds against an amount, and name
-> `haven_get_allowances` only for its `fundsCoverRemaining` flag, never as
+> say the surface has no check of funds against an amount, and, on funds,
+> name `haven_get_allowances` only for its `fundsCoverRemaining` flag, never as
 > such a check (a live budget is spend authority, not proof of a balance).
 > **What moves:** the four `description` strings, in the hosted golden
 > `packages/mcp-server/src/tools-list.snapshot.json` and the local golden

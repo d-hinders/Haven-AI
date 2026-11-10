@@ -360,6 +360,22 @@ Treat the registered tool unions in `packages/mcp/src/tools.ts`,
 `packages/mcp-server/src/tools.ts`, the facade), and
 `packages/signer/src/tools.ts` as the source of truth.
 
+**Where a local/hosted contract difference is declared (#4789).** Every tool
+name both surfaces register, plus the one different-name pair (hosted
+`haven_pay`, local `haven_send`), is compared key by key in
+`packages/mcp-server/src/local-hosted-contract-parity.test.ts`. Its
+`PARITY_MANIFEST` lists each difference with a one-line reason, in five
+classes: a key only the local schema declares, a key only the hosted schema
+declares, a key required on one side only, a legacy key the local schema
+declares only so its handler can refuse it (`idempotencyKey`, proven by a
+call), and a differing description (pinned by a short hash of both texts). The
+test fails on a difference the manifest does not list and on a manifest entry
+that no longer matches one, and it lists the tools that exist on one surface
+only. A new divergence is therefore a reviewed line with a reason, not a
+per-key pin added after an incident. It replaces the budget-scope-only check
+that #3620 added to `strict-tool-input.test.ts`. Value types and
+strict-versus-permissive parsing are outside it.
+
 The five edge-signer tools are `haven_sign`, `haven_sign_siwx`,
 `haven_x402_sign_header`, `haven_sign_x402`, and `haven_sign_sweep_delegate`.
 `haven_sign_siwx` (#3728) is the x402 Sign-In-With-X signer: it composes the

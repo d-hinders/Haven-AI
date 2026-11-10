@@ -56,7 +56,9 @@ text so two sessions dispatch the same review:
 
 > Work through [`references/review-rubric.md`](references/review-rubric.md)
 > against `origin/dev` at the commit the issue names, for the tracking issue and
-> each sub-issue. Report every measured claim as *reproduces* / *wrong (with the
+> each sub-issue. Start by running `node scripts/docs/issue-method.mjs
+> --body-file <snapshot>` on each body and paste its output.
+> Report every measured claim as *reproduces* / *wrong (with the
 > measured value and the command)* / *could not verify*, then the rubric's
 > remaining blocks. Findings by severity (blocking / should-fix / nit); no edits;
 > no issues filed.
@@ -279,6 +281,33 @@ lands in `ready after mechanical cleanup`; one that leaves a choice open is
 [new-task § Hold until ready](../new-task/SKILL.md#hold-until-ready), and only in
 repair mode.
 
+## The runner (#4799)
+
+The pass starts with `scripts/docs/issue-method.mjs` on the snapshot body, run
+in the reviewer's isolation root; its output goes into the report. The script's
+header comment is the grammar and the list of refusals.
+
+- **The root's `origin/dev` must be GitHub's ref** — a worktree of a fetched
+  clone, or `git fetch origin dev` first. In a plain clone of a local checkout
+  `origin` is that checkout, and the runner refuses every line as "not an
+  ancestor of origin/dev or origin/main". A SHA refusal that disappears after
+  the fetch is the reviewer's setup. It is not a finding and is not counted.
+- **`differs` is a wrong claim.** It enters the report like any other, with the
+  value the runner got.
+- **`refused` and `unproven zero` are should-fix findings**: the line claims to
+  be checkable and is not, or its zero has no control that reaches.
+- **A claim left free-form that fits one of the three kinds is a should-fix
+  finding** — a count, a `file:line` or a path-existence claim at a SHA, in a
+  body created after #4799 merged. Nothing mechanical can see this; the
+  reviewer is what enforces [new-task step 1](../new-task/SKILL.md#workflow).
+- **The manual re-run stays** for every free-form claim (rubric § 1). The
+  runner proves a line reproduces; it does not prove the line says what the
+  prose says, and a zero's control proves reach, not that the pattern could
+  match.
+- **Bodies from before #4799** are not faulted for having no checkable line.
+  A marker such a body carries by accident (a free-text `# control:` comment)
+  is named in a note, and that verdict's `Runner:` line reads `0 checkable`.
+
 ## Comment mode
 
 The comment pattern is in
@@ -291,7 +320,16 @@ The comment pattern is in
   child-style comment.
 - **The verdict** starts with `Spec-review verdict on`, names the reviewed SHA
   and the readiness, links or summarizes the child findings when applicable, and
-  ends with `Corrections: <n>.`
+  ends with three lines, in this order: `Claims: <checked> checked, <wrong> wrong.`,
+  `Runner: <checkable> checkable, <failed> not reproducing.`, `Corrections: <n>.`
+- **`Claims` counts claims, not lines**: every claim re-run in the pass, by the
+  runner or by hand. A control line is not a claim, and a claim checked both
+  ways counts once. Over several passes on one issue it is the sum.
+- **`Runner` is the runner's own summary** on the snapshot body of the last
+  pass: its count of checkable lines (controls included) and how many did not
+  reproduce; `0 checkable, 0 not reproducing` when it exited 3. For an epic,
+  `Claims` and `Runner` each carry the sum over the tracking issue and every
+  sub-issue.
 - **`Corrections` counts issue-body changes caused by the review**, not comments.
   `0` when the body stood, and the line is written on every **posted** verdict.
   A review-only report is not a verdict comment: it states the number of
@@ -357,6 +395,59 @@ gh api --paginate "repos/{owner}/{repo}/issues/comments?since=${FROM}T00:00:00Z&
 bounds are what define the window, and a verdict edited later is still counted
 once, in the window it was created in. One value per comment: the last
 `Corrections:` line in the body.
+
+## Re-measure: checkable Method lines (registered 2026-11-10, #4799)
+
+Writing checkable lines and running the runner before filing are rules agents
+must follow, so they carry numbers checked afterwards. Agreed **before** the
+result is known; the owner decided on 2026-11-10 that the rule binds every
+filer, so the population is not limited to `new-task` users:
+
+- **Window:** `FROM` = the day after #4799's PR merges to `dev`; `END` = `FROM`
+  + 14 days, exclusive. Re-measure on `END` or later.
+- **Population:** the **first** verdict comment on each issue **created** in
+  the window; one value per comment, its last `Claims:` and `Runner:` lines.
+- **Followed:** the share of those verdicts whose `Runner:` line reports at
+  least 1 checkable line. A verdict with no `Runner:` line counts as not
+  followed. Fewer than **1 in 2**, or fewer than 8 verdicts in the population,
+  is the "not followed" arm.
+- **Moved:** wrong claims per verdict, against a baseline of 27 wrong in 12
+  reviews (2.25; the table in #4771). At or above **2.25** is the "did not
+  move" arm. A verdict with no `Claims:` line is left out of this figure and
+  reported as missing. The pooled `wrong / checked` share is printed beside it
+  (baseline 27 in 226, 11.9%) and decides nothing: checkable lines the filer
+  already ran enlarge its denominator, so it would fall with no fewer wrong
+  claims.
+- **Decision rule:** either arm → the requirement to write checkable lines and
+  the pre-filing run (new-task steps 1 and 6) are reverted, with the
+  free-form-claim finding above; the runner stays as a tool and the `Claims:`
+  and `Runner:` lines stay in the verdict. No other rule is added in their
+  place. Otherwise the rules stay.
+- **Instrument** — run exactly this; a changed instrument is a new baseline:
+
+```bash
+# Method-block adoption re-measure (#4799). FROM=YYYY-MM-DD END=YYYY-MM-DD (exclusive)
+export FROM END
+gh api --paginate "repos/{owner}/{repo}/issues/comments?since=${FROM}T00:00:00Z&per_page=100" \
+  --jq '.[] | select(.body | test("^[#* ]*Spec-review verdict"))
+        | ([.body | scan("Claims: ([0-9]+) checked, ([0-9]+) wrong")] | last // ["missing", "missing"]) as $c
+        | [.issue_url, .created_at, ([.body | scan("Runner: ([0-9]+) checkable")] | last // ["missing"])[0], $c[0], $c[1]] | @tsv' \
+| sort -t "$(printf '\t')" -k1,1 -k2,2 | awk -F'\t' '!seen[$1]++' \
+| while IFS="$(printf '\t')" read -r url at runner checked wrong; do
+    created=$(gh api "$url" --jq '.created_at[0:10]')
+    if [ "$(printf '%s\n' "$FROM" "$created" | sort | head -1)" = "$FROM" ] && [ "$created" != "$END" ] \
+       && [ "$(printf '%s\n' "$created" "$END" | sort | head -1)" = "$created" ]; then
+      printf '%s\t%s\t%s\n' "$runner" "$checked" "$wrong"
+    fi
+  done \
+| awk -F'\t' '{n++; if ($1 != "missing" && $1 > 0) f++; if ($3 == "missing") m++; else {v++; w += $3; k += $2}}
+       END {printf "verdicts: %d, followed: %d (%d%%), wrong claims: %d over %d verdicts (%.2f per verdict), pooled: %d of %d checked, no Claims line: %d\n",
+                   n, f, n ? 100*f/n : 0, w, v, v ? w/v : 0, w, k, m}'
+```
+
+`since` narrows the fetch on `updated_at`; the window is the **issue's**
+creation date, read per issue. The sort keeps the earliest verdict on each
+issue, so a delta or corrections-applied verdict is not counted twice.
 
 ## Guardrails
 

@@ -1099,7 +1099,8 @@ const isMain = (() => {
   try {
     // realpath both sides: /tmp is a symlink on macOS, and an unresolved
     // comparison silently answers "not main" there — a script that prints
-    // nothing and exits 0. Every script resolves both sides since #4776.
+    // nothing and exits 0. Since #4776 every script under `scripts/` and
+    // `packages/*/scripts/` resolves both sides.
     const { realpathSync } = process.getBuiltinModule('node:fs')
     const { fileURLToPath } = process.getBuiltinModule('node:url')
     return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))

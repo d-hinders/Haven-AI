@@ -441,13 +441,14 @@ function main() {
 }
 
 // True only when this file is the process's entry point, so importing it (a
-// self-test) never runs the CLI. Both paths are resolved first: Node resolves
-// symlinks for a module's own URL and leaves `process.argv[1]` as typed, so an
-// unresolved comparison answered "not the entry point" through any symlink —
-// main() never ran, and the process exited 0 in SILENCE. Under --strict that
-// is a fail-OPEN: the gate passes a diff it never read (#4776). The catch
-// matters too: this runs at module load, OUTSIDE the try/catch below, so a
-// throw here would crash the advisory run that promises exit 0.
+// self-test) never runs the CLI. Both paths are resolved before they are
+// compared: Node resolves symlinks for a module's own URL and not for
+// `process.argv[1]`, so an unresolved comparison is false through any symlink
+// — main() would never run, and the process would exit 0 in SILENCE. Under
+// --strict that is a fail-OPEN: the gate passes a diff it never read. This
+// file resolved both sides before #4776 gave every script the same form. The
+// catch matters too: this runs at module load, OUTSIDE the try/catch below,
+// so a throw here would crash the advisory run that promises exit 0.
 function isEntryPoint() {
   if (!process.argv[1]) return false
   try {

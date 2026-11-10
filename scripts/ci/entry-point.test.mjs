@@ -4,8 +4,8 @@
 // entry test, so that importing it does not run `main()`. The test has to
 // answer one question — is this file the process's entry point — and for a
 // long time most copies answered it by comparing `import.meta.url` with
-// `process.argv[1]` as typed. Node resolves symlinks for the first and not for
-// the second, so through a symlinked path the comparison was false, `main()`
+// `process.argv[1]` unresolved. Node resolves symlinks for the first and not
+// for the second, so through a symlinked path the comparison was false, `main()`
 // was skipped, and the process exited 0 with no output: a gate that reports a
 // clean pass because it never ran. The `file://${…}` variant was also false
 // for any path that needs percent-encoding (a space, a non-ASCII character).
@@ -141,11 +141,20 @@ const REPRESENTATIVES = [
   },
 ]
 
+// Each `ran` line is what the script prints on its ordinary outcome, so a
+// representative also goes red when its own gate does (a real front-matter
+// error, say). The message names both readings; an empty output is the one
+// that means main() never ran.
+const notRun = (rep, status, out) =>
+  out === ''
+    ? `${rep.script}: main() did not run — exit ${status}, no output`
+    : `${rep.script}: main() ran but did not print its usual line (exit ${status}): ${JSON.stringify(out.slice(0, 200))}`
+
 describe('the entry test on the ordinary paths (#4776)', () => {
   for (const rep of REPRESENTATIVES) {
     test(`${rep.script} runs main() when invoked by a relative path`, () => {
       const { status, out } = runNode([rep.script, ...rep.args])
-      assert.match(out, rep.ran, `main() did not run; output was ${JSON.stringify(out.slice(0, 200))}`)
+      assert.match(out, rep.ran, notRun(rep, status, out))
       assert.equal(status, rep.status)
     })
 
@@ -196,11 +205,7 @@ describe('through a symlink, every representative still runs main() (#4776)', ()
         const viaLink = path.join(link, rep.script)
         assert.notEqual(realpathSync(viaLink), viaLink, 'the fixture path must go through a symlink')
         const { status, out } = runNode([viaLink, ...rep.args])
-        assert.match(
-          out,
-          rep.ran,
-          `main() did not run through the symlink (exit ${status}); output was ${JSON.stringify(out.slice(0, 200))}`,
-        )
+        assert.match(out, rep.ran, notRun(rep, status, out))
         assert.equal(status, rep.status)
       } finally {
         rmSync(dir, { recursive: true, force: true })
@@ -253,41 +258,76 @@ describe('from a directory whose real path needs percent-encoding (#4776)', () =
 // The structural guard
 // ---------------------------------------------------------------------------
 
-// The only two things a script may do with `argv[1]`: hand it to
-// `realpathSync`, or ask whether it is there at all.
-const ALLOWED_ARGV1_USES = [
-  /realpathSync\(\s*process\.argv\[1\]\s*\)/g,
-  /!process\.argv\[1\]/g,
-  /Boolean\(\s*process\.argv\[1\]\s*\)/g,
-  /process\.argv\[1\]\s*&&/g,
-]
-const ARGV1 = /argv\s*\[\s*1\s*\]|argv\.at\(\s*1\s*\)/
+// The two lines of the one entry test. A code line that reads
+// `process.argv[1]` must BE one of them, whole — not merely contain an allowed
+// fragment. Handing `argv[1]` to `realpathSync` is not enough on its own:
+// `file://${realpathSync(process.argv[1])}` is symlink-safe and still false
+// from any path that needs percent-encoding.
+const ALLOWED_LINES = new Set([
+  'if (!process.argv[1]) return false',
+  'return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))',
+])
+
+// Every spelling of "element 1 of process.argv" that is one expression.
+const ARGV1 =
+  /process\s*\.\s*argv\s*(?:\[\s*['"`]?1['"`]?\s*\]|\.\s*at\s*\(\s*1\s*\)|\.\s*slice\s*\(\s*1\s*\)\s*\[\s*0\s*\])/
 
 /**
- * Lines of `source` that read `argv[1]` in any way other than the allowed two.
+ * The code of `source`, line by line, with leading comments removed.
  *
- * Whole-line comments are skipped. A trailing comment is not stripped: the
- * old `file://${…}` form contains `//`, and stripping from there would hide
- * the very line this exists to find.
+ * Only a comment that STARTS a line (or follows another comment on it) is
+ * removed: `// …` to the end of the line, `/* … *\/` across lines. Once code
+ * has begun on a line the rest of the line is code. That keeps the two ways a
+ * careless strip would hide a violation out of reach: the retired
+ * `file://${…}` form contains `//`, and globs such as `packages/*\/src` look
+ * like comment delimiters. The cost is in the safe direction: a comment body
+ * that itself contains a comment terminator ends the comment early, and what
+ * follows is read as code.
+ */
+function codeLines(source) {
+  const lines = []
+  let inBlock = false
+  source.split('\n').forEach((text, index) => {
+    let rest = text
+    for (;;) {
+      if (inBlock) {
+        const end = rest.indexOf('*/')
+        if (end === -1) return
+        rest = rest.slice(end + 2)
+        inBlock = false
+        continue
+      }
+      const trimmed = rest.trimStart()
+      if (trimmed.startsWith('//')) return
+      if (trimmed.startsWith('/*')) {
+        rest = trimmed.slice(2)
+        inBlock = true
+        continue
+      }
+      break
+    }
+    if (rest.trim() !== '') lines.push({ line: index + 1, code: rest.trim() })
+  })
+  return lines
+}
+
+/**
+ * Code lines of `source` that read `process.argv[1]` and are not one of the
+ * two allowed lines.
  *
- * Known limit: an entry test built from a destructured or aliased
- * `process.argv` is not seen.
+ * Known limits: an alias or a destructuring of `process.argv` is not seen
+ * (`const [, entry] = process.argv`), and an allowed line that a formatter has
+ * wrapped is refused until it is put back on one line.
  */
 function entryTestViolations(source) {
-  const violations = []
-  source.split('\n').forEach((text, index) => {
-    const trimmed = text.trim()
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return
-    let rest = text
-    for (const allowed of ALLOWED_ARGV1_USES) rest = rest.replace(allowed, '')
-    if (ARGV1.test(rest)) violations.push({ line: index + 1, text: trimmed })
-  })
-  return violations
+  return codeLines(source)
+    .filter(({ code }) => ARGV1.test(code) && !ALLOWED_LINES.has(code.replace(/;$/, '')))
+    .map(({ line, code }) => ({ line, text: code }))
 }
 
 /** Every tracked script the guard covers: not a test, not package source. */
 function trackedScripts() {
-  return execFileSync('git', ['ls-files', '-z', '--', '*.mjs', '*.js', '*.cjs', '*.ts'], {
+  return execFileSync('git', ['ls-files', '-z', '--', '*.mjs', '*.js', '*.cjs', '*.ts', '*.mts', '*.cts'], {
     cwd: REPO,
     encoding: 'utf8',
   })
@@ -296,6 +336,18 @@ function trackedScripts() {
     .filter((file) => !/\.test\./.test(file))
     .filter((file) => !/^packages\/[^/]+\/src\//.test(file))
 }
+
+// One script from each place they live. Each must be in the scan and must
+// carry both allowed lines, which is what shows the scan read the entry tests
+// it is about. A count would not: dropping every `packages/*/scripts` file
+// still leaves more than sixty.
+const SENTINELS = [
+  'scripts/release-scope.mjs',
+  'scripts/ci/preflight.mjs',
+  'scripts/docs/coupling-gate.mjs',
+  'packages/frontend/scripts/design-lint.mjs',
+  'packages/cli/scripts/sync-agent-guidance.mjs',
+]
 
 const CANONICAL = `function isEntryPoint() {
   if (!process.argv[1]) return false
@@ -309,56 +361,97 @@ const CANONICAL = `function isEntryPoint() {
 }
 if (isEntryPoint()) main()`
 
-// Each retired form, as one line of code.
-const RETIRED_FORMS = {
-  A: 'if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()',
-  'A, operands swapped': 'if (process.argv[1] === fileURLToPath(import.meta.url)) main()',
-  B: 'if (import.meta.url === `file://${process.argv[1]}`) main()',
-  C: 'if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()',
-  D: 'if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()',
-  F: "if (process.argv[1] && process.argv[1].endsWith('gate.mjs')) main()",
+const FORM_B = 'if (import.meta.url === `file://${process.argv[1]}`) main()'
+
+// One line of code each. The first seven are the forms #4776 retired; the
+// rest are the nearest ways to keep an unresolved read past a looser guard.
+const REFUSED = {
+  'form A': 'if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main()',
+  'form A, operands swapped': 'if (process.argv[1] === fileURLToPath(import.meta.url)) main()',
+  'form B': FORM_B,
+  'form C': 'if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()',
+  'form D': 'if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()',
+  'form F': "if (process.argv[1] && process.argv[1].endsWith('gate.mjs')) main()",
   'argv.at(1)': 'if (import.meta.url === pathToFileURL(process.argv.at(1)).href) main()',
+  'a resolved path compared as a file:// URL': 'return import.meta.url === `file://${realpathSync(process.argv[1])}`',
+  'a resolved path compared as a URL': 'return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href',
+  'a method call behind the presence check': "if (!process.argv[1].endsWith('gate.mjs')) return false",
+  'a presence check with more on the line': 'if (!process.argv[1] || other) return false',
+  'a string index': "if (import.meta.url === pathToFileURL(process.argv['1']).href) main()",
+  'spaced out': 'if (import.meta.url === pathToFileURL(process . argv .at( 1 )).href) main()',
+  'slice(1)[0]': 'if (import.meta.url === pathToFileURL(process.argv.slice(1)[0]).href) main()',
 }
 
-describe('the structural guard: no script compares argv[1] unresolved (#4776)', () => {
-  for (const [form, line] of Object.entries(RETIRED_FORMS)) {
-    test(`form ${form} is flagged`, () => {
+describe('the structural guard: argv[1] is read only by the one entry test (#4776)', () => {
+  for (const [name, line] of Object.entries(REFUSED)) {
+    test(`refused: ${name}`, () => {
       assert.deepEqual(entryTestViolations(`const x = 1\n${line}\n`), [{ line: 2, text: line }])
     })
   }
 
-  test('the canonical form is not flagged', () => {
+  test('allowed: the canonical form', () => {
     assert.deepEqual(entryTestViolations(CANONICAL), [])
   })
 
-  test('the realpath variant that compares URLs is not flagged', () => {
-    const line =
-      'isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href'
-    assert.deepEqual(entryTestViolations(line), [])
+  test('allowed: the canonical form with semicolons', () => {
+    assert.deepEqual(entryTestViolations(CANONICAL.replace(/(false|\)\)|'\))$/gm, '$1;')), [])
   })
 
-  test('a comment that quotes a retired form is skipped; the same text as code is not', () => {
-    const quoted = RETIRED_FORMS.B
-    assert.deepEqual(entryTestViolations(`// ${quoted}\n * ${quoted}\n/* ${quoted} */\n`), [])
-    assert.equal(entryTestViolations(`  ${quoted}\n`).length, 1)
+  test('allowed: other elements of process.argv, and index 1 of a local array', () => {
+    const source = [
+      'const args = process.argv.slice(2)',
+      'const command = process.argv[2]',
+      'const argv = parse(args)',
+      'const second = argv[1]',
+    ].join('\n')
+    assert.deepEqual(entryTestViolations(source), [])
+  })
+
+  test('a comment that quotes a retired form is skipped', () => {
+    const source = [`// ${FORM_B}`, `/* ${FORM_B} */`, '/**', ` * ${FORM_B}`, ' */', '/*', FORM_B, '*/'].join('\n')
+    assert.deepEqual(entryTestViolations(source), [])
+  })
+
+  test('code after a comment on the same line is not skipped', () => {
+    assert.deepEqual(entryTestViolations(`/* entry */ ${FORM_B}`), [{ line: 1, text: FORM_B }])
+    assert.deepEqual(entryTestViolations(`/*\n a note\n*/ ${FORM_B}`), [{ line: 3, text: FORM_B }])
+    assert.deepEqual(entryTestViolations(`/* a */ /* b */ ${FORM_B}`), [{ line: 1, text: FORM_B }])
+  })
+
+  test('a code line that only looks like a comment body is not skipped', () => {
+    const continued = '* (process.argv[1] === self ? 1 : 0)'
+    assert.deepEqual(entryTestViolations(`const weight = 2\n  ${continued}`), [{ line: 2, text: continued }])
+  })
+
+  test('a trailing comment does not hide the code before it', () => {
+    const line = `${FORM_B} // entry`
+    assert.deepEqual(entryTestViolations(line), [{ line: 1, text: line }])
   })
 
   test('no tracked script outside packages/*/src reads argv[1] any other way', () => {
     const scripts = trackedScripts()
     const failures = []
-    let withEntryTest = 0
     for (const file of scripts) {
       const source = readFileSync(path.join(REPO, file), 'utf8')
-      if (/realpathSync\(\s*process\.argv\[1\]\s*\)/.test(source)) withEntryTest += 1
       for (const v of entryTestViolations(source)) failures.push(`${file}:${v.line}: ${v.text}`)
     }
-    // The scan must have read the scripts it is about before its silence
-    // counts: 71 carried an entry test when this guard was written.
-    assert.ok(withEntryTest >= 60, `only ${withEntryTest} of ${scripts.length} scanned files carry the entry test`)
     assert.deepEqual(
       failures,
       [],
-      'resolve process.argv[1] with realpathSync before comparing it (see isEntryPoint in any script)',
+      'process.argv[1] may only be read by the entry test: copy isEntryPoint() from any script, unchanged',
+    )
+  })
+
+  test('the scan reads the scripts it is about, in every place they live', () => {
+    const scripts = new Set(trackedScripts())
+    for (const file of SENTINELS) {
+      assert.ok(scripts.has(file), `${file} is not in the scan`)
+      const code = new Set(codeLines(readFileSync(path.join(REPO, file), 'utf8')).map((l) => l.code))
+      for (const line of ALLOWED_LINES) assert.ok(code.has(line), `${file} does not carry: ${line}`)
+    }
+    assert.ok(
+      [...scripts].every((file) => !/^packages\/[^/]+\/src\//.test(file)),
+      'package source is outside this guard (#4776, Not in scope)',
     )
   })
 })

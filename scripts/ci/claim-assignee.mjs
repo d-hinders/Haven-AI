@@ -314,21 +314,11 @@ export function parse({ body, onIssue = null, channelIssue = CHANNEL_ISSUE, auth
   return { claim: claim.filter((n) => !release.includes(n)), release }
 }
 
-// ---------------------------------------------------------------------------
-// CLI — reads the comment from a file (never argv, so no quoting hazard) and
-// prints one `claim=<n>` / `release=<n>` line per issue for the shell to read.
-// Exit 0 always when the input is readable: a comment that says nothing about
-// claims is the common case, not an error.
-//
-//   node scripts/ci/claim-assignee.mjs --body comment.txt [--on-issue 2947] [--author-type Bot]
-// ---------------------------------------------------------------------------
-
 // True only when this file is the process's entry point, so importing it (a
 // self-test, a build config) never runs the CLI. Both paths are resolved
-// first: Node resolves symlinks for a module's own URL and leaves
-// `process.argv[1]` as typed, so an unresolved comparison answered "not the
-// entry point" through any symlink, and the script exited 0 without running
-// (#4776).
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
 function isEntryPoint() {
   if (!process.argv[1]) return false
   try {
@@ -339,6 +329,15 @@ function isEntryPoint() {
     return false
   }
 }
+
+// ---------------------------------------------------------------------------
+// CLI — reads the comment from a file (never argv, so no quoting hazard) and
+// prints one `claim=<n>` / `release=<n>` line per issue for the shell to read.
+// Exit 0 always when the input is readable: a comment that says nothing about
+// claims is the common case, not an error.
+//
+//   node scripts/ci/claim-assignee.mjs --body comment.txt [--on-issue 2947] [--author-type Bot]
+// ---------------------------------------------------------------------------
 
 const isMain = isEntryPoint()
 

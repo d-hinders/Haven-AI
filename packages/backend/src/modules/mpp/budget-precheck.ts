@@ -126,7 +126,7 @@ import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { BudgetPrecheckBody, MppHandlerResult } from './types.js'
 
 /** `machine_metadata` is stored as text or already-parsed jsonb depending on the reader — same tolerant parse `settlement-observed.ts` and `agent-payment-status.ts` use. */
-function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
+export function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
   if (!machineMetadata) return null
   if (typeof machineMetadata === 'string') {
     try {
@@ -139,7 +139,7 @@ function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown
 }
 
 /** `machine_metadata.settlement_scheme`, parsed the way every other reader of it does. */
-function settlementSchemeOf(machineMetadata: unknown): string | null {
+export function settlementSchemeOf(machineMetadata: unknown): string | null {
   const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
   return typeof scheme === 'string' ? scheme : null
 }

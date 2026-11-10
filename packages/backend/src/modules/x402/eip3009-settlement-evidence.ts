@@ -98,7 +98,7 @@ export type Eip3009SettlementObservation =
    */
   | { outcome: 'unverified'; retryable: boolean; reason: string; errorCode?: SettlementProofErrorCode }
 
-function metadataOf(intent: Eip3009SettlementIntent): Record<string, unknown> | null {
+export function metadataOf(intent: Eip3009SettlementIntent): Record<string, unknown> | null {
   const raw = intent.machine_metadata
   if (!raw) return null
   if (typeof raw !== 'string') return raw

@@ -21,7 +21,7 @@ import { findIntentForAgent, expirePendingIntent } from '../../infra/repositorie
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
 
-function parseMachineMetadata(metadata: unknown): Record<string, unknown> | null {
+export function parseMachineMetadata(metadata: unknown): Record<string, unknown> | null {
   if (!metadata) return null
   if (typeof metadata === 'string') {
     try {
@@ -34,7 +34,7 @@ function parseMachineMetadata(metadata: unknown): Record<string, unknown> | null
   return null
 }
 
-function storedMcpCallContext(metadata: unknown): X402McpCallContextInput | null {
+export function storedMcpCallContext(metadata: unknown): X402McpCallContextInput | null {
   const parsed = parseMachineMetadata(metadata)
   const stored = parsed?.mcp_call_context
   if (!stored || typeof stored !== 'object') return null

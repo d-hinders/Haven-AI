@@ -288,7 +288,7 @@ function railForPayment(intent: MachinePaymentEvidenceSource): string | null {
  * eip3009 settlement branch above (reported hash ≠ funding hash) never sees;
  * the proof ladder runs here for it and nowhere else.
  */
-function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
+export function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
   const raw = intent.machine_metadata
   let metadata: Record<string, unknown> = {}
   if (raw && typeof raw === 'string') {
@@ -309,7 +309,7 @@ function isEip3009BridgePayment(intent: MachinePaymentEvidenceSource): boolean {
 }
 
 /** The payment's persisted receipt-attribution verdict, when one is stored (#4319 limit 7). */
-function storedReceiptVerdict(intent: MachinePaymentEvidenceSource): string | null {
+export function storedReceiptVerdict(intent: MachinePaymentEvidenceSource): string | null {
   const raw = intent.machine_metadata
   let metadata: Record<string, unknown> = {}
   if (raw && typeof raw === 'string') {

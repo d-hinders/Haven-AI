@@ -25,7 +25,7 @@ import type { X402HandlerResult } from './types.js'
 import { boundedErrorDetails } from '../payments/index.js'
 
 /** The row's recorded settlement scheme (`machine_metadata.settlement_scheme`), or null. */
-function settlementScheme(intent: { machine_metadata: Record<string, unknown> | string | null }): string | null {
+export function settlementScheme(intent: { machine_metadata: Record<string, unknown> | string | null }): string | null {
   let meta: unknown = intent.machine_metadata
   if (typeof meta === 'string') {
     try {

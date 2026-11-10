@@ -293,7 +293,7 @@ function railFor(row: { payment_rail: string | null; source: string | null }): s
   return row.payment_rail ?? row.source ?? AgentPaymentRail.Direct
 }
 
-function metadataObject(value: unknown): MachinePaymentMetadata {
+export function metadataObject(value: unknown): MachinePaymentMetadata {
   if (!value) return {}
   if (typeof value === 'object' && !Array.isArray(value)) return value as MachinePaymentMetadata
   if (typeof value !== 'string') return {}
@@ -503,7 +503,7 @@ export {
 } from '../../domain/merchant-report-grace.js'
 
 /** Parse `machine_metadata` the way `settlement-observed.ts` does, once, for both keys read off it below. */
-function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
+export function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown> | null {
   if (!machineMetadata) return null
   if (typeof machineMetadata === 'string') {
     try {
@@ -516,7 +516,7 @@ function parsedMachineMetadata(machineMetadata: unknown): Record<string, unknown
 }
 
 /** `machine_metadata.settlement_scheme`, parsed the way `settlement-observed.ts` does. */
-function settlementSchemeOf(machineMetadata: unknown): string | null {
+export function settlementSchemeOf(machineMetadata: unknown): string | null {
   const scheme = parsedMachineMetadata(machineMetadata)?.settlement_scheme
   return typeof scheme === 'string' ? scheme : null
 }

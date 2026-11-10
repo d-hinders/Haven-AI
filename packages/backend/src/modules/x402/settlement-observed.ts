@@ -111,7 +111,7 @@ export type SettlementObservation =
   /** Refused. `retryable` distinguishes "ask again later" from a settled no. */
   | { outcome: 'unverified'; retryable: boolean; reason: string }
 
-function settlementSchemeOf(intent: ObservableSettlementIntent): string | null {
+export function settlementSchemeOf(intent: ObservableSettlementIntent): string | null {
   const raw = intent.machine_metadata
   if (!raw) return null
   let metadata: Record<string, unknown> | null = null

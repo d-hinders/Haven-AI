@@ -15,7 +15,7 @@ import { findX402IntentByIdempotencyKey } from '../../infra/repositories/x402-au
 import { x402MetadataNetwork } from './helpers.js'
 import type { X402HandlerResult } from './types.js'
 
-function parseObject(value: unknown): Record<string, unknown> | null {
+export function parseObject(value: unknown): Record<string, unknown> | null {
   if (!value) return null
   if (typeof value === 'string') {
     try {
@@ -33,7 +33,7 @@ function parseObject(value: unknown): Record<string, unknown> | null {
  * legs); rows without it fall back to the stored settlement state's shape —
  * an erc7710 `{child, budget}` pair. Anything else is unknown (null).
  */
-function settlementSchemeOf(row: Record<string, unknown>): 'erc7710' | 'eip3009' | null {
+export function settlementSchemeOf(row: Record<string, unknown>): 'erc7710' | 'eip3009' | null {
   const scheme = parseObject(row.machine_metadata)?.settlement_scheme
   if (scheme === 'erc7710' || scheme === 'eip3009') return scheme
   const state = parseObject(row.prepared_user_op)

@@ -143,7 +143,7 @@ export function receiptPayloadTransaction(payload: unknown): string | null {
   return typeof tx === 'string' && tx ? tx : null
 }
 
-function metadataOf(row: SiblingX402DelegationRow): Record<string, unknown> {
+export function metadataOf(row: SiblingX402DelegationRow): Record<string, unknown> {
   if (!row.machine_metadata) return {}
   if (typeof row.machine_metadata !== 'string') return row.machine_metadata
   try {
@@ -509,7 +509,7 @@ function isFundedEip3009Shaped(intent: Eip3009SettlementIntent, candidateTxHash:
   )
 }
 
-function metadataRecord(intent: Eip3009SettlementIntent): Record<string, unknown> {
+export function metadataRecord(intent: Eip3009SettlementIntent): Record<string, unknown> {
   const raw = intent.machine_metadata
   if (!raw) return {}
   if (typeof raw !== 'string') return raw

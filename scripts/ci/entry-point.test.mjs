@@ -139,6 +139,15 @@ const REPRESENTATIVES = [
     status: 2,
     ran: /usage: claim-collision\.mjs/,
   },
+  {
+    // The one script a workflow starts by an absolute path
+    // (agent-evals.yml). With no files to read it reports a missing result.
+    script: 'scripts/ci/agent-evals-login-check.mjs',
+    was: 'E',
+    args: [],
+    status: 1,
+    ran: /claude printed no result/,
+  },
 ]
 
 // Each `ran` line is what the script prints on its ordinary outcome, so a
@@ -268,9 +277,20 @@ const ALLOWED_LINES = new Set([
   'return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))',
 ])
 
-// Every spelling of "element 1 of process.argv" that is one expression.
-const ARGV1 =
-  /process\s*\.\s*argv\s*(?:\[\s*['"`]?1['"`]?\s*\]|\.\s*at\s*\(\s*1\s*\)|\.\s*slice\s*\(\s*1\s*\)\s*\[\s*0\s*\])/
+// "Element 1 of process.argv", in the spellings a person would reach for:
+// `[1]`, `['1']`, `.at(1)`, `.slice(1)[0]`, each with or without optional
+// chaining or spaces, on `process.argv` or `process['argv']`.
+//
+// Not seen, by fixture: a computed index (`[+1]`, `[0x1]`), `.slice(1, 2)[0]`,
+// a read split over two lines, and any alias or destructuring of
+// `process.argv`. The matcher narrows the search; it is not a parser.
+const PROCESS_ARGV = String.raw`process\s*(?:\?\.|\.)\s*argv|process\s*(?:\?\.)?\s*\[\s*['"\`]argv['"\`]\s*\]`
+const ELEMENT_1 = [
+  String.raw`(?:\?\.)?\s*\[\s*['"\`]?1['"\`]?\s*\]`,
+  String.raw`(?:\?\.|\.)\s*at\s*(?:\?\.)?\s*\(\s*1\s*\)`,
+  String.raw`(?:\?\.|\.)\s*slice\s*\(\s*1\s*\)\s*(?:\?\.)?\s*\[\s*0\s*\]`,
+].join('|')
+const ARGV1 = new RegExp(`(?:${PROCESS_ARGV})\\s*(?:${ELEMENT_1})`)
 
 /**
  * The code of `source`, line by line, with leading comments removed.
@@ -280,9 +300,12 @@ const ARGV1 =
  * has begun on a line the rest of the line is code. That keeps the two ways a
  * careless strip would hide a violation out of reach: the retired
  * `file://${…}` form contains `//`, and globs such as `packages/*\/src` look
- * like comment delimiters. The cost is in the safe direction: a comment body
+ * like comment delimiters. One cost is in the safe direction: a comment body
  * that itself contains a comment terminator ends the comment early, and what
- * follows is read as code.
+ * follows is read as code. One is not, and is a stated limit: this is not a
+ * parser, so a line INSIDE a multi-line template literal that starts with a
+ * block-comment opener is taken for a comment, and code after it is skipped
+ * until the next terminator. No scanned file has such a line today.
  */
 function codeLines(source) {
   const lines = []
@@ -340,14 +363,20 @@ function trackedScripts() {
 // One script from each place they live. Each must be in the scan and must
 // carry both allowed lines, which is what shows the scan read the entry tests
 // it is about. A count would not: dropping every `packages/*/scripts` file
-// still leaves more than sixty.
+// still leaves more than sixty. `test-local.mjs` is here for its name: it is
+// a script, not a test, and an exclusion wider than `*.test.*` would drop it.
 const SENTINELS = [
   'scripts/release-scope.mjs',
   'scripts/ci/preflight.mjs',
   'scripts/docs/coupling-gate.mjs',
   'packages/frontend/scripts/design-lint.mjs',
+  'packages/frontend/scripts/test-local.mjs',
   'packages/cli/scripts/sync-agent-guidance.mjs',
 ]
+
+// A TypeScript script, which carries no entry test today. It only has to be
+// in the scan, so that dropping `*.ts` from the pathspec is noticed.
+const TS_IN_SCAN = 'packages/backend/scripts/check-bundler.ts'
 
 const CANONICAL = `function isEntryPoint() {
   if (!process.argv[1]) return false
@@ -380,6 +409,13 @@ const REFUSED = {
   'a string index': "if (import.meta.url === pathToFileURL(process.argv['1']).href) main()",
   'spaced out': 'if (import.meta.url === pathToFileURL(process . argv .at( 1 )).href) main()',
   'slice(1)[0]': 'if (import.meta.url === pathToFileURL(process.argv.slice(1)[0]).href) main()',
+  'optional chaining': 'if (import.meta.url === pathToFileURL(process.argv?.[1]).href) main()',
+  'optional call': 'if (import.meta.url === pathToFileURL(process.argv.at?.(1)).href) main()',
+  "process['argv']": "if (import.meta.url === pathToFileURL(process['argv'][1]).href) main()",
+  'an allowed line with more code after it':
+    "return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)) || process.argv[1].endsWith('gate.mjs')",
+  'an allowed line with more code before it':
+    'if (always) return true; if (!process.argv[1]) return false',
 }
 
 describe('the structural guard: argv[1] is read only by the one entry test (#4776)', () => {
@@ -405,6 +441,20 @@ describe('the structural guard: argv[1] is read only by the one entry test (#477
       'const second = argv[1]',
     ].join('\n')
     assert.deepEqual(entryTestViolations(source), [])
+  })
+
+  test('known limits: these reads are not seen', () => {
+    // Pinned so the comment above ARGV1 stays true. Each is a reason the
+    // process-level tests exist beside this guard, not a licence to use one.
+    for (const line of [
+      'if (self === process.argv[+1]) main()',
+      'if (self === process.argv[0x1]) main()',
+      'if (self === process.argv.slice(1, 2)[0]) main()',
+      'const [, entry] = process.argv',
+      'if (self === process.argv[\n  1\n]) main()',
+    ]) {
+      assert.deepEqual(entryTestViolations(line), [], line)
+    }
   })
 
   test('a comment that quotes a retired form is skipped', () => {
@@ -449,6 +499,7 @@ describe('the structural guard: argv[1] is read only by the one entry test (#477
       const code = new Set(codeLines(readFileSync(path.join(REPO, file), 'utf8')).map((l) => l.code))
       for (const line of ALLOWED_LINES) assert.ok(code.has(line), `${file} does not carry: ${line}`)
     }
+    assert.ok(scripts.has(TS_IN_SCAN), `${TS_IN_SCAN} is not in the scan`)
     assert.ok(
       [...scripts].every((file) => !/^packages\/[^/]+\/src\//.test(file)),
       'package source is outside this guard (#4776, Not in scope)',

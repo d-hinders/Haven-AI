@@ -1,0 +1,47 @@
+{
+  "packages/backend/src/routes/agent-activity.ts": {
+    "lines": 881
+  },
+  "packages/backend/src/routes/agent-connection-setups.ts": {
+    "lines": 1556
+  },
+  "packages/backend/src/routes/agent-delegations.ts": {
+    "lines": 1389
+  },
+  "packages/backend/src/routes/agent-rekey.ts": {
+    "lines": 1276
+  },
+  "packages/backend/src/routes/agent-sub-budgets.ts": {
+    "lines": 502
+  },
+  "packages/backend/src/routes/agents.ts": {
+    "lines": 654
+  },
+  "packages/backend/src/routes/auth.ts": {
+    "lines": 407
+  },
+  "packages/backend/src/routes/catalog-submissions.ts": {
+    "lines": 402
+  },
+  "packages/backend/src/routes/catalog.ts": {
+    "lines": 437
+  },
+  "packages/backend/src/routes/dashboard.ts": {
+    "lines": 1163
+  },
+  "packages/backend/src/routes/hybrid-accounts.ts": {
+    "lines": 721
+  },
+  "packages/backend/src/routes/ops.ts": {
+    "lines": 435
+  },
+  "packages/backend/src/routes/receive.ts": {
+    "lines": 485
+  },
+  "packages/backend/src/routes/task-budgets.ts": {
+    "lines": 457
+  },
+  "packages/backend/src/routes/transactions.ts": {
+    "lines": 594
+  }
+}

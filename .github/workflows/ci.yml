@@ -515,6 +515,17 @@ jobs:
           npm run lint:deps
           npm run lint:deps:test
 
+      - name: Route line ceiling (#4762)
+        # Blocking, shrink-only ceiling over backend route files larger than 400
+        # lines (epic #4759 slice 3). Slices 1 and 2 thinned routes/payments.ts
+        # from 1572 lines to 291; this stops a large route growing back. A file
+        # at or under 400 lines needs no baseline entry, so a new small route
+        # passes with no ceremony. Growth is a reviewed hand edit of
+        # packages/backend/route-line-ceiling.json, defended in the PR.
+        run: |
+          npm run lint:route-lines
+          npm run lint:route-lines:test
+
       - name: DB-mock ratchet (#1227)
         # Blocking, shrink-only baseline over positional DB mocking
         # (vi.mock('db.js') + mockResolvedValueOnce counts). Database

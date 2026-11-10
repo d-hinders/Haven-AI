@@ -5,11 +5,11 @@
 // (file → key → count) that may only SHRINK — new occurrences, or growth of
 // an existing count, fail. This module is the single implementation; a further
 // ratcheting gate should import it rather than clone either script. There are
-// TEN as of #3924 — design-lint, copy-lint, the wire-type ratchet, the
+// ELEVEN as of #4762 — design-lint, copy-lint, the wire-type ratchet, the
 // db-mock ratchet, the retired-rail prose ratchet, ui-gate-wording, the
 // request-schema ratchet (#3029), the typed next-step ratchet (#3104), the
-// MCP↔CLI vocabulary guard (#3131) and the budget-liveness census (#3924) —
-// and the two
+// MCP↔CLI vocabulary guard (#3131), the budget-liveness census (#3924) and the
+// route-line ceiling (#4762) — and the two
 // that had cloned instead of imported were the two missing a `--update`
 // refusal. That count is ASSERTED against the real importer list by
 // `ratchet.test.mjs` rather than maintained by hand: it said FIVE here and in
@@ -119,7 +119,7 @@ export function writeBaseline(path, counts) {
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
  * turns its remedy into a laundering step. Of the five gates on this module at
- * the time (nine today), three had a line-for-line copy of this decision and
+ * the time (eleven today), three had a line-for-line copy of this decision and
  * TWO had none at all
  * (`frontend-copy-lint`, the subject of #2728, and `design-lint`, which review
  * found by reading the importer list rather than the issue) -- exactly the
@@ -139,7 +139,7 @@ export function updateRefusals(
  * Run a gate's `main` as the CLI, and present a failure the way a gate should.
  *
  * Four of the six gates on this module called `main()` bare at the time
- * (#2761 — nine gates today), so an
+ * (#2761 — eleven gates today), so an
  * operator-facing condition — a malformed baseline, an unreadable file, a
  * permissions error — arrived as Node's uncaught-exception banner:
  *
@@ -212,12 +212,12 @@ export function runGate(name, main) {
       //
       // `ELOOP` is here because a first version of this comment excluded it as
       // "not reachable from a `git ls-files` scan set" — a reason that is true
-      // of exactly ONE of the nine gates. SEVEN walk the tree themselves
+      // of exactly ONE of the eleven gates. NINE walk the tree themselves
       // (`readdir`/`statSync`), and a self-referential symlink gives `ELOOP`
       // from both `statSync` and `readFileSync`; measured. The ninth, the
       // vocabulary guard (#3131), walks nothing — it reads three fixed paths —
       // and `ELOOP` still arrives there from `readFileSync`. A stated reason
-      // that holds for one ninth of the callers is worse than no reason,
+      // that holds for one eleventh of the callers is worse than no reason,
       // because the next reader takes it as settled.
       const OPERATOR_ERRNO = new Set([
         'EACCES',
@@ -244,10 +244,11 @@ export function runGate(name, main) {
 /**
  * A refusal, not a crash — so it is presented as one.
  *
- * All nine gates now run their `main` through `runGate` (#2761; the seventh,
+ * All eleven gates now run their `main` through `runGate` (#2761; the seventh,
  * request-schemas, came with #3029 already using it, as did the eighth,
- * lint-next-steps, with #3104, and the ninth, the vocabulary guard, with
- * #3131), which prints a
+ * lint-next-steps, with #3104, the ninth, the vocabulary guard, with #3131, the
+ * tenth, the budget-liveness census, with #3924, and the eleventh, the
+ * route-line ceiling, with #4762), which prints a
  * frameless error as one line. Without the replacement below the frames WOULD
  * run `assertUsableBaseline` -> `loadBaseline` -> the gate's `main`, which for
  * a malformed baseline is noise around the one line the operator needs -- and
@@ -289,13 +290,13 @@ function refusal(message) {
  * occurrence(s) remain", violation live.
  *
  * Validating here rather than inside `newViolations` is deliberate: it is one
- * place for all nine gates, it keeps the comparison a pure numeric predicate,
+ * place for all eleven gates, it keeps the comparison a pure numeric predicate,
  * and it puts the error where the file is named — a comparison that throws can
  * only say WHICH key, not which file it came from.
  *
  * This does not reach `scripts/docs/covers-gaps.mjs`, whose baseline stores gap
  * FILE ARRAYS by design and which does not import this module (#2679). Audited
- * before shipping: the entries across the nine gates on this engine, all
+ * before shipping: the entries across the eleven gates on this engine, all
  * numeric, so this is a pure tightening rather than a build someone else has to
  * fix. The 40 array-valued entries in the repo all live in covers-gaps'.
  */
@@ -360,7 +361,7 @@ export function loadBaseline(path) {
  * Validated like `loadBaseline`, because leaving one unvalidated read path
  * exported reopens #2759 for whichever gate reaches for it next — and none of
  * that gate's mutations would redden, since the hole would be in a function no
- * current caller uses. No gate uses this today (all nine call `loadBaseline`);
+ * current caller uses. No gate uses this today (all eleven call `loadBaseline`);
  * it stays for callers that need the object without the `firstRun` flag.
  */
 export function readBaseline(path) {

@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/modules/passport/**
+  - packages/backend/src/background-jobs.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
@@ -507,8 +508,8 @@ disambiguates the two alarms and their remedies.
 Both halves of the anchor are fire-and-forget — an EAS write must never block
 agent creation or an owner's revoke — which only holds because something later
 retries what the in-request attempt dropped. That something is the **passport
-sweep** in `index.ts`: a leader-locked tick (every 5 minutes, not hourly, so it
-does not flatten a schedule that starts at 30s) that runs
+sweep** in `background-jobs.ts`: a leader-locked tick (every 5 minutes, not
+hourly, so it does not flatten a schedule that starts at 30s) that runs
 `retryPendingPassports()`, then `reconcilePendingRevocations()`, then
 `reconcilePendingReanchors()` (#1699), then logs anything
 `listStuckRevocations()` or `listStuckReanchors()` returns as a warning — two

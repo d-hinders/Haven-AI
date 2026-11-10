@@ -9,8 +9,8 @@
  * treats Haven's DB as authoritative and this is the on-chain anchor catching
  * up, so a revoke that never resolves means an agent Haven considers revoked
  * still holds a live, merchant-readable attestation — and, because the whole
- * passport sweep runs sequentially under ONE leader lock (`index.ts`
- * `runPassportSweep` → `runIfLeader`), a single stalled revoke also parks the
+ * passport sweep runs sequentially under ONE leader lock (`background-jobs.ts`
+ * passport sweep row → `runIfLeader`), a single stalled revoke also parks the
  * `alarm` phase that exists to report exactly that condition.
  *
  * The mocked `wait` mirrors ethers v6 verbatim: a tx that never mines settles

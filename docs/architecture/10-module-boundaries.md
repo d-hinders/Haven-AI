@@ -79,7 +79,8 @@ the core stops being safe to touch.
 
 ```text
 packages/backend/src/
-  platform/   config, db pool, logging, http bootstrap, cache, leader-lock
+  platform/   config, db pool, logging, http bootstrap, cache, leader-lock,
+              job-scheduler
   domain/     PURE: money, address, chains, policy, rail decision, taxonomy
               — no fastify, no pg, no ethers/viem
   modules/    accounts, accounting, agents, budget-scope, catalog, dashboard, fee,
@@ -102,7 +103,7 @@ most maintainable code in the backend. The target generalises them.
 
 | Layer | Holds | Never holds |
 |---|---|---|
-| `platform/` | Process-level concerns: config parsing, the `pg` pool, the Fastify instance, cache, leader-lock | Business rules |
+| `platform/` | Process-level concerns: config parsing, the `pg` pool, the Fastify instance, cache, leader-lock, the generic job scheduler | Business rules |
 | `domain/` | Pure functions and types: money arithmetic, address validation, the chain registry, policy predicates, the rail *decision*, payment-state taxonomy | I/O of any kind |
 | `modules/` | One directory per domain capability, each with a public `index.ts` | Another module's internals |
 | `rails/` | Rail implementations behind one interface, plus the registry that selects between them | Rail selection scattered elsewhere |

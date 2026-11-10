@@ -17,15 +17,21 @@
 // then the fixture's, and the real repo is never scanned. No guard gains a
 // test-only env var, and the code under test is the shipped file byte for byte.
 //
-// ## The realpath, which is not optional
+// ## The realpath
 //
-// These scripts self-guard with `import.meta.url === \`file://${process.argv[1]}\``.
-// On macOS `mktemp -d` returns `/var/folders/…` reached through a symlink, so
-// `argv[1]` and `import.meta.url` disagree, `main()` never runs, and the script
-// exits 0 having done NOTHING. Measured: a fixture with a real violation
-// reported exit 0 and printed nothing at all — a false pass that looks exactly
-// like a clean run. `realpathSync` is what stops this helper from certifying
-// silence as success.
+// Until #4776 these scripts decided whether to run `main()` by comparing their
+// own resolved URL with the path they were invoked by, unresolved. On macOS
+// `mktemp -d` returns `/var/folders/…` reached through a symlink, so the two
+// disagreed, `main()` never ran, and the script exited 0 having done NOTHING.
+// Measured: a fixture with a real violation reported exit 0 and printed
+// nothing at all — a false pass that looks exactly like a clean run (#2721).
+// `realpathSync` here was what stopped this helper from certifying silence as
+// success.
+//
+// The scripts now resolve both paths themselves, and
+// `scripts/ci/entry-point.test.mjs` holds them to it, so `main()` no longer
+// depends on this call. It stays so that `root` is the same path the script
+// computes for itself from its resolved URL.
 import {
   chmodSync,
   cpSync,

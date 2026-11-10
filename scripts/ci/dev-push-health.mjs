@@ -280,7 +280,23 @@ function readAnnotations(red, gh = defaultGh) {
   return out
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   const gh = defaultGh
   // `--until <run-id>` replays the window as it stood when that run was
   // created: the pre-merge proof, since `workflow_run` only fires from the

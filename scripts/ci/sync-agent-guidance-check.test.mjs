@@ -11,11 +11,13 @@
  *
  * Why a mirror, not the repository: `--check` takes no path override — every
  * path derives from the script's own `import.meta.url` — and these cases have
- * to edit the copies. Why `realpathSync`: the script's entry guard compares
- * the resolved `import.meta.url` with the unresolved `argv[1]`, and on macOS
- * `os.tmpdir()` is a symlink, so an unresolved tree makes `--check` print
- * nothing and exit 0. The no-drift case below is the positive control for
- * that: it requires every ✓ line, which a silent exit cannot produce.
+ * to edit the copies. Why `realpathSync`: until #4776 the script's entry test
+ * compared its resolved URL with the unresolved path it was invoked by, and
+ * on macOS `os.tmpdir()` is a symlink, so an unresolved tree made `--check`
+ * print nothing and exit 0. The script resolves both paths now, so the call
+ * is no longer what makes it run; it stays so the mirror's root is the path
+ * the script computes for itself. The no-drift case below is still the
+ * positive control against a silent exit: it requires every ✓ line.
  *
  * Lives in scripts/ci/ because CI runs `node --test scripts/ci/*.test.mjs`
  * with no install step; `packages/cli` runs vitest, which would not run a

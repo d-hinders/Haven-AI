@@ -24,7 +24,6 @@
 //   node scripts/ci/epic-promotion-checklist.mjs <body-file>
 
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 
 // `[ \t]` rather than `\s`: under the `m` flag `\s*$` would swallow the heading's
 // newline and every blank line after it, and the line numbers reported below
@@ -122,6 +121,22 @@ function main(argv) {
   return verdict.ready ? 0 : 1
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   process.exit(main(process.argv.slice(2)))
 }

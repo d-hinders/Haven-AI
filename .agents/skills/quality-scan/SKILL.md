@@ -143,7 +143,9 @@ Report at most five concrete opportunities. For each, state:
 
 ```bash
 # routing (the CI surfaces these files turn on), then the money-path verdict over globs + controlGlobs (the positive control `sweep.ts` must print money-path)
-node -e 'import("./scripts/ci/change-classifier.mjs").then(m=>{const r=m.classifyChangedFiles(process.argv.slice(1));console.log(Object.keys(r).filter(k=>r[k]===true).join(" ")||"(none)")})' <file>...
+# `node -e <code> <arg>` puts the first <arg> in `process.argv[1]`, which the imported script reads to decide whether it is the entry point.
+# Keep that argument a fixed word (`files` below, `sweep.ts` on the next line), never the script's own path.
+node -e 'import("./scripts/ci/change-classifier.mjs").then(m=>{const r=m.classifyChangedFiles(process.argv.slice(2));console.log(Object.keys(r).filter(k=>r[k]===true).join(" ")||"(none)")})' files <file>...
 node -e 'import("./scripts/ci/qa-freshness.mjs").then(q=>{const g=[...q.loadMoneyPathGlobs(),...q.loadMoneyPathControlGlobs()];for(const f of process.argv.slice(1))console.log(f,g.some(x=>q.matchesGlob(f,x))?"money-path":"off")})' packages/backend/src/rails/sweep.ts <file>...
 ```
 

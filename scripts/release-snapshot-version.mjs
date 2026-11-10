@@ -24,7 +24,6 @@
  * reason `release-lockfile.mjs` and `release-manifest-doc.mjs` exist.
  */
 
-import { pathToFileURL } from 'node:url'
 
 /** Every snapshot version begins with this, and nothing else may. */
 export const SNAPSHOT_PREFIX = '0.0.0-dev.'
@@ -115,13 +114,29 @@ export function snapshotModeViolation(version, { snapshot }) {
   return null
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────
 //
 // `node scripts/release-snapshot-version.mjs [<shortsha>] [<timestamp>]`
 // prints the version and nothing else, so publish.yml can capture it directly.
 // Both arguments default from the environment (GITHUB_SHA / now) so the
 // workflow does not have to restate the format.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isEntryPoint()) {
   const sha = (process.argv[2] || process.env.GITHUB_SHA || '').slice(0, 7)
   const timestamp = process.argv[3] || new Date().toISOString().replace(/\D/g, '').slice(0, 12)
   try {

@@ -40,7 +40,7 @@
  * count guard would have to be updated by every legitimate change, and a guard
  * everybody has to edit is a guard everybody edits without reading.
  */
-import { readdirSync, statSync, appendFileSync } from 'node:fs'
+import { readdirSync, appendFileSync } from 'node:fs'
 import path from 'node:path'
 
 export const BASELINE_ROOT = 'packages/frontend/e2e/__screenshots__'
@@ -139,9 +139,24 @@ export function run(root = BASELINE_ROOT, write = (text) => process.stdout.write
   return 0
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // Not executed on import, so the test file can drive the pure functions above.
-if (process.argv[1] && statSync(process.argv[1]).isFile() &&
-    path.basename(process.argv[1]) === 'visual-baseline-inventory.mjs') {
+if (isEntryPoint()) {
   const code = run(process.env.VISUAL_BASELINE_ROOT ?? BASELINE_ROOT, (text) => {
     process.stdout.write(`${text}\n`)
     if (process.env.GITHUB_STEP_SUMMARY) {

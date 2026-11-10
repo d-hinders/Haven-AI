@@ -16,7 +16,7 @@ covers:
   - scripts/lint-budget-liveness-baseline.json
   - packages/backend/db-mock-baseline.json
   - packages/backend/scripts/record-kit-analytics-connections.mjs
-last-verified: "2026-10-21"
+last-verified: "2026-11-10"
 ---
 
 # Backend testing strategy: the real-database rule
@@ -107,6 +107,17 @@ tests that need no database — a guard against silent skipping must not itself
 skip silently. `vitest.global-setup.ts` owns the run-level verdict: it probes
 once before collection and prints the closing line *after* vitest's summary,
 which per-file harness state cannot do.
+
+### When the role cannot create roles (#4767)
+
+`ops-readonly-role.test.ts` (#3510) applies a script that issues `CREATE ROLE`
+and `ALTER ROLE`, so it needs a database role with `CREATEROLE` (or superuser):
+`docker compose up -d postgres` provides one because `haven` is
+`POSTGRES_USER`, while a non-compose Postgres needs `ALTER ROLE <you>
+CREATEROLE`. Without it the suite skips locally with a stated reason — listed
+apart from the green count by `npm run preflight`, never as a pass — and
+**fails** in CI, where the compose service always has the capability. The
+decision is `decideRoleMode`, the same pure-function shape as `decideDbMode`.
 
 ```ts
 import db from '../../../db.js'

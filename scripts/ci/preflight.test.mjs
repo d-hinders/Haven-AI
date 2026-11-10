@@ -45,6 +45,7 @@ import {
   ACTIONS_DIR,
   parseWorkflowCommands,
   DB_SKIP_MARKER,
+  OPS_ROLE_SKIP_MARKER,
   DEFAULT_SILENCE_MS,
   DEFAULT_KILL_GRACE_MS,
   GATE_RULES,
@@ -1083,6 +1084,33 @@ describe('the real-DB skip detector', () => {
   })
 })
 
+describe('the ops-role skip detector (#4767)', () => {
+  test('its marker matches the literal the harness prints', () => {
+    // Same coupling, same reason as the real-DB detector above: the marker
+    // lives in `db-availability.ts` (the policy module) and this detector reads
+    // it out of a gate's output. A reword there without this regex would make
+    // the skip silent — a silent skip inside the guard against silent skips.
+    // The probe below is deliberately a THIRD copy of the string, so the test
+    // can fail when the marker and the source drift apart.
+    const availability = readFileSync(
+      new URL(
+        '../../packages/backend/src/infra/__tests__/helpers/db-availability.ts',
+        import.meta.url,
+      ),
+      'utf8',
+    )
+    const literal = /ops-role suites SKIPPED/.exec(availability)
+    assert.ok(literal, 'db-availability.ts no longer declares the marker this detector reads')
+    assert.ok(OPS_ROLE_SKIP_MARKER.test(literal[0]), 'the marker stopped matching db-availability.ts')
+  })
+
+  test('it does not fire on ordinary green output, nor on the real-DB skip', () => {
+    assert.equal(OPS_ROLE_SKIP_MARKER.test('✓ 36 gate(s) green.'), false)
+    assert.equal(OPS_ROLE_SKIP_MARKER.test('real-DB suites SKIPPED'), false)
+    assert.equal(DB_SKIP_MARKER.test('ops-role suites SKIPPED'), false)
+  })
+})
+
 describe('the gate map file', () => {
   test('is valid JSON with the expected keys', () => {
     const raw = JSON.parse(readFileSync(new URL('./preflight-gates.json', import.meta.url), 'utf8'))
@@ -1758,16 +1786,26 @@ describe('the silence watchdog (#4276)', () => {
     }
   })
 
-  test('a gate that writes at least once per threshold is never stalled, past several thresholds', { timeout: 10_000 }, async () => {
-    // Writes every ~80ms for ~640ms: six windows of 100ms, three of 200ms —
-    // far past several thresholds of each size.
-    const command = `for i in 1 2 3 4 5 6 7 8; do echo tick; sleep 0.08; done`
-    for (const silenceMs of [100, 200]) {
-      const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs, graceMs: 100 })
-      assert.equal(result.stalled, false, `stalled at silenceMs=${silenceMs}: ${JSON.stringify(result)}`)
-      assert.equal(result.ok, true, result.output)
-      assert.equal((result.output.match(/tick/g) ?? []).length, 8, 'all output captured')
-    }
+  test('a gate that writes at least once per threshold is never stalled, past several thresholds', { timeout: 20_000 }, async () => {
+    // The threshold has to clear the child's START-UP latency, not only the
+    // write interval: `lastOutputAt` starts at spawn, so a gate killed before
+    // its first `tick` was read reports `output: ""` and `silentFor: 103`
+    // against a 100 ms threshold — the measured failure (#4767). Start-up
+    // measured over 300 ms under load (#4398), so 1000 ms leaves ~3x headroom,
+    // and the write interval is a 10x margin below the threshold rather than
+    // the 20 ms the old 80/100 pair left. 30 ticks at 100 ms is 3 s: three
+    // thresholds crossed, so the reset-on-output path is exercised repeatedly
+    // rather than once, and breaking it still reddens this test.
+    const TICKS = 30
+    const command = `i=0; while [ $i -lt ${TICKS} ]; do echo tick; sleep 0.1; i=$((i + 1)); done`
+    const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs: 1000, graceMs: 100 })
+    assert.equal(
+      result.stalled,
+      false,
+      `stalled: ${JSON.stringify({ ...result, output: result.output.slice(0, 200) })}`,
+    )
+    assert.equal(result.ok, true, result.output)
+    assert.equal((result.output.match(/tick/g) ?? []).length, TICKS, 'all output captured')
   })
 
   test('SIGINT to preflight kills the running gate process group: the grandchild is dead', { timeout: 30_000 }, async () => {
@@ -2142,5 +2180,45 @@ describe('the timeout-shaped re-run, at any load (#4175, #4191)', () => {
     const plain = await drive({ 'npm run test -w packages/backend': [{ ok: true, output: BANNER }] })
     assert.deepEqual(plain.outcome.skippedDb.map((r) => r.command), ['npm run test -w packages/backend'])
     assert.ok(plain.summary.out.includes('!   npm run test -w packages/backend'))
+  })
+
+  test('an ops-role skip is listed apart and leaves the exit code unchanged (#4767)', async () => {
+    const MARKER =
+      'ops-role suites SKIPPED — the database role at postgres://localhost:5432/haven cannot create roles'
+    const { outcome, summary } = await drive({
+      'npm run lint:a': [{ ok: true }],
+      'npm run test -w packages/backend': [{ ok: true, output: MARKER }],
+    })
+    // A skip is not a red: the exit code is the one the run earned.
+    assert.equal(outcome.code, EXIT.GREEN)
+    assert.deepEqual(outcome.skippedOpsRole.map((r) => r.command), ['npm run test -w packages/backend'])
+    // Listed APART from the green count, with the same `!` marker the real-DB
+    // skip uses — never folded into `✓ N gate(s) green`.
+    assert.ok(summary.out.includes('!   npm run test -w packages/backend'))
+    const joined = summary.out.join('\n')
+    assert.match(joined, /ops-role suites SKIPPED/)
+    assert.match(joined, /CREATEROLE/)
+    // And it is a DISTINCT signal from the real-DB skip: one does not imply the
+    // other, so a database that is up but cannot create roles is not reported
+    // as "no database".
+    assert.deepEqual(outcome.skippedDb, [])
+  })
+
+  test('a red run suppresses the ops-role skip notice; exit 3 still prints it', async () => {
+    const MARKER = 'ops-role suites SKIPPED — cannot create roles'
+    const red = await drive({
+      'npm run lint:a': [{ ok: false, output: 'lint:a: 1 new violation' }],
+      'npm run test -w packages/backend': [{ ok: true, output: MARKER }],
+    })
+    assert.equal(red.outcome.code, EXIT.RED)
+    const all = [...red.summary.out, ...red.summary.err].join('\n')
+    assert.equal(/ops-role suites SKIPPED/.test(all), false, 'the skip notice printed on a red run')
+
+    const loadRed = await drive({
+      'npm run lint:a': [{ ok: false, output: VITEST_TEST_TIMEOUT }, { ok: true }],
+      'npm run test -w packages/backend': [{ ok: true, output: MARKER }],
+    })
+    assert.equal(loadRed.outcome.code, EXIT.RED_UNDER_LOAD)
+    assert.ok(loadRed.summary.err.includes('!   npm run test -w packages/backend'))
   })
 })

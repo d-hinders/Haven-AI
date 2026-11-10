@@ -19,10 +19,14 @@ import { describe, expect, it } from 'vitest'
 import {
   ciFailureMessage,
   decideDbMode,
+  decideRoleMode,
   DEFAULT_TEST_DATABASE_URL,
+  OPS_ROLE_SKIP_MARKER,
   readDbModeInputs,
   redactDatabaseUrl,
   resolveTestDatabaseUrl,
+  roleCiFailureMessage,
+  roleSkipMessage,
   SKIP_ACK_ENV,
   unacknowledgedFailureMessage,
 } from '../db-availability.js'
@@ -64,6 +68,38 @@ describe('decideDbMode', () => {
       for (const acknowledged of [true, false]) {
         expect(decideDbMode({ available: false, ci, acknowledged })).not.toBe('run')
       }
+    }
+  })
+})
+
+describe('decideRoleMode (#4767)', () => {
+  it('runs the ops read-only role suite when the role can create roles', () => {
+    for (const ci of [true, false]) {
+      expect(decideRoleMode({ canCreateRole: true, ci })).toBe('run')
+    }
+  })
+
+  it('SKIPS locally with a stated reason when the role cannot create roles', () => {
+    // The macOS/Homebrew case: `haven` is not a superuser and has no
+    // CREATEROLE, so `CREATE ROLE` fails. Skipping is the local answer; the
+    // reason is printed with OPS_ROLE_SKIP_MARKER so preflight lists it apart.
+    expect(decideRoleMode({ canCreateRole: false, ci: false })).toBe('skip')
+  })
+
+  it('FAILS in CI when the role cannot create roles', () => {
+    // CI's compose service makes `haven` POSTGRES_USER and therefore a
+    // superuser, so this branch firing means the CI database is configured
+    // differently — not that the suite is optional. A green CI run that
+    // skipped it would prove nothing about the ops console's grants.
+    expect(decideRoleMode({ canCreateRole: false, ci: true })).toBe('fail-ci')
+  })
+
+  it('never returns a mode that lets a missing capability pass unremarked', () => {
+    // The property, stated once so a future branch has to satisfy it: without
+    // the capability, every mode either fails or is a stated skip. There is no
+    // path to 'run'.
+    for (const ci of [true, false]) {
+      expect(decideRoleMode({ canCreateRole: false, ci })).not.toBe('run')
     }
   })
 })
@@ -187,5 +223,28 @@ describe('failure messages', () => {
     const url = 'postgres://haven:hunter2@localhost:5432/haven'
     expect(ciFailureMessage(url)).not.toContain('hunter2')
     expect(unacknowledgedFailureMessage(url)).not.toContain('hunter2')
+  })
+
+  it('the ops-role skip message carries the marker preflight detects (#4767)', () => {
+    // The marker is the coupling: `scripts/ci/preflight.mjs` lists the skip
+    // apart from the green count by matching this string in the gate's output.
+    // A reword here without the detector would make the skip silent.
+    const message = roleSkipMessage(DEFAULT_TEST_DATABASE_URL)
+    expect(message).toContain(OPS_ROLE_SKIP_MARKER)
+    expect(message).toContain('CREATEROLE')
+    expect(message).toContain('docs/contributing/testing-strategy.md')
+  })
+
+  it('the ops-role CI message says FAIL, not skip, and names the compose service', () => {
+    const message = roleCiFailureMessage(DEFAULT_TEST_DATABASE_URL)
+    expect(message).toContain('must FAIL here, not skip')
+    expect(message).toContain('docker compose up -d postgres')
+    expect(message).toContain('#3510')
+  })
+
+  it('neither ops-role message leaks a password', () => {
+    const url = 'postgres://haven:hunter2@localhost:5432/haven'
+    expect(roleSkipMessage(url)).not.toContain('hunter2')
+    expect(roleCiFailureMessage(url)).not.toContain('hunter2')
   })
 })

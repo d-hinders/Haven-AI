@@ -119,7 +119,7 @@ export function writeBaseline(path, counts) {
  * This lives here rather than in one gate because `--update` is the command a
  * gate's own failure message sends you to, so a gate that omits the check
  * turns its remedy into a laundering step. Of the five gates on this module at
- * the time (nine today), three had a line-for-line copy of this decision and
+ * the time (eleven today), three had a line-for-line copy of this decision and
  * TWO had none at all
  * (`frontend-copy-lint`, the subject of #2728, and `design-lint`, which review
  * found by reading the importer list rather than the issue) -- exactly the
@@ -212,12 +212,12 @@ export function runGate(name, main) {
       //
       // `ELOOP` is here because a first version of this comment excluded it as
       // "not reachable from a `git ls-files` scan set" — a reason that is true
-      // of exactly ONE of the eleven gates. SEVEN walk the tree themselves
+      // of exactly ONE of the eleven gates. NINE walk the tree themselves
       // (`readdir`/`statSync`), and a self-referential symlink gives `ELOOP`
       // from both `statSync` and `readFileSync`; measured. The ninth, the
       // vocabulary guard (#3131), walks nothing — it reads three fixed paths —
       // and `ELOOP` still arrives there from `readFileSync`. A stated reason
-      // that holds for one ninth of the callers is worse than no reason,
+      // that holds for one eleventh of the callers is worse than no reason,
       // because the next reader takes it as settled.
       const OPERATOR_ERRNO = new Set([
         'EACCES',
@@ -361,7 +361,7 @@ export function loadBaseline(path) {
  * Validated like `loadBaseline`, because leaving one unvalidated read path
  * exported reopens #2759 for whichever gate reaches for it next — and none of
  * that gate's mutations would redden, since the hole would be in a function no
- * current caller uses. No gate uses this today (all nine call `loadBaseline`);
+ * current caller uses. No gate uses this today (all eleven call `loadBaseline`);
  * it stays for callers that need the object without the `firstRun` flag.
  */
 export function readBaseline(path) {

@@ -105,7 +105,7 @@ semantics match. They are not byte-for-byte identical:
   `haven_sign_sweep_delegate`.
 
 **A hosted tool list carries a contract fingerprint; a local one does not
-(#3816).** The hosted server's tool list changes on every deploy, while an
+(#3816) — it has a committed golden only (#4791).** The hosted server's tool list changes on every deploy, while an
 agent keeps the list it loaded when its session started, so the hosted server
 says which list it serves:
 
@@ -128,6 +128,12 @@ says which list it serves:
   is never paid again.
 - **Hosted only.** The local stdio server and the signer carry neither field;
   their tool list changes only on reinstall.
+- **What the local package has instead (#4791).** A committed golden of its
+  `tools/list` payload, `packages/mcp/src/local-tool-contract.golden.json`,
+  pinned by `packages/mcp/src/local-tool-contract.test.ts`. It makes a change
+  to a local tool's name, description or input schema a reviewed diff. It is a
+  test fixture, not a runtime signal: nothing is sent to the agent, and there
+  is still no local fingerprint.
 
 The full contract and the skew table live in
 [`mcp-runtime-compatibility.md` § Hosted tool lists](../operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816).

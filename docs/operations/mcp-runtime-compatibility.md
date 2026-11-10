@@ -89,6 +89,25 @@ covers:
 last-verified: "2026-11-09"
 ---
 
+> **No contract change (#4791, 2026-11-10): the local `tools/list` contract
+> gets a golden, as the hosted one has had since #3817.** Tests and one script
+> line; no runtime behaviour changes. The local `@haven_ai/mcp` `tools/list`
+> payload — each tool's name, description and input schema — is now captured
+> through the MCP SDK (`InMemoryTransport` + `client.listTools()`, the server
+> built by `buildMcpServer`) into the committed golden
+> `packages/mcp/src/local-tool-contract.golden.json` and pinned by
+> `packages/mcp/src/local-tool-contract.test.ts`; regenerate with
+> `npm run snapshot:regen -w packages/mcp` and review the diff as a contract
+> change. The golden holds `tools/list` only, so a release bump (which rewrites
+> the package's version constant) does not move it, and it is not published
+> (`files` stays `dist` and `README.md`). It deliberately does not reuse the
+> hosted basename `tools-list.snapshot.json`. The local package still has no
+> contract fingerprint and no next-arguments corpus: those serve the
+> stale-hosted-client check. No tool name, argument, input schema, strict-input
+> list, expected-context version, consent hash, `tools-list.snapshot.json` entry
+> or `next-arguments-corpus.json` row changes. `last-verified` is not
+> re-stamped: this block is the scope.
+
 > **No contract change (#4746, 2026-11-09): the runbook's release-record link
 > moves to the start of "If something breaks".** `packages/sdk/src/agent-guidance.ts`
 > is on this contract's cover list. The section's paragraph ended with "What

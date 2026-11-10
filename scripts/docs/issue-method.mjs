@@ -45,7 +45,8 @@
 // `lines = <n>` is the TOTAL of matching lines over all files (the sum of what
 // `git grep -c` prints per file); `files = <n>` is the number of files with a
 // match. A pathspec may carry the `:!` exclude prefix, followed by a letter,
-// digit, `.`, `_` or `*`, and no other magic. A
+// digit, `.` or `*`, and no other magic (git reads `:!_` as magic of its
+// own). A
 // free-text note may follow the expectation after a second ` # `.
 //
 // ## False zeros
@@ -85,7 +86,8 @@
 // escape, an unquoted glob character, a control character or whitespace other
 // than space and tab anywhere on the line; a tool other than `git`; a `git`
 // subcommand or flag outside the three forms. A body over 1 MB is a usage
-// error; a checkable line over 2000 characters, or past the 200th, is refused.
+// error; a checkable line over 2000 characters, past the 200th, or with more
+// than 50 pathspecs is refused.
 //
 // The report prints each line as the body wrote it, with every control
 // character shown as an escape (`\x1b`), so a body cannot move the cursor or
@@ -215,12 +217,14 @@ const UNQUOTED_REFUSALS = new Map([
   ['!', 'an unquoted history character (quote the field)'],
 ])
 
-const ODD_WHITESPACE = /[\u0085\u00a0\u1680\u2000-\u200f\u2028-\u202f\u205f\u2060\u3000\ufeff]/
+const ODD_WHITESPACE = /[\u0085\u00a0\u1680\u2000-\u200d\u2028\u2029\u202f\u205f\u2060\u3000\ufeff]/
+const BIDI_CONTROL = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/
 
 /** Space and tab separate words. Every other control or whitespace character is refused. */
 function checkChar(ch) {
   if ((ch < ' ' && ch !== '\t') || ch === '\x7f') refuse('a control character')
   if (ODD_WHITESPACE.test(ch)) refuse('whitespace other than space and tab')
+  if (BIDI_CONTROL.test(ch)) refuse('a text-direction control character')
 }
 
 /**
@@ -313,7 +317,7 @@ function checkPathspec(value) {
   checkField(value, 'pathspec')
   if (!value.startsWith(':!')) return checkPath(value, 'pathspec')
   const rest = value.slice(2)
-  if (!/^[A-Za-z0-9._*]/.test(rest)) refuse('pathspec magic other than the ":!" exclude prefix')
+  if (!/^[A-Za-z0-9.*]/.test(rest)) refuse('pathspec magic other than the ":!" exclude prefix')
   checkPath(rest, 'pathspec')
 }
 
@@ -736,7 +740,9 @@ export function formatReport(result) {
     out.push(`issue-method: no checkable line in the Method block (${freeForm} free-form). Nothing was checked.`)
     return out.join('\n') + '\n'
   }
-  const row = (e) => `  L${e.lineNumber}  ${printable(verdict(e))}\n        ${printable(e.text)}`
+  // A refused line can be as long as the body allows; the report shows its head.
+  const shown = (text) => printable(text.length > 240 ? `${text.slice(0, 240)}… (${text.length} characters)` : text)
+  const row = (e) => `  L${e.lineNumber}  ${printable(verdict(e))}\n        ${shown(e.text)}`
   out.push('issue-method: checkable lines of the Method block', '')
   for (const e of entries) out.push(row(e))
   const failedControls = entries.filter((e) => e.isControl && e.status !== 'reproduces')

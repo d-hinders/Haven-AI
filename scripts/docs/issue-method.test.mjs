@@ -268,6 +268,9 @@ describe('the grammar', () => {
     ["git grep -c -e 'a' 49747fac3 -- ':!:(top)x'   # check: lines = 1", /magic other than/],
     ["git grep -c -e 'a' 49747fac3 -- ':!^docs'   # check: lines = 1", /magic other than/],
     ["git grep -c -e 'a' 49747fac3 -- ':!!src'   # check: lines = 1", /magic other than/],
+    ["git grep -c -e 'a' 49747fac3 -- ':!_under'   # check: lines = 1", /magic other than/],
+    ["git grep -c -e 'a' 49747fac3 -- src   # check: lines = 1 # \u202ertl", /text-direction control/],
+    ["git grep -c -e 'a' 49747fac3 -- src   # check: lines = 1 # \u2066x", /text-direction control/],
     ["git grep -c -e 'a' 49747fac3 -- ':!x/..'   # check: lines = 1", /contains "\.\."/],
     ["git show 49747fac3::x   # check: line 1 contains 'x'", /magic other than/],
     ['git ls-tree 49747fac3 -- :x   # check: exists', /magic other than/],
@@ -569,6 +572,8 @@ describe('against the fixture repository', () => {
     assert.match(report, /a\\x0dL9/)
     assert.match(report, /\\u202eright-to-left/)
     assert.equal(printable('a\tb\x7f\u0085\u2066'), 'a\\x09b\\x7f\\x85\\u2066')
+    const long = await runChecks(`## Method\n\`\`\`\ngit ls-tree 249c77ca0 -- docs   # check: exists # ${'n'.repeat(5000)}\n\`\`\`\n`, { repo })
+    assert.match(formatReport(long), /# n{190}… \(5050 characters\)\n/)
   })
 
   it('refuses every SHA when the clone has no origin/dev or origin/main to check it against', async () => {

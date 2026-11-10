@@ -31,6 +31,7 @@
   "scripts": {
     "build": "npm --prefix ../sdk run build && tsup",
     "test": "npm --prefix ../sdk run build && vitest run",
+    "snapshot:regen": "npm --prefix ../sdk run build && UPDATE_LOCAL_TOOL_CONTRACT=1 vitest run src/local-tool-contract.test.ts",
     "typecheck": "npm --prefix ../sdk run build && tsc --noEmit"
   },
   "keywords": [

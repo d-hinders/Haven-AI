@@ -17,7 +17,7 @@
 Advisory; gates nothing. Fill it from `npm run release:scope -- --base=<merge base> --head=HEAD`
 and paste the line it prints (`.agents/skills/ship-next/SKILL.md`, *Commit And Pull Request* step 6):
 
-- Release lever: <next release train — the affected published packages | deploy only — the services | none>
+- Release lever: next release train (the affected published packages) / deploy only (the services) / none
 
 ## Workflow Used
 

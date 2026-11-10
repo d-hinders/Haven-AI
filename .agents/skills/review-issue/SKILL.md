@@ -297,7 +297,8 @@ script's header comment is the grammar and the list of refusals.
   `dev`, and the runner refuses every line as "not an ancestor of origin/dev or
   origin/main" (or "no origin/dev or origin/main remote-tracking ref" when the
   checkout has no local `dev`). Fetch GitHub's branch into the tracking ref
-  instead: `git fetch <github-url> dev:refs/remotes/origin/dev`. A SHA refusal
+  instead: `git fetch https://github.com/d-hinders/Haven-AI.git dev:refs/remotes/origin/dev`.
+  A SHA refusal
   that disappears after that fetch is the reviewer's setup. It is not a finding
   and is not counted.
 - **`differs` is a wrong claim.** It enters the report like any other, with the

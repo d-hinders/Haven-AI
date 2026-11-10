@@ -399,7 +399,7 @@ red.
 - Do not fabricate requirements for money-path, authentication, authorization, or schema tasks.
 - Do not write an unverified code claim into a body: every count and `file:line` comes from a command the body quotes at a named commit (step 1), and no issue — single task or epic — is queued, shipped or announced before its [review-issue](../review-issue/SKILL.md) pass and verdict comment.
 - Do not file an issue without `pending-review`, and do not lift it while an owner question is open (§ *Hold until ready*).
-- Do not create an issue whose draft the runner has not passed (step 6), and do not leave a count, a `file:line` or a path-existence claim at a SHA free-form when it fits one of the three checkable kinds (step 1).
+- Do not create an issue whose draft the runner has not passed (step 6, which also says what a client with no local checkout does), and do not leave a count, a `file:line` or a path-existence claim at a SHA free-form when it fits one of the three checkable kinds (step 1).
 - Do not file around this skill. Every agent-filed issue goes through it; a bare `gh issue create` is only the mechanism of step 6.
 - Keep generated and hand-written loop issues interchangeable.
 - Prefer an editable, correctly shaped issue over speculative implementation detail.

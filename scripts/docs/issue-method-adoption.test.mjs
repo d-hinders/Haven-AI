@@ -179,8 +179,9 @@ describe('the verdict contract', () => {
       "awk -F'\\t' '!seen[$1]++'", // the earliest verdict on each issue
       'sort -t "$(printf \'\\t\')" -k1,1 -k2,2', // …earliest by created_at
       "created=$(gh api \"$url\" --jq '.created_at[0:10]')", // the window is the issue's creation date
-      '= "$FROM" ]', // FROM inclusive
-      '[ "$created" != "$END" ]', // END exclusive
+      '"$FROM" "$created" | sort | head -1)" = "$FROM" ]', // created on or after FROM
+      '[ "$created" != "$END" ]', // END itself is out
+      '"$created" "$END" | sort | head -1)" = "$created" ]', // created before END
       'if ($1 != "missing" && $1 > 0) f++', // followed: at least one checkable line
       'if ($3 == "missing") m++; else {v++; w += $3; k += $2}', // a verdict with no Claims line is left out
     ]) {

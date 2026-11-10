@@ -101,7 +101,7 @@ export interface SignPaymentLog {
   warn: (obj: unknown, msg: string) => void
 }
 
-/** The two `modules/mpp/` collaborators the route hands in (see the header). */
+/** The two mpp collaborators the route hands in (see the header). */
 export interface SignPaymentMppCollaborators {
   mppDemoRetired: () => { statusCode: number; body: unknown }
   recordMachinePaymentEvidence: (
@@ -184,8 +184,8 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
   // When #1986 wrote this, the comment tracked three call sites of
   // `executeAllowanceTransfer`. There are now ZERO: this slice deleted
   // the function, the legacy branch below it, `modules/x402/
-  // legacy-authorize.ts`, and the legacy bodies in `modules/mpp/
-  // {authorize,send}.ts`. The gate is NOT redundant as a result — it is
+  // legacy-authorize.ts`, and the legacy bodies in the mpp module's
+  // `{authorize,send}.ts`. The gate is NOT redundant as a result — it is
   // what makes the deletion safe. Every intent below this line is treated
   // as delegation-rail (its `sign_hash`/raw-ECDSA sibling is gone), so
   // removing this refusal would not resurrect a legacy transfer, it would

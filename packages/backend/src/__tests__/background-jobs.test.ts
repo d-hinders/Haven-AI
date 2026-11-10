@@ -102,7 +102,7 @@ describe('the background-job table', () => {
     })
   })
 
-  it('carries each row’s leader lock key', () => {
+  it("carries each row's leader lock key", () => {
     const rows = createBackgroundJobs({ log, pool })
     expect(Object.fromEntries(rows.map((r) => [r.name, r.lockKey]))).toEqual({
       'catalog refresh': LEADER_LOCK_KEYS.catalogRefresh,

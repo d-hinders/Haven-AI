@@ -37,6 +37,9 @@
 //                                               run (asserted with a git stub)
 //   7  node_modules resolving workspace       → refused before any cell
 //      packages into another checkout
+//   8  a restore's copy gave the file a new  → the restore puts the journalled
+//      mtime, so a same-package cell left       mtime back, after the post-restore
+//      src/ newer than dist/ (2026-11-10)       rebuild when one ran (#4769)
 //
 // Exit codes: 0 every cell caught (census: every selected cell ran);
 // 1 a cell was not caught, or was refused at its baseline; 2 refused with
@@ -65,6 +68,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
   writeSync,
 } from 'node:fs'
@@ -1011,7 +1015,9 @@ async function runCell(ctx, cell, origin) {
     rmSync(backup, { force: true })
     throw refuse(`${cell.id}: the backup at ${backup} did not verify; nothing was mutated`)
   }
-  const fileMode = statSync(abs).mode & 0o7777
+  const st = statSync(abs)
+  const fileMode = st.mode & 0o7777
+  const fileMtimeMs = st.mtimeMs
   const journal = {
     version: 1,
     pid: process.pid,
@@ -1025,6 +1031,7 @@ async function runCell(ctx, cell, origin) {
     origSha,
     mutantSha,
     fileMode,
+    fileMtimeMs,
     rebuildPackage: pkg,
     phase: 'mutated',
     buildDirty: false,
@@ -1074,7 +1081,30 @@ async function runCell(ctx, cell, origin) {
   return res
 }
 
-/** Restore the in-flight cell: verified backup → cp → sha256 → rebuild if one ran → empty porcelain. */
+/**
+ * Put the file's mtime back to the value journalled before the mutation. The
+ * restore copies the verified backup over the file, and a copy stamps the file
+ * with the current time: for a same-package cell no rebuild runs, so the
+ * package's `src/` would read newer than its `dist/` and every consuming
+ * package's `check-dist-freshness` globalSetup would refuse to start (#4769).
+ * The restored content is byte-identical (the sha256 is verified), so the
+ * `dist/` is not stale.
+ *
+ * Call it only once the post-restore rebuild has succeeded, when one ran: a
+ * failed rebuild leaves a mutant `dist/` behind, and an old `src/` beside it
+ * would read fresh. A journal written before #4769 has no mtime and is
+ * tolerated, as `fileMode` is.
+ */
+function restoreMtime(abs, mtimeMs, label) {
+  if (!Number.isFinite(mtimeMs)) return
+  try {
+    utimesSync(abs, new Date(mtimeMs), new Date(mtimeMs))
+  } catch (e) {
+    throw restoreFailed(`${label}: putting the mtime back to ${new Date(mtimeMs).toISOString()} failed (${e.code ?? e.message}); the journal is kept`)
+  }
+}
+
+/** Restore the in-flight cell: verified backup → cp → sha256 → rebuild if one ran → mtime → empty porcelain. */
 async function restoreCurrent(ctx) {
   const cur = ctx.current
   if (!cur) return
@@ -1111,6 +1141,9 @@ async function restoreCurrent(ctx) {
     journal.buildDirty = false
     writeJournal(ctx, journal)
   }
+  // Only after the rebuild: a failed one above leaves a mutant dist/ behind,
+  // and an old src beside it would read fresh (#4769).
+  restoreMtime(abs, journal.fileMtimeMs, `${cell.id}: ${cell.file}`)
   const dirty = porcelain(ctx.root)
   if (dirty.length) throw restoreFailed(`${cell.id}: the source is restored (sha256 and mode verified) but the tree is not clean: ${dirty.join(', ')}. ${dirtyHint(ctx.root)} The journal is kept; recover clears it once the tree is clean.`)
   rmSync(backup, { force: true })
@@ -1317,6 +1350,10 @@ async function modeRecover(ctx) {
     writeJournal(ctx, j)
     say(`recover: rebuilt packages/${j.rebuildPackage}`)
   }
+  // Whenever the journal has one and the content matches the original — the
+  // no-copy branch included — and only after the rebuild, for the reason in
+  // restoreMtime (#4769).
+  restoreMtime(abs, j.fileMtimeMs, `recover: ${j.file}`)
   const dirty = porcelain(ctx.root)
   if (dirty.length) throw restoreFailed(`recover: the source is restored but the tree is not clean: ${dirty.join(', ')}. ${dirtyHint(ctx.root)} The journal is kept.`)
   rmSync(j.backup, { force: true })

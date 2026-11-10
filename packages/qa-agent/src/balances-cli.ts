@@ -573,13 +573,22 @@ export function topUpLogLine(wallet: TopUpWallet, outcome: TopUpOutcome | undefi
   )
 }
 
-const isMain = (() => {
+// True only when this file is the process's entry point, so importing it (a
+// test) never runs the CLI. Both paths are resolved before they are compared:
+// Node resolves symlinks for a module's own URL and not for `process.argv[1]`,
+// so an unresolved comparison is false through any symlink (#4776, #4786).
+function isEntryPoint(): boolean {
+  if (!process.argv[1]) return false
   try {
-    return import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('balances-cli.ts')
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
   } catch {
     return false
   }
-})()
+}
+
+const isMain = isEntryPoint()
 
 if (isMain) {
   runBalances(process.argv.slice(2))

@@ -54,6 +54,8 @@ covers:
   - packages/backend/src/modules/accounting/entry.ts
   - packages/backend/src/modules/catalog/catalog-discovery.ts
   - packages/backend/src/modules/catalog/merchant-catalog.ts
+  - packages/backend/src/ops/**
+  - packages/backend/scripts/cancel-stuck-attest-lane.ts
   - packages/backend/src/domain/machine-payment-lifecycle.ts
   - packages/core/src/machine-payment-lifecycle.ts
   - packages/signer/**

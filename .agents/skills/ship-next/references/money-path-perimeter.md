@@ -366,3 +366,28 @@ runtime list through `infra/repositories/**`.
 
 - `packages/backend/src/modules/catalog/catalog-discovery.ts`
 - `packages/backend/src/modules/catalog/merchant-catalog.ts`
+
+### The operator's lane cancel
+
+#4786. `ops/cancel-stuck-lane.ts` is the file an operator starts in the deployed
+container to burn the nonce of a stuck relayer broadcast; `ops/lane-cancel-command.ts`
+is its code (the argument check, the call into `infra/outbound-lane-cancel.ts`
+with production dependencies, and the exit codes the operator reads); the script
+is the `tsx` wrapper for the same command on a developer machine. The
+implementation they call is on the runtime list through `infra/outbound-*.ts`.
+The command that triggers it matched no glob, so #4786, which changes how that
+command starts, classified it as not money-path.
+
+Control, not runtime (owner decision 2026-11-10, recorded on #4786): the
+money-flow QA harness never runs an operator's lane cancel, so a green run says
+nothing about these files, and a runtime entry would hold promotion on it anyway.
+The entry gives the label, the `money.md` playbook with its characterization bar,
+and the perimeter shard.
+
+The directory is listed whole because it exists for operator commands that must
+run in the deployed container; the next one belongs here for the same reason.
+The wrapper is listed alone because `packages/backend/scripts` holds unrelated
+smoke and check scripts.
+
+- `packages/backend/src/ops/**`
+- `packages/backend/scripts/cancel-stuck-attest-lane.ts`

@@ -82,7 +82,6 @@ import {
   recordEip3009MerchantSettlement,
   recordEip3009ReceiptVerdict,
   type Eip3009ReceiptVerdict,
-  type SiblingX402DelegationRow,
 } from '../../infra/repositories/x402-authorizations.js'
 
 /** Well-formed 32-byte transaction hash; anything else is refused, never decoded loosely. */

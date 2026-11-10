@@ -50,7 +50,9 @@ for a standalone task. It:
   `Corrections: <n>.`
 
 `Claims` counts **claims re-run in the pass**, by the runner or by hand: a
-control line is not a claim, and a claim checked both ways counts once. `Runner`
+control line is not a claim, and a claim checked both ways counts once. Over
+several passes before one posted verdict it is the sum; a later delta verdict
+counts only its own pass. `Runner`
 is the runner's own summary on the snapshot body (`0 checkable, 0 not
 reproducing` when it found no checkable line). Both are defined in
 [§ Comment mode](../SKILL.md#comment-mode) and read by

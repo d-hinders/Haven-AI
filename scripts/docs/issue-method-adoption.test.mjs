@@ -18,6 +18,8 @@ import { extractMethodLines, parseCheckableLine } from './issue-method.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (path) => readFileSync(join(REPO_ROOT, path), 'utf8')
+/** Prose is matched with its line wraps collapsed, so a reflow is not a failure. */
+const flat = (text) => text.replace(/\n> ?/g, '\n').replace(/\s+/g, ' ')
 
 const NEW_TASK = read('.agents/skills/new-task/SKILL.md')
 const REVIEW_ISSUE = read('.agents/skills/review-issue/SKILL.md')
@@ -66,7 +68,10 @@ describe('new-task’s example Method block', () => {
 
   it('shows a zero, and every zero names a control that is a line in the block, over its SHA and pathspecs', () => {
     const parsed = checkable.map((l) => parseCheckableLine(l.text))
-    const controls = new Map(parsed.filter((p) => p.expectation.type === 'control').map((p) => [p.expectation.name, p.command]))
+    const controlLines = parsed.filter((p) => p.expectation.type === 'control')
+    const controls = new Map(controlLines.map((p) => [p.expectation.name, p.command]))
+    // The runner refuses a control name used twice, and every zero that cites it.
+    assert.equal(controls.size, controlLines.length, 'a control name is used twice in the example')
     const zeros = parsed.filter((p) => p.expectation.type === 'count' && p.expectation.expected === 0)
     assert.ok(zeros.length >= 1, 'the example shows no zero')
     for (const zero of zeros) {
@@ -84,19 +89,31 @@ describe('new-task’s example Method block', () => {
 
 describe('where the skills tell a filer and a reviewer to run the runner', () => {
   it('new-task: the three kinds in step 1, and the run on the draft before the create call', () => {
-    assert.match(NEW_TASK, /\*\*A claim a command can re-check is written so that it can \(#4799\)\.\*\*/)
-    assert.match(NEW_TASK, /^6\. \*\*Run the runner on the draft, then create the issue\.\*\*.*`node scripts\/docs\/issue-method\.mjs --body-file <draft>`/m)
-    assert.match(NEW_TASK, /Do not create the issue while any line is `differs`, `refused` or `unproven zero`/)
-    const step6 = NEW_TASK.indexOf('6. **Run the runner on the draft')
-    assert.ok(step6 > NEW_TASK.indexOf('5. Check GitHub') && step6 < NEW_TASK.indexOf('7. Apply every inferred'), 'the run is not between steps 5 and 7')
+    assert.ok(flat(NEW_TASK).includes('**A claim a command can re-check is written so that it can (#4799).**'))
+    const step6 = NEW_TASK.indexOf('\n6. **Run the runner on the draft')
+    const step7 = NEW_TASK.indexOf('\n7. Apply every inferred')
+    assert.ok(step6 > NEW_TASK.indexOf('\n5. Check GitHub') && step6 < step7, 'the run is not between steps 5 and 7')
+    const text = flat(NEW_TASK.slice(step6, step7))
+    assert.ok(text.includes('`node scripts/docs/issue-method.mjs --body-file <draft>`'), 'step 6 lost the command')
+    assert.ok(text.includes('Do not create the issue while any line is `differs`, `refused` or `unproven zero`'), 'step 6 lost the refusal to file')
+    assert.ok(text.indexOf('--body-file <draft>') < text.indexOf('Then create the issue'), 'the run comes after the create call')
   })
 
   it('review-issue: the fixed brief, the rubric and the section all start with the runner', () => {
-    assert.match(REVIEW_ISSUE, /^> each sub-issue\. Start by running `node scripts\/docs\/issue-method\.mjs\n> --body-file <snapshot>` on each body and paste its output\.$/m)
+    const brief = flat(/^> Work through[\s\S]*?\n\n/m.exec(REVIEW_ISSUE)?.[0] ?? '')
+    assert.ok(brief.includes('Start by running `node scripts/docs/issue-method.mjs --body-file <snapshot>` on each body and paste its output.'), 'the fixed brief lost the runner')
     assert.match(REVIEW_ISSUE, /^## The runner \(#4799\)$/m)
-    assert.match(REVIEW_ISSUE, /\*\*The root's `origin\/dev` must be GitHub's ref\*\*/)
-    assert.match(REVIEW_ISSUE, /\*\*A claim left free-form that fits one of the three kinds is a should-fix\s+finding\*\*/)
-    assert.match(RUBRIC, /^## 1\. Measured claims\n\n\*\*Start with the runner \(#4799\)\.\*\* Run `node scripts\/docs\/issue-method\.mjs\n--body-file <snapshot>`/m)
+    const section = flat(/^## The runner \(#4799\)\n([\s\S]*?)^## /m.exec(REVIEW_ISSUE)?.[1] ?? '')
+    for (const needle of [
+      "**The root's `origin/dev` must be GitHub's ref.**",
+      'dev:refs/remotes/origin/dev',
+      '**`differs` is a wrong claim.**',
+      '**A claim left free-form that fits one of the three kinds is a should-fix finding**',
+    ]) {
+      assert.ok(section.includes(needle), `§ The runner lost: ${needle}`)
+    }
+    const first = flat(/^## 1\. Measured claims\n\n([\s\S]*?)\n\n/m.exec(RUBRIC)?.[1] ?? '')
+    assert.ok(first.startsWith('**Start with the runner (#4799).** Run `node scripts/docs/issue-method.mjs --body-file <snapshot>`'), 'rubric § 1 does not start with the runner')
   })
 
   it('the templates have a Method section and no fence under it for the runner to read', () => {
@@ -123,11 +140,10 @@ describe('the verdict contract', () => {
   const last = (text, re) => [...text.matchAll(re)].at(-1)
 
   it('review-issue defines the three closing lines in order', () => {
-    assert.match(
-      REVIEW_ISSUE,
-      /ends with three lines, in this order: `Claims: <checked> checked, <wrong> wrong\.`,\s+`Runner: <checkable> checkable, <failed> not reproducing\.`, `Corrections: <n>\.`/,
-    )
-    assert.match(REVIEW_ISSUE, /\*\*`Claims` counts claims, not lines\*\*/)
+    const order = 'ends with three lines, in this order: `Claims: <checked> checked, <wrong> wrong.`, `Runner: <checkable> checkable, <failed> not reproducing.`, `Corrections: <n>.`'
+    assert.ok(flat(REVIEW_ISSUE).includes(order), 'review-issue lost the order of the closing lines')
+    assert.ok(flat(COMMENTING).includes(order.replace('ends with', '**ends** with').replace('order: ', 'order: ')), 'github-commenting.md states another order')
+    assert.ok(flat(REVIEW_ISSUE).includes('**`Claims` counts claims, not lines**'))
   })
 
   it('the instruments’ patterns in the skill are the ones tested here', () => {
@@ -147,10 +163,28 @@ describe('the verdict contract', () => {
   })
 
   it('the re-measurement is registered with its window, population, both arms and the baseline', () => {
-    const section = /^## Re-measure: checkable Method lines \(registered 2026-11-10, #4799\)\n([\s\S]*?)^## /m.exec(REVIEW_ISSUE)?.[1]
-    assert.ok(section, 'no registered re-measurement for #4799')
+    const raw = /^## Re-measure: checkable Method lines \(registered 2026-11-10, #4799\)\n([\s\S]*?)^## /m.exec(REVIEW_ISSUE)?.[1]
+    assert.ok(raw, 'no registered re-measurement for #4799')
+    const section = flat(raw)
     for (const needle of ['**Window:**', '**Population:**', '**Followed:**', '**Moved:**', '**Decision rule:**', '**Instrument**', 'Fewer than **1 in 2**', 'fewer than 8 verdicts', 'At or above **2.25**', '27 wrong in 12']) {
       assert.ok(section.includes(needle), `the registration lost: ${needle}`)
+    }
+  })
+
+  it('the instrument keeps the parts that define the figure: first verdict per issue, the window, the followed test', () => {
+    const raw = /^## Re-measure: checkable Method lines \(registered 2026-11-10, #4799\)\n([\s\S]*?)^## /m.exec(REVIEW_ISSUE)?.[1] ?? ''
+    const instrument = /```bash\n([\s\S]*?)\n```/.exec(raw)?.[1]
+    assert.ok(instrument, 'no instrument block')
+    for (const needle of [
+      "awk -F'\\t' '!seen[$1]++'", // the earliest verdict on each issue
+      'sort -t "$(printf \'\\t\')" -k1,1 -k2,2', // …earliest by created_at
+      "created=$(gh api \"$url\" --jq '.created_at[0:10]')", // the window is the issue's creation date
+      '= "$FROM" ]', // FROM inclusive
+      '[ "$created" != "$END" ]', // END exclusive
+      'if ($1 != "missing" && $1 > 0) f++', // followed: at least one checkable line
+      'if ($3 == "missing") m++; else {v++; w += $3; k += $2}', // a verdict with no Claims line is left out
+    ]) {
+      assert.ok(instrument.includes(needle), `the instrument lost: ${needle}`)
     }
   })
 })

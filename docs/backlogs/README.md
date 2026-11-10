@@ -83,11 +83,13 @@ old YAML `scope:` field demanded. The **🔁 Loop task** issue template
   behavior with a test before changing it.
 - **Method** — the commands behind every code claim, at the commit the body
   names, in one code fence. A count of matches, a line range containing a
-  text, and a path existing or not are written as checkable lines that
-  `scripts/docs/issue-method.mjs` re-runs before the issue is filed and again
+  text, and a path existing or not are written as checkable lines. The
+  Method-block runner re-runs them when `new-task` files the issue, and again
   at its spec review
-  ([#4799](https://github.com/d-hinders/Haven-AI/issues/4799)); the script's
-  header is the syntax. The epic template carries the same section.
+  ([#4799](https://github.com/d-hinders/Haven-AI/issues/4799)); an issue opened
+  from the template in GitHub's UI runs nothing until that review. The syntax
+  is in the runner's header, linked from the template. The epic template
+  carries the same section.
 
 ## History
 

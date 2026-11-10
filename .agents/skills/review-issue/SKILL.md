@@ -284,14 +284,22 @@ repair mode.
 ## The runner (#4799)
 
 The pass starts with `scripts/docs/issue-method.mjs` on the snapshot body, run
-in the reviewer's isolation root; its output goes into the report. The script's
-header comment is the grammar and the list of refusals.
+against the reviewer's isolation root; its output goes into the report. The
+script's header comment is the grammar and the list of refusals.
 
-- **The root's `origin/dev` must be GitHub's ref** — a worktree of a fetched
-  clone, or `git fetch origin dev` first. In a plain clone of a local checkout
-  `origin` is that checkout, and the runner refuses every line as "not an
-  ancestor of origin/dev or origin/main". A SHA refusal that disappears after
-  the fetch is the reviewer's setup. It is not a finding and is not counted.
+- **The runner needs no working tree.** It reads objects, so run the copy on
+  current `origin/dev` with `--repo <root-or-clone>` when the root sits at a
+  commit from before the runner existed (an issue measured before #4771
+  merged). A pass that reads only a real clone (§ *Isolation*) runs it there.
+- **The root's `origin/dev` must be GitHub's ref.** A worktree of a fetched
+  clone has it. A plain clone of a local checkout does not: there `origin` is
+  that checkout, a bare `git fetch origin dev` fetches the checkout's own
+  `dev`, and the runner refuses every line as "not an ancestor of origin/dev or
+  origin/main" (or "no origin/dev or origin/main remote-tracking ref" when the
+  checkout has no local `dev`). Fetch GitHub's branch into the tracking ref
+  instead: `git fetch <github-url> dev:refs/remotes/origin/dev`. A SHA refusal
+  that disappears after that fetch is the reviewer's setup. It is not a finding
+  and is not counted.
 - **`differs` is a wrong claim.** It enters the report like any other, with the
   value the runner got.
 - **`refused` and `unproven zero` are should-fix findings**: the line claims to
@@ -324,7 +332,8 @@ The comment pattern is in
   `Runner: <checkable> checkable, <failed> not reproducing.`, `Corrections: <n>.`
 - **`Claims` counts claims, not lines**: every claim re-run in the pass, by the
   runner or by hand. A control line is not a claim, and a claim checked both
-  ways counts once. Over several passes on one issue it is the sum.
+  ways counts once. Over several passes before one posted verdict it is the
+  sum; a later delta verdict counts only its own pass.
 - **`Runner` is the runner's own summary** on the snapshot body of the last
   pass: its count of checkable lines (controls included) and how many did not
   reproduce; `0 checkable, 0 not reproducing` when it exited 3. For an epic,
@@ -421,8 +430,11 @@ filer, so the population is not limited to `new-task` users:
 - **Decision rule:** either arm → the requirement to write checkable lines and
   the pre-filing run (new-task steps 1 and 6) are reverted, with the
   free-form-claim finding above; the runner stays as a tool and the `Claims:`
-  and `Runner:` lines stay in the verdict. No other rule is added in their
-  place. Otherwise the rules stay.
+  and `Runner:` lines stay in the verdict. The sentences that state the rule
+  in the two issue templates and `docs/backlogs/README.md`, and new-task's
+  guardrail line, go with it. The review still starts with the runner, on
+  whatever checkable lines a body has. No other rule is added in their place.
+  Otherwise the rules stay.
 - **Instrument** — run exactly this; a changed instrument is a new baseline:
 
 ```bash

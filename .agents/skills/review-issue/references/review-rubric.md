@@ -12,10 +12,10 @@ never a recollection of what the code or the thread said.
 ## 1. Measured claims
 
 **Start with the runner (#4799).** Run `node scripts/docs/issue-method.mjs
---body-file <snapshot>` in a root whose `origin/dev` is GitHub's ref, and paste
-its output. A `differs` line is a wrong claim; a `refused` or `unproven zero`
-line is a should-fix finding; a SHA refusal that a `git fetch origin dev`
-removes is your setup, not a finding. The details, and what the runner does not
+--body-file <snapshot>` against a root whose `origin/dev` is GitHub's ref, and
+paste its output. A `differs` line is a wrong claim; a `refused` or `unproven
+zero` line is a should-fix finding; a SHA refusal that goes away once GitHub's
+`dev` is fetched into `refs/remotes/origin/dev` is your setup, not a finding. The details, and what the runner does not
 prove, are in [review-issue § The runner](../SKILL.md#the-runner-4799). Then
 continue by hand, for every free-form claim and for whether each checkable line
 says what the prose says.

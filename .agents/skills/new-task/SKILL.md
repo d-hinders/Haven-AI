@@ -57,6 +57,7 @@ record a machine's observation, not an agent's judgement.
      for other issues.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
+   - **Method**: the commands behind the body's code claims, per step 1.
 
    Take the template's **body shape and its sizing rule** — "keep it small and
    self-contained, one PR's worth of work"; anything larger is an epic, below.
@@ -86,7 +87,7 @@ record a machine's observation, not an agent's judgement.
    spec, and do not mark the new issue as a duplicate of it. Write `Refs #<n>`
    and name it as external in the body; the new issue stands on what a
    maintainer asked for.
-6. **Run the runner on the draft, then create the issue.** Save the draft body to a file and run `node scripts/docs/issue-method.mjs --body-file <draft>` from a checkout whose `origin/dev` is fetched. Do not create the issue while any line is `differs`, `refused` or `unproven zero`: fix the claim or the line first. Exit 3 (no checkable line) is acceptable only when the body has no claim of the three kinds in step 1. Then create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
+6. **Run the runner on the draft, then create the issue.** Save the draft body to a scratch file outside the repository and run `node scripts/docs/issue-method.mjs --body-file <draft>` from a checkout whose `origin/dev` is fetched from GitHub (the script reads the repository it sits in; `--repo <dir>` names another). Do not create the issue while any line is `differs`, `refused` or `unproven zero`: fix the claim or the line first. Exit 3 (no checkable line) is acceptable only when the body has no claim of the three kinds in step 1. A client with no local checkout cannot run it: say so in the body's Method block, and the spec review's run is then the first. Then create the issue with the available GitHub integration. If no integration is available, use an authenticated `gh` CLI.
    **Create it with the `pending-review` label already on it** — in the create
    call itself, never added afterwards — and keep it there under § *Hold until
    ready* below. Other sessions and partner pipelines claim backlog issues within

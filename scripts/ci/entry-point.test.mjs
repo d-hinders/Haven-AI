@@ -19,6 +19,12 @@
 //   3. a structural guard over every tracked script, because (2) can only run
 //      read-only representatives — many of these scripts write files or call
 //      GitHub.
+//
+// Since #4786 the guard also reads package source (`packages/*/src`), and one
+// tool there answers the question differently: the operator command
+// `cancel-stuck-lane` has no entry test at all. Its entry file always starts,
+// its code lives in a module beside it, and (4) a check here fails on any
+// import of the entry file, because importing it would run the command.
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -292,6 +298,16 @@ const ELEMENT_1 = [
 ].join('|')
 const ARGV1 = new RegExp(`(?:${PROCESS_ARGV})\\s*(?:${ELEMENT_1})`)
 
+// The one read of `process.argv[1]` outside the entry test, allowed in one
+// file only, as this exact line (#4786). `packages/connect/src/cli.ts` is a
+// published bin whose `isCliEntrypoint(argvPath = process.argv[1], …)` already
+// resolves both sides. The exception pins the READ: the line is a default
+// parameter, and this guard does not follow where the value goes. What holds
+// the comparison is that package's own test of `isCliEntrypoint`.
+const FILE_EXCEPTIONS = {
+  'packages/connect/src/cli.ts': 'argvPath: string | undefined = process.argv[1],',
+}
+
 /**
  * The code of `source`, line by line, with leading comments removed.
  *
@@ -342,13 +358,14 @@ function codeLines(source) {
  * (`const [, entry] = process.argv`), and an allowed line that a formatter has
  * wrapped is refused until it is put back on one line.
  */
-function entryTestViolations(source) {
+function entryTestViolations(source, file = '') {
   return codeLines(source)
     .filter(({ code }) => ARGV1.test(code) && !ALLOWED_LINES.has(code.replace(/;$/, '')))
+    .filter(({ code }) => FILE_EXCEPTIONS[file] !== code)
     .map(({ line, code }) => ({ line, text: code }))
 }
 
-/** Every tracked script the guard covers: not a test, not package source. */
+/** Every tracked script and source file the guard covers: all but tests. */
 function trackedScripts() {
   return execFileSync('git', ['ls-files', '-z', '--', '*.mjs', '*.js', '*.cjs', '*.ts', '*.mts', '*.cts'], {
     cwd: REPO,
@@ -357,7 +374,6 @@ function trackedScripts() {
     .split('\0')
     .filter(Boolean)
     .filter((file) => !/\.test\./.test(file))
-    .filter((file) => !/^packages\/[^/]+\/src\//.test(file))
 }
 
 // One script from each place they live. Each must be in the scan and must
@@ -372,6 +388,9 @@ const SENTINELS = [
   'packages/frontend/scripts/design-lint.mjs',
   'packages/frontend/scripts/test-local.mjs',
   'packages/cli/scripts/sync-agent-guidance.mjs',
+  // Package source, in the scan since #4786. Dropping `packages/*/src` from
+  // the scan again loses this one.
+  'packages/qa-agent/src/seed.ts',
 ]
 
 // A TypeScript script, which carries no entry test today. It only has to be
@@ -478,12 +497,30 @@ describe('the structural guard: argv[1] is read only by the one entry test (#477
     assert.deepEqual(entryTestViolations(line), [{ line: 1, text: line }])
   })
 
-  test('no tracked script outside packages/*/src reads argv[1] any other way', () => {
+  test('the one exception is one line in one file (#4786)', () => {
+    const [[file, line]] = Object.entries(FILE_EXCEPTIONS)
+    assert.equal(Object.keys(FILE_EXCEPTIONS).length, 1)
+    const source = `export function isCliEntrypoint(\n  ${line}\n) {}\n`
+    assert.deepEqual(entryTestViolations(source, file), [])
+    // The same line anywhere else is an ordinary violation.
+    assert.deepEqual(entryTestViolations(source, 'packages/cli/src/cli.ts'), [{ line: 2, text: line }])
+    assert.deepEqual(entryTestViolations(source), [{ line: 2, text: line }])
+    // And the excepted file gets no other read of argv[1] for free.
+    assert.deepEqual(entryTestViolations(`${source}${FORM_B}\n`, file), [{ line: 4, text: FORM_B }])
+    const other = 'argvPath = process.argv[1],'
+    assert.deepEqual(entryTestViolations(`f(\n  ${other}\n)\n`, file), [{ line: 2, text: other }])
+    // The exception names a line that exists: a stale entry would allow
+    // nothing and look like a rule.
+    const code = codeLines(readFileSync(path.join(REPO, file), 'utf8')).map((l) => l.code)
+    assert.ok(code.includes(line), `${file} no longer carries: ${line}`)
+  })
+
+  test('no tracked script or package source file reads argv[1] any other way', () => {
     const scripts = trackedScripts()
     const failures = []
     for (const file of scripts) {
       const source = readFileSync(path.join(REPO, file), 'utf8')
-      for (const v of entryTestViolations(source)) failures.push(`${file}:${v.line}: ${v.text}`)
+      for (const v of entryTestViolations(source, file)) failures.push(`${file}:${v.line}: ${v.text}`)
     }
     assert.deepEqual(
       failures,
@@ -500,9 +537,83 @@ describe('the structural guard: argv[1] is read only by the one entry test (#477
       for (const line of ALLOWED_LINES) assert.ok(code.has(line), `${file} does not carry: ${line}`)
     }
     assert.ok(scripts.has(TS_IN_SCAN), `${TS_IN_SCAN} is not in the scan`)
-    assert.ok(
-      [...scripts].every((file) => !/^packages\/[^/]+\/src\//.test(file)),
-      'package source is outside this guard (#4776, Not in scope)',
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The operator tool's entry file is never imported (#4786)
+// ---------------------------------------------------------------------------
+
+// `packages/backend/src/ops/cancel-stuck-lane.ts` starts the command
+// unconditionally, so an import of it runs the command. Its code is in the
+// module beside it; that is what a test or a wrapper imports.
+//
+// The name is assembled so that this file's own fixtures are not what the
+// scan finds.
+const ENTRY_FILE = ['cancel', 'stuck', 'lane'].join('-')
+const IMPORT_OF_ENTRY = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['"\`])(?:[^'"\`\n]*\/)?` +
+    ENTRY_FILE +
+    String.raw`(?:\.[cm]?[jt]s)?\1`,
+)
+
+/** Lines of `source` that import the operator tool's entry file. */
+function entryFileImports(source) {
+  return source
+    .split('\n')
+    .map((text, index) => ({ line: index + 1, text: text.trim() }))
+    .filter(({ text }) => IMPORT_OF_ENTRY.test(text))
+}
+
+describe('nothing imports the operator tool entry file (#4786)', () => {
+  const refused = [
+    `import './${ENTRY_FILE}.js'`,
+    `import { runCli } from './${ENTRY_FILE}.js'`,
+    `import { runCli } from '../src/ops/${ENTRY_FILE}.js'`,
+    `import { runCli } from "../src/ops/${ENTRY_FILE}"`,
+    `const { runCli } = await import('../ops/${ENTRY_FILE}.js')`,
+    `const tool = require('./ops/${ENTRY_FILE}')`,
+    `export { runCli } from './${ENTRY_FILE}.ts'`,
+  ]
+  for (const line of refused) {
+    test(`refused: ${line}`, () => {
+      assert.deepEqual(entryFileImports(`const x = 1\n${line}\n`), [{ line: 2, text: line }])
+    })
+  }
+
+  test('allowed: the module beside it, and the built path in prose and commands', () => {
+    const source = [
+      "import { runCli } from './lane-cancel-command.js'",
+      `// node packages/backend/dist/ops/${ENTRY_FILE}.js <outbound-row-id>`,
+      `"ops:${ENTRY_FILE}:built": "node dist/ops/${ENTRY_FILE}.js",`,
+      `const USAGE = 'node packages/backend/dist/ops/${ENTRY_FILE}.js <row id>'`,
+      `runNode(['ops/${ENTRY_FILE}.js'], cwd)`,
+      `import { x } from './${ENTRY_FILE}-other.js'`,
+    ].join('\n')
+    assert.deepEqual(entryFileImports(source), [])
+  })
+
+  test('no tracked code file imports it, tests included', () => {
+    const files = execFileSync(
+      'git',
+      ['ls-files', '-z', '--', '*.ts', '*.mts', '*.cts', '*.tsx', '*.js', '*.mjs', '*.cjs', '*.jsx'],
+      { cwd: REPO, encoding: 'utf8' },
+    )
+      .split('\0')
+      .filter(Boolean)
+    // The scan read the two files that matter: the entry file exists, and the
+    // wrapper that used to import it is among the files read.
+    assert.ok(files.includes(`packages/backend/src/ops/${ENTRY_FILE}.ts`), 'the entry file is not tracked')
+    assert.ok(files.includes('packages/backend/scripts/cancel-stuck-attest-lane.ts'), 'the wrapper is not in the scan')
+    const failures = []
+    for (const file of files) {
+      const source = readFileSync(path.join(REPO, file), 'utf8')
+      for (const hit of entryFileImports(source)) failures.push(`${file}:${hit.line}: ${hit.text}`)
+    }
+    assert.deepEqual(
+      failures,
+      [],
+      'the entry file starts the command on import: import packages/backend/src/ops/lane-cancel-command.js instead',
     )
   })
 })

@@ -17,7 +17,16 @@
  * test.
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -26,6 +35,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const OPS_SRC = path.dirname(fileURLToPath(import.meta.url))
 const ENTRY = 'cancel-stuck-lane'
+/** The importable half: the code, and nothing that starts it. */
+const COMMAND = 'lane-cancel-command'
 
 const USAGE = [
   'usage: npm run ops:cancel-stuck-attest -w packages/backend -- <outbound_txs row id (uuid)>',
@@ -75,6 +86,8 @@ function expectUsage(run: Run): void {
 describe('cancel-stuck-lane, as built JavaScript under plain node (#4786)', () => {
   let base: string
   let plain: string
+  let linked: string
+  let encoded: string
 
   beforeAll(() => {
     // Resolved first: on macOS the temp directory is itself behind a symlink,
@@ -82,6 +95,12 @@ describe('cancel-stuck-lane, as built JavaScript under plain node (#4786)', () =
     base = mkdtempSync(path.join(realpathSync(tmpdir()), 'cancel-stuck-lane-'))
     plain = path.join(base, 'plain')
     buildOps(plain)
+    // The same build behind a symlink, as `/tmp/<checkout>` is on macOS.
+    linked = path.join(base, 'linked')
+    symlinkSync(plain, linked)
+    // And one whose real path cannot be written into a file URL unchanged.
+    encoded = path.join(base, 'ops spåce')
+    buildOps(encoded)
   })
 
   afterAll(() => {
@@ -96,8 +115,33 @@ describe('cancel-stuck-lane, as built JavaScript under plain node (#4786)', () =
     expectUsage(runNode([`ops/${ENTRY}.js`, 'not-a-row-id'], plain))
   })
 
-  it('does not start when the module is only imported', () => {
-    const url = pathToFileURL(path.join(plain, 'ops', `${ENTRY}.js`)).href
+  // Before #4786 the three cases below printed nothing and exited 0: the tool
+  // compared its own URL with `process.argv[1]`, which node leaves unresolved
+  // (a symlink), unencoded (a space) and without the extension the operator
+  // left off.
+  it('starts without the .js extension', () => {
+    expectUsage(runNode([`ops/${ENTRY}`], plain))
+  })
+
+  it('starts by an absolute path through a symlink, with and without the extension', () => {
+    expect(realpathSync(linked)).not.toBe(linked)
+    expectUsage(runNode([path.join(linked, 'ops', `${ENTRY}.js`)], base))
+    expectUsage(runNode([path.join(linked, 'ops', ENTRY)], base))
+  })
+
+  it('starts from a directory whose real path has a space and a non-ASCII character', () => {
+    expect(pathToFileURL(encoded).pathname).not.toBe(encoded)
+    expectUsage(runNode([`ops/${ENTRY}.js`], encoded))
+    expectUsage(runNode([`ops/${ENTRY}`], encoded))
+    expectUsage(runNode([path.join(encoded, 'ops', `${ENTRY}.js`)], base))
+  })
+
+  // The entry file starts unconditionally, so the code it starts must live in
+  // a module that does not. If the start moves into that module, the `tsx`
+  // wrapper (which imports it and calls `runCli()` itself) would run the
+  // command twice.
+  it('does not start when the command module is only imported', () => {
+    const url = pathToFileURL(path.join(plain, 'ops', `${COMMAND}.js`)).href
     const run = runNode(['--input-type=module', '-e', `await import(${JSON.stringify(url)})`], plain)
     expect(run).toEqual({ status: 0, stdout: '', stderr: '' })
   })

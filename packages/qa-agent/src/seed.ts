@@ -58,8 +58,6 @@
  */
 
 import { ethers } from 'ethers'
-import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 // ── Base Sepolia (84532) constants ───────────────────────────────────────────
 // Source of truth: `@haven_ai/core`'s chain registry. Mirrored here to keep this
@@ -509,7 +507,22 @@ export async function main(): Promise<void> {
   console.log('Done.')
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// True only when this file is the process's entry point, so importing it (a
+// test) never runs the CLI. Both paths are resolved before they are compared:
+// Node resolves symlinks for a module's own URL and not for `process.argv[1]`,
+// so an unresolved comparison is false through any symlink (#4776, #4786).
+function isEntryPoint(): boolean {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   main().catch((e) => {
     console.error('\n✗ seed failed:', e instanceof Error ? e.message : e)
     process.exitCode = 1

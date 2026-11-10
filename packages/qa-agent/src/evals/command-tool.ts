@@ -375,13 +375,21 @@ export function serveCommandTool(env: NodeJS.ProcessEnv = process.env): void {
   })
 }
 
-/** Runs only when this file is the process entry (the cli.ts idiom). */
-const isMain = (() => {
+// True only when this file is the process's entry point, so importing it (a
+// test) never runs the CLI. Both paths are resolved before they are compared:
+// Node resolves symlinks for a module's own URL and not for `process.argv[1]`,
+// so an unresolved comparison is false through any symlink (#4776, #4786).
+function isEntryPoint(): boolean {
+  if (!process.argv[1]) return false
   try {
-    return import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('evals/command-tool.ts') || process.argv[1]?.endsWith('evals/command-tool.js')
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
   } catch {
     return false
   }
-})()
+}
+
+const isMain = isEntryPoint()
 
 if (isMain) serveCommandTool()

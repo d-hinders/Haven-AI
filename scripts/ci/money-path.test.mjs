@@ -631,6 +631,52 @@ describe('money-path list stays in one piece', () => {
     }
   })
 
+  test("the operator's lane cancel is CONTROL money-path: the entry file, its code and the tsx wrapper (#4786)", () => {
+    // `ops/cancel-stuck-lane.ts` is what an operator starts in the deployed
+    // container to burn the nonce of a stuck relayer broadcast;
+    // `ops/lane-cancel-command.ts` is its code; the script is the tsx wrapper
+    // for the same command. The implementation they call is on the runtime
+    // list (`infra/outbound-*.ts`); the command that triggers it matched no
+    // glob until #4786.
+    //
+    // CONTROL, not runtime (owner decision 2026-11-10, recorded on #4786): the
+    // money-flow QA harness never runs an operator's lane cancel, so these
+    // files must not count toward qa-freshness.
+    //
+    // Nothing else names these paths: with both entries removed from the
+    // JSON, the labeler and the perimeter reference together, the three
+    // equality tests still agree with each other. This pin is what goes red.
+    const control = loadMoneyPathControlGlobs()
+    const runtime = loadMoneyPathGlobs()
+    const files = [
+      'packages/backend/src/ops/cancel-stuck-lane.ts',
+      'packages/backend/src/ops/lane-cancel-command.ts',
+      'packages/backend/scripts/cancel-stuck-attest-lane.ts',
+    ]
+    const tracked = new Set(trackedFiles())
+    for (const f of files) {
+      assert.ok(tracked.has(f), `${f} no longer exists — repoint this pin`)
+      assert.ok(
+        moneyPathFiles([f], control).length === 1,
+        `${f} must be matched by a CONTROL money-path glob — it is part of the operator command ` +
+          'that triggers a relayer broadcast, so a change to it is money-path (#4786)',
+      )
+      assert.deepEqual(
+        moneyPathFiles([f], runtime),
+        [],
+        `${f} must be a CONTROL glob, not a runtime one: the QA harness never runs the ` +
+          "operator's lane cancel, so it must not hold promotion on a QA run (#4786)",
+      )
+      const mutated = control.filter((g) => !matchesGlob(f, g))
+      assert.notEqual(
+        moneyPathFiles([f], mutated).length,
+        1,
+        `removing ${f}'s glob from controlGlobs left it matched — the pin above is not ` +
+          'sensitive to the glob it names (#4786)',
+      )
+    }
+  })
+
   test('the SDK client stays off the money-path list — it only wires the guards in (#3283, #4122)', () => {
     // A deliberate decision, recorded by #3283 and re-taken by the owner on
     // #4120 (2026-10-20): client.ts calls the listed guards and

@@ -271,7 +271,8 @@ export type { EvidenceReportOutcome } from './merchant-completion.js'
 export { isZeroSettlementTxHash } from './merchant-completion.js'
 // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses —
 // it takes `transaction` (or its aliases) only and never surfaces `payer`.
-export { parseMerchantSettlement } from './merchant-completion.js'
+// #4763: it lives in merchant-answer.ts, the leaf both sides can import.
+export { parseMerchantSettlement } from './merchant-answer.js'
 // #3888: the shared EIP-3009 nonce derivation (also on the edge surface).
 export { deriveX402PaymentNonce, X402_PAYMENT_NONCE_TAG } from './x402-nonce.js'
 export {

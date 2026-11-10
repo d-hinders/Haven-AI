@@ -119,6 +119,12 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
   'haven_send↔haven_send': {
     hostedOnly: { include_signing_payload: KEYLESS_SIGNING_PAYLOAD },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
+    description: {
+      local: '08b66e39b846',
+      hosted: 'b484fd5fde05',
+      reason:
+        '#4796: each text names only tools its own surface has — the local one says there is no funds check and keeps haven_pay_x402, the hosted one points at haven_quote_x402 and haven_check_funds.',
+    },
   },
   'haven_sweep_delegate↔haven_sweep_delegate': {
     hostedOnly: {
@@ -126,7 +132,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
       signature: 'The hosted sweep is keyless: the signature comes back from the edge signer and is relayed in.',
     },
     description: {
-      local: 'f0f0d594808a',
+      local: 'be1f6cb817d1',
       hosted: 'de1f44567c0a',
       reason:
         'The hosted text describes two keyless phases (the authorization out, the signature back in); the local text describes one call.',
@@ -153,7 +159,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
       local: 'f540347d6c34',
-      hosted: '0cc51fa14a30',
+      hosted: '7eabc12dd14c',
       reason:
         'The local text describes the whole initialize, pay and retry round trip in one call; the hosted text describes step 1 of a flow that hands a funding intent to the signer.',
     },
@@ -250,7 +256,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
-      local: '11ca3557a67b',
+      local: '08b66e39b846',
       hosted: 'f376faf01734',
       reason:
         'Two names for the direct wallet payment: the local text describes a send, the hosted text describes constructing an unsigned payload for the signer.',

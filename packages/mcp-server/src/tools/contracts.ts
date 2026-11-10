@@ -1247,7 +1247,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Sign per the response guidance (payment_id-only), then settle with haven_settle_mcp_tool. ' +
     'Exceptional states: on expiry re-run with the SAME idempotency_key; include_signing_payload=true on a re-run returns the inline signing payload for an older signer — and a merchant that repriced in between makes the signer refuse the stale copy: re-quote fresh.',
   nextActionGuidance: 'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool.',
-})
+}, 'hosted')
 
 const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
@@ -1526,7 +1526,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
-  haven_send: composeDescription(sharedDescriptions.send),
+  haven_send: composeDescription(sharedDescriptions.send, 'hosted'),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
   haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,

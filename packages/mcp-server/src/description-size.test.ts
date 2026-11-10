@@ -528,6 +528,13 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * under the round-29 pin, so the cap does not move. A first draft at +68
  * crossed it and was cut; PAYMENT-SIGNATURE stays named for the #2330 guard.
  * No tool was added — 29 holds. Shrink-only from here.
+ *
+ * **Re-derived — round 34, #4796 (2026-11-10).** Two hosted descriptions told
+ * the agent to use `haven_pay_x402`, a tool only the LOCAL MCP registers.
+ * `haven_send` (once) and `haven_pay_mcp_tool` (twice) now name
+ * `haven_quote_x402`, the hosted x402 entry point: three names, +2 bytes
+ * each, +6. 31,811 UTF-8 bytes — 1 under the round-29 pin, so the cap does
+ * not move. No tool was added — 29 holds. Shrink-only from here.
  */
 const MAX_TOTAL_BYTES = 31_812
 // Mean pin: round 29 (#4355 block above): 31,812 / 29 = 1096.9655…, pinned

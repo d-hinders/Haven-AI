@@ -340,7 +340,7 @@ const SUBMIT_DESCRIPTION = [
  * guidance lands in both places at once and a parity test can catch drift.
  */
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
-  haven_send: composeDescription(sharedDescriptions.send),
+  haven_send: composeDescription(sharedDescriptions.send, 'local'),
   haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
@@ -350,7 +350,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
-  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
+  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate, 'local'),
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),

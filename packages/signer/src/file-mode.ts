@@ -1,48 +1,34 @@
 import type { Stats } from 'node:fs'
-import { chmod, lstat, stat } from 'node:fs/promises'
+import { chmod, lstat } from 'node:fs/promises'
+import {
+  permissiveMode,
+  warnIfFilePermissiveWithPrefix,
+  type PermissionLog,
+} from '@haven_ai/sdk/edge'
+
+/**
+ * The signer's file-permission helpers.
+ *
+ * #4792 moved the permission CORE — `permissiveMode` and the prefix-taking
+ * warning — into `@haven_ai/sdk/edge` (`credential-file.ts`), because the local
+ * MCP carried a second copy of it. This file keeps the signer's own surface:
+ * `OWNER_ONLY_MODE` (the mode every file this package writes beside a
+ * credential gets), `warnIfFilePermissive` with its `haven-signer:` prefix and
+ * unchanged signature, and `tightenIfFilePermissive`, whose one caller is
+ * `packages/signer/src/audit.ts` and which is deliberately NOT shared — giving
+ * the local MCP the signer's tightening behaviour is a behaviour change that
+ * needs its own issue.
+ *
+ * `permissiveMode`, `PermissionLog` and `PermissiveFile` are re-exported so
+ * `packages/signer/src/index.ts` keeps every name and signature it exported
+ * before the move.
+ */
+export { permissiveMode, type PermissiveFile, type PermissionLog } from '@haven_ai/sdk/edge'
 
 /** Owner-only: the mode every file this package writes beside a credential gets. */
 export const OWNER_ONLY_MODE = 0o600
 
-export type PermissionLog = (message: string) => void
-
 const defaultLog: PermissionLog = (message) => process.stderr.write(`${message}\n`)
-
-export interface PermissiveFile {
-  /** The offending mode, e.g. `0644`. */
-  octal: string
-  /** False for a symlink, directory or device at that path — never chmod those. */
-  regular: boolean
-}
-
-/**
- * Is this path readable, writable or executable by anyone but its owner?
- * Returns null when the path cannot be stat'ed or is owner-only, and on
- * Windows where POSIX mode bits do not map cleanly (the same carve-out
- * `@haven_ai/mcp` makes). Pass `stats` to reuse a stat the caller took
- * IMMEDIATELY before — with `stats` the path is not touched, so a cached
- * `Stats` would be trusted over the disk. `follow` decides what a symlink at the path means: a file the signer
- * only READS (the credential) is judged by its target, which is what the
- * content protection is about and what the pre-#3172 `stat` did; a file the
- * signer is about to CHMOD (the audit sidecar) is judged as the link, so a
- * planted symlink is never chmod-ed through (#3172 review).
- */
-export async function permissiveMode(
-  path: string,
-  platform: NodeJS.Platform = process.platform,
-  stats?: Stats,
-  follow: 'follow' | 'nofollow' = 'nofollow',
-): Promise<PermissiveFile | null> {
-  if (platform === 'win32') return null
-  let info: Stats
-  try {
-    info = stats ?? (follow === 'follow' ? await stat(path) : await lstat(path))
-  } catch {
-    return null
-  }
-  if ((info.mode & 0o077) === 0) return null
-  return { octal: (info.mode & 0o777).toString(8).padStart(4, '0'), regular: info.isFile() }
-}
 
 /**
  * Warn (best-effort, POSIX only) when a file this signer READS is readable
@@ -56,12 +42,7 @@ export async function warnIfFilePermissive(
   log: PermissionLog = defaultLog,
   platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
-  const found = await permissiveMode(path, platform, undefined, 'follow')
-  if (found === null) return
-  log(
-    `haven-signer: warning: ${kind} at ${path} is readable beyond the owner ` +
-      `(mode ${found.octal}). Run: chmod 600 ${path}`,
-  )
+  await warnIfFilePermissiveWithPrefix('haven-signer', kind, path, log, platform, 'follow')
 }
 
 export type TightenOutcome = 'owner-only' | 'tightened' | 'warned' | 'skipped'

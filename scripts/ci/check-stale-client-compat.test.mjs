@@ -7,6 +7,9 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkStaleClientCompat, flatSchemaViolations, RECONNECT_HOWTO } from './check-stale-client-compat.mjs'
 
@@ -186,11 +189,47 @@ describe('check-stale-client-compat CLI', () => {
 
   test('a base without the snapshot file skips with a notice and exits 0', () => {
     const script = fileURLToPath(new URL('./check-stale-client-compat.mjs', import.meta.url))
-    // Any ref that cannot carry the file exercises the skip path; the full
-    // committed-goldens compare runs in CI's mcp_server_checks against
-    // origin/main.
-    const res = spawnSync('node', [script, '--base', 'HEAD~500'], { encoding: 'utf8' })
-    assert.equal(res.status, 0, res.stderr)
-    assert.match(res.stdout, /\[NOTICE\]/)
+    // The base must be a commit that CANNOT carry the snapshot, and it must be
+    // that way in BOTH a depth-1 clone (what `actions/checkout` produces) and a
+    // full-history checkout. Two refs failed that:
+    //   - `HEAD~500` (pre-#4792) is unresolvable in a depth-1 clone, so CI took
+    //     the script's unresolvable-base path and printed the NOTICE for the
+    //     wrong reason; on a full-history checkout it resolved to 826ceb4ca —
+    //     the commit that ADDED `tools-list.snapshot.json` — so the skip path
+    //     stopped being exercised and the test went red locally.
+    //   - `git rev-list --max-parents=0 HEAD` (round 1) is the shallow boundary
+    //     itself in a depth-1 clone, i.e. the PR head, which HAS the snapshot;
+    //     the skip path was never exercised and CI went red (#4792).
+    // So build the base instead of deriving it from this checkout: a throwaway
+    // repo with one commit that has no snapshot. `git show <base>:<path>` in
+    // the script resolves against the process cwd, so the script runs with the
+    // throwaway repo as cwd while its branch snapshot and corpus still come
+    // from this checkout (they are resolved from the script's own URL). The
+    // base is then independent of this checkout's depth by construction.
+    const tmp = mkdtempSync(join(tmpdir(), 'stale-client-base-'))
+    try {
+      const git = (...args) => {
+        const r = spawnSync('git', args, { cwd: tmp, encoding: 'utf8' })
+        assert.equal(r.status, 0, r.stderr)
+        return r.stdout.trim()
+      }
+      git('init', '--quiet')
+      git('config', 'user.email', 'ci@example.invalid')
+      git('config', 'user.name', 'ci')
+      // A developer's global config must not decide whether this test can
+      // commit: signing would need a key, and a global hooksPath could run
+      // arbitrary hooks in a throwaway repo.
+      git('config', 'commit.gpgsign', 'false')
+      writeFileSync(join(tmp, 'README.md'), 'a base commit that carries no tools/list snapshot\n')
+      git('add', 'README.md')
+      git('commit', '--quiet', '--no-verify', '-m', 'base without the snapshot')
+      const base = git('rev-parse', 'HEAD')
+
+      const res = spawnSync('node', [script, '--base', base], { cwd: tmp, encoding: 'utf8' })
+      assert.equal(res.status, 0, res.stderr)
+      assert.match(res.stdout, /\[NOTICE\]/)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
   })
 })

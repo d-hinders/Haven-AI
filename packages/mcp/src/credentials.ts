@@ -1,4 +1,10 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import {
+  readAccountAddressEnv,
+  readAccountAddressField,
+  stringField,
+  warnIfFilePermissiveWithPrefix,
+} from '@haven_ai/sdk/edge'
 
 export interface HavenCredentialFile {
   apiKey: string
@@ -250,72 +256,11 @@ function loadCredentialsFromEnv(): HavenCredentialFile | null {
 }
 
 /**
- * The account address off a credential FILE: `account_address` (what
- * `@haven_ai/connect` writes from #2908 on) first, then the two pre-#2908
- * spellings.
- *
- * The two old fallbacks are PERMANENT (#2906, decision 2a) — a credential
- * file on disk never rewrites itself, and a runtime that stopped reading
- * `safe_address` would silently lose the address (and change the consent
- * hash) for every agent connected before this release.
- *
- * Exported for the mutation tests: dropping `account_address` fails the
- * new-shape test, dropping either old key fails the old-shape test.
+ * The account-address readers moved to `@haven_ai/sdk/edge` (#4792) — the edge
+ * signer carried a second copy of them. Re-exported here because this
+ * package's tests and callers import them from `./credentials.js`.
  */
-export function readAccountAddressField(
-  raw: Pick<RawCredentialFile, 'account_address' | 'safe_address' | 'safeAddress'>,
-): string | undefined {
-  return stringField(raw.account_address ?? raw.safe_address ?? raw.safeAddress)
-}
-
-/**
- * The account address off the environment: `HAVEN_ACCOUNT_ADDRESS` (the
- * survivor, decided on #2906). The two names the dashboard handoff emitted
- * before #2908 — `HAVEN_WALLET_ADDRESS` and `HAVEN_SAFE_ADDRESS` — were
- * window-scoped and are retired as of #2914.
- */
-export function readAccountAddressEnv(env: NodeJS.ProcessEnv): string | undefined {
-  const current = stringField(env.HAVEN_ACCOUNT_ADDRESS)
-
-  // Retired, but REFUSED rather than ignored — the same rule the backend
-  // applies to retired request names, for the same reason and with more at
-  // stake. Silently dropping these would not merely leave the address unset:
-  // `accountAddress` is what `haven_sign_sweep_delegate` passes as
-  // `expectedSafe`, and an undefined `expectedSafe` SKIPS the check that a
-  // sweep's `to` matches the account in the local credential (see
-  // `core.ts`). An operator who upgrades without touching env would lose a
-  // money-path cross-check and get no signal at all.
-  //
-  // The verdict keys on RELIANCE, not presence, so a handoff that still
-  // exports both names alongside the new one keeps working:
-  //   retired alone      -> throw
-  //   both, same value   -> accept the new one
-  //   both, disagreeing  -> throw
-  for (const name of ['HAVEN_WALLET_ADDRESS', 'HAVEN_SAFE_ADDRESS'] as const) {
-    const retired = stringField(env[name])
-    if (!retired) continue
-    if (!current) {
-      throw new Error(
-        `${name} is retired (#2906) — Haven accounts are addressed as accounts, not Safes. ` +
-          'Set HAVEN_ACCOUNT_ADDRESS to the same value. Refusing rather than ignoring it, ' +
-          'because an unset account address silently skips the sweep-destination check.',
-      )
-    }
-    if (retired.toLowerCase() !== current.toLowerCase()) {
-      throw new Error(
-        `${name} and HAVEN_ACCOUNT_ADDRESS were both set to different addresses. ` +
-          'Remove the retired name, or make them match — picking one silently would hide ' +
-          'the mismatch.',
-      )
-    }
-  }
-
-  return current
-}
-
-function stringField(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
+export { readAccountAddressEnv, readAccountAddressField } from '@haven_ai/sdk/edge'
 
 function numberField(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -387,6 +332,11 @@ function allowanceSummaryField(value: unknown): HavenCredentialAllowance[] | und
  * skip the check there and the dashboard handoff text guides the user
  * separately.
  *
+ * The check itself is shared with `@haven_ai/signer` (#4792); the `haven-mcp:`
+ * prefix and the exact message are unchanged. It passes `'follow'` because a
+ * credential reached through a symlink is judged by its target — the same
+ * behaviour this package had before the move.
+ *
  * Exported for testing.
  */
 export async function warnIfCredentialFilePermissive(
@@ -394,26 +344,7 @@ export async function warnIfCredentialFilePermissive(
   log: (message: string) => void = (message) => process.stderr.write(`${message}\n`),
   platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
-  if (platform === 'win32') return
-
-  let mode: number
-  try {
-    const stats = await stat(path)
-    mode = stats.mode
-  } catch {
-    // The credential read already failed cleanly above if the file is
-    // unreadable. A stat failure here is not worth blocking on.
-    return
-  }
-
-  const groupOrOther = mode & 0o077
-  if (groupOrOther !== 0) {
-    const octal = (mode & 0o777).toString(8).padStart(4, '0')
-    log(
-      `haven-mcp: warning: credential file at ${path} is readable beyond the owner ` +
-      `(mode ${octal}). Run: chmod 600 ${path}`,
-    )
-  }
+  await warnIfFilePermissiveWithPrefix('haven-mcp', 'credential file', path, log, platform, 'follow')
 }
 
 /**

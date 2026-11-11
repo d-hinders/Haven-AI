@@ -10,6 +10,8 @@ import machinePaymentsReconciliationEventsRoutes from '../machine-payments-recon
 import { installRequestValidation } from '../../openapi/request-validation.js'
 // #1444: validate the real payload against the spec's own schema.
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
+// #4579: the guard reads the DECLARED key set from the spec itself.
+import { openapiSpec } from '../../openapi/spec.js'
 // #1987 (epic #1440 slice #1987): `modules/mpp/authorize.ts` — and its
 // exported `authorizeMachinePayment` / `AuthorizeMachinePaymentInput` — is
 // DELETED. It had no production caller left: `POST /machine-payments/authorize`
@@ -48,6 +50,8 @@ const { mockQuery, fiatMocks, reportingMocks } = vi.hoisted(() => ({
     // #3918: the Accounted late-attach, fired fire-and-forget next to the
     // Fortnox one by the same capture route — same barrel, same 500-if-unmocked.
     lateAttachAccountedMerchantReceipt: vi.fn().mockResolvedValue(undefined),
+    // #4521: the Igdrasil twin, fired by the same capture route.
+    lateAttachIgdrasilMerchantReceipt: vi.fn().mockResolvedValue(undefined),
   },
 }))
 
@@ -59,6 +63,19 @@ vi.mock('../../db.js', () => ({
 
 
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
+
+// #4721 review: a holdable `computeHybridAccountAddress`, so the GET /agent
+// concurrency test can keep the delegate-account derivation (an unbounded
+// factory RPC in production) pending. Pass-through unless a test sets a hold.
+const hybridHold = vi.hoisted(() => ({ fn: null as null | (() => Promise<string>) }))
+vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../rails/hybrid-provisioning.js')>()
+  return {
+    ...actual,
+    computeHybridAccountAddress: (...args: Parameters<typeof actual.computeHybridAccountAddress>) =>
+      hybridHold.fn ? hybridHold.fn() : actual.computeHybridAccountAddress(...args),
+  }
+})
 
 // Fee recording at settlement must not consume a mocked DB call in these
 // sequence-based tests; neutralize it (the module is dark anyway).
@@ -99,6 +116,53 @@ const challenge = {
   recipient: RECIPIENT,
   expiresAt: '2099-01-01T00:00:00.000Z',
   metadata: { demoResource: 'market-summary' },
+}
+
+/**
+ * #4579: the canonical served receipt row — one `machine_payment_evidence`
+ * row exactly as `LIST_EVIDENCE_RECEIPTS_SQL` returns it, including the two
+ * header VALUES (`payment_proof_header`, `protocol_receipt_header`) that the
+ * serializer must never emit. Shared by the exact-shape test below and by the
+ * emitted-vs-declared guard, so both read the same row.
+ */
+const RECEIPT_ROW = {
+  id: '44444444-4444-4444-4444-444444444444',
+  payment_intent_id: PAYMENT_ID,
+  approval_request_id: null,
+  agent_id: AGENT.id,
+  user_id: AGENT.user_id,
+  rail: 'mpp_demo',
+  proof_status: 'payment_confirmed',
+  tx_hash: TX_HASH,
+  chain_id: 8453,
+  resource_url: challenge.resource,
+  merchant_address: RECIPIENT.toLowerCase(),
+  payer_address: AGENT.account_address.toLowerCase(),
+  settlement_address: RECIPIENT.toLowerCase(),
+  token_symbol: 'USDC',
+  token_address: USDC,
+  amount_raw: '10000',
+  amount_human: '0.01',
+  challenge_id: challenge.challengeId,
+  idempotency_key: 'mpp_demo:test',
+  challenge_payload: { rail: 'mpp_demo' },
+  selected_payment: null,
+  payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
+  payment_proof_header: 'secret-proof-header',
+  protocol_receipt_header_name: 'Payment-Receipt',
+  protocol_receipt_header: 'receipt-header',
+  protocol_receipt_payload: { ok: true },
+  merchant_status: 200,
+  confirmed_at: '2026-05-15T12:00:00.000Z',
+  created_at: '2026-05-15T12:00:01.000Z',
+  updated_at: '2026-05-15T12:00:01.000Z',
+  settlement_scheme: 'eip3009',
+  // #2960: `pi.delegate_address AS intent_delegate_address` /
+  // `pi.machine_metadata->>'delegate_account_address'`, joined by
+  // `LIST_EVIDENCE_RECEIPTS_SQL` — the delegate that PAID this intent, not the
+  // calling agent's current delegate.
+  intent_delegate_address: AGENT.delegate_address,
+  intent_delegate_account_address: null,
 }
 
 /**
@@ -309,6 +373,8 @@ describe('machine payment routes', () => {
     // to a promise across tests, just with a clean call history.
     reportingMocks.lateAttachMerchantReceipt.mockClear()
     reportingMocks.lateAttachAccountedMerchantReceipt.mockClear()
+    reportingMocks.lateAttachIgdrasilMerchantReceipt.mockReset()
+    reportingMocks.lateAttachIgdrasilMerchantReceipt.mockResolvedValue(undefined)
   })
 
   function pendingIntent(overrides: Record<string, unknown> = {}) {
@@ -406,7 +472,104 @@ describe('machine payment routes', () => {
       parent_sub_budgets: [],
       // #3772: always present; null for an agent that was never superseded.
       superseded_by: null,
+      // #4721: always present; null for an agent with no anchored passport.
+      passport: null,
     })
+  })
+
+  // ── #4721: the agent reads its OWN passport reference ────────────────────
+  const PASSPORT_UID = '0x' + 'ab'.repeat(32)
+  const passportRow = (status: string, uid: string | null = PASSPORT_UID): DbRoute => [
+    /FROM agent_passports WHERE agent_id = \$1/,
+    () => ({ rows: [{ agent_id: AGENT.id, chain_id: 84532, status, attestation_uid: uid }] }),
+  ]
+
+  it('GET /agent carries the anchored passport reference (#4721)', async () => {
+    primeDb(AUTH, passportRow('anchored'))
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expectMatchesSpec('GET', '/machine-payments/agent', response.json())
+    expect(response.json().passport).toMatchObject({ attestation_uid: PASSPORT_UID, chain_id: 84532 })
+    // Read for THIS agent, never another.
+    expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)?.params).toEqual([AGENT.id])
+  })
+
+  it('GET /agent reads passport: null for a pending or failed passport — nothing a merchant could resolve (#4721)', async () => {
+    // A non-null UID, so the status check is what yields null — not a
+    // missing UID.
+    for (const status of ['pending', 'failed']) {
+      primeDb(AUTH, passportRow(status))
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/agent',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().passport).toBeNull()
+    }
+  })
+
+  it('GET /agent stays 200 with passport: null when the passport lookup fails (#4721)', async () => {
+    primeDb(AUTH, [/FROM agent_passports WHERE agent_id = \$1/, () => { throw new Error('passport table unavailable') }])
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/agent',
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().passport).toBeNull()
+    expect(response.json().id).toBe(AGENT.id)
+  })
+
+  it('GET /agent runs the passport lookup concurrently with the other identity reads (#4721)', async () => {
+    // Hold ALL FOUR reads open — the delegate-account derivation (delegation
+    // rail, so it really runs), the sub-budget grants, the supersession read
+    // and the passport lookup — and require every one to be ISSUED before any
+    // is released. Any sequential placement awaits one read before starting
+    // another, so at least one is never issued while the first is held and
+    // this wait times out: the passport first or last, and equally a
+    // derivation or grants read awaited ahead of the other three (#4721
+    // review: a test holding only two reads let those partial orders pass).
+    const holds: Array<() => void> = []
+    const held = <T,>(value: T) =>
+      new Promise<T>((resolve) => {
+        holds.push(() => resolve(value))
+      })
+    let deriveStarted = false
+    hybridHold.fn = () => {
+      deriveStarted = true
+      return held('0x' + '77'.repeat(20))
+    }
+    try {
+      primeDb(
+        authAs({ ...AGENT, chain_id: 84532, execution_rail: 'delegation', account_type: 'delegator_hybrid' }),
+        [/FROM agent_sub_budgets b/, () => held({ rows: [] })],
+        [/superseded_by_agent_id/, () => held({ rows: [] })],
+        [/FROM agent_passports WHERE agent_id = \$1/, () => held({ rows: [] })],
+      )
+      const pending = app.inject({
+        method: 'GET',
+        url: '/machine-payments/agent',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      await vi.waitFor(() => {
+        expect(deriveStarted).toBe(true)
+        expect(findCall(/FROM agent_sub_budgets b/)).toBeDefined()
+        expect(findCall(/superseded_by_agent_id/)).toBeDefined()
+        expect(findCall(/FROM agent_passports WHERE agent_id = \$1/)).toBeDefined()
+        // Must stay BELOW `passportReferenceFor`'s 1500 ms bound: past it, a
+        // passport awaited first times out to null and lets the others start.
+      }, { timeout: 500 })
+      for (const release of holds) release()
+      const response = await pending
+      expect(response.statusCode).toBe(200)
+    } finally {
+      hybridHold.fn = null
+    }
   })
 
   // ── #3772: superseded_by (warning only) ──────────────────────────────────
@@ -584,6 +747,8 @@ describe('machine payment routes', () => {
           // (expires_at is far beyond it). Derived here rather than frozen,
           // since the route reads the real clock.
           next_refill_at: new Date((Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000).toISOString(),
+          // #4666: the seed row's expires_at ('99999999999'), as ISO 8601.
+          budget_expires_at: '5138-11-16T09:46:39.000Z',
           onchain: {
             amount: '10000000',
             spent: '0',
@@ -637,6 +802,29 @@ describe('machine payment routes', () => {
       expect(degraded.statusCode).toBe(200)
       expectMatchesSpec('GET', '/machine-payments/allowances', degraded.json())
       expect(degraded.json().superseded_by).toBeNull()
+    })
+
+    it('delegation rail: budget_expires_at is null for an unrepresentable expiry, and the spec allows it (#4666)', async () => {
+      primeDb(
+        authAs(DELEGATION_AGENT),
+        delegationRows([{
+          id: '55555555-5555-4555-8555-555555555555',
+          agent_id: AGENT.id,
+          chain_id: 84532,
+          token_address: SEPOLIA_USDC,
+          budget_atomic: '1234567',
+          period_seconds: 86_400,
+          expires_at: '9007199254740991',
+        }]),
+      )
+      const response = await app.inject({
+        method: 'GET',
+        url: '/machine-payments/allowances',
+        headers: { authorization: 'Bearer sk_agent_test' },
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().allowances[0].budget_expires_at).toBeNull()
+      expectMatchesSpec('GET', '/machine-payments/allowances', response.json())
     })
 
     // #2328: the AllowanceSummary round trip. `GET /agents` and
@@ -909,45 +1097,7 @@ describe('machine payment routes', () => {
       AUTH,
       receiptsTotal(1),
       [/FROM machine_payment_evidence e/, () => ({
-        rows: [{
-          id: '44444444-4444-4444-4444-444444444444',
-          payment_intent_id: PAYMENT_ID,
-          approval_request_id: null,
-          agent_id: AGENT.id,
-          user_id: AGENT.user_id,
-          rail: 'mpp_demo',
-          proof_status: 'payment_confirmed',
-          tx_hash: TX_HASH,
-          chain_id: 8453,
-          resource_url: challenge.resource,
-          merchant_address: RECIPIENT.toLowerCase(),
-          payer_address: AGENT.account_address.toLowerCase(),
-          settlement_address: RECIPIENT.toLowerCase(),
-          token_symbol: 'USDC',
-          token_address: USDC,
-          amount_raw: '10000',
-          amount_human: '0.01',
-          challenge_id: challenge.challengeId,
-          idempotency_key: 'mpp_demo:test',
-          challenge_payload: { rail: 'mpp_demo' },
-          selected_payment: null,
-          payment_proof_header_name: 'MACHINE-PAYMENT-PROOF',
-          payment_proof_header: 'secret-proof-header',
-          protocol_receipt_header_name: 'Payment-Receipt',
-          protocol_receipt_header: 'receipt-header',
-          protocol_receipt_payload: { ok: true },
-          merchant_status: 200,
-          confirmed_at: '2026-05-15T12:00:00.000Z',
-          created_at: '2026-05-15T12:00:01.000Z',
-          updated_at: '2026-05-15T12:00:01.000Z',
-          settlement_scheme: 'eip3009',
-          // #2960: `pi.delegate_address AS intent_delegate_address` /
-          // `pi.machine_metadata->>'delegate_account_address'`, joined by
-          // `LIST_EVIDENCE_RECEIPTS_SQL` — the delegate that PAID this
-          // intent, not the calling agent's current delegate.
-          intent_delegate_address: AGENT.delegate_address,
-          intent_delegate_account_address: null,
-        }],
+        rows: [RECEIPT_ROW],
       })],
     )
 
@@ -1006,7 +1156,10 @@ describe('machine payment routes', () => {
         delivery_reference: null,
         // #4534: no purchase correlation reported for this seed — null, not
         // absent. An ungrouped payment is fed exactly as before.
+        // #4577: `parent_receipt_id` is the same value under the name that says
+        // what it holds; `parent_payment_id` stays as the deprecated alias.
         purchase_group_id: null,
+        parent_receipt_id: null,
         parent_payment_id: null,
         confirmed_at: '2026-05-15T12:00:00.000Z',
         created_at: '2026-05-15T12:00:01.000Z',
@@ -1022,6 +1175,48 @@ describe('machine payment routes', () => {
     })
     expectMatchesSpec('GET', '/machine-payments/receipts', response.json())
     expect(JSON.stringify(response.json())).not.toContain('secret-proof-header')
+  })
+
+  // #4579: the schema-side half of the emitted-vs-declared check. Quality-scan
+  // block 9 compares the emitted keys with what the SDK MAPPER reads; nothing
+  // compared them with what the SPEC declares. `MachinePaymentReceipt` sets
+  // `additionalProperties: true`, so `expectMatchesSpec` above passes an
+  // undeclared key BY DESIGN — six keys rode that gap until this guard.
+  //
+  // Declared set: read from the spec's own component schema, never a
+  // hand-written list. Emitted set: read from the live route's response, never
+  // a fixture literal. The allowlist is empty and pinned, so it can only stay
+  // empty — an undeclared key is a contract gap, not something to allowlist.
+  it('#4579: every key the receipts route emits is declared on MachinePaymentReceipt', async () => {
+    primeDb(
+      AUTH,
+      receiptsTotal(1),
+      [/FROM machine_payment_evidence e/, () => ({ rows: [RECEIPT_ROW] })],
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/machine-payments/receipts?limit=10',
+      headers: { authorization: 'Bearer sk_agent_test_key_4579' },
+    })
+    expect(response.statusCode).toBe(200)
+
+    const schemas = openapiSpec.components.schemas as unknown as Record<
+      string,
+      { properties: Record<string, unknown> }
+    >
+    const declared = Object.keys(schemas.MachinePaymentReceipt.properties)
+    const emitted = new Set(
+      (response.json().receipts as Record<string, unknown>[]).flatMap((receipt) => Object.keys(receipt)),
+    )
+
+    const allowlist: string[] = []
+    expect(allowlist).toEqual([])
+
+    const undeclared = [...emitted]
+      .filter((key) => !declared.includes(key) && !allowlist.includes(key))
+      .sort()
+    expect(undeclared, `receipt keys the schema does not declare: ${undeclared.join(', ')}`).toEqual([])
   })
 
   // #2960 finding 3: the erc7710 case was missing here — receipts had only
@@ -1888,6 +2083,79 @@ describe('machine payment routes', () => {
       })
     })
 
+    it('fires every destination\'s late-attach with the same receipt — Fortnox, Accounted and Igdrasil (#4521)', async () => {
+      primeDb(
+        AUTH,
+        [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
+        [/INSERT INTO merchant_receipts/, () => ({ rows: [{ evidence_id: 'evidence-1' }] })],
+      )
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+        headers: { authorization: 'Bearer sk_agent_test' },
+        payload: { url: 'https://merchant.example/invoice.pdf' },
+      })
+
+      expect(response.statusCode).toBe(201)
+      const args = [AGENT.user_id, PAYMENT_ID, { url: 'https://merchant.example/invoice.pdf', inlineJson: null }]
+      await vi.waitFor(() => {
+        expect(reportingMocks.lateAttachMerchantReceipt).toHaveBeenCalledWith(...args)
+        expect(reportingMocks.lateAttachAccountedMerchantReceipt).toHaveBeenCalledWith(...args)
+        expect(reportingMocks.lateAttachIgdrasilMerchantReceipt).toHaveBeenCalledWith(...args)
+      })
+    })
+
+    it('an Igdrasil late-attach that rejects changes nothing: the capture still answers 201 and the other destinations still fire (#4521)', async () => {
+      // MUTATION TARGET: drop the `.catch(() => {})` after the Igdrasil call
+      // in modules/mpp/merchant-receipt.ts and the rejection goes unhandled
+      // (the listener below records it); `await` it instead and the capture 500s.
+      // A plain function, not `vi.fn`: a spy attaches its own `.then` to the
+      // promise it returns (to record the settled result), which would mark
+      // the rejection handled and hide a missing `.catch`.
+      const outage = new Error('igdrasil outage')
+      const igdrasilCalls: unknown[][] = []
+      const spy = reportingMocks.lateAttachIgdrasilMerchantReceipt
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown) => {
+        if (reason === outage) unhandled.push(reason)
+      }
+      try {
+        reportingMocks.lateAttachIgdrasilMerchantReceipt = ((...a: unknown[]) => {
+          igdrasilCalls.push(a)
+          return Promise.reject(outage)
+        }) as unknown as typeof spy
+        process.on('unhandledRejection', onUnhandled)
+        primeDb(
+          AUTH,
+          [/FROM machine_payment_evidence mpe/, () => ({ rows: [{ id: 'evidence-1', user_id: AGENT.user_id }] })],
+          [/INSERT INTO merchant_receipts/, () => ({ rows: [{ evidence_id: 'evidence-1' }] })],
+        )
+
+        const response = await app.inject({
+          method: 'POST',
+          url: `/machine-payments/${PAYMENT_ID}/merchant-receipt`,
+          headers: { authorization: 'Bearer sk_agent_test' },
+          payload: { json: { fakturanummer: 'FAK-3' } },
+        })
+
+        expect(response.statusCode).toBe(201)
+        expect(response.json()).toEqual({ stored: true })
+        const args = [AGENT.user_id, PAYMENT_ID, { url: null, inlineJson: { fakturanummer: 'FAK-3' } }]
+        expect(igdrasilCalls).toEqual([args])
+        await vi.waitFor(() => {
+          expect(reportingMocks.lateAttachMerchantReceipt).toHaveBeenCalledWith(...args)
+          expect(reportingMocks.lateAttachAccountedMerchantReceipt).toHaveBeenCalledWith(...args)
+        })
+        // Give an unhandled rejection the turn it needs to be reported, then check none was.
+        await new Promise((r) => setTimeout(r, 20))
+        expect(unhandled).toEqual([])
+      } finally {
+        process.off('unhandledRejection', onUnhandled)
+        reportingMocks.lateAttachIgdrasilMerchantReceipt = spy
+      }
+    })
+
     it('first write wins: a duplicate report (200) does NOT re-fire the late-attach', async () => {
       primeDb(
         AUTH,
@@ -1906,6 +2174,7 @@ describe('machine payment routes', () => {
       expect(response.json()).toMatchObject({ stored: false })
       expect(response.json().message).toMatch(/first write wins/)
       expect(reportingMocks.lateAttachMerchantReceipt).not.toHaveBeenCalled()
+      expect(reportingMocks.lateAttachIgdrasilMerchantReceipt).not.toHaveBeenCalled()
     })
   })
 

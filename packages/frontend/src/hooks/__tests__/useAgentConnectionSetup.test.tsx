@@ -474,6 +474,23 @@ describe('useAgentConnectionSetup — rail awareness without rendering the modal
       })
       expect(result.current.promptCopied).toBe(false)
     })
+
+    it('does not latch when the clipboard write rejects — nothing was copied (#4573)', async () => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+        configurable: true,
+      })
+      const { result } = renderFlow()
+      await act(async () => {
+        await result.current.handleCreateSetup()
+      })
+      await act(async () => {
+        await result.current.copyText('prompt', 'prompt')
+      })
+      // The step advances only on a copy that actually happened.
+      expect(result.current.promptCopied).toBe(false)
+      expect(result.current.copied).toBeNull()
+    })
   })
 
   it('flags a connected-but-wrong-chain wallet instead of treating it as absent (#1070)', () => {
@@ -608,5 +625,78 @@ describe('headerSubtitle on terminal states', () => {
       expect(headerSubtitle('connect', status)).not.toBe(inProgress)
     }
     expect(headerSubtitle('connect', 'failed')).toBe('This setup could not finish')
+  })
+})
+
+/**
+ * #4710: "Start again" reopens the flow on step 1 with the old setup's name,
+ * budget and wallet. Both opt-in checkboxes start false — `GET /:setupId`
+ * does not return them, and both are opt-in on any new connect — and the flow
+ * opens at the first step, not the waiting screen, so both are on screen
+ * before a new prompt exists.
+ */
+describe('prefill for "Start again" (#4710)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseAuth.mockReturnValue({ user: { accounts: [SAFE] } })
+    mockUseSafeDetails.mockReturnValue({ details: null, loading: false, error: null })
+    mockUseAccountOperationGate.mockReturnValue({ kind: 'ready' })
+    mockUsePublicClient.mockReturnValue({})
+    mockUseAccount.mockReturnValue({ address: undefined, chain: undefined })
+    mockUseActiveSigner.mockReturnValue({
+      type: 'eoa',
+      address: '0x2222222222222222222222222222222222222222',
+      walletClient: {},
+    })
+    mockUseAgentConnectionSetupStatus.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      awaitingConnectionStage: 'starting',
+      refetch: vi.fn(),
+    })
+  })
+
+  const PREFILL = {
+    name: 'Research agent',
+    description: 'Pays for research APIs',
+    accountId: SAFE.id,
+    amount: '10',
+    resetPeriodMin: 1440,
+  }
+
+  function renderPrefilled() {
+    return renderHook(() =>
+      useAgentConnectionSetup({
+        open: true,
+        onClose: vi.fn(),
+        prefill: PREFILL,
+      }),
+    )
+  }
+
+  it('seeds the name, description, wallet and budget and opens on step 1', () => {
+    const { result } = renderPrefilled()
+    expect(result.current.step).toBe('details')
+    expect(result.current.name).toBe('Research agent')
+    expect(result.current.description).toBe('Pays for research APIs')
+    expect(result.current.selectedAccountId).toBe(SAFE.id)
+    expect(result.current.addAmount).toBe('10')
+    expect(result.current.addReset).toBe(1440)
+  })
+
+  it('leaves both opt-in checkboxes off', () => {
+    const { result } = renderPrefilled()
+    expect(result.current.issuePassport).toBe(false)
+    expect(result.current.localMcp).toBe(false)
+  })
+
+  it('does not seed anything without a prefill — the ordinary flow is unchanged', () => {
+    const { result } = renderHook(() =>
+      useAgentConnectionSetup({ open: true, onClose: vi.fn() }),
+    )
+    expect(result.current.step).toBe('details')
+    expect(result.current.name).toBe('')
+    expect(result.current.addAmount).toBe('')
   })
 })

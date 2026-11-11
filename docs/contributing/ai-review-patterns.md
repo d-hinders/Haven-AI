@@ -205,6 +205,7 @@ The patterns below are also the items checked by the **Captain Self-Check Prefli
 - A gate that reports on a file list can report success on an **empty** list, and that reads identically to a clean pass. Before recording a check as green in the PR body, confirm the run actually saw the candidate diff.
 - Flag a PR whose Local Checks quote a gate's success message when the gate's default range could not have included the change — a committed-only range run before the commit, a `paths`-filtered job on a non-matching PR, a check run in the wrong worktree.
 - Run the **CI-equivalent** form, not the convenient one. `node scripts/docs/coupling-gate.mjs` is advisory and always exits 0; `npm run docs:coupling` is what CI runs. A local invocation that cannot fail is not evidence that CI will pass (#1076 → #1077).
+- A script can exit 0 because its `main()` never ran. A script that is both a CLI and an importable module decides which it is with an entry test. Until #4776 most compared `process.argv[1]` unresolved with their own resolved URL, which is false through a symlink (`node /tmp/…` on macOS) and, for the `file://` form, from any path with a space: exit 0, no output. Exit 0 with **no output** from a gate that normally prints a line is not a pass. A structural guard in the CI-config tests now holds every script, and since #4786 package source as well, to the resolved form (one named exception: the connect package's CLI, which resolves both sides in its own function); a new script copies `isEntryPoint()` from an existing one. The resolved form still answers false when the extension was left off (`node dist/tool` for `tool.js`: `process.argv[1]` keeps the short path and does not resolve). A command that must never do nothing takes the other route: an entry file that starts unconditionally, with its code in a module beside it and a check that nothing imports the entry file.
 
 ## Assertions A Wrong Edit Still Satisfies
 
@@ -264,27 +265,4 @@ copied out of the very `--help` output the work existed to fix.
 - For money movement, test the selected account, selected chain, selected token, recipient, and signer context rather than only the happy path rendering.
 - If review feedback finds a bug that survived tests, add or update the smallest regression test that would have caught it.
 
-> **Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), a full re-read.**
-> Changed: *Inline Gate Placement* no longer names `EditAgentModal` as the
-> canonical hoisted notice (#2331 removed it; `git grep OnchainActionNotice --
-> packages/frontend/src` finds only `OnchainActionGate.tsx` and tests). The
-> Tailwind fix names the shared preset `packages/ui/tailwind.preset.js`
-> (#3508), where `boxShadow.card` and the `brand` colour now live. Two Safe
-> leftovers became account and smart-account wording (#1440). No rule was
-> added or weakened.
-> Re-checked without change: the *Captain Self-Check Preflight* heading in
-> `ai-agent-workflow.md` and the *Recurring traps* list in `reviewer.md`;
-> `useActiveSigner`'s `address && walletClient` EOA rung (`lib/signer.ts`);
-> #2413's notice deletion (PR #2460 removed `RetiredRailNotice.tsx`); the
-> `#patterns` anchor in `design-system.md`; `design:lint`; the
-> `focus-ring`, `shadow-token` and `compiled-colour-utilities` tests;
-> `humanAmountToAtomic`, `formatTokenValue` and the `allowanceHumanAmount`
-> pattern `^(0|[0-9]+\.[0-9]{2,6})$` (`openapi/spec.ts:332`); the coupling
-> gate exiting 0 without `--strict` and `docs:coupling` being the `--strict`
-> form CI runs (`docs-coupling.yml`); ship-next *Implement* step 5; the four
-> 2026-10-20 PRs (#4131, #4133, #4144, #4145, all merged that day) and the
-> five cited commits, each a commit of the PR it is listed under; the
-> `SETTLEMENT_PENDING` negative case in `x402-hosted-mcp-signer.test.ts`.
-> Not changed here: `reviewer.md:139` still names `EditAgentModal`, so the
-> three lists this doc keeps in sync now disagree on that one item (see the
-> PR's *Not filed* list).
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

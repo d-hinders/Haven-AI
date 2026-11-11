@@ -10,6 +10,7 @@ import { useAgents } from '@/hooks/useAgents'
 import { usePortfolio } from '@/hooks/usePortfolio'
 import { usePreferences } from '@/hooks/usePreferences'
 import { DEFAULT_CHAIN_ID } from '@/lib/chains'
+import { ARCHIVED_FACET, facetMatches } from '@/lib/agent-list-filters'
 import { formatFiat, timeAgo } from '@/lib/format'
 import { isTestnetChain } from '@/lib/marketplace'
 import { hasNonZeroBalance } from '@/lib/portfolio-breakdown'
@@ -17,6 +18,7 @@ import { BalanceFreshnessIndicator } from '@/components/haven'
 import { entityCardClassName } from '@/components/ui/entityCardStyles'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import ReceiveDialog from '@/components/ReceiveDialog'
@@ -123,19 +125,23 @@ function AccountCard({
           </h3>
           {/*
             Beside the name, never on a caption line (#4021 removed the
-            "Added {timeAgo}" caption): the "Test network" chip takes the
+            "Added {timeAgo}" caption): the "Test network" badge takes the
             badge slot on testnets only, and mainnet renders no network marker
             at all — no chain jargon on a primary surface (epic #3801).
+
+            #4571: both markers are `StatusBadge`s on #4563's vocabulary
+            (design-system.md § Status vocabulary), not hand-rolled chips, so
+            they match `/accounts/<id>`'s meta line exactly. The default badge
+            reads "Default account" there and here; #4021's lowercase "default"
+            is retired with the chip that carried it.
           */}
           {isTestnetChain(account.chain_id ?? DEFAULT_CHAIN_ID) && (
-            <span className="flex-shrink-0 rounded bg-[var(--v2-surface-2)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-ink-2)]">
-              Test network
-            </span>
+            <StatusBadge className="flex-shrink-0">Test network</StatusBadge>
           )}
           {showDefaultBadge && (
-            <span className="flex-shrink-0 rounded bg-[var(--v2-brand-soft)] px-1.5 py-0.5 text-xs font-medium text-[var(--v2-brand)]">
-              default
-            </span>
+            <StatusBadge tone="brand" className="flex-shrink-0">
+              Default account
+            </StatusBadge>
           )}
         </div>
       </div>
@@ -269,10 +275,13 @@ export default function AccountsOverviewClient() {
   const { currency } = usePreferences()
   const [newAccountOpen, setNewAccountOpen] = useState(false)
 
-  // Count agents per account
+  // Count agents per account. #4607: the card and the Agents page must agree,
+  // so the count goes through the page's own archived facet — archived agents
+  // are hidden by default there, revoked ones are not. One definition, not a
+  // second `archived_at` check.
   const agentCountByAccount = new Map<string, number>()
   for (const agent of agents) {
-    if (agent.account_id) {
+    if (agent.account_id && facetMatches(ARCHIVED_FACET, agent, ['hidden'])) {
       agentCountByAccount.set(agent.account_id, (agentCountByAccount.get(agent.account_id) ?? 0) + 1)
     }
   }
@@ -298,7 +307,7 @@ export default function AccountsOverviewClient() {
           // existing one, so there is no source — and ProtectedRoute sends a
           // user with no accounts to /onboarding, which creates the first.
           accounts.length > 0 ? (
-            <Button onClick={() => setNewAccountOpen(true)}>New account</Button>
+            <Button onClick={() => setNewAccountOpen(true)} leadingIcon={Plus}>New account</Button>
           ) : undefined
         }
       />
@@ -331,33 +340,18 @@ export default function AccountsOverviewClient() {
           body="Your Haven account is created when you sign in, so you shouldn't normally see this. Try reloading the page."
         />
       ) : accounts.length === 1 ? (
-        // #4021, one account: a deliberate wide card (about two thirds of the
-        // row) beside a dashed "Create another account" tile — the tile opens
-        // the SAME dialog as the header action. They stack at phone width.
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <AccountCard
-              account={accounts[0]}
-              agentCount={agentCountByAccount.get(accounts[0].id) ?? 0}
-              showDefaultBadge={false}
-              currency={currency}
-              staggerIndex={0}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setNewAccountOpen(true)}
-            className="flex min-h-[160px] flex-col items-start justify-center gap-2 rounded-lg border border-dashed border-[var(--v2-border)] p-6 text-left transition-colors hover:border-brand/40 hover:bg-[var(--v2-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-          >
-            <span className="flex items-center gap-2 text-sm font-semibold text-[var(--v2-ink)]">
-              <Icon icon={Plus} className="h-4 w-4" />
-              Create another account
-            </span>
-            <span className="text-sm leading-relaxed text-[var(--v2-ink-3)]">
-              Separate balances and agent budgets. Keep work and personal money apart, for example.
-            </span>
-          </button>
-        </div>
+        // #4571, one account: the card takes the whole row. #4021's dashed
+        // "Create another account" tile beside it is gone by owner decision
+        // 2026-10-30 — the header's "New account" button opens the same
+        // dialog, so the tile was a second door to one room, and it left the
+        // only account card at two thirds of the row for no reason.
+        <AccountCard
+          account={accounts[0]}
+          agentCount={agentCountByAccount.get(accounts[0].id) ?? 0}
+          showDefaultBadge={false}
+          currency={currency}
+          staggerIndex={0}
+        />
       ) : (
         // Two or more: a responsive grid of the slimmed cards, no tile.
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SOURCE_VERSION_CONSTANT_FILES, versionConstantPattern } from './release-version-constants.mjs'
+import { SOURCE_VERSION_CONSTANT_FILES, ALL_VERSION_CONSTANT_FILES, versionConstantPattern } from './release-version-constants.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -11,7 +11,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 // SIGNER_VERSION from signer/src/server.ts into tools.ts, and the next bump
 // stopped after rewriting the package.json files. Each entry must name the file
 // that DECLARES the constant, exactly once — a re-export does not count.
-for (const [name, rel] of SOURCE_VERSION_CONSTANT_FILES) {
+//
+// Iterated over ALL_VERSION_CONSTANT_FILES, not just the generic loop's set:
+// `MCP_VERSION` is written by a dedicated writer (#4612), and the docs coupling
+// gate's version-literal partition recognises it, so a move of that literal
+// would silently stop partitioning `packages/mcp/src/server.ts` out of a release
+// diff — the same class of failure #3454 caused, one gate over.
+for (const [name, rel] of ALL_VERSION_CONSTANT_FILES) {
   test(`${name} is declared in ${rel}, where release-bump rewrites it`, () => {
     const source = readFileSync(join(ROOT, rel), 'utf8')
     const all = new RegExp(versionConstantPattern(name).source, 'gm')

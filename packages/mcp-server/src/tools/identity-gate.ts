@@ -19,6 +19,23 @@ import type { HostedToolName } from './contracts.js'
 export const AGENT_IDENTITY_UNVERIFIED = 'AGENT_IDENTITY_UNVERIFIED'
 
 /**
+ * The refusal text for a key Haven does not accept (#4697). One answer for a
+ * mistyped, archived or revoked key: the gate never relays the backend's 401
+ * body, so which of those it was stays untold. It names the account owner and
+ * an action that exists for a revoked agent (connecting a new one), because
+ * nothing re-activates a revoked agent. Exported so the next-step fixture and
+ * the tests pin these exact strings instead of a copy.
+ */
+export const AGENT_IDENTITY_UNVERIFIED_MESSAGE =
+  'Haven did not accept this agent API key. Check the Authorization: Bearer key in your MCP client ' +
+  'configuration. If the key is correct, the account owner (you, if this is your account) can check this ' +
+  'agent in Haven and connect a new one if it no longer has access.'
+
+export const AGENT_IDENTITY_UNVERIFIED_OMITTED_REASON =
+  'the agent API key was not accepted and no payment tool can run; tell the user to check the key, or to ' +
+  'ask the account owner to check this agent in Haven or connect a new one'
+
+/**
  * Tools that make no request except, at most, to Haven's own
  * agent-authenticated API — so the gate protects nothing on them — and that
  * must keep working where the agent read itself is refused.
@@ -42,15 +59,12 @@ export async function requireAgentIdentity(haven: HavenClient): Promise<void> {
     if (!(err instanceof HavenApiError) || err.statusCode !== 401) throw err
     throw new HostedToolError({
       code: AGENT_IDENTITY_UNVERIFIED,
-      message:
-        'Haven did not accept this agent API key. Check the Authorization: Bearer key in your MCP client ' +
-        'configuration, or reconnect the agent in Haven.',
+      message: AGENT_IDENTITY_UNVERIFIED_MESSAGE,
       statusCode: 401,
       nextStep: refusalNextStep({
         nextAction: AgentPaymentNextAction.StopAndTellUser,
         nextTool: null,
-        nextToolOmittedReason:
-          'the agent API key was not accepted; the user must fix the key or reconnect the agent before any tool can run',
+        nextToolOmittedReason: AGENT_IDENTITY_UNVERIFIED_OMITTED_REASON,
       }),
     })
   }

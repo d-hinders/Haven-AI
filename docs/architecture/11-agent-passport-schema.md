@@ -3,17 +3,20 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/modules/passport/**
+  - packages/backend/src/background-jobs.ts
   - packages/backend/src/infra/repositories/agent-passports.ts
   - packages/backend/src/routes/agent-passports.ts
   - packages/backend/src/routes/passport-verify.ts
   - packages/backend/scripts/register-passport-schema.ts
+  - packages/sdk/src/x402.ts
+  - packages/sdk/src/passport.ts
   - packages/backend/src/db/migrations/048_agent_passports.ts
   - packages/backend/src/db/migrations/049_agent_passport_revocation.ts
   - packages/backend/src/db/migrations/050_agent_passport_revocation_index.ts
   - packages/backend/src/db/migrations/051_agent_passport_addresses.ts
   - packages/backend/src/db/migrations/096_agent_passports_uid_repair_confirmed_at.ts
   - packages/backend/src/db/migrations/099_agent_passports_uid_repair_next_at.ts
-last-verified: "2026-09-27"
+last-verified: "2026-11-07"
 ---
 
 # L0 Agent Passport — EAS schema
@@ -135,6 +138,32 @@ future rail is refused until it opts in.
 fire-and-forget entry points — `issue_passport` at agent creation, and the
 connect-setup register path — skip silently, because a passport that cannot be
 issued must never fail the agent creation it is attached to.
+
+**The dashboard offers only what can succeed (#4719).** Each session account
+carries `passport_issuable`: an issuable rail, a passport chain, the chain's
+schema UID registered here, **and** the receipt verifier on
+(`isPassportIssuableForAccount` / `isPassportIssuableOnChain` in
+`modules/passport/readiness.ts`). The verifier leg is an owner decision
+(2026-11-06): a passport anchored where `GET /passport/verify` answers 503 is
+the `issuance_only` state #1151 found. The connect checkbox and the Settings
+action render only when it is true, and both fire-and-forget entry points ask
+the same account-level question (`POST /agents` reads the account's
+`account_type` and `execution_rail` for it, without echoing them). An account
+that fails it records no passport row at all. It no longer records a `pending`
+row "deferred to the sweep", nor a row the #2138 rail gate then marks
+`failed`. The explicit `POST /agents/:id/passport` keeps its own refusals and
+adds one: a **503** while the receipt verifier is off.
+
+"The verifier is on" means `receiptIssuerAddress()` derives an address, not
+merely that `PASSPORT_RECEIPT_SIGNING_KEY` is set: a malformed key leaves
+`/passport/issuer` answering 503, so it counts as off. **The same requirement
+holds server-side in `issuePassport`**, so the retry sweep does not anchor a
+`pending` row recorded before the gate while the verifier is off. It marks the
+row `failed` with a retryable reason, exactly like the schema-unset case, and the
+row anchors once the verifier is on. A `failed` row on an account that is not
+`passport_issuable` renders in the dashboard as the neutral "not available for
+this wallet yet" reason, never the danger-tone "Issuance failed" (owner
+decision 2026-11-07). No data is changed.
 
 Two consequences worth stating rather than leaving to be rediscovered. **A
 passport issued on a legacy account before that gate is left alone**, not
@@ -479,8 +508,8 @@ disambiguates the two alarms and their remedies.
 Both halves of the anchor are fire-and-forget — an EAS write must never block
 agent creation or an owner's revoke — which only holds because something later
 retries what the in-request attempt dropped. That something is the **passport
-sweep** in `index.ts`: a leader-locked tick (every 5 minutes, not hourly, so it
-does not flatten a schedule that starts at 30s) that runs
+sweep** in `background-jobs.ts`: a leader-locked tick (every 5 minutes, not
+hourly, so it does not flatten a schedule that starts at 30s) that runs
 `retryPendingPassports()`, then `reconcilePendingRevocations()`, then
 `reconcilePendingReanchors()` (#1699), then logs anything
 `listStuckRevocations()` or `listStuckReanchors()` returns as a warning — two
@@ -697,7 +726,53 @@ if the clause is removed.
 A bare `{ ok: true }` forces a live call to Haven for every merchant decision:
 an availability coupling (Haven down means merchants cannot gate) and a privacy
 one (Haven sees every merchant's traffic). The response is instead a
-self-contained artifact whose authenticity a merchant checks **offline**:
+self-contained artifact whose authenticity a merchant checks **offline**.
+
+**Use the SDK helper.** `@haven_ai/sdk` exports the merchant-side verifier
+([#4723](https://github.com/d-hinders/Haven-AI/issues/4723)), and it is the same
+canonicalizer Haven signs with — there is exactly one copy, so it cannot drift:
+
+```ts
+import { checkPassport } from '@haven_ai/sdk'
+
+const result = await checkPassport({
+  baseUrl: HAVEN,                                 // e.g. https://api.haven.dev
+  issuer: PINNED_ISSUER,                          // from GET /passport/issuer, pinned once
+  payer: authorization.from,                      // EIP-3009; the erc7710 `delegator` on that rail
+  rail: 'eip3009',                                // or 'erc7710'
+  chainId: 8453,                                  // the merchant's chain
+  reference: extensions['haven-passport']?.info,  // the payment's reference, if any
+})
+// { ok, standing, reason, checked_at }
+```
+
+`checkPassport` fetches `GET /passport/verify?address=<payer>` and verifies the
+answer. `verifyPassportReceipt(body, options)` is the pure half — the same
+options minus `baseUrl` — for a merchant that already holds the body.
+
+**The lookup is by payer address, never by the UID the payment carried.** A UID
+is public on EAS, so a UID-only lookup lets any payer present another active
+agent's passport and be reported `active` — a "lent passport", and an authority
+claim. The reference's `attestation_uid` is a hint, cross-checked against the
+receipt's `evidenceUid`; a mismatch is `subject_mismatch`. The receipt's own
+`issuer` field is never trusted either: the pin is a required argument.
+
+The reasons are the backend's own `verifyReceipt` vocabulary
+(`not_signed_by_issuer`, `malformed_signature`, `expired`,
+`unsupported_version`), the verifier's `found: false` answers (`no_passport`,
+`unsupported_assurance_level`), `not_active`, `subject_mismatch`, and
+`unavailable` (503, 429, a timeout, a network error, a non-JSON body).
+`checkPassport` never throws and never refuses anything: a merchant decides what
+to do with the answer. The demo merchant reports it and settles regardless.
+
+Pin `PINNED_ISSUER` once from `GET /passport/issuer`. Do **not** take it from
+the receipt's own `issuer` field — authenticating an artifact against a value it
+carries is circular.
+
+#### If you verify by hand
+
+The helper is the recommended path, but the artifact is designed to be
+verifiable with nothing but `ethers` or `viem`:
 
 ```ts
 import { verifyMessage } from 'ethers' // or viem's verifyMessage
@@ -713,10 +788,6 @@ const { receipt, signature } = await fetch(`${HAVEN}/passport/verify?address=${a
 const ok = verifyMessage(JSON.stringify(canon(receipt)), signature).toLowerCase() === PINNED_ISSUER.toLowerCase()
 if (!ok || receipt.standing !== 'active' || receipt.expiresAt < Date.now() / 1000) return deny()
 ```
-
-Pin `PINNED_ISSUER` once from `GET /passport/issuer`. Do **not** take it from
-the receipt's own `issuer` field — authenticating an artifact against a value it
-carries is circular.
 
 Key ordering does not matter: the signature is over a canonical serialization
 (**every** key sorted, at every depth, no whitespace), so a merchant that parses
@@ -847,22 +918,66 @@ narrowness is the point:
 
 | Scheme | Reference rides the payment? | Delivery |
 |---|---|---|
-| **erc7710** (direct settlement) | Best-effort | `POST /x402/:id/settle` returns `passport: { attestation_uid, chain_id }`, optionally with `verify_url`. The agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
-| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **No** | The merchant sees a **standard** header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the only delivery **Haven provides to the agent** — `GET /agents/:id/passport` is dashboard-auth, so an agent cannot fetch its own UID, though an owner can hand it over out of band. |
+| **erc7710** (direct settlement) | **Yes, when the merchant asks** | Haven assembles the header. When the merchant's 402 advertised the `haven-passport` extension, the header's `extensions['haven-passport']` carries `attestation_uid` + `chain_id` (#4722). `POST /x402/:id/settle` also returns `passport: { attestation_uid, chain_id }`, optionally with `verify_url`, in Haven's own response. The merchant already sees the delegation during redemption, so this is a **bonus, not the mechanism**. |
+| **EIP-3009** ([#946](https://github.com/d-hinders/Haven-AI/issues/946) — the path with real merchant reach) | **Yes, when the merchant asks, from the SDK or local `@haven_ai/mcp`** | When the merchant's 402 advertised `haven-passport`, the envelope the SDK builds carries the two fields (#4722). **The default hosted + `@haven_ai/signer` path does not yet**: its header is built by the signer, which needs a signer release. There, `GET /passport/verify?address=…` is the only delivery **to the merchant**. The agent reads its own reference from its identity read, `GET /machine-payments/agent` → `passport` (#4721; `HavenAgent.passport` in the SDK, `haven_get_agent` in both MCP servers). |
 
-**The 3009 row is why the verifier endpoint is primary, not a fallback.** The
-scheme with actual merchant adoption cannot carry the reference at all.
-Describing inline delivery as *the* mechanism would present the rarer path as
-if it were the common one.
+**The verifier endpoint stays primary, not a fallback.** The reference is
+agent-supplied metadata on every path, and the most common client path (hosted
++ signer) does not carry it yet. A merchant that resolves the payer address
+needs nothing from the agent at all.
 
-### The reference never goes in the X-PAYMENT header
+### The `haven-passport` x402 extension (#4722)
 
-x402 does not guarantee arbitrary-metadata passthrough. That header is parsed by
-a merchant **facilitator Haven does not control**, and an unrecognised key in
-the payload is a rejection risk — a failed payment traded for a nice-to-have. So
-the reference rides Haven's own response body and the agent decides what to do
-with it. A characterization test pins the header's exact key set against this
-temptation.
+x402 does not guarantee arbitrary-metadata passthrough. The payment header is
+parsed by a merchant **facilitator Haven does not control**, and an
+unrecognised key is a rejection risk: a failed payment traded for a
+nice-to-have. So the reference enters the header **only when the merchant asked
+for it**, through the x402 v2 extension mechanism the spec already requires
+every client to echo.
+
+**How a merchant asks.** Advertise the key in the 402's `extensions`:
+
+```json
+"extensions": { "haven-passport": { "info": {} } }
+```
+
+Any plain-object value works. Fields you put in `info` (or at the top level,
+when there is no `info`) are echoed back unchanged.
+
+**What arrives.** The payment's `extensions['haven-passport']` holds everything
+you advertised plus `attestation_uid` (32-byte hex) and `chain_id` (integer),
+inside `info` when you advertised one, otherwise at the top level. Every other
+extension is echoed byte-identical.
+
+**When it does not arrive.** No fields are added, and your advertised extension
+is echoed exactly as you sent it (except in the last case below, where the
+header carries no extensions at all), when:
+- the agent has no anchored passport, or the lookup fails or times out (1500 ms);
+- the advertised value is not a plain object, or its `info` is not one;
+- you already put `attestation_uid` or `chain_id` where the fields would go (the client never overwrites);
+- the client is the hosted + signer EIP-3009 path, or an older SDK;
+- the SDK re-mints a header after its funding leg already ran (an executed
+  replay, or `resumeAuthorizedX402`), so as never to widen a funded window;
+- on erc7710, the SDK did not forward the 402 to Haven (it does so only up to
+  64 KB), so the header carries no extensions at all, as before.
+
+One rule (`withHavenPassportExtension` in `packages/sdk/src/x402.ts`) builds it
+for the SDK's EIP-3009 envelope and the backend's erc7710 header alike. On the
+SDK path the reference is read only when the 402 advertises the key, and only
+before a fresh authorization is minted, never after a funding leg already ran.
+
+**Treat it as a hint, never as authority.** Both fields are agent-supplied: an
+agent can present another agent's public UID. Resolve the passport against a
+Haven verifier you pin, and bind the answer to the payer:
+`GET /passport/verify?address=<payer>` answers for the address that actually
+paid. Presenting the UID also lets you read the attestation's public `treasury`
+on EAS: the treasury → agents graph is public by design (see *What L0 attests*
+above). The extension sits outside the signed EIP-3009 authorization and outside
+the erc7710 `permissionContext`, so it changes no payment authority.
+
+Characterization tests pin the header's exact key set for a merchant that did
+not advertise the key, and byte identity for a stored challenge whose other
+extensions it echoes.
 
 ### `verify_url` is a convenience, not a root of trust
 
@@ -875,7 +990,11 @@ asking the subject to vouch for itself.
 
 **Merchants: take `attestation_uid` + `chain_id` and resolve them against a
 verifier you already know** — your own pinned Haven base URL, or EAS on that
-chain directly. Those two fields are safe to accept from an agent precisely
+chain directly **together with the attester check**. The schema is registered
+with no resolver, so anyone can attest under its UID, and an attestation is
+Haven's only if its attester is Haven's. Haven does not publish its attester
+address yet, so the Haven verifier is the supported path today. Those two
+fields are safe to accept from an agent precisely
 because they are checkable against a source the agent does not control. The URL
 is not. Authority comes from the pinned issuer (`GET /passport/issuer`) and the
 receipt signature, never from where the link pointed.

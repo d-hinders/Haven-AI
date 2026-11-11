@@ -1,6 +1,7 @@
 'use client'
 
 import { ConnectAgentFlow } from './connect-agent/ConnectAgentFlow'
+import type { ConnectSetupPrefill } from '@/hooks/useAgentConnectionSetup'
 import { Modal } from './ui/Modal'
 
 interface Props {
@@ -20,6 +21,12 @@ interface Props {
    * confirming. Never overwrites allowances the user already added.
    */
   starterAllowance?: boolean
+  /**
+   * #4710: reopen the flow on step 1 with an existing setup's inputs, for
+   * "Start again" on the dashboard's still-connecting row. The caller has
+   * already cancelled the old setup.
+   */
+  prefill?: ConnectSetupPrefill | null
   /**
    * Open on an EXISTING setup instead of a blank flow (#2522). This is what
    * `/agents?setup=<id>` passes: the link an agent hands its user to land them
@@ -43,6 +50,7 @@ export default function ConnectAgentModal({
   accountId,
   onSetupUpdated,
   starterAllowance = false,
+  prefill = null,
   resumeSetupId = null,
 }: Props) {
   return (
@@ -53,9 +61,10 @@ export default function ConnectAgentModal({
       accountId={accountId}
       onSetupUpdated={onSetupUpdated}
       starterAllowance={starterAllowance}
+      prefill={prefill}
       resumeSetupId={resumeSetupId}
     >
-      {({ flow, progress, steps, nameInputRef, coarsePointer }) =>
+      {({ flow, progress, steps, nameInputRef, stepRegionRef, coarsePointer }) =>
         open ? (
           <Modal
             open
@@ -64,7 +73,13 @@ export default function ConnectAgentModal({
             subtitle={flow.headerSubtitleText}
             headerAccessory={progress}
             showCloseButton
-            initialFocusRef={coarsePointer ? undefined : nameInputRef}
+            // #4562: `Modal` now focuses the BODY's first focusable, not the
+            // header ✕. On a coarse pointer that would be the *Agent name*
+            // input, which opens the phone keyboard on a dialog the user has
+            // not asked to type into — so the flow's own step region (the
+            // `tabIndex={-1}` target it already uses on a step change) takes
+            // the open-time focus instead.
+            initialFocusRef={coarsePointer ? stepRegionRef : nameInputRef}
             closeButtonDisabled={flow.busy}
             width="xl"
             maxHeight="tight"

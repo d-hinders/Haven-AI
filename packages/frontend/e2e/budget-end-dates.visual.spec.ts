@@ -24,6 +24,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { hidePageBehindModal } from './support/hide-page-behind-modal'
 import {
   dismissMobileSidebar,
   mockHavenApi,
@@ -79,16 +80,20 @@ test.describe('budget end date visual regression (#4350)', () => {
     await openAgentPage(page)
 
     // #4261: with a budget listed, the form opens from a row's ⋯ menu —
-    // "Add budget". The shared end-date control rides inside it.
+    // "Add budget". #4564: the form is a DIALOG now, so the clip is the
+    // dialog's PANEL (`panelTestId`), never `getByRole('dialog')` — that
+    // wrapper is `fixed inset-0` and would screenshot the page behind it.
     await page.getByRole('button', { name: /^Budget options/ }).first().click()
     await page.getByRole('menuitem', { name: 'Add budget' }).click()
-    const form = page.getByRole('button', { name: 'Set budget' }).locator('../../..')
-    await expect(form.getByLabel('Ends — how long the budget lasts')).toBeVisible()
-    await expect(form.getByTestId('budget-end-date')).toBeVisible()
+    const dialog = page.getByRole('dialog', { name: 'Add a budget' })
+    await expect(dialog).toHaveCount(1)
+    await expect(dialog.getByLabel('Ends — how long the budget lasts')).toBeVisible()
+    await expect(dialog.getByTestId('budget-end-date')).toBeVisible()
 
     await page.evaluate(() => document.fonts.ready)
-    const section = page.locator('section[aria-label="Budgets"]')
-    await expect(section).toHaveScreenshot('agents-budget-grant-form-end-date-mobile.png', SNAPSHOT)
+    const panel = page.getByTestId('set-budget-dialog')
+    await hidePageBehindModal(panel)
+    await expect(panel).toHaveScreenshot('agents-budget-grant-form-end-date-mobile.png', SNAPSHOT)
   })
 
   test('the edit review with an end-date change renders pixel-stable (mobile)', async ({ page }) => {
@@ -109,7 +114,11 @@ test.describe('budget end date visual regression (#4350)', () => {
     await expect(afterBlock).toContainText('· ends ')
 
     await page.evaluate(() => document.fonts.ready)
-    await expect(dialog).toHaveScreenshot('agents-edit-budget-review-end-date-mobile.png', SNAPSHOT)
+    // #4564: `role="dialog"` is the `fixed inset-0` wrapper on `ui/Modal` —
+    // clip the panel (`panelTestId`), never the wrapper.
+    const panel = page.getByTestId('edit-budget-modal')
+    await hidePageBehindModal(panel)
+    await expect(panel).toHaveScreenshot('agents-edit-budget-review-end-date-mobile.png', SNAPSHOT)
   })
 
   test('the agent-page caption names the end date, pixel-stable (mobile)', async ({ page }) => {

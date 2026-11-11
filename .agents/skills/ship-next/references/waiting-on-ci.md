@@ -48,7 +48,8 @@ Do not burn fixed-timeout `sleep` loops against `gh pr checks`.
   that is a PR-body edit. For a label-triggered workflow, remove a non-gating
   label — never `external` (removing it is a maintainer's acceptance) and not
   `money-path` — let its run finish, then re-add it. `External intake gate`
-  has no concurrency group since #4524, so it should not get stuck this way.
+  (since #4524), `PR ownership gate` and `Baseline change gate` (both since
+  #4580) have no concurrency group, so they should not get stuck this way.
 - **Known infra flakes:** a required check failing with a known infrastructure
   signature gets **one rerun before any diagnosis** (`gh run rerun <id> --failed`).
   The signature list lives in

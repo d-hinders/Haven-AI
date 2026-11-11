@@ -64,6 +64,7 @@ import {
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, sweepUsdcDomain } from '@haven_ai/sdk'
 import { deriveX402PaymentNonce } from '@haven_ai/sdk/edge'
 import { CLOCK_SKEW_SECONDS } from './settlement-observed.js'
+import { settlementSchemeOf } from '../../domain/machine-metadata.js'
 
 /** The intent fields this seam reads; a structural subset of the evidence source row. */
 export interface Eip3009SettlementIntent {
@@ -98,17 +99,6 @@ export type Eip3009SettlementObservation =
    */
   | { outcome: 'unverified'; retryable: boolean; reason: string; errorCode?: SettlementProofErrorCode }
 
-function metadataOf(intent: Eip3009SettlementIntent): Record<string, unknown> | null {
-  const raw = intent.machine_metadata
-  if (!raw) return null
-  if (typeof raw !== 'string') return raw
-  try {
-    return JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    return null
-  }
-}
-
 /**
  * True only for a funded eip3009 delegation-rail x402 intent whose FUNDING
  * hash is not the one being reported. Reporting the funding hash itself keeps
@@ -122,7 +112,7 @@ export function isFundedEip3009Payment(intent: Eip3009SettlementIntent, reported
     intent.tx_hash.toLowerCase() !== reportedTxHash.toLowerCase() &&
     (intent.payment_rail ?? intent.source) === 'x402' &&
     intent.execution_rail === 'delegation' &&
-    metadataOf(intent)?.settlement_scheme === 'eip3009'
+    settlementSchemeOf(intent.machine_metadata) === 'eip3009'
   )
 }
 

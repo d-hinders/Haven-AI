@@ -80,7 +80,7 @@ Good split examples:
 - Confirm the PR target is `dev` (or `main` only for a `hotfix/*`).
 - Confirm migrations are uniquely ordered and named.
 - Confirm payment-related changes preserve the CASP guardrails: no Haven-held user or agent keys, no API-key-only payment authority, no off-chain-only spend control, no mutation of signed amount/token/recipient/route, and no unreviewed swap, ramp, fiat, card, merchant settlement, yield, or advice functionality.
-- Complete the PR template sections for changed surfaces, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
+- Complete the PR template sections for changed surfaces, the release lever, workflow used, agents used or skipped, local checks, browser or headless verification, generated artifacts, CASP/MiCA guardrails, review status, and merge readiness.
 - Include a merge-readiness section using the template below for non-trivial PRs.
 - Run the **Captain Self-Check Preflight** in `docs/contributing/ai-agent-workflow.md` for the surfaces the diff touches.
 - If browser verification is skipped for UI, routing, modal, setup-flow, or animation work, add the smallest headless equivalent that covers the skipped risk and name it in the PR.
@@ -102,7 +102,7 @@ apply. The PR template remains the source of truth for every other pull request.
 
 ## Before Merging
 
-- Re-check that the PR has no conflicts with `dev`.
+- Confirm that the PR has no conflicts with `dev`.
 - **Diagnosis rule (#1366): "only the labeler ran" on a push means the PR is
   CONFLICTING** — GitHub silently creates NO `pull_request`-triggered check
   runs when the merge commit cannot be built, while `pull_request_target`
@@ -228,7 +228,7 @@ Notes:
   script and their own CI job (*Demo merchant checks*, *QA agent checks*),
   and neither job is a required check. `npm run preflight` covers what
   `quality` misses.
-- Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with three exceptions (#3346 made the third). Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a generated copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). The four sources on the serve-docs allowlist (see `docs/contributing/docs-quality-system.md` § *Docs served to agents*) and `docs/exit/README.md` (read by `non-custody-no-lockin.test.ts`) route `code` + `frontend` too — `code` because the CI gate exits 0 when no code changed, before it ever reads the frontend flag — and the arm is derived from that allowlist, so a fifth served source routes the moment it is allowlisted (#3346). The classifier also diffs with `--no-renames`, so renaming a served source still routes the old spelling. Editing `.github/workflows/*.yml` triggers full workflow checks.
+- Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with three exceptions (#3346 made the third). Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a hand-kept byte copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). The four sources on the serve-docs allowlist (see `docs/contributing/docs-quality-system.md` § *Docs served to agents*) and `docs/exit/README.md` (read by `non-custody-no-lockin.test.ts`) route `code` + `frontend` too — `code` because the CI gate exits 0 when no code changed, before it ever reads the frontend flag — and the arm is derived from that allowlist, so a fifth served source routes the moment it is allowlisted (#3346). The classifier also diffs with `--no-renames`, so renaming a served source still routes the old spelling. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend **design and copy** gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only. Deliberately a scoped list, not every blocking step in *Frontend checks*: that job also runs typecheck, the wire-type ratchet, the *Visual baseline inventory* (#2318), the unit tests, the build and `lint:runbook-parity` (#2727), none of which is a design or copy gate. The visual-baseline step is the easiest of those to mistake for one: it inventories which screens have baselines, and is not the *Design visual regression* job named above.
 - The backend gate is stricter than the frontend baselines: **dependency-boundary lint** (#982, absolute since #999), a blocking step inside *Backend checks* enforcing `docs/architecture/10-module-boundaries.md` with **no baseline at all** — it fails on ANY violation. Fix the boundary; a reviewed, deliberate exception uses an inline `// dep-lint-exempt: <concrete reason>` comment on the offending import. `no-circular` can never be waived.
 - Auto-merge is gated by the required checks in the **"Haven automerge rules"** ruleset (per-surface checks plus the blocking gates such as *Banned product-copy terms*; *Design visual regression* is required on `main` only since #2632 O2 — read the live list, never a copy) — see `docs/contributing/autonomous-pr-loop.md` §One-time setup. A "blocking" job not in that list is advisory in practice.
@@ -269,33 +269,4 @@ Notes:
 - [ ] PR target is `dev` (or `main` for a `hotfix/*`)
 - [ ] Conflicts with `dev` checked before merge
 
-> **Re-verified 2026-10-24 (#4372 part G, at dev `b79b112ec`), a full re-read.**
-> Changed: the backend gate count is 39, not 36 (the snippet above prints
-> `39 11`; the raw-string variant still prints 9 and the whole-document
-> variant 12). `qa-agent` has had a CI job since #3005 (*QA agent checks*),
-> so "not one" was wrong. The docs row names all five `docs:check` steps.
-> The payment row says "account or signer setup" for the retired Safe term.
-> `guard-freshness.yml` is push-driven with a weekly floor, so the two guards
-> are no longer both called scheduled.
-> Re-checked without change: `dev-gate.yml`'s `dev`/`hotfix/*` rule; the
-> three active rulesets (`gh api …/rulesets`): *Haven automerge rules* on
-> `main` and `dev`, with the 15 required checks (*Banned product-copy terms*
-> and *Design-system coupling (strict)* among them), strict policy off and
-> code-owner review required; *Dev gate* on `main`, requiring `gate`,
-> `qa-freshness`, *Design visual regression* and *Frontend browser smoke*,
-> strict policy on and code-owner review required; and *Dev merge* on `dev`,
-> requiring *External intake gate* (#4200), strict policy off and no
-> code-owner review of its own;
-> `CODEOWNERS` on migrations; every npm script the doc names; the preflight
-> flags and exit codes 0/1/2/3 and `PREFLIGHT_SILENCE_MS`; the CI jobs that
-> run `lint:next-steps`, `lint:vocabulary`, `lint:runbook-parity`,
-> `design:lint` and the backend ratchets; the classifier's CLAUDE.md,
-> `frontend/public`, allowlist and `docs/exit/README.md` arms and
-> `--no-renames`; the ten-package `build` chain; the dependency lint with no
-> baseline; the *Update visual baselines* `mode` default `changed`, the
-> *Baseline change audit* and `baseline-before-after` artifact, and
-> `BASELINE_PUSH_TOKEN` absent from `gh secret list` (which lists 12 others);
-> `verify-merged-head.mjs` taking a PR number; the coupling gate's #2323
-> section heading and its exit 0 without `--strict`; the `ui-gate-wording`
-> baseline's one sentence in `ship-playbooks/frontend.md`; the anchors into
-> `ship-playbooks/frontend.md`, `ship-next` and `autonomous-pr-loop.md`.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

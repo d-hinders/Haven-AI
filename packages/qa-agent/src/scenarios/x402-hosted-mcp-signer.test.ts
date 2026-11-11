@@ -307,6 +307,33 @@ describe('both on-chain legs, not just the merchant saying yes', () => {
     expect(r.detail).toMatch(/did not settle/)
   })
 
+  // #4688: `settled: false` is no longer only a funding failure — the EIP-3009
+  // arm reports an unverified merchant settlement this way. A
+  // SETTLEMENT_PENDING on a just-mined settlement is NOT a funding or
+  // rehydration failure: the merchant leg ran, and the hash the settle held is
+  // prefilled in next_arguments for the report-tool handoff.
+  it('follows the report-tool handoff on SETTLEMENT_PENDING instead of failing the funding leg', async () => {
+    mockCallTool.mockImplementation(async (tool: string) => {
+      if (tool === 'haven_pay_mcp_tool') return quote()
+      if (tool === 'haven_settle_mcp_tool') {
+        return settled({
+          settled: false,
+          delivered: true,
+          code: 'SETTLEMENT_PENDING',
+          retryable: true,
+          settlement_tx_hash: null,
+          next_tool: 'mcp__haven__haven_report_settlement_evidence',
+          next_tool_name: 'haven_report_settlement_evidence',
+          next_arguments: { payment_id: 'pay_hosted_1', settlement_tx_hash: MERCHANT_TX },
+        })
+      }
+      return { payment_id: 'pay_hosted_1', settled: true, settlement_tx_hash: MERCHANT_TX }
+    })
+    const r = await x402HostedMcpSigner.run(ctx())
+    expect(r.pass).toBe(true)
+    expect(r.detail).toMatch(/via a follow-up haven_report_settlement_evidence/)
+  })
+
   it.each([
     ['no funding hash', { funding_tx_hash: null }, /funding leg is unevidenced/],
     ['no settlement hash', { settlement_tx_hash: null }, /merchant leg cannot be\s+verified/],

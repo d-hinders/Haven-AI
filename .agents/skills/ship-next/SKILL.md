@@ -14,7 +14,7 @@ Accept one source:
 - no argument or `label=<name>`: choose the lowest-numbered open issue with the label, defaulting to `code-quality`;
 - `epic=#<n>`: choose the lowest-numbered open sub-issue;
 - a specified ready issue: ship that issue;
-- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory § *Issue review*, and lifting `pending-review` per its § *Hold until ready* — if an owner question stays open, ask it and stop), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
+- a quoted freeform task: first use [new-task](../new-task/SKILL.md) (including its mandatory [review-issue](../review-issue/SKILL.md) pass, and lifting `pending-review` per its § *Hold until ready* — if an owner question stays open, ask it and stop), add `code-quality`, then ship the created issue. The label is not what makes the issue ready. It is there so that a run that stops partway leaves the issue in the loop's queue rather than orphaned.
 
 **Respect dependencies before number order.** An issue is BLOCKED — skip it and take the next candidate — when any of these hold:
 
@@ -517,9 +517,10 @@ do not restate them here.
 3. Ask the user before applying ambiguous architectural, product, security, money-movement, authorization, or schema findings.
 4. Record applied and deferred findings with reasons. A deferred finding that is
    filed is filed **through [new-task](../new-task/SKILL.md)** — its measurement
-   rule, prior-art sweep and mandatory § *Issue review* — never with a bare
-   `gh issue create`. Deferred findings from one pull request that share a
-   surface go into **one** epic, or into that surface's open epic (new-task §
+   rule, prior-art sweep and mandatory [review-issue](../review-issue/SKILL.md)
+   pass — never with a bare `gh issue create`. Deferred findings from one pull
+   request that share a surface go into **one** epic, or into that surface's
+   open epic (new-task §
    *Epics*), not one standalone issue each. When a deferred finding is filed
    as its own issue **and must land before something already queued**, write
    `Depends on #<new issue>` into the
@@ -528,7 +529,7 @@ do not restate them here.
    outbound references from the candidate it is about to ship, so an inbound "close
    this before #N" is invisible and #N ships anyway.
 5. Run `npm run docs:coupling`. The findings are not the same obligation:
-   - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`. Never push with this red.
+   - **⚠️ contract doc → blocking.** The strict gate exits 1 and so will CI. Resolve it in *this* pull request: update the stale claims, or genuinely re-verify the doc and bump `last-verified`, or record the re-read in a commit trailer — `Re-verified-unchanged: <doc path> @ <sha>`, where `<sha>` is an ancestor of the PR head. A trailer never satisfies a doc that declares `satisfied-by:`; those still need their shard. Never push with this red.
    - **⚠️ custody claim → blocking, in any doc, including a shard-cleared parent.** A wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement is **blocking** in any doc, whether or not it is `contract: true` (#4174). The doc-reviewer role labels it `blocking`; resolve it in *this* pull request.
    - **A parent doc cleared by a shard → advisory, and it is the one to read first (#2323).** The gate's own section is *"Parent docs cleared by a shard — body not re-read"*. The coupling requirement is genuinely satisfied and the gate does not block; what the shard does not do is prove anybody opened the parent, because the author of the change writes the shard. Re-read the named sections against the matched files. Leaving the parent untouched and saying so in the PR is a legitimate outcome — a rubber-stamped `last-verified` is worse than a stale one. Before #2323 the parent was not merely un-blocked here, it was **absent from the comment**, which is how #2274 (PR #2322) shipped a false CASP sentence past a green tick.
    - **Everything else → advisory.** Run the doc-reviewer role over the implicated docs; this is a **hard definition-of-done step**, not optional. Update what the diff actually made stale. Bump `last-verified` only on a doc you really re-read — a rubber-stamped date is worse than a stale one, because the weekly staleness audit ranks on it, so leaving a doc untouched and saying why is a legitimate outcome.
@@ -759,6 +760,13 @@ with no replacement figure can qualify when all five commands pass.
 5. Open a pull request with base `dev`, never `main`, using the available GitHub integration or authenticated `gh`.
 6. Fill the applicable sections of [the pull-request template](../../../.github/pull_request_template.md), including:
    - changed surfaces and workflow used;
+   - the **Release lever** line, filled from `npm run release:scope -- --base=<merge base> --head=HEAD`
+     — the merge base, not `origin/dev`, so the range is this pull request's own. The script prints
+     the line to paste: `next release train` naming the affected published packages, `deploy only`
+     naming the services, or `none`. It refuses rather than under-reporting — on an unbuilt package,
+     a missing sourcemap, or a shallow clone — and a refusal is not a reason to write `none`: build
+     the five published packages first (`npm run build -w packages/sdk -w packages/signer -w packages/mcp -w packages/connect -w packages/cli`)
+     and re-run. The line is advisory and gates nothing;
    - local checks and browser/headless verification;
    - intentionally excluded work;
    - generated-artifact and handoff impact;
@@ -1040,8 +1048,17 @@ gh issue view <epic> --json body -q .body | node scripts/ci/epic-promotion-check
 
 Exit 0 is "ready to close"; exit 1 prints the unticked boxes, and the report lists
 them instead. An epic with no such section predates the template change — the tool
-says so and exits 0, and the report names the absence. The epic stays open across
-the promotion until a human ticks the last box.
+says so and exits 0, and the report names the absence.
+
+**A box only a promotion can satisfy is filed, not carried** (owner decision
+2026-10-30, amending the 2026-09-08 rule #2767). When a box can only be done at or
+after the next `dev → main` promotion — a prod query after a migration applies, a
+check only prod can answer — it is filed as its own issue under the `Next release`
+convention, the box is rewritten to link that issue and ticked, and the epic may
+close before the promotion; the release process carries the step. The
+convention's filing mechanics are defined once in
+[branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main)
+— read them there, do not restate them.
 
 **An unticked box is not always outstanding work — it may be a mis-written box.**
 A box phrased so that no outcome can make it true (a waived operator step still
@@ -1089,9 +1106,14 @@ operator can run (funded testnet keys, vendor dashboards, live end-to-end runs):
    secret values — and the expected output of each step). The label is what makes
    step 1 enforceable rather than remembered: the close guard reads it off the issue,
    so it holds however the pull-request body is later rewritten.
-3. Leave the issue OPEN in this state and say so in the report; do not close on
+3. **If the live step needs prod, file a separate `Next release` issue** under the
+   convention in
+   [branch-and-release-flow.md § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main),
+   and link it from the original issue. The original keeps its own history and is
+   never re-titled; the release session works the new issue at closeout.
+4. Leave the issue OPEN in this state and say so in the report; do not close on
    "code merged".
-4. When the operator confirms (or pastes the output), verify it matches the expected
+5. When the operator confirms (or pastes the output), verify it matches the expected
    evidence, tick the checklist, remove the `operator-verify` label, and close with
    the evidence links. To find landed issues still waiting for that evidence,
    `gh issue list --label landed-partial --state open` lists the open issues the

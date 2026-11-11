@@ -163,6 +163,33 @@ describe('the transaction kind (#4532)', () => {
     expect(e.transactionDescription).toBe('api.example - v1/thing (unclassified)')
   })
 
+  // #4578: the direct-payment branch emits `TRUE::BOOLEAN` for the signal, so
+  // a settled direct payment is a transfer labelled with its counterparty's
+  // canonical address — not `Unknown merchant (unclassified)`.
+  it('a direct payment is a transfer labelled with its counterparty address (#4578)', () => {
+    const e = toAccountingEntry(
+      row({
+        resource_url: null,
+        merchant_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
+        is_direct_payment: true,
+      }),
+    )
+    expect(e.transactionKind).toBe('transfer')
+    expect(e.transactionDescription).toBe('0x15179876c595922999C2d5DC7c23Cc7711fE799a (transfer)')
+    // The label is the address only: filling `counterparty.name` would also
+    // change Fortnox's booked supplier and the underlag's `Counterparty` line.
+    expect(e.counterparty.name).toBeNull()
+    expect(e.counterparty.address).toBe('0x15179876c595922999C2d5DC7c23Cc7711fE799a')
+  })
+
+  it('CONTROL: the same row without the direct-payment signal is still unknown (#4578)', () => {
+    const e = toAccountingEntry(
+      row({ resource_url: null, merchant_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a' }),
+    )
+    expect(e.transactionKind).toBe('unknown')
+    expect(e.transactionDescription).toBe('Unknown merchant (unclassified)')
+  })
+
   it('CONTROL: two different routes really do produce two different kinds', () => {
     const pay = toAccountingEntry(row({ resource_url: 'https://api.bitrefill.com/x402/invoice/pay' }))
     const create = toAccountingEntry(row({ resource_url: 'https://api.bitrefill.com/x402/invoice/create' }))

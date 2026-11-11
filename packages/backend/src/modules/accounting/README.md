@@ -18,9 +18,11 @@ the architecture is in
 | **connector** | `<provider>-connector.ts`, implements `AccountingConnector` (`connector.ts`) | code: `isConnected`, `pushTransaction`, `verify`, `getCompanyInfo`, `revoke` |
 | **connection row** | `infra/repositories/accounting-connections.ts` | the user's grant, encrypted at rest (`infra/secrets.ts`), one row per (user, provider), at most one active destination per user (a partial unique index, migration 080) |
 
-A provider can be **listed without code** — Light and Igdrasil are
-`coming_soon` descriptors today (Fortnox and Accounted are `live`), and
-`GET /accounting/providers` shows them.
+A provider can be **listed without code** — Light is a `coming_soon`
+descriptor with no connector (Fortnox and Accounted are `live`), and
+`GET /accounting/providers` shows it. Igdrasil is `coming_soon` WITH a
+connector (#4518): it registers when the `IGDRASIL_*` variables are set and
+opens once the live check (#4519) flips the descriptor to `live`.
 Only a `live` provider with a registered connector accepts a connect
 (`assertConnectable` in `registry.ts`).
 
@@ -38,7 +40,9 @@ The routes (`routes/accounting-connections.ts`) and the feed (`feed-orchestrator
    add a case to `oauth2ConfigFor` in `connections.ts` — the generic
    `oauth-flow.ts` does the consent URL, the code exchange, the refresh, and
    the key-before-provider-call ordering that protects a single-use refresh
-   token. It also compares the scope string the provider echoes with the
+   token. A provider that requires PKCE (RFC 7636) sets `pkce: 'S256'` on
+   its config — nothing else: the flow adds the challenge and the verifier
+   (see *PKCE* below). It also compares the scope string the provider echoes with the
    descriptor's `requiredScopes` (#2865): a shortfall stores the connection
    as `scope_missing` naming the missing scopes (not a refusal), and the
    same connect-url + callback on an existing connection is the re-consent
@@ -240,10 +244,14 @@ did before this contract existed.
 one line that carries it (`api.bitrefill.com - invoice/pay (purchase)`). Both
 render on the receipt underlag (`Transaction` / `Description`) and both are
 DERIVED in `transaction-kind.ts` from the stored payment record: the payment
-direction, the x402 resource route, the intent's `mcp_call_context.toolName`,
+direction, the direct-payment rail (a literal the entry source's direct branch
+emits, #4578), the x402 resource route, the intent's `mcp_call_context.toolName`,
 the captured merchant document and the delivery reference. No route accepts a
 kind, so an agent cannot set it, and a payment with no derivable signal is
-`unknown` rather than a guess.
+`unknown` rather than a guess. A direct payment is a `transfer` and its
+description names the counterparty's canonical address
+(`0x1517…799a (transfer)`), because it has no merchant name and no resource
+host to name.
 
 A connector carries the two values where its API allows it — Fortnox's
 free-text `Comments` field does, with `/` folded to `-` for its character
@@ -269,6 +277,22 @@ state issued before a Postgres crash could be accepted once more within its
 ten minutes), and the limiter's increment is fail-open by design — here a
 store that cannot answer **refuses** the callback instead, because a connect
 is retried in seconds and a replayed grant is not undone.
+
+## PKCE
+
+A provider whose config sets `pkce: 'S256'` (#4517 — Igdrasil requires it,
+Fortnox does not use it) gets a `code_challenge` on the consent URL and the
+matching `code_verifier` on the code exchange; either call refuses, before
+any request, without a verifier. The verifier is **derived, never stored**
+(`oauth-pkce.ts`): `base64url(HMAC-SHA256(JWT_SECRET, "accounting-pkce:" +
+jti))`, recomputed at the callback from the `jti` of the state it has just
+verified and consumed. It is never a claim of the state — the state is
+signed, not encrypted, and rides the consent URL, so a verifier inside it
+would reach whoever sees the redirect, which is what PKCE exists to prevent.
+`JWT_SECRET` already signs the state, so rotating it invalidates an in-flight
+state and its verifier together. Without the flag, the consent URL and the
+exchange body are exactly what they were before PKCE existed
+(`__tests__/oauth-pkce.test.ts` pins both).
 
 ## What stays provider-scoped
 

@@ -473,12 +473,13 @@ describe('resolveScrollShell', () => {
     // label: a still-loading authenticated page that satisfied it would be
     // captured at once and filed as `captured_without_unclip` — a deliberate
     // result, not a failure. Pinned against the REAL markup
-    // (`src/components/ProtectedRoute.tsx`: a `min-h-screen` centred div
-    // reading "Loading...") so a future change to that copy, or to the
+    // (`src/components/ui/RouteLoading.tsx`, rendered by
+    // `src/components/ProtectedRoute.tsx`: a `min-h-screen` centred div
+    // reading "Loading…") so a future change to that copy, or to the
     // thresholds, has to redden this rather than pass silently.
     const loading: FakeProbe = {
       found: false,
-      renderedChars: 10,
+      renderedChars: 8,
       docScrollHeight: 800,
       viewportHeight: 800,
     }
@@ -492,7 +493,7 @@ describe('resolveScrollShell', () => {
   })
 
   it('does not end the wait for a page that is only marginally taller than the fold', async () => {
-    // The height half of the same floor, and the half the "Loading..." fixture
+    // The height half of the same floor, and the half the "Loading…" fixture
     // above cannot reach — it is stopped by the character floor first, so
     // without this test the margin is shadowed and a mutation of it stays
     // green. A loading state that grew a header and a little overflow (400
@@ -555,7 +556,7 @@ describe('resolveScrollShell', () => {
  * ── Is this a picture of the route, or of its spinner? (#2036) ──────────────
  *
  * The measured defect: `/dashboard` captured on both viewports showing the app
- * shell and a body reading only `Loading...`, reported as a SUCCESS. Both
+ * shell and a body reading only `Loading…`, reported as a SUCCESS. Both
  * neighbouring guards are correct to pass it — a loading state is short so
  * `blank-below-fold` is out of scope, and `#main-content` really did mount so
  * the shell guards really did their job. The gap is that nothing asked whether
@@ -579,8 +580,9 @@ type ContentProbe = {
 
 /**
  * The REAL loading fallback, transcribed from
- * `app/(authenticated)/dashboard/page.tsx`: a pulse dot and a `<span>` reading
- * `Loading...` inside a flex wrapper. Three elements, ten characters — and
+ * `app/(authenticated)/dashboard/page.tsx` — now the shared `RouteLoading`
+ * (`components/ui/RouteLoading.tsx`): a pulse dot and a `<span>` reading
+ * `Loading…` inside a flex wrapper. Three elements, eight characters — and
  * `renderedChars` is in the THOUSANDS, because the shell around it (sidebar
  * nav, user card) rendered perfectly. That gap between the two numbers is the
  * whole defect.
@@ -590,7 +592,7 @@ const DASHBOARD_LOADING: ContentProbe = {
   docScrollHeight: 800,
   viewportHeight: 800,
   renderedChars: 2_400,
-  contentChars: 10,
+  contentChars: 8,
   contentElements: 3,
 }
 
@@ -699,7 +701,7 @@ describe('judgeContentSettled', () => {
     expect(verdict.reason).toBe('still-loading')
     // Both numbers survive into the verdict, because the error message quotes
     // them and a reader has to be able to see how far below the floor it was.
-    expect(verdict.chars).toBe(10)
+    expect(verdict.chars).toBe(8)
     expect(verdict.elements).toBe(3)
   })
 
@@ -943,7 +945,7 @@ describe('resolveContentSettled', () => {
     expect(error.name).toBe('ContentNotSettledError')
     expect(error.captureCause).toBe('still-loading')
     expect(error.message).toContain('/dashboard · mobile')
-    expect(error.message).toContain('10 character(s)')
+    expect(error.message).toContain('8 character(s)')
     expect(error.message).toContain('3 element(s)')
     // The floor is quoted, so the reader can judge the margin without opening
     // the source.

@@ -24,6 +24,7 @@ covers:
   - packages/connect/src/signer-runtime.ts
   - packages/connect/src/storage.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/credential-file.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/signer.ts
@@ -45,7 +46,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # Haven — Edge Signer
@@ -295,17 +296,6 @@ giving the hosted service payment-signing authority.
 
 ## Orchestration
 
-> **Re-verified #3495 (2026-09-30):** the "Regular payment" sequence, the
-> paragraphs through the compact-by-default note below, and the "Preferred
-> x402 form" paragraph's direct-payment sentence further down (which used to
-> say direct payments "always carry the full pair as well, for older
-> signers" — no longer true since #3495) were updated for the #3495 owner
-> decision (direct-payment results compact by default, relay behind an
-> `include_signing_payload: true` opt-in) and its review-round-1 and
-> round-2 corrections (the two-trigger-shape fix, the S5 no-sign-data-replay
-> guard, the direct fetch's 404 naming both routes). Nothing else in this
-> document was re-verified in this pass.
-
 The hosted server (brain) and the local signer (key) are two MCP servers; the
 agent runtime drives the sequence.
 
@@ -496,7 +486,7 @@ local:   haven_sign               -> funding signature + x402_binding; pass { pa
                                     include_signing_payload=true
 hosted:  haven_submit             -> fund delegated agent EOA from the account budget
 local:   haven_x402_sign_header   -> EIP-3009 payment header if binding matches
-agent:   retry merchant, setting BOTH PAYMENT-SIGNATURE + X-PAYMENT
+agent:   retry merchant with exactly retry_headers (PAYMENT-SIGNATURE; + X-PAYMENT only for x402 v1)
 hosted:  haven_report_x402_outcome { payment_id, outcome, merchant_status, payment_header }
 ```
 
@@ -635,7 +625,11 @@ account is permanently out of scope.
   names `npx @haven_ai/connect --doctor` for the connector-wired case.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a credential file selected by `--credentials` / `HAVEN_CREDENTIALS`, with
-  a permissive-file warning.
+  a permissive-file warning. Since #4792 the mirror is literal — the
+  account-address readers and the permission check are one module in
+  `@haven_ai/sdk/edge` (`packages/sdk/src/credential-file.ts`), which both
+  packages import; only the log prefix (`haven-signer:` / `haven-mcp:`) and
+  each package's own loader stay local.
 - First-launch consent must match the current signer identity and tool set.
   Acknowledgement uses `HAVEN_SIGNER_ACK` or a local
   `<credentials>.signer-ack.json` sidecar. Re-acknowledgement after a tool-set
@@ -679,7 +673,7 @@ account is permanently out of scope.
   `sign_data.signature_scheme`: `eip712_userop` (payments) to
   `signUserOpTypedDataForDelegation`, `eip712_delegation` (x402 settlement)
   to `signSettlementDelegationTypedData` after `assertOwnSettlementChild`
-  (`packages/sdk/src/client.ts:668-697`). In the hosted topology this
+  (`packages/sdk/src/client.ts:674-702`). In the hosted topology this
   signer's `haven_sign` signs both: the `eip712_userop` typed data (by
   `payment_id` since #3271, under the #3272 allowlist; see Regular payment
   above) and the erc7710 settlement child, after `verifySettlementChild`
@@ -706,55 +700,4 @@ account is permanently out of scope.
   session after funding confirms, and reconcile or sweep stranded delegate
   balances when a merchant retry fails or the authorization expires unsettled.
 
-> **Re-verification (#3935, the derived EIP-3009 nonce, 2026-10-14):** the
-> `buildX402PaymentHeader` sentences were added against `origin/dev`
-> `686ac03c` (`packages/signer/src/core.ts`, the backend's
-> `eip3009-settlement-sweeper.ts`). Scope of this note: that bullet. The rest
-> of this document was not re-read for it, and `last-verified` is not bumped.
-
-> **Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`):** the
-> whole document was re-read against the code. Changed: the core lists
-> `signSiwxMessage` (#3728); the handshake paragraph names the sign-context
-> version sets (#3506 added the sub-budget one); the #3272 allowlist accepts
-> the #3330 three-link sub-budget chain, not two shapes; the over-budget 502 is
-> typed (#3609) and a confirmed budget revert answers 403; the hosted egress
-> policy's deadlines and caps (#3747); the decomposed x402 flows gain the quote
-> step (#3739) and the outcome / settlement-evidence report, with the proof
-> header #3925 requires; the SIWX audit row; and the sweep supports Base
-> Sepolia as well as Base mainnet (`isSweepableChain`). Checked and accurate:
-> the `core.ts:448-454` and sweeper `:464` line anchors, the tool set and
-> `--help` / unknown-option exit 2 (run), the consent and ack paths, the audit
-> rotation constants, the SIWX grammar limits, and the 300 s delivery default.
-
-> **Re-verified 2026-10-23 (#4372 part A, at dev `1579908a4`):** the whole
-> document was re-read. Changed: the nonce line anchors (`core.ts:495-501`,
-> sweeper `:472`), and the scope note no longer says delegation-rail payments
-> are not exposed as signer tools — `haven_sign` signs their `eip712_userop`
-> typed data (#3271/#3272) and the erc7710 settlement child — and names the
-> SDK's `eip712_delegation` target, `signSettlementDelegationTypedData`. Re-checked without change: `RETIRED_BINDING_MEMORY`
-> (64), the handshake version fields, the egress deadlines (5 s discovery, 15 s
-> quote and session, 300 s delivery, ≤3 GET redirects), the sweep chains
-> (`isSweepableChain`: Base, Base Sepolia), `X402_BINDING_PRIVATE_KEY` with no
-> fallback, `HAVEN_SIGNER_ACK` and the ack sidecar, and the 8 MiB audit rotation.
-
-> **Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`):**
-> the whole document's standing claims were re-spot-checked at this head.
-> Changed: the derived-nonce line anchor is now `core.ts:496-503` (the
-> overwrite and the library's `signPaymentHeader` call moved down three
-> lines); the sweeper's `:472` nonce anchor still lands exactly. Checked and
-> accurate: `RETIRED_BINDING_MEMORY` (64, `core.ts:270`), the
-> `client.ts:668-697` scheme dispatch, the 8 MiB audit rotation
-> (`AUDIT_ROTATE_BYTES`), the SIWX 300 s window plus pinned skew tolerance
-> (`SIWX_MAX_AGE_SECONDS`, `siwx.ts`), the dedicated binding key still read
-> from `X402_BINDING_PRIVATE_KEY` with a throw (never the relayer key — it
-> lives in `infra/chain/x402-binding-signer.ts:90`), and
-> `isSweepableChain` in `packages/sdk/src/sweep.ts`. The week's covered
-> drift (x402 proof-header settlement reports #4075, expired-only budgets
-> #4376) changed what reports carry and refuse, not any signer boundary.
-
-> **Re-verified 2026-10-26 (#4449, the signer's success next-step family):** the
-> six success sites and the settlement-child guidance were re-read against
-> `packages/signer/src/tools.ts`, `next-step.ts` and `no-funding-leg.ts` at
-> `origin/dev` `b9f9f1e47`. Scope of this note: the success-result paragraph and
-> the `NO_FUNDING_LEG` bullet. The rest of this document was not re-read for it,
-> and `last-verified` is not bumped.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

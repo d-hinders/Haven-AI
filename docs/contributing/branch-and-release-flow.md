@@ -8,6 +8,8 @@ covers:
   - scripts/release-bump.mjs
   - scripts/release-version-constants.mjs
   - scripts/ci/qa-freshness.mjs
+  - scripts/ci/operator-verify-close-guard.mjs
+  - scripts/ci/release-on-merge.mjs
   - .github/workflows/publish.yml
 last-verified: "2026-10-21"
 ---
@@ -180,103 +182,6 @@ the epic when its last sub-issue lands on `dev`.
 > (the dev → main promotion) won't re-close anything; the issues are already
 > closed from the dev-merge.
 
-> **Re-verification (#3819, 2026-10-09):** coupled through
-> `.github/workflows/publish.yml`: the dependency-presence ledger inside the
-> loop (`dep_state`) was rewritten from a bash-4 associative array
-> (`declare -A`) to a space-delimited `pkg=state` string read by an
-> exact-word `case` lookup, so the loop runs on bash 3.2 (stock macOS
-> `/bin/bash`) without changing what it decides (#3819). The gate's
-> behaviour is identical on every bash — the same packages are held back,
-> marked FAILED and never nominated for `latest` — so no branch-flow,
-> promotion-window, dev-gate/qa-freshness or credential claim in this
-> document moves. Verified by `release-bump.test.mjs` (102/102), which runs
-> the real loop shell on host bash 5 and in a real GNU bash 3.2.57
-> container.
-
-> **Re-verification (#3797, 2026-10-09):** coupled through
-> `.github/workflows/publish.yml`, which gains a dependency-presence gate: a
-> package whose exact-pinned internal `@haven_ai/*` dependency did not publish
-> in the same run is held back and marked FAILED, never nominated for
-> `latest`. The two `publish.yml` descriptions in this document were updated
-> in the same pass; branch flow, the promotion window, dev-gate/qa-freshness
-> requirements and every credential path are untouched. Verified by
-> `release-bump.test.mjs` (102/102), which runs the real loop shell.
-
-> **Re-verification (#3305):** coupled because `scripts/release-bump.mjs` is in
-> its `covers:`. The bump gains one owned file, the client release data in
-> `@haven_ai/core`, which it regenerates from the
-> CHANGELOGs after stamping their headings. It refuses up front when that file
-> was hand-edited, and skips both steps for a snapshot. The release still happens
-> on a release branch into `dev` and publishes on the `dev → main` promotion, and
-> no version, pin, channel, dist-tag, build order or credential path moves.
-> Nothing in this document was made false by that change; it describes the flow
-> the bump sits in, not the bump's list of files.
-
-> **Re-verification (contract-doc count correction, 2026-09-17):** this doc is
-> coupled because `scripts/release-bump.mjs` is in its `covers:` and that script
-> was edited — its *printed* next-steps block said "the two contract docs" and
-> enumerated two, while the docs had been corrected to three. Only operator-facing
-> log strings and comments changed; no version, pin, channel, dist-tag, build
-> order or credential path moves, and `release-bump.test.mjs` is 76/76.
-> **Nothing in this document was made false or stale by that edit** — it carries
-> no contract-doc count of its own, which is why it needed no content change.
-> `last-verified` deliberately NOT bumped: this is a scoped check of one script
-> edit, not a re-verification of the document, and #1366 rates a rubber-stamped
-> date worse than a stale one.
-
-> **Re-verification (#3303, 2026-09-25):** coupled again through
-> `scripts/release-bump.mjs`, which gains one `SOURCE_VERSION_CONSTANTS` entry —
-> the SDK's `SDK_VERSION`, rewritten and verified exactly like the four
-> constants beside it. No branch, promotion, dist-tag,
-> channel, build order or credential path moves, and this document names no
-> source constant, so nothing in it was made stale. `last-verified` not bumped,
-> for the reason in the note above.
-
-> **Re-verification (#3361, 2026-09-26):** coupled through
-> `scripts/ci/qa-freshness.mjs`, whose green-run query changes from "the newest
-> 30 run-level successes" to "every run-level success created within twice
-> `QA_FRESHNESS_HOURS`", with rows that cannot have run the harness dropped
-> before the job lookup and the lookups budgeted. This document states only
-> what `qa-freshness` requires — a green money-flow QA run covering the
-> promoted money-path code, bypass `qa-override` — and that requirement is
-> unchanged: the selector's rules, the freshness window and the coverage diff
-> are untouched. The change finds real greens the old window missed, or
-> refuses. In one narrow case it anchors differently at the same commit: when
-> a better-provenance `deployment_status` run lies beyond twice the window, a
-> younger admitted run at that commit (itself a passing money-flow run) is the
-> one whose age is judged. Nothing here was made stale. `last-verified` not bumped,
-> for the reason in the notes above.
-
-> **Re-verification (#3368, 2026-09-26):** coupled through
-> `scripts/ci/qa-freshness.mjs`, which loses a dead branch (the #1044
-> step-level completeness warning, which could never fire while the Coverage
-> completeness step fails its job) and gains precise refusals: a search cut
-> short by the lookup budget is reported as such instead of "no run found",
-> and an unusable `QA_FRESHNESS_HOURS` echoes the raw value. What
-> `qa-freshness` requires — a green money-flow QA run covering the promoted
-> money-path code, bypass `qa-override` — is unchanged, and every changed
-> path still refuses. Nothing here was made stale. `last-verified` not bumped,
-> for the reason in the notes above.
-
-> **Re-verification (#3337, 2026-09-26):** coupled through
-> `.github/workflows/dev-gate.yml`, where only a comment changes: the
-> `qa-override` escape hatch is no longer described as a quarantine for "a
-> wedged testnet flake" but by its documented rule (used only with a comment
-> stating what was verified out-of-band; see agent-qa.md and dev-environment.md
-> for the hotfix, stale-gate and red-run cases). The label,
-> its warning and the gate are unchanged, and this document's "bypass is
-> `qa-override`" still holds. `last-verified` not bumped, for the reason in the
-> notes above.
-
-> **Re-verification (release-bump constant table, 2026-09-29):** coupled through
-> `scripts/release-bump.mjs`. The bump's table of self-reported version
-> constants moved into `scripts/release-version-constants.mjs`, and its
-> `SIGNER_VERSION` entry now names the signer's `tools.ts`, where #3454
-> moved the declaration. Before this fix, the 0.7.0-alpha.0 cut died part-way
-> through. The release still runs on a release branch into `dev` and publishes
-> on the `dev → main` promotion. No step, gate or merge rule in this document
-> moved.
-
 ## Promotion to production (`dev → main`)
 
 1. Open a **`dev → main` PR** (a human step). Its diff is the promotion manifest
@@ -319,6 +224,69 @@ the epic when its last sub-issue lands on `dev`.
      [`../operations/package-dev-channel.md`](../operations/package-dev-channel.md).
 3. `git rev-list --count --first-parent origin/main..origin/dev` reads `0`:
    `dev` and `main` are back in sync.
+
+**Owed at this release — the `Next release (dev → main):` convention.** A step
+that can only be done at, or after, the next `dev → main` promotion — a prod
+query after a migration applies, a check only prod can answer — is filed as its
+own issue, never left as a box on an epic or a sentence in a PR body. This
+section is the convention's only definition — the prefix and the selector are
+written here and nowhere else, and the places that file or run a release link
+here rather than restating them.
+
+- **File it through `new-task`** as a standalone issue. Its title starts with the
+  prefix `Next release (dev → main):` (`->` is accepted in place of `→`), and it
+  carries the **`operator-verify`** label, so no PR closes it by accident — the
+  close guard in `scripts/ci/operator-verify-close-guard.mjs` enforces that.
+- **Announce it on the agent coordination channel #3193** (`📣 FYI`), so a
+  release session sees it without having to run the selector.
+- **Lifecycle.** The release session that carries it works it at closeout,
+  records the result on the issue, removes `operator-verify` and closes it. An
+  issue whose prerequisite is not in `origin/main..origin/dev` is carried to the
+  next promotion, with the reason recorded on the issue.
+- **Two carve-outs.** A data precondition a migration states stays where it is:
+  it is run against prod before the merge, as
+  [`../operations/release-checklist.md`](../operations/release-checklist.md)
+  step 5 says, and is not filed under this convention. A `hotfix/*` promotion
+  does not run this step at all — it branches from `main` and carries none of
+  `dev`'s owed work.
+
+**The selector.** GitHub search drops the arrow and punctuation and matches the
+phrase anywhere in a title, so the search alone also matches an issue that merely
+mentions it. The prefix is therefore checked client-side:
+
+```sh
+gh issue list --state open --label operator-verify --limit 200 --search 'in:title "Next release"' \
+  --json number,title --jq '.[] | select(.title | test("^Next release \\(dev (→|->) main\\):"))'
+```
+
+Measured on 2026-10-30, this returns #4555 alone. A second line lists phrase
+matches that fail either check — no `operator-verify` label, or the prefix not at
+the start — so a mis-filed issue shows up instead of being dropped silently:
+
+```sh
+gh issue list --state open --limit 200 --search 'in:title "Next release"' \
+  --json number,title,labels \
+  --jq '.[] | select( ((.title | test("^Next release \\(dev (→|->) main\\):")) | not) or (([.labels[].name] | index("operator-verify")) | not) ) | "\(.number)\t\(.title)"'
+```
+
+On 2026-10-30 that second line returns #4556 — the issue that defined this
+convention — which is correct: it carries no `operator-verify` label and its
+title does not start with the prefix.
+
+**A promotion PR's `Refs` lines release nothing.** A merge into a non-default
+branch releases nothing (AGENTS.md § *Cross-session agent coordination*):
+`release-on-merge.mjs` returns before reading anything when the merge's base is
+not the default branch — `decide()` and `decideRefs()` both early-return on
+`pr.base !== pr.defaultBranch`, and the CLI short-circuits before any read. The
+default branch is `dev` and a promotion's base is `main`, so a promotion PR
+writing `Refs #4555` adds no `landed-partial` label and posts no claim-release
+line — the issue stays open and the release session closes it at closeout.
+`release-on-merge.test.mjs` pins both halves (*unmerged and a promotion → no
+label*; *unmerged, a promotion, and a bot author release nothing*).
+`landed-partial` is not inert, though: it is a skip reason for `ship-next` §
+*Select The Work* and for AGENTS.md § *Cross-session agent coordination*. A
+promotion merge is one of the cases that never sets it — a bot-authored PR, an
+epic, and an issue not authored by a maintainer never do either.
 
 > **Never revert a published release bump — cut forward instead
 > ([#2580](https://github.com/d-hinders/Haven-AI/issues/2580)).** Once a version
@@ -487,12 +455,11 @@ close on dev-merge). Full ruleset/auto-merge setup is in
   the body**, since all three reach `dev` (#2320). A required check fails the PR if
   a closing keyword targets such an issue, wherever on the PR it is written — the
   rule is enforced rather than remembered (#2276).
+- **A step that only a promotion can satisfy is its own issue**, filed under the
+  [`Next release` convention](#promotion-to-production-dev--main) — not a box on
+  an epic and not a line in a PR body. That section owns the prefix, the label,
+  the announcement and the selector; read it there.
 - Promotion to prod is a separate human step; prod state lives in the `prod-*`
   Releases; what is pending is the `main...dev` compare.
 
-> **Re-verified unchanged (#4371, 2026-10-23 — `publish.yml`'s invariant
-> comment).** The comment over the dev-tag invariant in
-> `.github/workflows/publish.yml` now says five enforcement places, matching the
-> five it lists. Comment only: no job, trigger, branch rule or release step
-> changes. Scope of this note: that comment. Nothing else in this document was
-> re-verified.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

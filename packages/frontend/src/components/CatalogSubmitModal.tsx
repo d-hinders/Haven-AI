@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { formatLongDate } from '@/lib/format'
 import {
   getSubmissionStatus,
   submitCatalog,
@@ -83,7 +84,7 @@ function StatusSteps({ status }: { status: CatalogSubmissionStatus['status'] }) 
             <span
               className={`h-1.5 w-1.5 rounded-full ${
                 isCurrent
-                  ? 'bg-[var(--v2-brand)]'
+                  ? 'bg-[var(--v2-ink-2)]'
                   : done
                     ? 'bg-[var(--v2-success)]'
                     : 'bg-[var(--v2-surface-2)]'
@@ -413,6 +414,8 @@ export default function CatalogSubmitModal({
       )}
 
       {phase === 'error' && (
+        // #4607: keeps `role="alert"` — a larger failed-state panel (title +
+        // body), which DS § Inline alerts leaves in its own panel.
         <div
           role="alert"
           className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3"
@@ -474,11 +477,7 @@ export default function CatalogSubmitModal({
 
               <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
                 The ownership proof expires on{' '}
-                {new Date(instructions.expires_at).toLocaleDateString(undefined, {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
+                {formatLongDate(instructions.expires_at)}
                 . Verification keeps running after you close this window.
               </p>
             </div>
@@ -514,6 +513,8 @@ export default function CatalogSubmitModal({
       )}
 
       {phase === 'failed' && (
+        // #4607: keeps `role="alert"` — a larger failed-state panel (title +
+        // body), which DS § Inline alerts leaves in its own panel.
         <div
           role="alert"
           className="rounded-xl border border-danger/20 bg-[var(--v2-danger-soft)] px-4 py-3"

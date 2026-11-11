@@ -97,7 +97,7 @@ test.describe('/demo visual regression', () => {
       // `animations: 'disabled'`, networkidle and the pulse wait above cannot
       // stabilize it. Three other mechanisms were measured and rejected:
       // a screenshot `mask` paints onto the LIVE page only (playwright-core
-      // 1.60.0, `_maskElements` before `takeScreenshot`) while the committed
+      // 1.64.1 as at 1.60.0, `_maskElements` before `takeScreenshot`) while the committed
       // baseline is compared RAW by `compareImages`, so masking the video
       // would diff the whole video box against a baseline that still shows
       // the video (~480k pixels against the same budget); removing the

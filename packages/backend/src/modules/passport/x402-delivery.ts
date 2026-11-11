@@ -14,22 +14,22 @@
  *
  * | Scheme | Can the reference ride the payment? | Delivery |
  * |---|---|---|
- * | **erc7710** (direct settlement) | Best-effort | Haven's settle response carries it; the agent presents it however the channel allows. The merchant already sees the delegation during redemption, so this is a bonus, not the mechanism. |
- * | **EIP-3009** (#946, the path with real merchant reach) | **No** | The merchant sees a STANDARD header from the delegate EOA. The passport cannot ride a delegation chain that is not in the payment. `GET /passport/verify?address=…` is the ONLY delivery. |
+ * | **erc7710** (direct settlement) | When the merchant asks | Haven's settle response carries it, and the header Haven assembles carries it inside an advertised `haven-passport` extension (#4722). The merchant already sees the delegation during redemption, so this is a bonus, not the mechanism. |
+ * | **EIP-3009** (#946, the path with real merchant reach) | When the merchant asks, SDK / local MCP only | The SDK-built envelope carries it inside an advertised `haven-passport` extension (#4722). The hosted + signer header does not yet (a signer release). There `GET /passport/verify?address=…` is the only delivery to the merchant; the agent can read its own reference from `GET /machine-payments/agent` (#4721). |
  *
- * The 3009 row is the strongest argument for the verifier endpoint being
- * PRIMARY rather than a fallback — the scheme with actual merchant adoption
- * cannot carry the reference at all. Anything that presents inline delivery as
- * the mechanism would be describing the rarer path as if it were the common one.
+ * The verifier endpoint stays PRIMARY rather than a fallback: the reference is
+ * agent-supplied on every path, and the most common client path does not carry
+ * it yet.
  *
- * ## Why this never touches the X-PAYMENT header
+ * ## The X-PAYMENT header carries it only when the merchant asked
  *
  * x402 does not guarantee arbitrary-metadata passthrough. The header is parsed
  * by a merchant FACILITATOR we do not control, and an unrecognised key in the
  * payload is a rejection risk — a failed payment traded for a nice-to-have.
- * So the reference rides HAVEN's own response body, where the agent reads it
- * and decides. `x402-delegation.test.ts` pins the header's key set against
- * exactly this temptation.
+ * So the reference enters the header only inside a `haven-passport` extension
+ * the merchant's own 402 advertised, by the one merge rule
+ * `withHavenPassportExtension` (`@haven_ai/sdk`). `x402-delegation.test.ts`
+ * pins the header's key set for a merchant that did not ask.
  */
 
 import * as repo from '../../infra/repositories/agent-passports.js'
@@ -46,7 +46,8 @@ export interface PassportReference {
    * A CONVENIENCE link to Haven's verifier, not a root of trust.
    *
    * This whole object reaches a merchant by way of the AGENT — Haven returns it
-   * on the settle response, the agent forwards it over whatever channel it
+   * on the settle response and on the agent's own identity read
+   * (`GET /machine-payments/agent`, #4721), the agent forwards it over whatever channel it
    * likes. So every field here is agent-controlled by construction, `verify_url`
    * included: an agent can substitute a URL it operates and have it answer
    * `{ found: true }` for anything. A merchant that resolves the supplied URL is
@@ -54,7 +55,10 @@ export interface PassportReference {
    *
    * The only sound merchant behaviour is to take `attestation_uid` + `chain_id`
    * and resolve them against a verifier it ALREADY knows — its own pinned Haven
-   * base URL, or EAS on that chain directly. The UID and chain id are safe to
+   * base URL, or EAS on that chain directly TOGETHER WITH the attester check
+   * (the schema has no resolver, so anyone can attest under its UID; Haven
+   * does not publish its attester address yet, so the Haven verifier is the
+   * supported path). The UID and chain id are safe to
    * accept from the agent precisely because they are checkable against a source
    * the agent does not control; the URL is not. Same reasoning as the
    * `X-PAYMENT` header note above: the trust boundary is what the merchant can
@@ -88,7 +92,7 @@ export interface PassportReference {
  *
  * Omitting costs nothing that matters. `attestation_uid` + `chain_id` are what
  * a merchant should be resolving anyway — against a verifier it already pins,
- * or against EAS directly.
+ * or against EAS directly with the attester check (see `verify_url` above).
  */
 function verifyUrlFor(attestationUid: string): string | null {
   const env = process.env.HAVEN_API_URL ?? process.env.PUBLIC_API_URL
@@ -113,9 +117,10 @@ function verifyUrlFor(attestationUid: string): string | null {
  * already been authorised and signed by the time we get here, and a lookup
  * ERROR must not turn a good payment into an error. Absence is the graceful
  * degradation the acceptance criteria ask for, and it is also the failure mode.
- * Note the scope: this covers a throw, not an unbounded hang. There is no
- * timeout here, and the caller handles that case by ordering — see the comment
- * at the call site in `routes/x402.ts`.
+ * Note the scope: the lookup is bounded to 1500 ms below, so a slow passport
+ * table degrades to `null`. The caller also computes the reference before the
+ * settle UPDATE, by ordering — see the comment at the call site in
+ * `modules/x402/settle.ts`.
  *
  * The swallowed error is REPORTED through `log`, and that is not decoration
  * either. "Absence is normal" and "the lookup broke" produce the identical
@@ -156,7 +161,7 @@ export async function passportReferenceFor(
     // reference is not. Logged so the swallow is not also a silence.
     opts.log?.warn(
       { err: err instanceof Error ? err.message : String(err), agent_id: agentId },
-      'passport reference lookup failed; settle response degrades to passport: null',
+      'passport reference lookup failed; the response degrades to passport: null',
     )
     return null
   }

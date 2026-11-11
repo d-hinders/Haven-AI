@@ -938,18 +938,18 @@ test.describe('driven focus-state visual regression', () => {
     {
       slug: 'active',
       agent: agentState({ id: 'agent-delegation', name: 'Delegation agent' }),
-      items: ['Pause payments', 'Move to organization', 'Remove'],
+      items: ['Pause payments', 'Move to organisation', 'Remove…'],
     },
     {
       slug: 'paused',
       agent: agentState({ id: 'agent-paused', name: 'Paused agent', status: 'paused' }),
-      items: ['Resume payments', 'Move to organization', 'Remove'],
+      items: ['Resume payments', 'Move to organisation', 'Remove…'],
     },
     {
       // `archived_at: null` is load-bearing: an archived agent offers Restore.
       slug: 'revoked',
       agent: agentState({ id: 'agent-revoked', name: 'Revoked agent', status: 'revoked', archived_at: null }),
-      items: ['Remove from list'],
+      items: ['Remove from list…'],
     },
     {
       slug: 'archived',

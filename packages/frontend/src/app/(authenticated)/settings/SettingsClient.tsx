@@ -2,12 +2,12 @@
 
 /**
  * Settings in three tabs (#4358, epic #4356 slice 2/3): General, Security
- * and Business, selected through `?tab=` exactly as the account page owns
- * its tab (`AccountDetailClient`). General is the default — an unknown
- * value falls back to it — and switching uses `router.replace`, so the
- * tabs add no history entry: Back leaves Settings. The tab-switch URL
- * write preserves every other query parameter, because the Business tab's
- * `ConnectionsCard` is still reading the OAuth outcome
+ * and Business, selected through `?tab=` by the shared `useTabUrlState` hook
+ * (#4573) — the same rule the account and agent pages use. General is the
+ * default — an unknown value falls back to it — and switching uses
+ * `router.replace`, so the tabs add no history entry: Back leaves Settings.
+ * The tab-switch URL write preserves every other query parameter, because the
+ * Business tab's `ConnectionsCard` is still reading the OAuth outcome
  * (`provider`/`connect`/`reason`) when it strips them — and when no `tab`
  * is present but those parameters are, Business is selected anyway (an old
  * bookmarked callback URL still lands right).
@@ -63,7 +63,7 @@
 import { ArrowRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useT } from '@/context/LocaleContext'
 import { useTheme, type ThemePreference } from '@/context/ThemeContext'
@@ -73,6 +73,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tabs } from '@/components/ui/Tabs'
+import { useTabUrlState } from '@/components/ui/useTabUrlState'
 import { SettingsSection as Section, SettingsRow as SettingRow } from '@/components/ui/SettingsSection'
 import { accountingFeedOffState } from '@/hooks/useAccountingFeed'
 import { ConnectionsCard, CONNECT_OUTCOME_PARAMS } from '@/components/accounting/ConnectionsCard'
@@ -84,10 +85,6 @@ import { ProfileNameEditor } from '@/components/settings/ProfileNameEditor'
 type SettingsTab = 'general' | 'security' | 'business'
 
 const SETTINGS_TABS: readonly SettingsTab[] = ['general', 'security', 'business']
-
-function settingsTabFromUrl(raw: string | null): SettingsTab | null {
-  return SETTINGS_TABS.includes(raw as SettingsTab) ? (raw as SettingsTab) : null
-}
 
 /**
  * True when the URL carries an OAuth outcome the Business tab's card has
@@ -117,7 +114,6 @@ function SettingsTabs() {
   const { preference, setPreference } = useTheme()
   const { user } = useAuth()
   const t = useT()
-  const router = useRouter()
   const searchParams = useSearchParams()
   const { company, providers, feed } = useBusinessData()
 
@@ -139,8 +135,16 @@ function SettingsTabs() {
   const businessKnown = !companyPending && !providers.loading && !feed.loading
   const businessVisible = companyHasContent || accountingHasContent
 
-  // The URL owns the tab; an unknown value falls back to General.
-  const urlTab = settingsTabFromUrl(searchParams.get('tab'))
+  // The URL owns the tab; an unknown value falls back to General. #4573: the
+  // one `?tab=` hook — Settings opts in to KEEPING the other parameters,
+  // because the Business tab's `ConnectionsCard` is still reading the OAuth
+  // outcome when it strips them.
+  const { urlTab, setTab } = useTabUrlState({
+    tabs: SETTINGS_TABS,
+    defaultTab: 'general',
+    basePath: '/settings',
+    keepOtherParams: true,
+  })
   const outcomeSelected = !urlTab && hasConnectOutcome(searchParams)
   const requestedTab: SettingsTab = urlTab ?? (outcomeSelected ? 'business' : 'general')
   // While the reads are pending, an explicitly requested Business tab
@@ -158,18 +162,7 @@ function SettingsTabs() {
   // `general` is the default and carries no parameter (the canonical
   // address); every other tab is written alongside — never replacing — the
   // parameters already present, so an OAuth outcome survives until its
-  // card has read it.
-  const handleTabChange = (tab: SettingsTab) => {
-    if (tab === activeTab) return
-    const params = new URLSearchParams(searchParams.toString())
-    if (tab === 'general') {
-      params.delete('tab')
-    } else {
-      params.set('tab', tab)
-    }
-    const qs = params.toString()
-    router.replace(`/settings${qs ? `?${qs}` : ''}`, { scroll: false })
-  }
+  // card has read it. The hook owns both rules (`keepOtherParams`).
 
   // The `#signers` anchor lands on a tab that may mount after the hash is
   // set (`?tab=security#signers` from `AccountSignersCard`) — scroll once,
@@ -195,7 +188,12 @@ function SettingsTabs() {
       <Tabs
         tabs={tabItems}
         value={activeTab}
-        onChange={handleTabChange}
+        onChange={(tab) => {
+          // The hook writes the URL; whether the tab is already on screen is
+          // the page's question — Settings' active tab can differ from the
+          // URL's (an OAuth outcome selects Business with no `tab` in the URL).
+          if (tab !== activeTab) setTab(tab)
+        }}
         ariaLabel={t.settings.tab.ariaLabel}
       />
 

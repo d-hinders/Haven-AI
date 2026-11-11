@@ -4,8 +4,10 @@ status: current
 covers:
   - .agents/skills/haven-agent-workflow/**
   - .agents/skills/ship-next/**
+  - .agents/skills/review-issue/**
   - .claude/agents/**
   - .claude/commands/ship-next.md
+  - .claude/commands/review-issue.md
   - .github/pull_request_template.md
   - AGENTS.md
   - docs/contributing/autonomous-pr-loop.md
@@ -192,6 +194,11 @@ Portable project skills live under `.agents/skills/<name>/SKILL.md`. Run
 `npm run docs:check` to verify their metadata, references, portable-language
 boundary, and client-adapter targets.
 
+`review-issue` is the canonical issue-review workflow — the rubric, the three
+questions, the isolation and delta rules, the verdict contract, and the
+registered re-measurement live there. `new-task` delegates its mandatory
+post-filing pass to it rather than carrying a second copy.
+
 Skill catalogs are loaded at session start. After adding or changing a skill:
 
 - start a fresh Codex session rooted at the repository and invoke the skill by
@@ -203,7 +210,9 @@ Skill catalogs are loaded at session start. After adding or changing a skill:
 
 For example, ask `new-task` to report whether its default is backlog-only while
 explicitly forbidding issue creation. This checks discovery and argument
-forwarding without changing GitHub state.
+forwarding without changing GitHub state. For `review-issue`, ask it to review
+an existing issue in review-only mode and report which authorization mode it
+selected — it must post nothing.
 
 Example:
 
@@ -588,17 +597,4 @@ Do not run git mutation commands. The captain owns branch, commit, push, and PR 
 If you need a shared change, report it instead of making it.
 ```
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: *Inline Gate Placement* no longer points at a hoisted-notice layout
-> in `EditAgentModal` — #2331 removed it, and no product file renders
-> `<OnchainActionNotice />` now. The rule itself is unchanged, and the
-> *Safe setup* phrase in the self-check list is left to open PR #4388.
-> Re-checked without change: the three rulesets (`gh api …/rulesets`: code
-> owner review required on `dev` and `main`), `CLAUDE.md` § *How shipping is
-> governed*, `AGENTS.md` § *Agentic Workflow*, `.claude/hooks/ship-next-guard.sh`,
-> the seven `.claude/agents/` adapters and their canonical references,
-> `npm run preflight`, the named frontend symbols, `pendingApprovals` always 0
-> (`routes/agent-activity.ts`), the ship-next verdict-line and arming rules,
-> the Proportionality lane anchor, `scripts/ci/review-isolation.mjs`'s flags
-> and its "not asserted" lines, prove-red's backup naming, `npm run
-> screenshot`, and every cited issue's state with `gh api`.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

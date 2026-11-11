@@ -157,11 +157,17 @@ describe('BudgetGrantAction (#1073)', () => {
     // (#989 moved the modal's approval step into connect-agent/
     // DelegationApprovalStep — the pin follows the code to its new home,
     // same as the agents.test.ts account_type pin did in #988.)
+    // #4564: the agent page's grant form moved into SetBudgetDialog, so the
+    // pin follows it there — the card still wires that dialog.
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
     expect(
-      read('../DelegationBudgetCard.tsx'),
-      'DelegationBudgetCard must use the shared grant control',
+      read('../SetBudgetDialog.tsx'),
+      'SetBudgetDialog must use the shared grant control',
     ).toMatch(/import BudgetGrantAction from '\.\/BudgetGrantAction'/)
+    expect(
+      read('../DelegationBudgetCard.tsx'),
+      'the agent page must wire the Set budget dialog',
+    ).toMatch(/import SetBudgetDialog(?:, \{[^}]*\})? from '\.\/SetBudgetDialog'/)
     expect(
       read('../connect-agent/DelegationApprovalStep.tsx'),
       'the connect-flow approval step must use the shared grant control',

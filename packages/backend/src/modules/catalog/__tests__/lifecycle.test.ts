@@ -326,7 +326,8 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
 
   // The seam test: a cooldown handed in is the one the probe stage consults.
   // It injects the cooldown, so on its own it says nothing about production;
-  // the monitor tests below drive the entry point index.ts uses (#4407).
+  // the monitor tests below drive the entry point `background-jobs.ts` uses
+  // (#4407).
   it('threads an injected cooldown through to the probe stage', async () => {
     const claim = await seed('cooldown.example.com')
     const post = vi.fn(mcpServer())
@@ -345,14 +346,14 @@ describeDb('catalog ingestion lifecycle (#1714)', () => {
     expect(post.mock.calls.length).toBe(callsAfterFirst)
   })
 
-  describe('the monitor index.ts drives holds the cooldown across ticks (#4407)', () => {
+  describe('the monitor `background-jobs.ts` drives holds the cooldown across ticks (#4407)', () => {
     const MIN = 60 * 1000
     const T0 = new Date('2026-10-25T10:00:00Z').getTime()
 
     it('characterization: a bare tick builds a fresh cooldown, so it spans nothing', async () => {
       // The pre-#4407 production call shape: `runCatalogIngestTick()` with no
       // cooldown. Two ticks five minutes apart both probe the failing host.
-      // This is why index.ts must go through the monitor.
+      // This is why the catalog-ingest row must go through the monitor.
       const claim = await seed('bare.example.com')
       const post = vi.fn(brokenMcp())
       let clock = T0

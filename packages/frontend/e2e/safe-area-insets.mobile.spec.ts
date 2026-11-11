@@ -549,6 +549,14 @@ test.describe('safe-area insets — nothing under the notch or the home indicato
    * anything about safe areas.
    */
   test('a toast clears the home indicator', async ({ page }) => {
+    // #4573: the Receive dialog's toast is now raised by `CopyButton`'s
+    // `onCopied`, which fires only after the clipboard write RESOLVES — a
+    // rejected write copied nothing and must not claim otherwise. Headless
+    // Chromium does not auto-grant `clipboard-write` (a real browser does for
+    // the active tab in a secure context), so without this grant the write
+    // rejects and no toast is raised. The grant is the instrument's, not the
+    // product's: it makes the harness match the browser the test describes.
+    await page.context().grantPermissions(['clipboard-write'])
     await openReceiveDialog(page)
     await applyInsets(page)
     await page.getByRole('button', { name: 'Copy address' }).click()

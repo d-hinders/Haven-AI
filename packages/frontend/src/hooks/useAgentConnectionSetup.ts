@@ -10,6 +10,7 @@ import { resolveDiscoverySource } from '@/lib/discovery'
 import type { ApiSchema } from '@haven_ai/core'
 import { useAuth, type SmartAccount } from '@/context/AuthContext'
 import { useEscapeToClose } from '@/hooks/useEscapeToClose'
+import { useCopyToClipboard } from '@haven_ai/ui/hooks/useCopyToClipboard'
 import {
   useAgentConnectionSetupStatus,
   type AgentConnectionSetupStatusResponse,
@@ -45,6 +46,20 @@ export type CreateSetupResponse = ApiSchema<'CreateAgentConnectionSetupResponse'
 type ResolveSetupResponse = ApiSchema<'ResolveAgentConnectionSetupResponse'>
 type RegisterSetupResponse = ApiSchema<'RegisterAgentConnectionSetupResponse'>
 
+/**
+ * #4710: the inputs "Start again" seeds the flow with, from `GET /:setupId`.
+ * The old setup is already cancelled; this produces a NEW prompt.
+ */
+export interface ConnectSetupPrefill {
+  name: string
+  description: string | null
+  /** The Haven wallet the old setup was created against. */
+  accountId: string
+  /** Human-decimal budget amount for the policy step's input ('' when none). */
+  amount: string
+  resetPeriodMin: number
+}
+
 export interface ManualCredential {
   /** The prose prompt (the pre-#2482 rendering, kept for agent workspaces). */
   prompt: string
@@ -65,6 +80,17 @@ export interface UseAgentConnectionSetupOptions {
   /** See ConnectAgentModal's prop of the same name. */
   starterAllowance?: boolean
   /**
+   * #4710: reopen the flow on step 1 with an existing setup's inputs, for
+   * "Start again" on the dashboard's still-connecting row. The old setup has
+   * already been cancelled by the caller; this only seeds the form, so the
+   * user reviews both opt-in checkboxes before a new prompt exists.
+   *
+   * `issue_passport` and `localMcp` are deliberately NOT part of the prefill:
+   * `GET /:setupId` does not return them, both start false on any new connect,
+   * and both are opt-in.
+   */
+  prefill?: ConnectSetupPrefill | null
+  /**
    * Resume an EXISTING setup instead of creating a new one (#2522).
    *
    * This is what `/agents?setup=<id>` opens: an agent hands its user a link to
@@ -80,9 +106,9 @@ export interface UseAgentConnectionSetupOptions {
    *
    * #4065: the inline first-agent flow on `/agents` passes false. It is
    * mounted with `open` true for as long as it shows, so Escape anywhere on
-   * the page — including the Escape that closes the Labels or Organizations
-   * dialog above it — would reset the form and drop the create-time setup
-   * token. There is nothing for Escape to dismiss there.
+   * the page — including the Escape that closes the Manage labels or Manage
+   * organisations dialog above it — would reset the form and drop the
+   * create-time setup token. There is nothing for Escape to dismiss there.
    */
   escapeToClose?: boolean
 }
@@ -345,6 +371,7 @@ export function useAgentConnectionSetup({
   accountId: propAccountId,
   onSetupUpdated,
   starterAllowance = false,
+  prefill = null,
   resumeSetupId = null,
   escapeToClose = true,
 }: UseAgentConnectionSetupOptions) {
@@ -383,6 +410,9 @@ export function useAgentConnectionSetup({
   const creatingRef = useRef(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [copied, setCopied] = useState<CopyKind | null>(null)
+  // #4573: the shared clipboard write, so the setup prompt's copy is the same
+  // primitive `CopyButton` uses — and a failed write cannot advance the step.
+  const copyToClipboard = useCopyToClipboard()
   // #3832: LATCHED, and keyed to the setup it was copied for. `copied` is
   // single-valued — copying the local command or the .env block overwrites
   // 'prompt' — so the connect step's row 1 reads this instead, and a later
@@ -393,6 +423,16 @@ export function useAgentConnectionSetup({
   const [cancelled, setCancelled] = useState(false)
   const [manualCredential, setManualCredential] = useState<ManualCredential | null>(null)
   const [manualCredentialAcknowledged, setManualCredentialAcknowledged] = useState(false)
+  /**
+   * #4570: the close guard. Closing while a one-time manual credential is
+   * unsaved asks first — the credential is shown once and never again. The
+   * question is an INLINE panel inside the flow, not `window.confirm` (the
+   * app's only one) and not a `ConfirmDialog`: `ConnectAgentModal` already
+   * wraps the flow in a `Modal`, and `ConfirmDialog` is itself a `Modal`, so a
+   * dialog here would nest (`docs/product/README.md:222`). The same panel
+   * serves the inline `/agents` path, where the flow has no modal parent.
+   */
+  const [closeGuardOpen, setCloseGuardOpen] = useState(false)
   const [manualCreating, setManualCreating] = useState(false)
   const [manualError, setManualError] = useState<string | null>(null)
 
@@ -402,7 +442,17 @@ export function useAgentConnectionSetup({
   const chainId = selectedAccount?.chain_id ?? DEFAULT_CHAIN_ID
   // #1069: branch the final step on the account's rail — see
   const walletName = selectedAccount?.name ?? 'Selected Haven wallet'
+  // #4719: the session payload's server-computed answer — whether this
+  // deployment can issue the selected wallet's agents a passport a merchant
+  // can verify. Only an explicit `true` offers the opt-in; an older backend
+  // that omits the field reads as not issuable (fail closed).
+  const passportIssuable = selectedAccount?.passport_issuable === true
   const walletNetworkName = resolveChainOrNull(chainId)?.name ?? `Chain ${chainId}`
+  // #4719: switching to a wallet that cannot issue clears a ticked opt-in, so
+  // the box never reappears pre-ticked on a later switch back.
+  useEffect(() => {
+    if (!passportIssuable) setIssuePassport(false)
+  }, [passportIssuable])
   // A setup created in THIS session wins over a resumed id: the user who just
   // clicked through the wizard is looking at their own new setup, not at
   // whatever id happened to be in the URL that opened the page.
@@ -459,6 +509,29 @@ export function useAgentConnectionSetup({
     }
     prevOpenRef.current = open
   }, [open])
+
+  /**
+   * #4710: "Start again" seeds the form ONCE per open. Declared after the
+   * open-reset effect above so it wins the wallet selection on the same
+   * render. The flow opens on step 1, not the waiting screen, so both opt-in
+   * checkboxes are on screen before a new prompt exists; `issue_passport` and
+   * `localMcp` keep their false defaults.
+   */
+  const [prefillApplied, setPrefillApplied] = useState(false)
+  useEffect(() => {
+    if (!open) {
+      setPrefillApplied(false)
+      return
+    }
+    if (!prefill || prefillApplied) return
+    setPrefillApplied(true)
+    setName(prefill.name)
+    setDescription(prefill.description ?? '')
+    setSelectedAccountId(prefill.accountId)
+    setAddAmount(prefill.amount)
+    setAddReset(prefill.resetPeriodMin)
+    setStep('details')
+  }, [open, prefill, prefillApplied])
 
   useEffect(() => {
     if (!open) return
@@ -522,22 +595,39 @@ export function useAgentConnectionSetup({
     setCancelled(false)
     setManualCredential(null)
     setManualCredentialAcknowledged(false)
+    setCloseGuardOpen(false)
     setManualCreating(false)
     setManualError(null)
   }, [tokenOptions])
 
   const handleClose = useCallback(() => {
-    if (manualCredentialNeedsSave && typeof window !== 'undefined') {
-      const shouldClose = window.confirm(
-        'This one-time manual credential will be hidden if you close now. Continue?',
-      )
-      if (!shouldClose) return
+    // #4570: ask before dropping an unsaved one-time credential. The panel
+    // renders inside the flow (`ConnectAgentFlow`), so both containers get the
+    // same question and neither nests a dialog.
+    if (manualCredentialNeedsSave) {
+      setCloseGuardOpen(true)
+      return
     }
     resetForm()
     onClose()
   }, [manualCredentialNeedsSave, onClose, resetForm])
 
-  useEscapeToClose(open, handleClose, { enabled: escapeToClose && !creating && !manualCreating })
+  /** The guard's Cancel: keep the credential and stay in the flow. */
+  const cancelClose = useCallback(() => setCloseGuardOpen(false), [])
+
+  /** The guard's Confirm: drop the credential and leave. */
+  const confirmClose = useCallback(() => {
+    setCloseGuardOpen(false)
+    resetForm()
+    onClose()
+  }, [onClose, resetForm])
+
+  // While the guard shows, Escape dismisses the PANEL, not the flow — in both
+  // containers, including the inline one where Escape is otherwise unbound
+  // (#4065). Otherwise the pre-existing rule stands.
+  useEscapeToClose(open, closeGuardOpen ? cancelClose : handleClose, {
+    enabled: closeGuardOpen || (escapeToClose && !creating && !manualCreating),
+  })
 
   const hasMultipleAccounts = userAccounts.length > 1
   const setupSteps: SetupStep[] = ['details', 'policy', 'connect']
@@ -579,7 +669,9 @@ export function useAgentConnectionSetup({
           allowance_amount: parseUnits(allowance.amount, allowance.decimals).toString(),
           reset_period_min: allowance.resetTimeMin,
         })),
-        issue_passport: issuePassport || undefined,
+        // #4719: never sent for a wallet that cannot issue it, even if the
+        // box was ticked before the wallet was switched.
+        issue_passport: (issuePassport && passportIssuable) || undefined,
         // #2302: discovery-source attribution. URL ?src= wins when present;
         // otherwise the first-touch value captured to localStorage at landing
         // (DiscoverySourceCapture in the root layout) — the query string does
@@ -609,12 +701,13 @@ export function useAgentConnectionSetup({
   }
 
   async function copyText(kind: CopyKind, value: string) {
-    const clipboard = navigator.clipboard
-    await clipboard?.writeText(value)
+    // #4573: the shared clipboard write. A failed write copied nothing, so it
+    // must neither paint "Copied" nor latch the setup step forward (#3832) —
+    // latching would hide the prompt's only on-screen copy (row 1's "View the
+    // prompt") for nothing.
+    if (!(await copyToClipboard(value))) return
     setCopied(kind)
-    // Without a clipboard API nothing was copied; latching would hide the
-    // prompt's only on-screen copy (row 1's "View the prompt") for nothing.
-    if (kind === 'prompt' && clipboard && setup) setPromptCopiedFor(setup.setup_id)
+    if (kind === 'prompt' && setup) setPromptCopiedFor(setup.setup_id)
   }
 
   async function handleCancelSetup() {
@@ -732,6 +825,10 @@ export function useAgentConnectionSetup({
     headerSubtitleText: headerSubtitle(step, visibleStatus, installIsReadyForApproval(setupStatus?.install_status)),
     busy: creating || manualCreating,
     handleClose,
+    // #4570: the close guard's state and its two answers.
+    closeGuardOpen,
+    cancelClose,
+    confirmClose,
     // Details step
     name,
     setName,
@@ -758,6 +855,7 @@ export function useAgentConnectionSetup({
     setAddReset,
     issuePassport,
     setIssuePassport,
+    passportIssuable,
     handleAddAmountChange,
     // Setup creation
     creating,

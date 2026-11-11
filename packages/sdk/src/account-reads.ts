@@ -3,6 +3,7 @@ import type {
   AgentPaymentWarning,
   HavenAgent,
   HavenAgentSupersession,
+  HavenAgentPassport,
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,
   HavenAgentSummary,
@@ -128,6 +129,27 @@ export function formatTokenAmount(atomic: string, decimals: number): string {
   const intPart = digits.slice(0, digits.length - decimals) || '0'
   const fracPart = digits.slice(digits.length - decimals).replace(/0+$/, '')
   return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
+const ATTESTATION_UID_RE = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * #4721: the ONE mapping behind `HavenAgent.passport`. Absent, null or
+ * malformed (a UID that is not 32 bytes of hex, a non-integer chain id) →
+ * null: an older backend or a bad body never yields a reference an agent
+ * would then present to a merchant. A non-string `verify_url` is dropped,
+ * never coerced.
+ */
+export function mapAgentPassport(raw: unknown): HavenAgentPassport | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const { attestation_uid: uid, chain_id: chainId, verify_url: verifyUrl } = raw as Record<string, unknown>
+  if (typeof uid !== 'string' || !ATTESTATION_UID_RE.test(uid)) return null
+  if (typeof chainId !== 'number' || !Number.isInteger(chainId) || chainId <= 0) return null
+  return {
+    attestationUid: uid,
+    chainId,
+    ...(typeof verifyUrl === 'string' && verifyUrl !== '' ? { verifyUrl } : {}),
+  }
 }
 
 /**
@@ -463,7 +485,8 @@ export class AccountReads {
       delegateAddress: raw.delegate_address,
       chainId: raw.chain_id,
       // #4352: a non-empty parseable date → itself; anything else (absent on
-      // an older backend, null when no budget has ended) → null.
+      // an older backend, null when a live budget exists or no budget has
+      // ended) → null.
       budgetEndedAt:
         typeof raw.budget_ended_at === 'string' && !Number.isNaN(Date.parse(raw.budget_ended_at))
           ? raw.budget_ended_at
@@ -695,6 +718,7 @@ export class AccountReads {
       chainId: raw.chain_id,
       executionRail: raw.execution_rail === 'delegation' ? 'delegation' : 'legacy',
       supersededBy: mapSupersession(raw.superseded_by),
+      passport: mapAgentPassport(raw.passport),
     }
   }
 }

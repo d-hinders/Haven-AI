@@ -8,6 +8,7 @@ import { Icon } from '@/components/ui/Icon'
 import { StackedBarChart, type StackedBarDay } from '@/components/ui/StackedBarChart'
 import { formatAnalyticsDay, formatAnalyticsTick, formatAnalyticsValue } from '@/lib/analytics-format'
 import type { AnalyticsCurrency } from '@/lib/analytics-format'
+import { cutsItsDay, dayKeyInZone } from '@/lib/format'
 import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsRange } from '@/types/analytics'
 
 /**
@@ -53,34 +54,13 @@ import type { AnalyticsAgentRow, AnalyticsDayBucket, AnalyticsRange } from '@/ty
  *   section's empty state instead of a card around an empty plot.
  */
 
-/** `YYYY-MM-DD` of an ISO instant in a zone — the JS twin of the endpoint's
- *  `dayKeyInZone` (`infra/repositories/analytics.ts`). */
-function dayKeyInZone(iso: string, tz: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date(iso))
-}
-
-/** True when the instant is not local midnight in the zone — i.e. a window
- *  boundary that cuts its day. */
-function cutsItsDay(iso: string, tz: string): boolean {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(iso))
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
-  return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
-}
-
 /**
  * Which `by_day` dates are partial under this window and zone. Exported for
  * the test that pins the rule against a boundary the endpoint would produce.
+ *
+ * The day key and the cut test are `lib/format.ts`'s one zoned pair (#4573);
+ * the endpoint's `dayKeyInZone` (`infra/repositories/analytics.ts`) is the
+ * server twin of the same rule.
  */
 export function partialEdgeDates(range: Pick<AnalyticsRange, 'from' | 'to'>, tz: string): Set<string> {
   const partial = new Set<string>()
@@ -267,6 +247,7 @@ export function SpendSection({
           <Card.Header as="h2" title="Spend over time" description={SPEND_SUBTITLE} />
           <div className="px-5 pb-5 pt-2">
             <EmptyState
+              bare
               icon={<Icon icon={CircleDollarSign} className="w-full h-full" />}
               tone="neutral"
               title="No spend in this window"

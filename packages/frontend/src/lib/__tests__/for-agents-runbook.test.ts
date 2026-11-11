@@ -233,6 +233,16 @@ describe('/for-agents.md (#2523)', () => {
     // `budgetEndedAt` set (the budget ended; waiting will not help), no rows
     // without it (nobody approved), spent rows (`budgetRefillsAt`) —
     // +162 bytes. Nothing unrelated was trimmed to fit.
+    //
+    // #4675 SHRANK the page to 12240 bytes (2026-11-05): the account step and
+    // the signup hand-off script drop " or a wallet" (−24 bytes), because
+    // signup is passkey-only and a wallet joins an existing account's signer
+    // set later. Under the ceiling, so the bound is unchanged.
+    //
+    // #4746 grew it to 12260 bytes (2026-11-09): § If something breaks opens
+    // with "Client out of date? What changed: [/releases](/releases)." instead
+    // of ending on the pointer (+20 bytes). Under the ceiling, so the bound is
+    // unchanged.
     expect(Buffer.byteLength(served, 'utf8')).toBeLessThan(12400)
   })
 

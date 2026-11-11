@@ -6,8 +6,9 @@
 // section — the operator steps the epic depends on and its product verification
 // on `dev`, each an unticked box naming where it is done. An epic is ready to
 // close only when every box in that section is ticked; otherwise the closeout
-// lists the unticked ones and the epic stays open across the promotion until a
-// human ticks the last box (owner decision 2026-09-08).
+// lists the unticked ones. A box only a promotion can satisfy is filed as its
+// own `Next release` issue and ticked with a link to it, so the epic may close
+// before the promotion (owner decision 2026-10-30, amending 2026-09-08, #2767).
 //
 // Exit codes, so the skill can branch on them without parsing prose:
 //   0  ready — every box ticked, OR the epic has no such section (it predates the
@@ -23,7 +24,6 @@
 //   node scripts/ci/epic-promotion-checklist.mjs <body-file>
 
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 
 // `[ \t]` rather than `\s`: under the `m` flag `\s*$` would swallow the heading's
 // newline and every blank line after it, and the line numbers reported below
@@ -121,6 +121,22 @@ function main(argv) {
   return verdict.ready ? 0 : 1
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   process.exit(main(process.argv.slice(2)))
 }

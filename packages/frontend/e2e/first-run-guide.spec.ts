@@ -2,7 +2,11 @@
  * #3818: the first-run guide, walked from an unfunded account to an approved
  * budget against the real dashboard (mocked API, the shared fixtures). The
  * guide IS the Needs attention card while setup is in progress — titled
- * "Get started" — and becomes one "You're set up" line when it is done.
+ * "Get started".
+ *
+ * #4707: the finished state is no longer a line inside that card. The first
+ * agent payment gets its OWN card, found by its own heading — the Needs
+ * attention card is not widened to reach it.
  *
  * Each stage swaps the overview (`support/first-run-states.ts`) and reloads,
  * the way a real account moves: USDC arrives, an agent connects, its budget
@@ -15,6 +19,11 @@ import { serveFirstRunOverview, type FirstRunState } from './support/first-run-s
 
 function card(page: Page) {
   return page.getByRole('article').filter({ has: page.getByRole('heading', { name: /^(Get started|Needs attention)$/ }) })
+}
+
+/** #4707: the milestone card, found by its own heading — never by widening `card`. */
+function milestoneCard(page: Page) {
+  return page.getByRole('article').filter({ has: page.getByRole('heading', { name: /made its first payment$/ }) })
 }
 
 test.describe('first-run guide (#3818)', () => {
@@ -67,12 +76,27 @@ test.describe('first-run guide (#3818)', () => {
     await expect(guide.getByText('An agent is connected with a budget.')).toBeVisible()
     await expect(guide.getByRole('button', { name: 'Show me how' })).toBeVisible()
 
-    // ── 5. The first payment made: one line ───────────────────────────────
+    // ── 5. The first payment made: its own card, and the steps are gone ───
     state = 'set-up'
     await page.reload()
+    // The milestone is its own surface (#4707) — found by its own heading.
+    const milestone = milestoneCard(page)
+    await expect(milestone.getByRole('heading', { name: 'Research agent made its first payment' })).toBeVisible()
+    // The fixture's payment is dated 2026-09-01 and this spec runs on a real
+    // clock, so the card says the DATE — "just now" is for a recent row, and
+    // the rule is pinned in `lib/__tests__/first-agent-payment.test.ts`.
+    await expect(milestone.getByText(/0\.05 to research\.example, 1 September 2026\. You’re set up\./)).toBeVisible()
+    await expect(milestone.getByRole('link', { name: 'View transaction' })).toHaveAttribute('href', '/transactions')
+    // Needs attention is back to meaning what it says: no steps, no line.
     await expect(card(page).getByRole('heading', { name: 'Needs attention' })).toBeVisible()
-    await expect(card(page).getByText(/You’re set up/)).toBeVisible()
+    await expect(card(page).getByText(/You’re set up/)).toHaveCount(0)
     await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toHaveCount(0)
+
+    // Dismissing the card persists, on the line's own key.
+    await milestone.getByRole('button', { name: 'Dismiss' }).click()
+    await expect(milestoneCard(page)).toHaveCount(0)
+    await page.reload()
+    await expect(milestoneCard(page)).toHaveCount(0)
   })
 
   test('"Hide for now" survives a reload and comes back when a step completes', async ({ page }) => {
@@ -88,4 +112,33 @@ test.describe('first-run guide (#3818)', () => {
     await page.reload()
     await expect(page.getByRole('list', { name: 'Your first 3 steps' })).toBeVisible()
   })
+
+  // #4744: the step action sits at the row's right from `sm` up, centred
+  // against the step's text, and under it at full width below. jsdom does no
+  // layout and a baseline passes on tolerance, so the geometry is asserted.
+  for (const { width, side } of [
+    { width: 1280, side: true },
+    { width: 390, side: false },
+  ]) {
+    test(`step action placement at ${width}px (${side ? 'beside' : 'under'} the text)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto('/dashboard')
+      const row = card(page).locator('li[data-status="active"]')
+      const button = row.getByRole('button', { name: 'Add funds' })
+      await expect(button).toBeVisible()
+      const text = (await row.locator('[data-step-text]').boundingBox())!
+      const action = (await button.boundingBox())!
+      if (side) {
+        const mid = action.y + action.height / 2
+        expect(mid).toBeGreaterThanOrEqual(text.y)
+        expect(mid).toBeLessThanOrEqual(text.y + text.height)
+        // Centred against heading plus copy, not top-aligned inside its span.
+        expect(Math.abs(mid - (text.y + text.height / 2))).toBeLessThanOrEqual(2)
+        expect(action.x).toBeGreaterThanOrEqual(text.x + text.width)
+      } else {
+        expect(action.y).toBeGreaterThanOrEqual(text.y + text.height)
+        expect(Math.abs(action.width - text.width)).toBeLessThanOrEqual(1)
+      }
+    })
+  }
 })

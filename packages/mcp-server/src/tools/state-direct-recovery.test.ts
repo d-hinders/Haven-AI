@@ -633,6 +633,23 @@ describe('haven_get_agent', () => {
     expect(ok<Marked>(await handlers().haven_get_allowances({})).data.supersededBy).toBeNull()
   })
 
+  // #4721: the agent's own passport reference rides haven_get_agent.
+  it('#4721: haven_get_agent carries the agent\'s passport reference, null when the backend sends none', async () => {
+    const uid = '0x' + 'ab'.repeat(32)
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, passport: { attestation_uid: uid, chain_id: 84532 } } },
+      'GET /machine-payments/allowances': { status: 200, body: AGENT_ALLOWANCES_RESPONSE },
+    })
+    type WithPassport = { passport: { attestationUid: string; chainId: number } | null }
+    expect(ok<WithPassport>(await handlers().haven_get_agent({})).data.passport).toEqual({ attestationUid: uid, chainId: 84532 })
+
+    stubFetch({
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      'GET /machine-payments/allowances': { status: 200, body: AGENT_ALLOWANCES_RESPONSE },
+    })
+    expect(ok<WithPassport>(await handlers().haven_get_agent({})).data.passport).toBeNull()
+  })
+
   it('haven_get_agent: an OLD-only server (safe_address alone) no longer resolves an account address', async () => {
     stubFetch({
       'GET /machine-payments/agent': { status: 200, body: { ...AGENT_RESPONSE, safe_address: '0xAcct' } },

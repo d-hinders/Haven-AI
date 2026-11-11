@@ -349,7 +349,7 @@ describe('nonce reuse across retries (same idempotency key)', () => {
     expect(response.status).toBe(200)
 
     const retryInit = fetchMock.mock.calls[5][1] as RequestInit
-    const sentHeader = new Headers(retryInit.headers).get('X-PAYMENT') ?? ''
+    const sentHeader = new Headers(retryInit.headers).get('PAYMENT-SIGNATURE') ?? ''
     const sentNonce = decodeHeader(sentHeader).payload.authorization.nonce
 
     const callsBeforeResume = fetchMock.mock.calls.length

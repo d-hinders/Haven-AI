@@ -79,7 +79,7 @@
       "runsVia": [
         "lint:deps"
       ],
-      "reason": "The dependency-boundary gate itself. It scans packages/backend and packages/core but is only ever run by backend_checks."
+      "reason": "The dependency-boundary gate itself. It scans packages/backend and packages/core under the STRICT definition of rule 7 (type-only imports counted) and is only ever run by backend_checks; the other eleven packages are policed by scripts/dep-cycles.mjs, which has its own entry below."
     },
     {
       "path": "scripts/dep-lint.test.mjs",
@@ -90,6 +90,26 @@
         "lint:deps:test"
       ],
       "reason": "The gate's own self-test. A lint nobody tests can start passing vacuously, so loosening the test must run it."
+    },
+    {
+      "path": "scripts/dep-cycles.mjs",
+      "jobs": [
+        "packages"
+      ],
+      "runsVia": [
+        "lint:dep-cycles"
+      ],
+      "reason": "The runtime import-cycle pass over the eleven packages dep-lint does not scan (#4763). It lives outside every tree it polices and is only ever run by packages_checks, so weakening it must route that job."
+    },
+    {
+      "path": "scripts/dep-cycles.test.mjs",
+      "jobs": [
+        "packages"
+      ],
+      "runsVia": [
+        "lint:dep-cycles:test"
+      ],
+      "reason": "The cycle pass's own self-test, for the same reason as dep-lint's: it is what proves the scan reaches all eleven packages and that a planted value cycle is reported while a type-only one is not."
     },
     {
       "path": "scripts/db-mock-ratchet.mjs",
@@ -172,6 +192,26 @@
       "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
     },
     {
+      "path": "scripts/lint-route-line-ceiling.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:route-lines"
+      ],
+      "reason": "The shrink-only line ceiling over backend route files larger than 400 lines (#4762, epic #4759 slice 3). It scans packages/backend/src/routes but only backend_checks runs it."
+    },
+    {
+      "path": "scripts/lint-route-line-ceiling.test.mjs",
+      "jobs": [
+        "backend"
+      ],
+      "runsVia": [
+        "lint:route-lines:test"
+      ],
+      "reason": "The ratchet's self-test, for the same reason as dep-lint's: a ratchet whose test is weakened can ratchet nothing."
+    },
+    {
       "path": "scripts/lint-next-steps.mjs",
       "jobs": [
         "backend",
@@ -218,7 +258,7 @@
         "lint:db-mocks",
         "lint:wire-types"
       ],
-      "reason": "The shared ratchet ENGINE, backing NINE gates as of #3131 (eight as of #3104, seven as of #3029, six as of #2747): the backend db-mock, retired-rail-prose and request-schema ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, scripts/docs/ui-gate-wording, the typed next-step ratchet (#3104), and the MCP\u2194CLI vocabulary guard (#3131). An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason multiple jobs are named here. ops joined in #3515: ops_checks runs lint:wire-types, whose SCAN_DIRS gained packages/ops/src/lib, so a ratchet weakening reachable from the console must run its job."
+      "reason": "The shared ratchet ENGINE, backing ELEVEN gates as of #4762 (ten as of #3924, nine as of #3131, eight as of #3104, seven as of #3029, six as of #2747): the backend db-mock, retired-rail-prose, request-schema and route-line-ceiling ratchets, the frontend wire-type ratchet (#1447), the frontend copy lint, packages/frontend/scripts/design-lint, scripts/docs/ui-gate-wording, the typed next-step ratchet (#3104), the MCP\u2194CLI vocabulary guard (#3131) and the budget-liveness census (#3924). An earlier version of this sentence said two, which is what it backed at #1447. Routing it to one job would leave the other surface's gates unguarded, which is the whole reason multiple jobs are named here. ops joined in #3515: ops_checks runs lint:wire-types, whose SCAN_DIRS gained packages/ops/src/lib, so a ratchet weakening reachable from the console must run its job."
     },
     {
       "path": "scripts/lib/ratchet.test.mjs",

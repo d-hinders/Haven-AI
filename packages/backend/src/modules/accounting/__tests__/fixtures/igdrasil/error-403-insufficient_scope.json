@@ -1,0 +1,1 @@
+{"error": {"type": "authorization_error", "code": "insufficient_scope", "message": "The token lacks the scope this route needs.", "request_id": "req_fixture_insufficient_scope"}}

@@ -1,7 +1,7 @@
 // The package-to-job routing matrix (#1623, epic #1621).
 //
 // One row per routing decision the CI change classifier makes, with the FULL
-// expected output — all fourteen flags, not just the one that turns true. This is a
+// expected output — all sixteen flags, not just the one that turns true. This is a
 // characterization fixture: it is written to describe what routing does today,
 // before #1624/#1625 make the rule data declarative and #1626 starts enforcing
 // completeness. Refactors are supposed to leave it untouched. A row that has to
@@ -37,7 +37,7 @@ export const RETAINED = 'retained'
  * its expectation from the code under test cannot fail when that code is wrong,
  * which is the one thing a characterization table must not do.
  */
-const ALL = ['code', 'frontend', 'ui', 'ops', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'full']
+const ALL = ['code', 'frontend', 'ui', 'ops', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'core', 'qa_agent', 'packages', 'full']
 
 /**
  * @typedef {object} RoutingCase
@@ -64,7 +64,7 @@ export const ROUTING_MATRIX = [
       'Same, for the docs/ tree. The docs-quality gates cover these on their own workflow. ' +
       'Re-pointed here from agent-passport.md by #3346, which made the served docs a real ' +
       'exception; this row is also the CONTROL the same issue asks for — another docs/**/*.md ' +
-      'must keep returning all fourteen flags false.',
+      'must keep returning all sixteen flags false.',
   },
   {
     files: ['docs/product/account-recovery.md'],
@@ -164,61 +164,61 @@ export const ROUTING_MATRIX = [
   // ─── One workspace, one job ────────────────────────────────────────────────
   {
     files: ['packages/ui/src/Button.tsx'],
-    expect: ['code', 'frontend', 'ui', 'ops'],
+    expect: ['code', 'frontend', 'ui', 'ops', 'packages'],
     kind: CONTRACT,
     why: 'The shared design system (#3508): a ui-only diff runs the ui job for the moved primitive suites, and the frontend fans back in because its package-dependencies entry declares ui — the frontend suite covers the re-export shims, so a ui-only change must never skip it. ops joined in #3515 for the same reason: the console consumes the primitives through transpilePackages.',
   },
   {
     files: ['packages/frontend/src/app/page.tsx'],
-    expect: ['code', 'frontend'],
+    expect: ['code', 'frontend', 'packages'],
     kind: CONTRACT,
     why: 'Frontend alone fans out to nothing — the check that the full-matrix rule is not firing spuriously.',
   },
   {
     files: ['packages/backend/src/routes/payments.ts'],
-    expect: ['code', 'backend'],
+    expect: ['code', 'backend', 'packages'],
     kind: CONTRACT,
     why: 'Backend alone. Nothing depends on the backend, so it fans out to nothing.',
   },
   {
     files: ['packages/connect/src/index.ts'],
-    expect: ['code', 'connect'],
+    expect: ['code', 'connect', 'packages'],
     kind: CONTRACT,
     why: 'connect is the leaf of the dependency graph — it consumes mcp and signer, nothing consumes it.',
   },
   {
     files: ['packages/mcp-server/src/tools.ts'],
-    expect: ['code', 'mcp_server'],
+    expect: ['code', 'mcp_server', 'packages'],
     kind: CONTRACT,
     why: 'Must NOT be swallowed by the packages/mcp/* rule listed above it — the shared prefix is the ordering mistake that would silently stop routing mcp-server.',
   },
   {
     files: ['packages/mcp-server/src/tools-list.snapshot.json'],
-    expect: ['code', 'mcp_server', 'qa_agent'],
+    expect: ['code', 'mcp_server', 'qa_agent', 'packages'],
     kind: CONTRACT,
     why: 'The hosted tools/list snapshot (#4121). qa-agent\'s tools.test.ts holds the eval graders\' copy of the hosted tool names equal to this file, and only qa_agent_checks runs it. qa-agent does not depend on mcp-server, so the dependency table cannot carry it; without this arm a snapshot-only change never runs the test that exists to catch it. Any other packages/mcp-server/ file still routes mcp_server alone (the tools.ts row above).',
   },
   {
     files: ['packages/cli/src/index.ts'],
-    expect: ['code', 'cli'],
+    expect: ['code', 'cli', 'packages'],
     kind: CONTRACT,
     why: 'cli is a leaf of the dependency graph — it consumes the SDK, but nothing consumes it, so it fans out to nothing.',
   },
   {
     files: ['packages/demo-merchant-mcp/src/index.ts'],
-    expect: ['code', 'demo_merchant'],
+    expect: ['code', 'demo_merchant', 'packages'],
     kind: CONTRACT,
     why: 'demo_merchant is a leaf of the dependency graph (#2996) — it declares no internal @haven_ai/* dependency today, checked against the real package.json, and nothing consumes it, so it fans out to nothing in either direction.',
   },
   {
     files: ['packages/core/src/chains.ts'],
-    expect: ['code', 'core', 'frontend', 'ops', 'backend', 'mcp_server'],
+    expect: ['code', 'core', 'frontend', 'ops', 'backend', 'mcp_server', 'packages'],
     kind: CONTRACT,
     why: 'The shared kernel got its own job in #3005, and frontend and backend declare @haven_ai/core, so the table fans both out: the suites that consume core run on a core change WITHOUT the full matrix. Until #3005 this routed ALL — over-routing that ran cli and signer suites blind to core. mcp_server joined in #3419: its hosted-signer-integration test pins CLIENT_RELEASES from core, its job runs that test, and its test/typecheck scripts build core first — the same "a dependency that can redden the job is a dependency for routing purposes" rule the table applies to its other devDependencies. ops joined in #3515: the console reads core api-types for /ops/* and its scripts build core first.',
   },
   {
     files: ['packages/qa-agent/src/run.ts'],
-    expect: ['code', 'qa_agent'],
+    expect: ['code', 'qa_agent', 'packages'],
     kind: CONTRACT,
     why: 'The QA harness got its own unit-test job in #3005 and fans out to nothing in reverse — no package consumes it. sdk and signer fan out TO it (its tests import both), so this is the direction that stays a leaf.',
   },
@@ -237,31 +237,31 @@ export const ROUTING_MATRIX = [
   // ─── Dependency propagation ────────────────────────────────────────────────
   {
     files: ['packages/sdk/src/client.ts'],
-    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent'],
+    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant', 'packages'],
     kind: CONTRACT,
-    why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. qa_agent joined in #3005: its tests import the SDK, and its job runs those tests. Frontend stays out because it consumes @haven_ai/core, not the SDK.',
+    why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. qa_agent joined in #3005: its tests import the SDK, and its job runs those tests. demo_merchant joined in #4723: the demo merchant imports @haven_ai/sdk at runtime (the merchant-side passport verifier) and demo_merchant_checks runs its suite, so an SDK change can break it with its job never running. Frontend stays out because it consumes @haven_ai/core, not the SDK.',
   },
   {
     files: ['packages/mcp/src/index.ts'],
-    expect: ['code', 'mcp', 'connect', 'mcp_server'],
+    expect: ['code', 'mcp', 'connect', 'mcp_server', 'packages'],
     kind: CONTRACT,
     why: 'connect bundles the MCP runtime it hands out, so it must rebuild when mcp changes. mcp_server joined in #2348 on the same reasoning as the signer row below: its strict-tool-input test imports @haven_ai/mcp toolSchemas to pin the local-vs-hosted argument spellings against the real local surface rather than restating them as literals, and mcp_server_checks runs that test -- so a rename in the local schemas must run it, which is exactly what the pin is for.',
   },
   {
     files: ['packages/signer/src/index.ts'],
-    expect: ['code', 'signer', 'connect', 'mcp_server', 'qa_agent'],
+    expect: ['code', 'signer', 'connect', 'mcp_server', 'qa_agent', 'packages'],
     kind: CONTRACT,
     why: 'connect bundles the signer, and mcp_server consumes it too — its hosted-signer-integration test imports @haven_ai/signer, and mcp_server_checks runs that test. mcp_server was MISSING here until #1625 derived fan-out from the real dependency graph; a signer change could break that test with its job never running. qa_agent joined for the same reason in #3005: its tests run the real signer in-process.',
   },
   {
     files: ['packages/frontend/src/app/page.tsx', 'packages/cli/src/index.ts'],
-    expect: ['code', 'frontend', 'cli'],
+    expect: ['code', 'frontend', 'cli', 'packages'],
     kind: CONTRACT,
     why: 'Flags accumulate across files and never turn back off; two unrelated leaves stay two.',
   },
   {
     files: ['docs/operations/dev-environment.md', 'packages/backend/src/routes/payments.ts'],
-    expect: ['code', 'backend'],
+    expect: ['code', 'backend', 'packages'],
     kind: CONTRACT,
     why: 'A doc in the same PR neither adds nor suppresses routing — the common real-world diff shape.',
   },
@@ -299,7 +299,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/backend/tsconfig.json'],
-    expect: ['code', 'backend'],
+    expect: ['code', 'backend', 'packages'],
     kind: CONTRACT,
     why: 'The tsconfig*.json rule is anchored at the repo root. A package-local tsconfig must route to its own package, not escalate a one-package change into the full matrix.',
   },
@@ -330,8 +330,26 @@ export const ROUTING_MATRIX = [
     why: 'The dependency-boundary gate itself (#982).',
   },
   {
+    files: ['scripts/dep-cycles.mjs'],
+    expect: ['code', 'packages'],
+    kind: CONTRACT,
+    why:
+      'The runtime import-cycle pass over the eleven packages dep-lint does not scan (#4763). ' +
+      'It lives outside every tree it polices and only packages_checks runs it, so weakening ' +
+      'it must route that job — the same reason every other guard here has an arm.',
+  },
+  {
+    files: ['scripts/dep-cycles.test.mjs'],
+    expect: ['code', 'packages'],
+    kind: CONTRACT,
+    why:
+      'The cycle pass self-test (#4763): the coverage assertions and the value-vs-type-only ' +
+      'live scans. Loosening it must run the job that runs it, or the pass can start passing ' +
+      'vacuously with nothing red.',
+  },
+  {
     files: ['packages/sdk/src/agent-guidance.ts'],
-    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent'],
+    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant', 'packages'],
     kind: CONTRACT,
     why:
       'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
@@ -341,8 +359,8 @@ export const ROUTING_MATRIX = [
       'frontend, so none of those tests ran: #2713 edited this file and left the CLI copy stale, ' +
       'and dev did not even go red — cli_checks was skipped, so the stale copy was carried until ' +
       'an unrelated backend PR (#2719) regenerated it. lint:runbook-parity covers the two ' +
-      'full-text copies from every job that owns the source; the ' +
-      'partial one is not readable back, so frontend is ROUTED rather than checked. That is the ' +
+      'full-text copies and, since #3596, the nine step files from every job that owns the ' +
+      'source; the partial one is not readable back, so frontend is ROUTED rather than checked. That is the ' +
       'reason both jobs are here, and why removing either silently uncovers a pin test.',
   },
   {
@@ -358,6 +376,8 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
+      'packages',
     ],
     kind: CONTRACT,
     why:
@@ -369,7 +389,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/frontend/public/402.md'],
-    expect: ['code', 'frontend'],
+    expect: ['code', 'frontend', 'packages'],
     kind: CONTRACT,
     why:
       'The GENERAL public/ arm (#2743), and the row that reaches it — the for-agents.md row ' +
@@ -392,11 +412,13 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
+      'packages',
     ],
     kind: CONTRACT,
     why:
-      'The served runbook (#2743) — a GENERATED artifact that happens to be Markdown, so the ' +
-      'DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
+      'The served runbook (#2743) — a hand-kept, byte-pinned copy that happens to be Markdown, ' +
+      'so the DOC_ONLY `*.md` arm swallowed it and a hand-edit routed NOTHING, not even `code`. Its ' +
       'sibling copy packages/cli/src/agent-guidance-text.ts routed `cli`, and its NON-MARKDOWN ' +
       'siblings in public/ routed `frontend` — the other Markdown file there, 402.md, was ' +
       'swallowed too, which is why DOC_EXCEPTIONS also carries a general arm for the ' +
@@ -417,6 +439,8 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
+      'packages',
     ],
     kind: CONTRACT,
     why:
@@ -438,6 +462,8 @@ export const ROUTING_MATRIX = [
       'mcp_server',
       'signer',
       'qa_agent',
+      'demo_merchant',
+      'packages',
     ],
     kind: CONTRACT,
     why:
@@ -456,7 +482,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/backend/src/infra/chain/x402-binding-signer.ts'],
-    expect: ['code', 'backend', 'mcp_server'],
+    expect: ['code', 'backend', 'mcp_server', 'packages'],
     kind: CONTRACT,
     why:
       'The producer of the Haven-signed x402 expected context (#3046). The mcp-server ' +
@@ -469,7 +495,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/backend/src/config/boolean-flag.ts'],
-    expect: ['code', 'backend', 'mcp_server'],
+    expect: ['code', 'backend', 'mcp_server', 'packages'],
     kind: CONTRACT,
     why:
       'The one backend module the binding signer reaches (#3046); it must stay import-free, ' +
@@ -489,6 +515,18 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/db-mock-ratchet.test.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The ratchet’s self-test, same reason as dep-lint’s.',
+  },
+  {
+    files: ['scripts/lint-route-line-ceiling.mjs'],
+    expect: ['code', 'backend'],
+    kind: CONTRACT,
+    why: 'The shrink-only line ceiling over backend route files larger than 400 lines (#4762, epic #4759 slice 3); it lives under scripts/ but only the backend job runs it.',
+  },
+  {
+    files: ['scripts/lint-route-line-ceiling.test.mjs'],
     expect: ['code', 'backend'],
     kind: CONTRACT,
     why: 'The ratchet’s self-test, same reason as dep-lint’s.',
@@ -608,8 +646,8 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'backend', 'frontend', 'ops'],
     kind: CONTRACT,
     why:
-      'The shared ratchet engine backs TEN gates as of #3924 (nine as of #3131, ' +
-      'eight as of #3104, ' +
+      'The shared ratchet engine backs ELEVEN gates as of #4762 (ten as of #3924, ' +
+      'nine as of #3131, eight as of #3104, ' +
       'backend db-mock gate, the ' +
       'frontend wire-type gate (#1447), the retired-rail prose ratchet, the frontend copy ' +
       'lint, packages/frontend/scripts/design-lint.mjs — which an earlier draft of this row ' +
@@ -617,8 +655,10 @@ export const ROUTING_MATRIX = [
       'scripts/docs/ui-gate-wording.mjs, the request-schema ratchet ' +
       '(scripts/lint-request-schemas.mjs, #3029), the typed next-step ratchet ' +
       '(scripts/lint-next-steps.mjs, #3104) — which this row missed, leaving it stale a ' +
-      'THIRD time until #3131 swept it — and the MCP-CLI vocabulary guard ' +
-      '(scripts/ci/vocabulary-divergence.mjs, #3131). All nine share one `updateRefusals`; the count is ' +
+      'THIRD time until #3131 swept it — the MCP-CLI vocabulary guard ' +
+      '(scripts/ci/vocabulary-divergence.mjs, #3131), the budget-liveness census ' +
+      '(scripts/lint-budget-liveness.mjs, #3924) and the route-line ceiling ' +
+      '(scripts/lint-route-line-ceiling.mjs, #4762). All eleven share one `updateRefusals`; the count is ' +
       'pinned by scripts/lib/ratchet.test.mjs rather than trusted, because this row has now ' +
       'been stale three times. Weakening the module must run every surface whose gates import it; ' +
       'routing it to one would leave the others unguarded. ops joined in #3515 (its ops_checks ' +
@@ -640,19 +680,19 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/ops/package.json'],
-    expect: ['code', 'ops'],
+    expect: ['code', 'ops', 'packages'],
     kind: CONTRACT,
     why: 'The console scaffold (#3515). A change to what the package builds or declares must run its own job; core and ui fan back in through the dependency table.',
   },
   {
     files: ['packages/ops/next.config.ts'],
-    expect: ['code', 'ops'],
+    expect: ['code', 'ops', 'packages'],
     kind: CONTRACT,
     why: 'The static security headers (#3515). Weakening a header must run the suite whose source guard pins the injection/storage rules. The CSP moved to src/middleware.ts in #3581; the row below routes it.',
   },
   {
     files: ['packages/ops/src/middleware.ts', 'packages/ops/src/lib/csp.ts'],
-    expect: ['code', 'ops'],
+    expect: ['code', 'ops', 'packages'],
     kind: CONTRACT,
     why: 'The per-request nonce CSP (#3581). A change to it must run ops_checks, whose csp.test.ts pins the policy, the fresh nonce and the single-CSP rule.',
   },
@@ -684,9 +724,9 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/network-map-pins.test.mjs'],
-    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent'],
+    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'demo_merchant'],
     kind: CONTRACT,
-    why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005) appear without being named by the rule.',
+    why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005, demo_merchant since #4723) appear without being named by the rule.',
   },
 
   // ─── Guard data and shared vitest/frontend helpers, one entry each (#3229) ─
@@ -808,11 +848,11 @@ export const ROUTING_MATRIX = [
     files: [],
     expect: [],
     kind: CONTRACT,
-    why: 'An empty diff routes nothing — and must still emit all fourteen flags rather than an empty object.',
+    why: 'An empty diff routes nothing — and must still emit all sixteen flags rather than an empty object.',
   },
   {
     files: ['', '   ', 'packages/cli/src/index.ts'],
-    expect: ['code', 'cli'],
+    expect: ['code', 'cli', 'packages'],
     kind: CONTRACT,
     why: 'git output ends with a newline, so a trailing empty element is always present; blank entries must not be classified.',
   },

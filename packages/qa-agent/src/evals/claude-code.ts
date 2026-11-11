@@ -57,6 +57,12 @@ export interface ClaudeCodeSessionMeta {
   numTurns?: number
   /** The log file the session stream was captured to (kept for the pilot's evidence). */
   logPath?: string
+  /**
+   * The session id the stream reported (`system/init`'s `session_id`), so a
+   * later turn can RESUME this session (#4682). Absent when the stream carried
+   * no init line — a resumed turn cannot be invented from nothing.
+   */
+  sessionId?: string
   /** `claude`'s exit code when it was not 0 (e.g. the turn limit), with the session still graded. */
   exitCode?: number
 }
@@ -107,14 +113,113 @@ export function claudeCodeConfigFromEnv(env: NodeJS.ProcessEnv = process.env): C
   }
 }
 
-/** Build the concrete command for one resolved task. */
-export function buildClaudeCodeCommand(cfg: ClaudeCodeAdapterConfig, instruction: string): string {
-  return cfg.commandTemplate.replaceAll('{instruction}', shellQuote(instruction))
+/**
+ * Build the concrete command for one resolved task.
+ *
+ * `template` is the PER-TASK override (#4678) when the task file carries one;
+ * otherwise the lane's `QA_EVAL_CLAUDE_CODE_COMMAND`. A per-task template is
+ * how a throwaway trial points `--mcp-config` at ITS OWN config, which the
+ * lane's single env template cannot express.
+ */
+export function buildClaudeCodeCommand(cfg: ClaudeCodeAdapterConfig, instruction: string, template?: string): string {
+  const chosen = template ?? cfg.commandTemplate
+  if (!chosen.includes('{instruction}')) {
+    throw new ClaudeCodeAdapterError('the command template must contain {instruction} — the task instruction has to reach the agent')
+  }
+  return chosen.replaceAll('{instruction}', shellQuote(instruction))
 }
 
 /** Single-quote for the shell, escaping embedded quotes. */
 export function shellQuote(s: string): string {
   return `'${s.replaceAll("'", `'\\''`)}'`
+}
+
+/**
+ * The env names the agent's child process inherits (#4678).
+ *
+ * An explicit ALLOWLIST, not `{...process.env}`: the eval harness's own
+ * secrets must never reach the agent under test or any stdio MCP server it
+ * spawns. `AGENT_EVALS_DELEGATE_KEY` is the one that matters — it is the eval
+ * agent's signing authority, and the workflow's custody comment says only the
+ * signer process reads it, via the credential file. `HAVEN_CREDENTIALS` (the
+ * eval agent's credential file path) and `QA_EVAL_AGENT_API_KEY` are the same
+ * class of leak, and neither is on this list. A throwaway trial's own wiring
+ * arrives through `trialEnv`, which is merged over the allowlist.
+ *
+ * Everything listed is what `claude` (a Node CLI) needs to start and
+ * authenticate: the shell/OS basics, the subscription token, the CI runner's
+ * non-secret context, and TLS/proxy settings.
+ */
+export const CHILD_ENV_ALLOWLIST = [
+  // shell + OS basics
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ',
+  'TMPDIR', 'TEMP', 'TMP', 'PWD', 'OLDPWD', 'SHLVL', '_', 'HOSTNAME',
+  // the CI runner's non-secret context
+  'CI', 'GITHUB_ACTIONS', 'GITHUB_WORKSPACE', 'GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_SHA',
+  'GITHUB_REF', 'GITHUB_HEAD_REF', 'GITHUB_BASE_REF', 'RUNNER_TEMP', 'RUNNER_OS', 'RUNNER_ARCH',
+  'RUNNER_NAME', 'RUNNER_TOOL_CACHE',
+  // TLS / proxy, so a runner proxy does not break the session
+  'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
+  'http_proxy', 'https_proxy', 'no_proxy',
+  // claude's own auth + config
+  'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CONFIG_DIR', 'DISABLE_AUTOUPDATER', 'DISABLE_TELEMETRY',
+  'FORCE_COLOR', 'NO_COLOR', 'COLORTERM', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+] as const
+
+/**
+ * Build the child env from the allowlist, then merge the trial's own env over
+ * it. Exported so a test can prove the eval harness's secrets are stripped.
+ */
+export function buildChildEnv(base: NodeJS.ProcessEnv, trialEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const name of CHILD_ENV_ALLOWLIST) {
+    const value = base[name]
+    if (value !== undefined) env[name] = value
+  }
+  return { ...env, ...(trialEnv ?? {}) }
+}
+
+/**
+ * The env names the cold profile strips even when the allowlist would keep
+ * them (#4680). `HAVEN_*` and `AGENT_EVALS_*` are stripped by prefix; these
+ * are the harness's own `QA_EVAL_*` credential values, which the cold agent
+ * must never see. The trial's WIRING (`QA_EVAL_TRIAL_HOME`,
+ * `QA_EVAL_TRIAL_MCP_CONFIG`, `QA_EVAL_CLI_PACKAGE`, `QA_EVAL_COMMAND_TOOL`)
+ * stays: the command template and the MCP config need it, and none of it is a
+ * credential.
+ */
+export const COLD_ENV_DENYLIST = [
+  'QA_EVAL_AGENT_API_KEY',
+  'QA_EVAL_AGENT_ACCOUNT',
+  'QA_EVAL_RECIPIENT',
+  'QA_EVAL_X402_TARGET',
+  'QA_EVAL_SECRET_MANIFEST',
+  'QA_EVAL_SIGNER_CLI',
+  'QA_EVAL_HOSTED_MCP_URL',
+  'QA_EVAL_TRIAL_CREDENTIALS',
+  'QA_EVAL_TRIAL_API_KEY',
+  'QA_X402_BINDING_SIGNER',
+] as const
+
+/**
+ * The cold profile's child env (#4680): the allowlist, then every Haven and
+ * harness credential stripped, whatever the allowlist says. The cold agent
+ * holds no Haven credentials — proved on the environment, not only on the
+ * tool lists — and its `HOME` is the trial's own directory, so `haven login`
+ * writes a session that cannot warm a later trial.
+ *
+ * `CLAUDE_CODE_OAUTH_TOKEN` stays: it authenticates `claude` itself, not
+ * Haven.
+ */
+export function buildColdChildEnv(base: NodeJS.ProcessEnv, trialEnv?: Record<string, string>): NodeJS.ProcessEnv {
+  const env = buildChildEnv(base, trialEnv)
+  for (const key of Object.keys(env)) {
+    if (/^(HAVEN_|AGENT_EVALS_)/.test(key) || (COLD_ENV_DENYLIST as readonly string[]).includes(key)) delete env[key]
+  }
+  const home = trialEnv?.HOME
+  if (home !== undefined) env.HOME = home
+  return env
 }
 
 /**
@@ -132,8 +237,11 @@ export class ClaudeCodeAdapter {
     const taskId = resolved.task.id
     const base = this.cfg.logPath ?? (await mkdtemp(join(tmpdir(), 'qa-eval-claude-')))
     const logPath = `${base}.${taskId}.trial${trial}.jsonl`
-    const command = buildClaudeCodeCommand(this.cfg, resolved.instruction)
-    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial)
+    const command = buildClaudeCodeCommand(this.cfg, resolved.instruction, resolved.commandTemplate)
+    // The trial's own env (#4678): its MCP config, its credential file, its
+    // API key. Merged OVER the inherited env, so a throwaway trial's agent
+    // never sees the eval agent's wiring.
+    const { code, stderrTail } = await this.runCommand(command, logPath, taskId, trial, resolved.trialEnv, resolved.coldProfile !== undefined)
     const raw = await readFile(logPath, 'utf8')
     const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
     // A non-zero exit after the agent worked (the turn limit, for one) still
@@ -155,6 +263,67 @@ export class ClaudeCodeAdapter {
   }
 
   /**
+   * Run ONE turn and return its log plus the session it belongs to (#4682).
+   *
+   * `resumeSessionId` continues an earlier session: `claude -p` accepts
+   * `--resume <id>`, so the hand-off loop can perform a human step and then
+   * carry on in the SAME conversation instead of starting a second one that
+   * knows nothing about the first.
+   *
+   * Unlike {@link runTask} this does NOT throw on a non-zero exit: the loop
+   * needs the log to see what the agent asked for, and an infrastructure
+   * failure is reported on `exitCode` for the caller to judge.
+   */
+  async runTurn(
+    instruction: string,
+    opts: {
+      resumeSessionId?: string
+      logPath?: string
+      template?: string
+      trialEnv?: Record<string, string>
+      cold?: boolean
+      taskId?: string
+      trial?: number
+    } = {},
+  ): Promise<{ log: AgentRunLog; session: ClaudeCodeSessionMeta; exitCode: number | null }> {
+    const taskId = opts.taskId ?? 'handoff'
+    const trial = opts.trial ?? 1
+    const base = this.cfg.logPath ?? (await mkdtemp(join(tmpdir(), 'qa-eval-claude-')))
+    const logPath = opts.logPath ?? `${base}.${taskId}.trial${trial}.turn${Date.now()}.jsonl`
+    const built = buildClaudeCodeCommand(this.cfg, instruction, opts.template)
+    // The session id is a UUID the stream reported; quoting it keeps a
+    // malformed one from becoming a second shell word.
+    const command = opts.resumeSessionId
+      ? `${built} --resume ${shellQuote(opts.resumeSessionId)}`
+      : built
+    const { code, stderrTail } = await this.runCommand(
+      command,
+      logPath,
+      taskId,
+      trial,
+      opts.trialEnv,
+      opts.cold === true,
+    )
+    const raw = await readFile(logPath, 'utf8')
+    const { log, session } = parseClaudeCodeStreamLog(raw, { taskId, trial })
+    const recorded: ClaudeCodeSessionMeta = {
+      ...session,
+      logPath,
+      ...(code !== null && code !== 0 ? { exitCode: code } : {}),
+    }
+    this.sessions.push({ ...recorded, taskId, trial })
+    if (code !== 0 && log.calls.length === 0) {
+      // No tool call and a non-zero exit is an infrastructure failure, not the
+      // agent's behaviour — surface claude's own reason on the log.
+      log.finalMessage =
+        `${log.finalMessage ?? ''}` +
+        (log.finalMessage ? '; ' : '') +
+        `claude exited ${code}: ${stderrTail.slice(-400) || '(no stderr)'}`
+    }
+    return { log, session: recorded, exitCode: code }
+  }
+
+  /**
    * Run one session, resolving only when the process has closed AND the
    * captured stdout has been flushed to `logPath`: the final `result` line
    * (the one carrying `total_cost_usd`) is the last thing written, so reading
@@ -165,6 +334,8 @@ export class ClaudeCodeAdapter {
     logPath: string,
     taskId: string,
     trial: number,
+    trialEnv?: Record<string, string>,
+    cold = false,
   ): Promise<{ code: number | null; stderrTail: string }> {
     return new Promise((resolve, reject) => {
       let settled = false
@@ -180,7 +351,17 @@ export class ClaudeCodeAdapter {
       // The token travels ONLY in the inherited env — never in the command
       // string, never logged. An error report quotes the template, which is
       // the caller's own (secret-free) command, and the stderr TAIL only.
-      const child = spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      // The child env is an explicit ALLOWLIST (#4678): the eval harness's
+      // own secrets — AGENT_EVALS_DELEGATE_KEY above all — never reach the
+      // agent under test or the stdio MCP servers it spawns.
+      const child = spawn(command, {
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // #4680: a cold-profile trial gets the scrubbed env — no Haven
+        // credentials at all, and its own HOME. Every other trial keeps the
+        // allowlist + its own wiring.
+        env: cold ? buildColdChildEnv(process.env, trialEnv) : buildChildEnv(process.env, trialEnv),
+      })
       const timer = setTimeout(() => {
         child.kill('SIGKILL')
         done(new ClaudeCodeAdapterError(`claude session timed out after ${this.cfg.timeoutMs}ms (${taskId} trial ${trial})`))
@@ -224,6 +405,9 @@ export class ClaudeCodeAdapter {
 
 interface StreamLine {
   type?: string
+  subtype?: string
+  /** The `system/init` line's session id (#4682) — what `--resume` takes. */
+  session_id?: unknown
   message?: { model?: string; content?: Array<Record<string, unknown>> | string }
   // The result line:
   total_cost_usd?: unknown
@@ -272,6 +456,14 @@ export function parseClaudeCodeStreamLog(
       // The result line's `result` is the final user-facing text — the
       // "told the user" evidence, same role as Hermes' last text block.
       finalMessage = strField(entry.result) ?? finalMessage
+      continue
+    }
+    // `system/init` is the FIRST line of every session and carries the id a
+    // later turn resumes (#4682). Read it before the block walk: the init line
+    // has no `message`.
+    if (entry.type === 'system' && entry.subtype === 'init') {
+      const id = strField(entry.session_id)
+      if (id) session.sessionId = id
       continue
     }
     const content = entry.message?.content

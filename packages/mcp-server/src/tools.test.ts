@@ -304,7 +304,11 @@ describe('haven_pay_mcp_tool', () => {
       status: 200,
       ok: true,
       body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'a joke about agents' }] } },
-      settlementTxHash: '0xsettle',
+      // #4688: a well-formed merchant settlement hash AND a CONFIRMED
+      // settlement-evidence outcome — the merchant's 2xx alone is delivery,
+      // not money.
+      settlementTxHash: '0x' + 'cd'.repeat(32),
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{ ok: boolean; result: unknown; settlement_tx_hash: string | null }>(
@@ -331,7 +335,7 @@ describe('haven_pay_mcp_tool', () => {
 
     expect(result.data.ok).toBe(true)
     expect(result.data.result).toMatchObject({ result: { content: [{ text: 'a joke about agents' }] } })
-    expect(result.data.settlement_tx_hash).toBe('0xsettle')
+    expect(result.data.settlement_tx_hash).toBe('0x' + 'cd'.repeat(32))
   })
 
   it('haven_complete_mcp_tool requires the funding payment_id for evidence', async () => {
@@ -2475,15 +2479,22 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
   const SETTLEMENT = '0x' + 'cd'.repeat(32)
   const SIG7710 = '0x' + '22'.repeat(65)
   const GOODS = { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'goods' }] } }
-  // #4123: the retryable arm's whole reason, pinned with toBe so the
+  // #4123 / #4688: the unverified arm's whole reason, pinned with toBe so the
   // instruction's polarity (add the header, with next_arguments) is pinned,
   // not just its words — in the wording family of the missing-header arm
   // beside it (these tools sent the merchant the header the agent passed).
+  // #4688 added the two facts the old text lacked: the goods WERE delivered
+  // and the settlement is NOT verified, plus the verify-then-sweep window.
   const RETRYABLE_REASON =
-    'The purchase is complete and the merchant settlement was reported, but Haven could not ' +
-    'verify it on-chain just yet (Haven did not answer, the chain was unreachable, or the transaction is not mined). ' +
-    'Call next_tool (haven_report_settlement_evidence) shortly with next_arguments, adding ' +
-    'payment_header: the exact payment_header you passed to this call.'
+    'The merchant delivered the result, but Haven could not yet verify its settlement on-chain ' +
+    '(Haven did not answer, the RPC was unreachable, or the transaction is not mined). The goods ' +
+    'were delivered; the merchant settlement is not verified. Call next_tool ' +
+    '(haven_report_settlement_evidence) shortly with next_arguments, adding payment_header: the ' +
+    'exact payment_header you passed to this call. If it still does not confirm, poll ' +
+    'haven_get_payment_status after about 3 minutes — the settlement sweep runs on that window. ' +
+    'Use haven_sweep_delegate only if merchant_settlement_recorded is still not true at that ' +
+    'point: a merchant that settled without sending a hash is recorded by the sweep and must not ' +
+    'be swept.'
 
   function stubDelivery() {
     // The eip3009 arms fund first; the delivery wait is not what these tests
@@ -2540,9 +2551,17 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     // #4123: a retry without the header is refused before the hash is judged,
     // so the retry instruction names it — the instruction, not just the word.
     expect(res.data.reason).toBe(RETRYABLE_REASON)
-    // The purchase answer itself is unchanged beside the guidance.
-    expect(res.data.settled).toBeUndefined()
-    expect(res.data.settlement_tx_hash).toBe(SETTLEMENT)
+    // #4688: the complete tool now gives the same unverified answer as the
+    // settle arm — settled:false, a code, a warning, and a null settlement
+    // hash (the merchant's hash rides next_arguments, never the settlement
+    // field). Flipped on purpose: this used to be the bare delivery shape.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('SETTLEMENT_PENDING')
+    expect(res.data.delivered).toBe(true)
+    expect(res.data.settlement_tx_hash).toBeNull()
+    expect(res.data.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'SETTLEMENT_UNCONFIRMED' })]),
+    )
   })
 
   it('haven_complete_mcp_tool names NO tool when the settlement hash was refused — with the reason', async () => {
@@ -2561,9 +2580,14 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
       }),
     )
 
-    expect(res.data.next_tool).toBeUndefined()
-    expect(res.data.next_tool_omitted_reason).toContain('do not re-report the same hash')
-    expect(res.data.reason).toContain('do not re-report the same hash')
+    // #4688: a plain refusal names no report tool (re-reporting the same hash
+    // re-refuses), so the unverified answer hands the agent the status poll
+    // instead of the bare delivery shape.
+    expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(res.data.next_tool_omitted_reason).toBeUndefined()
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data.reason).toContain('Do not re-report the same hash')
   })
 
   // #4061: the missing-proof-header refusal. Unreachable while
@@ -2598,7 +2622,7 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     expect(JSON.stringify(res.data)).not.toMatch(/do not re-report|does not match this payment on-chain/)
   })
 
-  it("haven_settle_mcp_tool's eip3009 settled arm re-names the report tool when the settlement report lacked the proof header (#4061)", async () => {
+  it("haven_settle_mcp_tool's eip3009 unverified arm re-names the report tool when the settlement report lacked the proof header (#4061)", async () => {
     stubFetch({
       'POST /payments/pay_7710/sign': { status: 200, body: { payment_id: 'pay_7710', status: 'confirmed', tx_hash: '0x' + 'ee'.repeat(32) } },
     })
@@ -2621,14 +2645,17 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
       }),
     )
 
-    expect(res.data.settled).toBe(true)
+    // #4688: a refused settlement report is an UNVERIFIED settlement — the
+    // goods were delivered, the money is not proven. Flipped on purpose.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
     expect(res.data.reason).toContain('adding payment_header')
     expect(JSON.stringify(res.data)).not.toMatch(/do not re-report|does not match this payment on-chain/)
   })
 
-  it('haven_complete_mcp_tool answers the pre-#3764 shape — no guidance block — when the settlement was recorded (or never posted)', async () => {
+  it('haven_complete_mcp_tool answers the pre-#3764 shape — no guidance block — when the settlement was recorded', async () => {
     stubFetch({})
     stubDelivery()
     const haven = new HavenClient({ apiKey: 'test' as never, baseUrl: 'http://haven.test' })
@@ -2647,6 +2674,9 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
     expect(res.data.next_tool).toBeUndefined()
     expect(res.data.next_tool_omitted_reason).toBeUndefined()
     expect(res.data.next_action).toBeUndefined()
+    // #4688: the confirmed arm now says so explicitly — additive, and no
+    // consumer read its absence.
+    expect(res.data.settled).toBe(true)
   })
 
   it("haven_settle_mcp_tool's eip3009 settled arm names the report tool with the hash prefilled when the settlement report is retryable", async () => {
@@ -2674,7 +2704,12 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
       }),
     )
 
-    expect(res.data.settled).toBe(true)
+    // #4688: retryable is an UNVERIFIED settlement — settled:false with
+    // SETTLEMENT_PENDING, the merchant's hash prefilled for the report tool.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('SETTLEMENT_PENDING')
+    expect(res.data.delivered).toBe(true)
+    expect(res.data.settlement_tx_hash).toBeNull()
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
     // #4530: the settle arm prefills the header it forwarded, exactly as the
     // complete arm does.
@@ -2721,7 +2756,12 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
       }),
     )
 
-    expect(res.data.settled).toBe(true)
+    // #4688: retryable is an UNVERIFIED settlement — settled:false with
+    // SETTLEMENT_PENDING, the merchant's hash prefilled for the report tool.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('SETTLEMENT_PENDING')
+    expect(res.data.delivered).toBe(true)
+    expect(res.data.settlement_tx_hash).toBeNull()
     expect(res.data.next_tool).toBe('mcp__haven__haven_report_settlement_evidence')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_7710', settlement_tx_hash: SETTLEMENT })
     expect(res.data.next_arguments).not.toHaveProperty('payment_header')
@@ -2752,9 +2792,12 @@ describe('#3764 — the merchant settlement evidence maps to next steps (eip3009
       }),
     )
 
-    expect(res.data.settled).toBe(true)
-    expect(res.data.next_tool).toBeUndefined()
-    expect(res.data.next_tool_omitted_reason).toContain('do not re-report the same hash')
+    // #4688: a refused hash is an UNVERIFIED settlement; the report tool is
+    // not named (re-reporting re-refuses), so the status poll is the next step.
+    expect(res.data.settled).toBe(false)
+    expect(res.data.code).toBe('DELIVERED_UNSETTLED')
+    expect(res.data.next_tool).toBe('mcp__haven__haven_get_payment_status')
+    expect(res.data.reason).toContain('Do not re-report the same hash')
   })
 
   it("haven_settle_mcp_tool's eip3009 settled arm keeps the settled no-tool answer when the settlement was recorded", async () => {

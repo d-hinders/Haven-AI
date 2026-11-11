@@ -102,8 +102,18 @@ describe('AgentOrganizationTree (#3236 refetch states)', () => {
 
   it('first load with no rows yet is still the status panel', () => {
     renderTree({ organizations: [], loading: true })
-    expect(screen.getByRole('status')).toHaveTextContent('Loading organizations…')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading organisations…')
     expect(screen.queryByTestId('organization-tree')).toBeNull()
+  })
+
+  // The empty line sits in the left-aligned tree column. Its old
+  // `className="px-0 py-0 text-left"` override lost to EmptyState's own
+  // `text-center px-3` in Tailwind's emitted order, so it rendered centred.
+  it('the no-organisations line is left-aligned with the column', () => {
+    renderTree({ organizations: [] })
+    const line = screen.getByText(/No organisations yet/)
+    expect(line).toHaveClass('text-left')
+    expect(line).not.toHaveClass('text-center')
   })
 
   it('renders no status once loading settles', () => {

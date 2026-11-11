@@ -12,13 +12,16 @@
  * it is absent, which is how the backend says "feature off, no connection,
  * or this payment was never fed" (the absence is the contract, not a null).
  *
- * Three states, one label each:
+ * Three states, one label each (#4567 — the vocabulary table in
+ * `docs/product/design-system.md` § StatusBadge is the source of truth):
  *   pushed          → "In <Provider>", or "Evidence archived" for a
  *                     record-only connector (#3018: Accounted archives the
  *                     document Haven pushed — "In …" would read as a booking
- *                     the provider made)
- *   pending         → "Feeding…"       (neutral — in flight)
- *   failed/skipped  → "Not fed"        (warning), the reason on hover/focus
+ *                     the provider made), or "Tracked" when the deployment's
+ *                     live connector is not configured (SR:1583 — nothing
+ *                     left Haven, so the row may not claim delivery)
+ *   pending         → "Sending…"       (neutral — in flight)
+ *   failed/skipped  → "Not sent"       (warning), the reason on hover/focus
  *                                      where the badge is interactive
  *
  * No "Booked in <Provider>" state: the ledger stores no verify result, so the
@@ -32,6 +35,7 @@ import Link from 'next/link'
 import type { MouseEvent } from 'react'
 import type { ApiSchema } from '@haven_ai/core'
 import type { AccountingProvider } from '@/hooks/useAccounting'
+import type { Messages } from '@/lib/i18n'
 import { useT } from '@/context/LocaleContext'
 import { StatusBadge, type StatusTone } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -88,11 +92,45 @@ export function isRecordOnlyProvider(
   return RECORD_ONLY_PROVIDERS.has(id)
 }
 
-const TONE: Record<TransactionAccounting['status'], StatusTone> = {
-  pushed: 'success',
-  pending: 'neutral',
-  failed: 'warning',
-  skipped: 'warning',
+/**
+ * The ONE label and tone for a feed row's state (#4567). Both surfaces that
+ * render it — the per-payment badge and the `/accounting` page's row chip —
+ * call this, so the two cannot drift; `lib/__tests__/status-vocabulary.test.ts`
+ * holds it to the published table.
+ *
+ * Precedence, and why:
+ *  1. A record-only connector's pushed row is "Evidence archived" whatever the
+ *     deployment's live state — for Accounted/Igdrasil the archive IS the
+ *     delivery, so the label stays true either way (#3018).
+ *  2. A pushed row on a deployment whose live connector is not configured is
+ *     "Tracked": the row exists in Haven, nothing left it (SR:1583).
+ *  3. Otherwise a pushed row is "In <Provider>".
+ *
+ * `liveSyncReady` is optional because the ledger row and the detail drawer
+ * read only the row's `accounting` object and have no feed status to consult;
+ * absent means "not known to be a preview", which is the pre-#4567 answer.
+ */
+export function accountingStatusPresentation(
+  accounting: Pick<TransactionAccounting, 'status' | 'provider'>,
+  copy: Messages['accountingBadge'],
+  options: {
+    liveSyncReady?: boolean
+    providers?: ReadonlyArray<Pick<AccountingProvider, 'id' | 'capabilities'>> | null
+  } = {},
+): { label: string; tone: StatusTone } {
+  if (accounting.status === 'pushed') {
+    if (isRecordOnlyProvider(accounting.provider, options.providers)) {
+      return { label: copy.evidenceArchived, tone: 'success' }
+    }
+    if (options.liveSyncReady === false) {
+      return { label: copy.tracked, tone: 'neutral' }
+    }
+    return { label: copy.inProvider(providerDisplayName(accounting.provider)), tone: 'success' }
+  }
+  if (accounting.status === 'pending') {
+    return { label: copy.sending, tone: 'neutral' }
+  }
+  return { label: copy.notSent, tone: 'warning' }
 }
 
 /**
@@ -141,14 +179,7 @@ function PresentAccountingBadge({
 }) {
   const t = useT()
 
-  const label =
-    accounting.status === 'pushed'
-      ? isRecordOnlyProvider(accounting.provider)
-        ? t.accountingBadge.evidenceArchived
-        : t.accountingBadge.inProvider(providerDisplayName(accounting.provider))
-      : accounting.status === 'pending'
-        ? t.accountingBadge.feeding
-        : t.accountingBadge.notFed
+  const { label, tone } = accountingStatusPresentation(accounting, t.accountingBadge)
 
   // The reason is elaboration on a visible label, which is what `Tooltip` is
   // for (#2038) — the label itself already says the payment was not fed, so
@@ -166,7 +197,7 @@ function PresentAccountingBadge({
         data-testid="accounting-badge"
         data-status={accounting.status}
       >
-        <StatusBadge tone={TONE[accounting.status]}>{label}</StatusBadge>
+        <StatusBadge tone={tone}>{label}</StatusBadge>
       </span>
     )
   }
@@ -180,7 +211,7 @@ function PresentAccountingBadge({
       data-testid="accounting-badge"
       data-status={accounting.status}
     >
-      <StatusBadge tone={TONE[accounting.status]}>{label}</StatusBadge>
+      <StatusBadge tone={tone}>{label}</StatusBadge>
     </Link>
   )
 

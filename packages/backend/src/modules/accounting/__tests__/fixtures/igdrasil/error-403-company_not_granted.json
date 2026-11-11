@@ -1,0 +1,1 @@
+{"error": {"type": "authorization_error", "code": "company_not_granted", "message": "This token has no grant for that company.", "request_id": "req_fixture_company_not_granted"}}

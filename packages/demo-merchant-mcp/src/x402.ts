@@ -26,6 +26,10 @@ import {
 } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from '@x402/core/types'
 import {
+  HAVEN_PASSPORT_EXTENSION,
+  type PassportReference,
+} from '@haven_ai/sdk'
+import {
   DEFAULT_SETTLEMENT_METHOD,
   SUPPORTED_SETTLEMENT_METHODS,
   USDC_ADDRESS,
@@ -46,6 +50,12 @@ const MAX_TIMEOUT_SECONDS = 300
  * #2361: the extensions block every 402 challenge advertises, exported so
  * tests build echo-compliant payments from the same object the merchant
  * advertises rather than a hand-copied twin.
+ *
+ * #4723: this is the BASE block — `haven-demo` only. A merchant that has both
+ * passport env values set advertises `haven-passport` as well, through
+ * `demoMerchantExtensions` below. Keeping the base constant separate is what
+ * lets the no-env case be pinned to a literal (`['haven-demo']`) instead of to
+ * whatever the code happens to emit.
  */
 export const DEMO_MERCHANT_EXTENSIONS = {
   'haven-demo': {
@@ -53,6 +63,45 @@ export const DEMO_MERCHANT_EXTENSIONS = {
     echoRule: 'x402 v2: clients must echo this extensions object in PaymentPayload',
   },
 } as const
+
+/**
+ * #4723: where the merchant resolves a payment's passport reference, and which
+ * issuer it pins. BOTH values come from env and BOTH must be set — with either
+ * missing the merchant advertises only `haven-demo`, exactly as before.
+ */
+export interface PassportVerifierConfig {
+  /** Haven base URL, e.g. `https://api.haven.dev`. */
+  baseUrl: string
+  /** The issuer address pinned from `GET /passport/issuer`. */
+  issuer: string
+}
+
+/**
+ * #4723: the extensions block a challenge advertises.
+ *
+ * `haven-passport` is `{ info: {} }` — the #4722 convention: the merchant
+ * advertises the KEY and an empty `info`, and the client adds
+ * `attestation_uid` + `chain_id` inside `info`. The merchant never advertises
+ * a reference of its own.
+ *
+ * ## The echo contract, stated correctly (#4723 spec review, finding 2)
+ *
+ * `assertExtensionsEchoed` refuses unless EVERY advertised key is present and
+ * deep-equal — the merchant is not append-only, the CLIENTS are. It is safe
+ * only because every in-repo client echoes the whole object verbatim (SDK
+ * `x402.ts`, signer `core.ts`, backend `settle.ts`). So flipping this on is a
+ * real window: a 402 quoted before the env flip and paid after it is refused,
+ * and on the EIP-3009 bridge that happens AFTER funding, so funds strand until
+ * a sweep. Set both env values on a service that is not mid-quote; the
+ * operator step is named in `docs/operations/railway-services.md`.
+ */
+export function demoMerchantExtensions(passport?: PassportVerifierConfig | null): Record<string, unknown> {
+  if (!passport) return DEMO_MERCHANT_EXTENSIONS
+  return {
+    ...DEMO_MERCHANT_EXTENSIONS,
+    [HAVEN_PASSPORT_EXTENSION]: { info: {} },
+  }
+}
 // #1279: accepted forward-validity slack beyond the advertised timeout. Covers
 // clock skew plus client settlement margins (Haven's SDK signs
 // clamped-timeout + 300 s forward, #1256) without accepting year-long windows.
@@ -435,6 +484,18 @@ export interface SettledPayment {
   paymentResponseHeader: string
   /** #2969: see `SettlementState`. Always set, never inferred from `txHash`. */
   settlement: SettlementState
+  /**
+   * #4723: the `haven-passport` reference the payment carried, if any.
+   *
+   * Display/reporting-only, exactly like `settlement`: it is NOT on the x402
+   * wire and the settle path never reads it. `null` means there is nothing to
+   * check — the key was absent, or it was present but empty (the normal shape
+   * for an agent with no passport, since the #4722 client only adds fields when
+   * it has one). `{}` means the key was present but not a plain object: the
+   * reference is malformed, and the check answers `subject_mismatch` rather
+   * than silently treating it as absent.
+   */
+  passportReference: PassportReference | null
 }
 
 export interface SettlementClient {
@@ -571,6 +632,12 @@ export interface X402PaymentProcessorOptions {
     erc20TransferAmountEnforcer?: Address
   }
   settlementMethods?: readonly SettlementMethod[]
+  /**
+   * #4723: when set, every challenge advertises `haven-passport` and a payment
+   * that carries a reference is checked against this Haven verifier. Advisory
+   * only — the settle path never consults it.
+   */
+  passport?: PassportVerifierConfig
 }
 
 export interface X402PaymentProcessor {
@@ -622,6 +689,8 @@ interface VerifiedPayment {
   payTo: Address
   nonce: Hex
   settlementMethod: SettlementMethod
+  /** #4723: the `haven-passport` reference the payload carried, if any. */
+  passportReference: PassportReference | null
   submit: () => Promise<Hex>
 }
 
@@ -774,6 +843,8 @@ export function createX402PaymentProcessor(
       txHash,
       // #2969: explicit, caller-supplied state — see `SettlementState`.
       settlement,
+      // #4723: display-only, never on the wire.
+      passportReference: params.verified.passportReference,
       paymentResponse: response,
       paymentResponseHeader: encodePaymentResponseHeader(response),
     }
@@ -784,6 +855,7 @@ export function createX402PaymentProcessor(
     merchantAddress: Address
     expectedAmount: bigint
     paymentRequired: PaymentRequired
+    passportReference: PassportReference | null
   }): Promise<VerifiedPayment> {
     const { authorization, signature } = parseExactEvmPayload(params.payload.payload)
     assertPaymentOptionMatches(
@@ -801,6 +873,7 @@ export function createX402PaymentProcessor(
       payTo: getAddress(authorization.to),
       nonce: authorization.nonce as Hex,
       settlementMethod: 'eip3009',
+      passportReference: params.passportReference,
       submit: () => settlementClient.submit(authorization, signature),
     }
   }
@@ -810,6 +883,7 @@ export function createX402PaymentProcessor(
     merchantAddress: Address
     expectedAmount: bigint
     paymentRequired: PaymentRequired
+    passportReference: PassportReference | null
   }): Promise<VerifiedPayment> {
     if (!options.erc7710) {
       throw new PaymentError('ERC-7710 payments are not enabled on this merchant')
@@ -844,6 +918,7 @@ export function createX402PaymentProcessor(
       payTo: getAddress(params.merchantAddress),
       nonce: contextHash,
       settlementMethod: ERC7710_TRANSFER_METHOD,
+      passportReference: params.passportReference,
       // #3170: explain a submit-time revert the way the EIP-3009 rail explains
       // its pre-submit failures (#1519). `writeContract` raises viem's
       // `ContractFunctionExecutionError` on a revert, which is not a
@@ -1001,6 +1076,10 @@ export function createX402PaymentProcessor(
         facilitatorAddresses: settlementClient.erc7710?.redeemerAddress
           ? [settlementClient.erc7710.redeemerAddress]
           : undefined,
+        // #4723: the merchant-wide passport config, never a per-call one — the
+        // advertised extension and the verifier the purchase response uses
+        // must be the same decision.
+        passport: options.passport,
       }),
     paymentRequiredHeader: encodePaymentRequiredHeader,
     paymentResponseHeader: encodePaymentResponseHeader,
@@ -1011,12 +1090,16 @@ export function createX402PaymentProcessor(
       // scheme dispatch so both erc7710 and eip3009 payments are covered.
       assertExtensionsEchoed(payload, params.paymentRequired)
       const method = paymentMethod(payload.accepted)
+      // #4723: read the passport reference the client echoed. Advisory only —
+      // it is carried on the settled payment for the purchase response and is
+      // never consulted by the settle path.
+      const passportReference = readPassportReference((payload as { extensions?: unknown }).extensions)
 
       let verified: VerifiedPayment
       if (method === ERC7710_TRANSFER_METHOD) {
-        verified = await verifyErc7710Payment({ ...params, payload })
+        verified = await verifyErc7710Payment({ ...params, payload, passportReference })
       } else if (method === 'eip3009') {
-        verified = await verifyEip3009Payment({ ...params, payload })
+        verified = await verifyEip3009Payment({ ...params, payload, passportReference })
       } else {
         throw new PaymentError(`Unsupported x402 assetTransferMethod: ${method}`)
       }
@@ -1214,6 +1297,8 @@ export function buildPaymentRequired(params: {
   /** #1058: advertised on the erc7710 option only — payers pin their child
    *  delegation's redeemer caveat to these, and must echo them verbatim. */
   facilitatorAddresses?: Address[]
+  /** #4723: when set, the challenge also advertises `haven-passport`. */
+  passport?: PassportVerifierConfig | null
 }): PaymentRequired {
   const methods = orderedSettlementMethods(params.settlementMethod, params.settlementMethods)
   const eip3009Option: PaymentRequirements = {
@@ -1253,7 +1338,7 @@ export function buildPaymentRequired(params: {
     // defects reached mainnet (#2288's header name, #2360's missing echoes).
     // Kept deliberately small: the whole challenge rides an HTTP header, and
     // the echo doubles it back.
-    extensions: DEMO_MERCHANT_EXTENSIONS,
+    extensions: demoMerchantExtensions(params.passport),
     error: 'Payment required',
   }
 }
@@ -1466,6 +1551,40 @@ function objectContainsSubset(subset: Record<string, unknown>, superset: Record<
     }
     return JSON.stringify(value) === JSON.stringify(other)
   })
+}
+
+/**
+ * #4723: read the `haven-passport` reference a payment echoed.
+ *
+ * `null` means there is no reference to check: the key was absent (the merchant
+ * did not advertise it), or it was present but empty — which is the normal
+ * shape for an agent with no passport, because the #4722 client only adds
+ * fields when it has one. `{}` means the key was present but not a plain
+ * object: the reference is malformed, and the check answers `subject_mismatch`
+ * rather than pretending it was absent. A reference carrying only ONE of the
+ * two fields is likewise passed through as-is and refused by the check.
+ *
+ * The values are passed through UNVALIDATED on purpose — `verifyPassportReceipt`
+ * is the one place that validates them, so the merchant and any other consumer
+ * cannot disagree about what a valid reference is.
+ */
+function readPassportReference(extensions: unknown): PassportReference | null {
+  if (!isPlainRecord(extensions)) return null
+  if (!Object.prototype.hasOwnProperty.call(extensions, HAVEN_PASSPORT_EXTENSION)) return null
+  const entry = extensions[HAVEN_PASSPORT_EXTENSION]
+  if (!isPlainRecord(entry)) return {}
+  const info = isPlainRecord(entry.info) ? entry.info : entry
+  const hasUid = Object.prototype.hasOwnProperty.call(info, 'attestation_uid')
+  const hasChain = Object.prototype.hasOwnProperty.call(info, 'chain_id')
+  if (!hasUid && !hasChain) return null
+  return { attestation_uid: info.attestation_uid, chain_id: info.chain_id }
+}
+
+/** A JSON object, not an array and not a class instance. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
 }
 
 async function verifyAuthorization(

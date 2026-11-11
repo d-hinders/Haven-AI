@@ -69,8 +69,7 @@ vi.mock('../../middleware/auth.js', () => ({
 vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: async () => true,
   issuePassportBestEffort: async () => undefined,
-  isPassportConfigured: () => true,
-  PASSPORT_CHAIN_IDS: new Set([84532]),
+  isPassportIssuableForAccount: () => true,
 }))
 
 const SAFE = {

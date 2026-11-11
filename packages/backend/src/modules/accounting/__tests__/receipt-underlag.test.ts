@@ -38,7 +38,10 @@ const DATA = {
   // #4534: the purchase correlation key. Nulls are the ungrouped case; the
   // correlation-key cases override.
   purchaseGroupId: null,
-  parentPaymentId: null,
+  parentReceiptRef: null,
+  // #4577: this document's own evidence id, rendered as `Receipt ref` on a
+  // protocol underlag.
+  receiptRef: 'evidence-1',
   chainId: 84532,
   txHash: '0x' + 'cd'.repeat(32),
   txHashIsFunding: false,
@@ -67,7 +70,7 @@ const TX = {
   receiptRef: 'evidence-1',
   // #4534: ungrouped by default; the correlation-key cases override.
   purchaseGroupId: null,
-  parentPaymentId: null,
+  parentReceiptRef: null,
   // #3918: the captured merchant receipt — the demo merchant's seller block
   // (empirical anchor: settle of b1e26fc2 returned exactly these values).
   merchantReceipt: {
@@ -177,6 +180,49 @@ describe('underlagFromData', () => {
       description: 'merchant.example - vpn (API fee)',
     }).pdf.toString('latin1')
     expect(purchase).not.toBe(fee)
+  })
+
+  /**
+   * #4577: the parent correlation value is a RECEIPT id, so the document names
+   * it `Parent receipt`, and a protocol underlag prints its OWN evidence id as
+   * `Receipt ref` — that is what lets a fee's document and its purchase's
+   * document match by eye. Before this the fee printed `Parent payment
+   * <evidence id>` beside `Payment id <intent id>` and never printed its own
+   * evidence id, so nothing on the two documents joined.
+   */
+  it('renders `Parent receipt` and its own `Receipt ref` on a protocol underlag (#4577)', () => {
+    const s = underlagFromData({
+      ...DATA,
+      parentReceiptRef: 'evidence-parent-1',
+      receiptRef: 'evidence-fee-1',
+    }).pdf.toString('latin1')
+    expect(s).toContain('Parent receipt evidence-parent-1')
+    expect(s).toContain('Receipt ref    evidence-fee-1')
+    // The old label is gone — it named a receipt id a payment id.
+    expect(s).not.toContain('Parent payment')
+  })
+
+  it('renders `Parent receipt n/a` for an ungrouped protocol payment (#4577)', () => {
+    const s = underlagFromData(DATA).pdf.toString('latin1')
+    expect(s).toContain('Parent receipt n/a')
+    expect(s).not.toContain('Parent payment')
+  })
+
+  /**
+   * #4577: a direct payment's `receiptRef` is the intent id, which `Payment id`
+   * already prints — so the `Receipt ref` line is omitted rather than printing
+   * the same value twice on a document an accountant files.
+   */
+  it('omits `Receipt ref` on a direct-payment underlag, and still says `Parent receipt n/a` (#4577)', () => {
+    const s = underlagFromData({
+      ...DATA,
+      merchantName: null,
+      resourceUrl: null,
+      receiptRef: DATA.paymentId,
+    }).pdf.toString('latin1')
+    expect(s).toContain('Parent receipt n/a')
+    expect(s).not.toContain('Receipt ref')
+    expect(s).not.toContain('Parent payment')
   })
 
   /**

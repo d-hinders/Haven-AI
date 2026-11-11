@@ -355,7 +355,7 @@ test.describe('agent panel empty states and card banners', () => {
     // The ⋯ menu, open, and painted above the card below it.
     await page.getByRole('button', { name: 'Actions for claude-eval' }).click()
     const menu = page.getByRole('menu')
-    await expect(menu.getByRole('menuitem')).toHaveText(['Pause payments', 'Remove'])
+    await expect(menu.getByRole('menuitem')).toHaveText(['Pause payments', 'Remove…'])
     const menuBox = await menu.boundingBox()
     const topmost = await page.evaluate(
       ({ x, y }) => document.elementFromPoint(x, y)?.closest('[role="menu"]') !== null,

@@ -1,7 +1,8 @@
 'use client'
 
-import { Archive, CircleAlert, Clock, EllipsisVertical, LoaderCircle, Plus } from 'lucide-react'
+import { Archive, CircleAlert, Clock, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
+import { Spinner } from '@haven_ai/ui/Spinner'
 import { useCallback, useMemo, useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { setupIdFromSearch } from '@/lib/discovery'
@@ -35,7 +36,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenuIconTrigger,
 } from './ui/DropdownMenu'
 import { PageHeader } from './ui/PageHeader'
 import { BotIcon } from './agent-panel/agent-display'
@@ -279,7 +280,7 @@ export default function AgentPanel() {
           it reads stays in `useAgentPanelState`. Like Accounts: the primary
           action level with the title, and the occasional management tasks
           (Labels, Organizations) in a ⋯ menu beside it — the same
-          `EllipsisVertical` trigger the agent page uses. No count chip: the
+          `DropdownMenuIconTrigger` every overflow menu uses. No count chip: the
           list summary line owns the count.
 
           #4065 (owner decision 2026-10-19): no Connect agent while the inline
@@ -293,26 +294,25 @@ export default function AgentPanel() {
           // here would make the pair one unbreakable child.
           <>
             {!showInlineSetup && (
-              <Button onClick={() => panel.setConnectAgentOpen(true)}>
-                <Icon icon={Plus} className="h-4 w-4" />
+              <Button onClick={() => panel.setConnectAgentOpen(true)} leadingIcon={Plus}>
                 Connect agent
               </Button>
             )}
             <DropdownMenu>
-              <DropdownMenuTrigger
+              <DropdownMenuIconTrigger
                 aria-label="More agent actions"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--v2-border)] bg-[var(--v2-bg)] text-[var(--v2-ink-2)] transition-colors hover:border-[var(--v2-border-strong)] hover:text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-              >
-                <Icon icon={EllipsisVertical} className="h-4 w-4" />
-              </DropdownMenuTrigger>
+                edge="end"
+              />
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => panel.setLabelsManagerOpen(true)}>
-                  Labels
+                  Manage labels
                 </DropdownMenuItem>
                 {/* #3164: the organization manager — create/rename/move/delete.
-                    The tree above the list appears once one exists. */}
+                    The tree above the list appears once one exists.
+                    #4565: the menu item and the dialog title are the same
+                    words, and the manager's name uses the British spelling. */}
                 <DropdownMenuItem onSelect={() => panel.setOrganizationsManagerOpen(true)}>
-                  Organizations
+                  Manage organisations
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -338,7 +338,7 @@ export default function AgentPanel() {
           {/* #3164: the organization tree above the list — only when the user HAS
               organizations. An empty tree would be a permanent empty management
               panel on every org-less /agents visit (product README, First-Run
-              Simplicity); the header's Organizations button is the entry point
+              Simplicity); the header's Manage organisations button is the entry point
               until one exists. */}
           {panel.organizations.length > 0 && (
             <AgentOrganizationTree
@@ -363,7 +363,7 @@ export default function AgentPanel() {
                 filtering="browser"
                 facets={toolbarFacets}
                 sort={{ options: SORT_OPTIONS }}
-                searchDescription="by name, description or delegate address"
+                searchDescription="by name, description or wallet address"
                 count={{ shown: listFilters.filtered.length, total: listFilters.total }}
               />
             </div>
@@ -388,6 +388,8 @@ export default function AgentPanel() {
           )}
 
           {agentsError && agents.length > 0 ? (
+            // #4607: keeps `role="alert"` — the block holds the retry button,
+            // which `InlineAlert` (a single text line) cannot carry.
             <div
               role="alert"
               className="mb-4 rounded-lg border border-warning/30 bg-[var(--v2-warning-soft)] px-4 py-3 text-sm text-[var(--v2-ink-2)]"
@@ -439,8 +441,8 @@ export default function AgentPanel() {
               <EmptyState
                 tone="neutral"
                 icon={
-                  /* Heavier stroke: matches the original spinner's 3px ring weight. */
-                  <Icon icon={LoaderCircle} className="h-5 w-5 animate-spin" strokeWidth={3} />
+                  /* The one busy indicator (#4563), at the standalone size. */
+                  <Spinner size="md" />
                 }
                 title="Finalizing your agent…"
                 body="Haven is confirming the new rules on-chain. Your agent will appear here in a moment — no need to refresh."

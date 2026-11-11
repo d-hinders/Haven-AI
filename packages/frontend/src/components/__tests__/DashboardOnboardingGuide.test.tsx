@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
-import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
 import type { AccountFunding } from '@/hooks/useAccountFunding'
 
 /**
@@ -70,6 +70,22 @@ function renderGuide(overrides: Partial<Parameters<typeof DashboardOnboardingGui
 }
 
 describe('DashboardOnboardingGuide — step 1 (#2534, #3818)', () => {
+  it('uses a static unfilled ink-2 ring without a brand-tinted active row', () => {
+    const { container } = renderGuide()
+    const active = container.querySelector('li[data-status="active"]')!
+    expect(active.className).not.toContain('brand')
+    const marker = active.querySelector('[aria-hidden="true"]')!
+    expect(marker).toHaveClass('border-[1.5px]', 'border-[var(--v2-ink-2)]', 'text-[var(--v2-ink-2)]')
+    expect(container.querySelector('.v2-step-halo')).toBeNull()
+  })
+
+  it('draws later steps with the stepper family quiet 1px ring', () => {
+    const { container } = renderGuide()
+    const later = container.querySelector('li[data-status="locked"] [aria-hidden="true"]')!
+    expect(later).toHaveClass('border', 'border-[var(--v2-border)]', 'text-[var(--v2-ink-3)]')
+    expect(later.className).not.toContain('border-strong')
+  })
+
   it('suggests the endpoint\'s amount and offers Add funds, which opens the dialog with the faucet', async () => {
     const { props } = renderGuide({ funding: FUNDING })
     expect(document.body.textContent).toContain('We suggest 5 USDC')
@@ -181,9 +197,21 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
     expect(document.body.textContent).not.toContain('Set up an agent first')
   })
 
-  it('without a set-up agent step 3 stays locked', () => {
+  it('an agent whose budget ENDED: step 2 says when, since the card drops its "Budget ended" row (#4744)', () => {
+    renderGuide({
+      usdcFunded: true,
+      pendingAgent: { id: 'b', name: 'Bot', moreCount: 0, awaiting: 'budget', budgetEndedOn: '2 Nov 2026' },
+    })
+    expect(screen.getByText('Finish setting up Bot')).toBeInTheDocument()
+    expect(screen.getByText('Its budget ended 2 Nov 2026. Set a new one so it can pay.')).toBeInTheDocument()
+    expect(screen.queryByText('Set a budget so it can pay.')).not.toBeInTheDocument()
+  })
+
+  it('without a set-up agent step 3 stays locked, and says what unlocks it (#4744, N1)', () => {
     renderGuide({ usdcFunded: true, pendingAgent: { id: 'a', name: 'A', moreCount: 0, awaiting: 'approval' as const } })
-    expect(document.body.textContent).toContain('Set up an agent first to unlock this step.')
+    // The old copy was wrong whenever an agent existed and only needed a budget.
+    expect(screen.getByText('Unlocks when an agent has a budget.')).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('Set up an agent first')
     expect(screen.queryByRole('button', { name: 'Show me how' })).not.toBeInTheDocument()
   })
 
@@ -195,21 +223,137 @@ describe('DashboardOnboardingGuide — step 2 and 3 (#3818)', () => {
   })
 })
 
-describe('SetupCompleteLine (#3818)', () => {
-  it('is one line with a dismiss', async () => {
-    const onDismiss = vi.fn()
-    render(<SetupCompleteLine onDismiss={onDismiss} />)
-    expect(document.body.textContent).toContain('You’re set up')
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(onDismiss).toHaveBeenCalledTimes(1)
+// #4707: `SetupCompleteLine` is gone — the first agent payment is its own card
+// (`components/FirstAgentPaymentCard`), tested in its own suite. The guide's
+// finished state is no longer a branch of this component.
+
+// #4704: a guide step plays Milestone Step only when it completes while the
+// guide is open. The global setup stub answers `reduce`, so these cases set
+// no-preference explicitly — under `reduce` Milestone never opts in at all.
+describe('guide steps play Step on a completion you watch (#4704)', () => {
+  function setReducedMotion(reduce: boolean) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: reduce && query === '(prefers-reduced-motion: reduce)',
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    })
+  }
+  const base = {
+    hasSetUpAgent: false,
+    hasFirstAgentPayment: false,
+    onAddFunds: vi.fn(),
+    onAddAgent: vi.fn(),
+    onShowAgentUsage: vi.fn(),
+  }
+  const stepRow = (n: number) => document.querySelectorAll('li[data-status]')[n - 1] as HTMLElement
+
+  afterEach(() => setReducedMotion(true))
+
+  it('a step that completes while watched pops', () => {
+    setReducedMotion(false)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={false} />)
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).not.toBeNull()
   })
 
-  it('sits on the full-bleed rows\' icon slot and title column: a 32px slot, gap-3, no inset of its own (#3902)', () => {
-    const { container } = render(<SetupCompleteLine onDismiss={() => {}} />)
-    const line = container.firstElementChild as HTMLElement
-    expect(line.className).not.toMatch(/(^|\s)p[xl]-/)
-    const sentence = line.querySelector('p') as HTMLElement
-    expect(sentence.className).toMatch(/(^|\s)gap-3(\s|$)/)
-    expect((sentence.firstElementChild as HTMLElement).className).toMatch(/(^|\s)w-8(\s|$)/)
+  it('a step already complete when the guide opens (a reload) just shows its check', () => {
+    setReducedMotion(false)
+    render(<DashboardOnboardingGuide {...base} usdcFunded={true} hasSetUpAgent={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(document.querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('a balance read that recovers (unknown → complete) shows the check without a pop', () => {
+    setReducedMotion(false)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={null} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('unknown')
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('step 2 completing while watched pops too', () => {
+    setReducedMotion(false)
+    const props = { ...base, usdcFunded: true }
+    const { rerender } = render(<DashboardOnboardingGuide {...props} />)
+    rerender(<DashboardOnboardingGuide {...props} hasSetUpAgent={true} />)
+    expect(stepRow(2).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(2).querySelector('.animate-check-pop')).not.toBeNull()
+  })
+
+  it('step 3 never pops: the first payment is its own card (#4707)', () => {
+    setReducedMotion(false)
+    const props = { ...base, usdcFunded: true, hasSetUpAgent: true }
+    const { rerender } = render(<DashboardOnboardingGuide {...props} />)
+    rerender(<DashboardOnboardingGuide {...props} hasFirstAgentPayment={true} />)
+    expect(stepRow(3).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(3).querySelector('.animate-check-pop')).toBeNull()
+  })
+
+  it('under reduced motion the completed step shows its check with no pop', () => {
+    setReducedMotion(true)
+    const { rerender } = render(<DashboardOnboardingGuide {...base} usdcFunded={false} />)
+    rerender(<DashboardOnboardingGuide {...base} usdcFunded={true} />)
+    expect(stepRow(1).getAttribute('data-status')).toBe('complete')
+    expect(stepRow(1).querySelector('.animate-check-pop')).toBeNull()
+  })
+})
+
+describe('the guide is the shared Step status checklist (#4744)', () => {
+  it('renders through StepChecklist: numbered markers, one connector per gap, a list label', () => {
+    const { container } = renderGuide({ usdcFunded: false })
+    const list = container.querySelector('ol')!
+    expect(list).toHaveAttribute('aria-labelledby')
+    const rows = [...list.querySelectorAll(':scope > li')]
+    expect(rows.map((li) => li.getAttribute('data-step-state'))).toEqual(['active', 'pending', 'pending'])
+    // Numbered: the list is the card's counter (screen-recipes, First-Run item 2).
+    expect(rows.map((li) => li.querySelector('[aria-hidden="true"]')!.textContent)).toEqual(['1', '2', '3'])
+    expect(container.querySelectorAll('[data-step-connector]')).toHaveLength(2)
+  })
+
+  it('a locked step is quiet by TOKEN, never by opacity — and a done step\'s heading is ink-3', () => {
+    const { container } = renderGuide({ usdcFunded: true })
+    const locked = container.querySelector('li[data-status="locked"]') as HTMLElement
+    // On the rendered row and everything in it, so an opacity moved into the
+    // primitive fails this too.
+    for (const el of [locked, ...locked.querySelectorAll<HTMLElement>('*')]) {
+      expect(el.getAttribute('class') ?? '').not.toMatch(/(^|\s)opacity-/)
+    }
+    expect(screen.getByText('Make your first agent payment').closest('p')).toHaveClass('text-[var(--v2-ink-2)]')
+    expect(screen.getByText('Unlocks when an agent has a budget.')).toHaveClass('text-[var(--v2-ink-3)]')
+    expect(screen.getByText('Add USDC to your account').closest('p')).toHaveClass('text-[var(--v2-ink-3)]')
+    // An open-but-not-next step reads at full ink: actionable, not dimmed (#3818).
+    expect(screen.getByText('Connect your first agent').closest('p')).toHaveClass('text-[var(--v2-ink)]')
+  })
+
+  it('states each step to assistive tech, except an unreadable one', () => {
+    const { container } = renderGuide({ usdcFunded: null })
+    const headings = [...container.querySelectorAll('ol > li')].map((li) => li.querySelector('p')!.textContent)
+    // Step 1 is `unknown`: no "Not started" — the balance could not be read.
+    expect(headings).toEqual([
+      'Add USDC to your account',
+      'Not started: Connect your first agent',
+      'Not started: Make your first agent payment',
+    ])
+  })
+
+  it('the step action sits in the row action slot, not under the heading block', () => {
+    const { container } = renderGuide({ usdcFunded: false })
+    const active = container.querySelector('li[data-status="active"]')!
+    const slot = active.querySelector('[data-step-action]')!
+    expect(slot).toContainElement(screen.getByRole('button', { name: 'Add funds' }))
+    expect(slot.parentElement!.className).toContain('sm:flex-row')
+    expect(active.querySelector('[data-step-text]')).not.toContainElement(slot as HTMLElement)
   })
 })

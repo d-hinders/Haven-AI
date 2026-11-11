@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { toPathspec, rankFindings } from './audit-staleness.mjs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { toPathspec, rankFindings, figuresSection } from './audit-staleness.mjs'
 
 test('toPathspec adds :(glob) only for glob patterns', () => {
   assert.equal(toPathspec('packages/backend/src/index.ts'), 'packages/backend/src/index.ts')
@@ -56,4 +59,54 @@ test('CLI (#4459): a `record` doc is never ranked; a `current` doc with the same
   assert.equal(status, 0, out)
   const ranked = JSON.parse(out.slice(out.indexOf('{\n  "generated"'))).findings.map((f) => f.doc)
   assert.deepEqual(ranked.sort(), ['docs/area/live.md', 'docs/bug-reports/_template.md'])
+})
+
+// ---- doc-figure section (#4631) ------------------------------------------
+
+const FIGURES = 'Doc figures that moved (#4631) at `abc123456`.\n\ndocs/area/live.md · live-count · recorded 3 @ `abc123456` · now 4 @ `abc123456` · moved\n'
+
+/** The audit's fixture: one ranked doc, so the ranking is non-empty. */
+function auditFixture(extra = {}) {
+  return {
+    'packages/thing/index.ts': '// covered code\n',
+    'docs/area/live.md': doc('current'),
+    ...Object.fromEntries(['CLAUDE.md', 'AGENTS.md', 'README.md', 'ABOUT_HAVEN.md'].map((f) => [f, '---\nowner: "@d-hinders"\nstatus: current\ncovers: []  # fixture\nlast-verified: "2020-01-01"\n---\n'])),
+    ...extra,
+  }
+}
+
+test('CLI (#4631): --figures-report appends the doc-figure section under the ranking', () => {
+  const { status, out } = runGuard('docs/audit-staleness.mjs', {
+    also: ['docs/validate-frontmatter.mjs', 'docs/package-docs.mjs'],
+    gitCommit: true,
+    args: ['--figures-report', 'figures.txt'],
+    files: auditFixture({ 'figures.txt': FIGURES }),
+  })
+  assert.equal(status, 0, out)
+  assert.match(out, /Docs audit: 1 doc\(s\) whose covered code changed/)
+  assert.match(out, /Doc figures that moved \(#4631\)/)
+  assert.match(out, /live-count · recorded 3 .* · moved/)
+  // The section sits UNDER the ranking, not above it.
+  assert.ok(out.indexOf('Docs audit:') < out.indexOf('Doc figures that moved'), out)
+})
+
+test('CLI (#4631): without the flag the audit prints the one placeholder line', () => {
+  const { status, out } = runGuard('docs/audit-staleness.mjs', {
+    also: ['docs/validate-frontmatter.mjs', 'docs/package-docs.mjs'],
+    gitCommit: true,
+    args: [],
+    files: auditFixture(),
+  })
+  assert.equal(status, 0, out)
+  assert.match(out, /doc-figure report not supplied \(run scan-remeasure\.mjs --doc-figures-only\)/)
+  assert.doesNotMatch(out, /Doc figures that moved/)
+})
+
+test('unit (#4631): figuresSection distinguishes not-supplied, unreadable and empty', () => {
+  assert.equal(figuresSection(undefined), 'doc-figure report not supplied (run scan-remeasure.mjs --doc-figures-only)')
+  assert.match(figuresSection('/nonexistent/figures.txt'), /doc-figure report unreadable: \/nonexistent\/figures\.txt/)
+  const empty = join(mkdtempSync(join(tmpdir(), 'figures-')), 'empty.txt')
+  writeFileSync(empty, '\n\n')
+  assert.match(figuresSection(empty), /doc-figure report is empty/)
+  rmSync(dirname(empty), { recursive: true, force: true })
 })

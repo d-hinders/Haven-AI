@@ -1,0 +1,11 @@
+{
+  "name": "Fixture — token price (match)",
+  "endpoint_host": "api.fixture-match.test",
+  "resource_url": "https://api.fixture-match.test/v1/price/token",
+  "protocol": "http",
+  "source": "operator",
+  "status": "active",
+  "http_method": "POST",
+  "body_type": "json",
+  "body_example": { "token": "USDC", "chain": "base" }
+}

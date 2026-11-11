@@ -137,6 +137,35 @@ describe('ApiKeyConnectModal', () => {
     await waitFor(() => expect(submit()).toBeEnabled())
   })
 
+  /**
+   * #4562: the header ✕ is on by default now. This dialog guards Escape and the
+   * backdrop with `!busy`, so the ✕ has to be guarded too — otherwise it is the
+   * one way to close the dialog while the key is being verified, and the
+   * in-flight request lands on an unmounted modal.
+   */
+  it('disables the header close button while connecting, and re-enables it after', async () => {
+    let resolveConnect: (() => void) | undefined
+    const { onClose } = renderModal(
+      vi.fn().mockImplementation(
+        () => new Promise<void>((resolve) => {
+          resolveConnect = resolve
+        }),
+      ),
+    )
+    const closeButton = screen.getByRole('button', { name: 'Close' })
+    expect(closeButton).toBeEnabled()
+
+    fireEvent.change(keyField(), { target: { value: 'k' } })
+    fireEvent.click(submit())
+    expect(await screen.findByRole('button', { name: 'Connecting…' })).toBeDisabled()
+    expect(closeButton).toBeDisabled()
+    fireEvent.click(closeButton)
+    expect(onClose).not.toHaveBeenCalled()
+
+    resolveConnect?.()
+    await waitFor(() => expect(closeButton).toBeEnabled())
+  })
+
   it('clears the secret on close, so a reopen starts empty', () => {
     const { rerender } = render(
       <LocaleProvider>

@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/platform/leader-lock.ts
+  - packages/backend/src/platform/job-scheduler.ts
+  - packages/backend/src/background-jobs.ts
   - packages/backend/src/rails/hybrid-provisioning.ts
   - packages/backend/src/infra/relayer.ts
 last-verified: "2026-10-25"
@@ -15,17 +17,19 @@ may now run more than one, and the relayer is what still caps throughput.**
 
 ## What multiple replicas already handle
 
-- **Periodic monitors** — every replica starts the same `setInterval` ticks, so
-  every periodic scan but one is wrapped in `runIfLeader` (`platform/leader-lock.ts`).
+- **Periodic monitors** — every replica starts the same `setInterval` ticks from
+  one importable table (`packages/backend/src/background-jobs.ts`, started by
+  `startBackgroundJobs`), so every periodic scan but one is wrapped in
+  `runIfLeader` (`platform/leader-lock.ts`).
   (The in-memory caches' own eviction timers, `platform/cache.ts`, are
   per-process by nature and are not scans.) A
   Postgres advisory lock elects one executor per tick; the losers skip rather
   than queue. Without it, an N-replica deployment runs every scan N times and
   sends up to N copies of each alert. The exception is the relayer balance
-  monitor, deliberately NOT leader-locked (`index.ts`): its scan feeds each
-  replica's own `/health/ops` answer. Its low-balance alert is edge-triggered
-  per chain but tracked per replica, so each low edge sends one alert per
-  replica.
+  monitor, deliberately NOT leader-locked (`background-jobs.ts`): its scan
+  feeds each replica's own `/health/ops` answer. Its low-balance alert is
+  edge-triggered per chain but tracked per replica, so each low edge sends one
+  alert per replica.
 - **First-deploy races on one counterfactual account**
   ([#1673](https://github.com/d-hinders/Haven-AI/issues/1673)). `runIfLeader`'s
   blocking sibling, `withKeyedAdvisoryLock`, serialises the callers that must

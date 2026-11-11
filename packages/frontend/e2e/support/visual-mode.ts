@@ -91,10 +91,12 @@ export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
  *      `-xu` parses as `-x --update-snapshots`.
  *
  * Hence the character class rather than a prefix test, and hence its bounds,
- * measured against Playwright 1.60's option table rather than guessed:
+ * measured against Playwright 1.64.1's option table rather than guessed (first
+ * against 1.60's; the 1.64.1 bump added `-G`, which takes a value too):
  * `-x` is the only value-less short that clusters (`-hu` is rejected as an
- * unknown option), while `-c`, `-g` and `-j` take a REQUIRED value — so `-gu`
- * is `grep "u"`, an ordinary run that must not be refused. A guard that matches
+ * unknown option), while `-c`, `-g`, `-G` and `-j` take a REQUIRED value — so
+ * `-gu` is `grep "u"` and `-Gu` is `grep-invert "u"`, ordinary runs that must
+ * not be refused. A guard that matches
  * one spelling of the thing it forbids reports green on the others (#2827).
  *
  * ## What this deliberately does NOT cover
@@ -115,7 +117,7 @@ export const VISUAL_SPECS_ENABLED = VISUAL_COMPARE || VISUAL_STRUCTURE_ONLY
  *
  * The enumeration is version-bound: a future Playwright that adds a value-less
  * short option would widen the cluster silently. `package.json` carries a
- * CARET range (`^1.60.0`), so that version can arrive without a diff anyone
+ * CARET range (`^1.64.1`), so that version can arrive without a diff anyone
  * re-reads — re-check this against the lockfile, not against a bump you expect
  * to see.
  */

@@ -29,6 +29,13 @@ vi.mock('@/hooks/useEscapeToClose', () => ({
   useEscapeToClose: vi.fn(),
 }))
 
+// #4705: the deposit watch reads the dashboard overview while the dialog is
+// open. No overview here — the watch's behaviour is
+// `ReceiveDialog.deposit.test.tsx`'s — so these tests stay off the network.
+vi.mock('@/hooks/useDashboardOverview', () => ({
+  useDashboardOverview: () => ({ data: null, loading: true, error: null, refetch: vi.fn() }),
+}))
+
 import ReceiveDialog from '@/components/ReceiveDialog'
 import ComingSoonModal from '@/components/ComingSoonModal'
 
@@ -185,7 +192,11 @@ describe('ReceiveDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy address' }))
 
     expect(writeText).toHaveBeenCalledWith(SAFE.account_address)
-    expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument()
+    // #4573: the write is awaited before the confirmation paints, so the
+    // "Copied" state lands a microtask after the click.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Address copied' })).toBeInTheDocument(),
+    )
 
     // No toggle to flip: the QR is generated the moment the dialog opens.
     await waitFor(() => {

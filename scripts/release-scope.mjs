@@ -31,6 +31,15 @@
 // package's `files` field, which is what npm itself packs. Nothing here is a
 // hand-maintained list of what ships.
 //
+// THE OTHER PATH (#4770). A change that is not in a published package reaches an
+// installed agent when the service that builds it deploys, and a pull request
+// should say which of the two paths it takes. So the files this script reports as
+// "not in a published package" are attributed to the deploy surfaces the tree
+// says build them — read from the workspace list and each package's own
+// package.json, never from a list kept here — and the report ends with the
+// `Release lever:` line the pull request carries. That line is advisory: nothing
+// reads it, and it gates nothing.
+//
 // REFUSALS. A measurement instrument that reports "nothing ships" when it simply
 // could not look is worse than no instrument, because an empty result is what tells
 // a release author to skip the amendment. So this script refuses rather than
@@ -132,6 +141,108 @@ function publishedPackages() {
     throw new Refusal('found no publishable packages under packages/ — refusing to report an empty release scope')
   }
   return published
+}
+
+// --- the deploy surfaces -----------------------------------------------------
+//
+// A change that is not in a published package reaches an installed agent by the
+// other path: it ships when the service that builds it deploys. Which services
+// those are is read from the tree, never from a list kept here — a hand-kept
+// list of package names is the defect this script exists to stop, one bucket
+// over.
+//
+// Two facts, both from each package's own package.json:
+//
+//   - a package that declares a `start` script is a SERVICE. That is the tree's
+//     only statement of "this runs somewhere" that covers every deployed
+//     package: backend, frontend and mcp-server carry a Dockerfile, frontend and
+//     ops a vercel.json, and demo-merchant-mcp carries neither — Railway builds
+//     it from the repo root (docs/operations/railway-services.md) — while all
+//     five declare `start`. A Dockerfile-or-vercel.json rule would silently drop
+//     the demo merchant.
+//   - a package that is not a service reaches a service through the workspace
+//     dependency graph: core is built into backend, frontend and ops, and ui into
+//     frontend and ops, so a change to either deploys those services. The graph is
+//     read from each package.json's dependency fields, by workspace package NAME.
+//
+// So the deploy surfaces of a package are itself when it is a service, and
+// otherwise the surfaces of every workspace package that depends on it,
+// transitively. A package nothing depends on and that declares no `start` script
+// (qa-agent) has no deploy surface: it is a test harness, not a service.
+//
+// The rule is over-inclusive in the safe direction — a README edit inside a
+// service package names that service, though the image's behaviour is unchanged.
+// Under-reporting is the direction that loses a line from a release record, so
+// the coarse answer is the one to give. Test files are the exception: they are
+// not built into anything, so they name no surface.
+
+// `devDependencies` is deliberately absent: a dev dependency is not installed in
+// the deployed image, so it does not make a service build the package. mcp-server
+// lists @haven_ai/core there for its tests, and counting it would name the hosted
+// MCP as a surface for a core change that never reaches its bundle.
+const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies']
+
+// Every workspace package, published or not. The set is the expansion of the
+// root package.json's only workspace glob, `packages/*` — the same directory
+// listing publishedPackages() walks, read once here with the two facts the
+// deploy-surface rule needs.
+function workspacePackages() {
+  const names = readdirSync(PACKAGES_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort()
+
+  const packages = []
+  for (const dir of names) {
+    const manifestPath = join(PACKAGES_DIR, dir, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    const deps = new Set()
+    for (const field of DEPENDENCY_FIELDS) {
+      for (const dep of Object.keys(manifest[field] ?? {})) deps.add(dep)
+    }
+    packages.push({
+      dir,
+      name: manifest.name,
+      private: manifest.private === true,
+      service: typeof manifest.scripts?.start === 'string',
+      deps,
+    })
+  }
+  return packages
+}
+
+// dir -> { pkg, surfaces }. `surfaces` is the sorted list of service package
+// directories that build this package, itself included when it is a service.
+function deploySurfaces(packages) {
+  const byName = new Map(packages.map((p) => [p.name, p]))
+  const dependents = new Map(packages.map((p) => [p.name, []]))
+  for (const p of packages) {
+    for (const dep of p.deps) {
+      if (byName.has(dep)) dependents.get(dep).push(p.name)
+    }
+  }
+
+  const byDir = new Map()
+  for (const p of packages) {
+    // Breadth-first over the dependents graph. `seen` makes a dependency cycle
+    // terminate instead of recursing forever; a cycle adds no surface of its own.
+    const seen = new Set([p.name])
+    const queue = [p.name]
+    const found = new Set()
+    while (queue.length > 0) {
+      const name = queue.shift()
+      const pkg = byName.get(name)
+      if (pkg.service) found.add(pkg.dir)
+      for (const dependent of dependents.get(name) ?? []) {
+        if (seen.has(dependent)) continue
+        seen.add(dependent)
+        queue.push(dependent)
+      }
+    }
+    byDir.set(p.dir, { pkg: p, surfaces: [...found].sort() })
+  }
+  return byDir
 }
 
 // --- what each package actually ships ---------------------------------------
@@ -251,7 +362,32 @@ function literalMembers(pkg, changedFiles) {
 
 // --- classification ----------------------------------------------------------
 
-function classify(changedFiles, packages) {
+// Test-support modules are not tarball content. `test-helpers.ts` is not
+// `.test.ts`, so without this a MODIFIED one landed in `unresolved` while a
+// DELETED one was counted as shipped — the same file, opposite answers,
+// decided only by change status (review finding D).
+//
+// This is a naming heuristic, and the limit is worth stating precisely
+// because an earlier version of this comment overstated it. On the MODIFIED
+// path it is safe by construction: `bundled.has(file)` is checked first, so
+// it only ever routes a file the build already says it did not consume. On
+// the DELETED path there is no such protection — a deleted file cannot be in
+// the head tree's sourcemaps either way, so here the name is the sole
+// decider, and a genuinely bundled module named `test-helpers.ts` would be
+// dropped. Implausible, not impossible.
+//
+// Directory forms carry a trailing slash, matching how `__tests__/` is
+// handled above; without it `__mocks__` could never fire, since it is
+// essentially always a directory.
+function isTestFile(file) {
+  return (
+    /(\.test\.[cm]?[jt]sx?$)|(^|\/)__tests__\//.test(file) ||
+    /(^|\/)(test-helpers?|test-support|__mocks__)(\.[cm]?[jt]sx?)?$/.test(file) ||
+    /(^|\/)(test-helpers?|test-support|__mocks__)\//.test(file)
+  )
+}
+
+function classify(changedFiles, packages, workspace) {
   const ships = []
   const excluded = []
   const unresolved = []
@@ -267,7 +403,18 @@ function classify(changedFiles, packages) {
     const entry = match ? byPackage.get(match[1]) : undefined
 
     if (!entry) {
-      excluded.push({ file, reason: 'not in a published package' })
+      // Not in a published package. Attribute it to the deploy surfaces the tree
+      // says build it, so the "deploy only" answer comes from this same run. A
+      // test file is built into nothing and names no surface; a file outside
+      // packages/ (docs, scripts, workflows) belongs to no workspace package.
+      const ws = match ? workspace.get(match[1]) : undefined
+      const surfaces = ws && !isTestFile(file) ? ws.surfaces : []
+      excluded.push({
+        file,
+        reason: 'not in a published package',
+        ...(ws ? { package: ws.pkg.name } : {}),
+        ...(surfaces.length > 0 ? { deploySurfaces: surfaces } : {}),
+      })
       continue
     }
     const { pkg, bundled, literals } = entry
@@ -282,27 +429,7 @@ function classify(changedFiles, packages) {
     }
 
     const isSource = /^packages\/[^/]+\/src\//.test(file)
-    // Test-support modules are not tarball content. `test-helpers.ts` is not
-    // `.test.ts`, so without this a MODIFIED one landed in `unresolved` while a
-    // DELETED one was counted as shipped — the same file, opposite answers,
-    // decided only by change status (review finding D).
-    //
-    // This is a naming heuristic, and the limit is worth stating precisely
-    // because an earlier version of this comment overstated it. On the MODIFIED
-    // path it is safe by construction: `bundled.has(file)` is checked first, so
-    // it only ever routes a file the build already says it did not consume. On
-    // the DELETED path there is no such protection — a deleted file cannot be in
-    // the head tree's sourcemaps either way, so here the name is the sole
-    // decider, and a genuinely bundled module named `test-helpers.ts` would be
-    // dropped. Implausible, not impossible.
-    //
-    // Directory forms carry a trailing slash, matching how `__tests__/` is
-    // handled above; without it `__mocks__` could never fire, since it is
-    // essentially always a directory.
-    const isTest =
-      /(\.test\.[cm]?[jt]sx?$)|(^|\/)__tests__\//.test(file) ||
-      /(^|\/)(test-helpers?|test-support|__mocks__)(\.[cm]?[jt]sx?)?$/.test(file) ||
-      /(^|\/)(test-helpers?|test-support|__mocks__)\//.test(file)
+    const isTest = isTestFile(file)
 
     // A DELETED source cannot be in head's sourcemaps, because it does not exist
     // at head. Absence carries no information here, so the sourcemap evidence
@@ -427,15 +554,33 @@ function lineStats(base, head, files) {
 
 // --- report ------------------------------------------------------------------
 
+// The PR-time statement (#4770). Advisory: it is a line in the pull request, and
+// nothing reads it. The three answers are the template's three answers, and the
+// train wins when both paths are affected — the published change is the one that
+// waits for a release, so it is the one the line has to name.
+function releaseLever(packages, surfaces) {
+  if (packages.length > 0) {
+    return {
+      answer: 'next release train',
+      line: `next release train — ${packages.join(', ')}${
+        surfaces.length > 0 ? ` (also deploys: ${surfaces.join(', ')})` : ''
+      }`,
+    }
+  }
+  if (surfaces.length > 0) return { answer: 'deploy only', line: `deploy only — ${surfaces.join(', ')}` }
+  return { answer: 'none', line: 'none — nothing published, nothing deployed' }
+}
+
 function buildReport(opts) {
   assertUsableCheckout()
   const baseSha = resolveRef(opts.base)
   const headSha = resolveRef(opts.head)
 
   const packages = publishedPackages()
+  const workspace = deploySurfaces(workspacePackages())
   const commits = commitsInRange(baseSha, headSha)
   const changedFiles = changedFilesInRange(baseSha, headSha)
-  const { ships, excluded, unresolved } = classify(changedFiles, packages)
+  const { ships, excluded, unresolved } = classify(changedFiles, packages, workspace)
 
   const shippedFiles = ships.map((s) => s.file)
   const stats = lineStats(baseSha, headSha, shippedFiles)
@@ -448,6 +593,7 @@ function buildReport(opts) {
   const inferred = lineStats(baseSha, headSha, inferredFiles)
 
   const affected = [...new Set(ships.map((s) => s.pkg))].sort()
+  const surfaces = [...new Set(excluded.flatMap((e) => e.deploySurfaces ?? []))].sort()
 
   return {
     range: { base: opts.base, baseSha, head: opts.head, headSha },
@@ -455,6 +601,8 @@ function buildReport(opts) {
     references: referencesIn(commits),
     packages: packages.map((p) => ({ name: p.name, version: p.version })),
     affectedPackages: affected,
+    deploySurfaces: surfaces,
+    releaseLever: releaseLever(affected, surfaces),
     shipped: {
       files: ships,
       count: ships.length,
@@ -517,6 +665,12 @@ function render(report) {
     out.push(`  ${String(count).padStart(4)}  ${reason}`)
   }
 
+  // The other path to an installed agent. Named from the same run as the shipped
+  // delta, so the PR-time statement is one command rather than a hand count.
+  out.push('')
+  out.push(`Deploy surfaces affected: ${report.deploySurfaces.length ? report.deploySurfaces.join(', ') : '(none)'}`)
+  out.push('  (unpublished workspace packages that declare a start script, plus the packages they build)')
+
   if (report.unresolved.length > 0) {
     out.push('')
     out.push(`UNRESOLVED: ${report.unresolved.length} source files could not be classified`)
@@ -535,6 +689,12 @@ function render(report) {
     out.push('  whether the file belongs in the record. The delta above is measured but not')
     out.push('  complete, which is why this run exits 1 rather than 0.')
   }
+
+  // The line the pull request carries (#4770). Last, so it is the thing left on
+  // screen after a long report, and prefixed so it can be copied whole.
+  out.push('')
+  out.push(`Release lever: ${report.releaseLever.line}`)
+  out.push("  (advisory — paste it into the pull request's Release lever line; it gates nothing)")
 
   return out.join('\n')
 }
@@ -572,11 +732,46 @@ function main() {
 
   // An unresolved file means the shipped delta may be an under-count, so the exit
   // code says so rather than leaving a green run to be quoted as a clean measure.
-  process.exit(report.unresolved.length > 0 ? 1 : 0)
+  //
+  // `process.exitCode`, never `process.exit()` here (#4809): Node documents a
+  // write to a pipe as asynchronous on POSIX, and `process.exit()` ends the
+  // process before it drains (measured on macOS, Node v24.17.0). A `--json` payload over the 64 KiB pipe buffer then reached
+  // `release-records.mjs` cut at byte 65 536 and died in `JSON.parse`. Nothing
+  // keeps this process alive after `main()` returns — no timer, no handle — so
+  // it exits by itself once stdout is flushed. The two refusals above keep
+  // `process.exit(2)`: each writes one short line to stderr.
+  process.exitCode = report.unresolved.length > 0 ? 1 : 0
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   main()
 }
 
-export { buildReport, classify, publishedPackages, bundledSources, literalMembers, Refusal }
+export {
+  buildReport,
+  classify,
+  publishedPackages,
+  workspacePackages,
+  deploySurfaces,
+  releaseLever,
+  bundledSources,
+  literalMembers,
+  isTestFile,
+  Refusal,
+}

@@ -99,8 +99,10 @@
       "note": "Declares no internal dependencies at all, which is why an SDK change does not fan out to it."
     },
     "demo_merchant": {
-      "dependsOn": [],
-      "note": "packages/demo-merchant-mcp (#2996). Declares no @haven_ai/* dependency today -- checked, not assumed: it does not import @haven_ai/sdk or any sibling package, so an SDK change does not fan out to it. If it starts consuming one, package-dependencies.test.mjs's real-manifest check catches the mismatch."
+      "dependsOn": [
+        "sdk"
+      ],
+      "note": "packages/demo-merchant-mcp (#2996). Consumes @haven_ai/sdk since #4723 (the merchant-side passport verifier), so an SDK change fans out to this job. Its build/test/typecheck scripts build core and the SDK first, the same way backend/package.json does, so the Railway build command does not change."
     },
     "qa_agent": {
       "dependsOn": ["sdk", "signer"],

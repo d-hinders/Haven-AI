@@ -60,6 +60,22 @@ describe('Tabs', () => {
     expect(screen.getByRole('tab', { name: 'ActivityNeeds attention' })).toHaveAttribute('aria-selected', 'false')
   })
 
+  // #4571: the list is a horizontal scroll container, and `overflow-x-auto`
+  // alone makes it one on BOTH axes (CSS computes `overflow-y: visible` to
+  // `auto`). The clipped decoration inside it — the selected tab's `-mb-px`
+  // underline overlap and the 44px `::after` hit area on a 38px tab — then
+  // overflows it by 3px vertically, and Chrome paints a vertical scrollbar at
+  // the right end of the row. That was the thin line in the 375px dark
+  // Settings screenshot. jsdom has no layout, so this pins the class that
+  // removes the vertical axis; `e2e/settings-tabs.visual.spec.ts` measures the
+  // real geometry.
+  it('is a horizontal-only scroll container — no vertical scrollbar (#4571)', () => {
+    renderTabs()
+    const list = screen.getByRole('tablist', { name: 'Account' })
+    expect(list.className).toContain('overflow-x-auto')
+    expect(list.className).toContain('overflow-y-hidden')
+  })
+
   it('is controlled: click reports the new value, the mark moves only when the caller re-renders', async () => {
     const user = userEvent.setup()
     const { onChange, rerender } = renderTabs()

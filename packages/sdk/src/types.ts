@@ -730,6 +730,22 @@ export interface HavenAgent {
    * removes it. Null when not superseded, and on an older backend that sends nothing.
    */
   supersededBy: HavenAgentSupersession | null
+  /**
+   * #4721: this agent's own Agent Passport reference, or null when it has no
+   * anchored passport (none, pending or failed), when the read failed, and on
+   * an older backend that sends nothing. Present `attestationUid` + `chainId`
+   * to a merchant that asks for them; never treat `verifyUrl` as authority —
+   * a merchant resolves the UID against a Haven verifier it already pins.
+   */
+  passport: HavenAgentPassport | null
+}
+
+/** #4721: an anchored passport's compact reference. */
+export interface HavenAgentPassport {
+  attestationUid: string
+  chainId: number
+  /** A convenience link to Haven's verifier; absent when the deployment cannot honestly emit one. */
+  verifyUrl?: string
 }
 
 /** #3772: the "this agent was replaced" notice carried by agent reads. */
@@ -827,9 +843,11 @@ export interface HavenAllowanceSummary {
   /**
    * #4352 (additive, decision 5): when the agent's only budgets for this
    * chain have ENDED, the latest ended budget's expiry (ISO 8601) — read by
-   * the same narrow expired-row query the refusal answers use. `null` when no
-   * expired row exists; the field NEVER reports a live budget. `null` on a
-   * backend that predates the field.
+   * the same narrow expired-row query the refusal answers use. `null`
+   * whenever `allowances` has a row for this chain: a live or dormant budget
+   * is never reported as ended, even when an older ended row exists beside
+   * it. The date is answered only when `allowances` is empty and an expired
+   * row exists. `null` on a backend that predates the field.
    */
   budgetEndedAt: string | null
   /** #3772: see {@link HavenAgent.supersededBy}. */
@@ -1670,11 +1688,19 @@ export interface HavenPaymentReceipt {
   /**
    * #4534: the purchase correlation key. `purchaseGroupId` is the merchant's
    * own invoice/order id (or an agent-supplied group key) shared by every
-   * payment of one purchase; `parentPaymentId` is the purchase payment a fee
-   * call paid for. Both null on an ungrouped payment. Absent on an older
-   * backend.
+   * payment of one purchase; `parentReceiptId` is the purchase's receipt
+   * (evidence) id — the `id` of the parent purchase receipt, NOT a payment id.
+   * Both null on an ungrouped payment. Absent on an older backend.
+   *
+   * #4577: joins to `id`, not to `paymentId`.
    */
   purchaseGroupId?: string | null
+  parentReceiptId?: string | null
+  /**
+   * @deprecated #4577: same value as `parentReceiptId`, under a name that says
+   * the wrong thing — it holds a receipt (evidence) id, not a payment id. Kept
+   * because 0.13.0-alpha.0 shipped it. Use `parentReceiptId`.
+   */
   parentPaymentId?: string | null
   confirmedAt: string | null
   createdAt: string
@@ -2486,7 +2512,8 @@ export interface X402Erc7710Settlement {
    * Pass verbatim as the `PAYMENT-SIGNATURE` header on the merchant retry —
    * that name ALONE. erc7710 is always x402 v2, and this header carries the
    * delegation chain, so also sending the legacy `X-PAYMENT` overflows the
-   * merchant's header limit (HTTP 431, #2341).
+   * merchant's header limit (HTTP 431, #2341). Since #4754 every x402 v2
+   * payload follows the same one-name rule.
    */
   paymentHeader: string
   /** The merchant address the child delegation is pinned to. */
@@ -2681,6 +2708,8 @@ export interface RawHavenAgent {
   execution_rail: string
   /** #3772: absent on an older backend. */
   superseded_by?: { agent_id: string; superseded_at: string } | null
+  /** #4721: absent on an older backend. */
+  passport?: { attestation_uid: string; chain_id: number; verify_url?: string } | null
 }
 
 /** @internal */
@@ -2780,8 +2809,13 @@ export interface RawHavenPaymentReceipt {
   delivery_reported_at?: string | null
   /** #4469: the NON-SECRET delivery pointer (#3778); absent on an older backend. */
   delivery_reference?: string | null
-  /** #4534: the purchase correlation key; absent on an older backend. */
+  /**
+   * #4534: the purchase correlation key; absent on an older backend.
+   * #4577: `parent_receipt_id` is the parent purchase receipt's `id`;
+   * `parent_payment_id` carries the same value as a deprecated alias.
+   */
   purchase_group_id?: string | null
+  parent_receipt_id?: string | null
   parent_payment_id?: string | null
   confirmed_at: string | null
   created_at: string

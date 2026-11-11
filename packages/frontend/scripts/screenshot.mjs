@@ -724,6 +724,10 @@ export const FIXTURE_ACCOUNT = {
   // keeps `fixture-shape-parity.test.ts`'s strict key comparison honest now
   // that the e2e `testSafe` carries the field.
   account_type: 'delegator_hybrid',
+  // #4719: a Base Sepolia account on a deployment with schema UID and
+  // verifier set, so the captures show the passport opt-in, not the
+  // "not available" reason.
+  passport_issuable: true,
   created_at: '2026-05-01T10:00:00.000Z',
 }
 export const FIXTURE_USER = {
@@ -1292,6 +1296,29 @@ export const FIXTURE_OVERVIEW = {
   hasOlderActivity: false,
   activityWindowDays: 7,
   activityWindowStart: new Date((T0 - 7 * 86_400) * 1000).toISOString(),
+}
+
+// #4707: the first-agent-payment card's own read. The overview fixture says
+// `hasFirstAgentPayment: true`, so the row is what that state now looks like —
+// the card replaces the old "You're set up" line inside Needs attention.
+// `confirmedAt` sits two minutes before T0, so a capture with the frozen clock
+// reads "just now"; under a real clock it reads its date. Either way the card
+// is the same surface.
+export const FIXTURE_FIRST_AGENT_PAYMENT = {
+  payment: {
+    id: '44444444-4444-4444-8444-444444444444',
+    agentName: 'Research agent',
+    amountHuman: '0.05',
+    amountRaw: '50000',
+    tokenSymbol: 'USDC',
+    chainId: 84532,
+    confirmedAt: new Date((T0 - 120) * 1000).toISOString(),
+    usdValue: 0.05,
+    eurValue: 0.046,
+    sekValue: 0.54,
+    merchantName: null,
+    x402ResourceUrl: 'https://research.example/paper',
+  },
 }
 
 // #3804: the cached budget-remaining read. One KNOWN row (chain-backed,
@@ -2074,6 +2101,7 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/chains') return { deployable: [FIXTURE_ACCOUNT.chain_id] }
   if (pathname === '/dashboard/overview') return FIXTURE_OVERVIEW
   if (pathname === '/dashboard/budget-remaining') return FIXTURE_BUDGET_REMAINING
+  if (pathname === '/dashboard/first-agent-payment') return FIXTURE_FIRST_AGENT_PAYMENT
   // #3813's server-saved "Needs attention" dismissals — read on every dashboard
   // render. Without this key the generic fallback answered an object with no
   // `dismissals` array and the dashboard hit its error boundary (#3897).
@@ -3219,18 +3247,18 @@ const BACKUP_RECOVERY_STAGES = {
 }
 
 /**
- * #2473: the agent budget card's three no-happy-path states.
+ * #2473: the agent budget card's no-happy-path states, plus two budgets.
  *
- * The bug this scenario is evidence for: the grant form's token options came
- * from `currentAgent.allowances`, a view over ACTIVE delegations — empty for
- * exactly the agent that has no budget yet — so a budget-less agent got no
- * form at all and the page's "Add budget" scrolled to an empty anchor. The
- * fixed empty state is therefore the one state a reviewer most needs to see,
- * and no route capture reaches it: the shared fixture's `agent-research`
- * always has a budget.
+ * The bug this scenario was first evidence for: the grant form's token
+ * options came from `currentAgent.allowances`, a view over ACTIVE delegations
+ * — empty for exactly the agent that has no budget yet — so a budget-less
+ * agent got no way to set one. The no-budget state is therefore the one a
+ * reviewer most needs to see, and no route capture reaches it: the shared
+ * fixture's `agent-research` always has a budget.
  *
- *   no-budget   delegations `[]` AND allowances `[]` — the state the fix is
- *               about. The card must show the grant form, not nothing.
+ *   no-budget   delegations `[]` AND allowances `[]` — "No budget yet." with
+ *               Set budget under it (#4226), then the Set budget dialog it
+ *               opens, titled "Set its first budget" (#4564).
  *   load-error  the delegations fetch FAILS. Reachable only as a throw:
  *               `useDelegationBudget`'s `reload` sets `budgetsError` in its
  *               `catch`, and `lib/api.ts` throws only on `!response.ok`, so
@@ -3239,8 +3267,8 @@ const BACKUP_RECOVERY_STAGES = {
  *   loading     the fetch stays pending. The skeleton has to hold the card's
  *               shape, which is a claim only a render can settle.
  *   two-budgets two ACTIVE budgets (#3695) — each row's meter and caption,
- *               the grant form collapsed behind "Add budget", and (shot
- *               after clicking it) the form opened in place.
+ *               no control at the foot (#4261: Add budget is a row's ⋯ menu
+ *               item), and (shot after choosing it) the Add a budget dialog.
  */
 const AGENT_BUDGET_TWO_ROWS = [
   {
@@ -3250,7 +3278,8 @@ const AGENT_BUDGET_TWO_ROWS = [
     delegation_hash: '0x' + '6a'.repeat(32),
     version: 1, status: 'active', is_live: true,
     budget_atomic: '250000000', period_seconds: 604_800,
-    start_date: '2026-06-02T10:00:00.000Z',
+    // #3806: Unix-seconds digit string on the wire, never ISO.
+    start_date: '1780394400',
     expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
     created_at: '2026-06-02T10:00:00.000Z',
   },
@@ -3261,11 +3290,17 @@ const AGENT_BUDGET_TWO_ROWS = [
     delegation_hash: '0x' + '6b'.repeat(32),
     version: 1, status: 'active', is_live: true,
     budget_atomic: '20000000', period_seconds: 86_400,
-    start_date: '2026-06-02T10:00:00.000Z',
+    // #3806: Unix-seconds digit string on the wire, never ISO.
+    start_date: '1780394400',
     expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
     created_at: '2026-06-02T10:00:00.000Z',
   },
 ]
+/** The end (ms) of the period running now, for a row anchored at `startSec`. */
+function currentPeriodEndMs(startSec, periodSeconds) {
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - startSec)
+  return (startSec + (Math.floor(elapsed / periodSeconds) + 1) * periodSeconds) * 1000
+}
 const AGENT_BUDGET_STAGES = {
   'no-budget': { kind: 'ok', delegations: [] },
   'load-error': { kind: 'error' },
@@ -3275,7 +3310,7 @@ const AGENT_BUDGET_STAGES = {
 
 let agentBudgetStage = 'no-budget'
 
-/** Move `agent-budget-card` onto one of its three states. */
+/** Move `agent-budget-card` onto one of its four states. */
 function setAgentBudgetStage(next) {
   if (!(next in AGENT_BUDGET_STAGES)) {
     throw new Error(
@@ -4049,7 +4084,7 @@ export const SCENARIOS = {
 
   /**
    * The `/accounting` feed page after #2868 (#2903 review): the connection
-   * row that now only points at Settings, the Synced transactions list with
+   * row that now only points at Settings, the Sent transactions list with
    * a pushed row (invoice number + Check in Fortnox) and a failed one.
    * Needs the feed-status fixture above — without `hosted && flagEnabled`
    * the page renders null, which is exactly why there was no evidence.
@@ -4116,7 +4151,7 @@ export const SCENARIOS = {
       await main.getByText('Manage your accounting connection in Settings.').waitFor({ timeout: 15_000 })
       await refuseIfPresent(main.getByRole('button', { name: 'Connect', exact: true }), 'accounting-feed · Connect')
       await refuseIfPresent(main.getByRole('button', { name: 'Disconnect', exact: true }), 'accounting-feed · Disconnect')
-      await main.getByRole('heading', { name: 'Synced transactions' }).waitFor({ timeout: 15_000 })
+      await main.getByRole('heading', { name: 'Sent transactions' }).waitFor({ timeout: 15_000 })
       await main.getByTestId('feed-counts').waitFor({ timeout: 15_000 })
       await main.getByText('Fortnox invoice 1042', { exact: true }).waitFor({ timeout: 15_000 })
       await main.getByRole('button', { name: 'Check in Fortnox', exact: true }).waitFor({ timeout: 15_000 })
@@ -5004,7 +5039,7 @@ export const SCENARIOS = {
       const card = section.locator('div.rounded-\\[10px\\]').first()
 
       // #4474: the SHOT is the section, not the card. The slice added the
-      // "Who can approve" heading row and its "All signers in Settings" link
+      // "Who can approve" heading row and its "Passkeys and wallets" link
       // above the card, and a card-only capture evidences neither — the two
       // things the diff is judged on would be the two things the PNG omits.
       // All three states shoot the same wrapper so the framing cannot read as
@@ -6526,12 +6561,13 @@ export const SCENARIOS = {
     },
   },
   /**
-   * #2473: the budget card with no budget, with a failed fetch, and loading.
-   * See AGENT_BUDGET_STAGES above for why each stage is reachable.
+   * #2473: the budget card with no budget (and its dialog), a failed fetch,
+   * loading, and two budgets (and the Add a budget dialog). See
+   * AGENT_BUDGET_STAGES above for why each stage is reachable.
    */
   'agent-budget-card': {
     stages: AGENT_BUDGET_STAGES,
-    /** Exposed so the fixture-contract test can pin each stage (#1409). */
+    /** Exposed the #1409 way; `screenshot-fixture.test.ts` has no case for this scenario. */
     stage: setAgentBudgetStage,
     api(apiPath) {
       // A scenario hook sees the request PATH only (the router strips the
@@ -6553,9 +6589,19 @@ export const SCENARIOS = {
             ...r,
             remaining_atomic: (BigInt(r.budget_atomic) * (4n - usedShare[i % 2]) / 4n).toString(),
             remaining_from_chain: true,
-            period_end: new Date(Date.parse(r.start_date) + r.period_seconds * 1000).toISOString(),
+            // The CURRENT period's end, from the real clock: this harness
+            // freezes none, and a fixed end in the past reads as a stale
+            // read ("refilled-updating"), which draws no meter at all.
+            period_end: new Date(currentPeriodEndMs(Number(r.start_date), r.period_seconds)).toISOString(),
           })),
         }
+      }
+      // A task budget is carved from an active budget (#3329), so the common
+      // no-budget state has no open task budget. The shared fixture's open
+      // one would otherwise sit under "No budget yet." as "taken from the
+      // budget above" with nothing above it.
+      if (apiPath === '/agents/agent-research/task-budgets' && agentBudgetStage === 'no-budget') {
+        return { task_budgets: [] }
       }
       // The agent's own `allowances` is a VIEW over active delegations
       // (#1090), so a no-budget agent whose allowances still listed a token
@@ -6597,9 +6643,16 @@ export const SCENARIOS = {
       // #3695: the heading sits ABOVE the card, so the capture target is the
       // section holding both.
       const card = page.locator('section', { has: heading })
-      const emptyCopy = card.getByText('Set its first budget')
-      const errorCopy = card.getByText(/could not load this agent.s current budgets/)
+      const emptyCopy = card.getByText('No budget yet.')
+      const errorCopy = card.getByText('Agent budgets could not load')
+      // The Set budget dialog mounts INSIDE this section (#4564), so once it
+      // is open `card` matches its submit too: dialog locators go through the
+      // panel's test id, and `setBudget` is read only while it is closed.
       const setBudget = card.getByRole('button', { name: 'Set budget' })
+      const rowMenu = card.getByRole('button', { name: /^Budget options/ })
+      // Never `getByRole('dialog')` as a shot target: that wrapper is
+      // `fixed inset-0` (ui/Modal) and would capture the page behind it.
+      const dialogPanel = page.getByTestId('set-budget-dialog')
 
       const openStage = async (stage) => {
         setAgentBudgetStage(stage)
@@ -6607,18 +6660,27 @@ export const SCENARIOS = {
       }
 
       // ── no budget yet ─────────────────────────────────────────────────────
-      // The grant form is the SUBJECT: before #2473 it did not render here at
-      // all. Waiting on the heading alone would accept the broken state as
-      // the evidence.
+      // "No budget yet." with Set budget under it is the SUBJECT: before
+      // #2473 a budget-less agent had no way to set one. Waiting on the
+      // heading alone would accept the broken state as the evidence.
       await emptyCopy.waitFor({ timeout: 15_000 })
       await setBudget.waitFor({ timeout: 15_000 })
       await refuseIfPresent(errorCopy, 'agent-budget-card · no-budget · error copy')
+      await refuseIfPresent(rowMenu, 'agent-budget-card · no-budget · a budget row')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'no-budget')
 
+      // ...then the dialog it opens (#4564), titled for a first budget.
+      await setBudget.click()
+      await dialogPanel.getByRole('heading', { name: 'Set its first budget' }).waitFor({ timeout: 15_000 })
+      // The click leaves the pointer on the panel; park it off any hover fill.
+      await page.mouse.move(0, 0)
+      await shoot(dialogPanel, 'no-budget-dialog')
+
       // ── load failure ──────────────────────────────────────────────────────
-      // The card must KEEP its form here rather than collapse to a bare error,
-      // which is the design-review finding this state exists to show.
+      // The card must keep Set budget REACHABLE here rather than collapse to a
+      // bare error, which is the design-review finding this state exists to
+      // show — and must not read the unknown list as "no budget yet".
       await openStage('load-error')
       await errorCopy.waitFor({ timeout: 15_000 })
       await setBudget.waitFor({ timeout: 15_000 })
@@ -6627,29 +6689,32 @@ export const SCENARIOS = {
       await shoot(card, 'load-error')
 
       // ── loading ───────────────────────────────────────────────────────────
-      // The skeleton branch renders no form and no list, so both are the
-      // negative proof that this is the loading card and not a settled one.
+      // The skeleton branch renders no Set budget, no empty line and no row,
+      // the negative proof that this is the loading card and not a settled one.
       await openStage('loading')
-      await refuseIfPresent(setBudget, 'agent-budget-card · loading · settled form')
+      await refuseIfPresent(setBudget, 'agent-budget-card · loading · settled Set budget')
       await refuseIfPresent(emptyCopy, 'agent-budget-card · loading · empty copy')
+      await refuseIfPresent(rowMenu, 'agent-budget-card · loading · a budget row')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'loading')
 
       // ── two budgets (#3695) ───────────────────────────────────────────────
-      // Collapsed first: the form must NOT be on screen, the meters must be.
+      // Both meters, and NO control at the foot (#4261): no Set budget, no
+      // empty line. Add budget is a row's ⋯ menu item.
       await openStage('two-budgets')
-      const addBudget = card.getByRole('button', { name: 'Add budget' })
-      await addBudget.waitFor({ timeout: 15_000 })
+      await rowMenu.nth(1).waitFor({ timeout: 15_000 })
       await card.getByRole('progressbar').nth(1).waitFor({ timeout: 15_000 })
-      await refuseIfPresent(setBudget, 'agent-budget-card · two-budgets · form open before Add budget')
+      await refuseIfPresent(setBudget, 'agent-budget-card · two-budgets · Set budget at the foot')
+      await refuseIfPresent(emptyCopy, 'agent-budget-card · two-budgets · empty copy')
       await card.scrollIntoViewIfNeeded()
       await shoot(card, 'two-budgets')
 
-      // ...then the form opened in place.
-      await addBudget.click()
-      await setBudget.waitFor({ timeout: 15_000 })
-      await card.scrollIntoViewIfNeeded()
-      await shoot(card, 'form-open')
+      // ...then ⋯ → Add budget, which opens the same dialog as "Add a budget".
+      await rowMenu.first().click()
+      await page.getByRole('menuitem', { name: 'Add budget' }).click()
+      await dialogPanel.getByRole('heading', { name: 'Add a budget' }).waitFor({ timeout: 15_000 })
+      await page.mouse.move(0, 0)
+      await shoot(dialogPanel, 'form-open')
     },
   },
   // 'send-review' (#1856) is DELETED with its subject (#1989, epic #1440): it
@@ -7058,7 +7123,7 @@ export const SCENARIOS = {
             delegation_hash: '0x' + '8b'.repeat(32),
             version: 1, status: 'active', is_live: true,
             budget_atomic: '150000000', period_seconds: 604_800,
-            start_date: '2026-06-02T10:00:00.000Z',
+            start_date: '1780394400', // #3806: Unix seconds, never ISO
             expires_at: Math.floor(Date.UTC(2027, 5, 2) / 1000),
             created_at: '2026-06-02T10:00:00.000Z',
           }],
@@ -7068,8 +7133,8 @@ export const SCENARIOS = {
       // page) and agent-research, whose Stop budget confirm is captured from
       // its live row. One enrolled passkey and no owner wallet — the same
       // ready answer the half-revoked agents carry for their affordances.
-      // Without it the row's button stays `disabled` (`busy || !ready`) and
-      // the confirm can never open.
+      // Without it the row menu's Stop budget… item stays `disabled` (`!ready`)
+      // and the confirm can never open.
       if (apiPath === '/agents/agent-paused/account-signers' || apiPath === '/agents/agent-research/account-signers') {
         return {
           account_address: FIXTURE_ACCOUNT.account_address,
@@ -7104,9 +7169,11 @@ export const SCENARIOS = {
       // ── the Stop budget confirm, from the live row ───────────────────────
       await page.goto(`${BASE_URL}/agents/agent-research`, { waitUntil: 'networkidle', timeout: 60_000 })
       await dismissMobileSidebar(page, vp)
-      const stopButton = page.getByRole('button', { name: /^Stop budget/ })
-      await stopButton.waitFor({ timeout: 20_000 })
-      await stopButton.click()
+      // #4261: Stop budget… is an item in the row's ⋯ menu, not a button.
+      const rowMenu = page.getByRole('button', { name: /^Budget options/ }).first()
+      await rowMenu.waitFor({ timeout: 20_000 })
+      await rowMenu.click()
+      await page.getByRole('menuitem', { name: 'Stop budget…' }).click()
       const confirm = page.getByRole('dialog', { name: 'Stop this budget?' })
       await confirm.waitFor({ timeout: 20_000 })
       await confirm.getByText(/Research agent can no longer spend from this 250 USDC\/week budget\./).waitFor({ timeout: 20_000 })
@@ -7938,8 +8005,24 @@ async function main() {
   printRunResult(true, `${captured.length} PNG(s) in ${path.relative(process.cwd(), OUT_DIR) || OUT_DIR}`)
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // Run only as a CLI (fixtureFor is imported by tests).
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isEntryPoint()) {
   main().catch((err) => {
     console.error('screenshot failed:', err instanceof Error ? err.message : err)
     printRunResult(false, err instanceof Error ? firstLine(err.message) : String(err))

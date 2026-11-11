@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Issue"
+  short_description: "Review an existing Haven issue or epic"
+  default_prompt: "Use $review-issue to review this Haven issue for specification quality and queue readiness."

@@ -13,7 +13,7 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
   - packages/backend/src/middleware/safe-inflow-retired.ts
-last-verified: "2026-10-23"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Architecture
@@ -133,6 +133,19 @@ done
   `packages/backend/src/domain/chains.ts`), API-key-only agent auth
   (`middleware/agentAuth.ts`), the Safe-import 410s (`routes/user.ts`), and
   that no backend path generates a delegate key.
+- Re-verified 2026-11-02 (weekly docs audit #4605, at dev `fc8ac1eb6`), a full
+  re-read. No claim needed rewriting. Re-checked: every index row's target
+  exists and describes what its row says (docs 00–11), the archive and research
+  links, the decision-log anchor, chain 100's history-only status in all three
+  registries (`SUPPORTED_CHAIN_IDS = [8453, 84532]` in
+  `packages/backend/src/domain/chains.ts`), API-key-only agent auth
+  (`middleware/agentAuth.ts`), the Safe-import 410s, and that no backend path
+  generates a delegate key. The week's drift (receipts' six served keys #4587,
+  the parent receipt field rename #4583, accounting transaction kind #4535 and
+  purchase correlation key #4544, MCP retry-or-stop by failure cause #4516, the
+  typed task-/sub-budget refusals #4483, `delegation_expired` #4376, the
+  dep-lint module-to-module arm #4381) touched covered code and sibling docs
+  without moving any claim this index makes.
 - These docs and their mapped code are the implementation authority.
   [CLAUDE.md](../../CLAUDE.md) is current repository guidance, but broad claims
   must still be checked against implementation. Safe import is closed with the

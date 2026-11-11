@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { deepFind } from './json-reading.js'
+import { SecretManifest } from './secret-manifest.js'
 import {
   REDACTION_CLASSES,
   loadSecrets,
@@ -117,6 +118,16 @@ const CANARIES: Record<RedactionClass, Canary> = {
         isError: false,
       },
       merchant_body: 'MERCHANT-PAID-CANARY-body',
+    },
+  },
+  // #4680: the device-login code and the code-bearing verification URL.
+  'device-code': {
+    needles: ['DEVICE-CODE-CANARY-0123456789', 'ABCD-2345', 'VERIFY-CODE-CANARY'],
+    obj: {
+      device_code: 'DEVICE-CODE-CANARY-0123456789',
+      user_code: 'ABCD-2345',
+      verification_uri_complete: 'https://dev.example/device?code=VERIFY-CODE-CANARY',
+      note: 'open https://dev.example/device?code=VERIFY-CODE-CANARY and approve ABCD-2345',
     },
   },
 }
@@ -353,6 +364,29 @@ describe('runRedaction', () => {
     })
   }
 
+  it('#4678: a run with NO setup task still redacts — the CLI creates the manifest with setupTasks: 0', async () => {
+    // The workflow passes --manifest= unconditionally, so a `tasks=` run of a
+    // shared-agent task used to fail the whole redaction step on a missing
+    // file. The CLI now always creates the manifest; its header says no setup
+    // task ran, so the empty inventory is legitimate.
+    const f = await fixtureRun()
+    const manifestPath = join(f.root, 'eval-secret-manifest', 'manifest.json')
+    await SecretManifest.create(manifestPath, { setupTasks: 0 })
+    const result = await runRedaction({ ...f.opts, env: ENV, manifestPath })
+    expect(result.clean).toBe(true)
+    expect(await ls(f.outDir)).toEqual(['claude-sessions.task-a.trial1.jsonl', 'claude-sessions.task-b.trial1.jsonl'])
+  })
+
+  it('#4678: a manifest that DECLARES setup tasks but records none refuses the redaction', async () => {
+    const f = await fixtureRun()
+    const manifestPath = join(f.root, 'eval-secret-manifest', 'manifest.json')
+    await SecretManifest.create(manifestPath, { setupTasks: 1 })
+    const result = await runRedaction({ ...f.opts, env: ENV, manifestPath })
+    expect(result.clean).toBe(false)
+    expect(await ls(f.outDir)).toBe('missing')
+    expect(f.logs.join('\n')).toContain('declares 1 setup task(s) but records no secrets')
+  })
+
   it('a fallback URL set as a secret with no key-bearing segment is kept whole, with a warning by name', async () => {
     const f = await fixtureRun()
     await writeFile(`${f.opts.inPrefix}.task-c.trial1.jsonl`, lineAt('nested-text', SURVIVORS))
@@ -474,6 +508,50 @@ describe('merchant-body: haven_complete_mcp_tool and refusal echoes', () => {
     expect(result.clean).toBe(false)
     expect(result.scanCounts['merchant-body']).toBeGreaterThan(0)
     expect(await ls(join(root, 'u'))).toBe('missing')
+  })
+
+  // #4696: the shape of a real `claude -p --output-format stream-json` WebFetch.
+  const WEB_FETCH_TEXT = 'The page is the Haven runbook for agents.'
+  const WEB_FETCH_STREAM = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_w', name: 'WebFetch', input: { url: 'https://haven.example.test/', prompt: 'read it' } }] } }),
+    JSON.stringify({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'tu_w', content: WEB_FETCH_TEXT }] },
+      tool_use_result: { bytes: 42, code: 200, codeText: 'OK', result: WEB_FETCH_TEXT, durationMs: 9, url: 'https://haven.example.test/' },
+    }),
+  ].join('\n')
+
+  it('a WebFetch answer scans clean, keeping the text the agent read and its request (#4696)', () => {
+    expect(scanSessionText(WEB_FETCH_STREAM, secrets())['merchant-body']).toBe(1)
+    const { text } = redactSessionText(WEB_FETCH_STREAM, { secrets: secrets() })
+    const line = JSON.parse(text.split('\n')[1])
+    expect(line.message.content[0].content).toBe(WEB_FETCH_TEXT)
+    expect(line.tool_use_result).toEqual({ bytes: 42, code: 200, codeText: 'OK', result: marker('merchant-body'), durationMs: 9, url: 'https://haven.example.test/' })
+    expect(scanSessionText(text, secrets())).toEqual(Object.fromEntries(REDACTION_CLASSES.map((c) => [c, 0])))
+  })
+
+  it("WebFetch's exemption is by tool: another tool's bare result still fails the scan (#4696)", () => {
+    const raw = [PAID_TOOL_USE('tu_o', 'haven_get_payment_status'), TOOL_RESULT('tu_o', COMPLETE_BARE)].join('\n')
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(scanSessionText(text, secrets())['merchant-body']).toBeGreaterThan(0)
+  })
+
+  it.each(['mcp__merchant__WebFetch', 'webfetch', 'WebFetch2'])('the name must be exactly WebFetch: %s still fails the scan (#4696)', (name) => {
+    const { text } = redactSessionText(WEB_FETCH_STREAM.replace('"name":"WebFetch"', `"name":"${name}"`), { secrets: secrets() })
+    expect(scanSessionText(text, secrets())['merchant-body']).toBeGreaterThan(0)
+  })
+
+  it('a scan hit names the file and its classes, and no value (#4696)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'redact-4696-hit-'))
+    await writeFile(join(root, 'claude-sessions.some-task.trial2.jsonl'), TOOL_RESULT('tu_missing', COMPLETE_BARE))
+    await writeFile(join(root, 'claude-sessions.clean-task.trial1.jsonl'), WEB_FETCH_STREAM)
+    const logs: string[] = []
+    const result = await runRedaction({ inPrefix: join(root, 'claude-sessions'), stageDir: join(root, 's'), outDir: join(root, 'u'), required: REQUIRED, optional: OPTIONAL, env: ENV, log: (l) => logs.push(l) })
+    expect(result.clean).toBe(false)
+    const named = logs.filter((l) => l.startsWith('::error::redact-sessions scan hit in '))
+    expect(named).toHaveLength(1)
+    expect(named[0]).toMatch(/^::error::redact-sessions scan hit in claude-sessions\.some-task\.trial2\.jsonl: merchant-body: \d+$/)
+    expect(logs.join('\n')).not.toContain('MERCHANT-PAID-CANARY')
   })
 
   it('a non-paid tool result without result keeps every field', () => {
@@ -655,5 +733,73 @@ describe('round 2: escapes in parseable lines, unbounded whitespace, first unmar
     expect(paid.map(([n]) => n)).toEqual(['haven_complete_mcp_tool', 'haven_settle_mcp_tool'])
     const firstOther = Math.min(...handlers.filter(([n]) => !paid.some(([p]) => p === n)).map(([, i]) => i))
     for (const [i, l] of lines.entries()) if (RESULT_FIELD.test(l)) expect(i, `result field at paid-mcp-completion.ts:${i + 1}`).toBeLessThan(firstOther)
+  })
+})
+
+// ── #4680: the device code, in all four places ─────────────────────────────
+
+describe('device-code: tool arguments, tool results, assistant text and the result line', () => {
+  const DEVICE = 'DEVICE-CODE-CANARY-0123456789'
+  const USER = 'ABCD-2345'
+  const URL = 'https://dev.example/device?code=VERIFY-CODE-CANARY'
+
+  it('redacts the code after --poll in a run_command argv (tool arguments)', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      message: {
+        model: 'claude-sonnet-5-5',
+        content: [{ type: 'tool_use', id: 'tu_1', name: 'mcp__eval-command__run_command', input: { argv: ['npx', '@haven_ai/cli@dev', 'login', '--poll', DEVICE] } }],
+      },
+    })
+    const { text, counts } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain(DEVICE)
+    expect(text).toContain('--poll')
+    expect(counts['device-code']).toBeGreaterThan(0)
+  })
+
+  it('redacts device_code / user_code / verification_uri_complete in a tool result', () => {
+    const raw = JSON.stringify({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu_1',
+            content: [{ type: 'text', text: JSON.stringify({ device_code: DEVICE, user_code: USER, verification_uri_complete: URL }) }],
+          },
+        ],
+      },
+    })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain(DEVICE)
+    expect(text).not.toContain(USER)
+    expect(text).not.toContain('VERIFY-CODE-CANARY')
+  })
+
+  it('redacts the code and the URL in assistant text', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: `Open ${URL} and approve the code ${USER}.` }] },
+    })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain('VERIFY-CODE-CANARY')
+    expect(text).not.toContain(USER)
+  })
+
+  it('redacts the code and the URL on the result line (which is kept on purpose)', () => {
+    const raw = JSON.stringify({ type: 'result', subtype: 'success', result: `device_code: ${DEVICE}; open ${URL} and approve ${USER}` })
+    const { text } = redactSessionText(raw, { secrets: secrets() })
+    expect(text).not.toContain(DEVICE)
+    expect(text).not.toContain('VERIFY-CODE-CANARY')
+    expect(text).not.toContain(USER)
+  })
+
+  it('the independent scan catches a broken device-code rule (fail-closed)', () => {
+    const raw = JSON.stringify({ type: 'result', result: `device_code: ${DEVICE}` })
+    const broken = { ...secrets(), needles: [] }
+    const { text } = redactSessionText(raw, { secrets: broken, disabled: new Set(['device-code']) })
+    expect(text).toContain(DEVICE)
+    // The scan is a separate detector: it must still see the code.
+    expect(scanSessionText(text, broken)['device-code']).toBeGreaterThan(0)
   })
 })

@@ -1,0 +1,1 @@
+{"error": {"type": "service_unavailable", "code": "writes_disabled", "message": "Writes are switched off for this app.", "request_id": "req_fixture_writes_disabled"}}

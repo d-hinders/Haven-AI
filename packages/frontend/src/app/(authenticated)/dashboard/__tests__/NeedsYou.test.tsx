@@ -93,6 +93,24 @@ describe('NeedsYou', () => {
     expect(band.contains(screen.getByRole('button', { name: 'Hide for now' }))).toBe(true)
   })
 
+  it('#4744: captions the items "Also needs you" exactly when the guide and items both show', () => {
+    const base = { hasOverviewError: false, onRetry: () => {}, onDismiss: () => {} }
+    const one = [item({ id: 'i1', title: 'Scout reached its budget' })]
+    const { rerender } = render(<NeedsYou {...base} items={one} guide={<p>steps</p>} />)
+    const caption = screen.getByText('Also needs you')
+    // A caption, not a heading: the card keeps its one h2.
+    expect(caption.tagName).toBe('P')
+    expect(caption).toHaveClass('text-xs', 'font-medium', 'text-[var(--v2-ink-3)]')
+    // Above the first item, inside the divided block.
+    expect(caption.compareDocumentPosition(screen.getByText('Scout reached its budget')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(caption.closest('.border-t')).not.toBeNull()
+
+    rerender(<NeedsYou {...base} items={[]} guide={<p>steps</p>} />)
+    expect(screen.queryByText('Also needs you')).not.toBeInTheDocument()
+    rerender(<NeedsYou {...base} items={one} />)
+    expect(screen.queryByText('Also needs you')).not.toBeInTheDocument()
+  })
+
   // ── #3902: the title, the count badge and the empty state ────────────────
 
   it('titles the card "Needs attention", with the count beside the heading, not inside it', () => {
@@ -360,5 +378,74 @@ describe('NeedsYou', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Add funds' }))
     expect(onAddFunds).toHaveBeenCalledWith('acct-1')
+  })
+})
+
+/**
+ * #4710: the still-connecting row offers TWO actions — Open (the existing
+ * resume link) and Start again (cancel + reopen prefilled) — and no dismiss
+ * control, because it ends on its own within 30 minutes, or on register or
+ * cancel.
+ */
+describe('NeedsYou — still connecting (#4710)', () => {
+  const SETUP_ID = '11111111-1111-1111-1111-111111111111'
+  const CONNECTING = item({
+    id: `connection-pending:${SETUP_ID}`,
+    kind: 'connection-pending',
+    tone: 'brand',
+    badge: 'Connecting',
+    title: 'Research agent is still connecting',
+    subtitle: 'Your setup prompt works until 14:30.',
+    actionLabel: 'Open',
+    href: `/agents?setup=${SETUP_ID}`,
+    setupId: SETUP_ID,
+  })
+
+  it('renders Open as the resume link and Start again as a button', () => {
+    render(
+      <NeedsYou
+        items={[CONNECTING]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        onStartAgain={() => {}}
+      />,
+    )
+    expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute(
+      'href',
+      `/agents?setup=${SETUP_ID}`,
+    )
+    expect(screen.getByRole('button', { name: 'Start again' })).toBeInTheDocument()
+  })
+
+  it('hands the setup id to Start again', async () => {
+    const user = userEvent.setup()
+    const onStartAgain = vi.fn()
+    render(
+      <NeedsYou
+        items={[CONNECTING]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        onStartAgain={onStartAgain}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Start again' }))
+    expect(onStartAgain).toHaveBeenCalledWith(SETUP_ID)
+  })
+
+  it('offers no dismiss control', () => {
+    render(
+      <NeedsYou
+        items={[CONNECTING]}
+        hasOverviewError={false}
+        onRetry={() => {}}
+        onDismiss={() => {}}
+        onStartAgain={() => {}}
+      />,
+    )
+    expect(
+      screen.queryByTestId(`attention-dismiss-connection-pending:${SETUP_ID}`),
+    ).not.toBeInTheDocument()
   })
 })

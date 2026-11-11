@@ -67,9 +67,9 @@ describe how the system is actually built and how we work on it.
 - [Migrate local → hosted MCP](operations/local-to-hosted-mcp.md)
 - [Dev environment (Railway + Vercel, `dev` branch)](operations/dev-environment.md)
 - [Railway service settings and cost](operations/railway-services.md)
+- [Secret inventory and rotation runbook](operations/secret-rotation.md)
 - [Automated agent QA (local + GitHub Actions)](operations/agent-qa.md)
 - [E2E QA runbook (agent connection & x402)](operations/e2e-qa-runbook.md)
-- [qa-explore-ui cadence (recurring UX discovery → backlog)](operations/qa-explore-ui-cadence.md)
 
 **Regulatory**
 - [CASP / MiCA risk guardrails](regulatory/casp-risk-guardrails.md)

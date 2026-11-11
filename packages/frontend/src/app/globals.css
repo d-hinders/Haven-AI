@@ -184,11 +184,9 @@
     animation: v2-chart-grow 0.45s ease-out both;
   }
   .v2-chart-draw-stroke {
-    /* The dash trick: 1 path-length, measured in the same units the
-       drawing uses; path-length units are the viewBox's. */
-    stroke-dasharray: 1;
-    stroke-dashoffset: 1;
-    animation: v2-chart-draw-stroke 0.6s ease-out 0.15s both;
+    /* `backwards`, not `both`: the clip holds through the delay and is gone
+       when the reveal ends, so nothing can leave the line cut short. */
+    animation: v2-chart-draw-stroke 0.6s ease-out 0.15s backwards;
   }
 }
 
@@ -202,8 +200,16 @@
  * `ui/StackedBarChart` and `ui/AreaChart` stamp the gated classes (in the
  * prefers-reduced-motion: no-preference block above) on the elements that
  * grow in — the per-day bar groups (grow from the baseline, which is where a
- * bar's story starts) and the area line (drawn along its path by the
- * dash-offset companion, the `_stroke` variant).
+ * bar's story starts) and the area line (revealed left to right by the clip
+ * companion, the `_stroke` variant).
+ *
+ * The reveal is a clip and never a dash. The line is
+ * `vector-effect: non-scaling-stroke`, so the browser measures a dash in CSS
+ * px while `pathLength` is the path's length in viewBox units. On a chart
+ * stretched wider than its viewBox, a dash of "the whole path" runs out early
+ * and the line stops part-way across, at the viewBox's width over the chart's.
+ * The insets are negative so the clip takes nothing from the stroke's width or
+ * its round caps while it runs.
  *
  * The gating lives with the `.v2-mesh-drift` animation above, which is why
  * the primitives do not subscribe to the media list themselves: the media
@@ -220,8 +226,8 @@
 }
 
 @keyframes v2-chart-draw-stroke {
-  from { stroke-dashoffset: 1; }
-  to   { stroke-dashoffset: 0; }
+  from { clip-path: inset(-8px 100% -8px -8px); }
+  to   { clip-path: inset(-8px -8px -8px -8px); }
 }
 
 /* Custom scrollbar */
@@ -249,7 +255,8 @@
   scrollbar-color: rgba(82, 95, 127, 0.22) transparent;
 }
 
-/* Copy-to-clipboard checkmark spring */
+/* Milestone's check spring (#4702). `ui/Milestone` is the only consumer: the
+   copy button's 1.5s confirmation shares the name but not this class. */
 @keyframes check-pop {
   0%   { transform: scale(0.4); opacity: 0; }
   55%  { transform: scale(1.25); opacity: 1; }
@@ -385,6 +392,18 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* #4638: a ring that leaves the disc at ~30% ink-2, grows ~8px and fades,
+     then rests before the next one. One direction only: it never shrinks
+     back in. */
+  @keyframes v2-step-halo {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--v2-ink-2) 30%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 8px transparent; }
+  }
+
+  .v2-step-halo {
+    animation: v2-step-halo 1.8s ease-out infinite;
+  }
+
   .v2-animate-step-rise {
     animation: v2-step-rise 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
@@ -409,9 +428,10 @@
 }
 
 /*
- * Onboarding success bloom — a single soft radial glow that grows once and
- * fades behind the check-pop circle on the wizard's "you're in" screen.
- * Plays only on first paint of the success state.
+ * Milestone Peak's bloom (#4702) — a single soft radial glow that grows once
+ * and fades behind the check. `ui/Milestone` owns the class, and the glow's
+ * size comes from the child it wraps, so a 48px dialog disc and a 56px
+ * onboarding disc bloom at their own scale. Plays once, on the moment.
  */
 @keyframes v2-bloom {
   0%   { opacity: 0; transform: scale(0.55); }
@@ -422,6 +442,23 @@
 @media (prefers-reduced-motion: no-preference) {
   .v2-animate-bloom {
     animation: v2-bloom 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+/*
+ * Milestone Live (#4702) — a row that arrives while the page is open fades in
+ * from a soft brand-soft wash over 1600ms. No check, no sound: the row's own
+ * content is the news. `ui/Milestone` owns the class; nothing consumes it yet
+ * beyond the `/design-system` specimen (#4708 is its first product use).
+ */
+@keyframes v2-live-row {
+  from { opacity: 0; background-color: var(--v2-brand-soft); }
+  to   { opacity: 1; background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .v2-animate-live {
+    animation: v2-live-row 1600ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }
 

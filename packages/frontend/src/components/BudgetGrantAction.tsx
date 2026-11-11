@@ -225,16 +225,24 @@ export default function BudgetGrantAction({
           DialogActions: equal halves from `sm` up, stacked primary-on-top
           below it. */}
       {leadingAction ? (
-        <DialogActions className={actionsClassName}>
-          {leadingAction}
-          <Button
-            onClick={handleClick}
-            disabled={busy || !ready || !input || outcome === 'slot_occupied'}
-            className="flex-1"
-          >
-            {busy ? busyLabel : label}
-          </Button>
-        </DialogActions>
+        <>
+          {/* #4564: the dialog-footer mode carries the same pre-sign line the
+              page form does. It sits ABOVE the pair — the sentence explains
+              what the action does, so it must be read before the button. */}
+          {helper && (
+            <p className="mb-3 text-xs leading-relaxed text-[var(--v2-ink-3)]">{helper}</p>
+          )}
+          <DialogActions className={actionsClassName}>
+            {leadingAction}
+            <Button
+              onClick={handleClick}
+              disabled={busy || !ready || !input || outcome === 'slot_occupied'}
+              className="flex-1"
+            >
+              {busy ? busyLabel : label}
+            </Button>
+          </DialogActions>
+        </>
       ) : (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <Button

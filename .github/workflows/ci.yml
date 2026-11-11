@@ -35,6 +35,7 @@ jobs:
       demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
       core: ${{ steps.filter.outputs.core }}
       qa_agent: ${{ steps.filter.outputs.qa_agent }}
+      packages: ${{ steps.filter.outputs.packages }}
       full: ${{ steps.filter.outputs.full }}
 
     steps:
@@ -274,6 +275,13 @@ jobs:
       - name: Build demo merchant
         run: npm run build -w packages/demo-merchant-mcp
 
+      # #4723: the package now imports @haven_ai/sdk at runtime, so a green
+      # tsup is not enough — the built entrypoint must resolve its workspace
+      # dependency and bind a socket. The script waits for the startup banner,
+      # which is printed inside `server.listen`'s callback.
+      - name: Smoke-test the built service
+        run: npm run smoke:start -w packages/demo-merchant-mcp
+
   core_checks:
     name: Core checks
     needs: changes
@@ -508,6 +516,17 @@ jobs:
           npm run lint:deps
           npm run lint:deps:test
 
+      - name: Route line ceiling (#4762)
+        # Blocking, shrink-only ceiling over backend route files larger than 400
+        # lines (epic #4759 slice 3). Slices 1 and 2 thinned routes/payments.ts
+        # from 1572 lines to 291; this stops a large route growing back. A file
+        # at or under 400 lines needs no baseline entry, so a new small route
+        # passes with no ceremony. Growth is a reviewed hand edit of
+        # packages/backend/route-line-ceiling.json, defended in the PR.
+        run: |
+          npm run lint:route-lines
+          npm run lint:route-lines:test
+
       - name: DB-mock ratchet (#1227)
         # Blocking, shrink-only baseline over positional DB mocking
         # (vi.mock('db.js') + mockResolvedValueOnce counts). Database
@@ -605,6 +624,38 @@ jobs:
 
       - name: Build backend
         run: npm run build -w packages/backend
+
+  packages_checks:
+    name: Package dependency cycles (#4763)
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Runtime import cycles across the eleven packages (#4763)
+        # Blocking and unwaivable, like `no-circular` everywhere else. Rule 7 of
+        # docs/architecture/10-module-boundaries.md was checked on backend and
+        # core only; this pass covers the other eleven packages under the
+        # owner's RUNTIME definition (type-only imports are not edges). It runs
+        # here, not in backend_checks, because a PR touching only frontend, ui,
+        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp or
+        # qa-agent never triggers that job — which is how the SDK's runtime
+        # cycle survived. Self-tested for the same reason as lint:deps above:
+        # a gate that cannot fire is worse than no gate.
+        run: |
+          npm run lint:dep-cycles
+          npm run lint:dep-cycles:test
 
   mcp_checks:
     name: MCP checks
@@ -1014,9 +1065,30 @@ jobs:
     needs: [changes, frontend_checks]
     if: always() && needs.changes.outputs.frontend == 'true' && needs.frontend_checks.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # #4651: 12, not 8. Measured on PR #4650 (2026-11-04) — the PR that added
+    # `e2e/send-dialog.visual.spec.ts` (12 tests) — the job took 8m11s and
+    # 8m22s across two attempts, with EVERY step green and `Upload visual diff
+    # artifacts` SKIPPED because no diff existed. The previous merged UI PR
+    # (#4649) took 7m51s, so 8 was already at the edge and the new spec tipped
+    # it over: the job was killed by its own timeout AFTER the comparisons
+    # passed, and the check read `fail`/`cancelled` — indistinguishable in
+    # `gh pr checks` from a real pixel failure.
+    #
+    # 12 is 1.43x the measured worst case (8m22s). The headroom rule and the
+    # measurement are stated in docs/contributing/ship-playbooks/frontend.md
+    # §4: keep the budget at >= 1.4x the measured worst case, and re-measure
+    # when a visual spec is added. The step at the end of this job makes a
+    # cancellation legible rather than leaving it to look like a pixel diff.
+    timeout-minutes: 12
 
     steps:
+      # #4651: the timeout diagnostic at the end of this job needs the job's
+      # own start, not the run's — `github.run_started_at` is minutes earlier
+      # (this job waits on `changes` and `frontend_checks`), which would make
+      # every superseded run look like a timeout.
+      - name: Record job start (the timeout diagnostic below reads it)
+        run: echo "start=$(date +%s)" > "$RUNNER_TEMP/design-visual-start"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -1139,9 +1211,44 @@ jobs:
           path: output/playwright/test-results
           retention-days: 7
 
+      # #4651. A job killed by its own `timeout-minutes` is reported as
+      # `fail`/`cancelled`, which `gh pr checks` renders exactly like a pixel
+      # failure — so a reviewer has to open the job and read the step list to
+      # tell them apart. This step runs only on cancellation and says which of
+      # the two it was, in its NAME (the part a reviewer sees without opening
+      # the log) and in the job summary.
+      #
+      # It distinguishes the two cancellation causes by elapsed time, because
+      # `concurrency.cancel-in-progress` cancels a superseded run the same way
+      # the timeout does: at or past the budget it is the timeout, under it a
+      # newer push superseded this run. A real pixel failure never reaches this
+      # step — it fails the comparison step and uploads `visual-regression-diffs`
+      # instead, which is the artifact to look for before believing a red here.
+      - name: Job cancelled — TIMEOUT or superseded run, NOT a pixel diff
+        if: cancelled()
+        run: |
+          set -euo pipefail
+          START_FILE="$RUNNER_TEMP/design-visual-start"
+          BUDGET_SECONDS=$((12 * 60))
+          if [ ! -f "$START_FILE" ]; then
+            echo "::error::The job was cancelled before its first step recorded a start time. This is NOT a pixel diff: a pixel failure uploads the visual-regression-diffs artifact and fails the comparison step, not this one."
+            exit 1
+          fi
+          START=$(cat "$START_FILE")
+          NOW=$(date +%s)
+          ELAPSED=$((NOW - START))
+          echo "Job ran ${ELAPSED}s before cancellation; the budget is ${BUDGET_SECONDS}s."
+          if [ "$ELAPSED" -ge "$BUDGET_SECONDS" ]; then
+            echo "::error::TIMEOUT — the job was killed by its own ${BUDGET_SECONDS}s timeout, not by a pixel diff. Every comparison that ran passed; a real pixel failure uploads the visual-regression-diffs artifact and fails the comparison step instead."
+            echo "TIMEOUT after ${ELAPSED}s (budget ${BUDGET_SECONDS}s) — not a pixel diff. Every comparison that ran passed." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Cancelled after ${ELAPSED}s, under the ${BUDGET_SECONDS}s budget: a newer push superseded this run. Not a timeout and not a pixel diff."
+          echo "SUPERSEDED after ${ELAPSED}s (budget ${BUDGET_SECONDS}s) — not a timeout and not a pixel diff." >> "$GITHUB_STEP_SUMMARY"
+
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, packages_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1177,6 +1284,14 @@ jobs:
 
           if [ "${{ needs.changes.outputs.backend }}" = "true" ] && [ "${{ needs.backend_checks.result }}" != "success" ]; then
             echo "Backend checks result: ${{ needs.backend_checks.result }}"
+            exit 1
+          fi
+
+          # The runtime import-cycle pass (#4763). Gated on `packages`, which
+          # every packages/* arm sets, so a frontend-only PR is checked here
+          # even though backend_checks never runs for it.
+          if [ "${{ needs.changes.outputs.packages }}" = "true" ] && [ "${{ needs.packages_checks.result }}" != "success" ]; then
+            echo "Package dependency cycles result: ${{ needs.packages_checks.result }}"
             exit 1
           fi
 

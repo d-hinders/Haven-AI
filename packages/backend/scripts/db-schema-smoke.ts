@@ -146,6 +146,7 @@ import {
   INSERT_SETUP_ALLOWANCE_SQL,
   INSERT_SETUP_SQL,
   LIST_ACTIVE_DELEGATIONS_SQL,
+  LIST_PENDING_SETUPS_FOR_USER_SQL,
   LIST_SETUP_ALLOWANCES_SQL,
   LOCK_SETUP_BY_TOKEN_HASH_SQL,
   LOCK_SETUP_FOR_USER_SQL,
@@ -320,11 +321,13 @@ import {
   FIND_USER_ID_BY_EMAIL_SQL,
   FIND_USER_PROFILE_BY_ID_SQL,
   INSERT_USER_SQL,
+  OPEN_USER_VISIT_SQL,
   UPDATE_CURRENCY_PREFERENCE_SQL,
   UPDATE_USER_NAME_SQL,
   UPDATE_USER_WALLET_ADDRESS_SQL,
 } from '../src/infra/repositories/users.js'
 import {
+  FIND_FIRST_AGENT_PAYMENT_SQL,
   FIND_PORTFOLIO_SNAPSHOTS_SQL,
   HAS_FIRST_AGENT_PAYMENT_SQL,
   INSERT_PORTFOLIO_SNAPSHOT_SQL,
@@ -333,6 +336,7 @@ import {
   SUM_MONTHLY_PAYMENT_SPEND_SQL,
   AGENT_LAST_PAYMENT_SQL,
   DASHBOARD_MERCHANTS_SQL,
+  DASHBOARD_SINCE_GROUPS_SQL,
   DASHBOARD_SPEND_GROUPS_SQL,
   FAILED_INTENTS_7D_SQL,
   PENDING_AGENT_SETUP_STATUSES_SQL,
@@ -425,6 +429,7 @@ const QUERIES: SmokeQuery[] = [
   { name: 'setup: find user account by id', sql: FIND_USER_ACCOUNT_BY_ID_SQL },
   { name: 'setup: find default user account', sql: FIND_DEFAULT_USER_ACCOUNT_SQL },
   { name: 'setup: list allowances', sql: LIST_SETUP_ALLOWANCES_SQL },
+  { name: 'setup: list pending for user (#4710)', sql: LIST_PENDING_SETUPS_FOR_USER_SQL },
   { name: 'setup: list active delegations for budget approval', sql: LIST_ACTIVE_DELEGATIONS_SQL },
   { name: 'setup: find active agent by delegate', sql: FIND_ACTIVE_AGENT_BY_DELEGATE_SQL },
   { name: 'setup: insert', sql: INSERT_SETUP_SQL },
@@ -493,6 +498,10 @@ const QUERIES: SmokeQuery[] = [
   // routes/user.ts.
   { name: 'users: update display name', sql: UPDATE_USER_NAME_SQL },
   { name: 'users: update connected wallet address', sql: UPDATE_USER_WALLET_ADDRESS_SQL },
+  // #4709: the visit marker's one atomic statement (row lock + retry-safe
+  // window). PREPARE proves the CTE, the `FOR UPDATE` and the UUID parameter
+  // resolve against the real schema.
+  { name: 'users: open a visit entry (row lock, retry-safe)', sql: OPEN_USER_VISIT_SQL },
   { name: 'users: read currency preference', sql: FIND_CURRENCY_PREFERENCE_SQL },
   { name: 'users: update currency preference', sql: UPDATE_CURRENCY_PREFERENCE_SQL },
   // Signup/login (#1180). IMPORTED — verbatim from routes/auth.ts. These are
@@ -521,6 +530,8 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: account list', sql: LIST_DASHBOARD_ACCOUNTS_SQL },
   { name: 'dashboard: agent preview (account join)', sql: LIST_DASHBOARD_AGENTS_SQL },
   { name: 'dashboard: first-agent-payment milestone', sql: HAS_FIRST_AGENT_PAYMENT_SQL },
+  // #4707: the card's own read — the qualifying row, not just yes/no.
+  { name: 'dashboard: first agent payment, named', sql: FIND_FIRST_AGENT_PAYMENT_SQL },
   { name: 'dashboard: portfolio snapshots for today+yesterday', sql: FIND_PORTFOLIO_SNAPSHOTS_SQL },
   { name: 'dashboard: portfolio snapshot upsert', sql: INSERT_PORTFOLIO_SNAPSHOT_SQL },
   { name: 'dashboard: month-to-date payment spend', sql: SUM_MONTHLY_PAYMENT_SPEND_SQL },
@@ -530,6 +541,9 @@ const QUERIES: SmokeQuery[] = [
   { name: 'dashboard: pending-agent setup statuses', sql: PENDING_AGENT_SETUP_STATUSES_SQL },
   { name: 'agents: received grants (chain-qualified)', sql: RECEIVED_GRANTS_FOR_AGENTS_SQL },
   { name: 'dashboard: 7/30-day spend groups (netting + pace)', sql: DASHBOARD_SPEND_GROUPS_SQL },
+  // #4709: the "Since your last visit" window — `(after, through]`, the same
+  // rail join and netting fragment as the 7/30-day statement above.
+  { name: 'dashboard: since-last-visit spend groups', sql: DASHBOARD_SINCE_GROUPS_SQL },
   { name: 'dashboard: distinct merchants + top merchant', sql: DASHBOARD_MERCHANTS_SQL },
   { name: 'dashboard: per-agent last payment', sql: AGENT_LAST_PAYMENT_SQL },
   { name: 'dashboard: refusal buckets by agent', sql: REFUSAL_BUCKETS_BY_AGENT_SQL },

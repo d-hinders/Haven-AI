@@ -47,6 +47,9 @@ export const testSafe = {
   name: 'Operations',
   is_default: true,
   account_type: 'delegator_hybrid',
+  // #4719: the session payload's answer. Base mainnet is not a passport
+  // chain, so false is what the backend serves for this account.
+  passport_issuable: false,
   created_at: '2026-05-01T10:00:00.000Z',
 }
 
@@ -896,6 +899,40 @@ export const dashboardOverview = {
 }
 
 /**
+ * `GET /dashboard/first-agent-payment` (#4707) — the one payment the
+ * first-agent-payment card names.
+ *
+ * The default is a ROW, because the shared overview fixture's story is a user
+ * who HAS made their first payment (`onboardingProgress.hasFirstAgentPayment:
+ * true`): the card is what that state now looks like, so the dashboard
+ * baselines move where the old "You're set up" line moved and nowhere else.
+ *
+ * `confirmedAt` sits two minutes before the visual harness's frozen clock
+ * (2026-09-01T12:00Z), so the card reads "just now" and Peak plays there; under
+ * a real clock it reads its date and plays no Peak — the same card, and the
+ * honest answer for a payment that is not recent.
+ *
+ * Specs that need the unsettled, null, error or 404 states serve their own
+ * route (see `support/first-run-states.ts`).
+ */
+export const dashboardFirstAgentPayment = {
+  payment: {
+    id: '44444444-4444-4444-8444-444444444444',
+    agentName: testAgent.name,
+    amountHuman: '0.05',
+    amountRaw: '50000',
+    tokenSymbol: 'USDC',
+    chainId: 8453,
+    confirmedAt: '2026-09-01T11:58:00.000Z',
+    usdValue: 0.05,
+    eurValue: 0.046,
+    sekValue: 0.54,
+    merchantName: null,
+    x402ResourceUrl: 'https://research.example/paper',
+  },
+}
+
+/**
  * `GET /dashboard/budget-remaining` (#3804) — the cached, display-only
  * budget-remaining read. THREE rows: two KNOWN (fromChain, amounts
  * populated, a sub-budget attribution line) wired to the overview fixture's
@@ -1193,6 +1230,30 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #4709: `DashboardClient` opens one visit entry per tab and then reads
+    // the window's figures. The shared fixture answers a FIRST EVER visit
+    // (`previous: null`) and an empty window, so no "Since your last visit"
+    // line renders and no existing dashboard baseline moves. A spec that wants
+    // the line overrides these two routes AFTER `mockHavenApi` (later routes
+    // win), the same overlay pattern the degraded-balance suite uses.
+    if (method === 'POST' && path === '/user/visits') {
+      await fulfillJson(route, { previous: null, current: '2026-09-01T12:00:00.000Z' })
+      return
+    }
+
+    if (method === 'GET' && path === '/dashboard/since') {
+      await fulfillJson(route, {
+        after: '2026-09-01T12:00:00.000Z',
+        through: '2026-09-01T12:00:00.000Z',
+        timeWord: 'Since earlier today',
+        currency: servedCurrencyPreference,
+        payments: 0,
+        net: 0,
+        agents: [],
+      })
+      return
+    }
+
     // #3808: `DashboardClient` mounts `useBudgetRemaining`, which reads
     // `GET /dashboard/budget-remaining` on every dashboard render. The
     // #3804 fixture default is the same two-row shape the API serves (one
@@ -1201,6 +1262,16 @@ export async function mockHavenApi(page: Page) {
     // fails every dashboard-rendering spec.
     if (method === 'GET' && path === '/dashboard/budget-remaining') {
       await fulfillJson(route, dashboardBudgetRemaining)
+      return
+    }
+
+    // #4707: `DashboardClient` mounts `useFirstAgentPayment` once the setup
+    // facts say the first payment happened. The default is the row the shared
+    // overview fixture's story implies; without a handler here the read falls
+    // through to `fulfillUnmockedRoute` → 599 and `unexpectedBrowserErrors`
+    // fails every dashboard-rendering spec.
+    if (method === 'GET' && path === '/dashboard/first-agent-payment') {
+      await fulfillJson(route, dashboardFirstAgentPayment)
       return
     }
 
@@ -1275,6 +1346,14 @@ export async function mockHavenApi(page: Page) {
     }
     if (method === 'GET' && path.startsWith('/merchants/')) {
       await fulfillJson(route, { error: 'Merchant not found' }, 404)
+      return
+    }
+
+    // #4710: the dashboard's "still connecting" read. Empty by default — the
+    // row's own component tests cover it, and a 404 here would log a console
+    // error on every dashboard page.
+    if (method === 'GET' && path === '/agent-connection-setups/pending') {
+      await fulfillJson(route, { setups: [] })
       return
     }
 
@@ -1925,6 +2004,10 @@ export async function serveAgentDetailResponses(
     // allowances empty out and its received grants ride on the list read
     // (the shared sub-budgets/received handler answers the detail fetch).
     receivedSubBudgets?: Array<{ parent_agent_id: string; parent_agent_name: string; open: boolean }>
+    // #4602: research an agent with NO budget yet — no active delegation and
+    // so (the view, #1090) no allowances, and no received grant either. Not
+    // `receivedSubBudgets: []`, which means "a grant holder with none open".
+    noBudget?: true
   } = {},
 ) {
   await page.route('**/api/**', async (route) => {
@@ -1960,7 +2043,7 @@ export async function serveAgentDetailResponses(
             // The spread keeps the literal under the `allowances: [` key the
             // fixture-shape-parity test classifies it by.
             allowances: [
-              ...(options.receivedSubBudgets !== undefined
+              ...(options.receivedSubBudgets !== undefined || options.noBudget
                 ? []
                 : [
                     {
@@ -2024,9 +2107,9 @@ export async function serveAgentDetailResponses(
       // One ACTIVE delegation — the spend authority row the budget card and
       // the page summary both read. 250.00 USDC per week, recipient-pinned,
       // mirroring the screenshot harness's `dlg-1` shape so both capture
-      // paths describe the same authority.
+      // paths describe the same authority. `noBudget` (#4602) answers none.
       await fulfillJson(route, {
-        delegations: [
+        delegations: options.noBudget ? [] : [
           {
             id: 'dlg-e2e-1',
             chain_id: testSafe.chain_id,

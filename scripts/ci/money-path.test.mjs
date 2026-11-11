@@ -576,6 +576,25 @@ describe('money-path list stays in one piece', () => {
     )
   })
 
+  test('the shared delegate-key credential-file handling is RUNTIME money-path — a change to it gates promotion (#4792)', () => {
+    // The #4120 shape, one package over. #4792 moved the account-address
+    // readers and the permission core OUT of packages/mcp/src/credentials.ts
+    // and packages/signer/src/credentials.ts into the new
+    // packages/sdk/src/credential-file.ts. packages/signer/** covered the
+    // signer's copy; the local MCP's copy was on no glob at all, so without
+    // this pin the move would have taken the permission core off the
+    // perimeter silently. Runtime, not control: both packages run it on every
+    // credential load, and the money-flow harness drives both. Mutation: move
+    // the glob to controlGlobs (or drop it) and this fails by name.
+    const f = 'packages/sdk/src/credential-file.ts'
+    assert.ok(trackedFiles().includes(f), `${f} no longer exists — repoint this pin`)
+    assert.ok(
+      moneyPathFiles([f], loadMoneyPathGlobs()).length === 1,
+      `${f} must be matched by a RUNTIME money-path glob — it is how the delegate-key ` +
+        'credential file is read, and both the local MCP and the edge signer run it (#4792)',
+    )
+  })
+
   test('the two catalog pay_to writers are CONTROL money-path — a change to either is labelled and owes the perimeter analysis (#4394)', () => {
     // Both files write merchant_catalog.pay_to, the value the server fills a
     // merchant-locked budget's recipient_address from
@@ -627,6 +646,52 @@ describe('money-path list stays in one piece', () => {
         1,
         `removing ${f}'s glob from controlGlobs left it matched — the pin above is not ` +
           'sensitive to the glob it names (#4394)',
+      )
+    }
+  })
+
+  test("the operator's lane cancel is CONTROL money-path: the entry file, its code and the tsx wrapper (#4786)", () => {
+    // `ops/cancel-stuck-lane.ts` is what an operator starts in the deployed
+    // container to burn the nonce of a stuck relayer broadcast;
+    // `ops/lane-cancel-command.ts` is its code; the script is the tsx wrapper
+    // for the same command. The implementation they call is on the runtime
+    // list (`infra/outbound-*.ts`); the command that triggers it matched no
+    // glob until #4786.
+    //
+    // CONTROL, not runtime (owner decision 2026-11-10, recorded on #4786): the
+    // money-flow QA harness never runs an operator's lane cancel, so these
+    // files must not count toward qa-freshness.
+    //
+    // Nothing else names these paths: with both entries removed from the
+    // JSON, the labeler and the perimeter reference together, the three
+    // equality tests still agree with each other. This pin is what goes red.
+    const control = loadMoneyPathControlGlobs()
+    const runtime = loadMoneyPathGlobs()
+    const files = [
+      'packages/backend/src/ops/cancel-stuck-lane.ts',
+      'packages/backend/src/ops/lane-cancel-command.ts',
+      'packages/backend/scripts/cancel-stuck-attest-lane.ts',
+    ]
+    const tracked = new Set(trackedFiles())
+    for (const f of files) {
+      assert.ok(tracked.has(f), `${f} no longer exists — repoint this pin`)
+      assert.ok(
+        moneyPathFiles([f], control).length === 1,
+        `${f} must be matched by a CONTROL money-path glob — it is part of the operator command ` +
+          'that triggers a relayer broadcast, so a change to it is money-path (#4786)',
+      )
+      assert.deepEqual(
+        moneyPathFiles([f], runtime),
+        [],
+        `${f} must be a CONTROL glob, not a runtime one: the QA harness never runs the ` +
+          "operator's lane cancel, so it must not hold promotion on a QA run (#4786)",
+      )
+      const mutated = control.filter((g) => !matchesGlob(f, g))
+      assert.notEqual(
+        moneyPathFiles([f], mutated).length,
+        1,
+        `removing ${f}'s glob from controlGlobs left it matched — the pin above is not ` +
+          'sensitive to the glob it names (#4786)',
       )
     }
   })
@@ -704,8 +769,10 @@ describe('money-path list stays in one piece', () => {
       // by #3283 (delegate-account, direct-payment-guard, redemption-guard,
       // settlement-child), joined by the task/sub-budget guards (#3661), are
       // spend authority, merchant-completion (#4122) decides a funded
-      // payment's merchant outcome, and merchant-answer.ts (#4120) is the one
-      // shared copy of that decision; those ten files ARE on the runtime list.
+      // payment's merchant outcome, merchant-answer.ts (#4120) is the one
+      // shared copy of that decision, and credential-file.ts (#4792) is the
+      // one shared copy of how the delegate-key credential file is read; those
+      // eleven files ARE on the runtime list.
       // The rest is transport — client.ts among it, pinned off above.
       // The doc covers all four because the CASP perimeter question (does
       // Haven hold or move funds?) still applies to what they ship. Widening
@@ -713,7 +780,7 @@ describe('money-path list stays in one piece', () => {
       // local-runtime PR would then owe a covering QA run.
       // A DOC_ONLY entry whose files are ALL on the list is stale and fails
       // below — an exclusion must exclude something.
-      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards, merchant-completion.ts (#4122) and merchant-answer.ts (#4120) are on the runtime list — see #3098'],
+      ['packages/sdk/src/**', 'client library; only signer.ts, userop-binding.ts, the #3283 signing guard, the #3661 budget guards, merchant-completion.ts (#4122), merchant-answer.ts (#4120) and credential-file.ts (#4792) are on the runtime list — see #3098'],
       ['packages/cli/src/**', 'client CLI; not deployed by Haven — see #3098'],
       ['packages/connect/src/**', 'the dashboard\'s connector, runs on the user\'s machine — see #3098'],
       ['packages/mcp/src/**', 'the local MCP runtime, runs in the agent\'s process — see #3098'],

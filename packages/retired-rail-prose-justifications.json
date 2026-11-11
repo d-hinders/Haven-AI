@@ -95,12 +95,6 @@
       "note": "Asserts the legacy sign path is readable but never executable after retirement; an assertion target."
     }
   },
-  "packages/backend/src/routes/payments.ts": {
-    "stays-readable": {
-      "category": "route-db-readability",
-      "note": "Historical rows stay readable, never actionable — the route/DB-level readability that is true under the screen-vs-route distinction (#2669)."
-    }
-  },
   "packages/core/src/api-types.ts": {
     "remain-readable": {
       "category": "mpp_demo",

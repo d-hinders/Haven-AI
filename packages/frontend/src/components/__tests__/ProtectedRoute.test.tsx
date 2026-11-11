@@ -71,7 +71,7 @@ describe('ProtectedRoute', () => {
       </ProtectedRoute>,
     )
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument()
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument()
     expect(mockReplace).not.toHaveBeenCalled()
   })

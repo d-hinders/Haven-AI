@@ -240,30 +240,46 @@ const RELEASE_BUMP_VERSION_CONSTANTS = ['SIGNER_VERSION', 'HOSTED_SERVER_VERSION
  * paired with the SYMBOL it addresses. The symbol is what makes this a check
  * for a version *bump* rather than for a version-*shaped* line — see
  * `isVersionOnlyDiff`.
+ *
+ * `constants` is the set of `export const <NAME>_VERSION` names the caller
+ * considers release-owned. It defaults to the two this gate reasons about, so
+ * every existing caller is unchanged; the docs coupling gate passes the wider
+ * set `scripts/release-version-constants.mjs` owns, because it partitions files
+ * this gate never looks at (#4612). An empty set drops the `export const` shape
+ * entirely rather than compiling `()` — an empty alternation matches the empty
+ * string and would make every `export const = '…'` line look version-shaped.
  */
-const VERSION_ONLY_LINE_SHAPES = [
-  {
-    // export const SIGNER_VERSION = '0.1.31-alpha.0'
-    re: new RegExp(
-      String.raw`^\s*export const (${RELEASE_BUMP_VERSION_CONSTANTS.join('|')})\s*=\s*(['"])${SEMVER}\2;?\s*$`,
-    ),
-    symbol: (m) => `const:${m[1]}`,
-  },
-  {
-    //   "version": "0.1.31-alpha.0",
-    re: new RegExp(String.raw`^\s*"version":\s*"${SEMVER}",?\s*$`),
-    symbol: () => 'pkg:version',
-  },
-  {
-    //     "@haven_ai/sdk": "0.1.31-alpha.0",
-    re: new RegExp(String.raw`^\s*"(@haven_ai/[a-z0-9-]+)":\s*"${SEMVER}",?\s*$`),
-    symbol: (m) => `dep:${m[1]}`,
-  },
-]
+function versionOnlyLineShapes(constants) {
+  const shapes = []
+  if (constants.length > 0) {
+    shapes.push({
+      // export const SIGNER_VERSION = '0.1.31-alpha.0'
+      re: new RegExp(
+        String.raw`^\s*export const (${constants.join('|')})\s*=\s*(['"])${SEMVER}\2;?\s*$`,
+      ),
+      symbol: (m) => `const:${m[1]}`,
+    })
+  }
+  shapes.push(
+    {
+      //   "version": "0.1.31-alpha.0",
+      re: new RegExp(String.raw`^\s*"version":\s*"${SEMVER}",?\s*$`),
+      symbol: () => 'pkg:version',
+    },
+    {
+      //     "@haven_ai/sdk": "0.1.31-alpha.0",
+      re: new RegExp(String.raw`^\s*"(@haven_ai/[a-z0-9-]+)":\s*"${SEMVER}",?\s*$`),
+      symbol: (m) => `dep:${m[1]}`,
+    },
+  )
+  return shapes
+}
+
+const VERSION_ONLY_LINE_SHAPES = versionOnlyLineShapes(RELEASE_BUMP_VERSION_CONSTANTS)
 
 /** The symbol a changed line addresses, or null if it is not a version line. */
-function versionLineSymbol(line) {
-  for (const shape of VERSION_ONLY_LINE_SHAPES) {
+function versionLineSymbol(line, shapes = VERSION_ONLY_LINE_SHAPES) {
+  for (const shape of shapes) {
     const m = shape.re.exec(line)
     if (m) return shape.symbol(m)
   }
@@ -315,8 +331,11 @@ function versionLineSymbol(line) {
  * A real rename surfaces the whole file as added content, which fails the
  * pairing check anyway; a mode flip is not something release-bump does.
  */
-export function isVersionOnlyDiff(diffText) {
+export function isVersionOnlyDiff(diffText, constants = RELEASE_BUMP_VERSION_CONSTANTS) {
   if (typeof diffText !== 'string' || diffText.trim() === '') return false
+  const shapes = constants === RELEASE_BUMP_VERSION_CONSTANTS
+    ? VERSION_ONLY_LINE_SHAPES
+    : versionOnlyLineShapes(constants)
 
   // Split into hunks. Pairing is checked WITHIN each hunk, never across the
   // file: two unrelated hunks whose symbols happen to net to zero are not a
@@ -349,7 +368,7 @@ export function isVersionOnlyDiff(diffText) {
       // a single +/- is a real changed line.
       if (!(line.startsWith('+') || line.startsWith('-'))) continue
       if (line.startsWith('+++') || line.startsWith('---')) continue
-      const symbol = versionLineSymbol(line.slice(1))
+      const symbol = versionLineSymbol(line.slice(1), shapes)
       if (symbol === null) return false
       ;(line.startsWith('-') ? removed : added).push(symbol)
     }
@@ -372,8 +391,12 @@ export function isVersionOnlyDiff(diffText) {
  * whole diff is a release-bump version string. `diffFor` returns a file's
  * unified diff, or null when git cannot answer — null is treated as behavioural,
  * so an uncomputable diff can never excuse a file.
+ *
+ * `constants` is the release-owned `export const` set to recognise; it defaults
+ * to this gate's two, and the docs coupling gate passes the wider set from
+ * `scripts/release-version-constants.mjs` (#4612).
  */
-export function partitionVersionOnly(files, diffFor) {
+export function partitionVersionOnly(files, diffFor, constants = RELEASE_BUMP_VERSION_CONSTANTS) {
   const behavioural = []
   const versionOnly = []
   for (const file of files) {
@@ -383,7 +406,7 @@ export function partitionVersionOnly(files, diffFor) {
     } catch {
       diffText = null
     }
-    if (isVersionOnlyDiff(diffText)) versionOnly.push(file)
+    if (isVersionOnlyDiff(diffText, constants)) versionOnly.push(file)
     else behavioural.push(file)
   }
   return { behavioural, versionOnly }
@@ -1123,6 +1146,22 @@ function main() {
   console.log(`✅ ${result.message}`)
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   main()
 }

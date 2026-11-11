@@ -30,10 +30,12 @@
  *   `BalanceFreshnessIndicator`** — the same #3295 contract the hero had.
  */
 
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useCountUp } from '@/hooks/useCountUp'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { StatTile } from '@/components/ui/StatTile'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { AreaChart, type SparklinePoint } from '@/components/ui/AreaChart'
 import { SeriesSwatch } from '@/components/ui/StackedBarChart'
 import { seriesColorForAgent } from '@/lib/avatar-tint'
@@ -45,9 +47,14 @@ import { formatFiat, currencyLocale, SUB_CENT_THRESHOLD } from '@/lib/format'
 import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import {
   buildDashboardSummary,
+  buildSinceLastVisitSummary,
   type DashboardSummaryAgent,
 } from '@/lib/dashboard-summary'
-import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
+import type {
+  DashboardAgentPreview,
+  DashboardOverviewResponse,
+  DashboardSinceResponse,
+} from '@/types/dashboard'
 
 const SPARKLINE_DAYS = 30
 
@@ -205,6 +212,21 @@ export interface MoneyPanelProps {
   receiveSecondary?: boolean
   onReceive: () => void
   onSend: () => void
+  /**
+   * The signed-in user the balance count-up's entry latch is keyed on (#4704).
+   * Absent: no entrance, the balance shows straight away.
+   */
+  countUpUserId?: string | null
+  /**
+   * #4709: the "Since your last visit" window's figures, or null when there is
+   * nothing to show (a first ever visit, nothing since, or a failed read).
+   */
+  since?: DashboardSinceResponse | null
+  /**
+   * #4709: the PREVIOUS entry's instant (ISO), or null on a first ever visit.
+   * The line is built from this and `since`; both absent means no line.
+   */
+  sincePrevious?: string | null
 }
 
 export default function MoneyPanel({
@@ -230,11 +252,19 @@ export default function MoneyPanel({
   usdcFunded = null,
   onReceive,
   onSend,
+  countUpUserId = null,
+  since = null,
+  sincePrevious = null,
 }: MoneyPanelProps) {
-  // Animate the balance from 0 → totalFiat on first paint after data loads.
-  // Subsequent changes (currency switches, polled refresh) snap instantly.
-  // Respects prefers-reduced-motion via the hook.
-  const animatedTotal = useCountUp(totalFiat, { enabled: !loading && !unavailable })
+  // #4704: the balance counts up on this tab's entrance only (owner decision 3
+  // on #4701) — a new tab, a phone launch, or after signing back in. A reload,
+  // a return from another page and any update while open show the number
+  // straight away, and so does reduced motion. The decision waits for the
+  // first loaded balance, never a loading placeholder.
+  const animatedTotal = useCountUp(totalFiat, {
+    enabled: !loading && !unavailable,
+    userId: countUpUserId,
+  })
 
   // #4167's primary-button rule: Send primary once funded (and while the
   // state is unknown — null never reads as empty); Receive primary and Send
@@ -269,6 +299,27 @@ export default function MoneyPanel({
         topMerchant: spend?.topMerchant7d ?? null,
       })
     : null
+
+  // #4709: the "Since your last visit" line, ABOVE the 7-day sentence. Null
+  // when there is nothing to say — a first ever visit (no previous marker),
+  // nothing since, or a failed read — so the header reads exactly as it did
+  // before. The time word is spoken in the user's own zone.
+  const sinceLine =
+    since && sincePrevious !== null
+      ? buildSinceLastVisitSummary({
+          currency: since.currency,
+          previous: sincePrevious,
+          timeWord: since.timeWord,
+          payments: since.payments,
+          netSpend: since.net,
+          agents: since.agents.map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            netSpend: agent.netSpend,
+            payments: agent.payments,
+          })),
+        })
+      : null
 
   const sparkPoints = spend?.balance_by_day
     ? balanceSparkPoints(spend.balance_by_day, currency)
@@ -348,7 +399,7 @@ export default function MoneyPanel({
       <h2 className="text-sm font-medium text-[var(--v2-ink-2)]">Agent spending, last 30 days</h2>
       <div className="mt-2">
         {loading ? (
-          <div className="h-8 w-32 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+          <Skeleton className="h-8 w-32" />
         ) : unavailable ? (
           <p className="text-2xl font-semibold tracking-tight text-[var(--v2-ink-3)] v2-tabular">—</p>
         ) : d30 ? (
@@ -464,7 +515,20 @@ export default function MoneyPanel({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" subtitle={summary ?? undefined} />
+      <PageHeader
+        title="Dashboard"
+        subtitle={
+          sinceLine || summary ? (
+            <>
+              {/* #4709: the "Since your last visit" line sits ABOVE the 7-day
+                  sentence, in the same type. `block` spans keep them on their
+                  own lines inside PageHeader's subtitle paragraph. */}
+              {sinceLine ? <span className="block">{sinceLine}</span> : null}
+              {summary ? <span className="block">{summary}</span> : null}
+            </>
+          ) : undefined
+        }
+      />
 
       {/*
         #3897: ONE money card, as the mockup draws it — `raised`, the page's
@@ -481,7 +545,7 @@ export default function MoneyPanel({
             <div>
               <p className="text-sm font-medium text-[var(--v2-ink-2)]">Balance</p>
               {loading ? (
-                <div className="mt-3 h-11 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                <Skeleton className="mt-3 h-11 w-56" />
               ) : unavailable ? (
                 <p className="mt-2 text-4xl font-semibold tracking-tight text-[var(--v2-ink-3)]">
                   Unavailable
@@ -571,12 +635,13 @@ export default function MoneyPanel({
                 // is unchanged (#4167): Send primary once funded, Receive
                 // primary with Send disabled when known empty.
                 <div className="flex flex-wrap gap-3 lg:mt-auto">
-                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled}>
+                  <Button onClick={onSend} variant={sendPrimary ? 'primary' : 'ghost'} disabled={sendDisabled} leadingIcon={ArrowUp}>
                     Send
                   </Button>
                   <Button
                     onClick={onReceive}
                     variant={sendPrimary || receiveSecondary ? 'ghost' : 'primary'}
+                    leadingIcon={ArrowDown}
                   >
                     Receive
                   </Button>

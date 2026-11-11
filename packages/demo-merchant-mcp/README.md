@@ -361,6 +361,50 @@ domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at t
 matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
 and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 
+## Agent Passport check (advisory, #4723)
+
+The merchant is the first consumer of the SDK's merchant-side passport verifier.
+When a payment carries a `haven-passport` reference, the merchant resolves it
+against Haven and reports the result in its purchase response. It **never
+refuses a payment** over it: the check runs after settlement, is cached per
+payment, and every failure — 503, 429, a timeout, a network error, a malformed
+reference — is reported as an error, not a refusal.
+
+Two env values, and **both** must be set:
+
+| Variable | Value |
+|---|---|
+| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against |
+| `MERCHANT_PASSPORT_ISSUER` | the issuer address from `GET /passport/issuer` on that deployment |
+
+With either missing, the merchant advertises only `haven-demo` and reports
+`passport: null` — exactly the pre-#4723 behaviour. A half-configured or invalid
+value logs a warning and disables the check rather than taking the merchant
+down.
+
+When both are set, every 402 challenge advertises `haven-passport` as
+`{ info: {} }` (the #4722 convention: the client adds `attestation_uid` and
+`chain_id` inside `info`). The purchase response then carries:
+
+- `structuredContent.summary.passport` — `{ standing, checked_at }` when the
+  receipt authenticated, was unexpired, named this chain and bound the payer;
+  `{ error, checked_at }` otherwise; `null` when the payment carried no
+  reference.
+- a `Passport:` line in the text — "standing checked" or "standing not
+  checked". It never says "verified agent": only L2 may say verified, and L2 is
+  not issuable.
+
+**The env flip is a real window.** The merchant's echo rule refuses a payment
+whose extensions do not contain every advertised key, so a 402 quoted before
+the flip and paid after it is refused — and on the EIP-3009 bridge that happens
+after funding, so the funds strand until a sweep. Set both values together, on
+a service that is not mid-quote. See
+[railway-services.md](../../docs/operations/railway-services.md).
+
+Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks the pin: the merchant answers
+`not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER` is
+updated.
+
 ## QA hook: verify-without-settle (testnet-only)
 
 `MERCHANT_SKIP_SETTLE_PRODUCT=<product_id,...>` (#603) verifies listed

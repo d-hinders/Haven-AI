@@ -414,6 +414,17 @@ test.describe('design-system visual regression', () => {
           threshold: PIXEL_THRESHOLD,
         })
       }
+
+      // #4638: the halo is dialog-only and opt-in. No always-mounted specimen
+      // carries it; the opened-on-demand Modal specimen is the one example,
+      // so the page shows none until it opens and exactly one, inside it, after.
+      await expect(page.locator('.v2-step-halo')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Open modal', exact: true }).click()
+      const dialog = page.getByRole('dialog')
+      await expect(dialog).toBeVisible()
+      await expect(page.locator('.v2-step-halo')).toHaveCount(1)
+      await expect(dialog.locator('.v2-step-halo')).toHaveCount(1)
+      await page.keyboard.press('Escape')
     })
   }
 
@@ -577,12 +588,12 @@ test.describe('design-system visual regression', () => {
   }
 
   /**
-   * ── The later showcase clips — #3805's Amount currency, AttentionList, sparkline, inline StatTile; #3845's NoticeRow; #3810's activity row ──
+   * ── The later showcase clips — step markers plus the dashboard primitives ──
    *
    * The design-system pieces the redesigned dashboard (#3801) is built from,
    * each photographed against its own sample the way the StackedBarChart
    * clips above are: one clip per `data-testid` sample, per viewport, per
-   * scheme — six samples, 24 baselines in all. Each clip asserts its own box
+   * scheme. Each clip asserts its own box
    * fits the viewport (the fold guarantee above), so an edit that pushes a
    * sample past the fold fails HERE, naming the sample.
    *
@@ -596,6 +607,65 @@ test.describe('design-system visual regression', () => {
   const SAMPLE_MAX_DIFF_PIXELS = 100
 
   for (const vp of VIEWPORTS) {
+    test(`/design-system StepProgress sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-step-progress')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.locator('.v2-step-halo')).toHaveCount(0)
+      await expectShowcaseClip(sample, vp.height, 'the StepProgress sample', `design-system-step-progress-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    test(`/design-system ConnectSteps sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-connect-steps')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.locator('.v2-step-halo')).toHaveCount(0)
+      await expectShowcaseClip(sample, vp.height, 'the ConnectSteps sample', `design-system-connect-steps-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    // #4744: the Get started card — the guide on the shared Step status
+    // checklist, its connector, the row action and the "Also needs you"
+    // caption above a rule item.
+    test(`/design-system First-run card sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-first-run-card')
+      await expect(sample).toHaveCount(1)
+      await expect(sample.getByText('Also needs you')).toBeVisible()
+      await expect(sample.locator('[data-step-connector]')).toHaveCount(2)
+      await expectShowcaseClip(sample, vp.height, 'the First-run card sample', `design-system-first-run-card-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
+    test(`/design-system Address grouped sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-address-grouped')
+      await expect(sample).toHaveCount(1)
+      await expectShowcaseClip(sample, vp.height, 'the Address grouped sample', `design-system-address-grouped-${vp.name}${schemeSuffix}.png`, SAMPLE_MAX_DIFF_PIXELS)
+    })
+
     test(`/design-system Amount currency sample renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''
@@ -907,6 +977,116 @@ test.describe('design-system visual regression', () => {
   })
 
   /**
+   * #4572: the phone ledger row at 375px.
+   *
+   * The committed viewports are 1280 and 390, and the issue measured the
+   * three-line row at 375 — narrower than either, so this is the stricter
+   * render and the width the acceptance cases name. Two cases the 390px
+   * ledger clip cannot show: a 40-character title (the amount must stay on
+   * the title line while the title truncates) and the crowded worst case
+   * (long title + amount + payment-status badge + accounting badge), plus a
+   * grouped `×N` row.
+   *
+   * Same clock freeze and zone as the ledger clip above: `DS_PHONE_LEDGER_ROWS`
+   * stamps its timestamps from `Date.now()` at module load, and the clock
+   * times it renders are LOCAL.
+   */
+  test.describe('phone ledger row (#4572)', () => {
+    test.use({ timezoneId: LEDGER_TZ })
+
+    test('/design-system phone ledger row renders pixel-stable at 375px', async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.clock.setFixedTime(FROZEN_LEDGER_NOW)
+      await page.setViewportSize({ width: 375, height: 812 })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-activity-ledger-phone')
+      await expect(sample).toHaveCount(1)
+      // Three rows under one day band: the truncation case, the crowded worst
+      // case and the grouped ×N row. Without this the clip could photograph
+      // an empty card and still pass.
+      await expect(sample.getByRole('button')).toHaveCount(3)
+      await expect(sample.getByText('×3')).toHaveCount(1)
+      await expect(sample.getByText('Pending')).toHaveCount(1)
+
+      // The acceptance cases, asserted structurally before the pixels — a
+      // baseline diff says "something moved", these say WHAT broke.
+      const geometry = await sample.evaluate((root) => {
+        const rows = Array.from(root.querySelectorAll('[role="button"]'))
+        const read = (row: Element) => {
+          const title = row.querySelector('p') as HTMLElement
+          const spans = Array.from(row.querySelectorAll('span')) as HTMLElement[]
+          const amount = spans.find((s) => /^-\d/.test((s.textContent ?? '').trim()))
+          const titleRect = title.getBoundingClientRect()
+          const amountRect = amount?.getBoundingClientRect()
+          return {
+            titleLength: (title.textContent ?? '').trim().length,
+            truncated: title.scrollWidth > title.clientWidth,
+            amountOnTitleLine:
+              amountRect !== undefined &&
+              amountRect.top >= titleRect.top - 4 &&
+              amountRect.top <= titleRect.bottom,
+            titleBottom: titleRect.bottom,
+            badgeTops: spans
+              .filter((s) => ['Pending', '×3'].includes((s.textContent ?? '').trim()))
+              .map((s) => s.getBoundingClientRect().top),
+          }
+        }
+        const longTitle = rows.find((r) =>
+          (r.textContent ?? '').includes('Merchant settlement for September charge'),
+        )
+        const crowded = rows.find((r) => (r.textContent ?? '').includes('Pending'))
+        const grouped = rows.find((r) => (r.textContent ?? '').includes('×3'))
+        return {
+          longTitle: longTitle ? read(longTitle) : null,
+          crowded: crowded ? read(crowded) : null,
+          grouped: grouped ? read(grouped) : null,
+        }
+      })
+
+      // The 40-character title truncates with an ellipsis instead of pushing
+      // the amount down, and the amount stays on the title line.
+      expect(geometry.longTitle, 'the 40-character title row did not render').not.toBeNull()
+      expect(geometry.longTitle!.titleLength).toBe(40)
+      expect(geometry.longTitle!.truncated, 'the 40-character title should truncate').toBe(true)
+      expect(geometry.longTitle!.amountOnTitleLine, 'the amount should stay on the title line').toBe(true)
+
+      // The crowded worst case: long title + amount + status badge +
+      // accounting badge. The amount keeps the title line; the badges drop to
+      // a subordinate line rather than squeezing it.
+      expect(geometry.crowded, 'the crowded worst-case row did not render').not.toBeNull()
+      expect(geometry.crowded!.amountOnTitleLine, 'the crowded row lost its amount to a badge').toBe(true)
+      expect(geometry.crowded!.badgeTops.length, 'the crowded row lost its status badge').toBeGreaterThan(0)
+      for (const top of geometry.crowded!.badgeTops) {
+        expect(top, 'a badge stayed on the title line and squeezed the amount').toBeGreaterThanOrEqual(
+          geometry.crowded!.titleBottom - 1,
+        )
+      }
+
+      // The grouped ×N row: the count label is a badge too, so it rides the
+      // subordinate line while the amount keeps the title line.
+      expect(geometry.grouped, 'the grouped ×N row did not render').not.toBeNull()
+      expect(geometry.grouped!.amountOnTitleLine, 'the grouped row lost its amount to the ×N label').toBe(true)
+      for (const top of geometry.grouped!.badgeTops) {
+        expect(top, 'the ×N label stayed on the title line').toBeGreaterThanOrEqual(
+          geometry.grouped!.titleBottom - 1,
+        )
+      }
+
+      await expectShowcaseClip(
+        sample,
+        812,
+        'the phone ledger row sample',
+        `design-system-activity-ledger-phone-375${schemeSuffix}.png`,
+        SAMPLE_MAX_DIFF_PIXELS,
+      )
+    })
+  })
+
+  /**
    * ── The #3441 guard: content above a showcase sample cannot move its clip ──
    *
    * Every clip above is captured through `expectShowcaseClip`, which always
@@ -929,6 +1109,9 @@ test.describe('design-system visual regression', () => {
     ['StackedBarChart wide sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(0)],
     ['StackedBarChart narrow sample', (p) => p.getByTestId(SECTION_TEST_ID).getByTestId('stacked-bar-chart').nth(1)],
     ['StackedBarChart swatch list', (p) => p.getByTestId('ds-stacked-bar-swatch-list')],
+    ['StepProgress sample', (p) => p.getByTestId('ds-step-progress')],
+    ['ConnectSteps sample', (p) => p.getByTestId('ds-connect-steps')],
+    ['Address grouped sample', (p) => p.getByTestId('ds-address-grouped')],
     ['Amount currency sample', (p) => p.getByTestId('ds-amount-currency')],
     ['AttentionList sample', (p) => p.getByTestId('ds-attention-list')],
     ['NoticeRow sample', (p) => p.getByTestId('ds-notice-row')],
@@ -941,6 +1124,7 @@ test.describe('design-system visual regression', () => {
     ['PageHeader leading sample', (p) => p.getByTestId('ds-pageheader-leading')],
     ['SegmentedControl sample', (p) => p.getByTestId('ds-segmented-control')],
     ['list-controls paging sample', (p) => p.getByTestId('ds-list-controls-paging')],
+    ['phone ledger row sample', (p) => p.getByTestId('ds-activity-ledger-phone')],
   ]
 
   const FRACTIONAL_SPACERS_PX = [0.25, 0.5, 0.75]
@@ -965,6 +1149,15 @@ test.describe('design-system visual regression', () => {
     const sample = get(page)
     await expect(sample).toHaveCount(1)
     await isolateShowcaseSample(sample)
+    // #4638: this guard measures layout, so motion is frozen for it. The
+    // ConnectSteps sample's working row spins the shared Spinner; a raw
+    // `screenshot` can catch the compositor mid-rotation even with
+    // `animations: 'disabled'`, and the run then failed at a DIFFERENT spacer
+    // on retry, which a real layout shift never does. `toHaveScreenshot`
+    // retries until two shots agree, so the pixel clips do not need this.
+    await page.addStyleTag({
+      content: '*, *::before, *::after { animation: none !important; transition: none !important; }',
+    })
     return async (spacerPx: number) => {
       // Resized in place after isolation: if isolation stopped hiding the
       // region above, the new height would move the sample.
@@ -1062,5 +1255,157 @@ test.describe('design-system visual regression', () => {
       box.height,
       `${what} grew past the ${viewportHeight}px viewport (${box.height}px) — the showcase no longer fits the fold; shrink the sample or split this clip`,
     ).toBeLessThanOrEqual(viewportHeight)
+  }
+
+  /**
+   * ── The Combobox and RecipientField specimens (#4640) ───────────────────────
+   *
+   * Two widths, and 375 is NOT in `VIEWPORTS` on purpose. Adding a width there
+   * mints a blocking baseline and a PNG of every route in every evidence run,
+   * forever — the reason #1944 declined 320 and #2006 built an opt-in override
+   * instead. These clips are scoped to two specimens, so the phone width is
+   * local to this block: 375 is the width the issue names, and it sits in the
+   * same below-`sm` band as the committed 390.
+   *
+   * ── Why the capture drives the trigger ──────────────────────────────────────
+   *
+   * The list opens on a click, and `/design-system` renders these LIVE rather
+   * than as permanently-open copies (§ *Showcase copies of overlays*). So the
+   * clip clicks the field first — the same shape the Modal specimen already uses
+   * (`getByRole('button', { name: 'Open modal' }).click()`).
+   *
+   * The click has to happen AFTER `isolateShowcaseSample`, because isolation
+   * hides the content above the sample and moves the field up the page; a
+   * popover positioned before that move would be anchored to a stale rect. That
+   * is why this helper isolates first and does not route through
+   * `expectShowcaseClip` (which isolates again, after the click).
+   *
+   * ── Why the sample box is taller than its card ──────────────────────────────
+   *
+   * From `sm` up the list is portaled to `document.body`, so it is not a
+   * descendant of the sample. `locator.screenshot()` captures the page region of
+   * the element's box, overlapping elements included — so the sample's box has
+   * to CONTAIN the popover's area. Each specimen wrapper reserves that height
+   * (`min-h-[420px]`), which is what makes the portaled list visible in the clip
+   * instead of cropped out of it.
+   */
+  const SPECIMEN_VIEWPORTS = [
+    { name: 'desktop', width: 1280, height: 800 },
+    { name: 'phone', width: 375, height: 812 },
+  ] as const
+
+  async function expectOpenSpecimenClip(
+    sample: Locator,
+    viewportHeight: number,
+    what: string,
+    baseline: string,
+  ) {
+    await isolateShowcaseSample(sample)
+    await sample.getByRole('combobox').click()
+    // The list is a descendant of the sample below `sm` and a PORTALED child of
+    // `document.body` from `sm` up, so the assertion is page-wide: the popover
+    // marker is the one handle both layouts share.
+    await expect(sample.page().locator('[data-combobox-popover]')).toBeVisible()
+    await assertFitsViewport(sample, viewportHeight, what)
+    await assertClearOfTabBar(sample, viewportHeight, what)
+    await expect(sample).toHaveScreenshot(baseline, {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixels: SAMPLE_MAX_DIFF_PIXELS,
+      threshold: PIXEL_THRESHOLD,
+    })
+  }
+
+  for (const vp of SPECIMEN_VIEWPORTS) {
+    test(`/design-system Combobox specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-combobox')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the Combobox specimen',
+        `design-system-combobox-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system RecipientField specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-field')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the RecipientField specimen',
+        `design-system-recipient-field-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system pasted-address specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-paste')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the pasted-address specimen',
+        `design-system-recipient-paste-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system contacts-unavailable specimen renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-status')
+      await expect(sample).toHaveCount(1)
+      await expectOpenSpecimenClip(
+        sample,
+        vp.height,
+        'the contacts-unavailable specimen',
+        `design-system-recipient-status-${vp.name}${schemeSuffix}.png`,
+      )
+    })
+
+    test(`/design-system recipient chips render pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const sample = page.getByTestId('ds-recipient-chips')
+      await expect(sample).toHaveCount(1)
+      await expectShowcaseClip(
+        sample,
+        vp.height,
+        'the recipient chips',
+        `design-system-recipient-chips-${vp.name}${schemeSuffix}.png`,
+        SAMPLE_MAX_DIFF_PIXELS,
+      )
+    })
   }
 })

@@ -441,7 +441,7 @@ export { newViolations, hasShrunk }
  * The shared engine's violations, sorted for a stable report. The ordering is
  * this gate's own concern -- `lib/ratchet.mjs` deliberately does not sort, and
  * the private copy this replaced did, so keeping it here preserves the output
- * byte-for-byte while the DECISION moves to the one place all nine gates share.
+ * byte-for-byte while the DECISION moves to the one place all eleven gates share.
  *
  * The shared engine names the second dimension `key`; this gate calls it a
  * `rule`, and the printing below reads `f.key`.
@@ -477,7 +477,7 @@ async function main() {
   let loaded
   try {
     // The shape check this gate carried in #2747 lived here. It moved into
-    // `loadBaseline` in #2759, where it covers all nine gates and one more case
+    // `loadBaseline` in #2759, where it covers all eleven gates and one more case
     // this one never reached: an OBJECT baseline holding a non-numeric COUNT,
     // which `count > allowed` reads as false and so silently allows everything
     // for that key. Proven dead before removing it rather than assumed —
@@ -561,7 +561,23 @@ async function main() {
   )
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   // Fail closed: a broken gate that passes is the defect one layer up. The
   // named remedy for a bad baseline lives in `main`'s own try/catch and never
   // reaches this one.

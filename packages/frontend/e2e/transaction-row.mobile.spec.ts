@@ -41,7 +41,7 @@ import {
  * review: three lines at 640/700). 768 is where long account names still
  * overran the subline (#4266 design review: 39px clipped).
  */
-const WIDTHS = [320, 390, 393, 640, 700, 768] as const
+const WIDTHS = [320, 375, 390, 393, 640, 700, 768] as const
 
 const ROW = '[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]'
 
@@ -204,22 +204,30 @@ test('/transactions: an own-transfer ledger row keeps its movement arrow beside 
 })
 
 /**
- * The amount and its time ride UNDER the title below `sm` (#2734, #4266).
+ * The phone row is TWO bands (#4572): the title line carries the title
+ * (truncating) and the amount, right-aligned; the description line carries
+ * the description and the clock time.
  *
- * The ledger row stacks its two blocks below 640px: the title/subline block,
- * then the amount with the relative time beneath it. TWO ASSERTIONS, and the
- * structural one is load-bearing: a title that merely stays short could pass a
- * line ceiling while the amount sat beside it, eating its room. So this also
- * asserts WHERE the amount and the time are (below the title, time below the
- * amount), plus that the title never wraps.
+ * Before #4572 the amount and its time were a THIRD band under the text
+ * block, so a payment took three lines (name, amount, time) and a 375px
+ * screen showed about five rows. The stacking itself was deliberate (#1833:
+ * a fixed height meeting a stacked layout overlapped rows at 390px), so the
+ * fix is not "un-stack" — it is to put the amount back on the title line and
+ * the time on the description line, with the title truncating instead of
+ * pushing the amount down.
+ *
+ * Asserted on GEOMETRY, not on a screenshot: the pixel budget is larger than
+ * a whole row changing shape (#1805). The structural half is load-bearing — a
+ * title that merely stays short could pass a line ceiling while the amount sat
+ * under it.
  */
-test('/transactions: the amount rides under the title with the time beneath it, and the title stays on one line (#2734)', async ({
+test('/transactions: the amount rides the title line and the clock time the description line (#4572)', async ({
   page,
 }) => {
   const errors = collectBrowserErrors(page)
   await seedAuthenticatedSession(page)
   await mockHavenApi(page)
-  await page.setViewportSize({ width: 390, height: 900 })
+  await page.setViewportSize({ width: 375, height: 900 })
   await page.goto('/transactions')
   await dismissMobileSidebar(page)
   await page.waitForSelector(ROW, { timeout: 30_000 })
@@ -248,20 +256,37 @@ test('/transactions: the amount rides under the title with the time beneath it, 
             AMOUNT_TEXT.test((el.textContent ?? '').trim()),
         )
         const amounts = matches.filter((el) => !matches.some((o) => o !== el && el.contains(o)))
+        // The clock time (#4572): `HH:MM`, never "29d ago" — the day band
+        // above the row already states the day.
         const time = Array.from(row.querySelectorAll('p')).find(
-          (p) => visible(p) && /\d+(m|h|d|mo|y) ago$/.test((p.textContent ?? '').trim()),
+          (p) => visible(p) && /^\d{2}:\d{2}$/.test((p.textContent ?? '').trim()),
+        )
+        // The description line: the `text-xs` block under the title.
+        const description = Array.from(row.querySelectorAll('div')).find(
+          (div) => visible(div) && div.className.includes('text-xs') && div !== row,
         )
         const amount = amounts[0]
+        const titleRect = title.getBoundingClientRect()
+        const amountRect = amount?.getBoundingClientRect()
+        const timeRect = time?.getBoundingClientRect()
+        const descriptionRect = description?.getBoundingClientRect()
         return {
           text: (title.textContent ?? '').trim(),
           lines,
           amountMatches: amounts.length,
-          amountBelowTitle:
-            amount !== undefined && amount.getBoundingClientRect().top >= title.getBoundingClientRect().bottom - 1,
-          timeBelowAmount:
-            amount !== undefined &&
-            time !== undefined &&
-            time.getBoundingClientRect().top >= amount.getBoundingClientRect().bottom - 1,
+          // Same band: the amount sits within the title's first line.
+          amountOnTitleLine:
+            amountRect !== undefined &&
+            amountRect.top >= titleRect.top - 4 &&
+            amountRect.top <= titleRect.bottom,
+          // Right-aligned: the amount starts at or after the title's right edge.
+          amountRightOfTitle: amountRect !== undefined && amountRect.left >= titleRect.right - 1,
+          // The clock time is on the description line, not under the amount.
+          timeOnDescriptionLine:
+            timeRect !== undefined &&
+            descriptionRect !== undefined &&
+            Math.abs(timeRect.top - descriptionRect.top) <= 4,
+          timeIsClock: time !== undefined,
           overflow: (row as HTMLElement).scrollWidth - (row as HTMLElement).clientWidth,
         }
       })
@@ -273,9 +298,13 @@ test('/transactions: the amount rides under the title with the time beneath it, 
   // `expect.soft` so one run reports every property that broke.
   for (const row of rows) {
     expect.soft(row.amountMatches, `${row.amountMatches} visible amounts in "${row.text}"`).toBe(1)
-    expect.soft(row.lines, `"${row.text}" wraps to ${row.lines} lines at 390px`).toBe(1)
-    expect.soft(row.amountBelowTitle, `the amount for "${row.text}" is not under its title`).toBe(true)
-    expect.soft(row.timeBelowAmount, `the time for "${row.text}" is not under its amount`).toBe(true)
+    expect.soft(row.lines, `"${row.text}" wraps to ${row.lines} lines at 375px`).toBe(1)
+    expect.soft(row.amountOnTitleLine, `the amount for "${row.text}" is not on its title line`).toBe(true)
+    expect.soft(row.amountRightOfTitle, `the amount for "${row.text}" is not right of its title`).toBe(true)
+    expect.soft(row.timeIsClock, `"${row.text}" shows no clock time under its day band`).toBe(true)
+    expect
+      .soft(row.timeOnDescriptionLine, `the time for "${row.text}" is not on its description line`)
+      .toBe(true)
     expect.soft(row.overflow, `"${row.text}" row scrolls horizontally`).toBeLessThanOrEqual(0)
   }
 

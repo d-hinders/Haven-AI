@@ -42,15 +42,20 @@ vi.mock('../../middleware/auth.js', () => ({
 // Mirrors agents.test.ts: the passport module is mocked so the register-path
 // opt-in (#1072) can be tested directly, including the "never breaks
 // registration" guarantee it inherits from POST /agents (#972).
-const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+const { mockRequestPassport, mockIssueBestEffort, mockIssuableForAccount } = vi.hoisted(() => ({
   mockRequestPassport: vi.fn(),
   mockIssueBestEffort: vi.fn(),
+  // #4719: the account answer (issuable rail + chain + schema UID + verifier).
+  mockIssuableForAccount: vi.fn(
+    (account: { chain_id: number | null; account_type: string | null }) =>
+      account.chain_id === 84532 && account.account_type === 'delegator_hybrid',
+  ),
 }))
 vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
-  isPassportConfigured: () => true,
-  PASSPORT_CHAIN_IDS: new Set([84532]),
+  isPassportIssuableForAccount: (account: { chain_id: number | null; account_type: string | null }) =>
+    mockIssuableForAccount(account),
 }))
 
 const SAFE = {
@@ -1038,6 +1043,47 @@ describe('agent connection setup routes', () => {
     await app.close()
   })
 
+  it('lists the signed-in user’s pending setups with no credential fields (#4710)', async () => {
+    const app = await buildApp()
+    const pending = {
+      id: '11111111-1111-1111-1111-111111111111',
+      name: 'Research agent',
+      setup_token_expires_at: '2099-01-01T00:00:00.000Z',
+    }
+    mockQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes("s.source IS DISTINCT FROM 'cli'")) {
+        return { rows: [pending] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/agent-connection-setups/pending',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      setups: [
+        {
+          setup_id: pending.id,
+          name: 'Research agent',
+          expires_at: pending.setup_token_expires_at,
+        },
+      ],
+    })
+    // Tenant scope is the authenticated `sub`, never a caller-supplied id.
+    const call = mockQuery.mock.calls.find(([sql]) =>
+      String(sql).includes("s.source IS DISTINCT FROM 'cli'"),
+    )
+    expect(call?.[1]).toEqual(['user-1'])
+    // The projection carries no token, hash, challenge or prompt.
+    expect(JSON.stringify(response.json())).not.toMatch(
+      /setup_token|token_hash|challenge|prompt|api_key/i,
+    )
+    await app.close()
+  })
+
   it('records the manual credential fallback as approval-ready without activating the agent', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
@@ -1573,7 +1619,7 @@ describe('agent connection setup routes', () => {
   it('requests a passport at register time when the setup opted in on an eligible chain', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
-    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 84532 }
+    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 84532, account_type: 'delegator_hybrid' }
     const proof = await wallet.signMessage(passportSetup.challenge_message)
 
     mockClientQuery.mockImplementation(async (sql: string) => {
@@ -1606,6 +1652,48 @@ describe('agent connection setup routes', () => {
     expect(response.json().passport_requested).toBe(true)
     expect(mockRequestPassport).toHaveBeenCalledWith('agent-1', 84532)
     expect(mockIssueBestEffort).toHaveBeenCalledWith('agent-1', 'user-1')
+
+    await app.close()
+  })
+
+  it('#4719: a setup that opted in on an account this deployment cannot issue for records NO passport row', async () => {
+    const app = await buildApp()
+    const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
+    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 8453, account_type: 'delegator_hybrid' }
+    const proof = await wallet.signMessage(passportSetup.challenge_message)
+
+    mockClientQuery.mockImplementation(async (sql: string) => {
+      if (String(sql).includes('FROM agent_connection_setups')) {
+        return { rows: [passportSetup] }
+      }
+      if (String(sql).includes('SELECT id FROM agents')) {
+        return { rows: [] }
+      }
+      if (String(sql).includes('INSERT INTO agents')) {
+        return { rows: [{ id: 'agent-1' }] }
+      }
+      return { rows: [] }
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/agent-connection-setups/register',
+      payload: {
+        setup_token: 'hv_setup_test',
+        challenge_id: passportSetup.challenge_id,
+        delegate_address: wallet.address,
+        proof_signature: proof,
+        api_key_hash: API_KEY_HASH,
+        api_key_prefix: API_KEY_PREFIX,
+      },
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json().passport_requested).toBe(false)
+    // The account the setup was created on is what the answer is asked about.
+    expect(mockIssuableForAccount).toHaveBeenCalledWith({ chain_id: 8453, account_type: 'delegator_hybrid' })
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+    expect(mockIssueBestEffort).not.toHaveBeenCalled()
 
     await app.close()
   })
@@ -1653,7 +1741,7 @@ describe('agent connection setup routes', () => {
   it('registers the agent even when passport issuance throws', async () => {
     const app = await buildApp()
     const wallet = new Wallet('0x59c6995e998f97a5a0044966f094538eac3f95e63a6c4ed67f298b7c89c86d38')
-    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 84532 }
+    const passportSetup = { ...SETUP, issue_passport: true, account_chain_id: 84532, account_type: 'delegator_hybrid' }
     const proof = await wallet.signMessage(passportSetup.challenge_message)
     mockRequestPassport.mockRejectedValue(new Error('passport table missing'))
 
@@ -2623,6 +2711,9 @@ describe('data access characterization (#985)', () => {
     ['setup not found under the lock', {}, 401, null],
     ['setup already consumed', {}, 409, { ...SETUP, setup_token_consumed_at: '2026-01-01T00:00:00.000Z' }],
     ['setup no longer awaiting connection', {}, 409, { ...SETUP, status: 'connected_local' }],
+    // #4710 accepted residual: an old prompt pasted after "Start again" gets
+    // the raw 409, and /register refuses it BEFORE any agent row is written.
+    ['setup cancelled by Start again', {}, 409, { ...SETUP, status: 'cancelled' }],
     ['expired setup token', {}, 410, { ...SETUP, setup_token_expires_at: '2000-01-01T00:00:00.000Z' }],
     ['invalid challenge', { challenge_id: 'wrong' }, 400, SETUP],
     ['malformed signing address', { delegate_address: 'not-an-address' }, 400, SETUP],

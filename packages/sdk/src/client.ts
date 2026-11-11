@@ -318,6 +318,12 @@ export class HavenClient {
       signForData: (signData, fundingExpectation) => this.signForData(signData, undefined, fundingExpectation),
       assertSignableAuthorizationState: (label, raw) =>
         this.throwIfNonSignableAuthorizationState(label, raw),
+      // #4722: only consulted when a merchant's 402 advertises
+      // `haven-passport`; the read is bounded inside the funding leg.
+      readAgentPassport: async () => {
+        const passport = (await this.getAgent()).passport
+        return passport ? { attestation_uid: passport.attestationUid, chain_id: passport.chainId } : null
+      },
     })
     this.merchantCompletion = new MerchantCompletion({
       post: (path, body) => this.post(path, body),
@@ -1619,6 +1625,9 @@ export class HavenClient {
     // #3888: the resume re-signs the SAME derived nonce the original header
     // carried, so a settled payment's re-signed authorization is refused by
     // the merchant as already used instead of paying twice (#3475).
+    // #4722: no passport reference here. The funding leg already executed, so
+    // a passport read would only widen a funded window; an advertised
+    // `haven-passport` extension is still echoed verbatim.
     const paymentHeader = await this.fundingLeg.createPaymentHeader(input.paymentRequired, option, status.paymentId)
     const receipt = this.fundingLeg.receiptFromStatus(input.paymentRequired, option, paymentHeader, status)
     this.fundingLeg.cacheReceipt(idempotencyKey, paymentHeader, receipt, input.taskBudgetId)
@@ -1847,8 +1856,10 @@ export class HavenClient {
      * `undefined` when there was no hash to report at all — no funding tx on
      * the erc7710 branch and no (or a zero) merchant-reported settlement hash.
      * The hosted erc7710 settle/complete gate reads this to decide whether
-     * `settled: true` is honest; the 3009 branch's `settled: true` does not
-     * need it — see `paid-mcp-completion.ts` for why. #3764: this stays the
+     * `settled: true` is honest; the 3009 branch's `settled: true` reads the
+     * SECOND report's outcome (`settlementEvidenceOutcome` below) instead —
+     * #4688: a merchant 2xx alone is never `settled: true` on either scheme.
+     * See `paid-mcp-completion.ts` for why. #3764: this stays the
      * FUNDING/anchor outcome; the merchant's own EIP-3009 settlement is a
      * second report with its own outcome — `settlementEvidenceOutcome` below.
      */

@@ -254,8 +254,12 @@ const BANNED_MODULES = [
  * Mutation-proven, not reasoned about (#2049).
  */
 /**
- * The import STRUCTURE of `routes/payments.ts`, parsed from source with the
- * TypeScript parser.
+ * The import STRUCTURE of the payment path — `routes/payments.ts` PLUS the
+ * create flow it delegates to (`modules/payments/create-payment.ts`, #4760).
+ * Both are parsed and their facts unioned: the create flow moved out of the
+ * route verbatim, so a rule that read only the route would have stopped
+ * seeing the delegation-rail prepare it performs — the guard would have gone
+ * green by looking at less.
  *
  * Deliberately not a substring scan of the whole file: `payments.ts` names
  * retired symbols in comments explaining why the retirement gate above them
@@ -278,9 +282,9 @@ const BANNED_MODULES = [
  * itself hard to falsify, and it stops matching silently when a ninth appears.
  *
  * ⚠️ **What this still does NOT see, named here so it cannot be over-read.**
- * 1. **Transitive reach.** It reads ONE file. An allowed module that itself
- *    imports the arithmetic and re-exposes it is invisible — and that path is
- *    real: `routes/payments.ts` → `modules/mpp/index.ts` →
+ * 1. **Transitive reach.** It reads the payment path's own files. An allowed
+ *    module that itself imports the arithmetic and re-exposes it is invisible
+ *    — and that path is real: `routes/payments.ts` → `modules/mpp/index.ts` →
  *    `modules/mpp/allowances.ts` (#2044). What covers a transitive CALL is the
  *    `vi.mock` spy set above, which is live for exactly that reason.
  * 2. **Other payment surfaces.** `routes/x402.ts` and the machine-payment path
@@ -297,9 +301,29 @@ const BANNED_MODULES = [
  *    the reminder that the normalization must learn `/index` first.
  */
 function paymentPathImports(): ImportFacts {
-  return parseImportFacts(
-    readFileSync(fileURLToPath(new URL('../payments.ts', import.meta.url)), 'utf8'),
+  // #4760 moved the create flow out of the route; #4761 moved the sign
+  // submit state machine out too. The payment path is all three files now —
+  // leaving either module out would let a banned import land in the file the
+  // route actually calls.
+  const files = [
+    '../payments.ts',
+    '../../modules/payments/create-payment.ts',
+    '../../modules/payments/sign-payment.ts',
+  ]
+  const facts = files.map((rel) =>
+    parseImportFacts(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'), rel),
   )
+  const union = <T>(pick: (f: ImportFacts) => Set<T>): Set<T> =>
+    new Set(facts.flatMap((f) => [...pick(f)]))
+  return {
+    bindings: union((f) => f.bindings),
+    reexports: union((f) => f.reexports),
+    staticModuleRefs: union((f) => f.staticModuleRefs),
+    codeStringLiterals: union((f) => f.codeStringLiterals),
+    unresolvableDynamicImports: facts.reduce((n, f) => n + f.unresolvableDynamicImports, 0),
+    registeredPrefixes: union((f) => f.registeredPrefixes),
+    railDecisionLiterals: union((f) => f.railDecisionLiterals),
+  }
 }
 
 describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () => {
@@ -405,7 +429,9 @@ describe('non-custody: the on-chain policy is the final gate (Red Line #4)', () 
     expect(imports.bindings.has('prepareDelegationPayment')).toBe(true)
     expect(imports.bindings.has('submitDelegationPayment')).toBe(true)
     expect(imports.bindings.size).toBeGreaterThan(20)
-    expect(imports.staticModuleRefs.has('../rails/delegation-authorization.js')).toBe(true)
+    // #4760: the prepare import lives in the create-flow module now, so the
+    // specifier carries that file's deeper relative prefix.
+    expect(imports.staticModuleRefs.has('../../rails/delegation-authorization.js')).toBe(true)
     expect(imports.codeStringLiterals.size).toBeGreaterThan(20)
 
     // (1) BOUND NAMES. No retired arithmetic is bound into the route's module

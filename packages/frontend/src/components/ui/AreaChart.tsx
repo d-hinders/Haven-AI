@@ -78,7 +78,10 @@
  * round dot centred there would straddle it.
  * The line's own stroke takes `vector-effect: non-scaling-stroke` for the
  * same reason: without it the 2-unit stroke is 2 px on flat segments and
- * stretched on steep ones.
+ * stretched on steep ones. That is also why the full chart's line draws in
+ * with a clip and not a dash: a dash on a non-scaling stroke is measured in
+ * CSS px, so a "whole path" dash stopped the line part-way across any chart
+ * wider than its viewBox (`globals.css`, the chart draw-in keyframes).
  *
  * ## Accessibility
  *
@@ -561,7 +564,6 @@ function AreaChartFull({
           <path d={areaPath} fill={LINE_COLOR} fillOpacity={AREA_OPACITY} stroke="none" />
           <path
             d={plot.linePath}
-            pathLength={1}
             fill="none"
             stroke={LINE_COLOR}
             strokeWidth={2}

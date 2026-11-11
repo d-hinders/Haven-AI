@@ -283,9 +283,10 @@ describe('Haven MCP tool handlers', () => {
       // First call: merchant returns 402 with x402 payload (used by quoteX402).
       // Second call: merchant returns 402 again on the pay path (Haven re-probes).
       if (u === x402PaymentRequired.resource.url) {
-        // Has X-PAYMENT header? It's the retry — return the paid response.
+        // Has a payment header? It's the retry — return the paid response.
+        // #4754: an x402 v2 payload goes out under PAYMENT-SIGNATURE alone.
         const headers = init?.headers ? new Headers(init.headers) : new Headers()
-        if (headers.has('X-PAYMENT')) {
+        if (headers.has('PAYMENT-SIGNATURE')) {
           return new Response(JSON.stringify({ ok: true, data: 'paid-x402' }), {
             status: 200,
             headers: {
@@ -385,7 +386,8 @@ describe('Haven MCP tool handlers', () => {
     // Regression for the agent-feedback fix that added haven_pay_x402: the
     // single-call form must internally do quoteX402 -> payX402Quote -> retry
     // without the agent orchestrating intermediate tools. We assert the merchant
-    // sees X-PAYMENT on exactly one retry and the response body reaches the agent.
+    // sees PAYMENT-SIGNATURE (#4754: the v2 name alone) on exactly one retry
+    // and the response body reaches the agent.
     const requests: CapturedRequest[] = []
     let merchantRetries = 0
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
@@ -394,7 +396,7 @@ describe('Haven MCP tool handlers', () => {
 
       if (u === x402PaymentRequired.resource.url) {
         const headers = init?.headers ? new Headers(init.headers) : new Headers()
-        if (headers.has('X-PAYMENT')) {
+        if (headers.has('PAYMENT-SIGNATURE')) {
           merchantRetries += 1
           return new Response(JSON.stringify({ ok: true, data: 'one-shot-paid' }), {
             status: 200,
@@ -698,7 +700,7 @@ describe('Haven MCP tool handlers', () => {
       if (String(url).endsWith('/machine-payments/evidence')) {
         return jsonResponse({ evidence: { id: 'ev-1' } }, 202)
       }
-      // Resource retry with X-PAYMENT header — merchant confirms
+      // Resource retry with the payment header — merchant confirms
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: {
@@ -987,6 +989,10 @@ describe('Haven MCP tool handlers', () => {
     if (!quote.success) throw new Error('quote failed')
     const data = quote.data as Record<string, unknown>
     expect(data.price_differs_from_expected).toBe(true)
+    // #4754: the reason names the token symbol, never the contract address.
+    expect(data.reason).toContain(`(${data.amount as string} ${data.token as string}) does not match`)
+    expect(data.asset as string).toMatch(/^0x[0-9a-fA-F]{40}$/) // non-vacuity: the address exists to leak
+    expect(data.reason).not.toContain(data.asset as string)
     expect(data.safe_to_continue).toBe(false)
     expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
     expect(data.next_tool_omitted_reason).toBeDefined()
@@ -1033,6 +1039,32 @@ describe('Haven MCP tool handlers', () => {
       remainingAtomic: '7500',
       remainingDisplay: '0.0075 USDC',
     })
+  })
+
+  it('#4721: haven_get_agent carries the agent\'s passport reference', async () => {
+    const uid = '0x' + 'ab'.repeat(32)
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith('/machine-payments/agent')) {
+        return jsonResponse({
+          id: 'agt_1', name: 'Test', status: 'active', account_address: safeAddress,
+          delegate_address: delegateAddress, chain_id: 8453, execution_rail: 'delegation',
+          passport: { attestation_uid: uid, chain_id: 84532 },
+        })
+      }
+      if (u.includes('/allowances')) {
+        return jsonResponse({
+          agent_id: 'agt_1', account_address: safeAddress, delegate_address: delegateAddress,
+          chain_id: 8453, allowances: [],
+        })
+      }
+      return jsonResponse({ task_budgets: [] })
+    })
+    const handlers = createToolHandlers(new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl }))
+    const result = await handlers.haven_get_agent({})
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect((result.data as { passport: unknown }).passport).toEqual({ attestationUid: uid, chainId: 84532 })
   })
 
   it('#3772: haven_get_agent and haven_get_allowances carry supersededBy with the warning, null otherwise', async () => {

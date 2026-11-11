@@ -8,8 +8,11 @@ import { DialogActions } from '../ui/DialogActions'
 import { Icon } from '../ui/Icon'
 import { StatusBadge, type StatusTone } from '../ui/StatusBadge'
 import { describeBudgetGrant } from '@/lib/budget-period'
+import { useCopyTimeout } from '@haven_ai/ui/hooks/useCopyTimeout'
+import { useCopyToClipboard } from '@haven_ai/ui/hooks/useCopyToClipboard'
 import { ActionCallout } from './SetupNotices'
-import { restartCopyForRuntime } from './setup-copy'
+import { CopyBlock } from './CopyBlock'
+import { restartCopyForRuntime, SAY_HELLO_BODY, SAY_HELLO_PROMPT } from './setup-copy'
 
 /** Terminal state (expired/cancelled/failed) with a restart + close action. */
 export function TerminalSetupState({
@@ -101,6 +104,8 @@ export function SetupDoneState({
   chainId,
   beforeDone,
   onClose,
+  connectorPath = true,
+  nestedCopyBlocks = false,
 }: {
   runtime: string
   skillInstalled: boolean
@@ -115,9 +120,26 @@ export function SetupDoneState({
   /** Rendered directly above the Done button — see the comment at its use. */
   beforeDone?: ReactNode
   onClose: () => void
+  /**
+   * #4706: offer "Say hello to it" — the read-only budget check. True on the
+   * connector path; the manual-credential path hands out env lines and has no
+   * connector to say hello to, so it leaves the block out.
+   */
+  connectorPath?: boolean
+  /** #4065: drop the copy block's own `Card` shell inside the inline flow. */
+  nestedCopyBlocks?: boolean
 }) {
   const [downloading, setDownloading] = useState(false)
   const restartCopy = restartCopyForRuntime(runtime)
+  // #4706: the "Say hello" prompt's copy state. `CopyBlock` owns the shape;
+  // the write goes through the one clipboard hook (#4573), so a refused copy
+  // never reads as copied.
+  const { copied: helloCopied, markCopied: markHelloCopied } = useCopyTimeout(1500)
+  const copyToClipboard = useCopyToClipboard()
+
+  async function handleCopyHello() {
+    if (await copyToClipboard(SAY_HELLO_PROMPT)) markHelloCopied()
+  }
 
   // #1394: name the authority the user just granted, in the same words the
   // connector uses in the agent's own terminal. "Your agent can now spend
@@ -237,6 +259,25 @@ export function SetupDoneState({
           skip it and the tools never load, so setup looks silently broken.
           A to-do and a done-list do not share a list. */}
       {restartCopy && <ActionCallout>{restartCopy}</ActionCallout>}
+
+      {/* #4706: the read-only check the recipe asks for — ask the agent its
+          live budget and spend nothing. It comes AFTER the restart callout
+          because desktop runtimes only load Haven tools after a restart, so
+          the prompt cannot work until that is done. Connector path only: the
+          manual-credential path hands out env lines and has no connector to
+          say hello to. */}
+      {connectorPath && (
+        <div className="flex flex-col gap-2">
+          <CopyBlock
+            label="Say hello to it"
+            value={SAY_HELLO_PROMPT}
+            copied={helloCopied}
+            nested={nestedCopyBlocks}
+            onCopy={handleCopyHello}
+          />
+          <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">{SAY_HELLO_BODY}</p>
+        </div>
+      )}
 
       {/* Anything the user should decide BEFORE dismissing. Rendered here
           rather than after the button by the caller (#2561): a rendered

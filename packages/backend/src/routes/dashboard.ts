@@ -1,8 +1,9 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, FastifyRequest } from 'fastify'
 import { authMiddleware } from '../middleware/auth.js'
 import { getChainData, shouldMarkApprox, tokenPeg } from '@haven_ai/core'
 import {
   countFailedIntents7d,
+  findFirstAgentPayment,
   findPortfolioSnapshots,
   hasFirstAgentPayment,
   insertPortfolioSnapshot,
@@ -10,6 +11,7 @@ import {
   listDashboardAgents,
   listDashboardAccounts,
   listDashboardMerchants,
+  listDashboardSinceGroups,
   listDashboardSpendGroups,
   listLatestEndedBudgetByAgent,
   listPendingAgentSetupStatuses,
@@ -36,6 +38,7 @@ import {
   ownAccountNameResolver,
   compareTransactions,
   isValidActivityTimeZone,
+  sinceTimeWord,
   type EnrichedTransaction,
   enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
@@ -74,6 +77,49 @@ interface FiatFlags {
   sek: boolean
 }
 
+// ── #4707: the first agent payment, named ────────────────────────────────────
+
+/**
+ * `GET /dashboard/first-agent-payment` — the one payment the first-agent-payment
+ * card names, or `null`.
+ *
+ * A separate route rather than an overview field: the overview polls every
+ * 10 s, `onboardingProgress` is `additionalProperties: false`, and no
+ * `payment_intents` index includes `user_id`. This read is asked for only
+ * while `hasFirstAgentPayment` is true and the card is not dismissed, and it
+ * stops as soon as a row comes back.
+ *
+ * `null` is a real answer, not an error: the user's only confirmed payment may
+ * still be awaiting its merchant leg (see `FIND_FIRST_AGENT_PAYMENT_SQL`), and
+ * the client renders nothing rather than a weaker claim.
+ */
+export interface FirstAgentPaymentResponse {
+  payment: {
+    id: string
+    /** The agent's name — the card's heading. */
+    agentName: string
+    /** The token amount as stored; the card's figure when fiat would read $0.00. */
+    amountHuman: string
+    amountRaw: string | null
+    tokenSymbol: string
+    chainId: number
+    /** ISO instant the funding leg confirmed — the card's "just now" / date. */
+    confirmedAt: string
+    /** Booked fiat at settle time, in each bucket; null when never priced. */
+    usdValue: number | null
+    eurValue: number | null
+    sekValue: number | null
+    /**
+     * Contact name, else receipt-merchant name, for the counterparty. Null when
+     * neither exists — the client then falls back to the x402 resource host and
+     * renders no name at all rather than an address (#3810 rule 4).
+     */
+    merchantName: string | null
+    /** The x402 resource URL, whose HOST is the last displayable name. */
+    x402ResourceUrl: string | null
+  } | null
+}
+
 export function emptySpendWindow(): SpendWindowFigures {
   return {
     grossUsd: 0,
@@ -100,6 +146,99 @@ export interface TokenRates {
 export interface GroupPricing {
   symbol: string | null
   rates: TokenRates | null
+}
+
+/**
+ * The chain registry's token identity for a (chain, token address) pair, or
+ * `null` when the registry does not know it. Module scope since #4709: the
+ * overview and the "since your last visit" read price their groups the same
+ * way, and a second copy of this lookup is how the two would drift.
+ */
+function chainToken(
+  chainKey: number,
+  tokenKey: string,
+): { symbol: string; decimals: number } | null {
+  try {
+    return (
+      getChainData(chainKey).tokens.find(
+        (t) => t.address !== null && t.address.toLowerCase() === tokenKey.toLowerCase(),
+      ) ?? null
+    )
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Today's spot rates for a set of symbols. One `getTokenPrice` call per symbol
+ * (shared 60 s CoinGecko cache); a failed read or a zero quote is `null` — the
+ * wire distinguishes "no rate" from a 0 rate (owner decision 1: a
+ * NULL-booked-fiat row is priced at today's rate and the total is marked ≈, so
+ * a rate must never silently undercount).
+ */
+async function loadTokenRates(symbols: Iterable<string>): Promise<Map<string, TokenRates | null>> {
+  const rateBySymbol = new Map<string, TokenRates | null>()
+  for (const symbol of symbols) {
+    if (!rateBySymbol.has(symbol)) rateBySymbol.set(symbol, null)
+  }
+  for (const symbol of rateBySymbol.keys()) {
+    try {
+      const price = await getTokenPrice(symbol)
+      const pick = (value: number): number | null => (value > 0 ? value : null)
+      rateBySymbol.set(symbol, { usd: pick(price.usd), eur: pick(price.eur), sek: pick(price.sek) })
+    } catch {
+      rateBySymbol.set(symbol, null)
+    }
+  }
+  return rateBySymbol
+}
+
+/** The per-(chain, token) pricing map `accumulateWindow` reads. */
+function groupPricing(
+  groups: Array<{ chain_key: number; token_key: string }>,
+  rateBySymbol: Map<string, TokenRates | null>,
+): Map<string, GroupPricing> {
+  const rates = new Map<string, GroupPricing>()
+  for (const group of groups) {
+    const symbol = chainToken(group.chain_key, group.token_key)?.symbol ?? null
+    rates.set(`${group.chain_key}:${group.token_key}`, {
+      symbol,
+      rates: symbol ? (rateBySymbol.get(symbol) ?? null) : null,
+    })
+  }
+  return rates
+}
+
+/**
+ * The registry's own testnet marker (testnets only, #2534). Module scope since
+ * #4709: the spend scope and the per-account wire flag read the same fact.
+ */
+function isChainTestnet(chainId: number): boolean {
+  try {
+    return getChainData(chainId).faucetUrl !== undefined
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Testnet scope (owner decision 3): the figures cover mainnet accounts only
+ * whenever the user has one; a testnet-only user sees test totals. One
+ * derivation for every spend consumer — the overview's 7/30-day block and
+ * #4709's "since your last visit" read the same `spend.scope`.
+ */
+export function spendScopeForAccounts(accounts: Array<{ chain_id: number }>): {
+  scope: 'mainnet' | 'testnet'
+  chainIds: number[]
+} {
+  const mainnetChainIds = [
+    ...new Set(accounts.filter((account) => !isChainTestnet(account.chain_id)).map((a) => a.chain_id)),
+  ]
+  const allChainIds = [...new Set(accounts.map((a) => a.chain_id))]
+  return {
+    scope: mainnetChainIds.length > 0 ? 'mainnet' : 'testnet',
+    chainIds: mainnetChainIds.length > 0 ? mainnetChainIds : allChainIds,
+  }
 }
 
 function emptyRefusalBuckets(): {
@@ -138,47 +277,67 @@ export function latestRefusalTimes(row: RefusalBucketRow | undefined): {
 }
 
 /**
- * Folds a spend GROUP into a window accumulator. `fb*` is the token amount of
- * rows whose booked fiat was NULL — priced at TODAY's rate here (owner
- * decision 1) and added to the same bucket. `approx` records that a
+ * The window columns every spend statement emits, suffix-free. `accumulateGroup`
+ * adapts the 7/30-day rows to this shape; the "since your last visit" statement
+ * (#4709) emits it directly, so the pricing fold below has ONE implementation
+ * rather than a fourth copy of the netting/pricing rules.
+ */
+export interface SpendWindowColumns {
+  gross_usd: string
+  net_usd: string
+  gross_eur: string
+  net_eur: string
+  gross_sek: string
+  net_sek: string
+  fb_usd: string
+  fb_eur: string
+  fb_sek: string
+  payments: string
+}
+
+/**
+ * Folds one spend GROUP's window columns into a window accumulator. `fb*` is
+ * the token amount of rows whose booked fiat was NULL — priced at TODAY's rate
+ * here (owner decision 1) and added to the same bucket. `approx` records that a
  * re-pricing happened; the display mark is `approxByCurrency`, which the one
  * rule sets only where the conversion changes the number (#4165), and a
  * bucket with no rate sets `unpricedByCurrency` instead of adding anything.
  * Exported for its unit test (`dashboard-spend-window.test.ts`): a pure fold.
  */
-export function accumulateGroup(
+export function accumulateWindow(
   target: SpendWindowFigures,
-  group: DashboardSpendGroupRow,
-  suffix: '7' | '30',
+  row: SpendWindowColumns,
+  chainKey: number,
+  tokenKey: string,
   pricing: Map<string, GroupPricing>,
 ): void {
-  target.grossUsd += Number(group[`gross_usd_${suffix}`] ?? '0')
-  target.netUsd += Number(group[`net_usd_${suffix}`] ?? '0')
-  target.grossEur += Number(group[`gross_eur_${suffix}`] ?? '0')
-  target.netEur += Number(group[`net_eur_${suffix}`] ?? '0')
-  target.grossSek += Number(group[`gross_sek_${suffix}`] ?? '0')
-  target.netSek += Number(group[`net_sek_${suffix}`] ?? '0')
-  target.payments += Number(group[`payments_${suffix}`] ?? '0')
+  target.grossUsd += Number(row.gross_usd ?? '0')
+  target.netUsd += Number(row.net_usd ?? '0')
+  target.grossEur += Number(row.gross_eur ?? '0')
+  target.netEur += Number(row.net_eur ?? '0')
+  target.grossSek += Number(row.gross_sek ?? '0')
+  target.netSek += Number(row.net_sek ?? '0')
+  target.payments += Number(row.payments ?? '0')
 
   // String-concat, not a template literal: the route-module inventory regex
   // reads any `x.get(` followed by a quoted string as a Fastify registration,
   // and a backtick here fabricated a `GET /dashboard${chain}:${token}` route
   // in `route-modules.generated.ts` (#3803 round-2).
-  const groupPricing = pricing.get(group.chain_key + ':' + group.token_key)
+  const groupPricing = pricing.get(chainKey + ':' + tokenKey)
   const rate = groupPricing?.rates ?? null
   // #4288: a token PEGGED to the bucket's currency is that currency — the
   // registry's `tokenPeg` is a fact, so a NULL-booked USDC row re-prices at
   // exactly 1.0 in the USD bucket, not at CoinGecko's ≈0.9998 `usd` quote,
   // and a missing quote no longer marks a peg it could have priced. A float
   // (ETH, anything unknown) still uses the market rate, or nothing.
-  const peg = tokenPeg(group.chain_key, groupPricing?.symbol ?? null)
+  const peg = tokenPeg(chainKey, groupPricing?.symbol ?? null)
   const buckets = [
     { key: 'usd', currency: 'USD', grossKey: 'grossUsd', netKey: 'netUsd' },
     { key: 'eur', currency: 'EUR', grossKey: 'grossEur', netKey: 'netEur' },
     { key: 'sek', currency: 'SEK', grossKey: 'grossSek', netKey: 'netSek' },
   ] as const
   for (const bucket of buckets) {
-    const fallback = Number(group[`fb_${bucket.key}_${suffix}`] ?? '0')
+    const fallback = Number(row[`fb_${bucket.key}`] ?? '0')
     if (fallback <= 0) continue
     target.approx = true
     const perToken = peg === bucket.currency ? 1.0 : (rate?.[bucket.key] ?? null)
@@ -193,7 +352,7 @@ export function accumulateGroup(
     if (
       shouldMarkApprox({
         repriced: true,
-        chainId: group.chain_key,
+        chainId: chainKey,
         tokenSymbol: groupPricing?.symbol ?? null,
         displayCurrency: bucket.currency,
         kind: 'total',
@@ -202,6 +361,37 @@ export function accumulateGroup(
       target.approxByCurrency[bucket.key] = true
     }
   }
+}
+
+/**
+ * Folds a 7/30-day spend GROUP into a window accumulator — the suffix adapter
+ * over `accumulateWindow`, kept so the existing call sites and their unit test
+ * read unchanged.
+ */
+export function accumulateGroup(
+  target: SpendWindowFigures,
+  group: DashboardSpendGroupRow,
+  suffix: '7' | '30',
+  pricing: Map<string, GroupPricing>,
+): void {
+  accumulateWindow(
+    target,
+    {
+      gross_usd: group[`gross_usd_${suffix}`],
+      net_usd: group[`net_usd_${suffix}`],
+      gross_eur: group[`gross_eur_${suffix}`],
+      net_eur: group[`net_eur_${suffix}`],
+      gross_sek: group[`gross_sek_${suffix}`],
+      net_sek: group[`net_sek_${suffix}`],
+      fb_usd: group[`fb_usd_${suffix}`],
+      fb_eur: group[`fb_eur_${suffix}`],
+      fb_sek: group[`fb_sek_${suffix}`],
+      payments: group[`payments_${suffix}`],
+    },
+    group.chain_key,
+    group.token_key,
+    pricing,
+  )
 }
 
 function accumulateRefusalRow(target: ReturnType<typeof emptyRefusalBuckets>, row: RefusalBucketRow, suffix: '7' | '30'): void {
@@ -311,20 +501,7 @@ export default async function dashboardRoutes(
 
     // Testnet scope (owner decision 3): the figures cover mainnet accounts
     // only whenever the user has one; a testnet-only user sees test totals.
-    // `faucetUrl` is the registry's own testnet marker (testnets only, #2534).
-    const isChainTestnet = (chainId: number): boolean => {
-      try {
-        return getChainData(chainId).faucetUrl !== undefined
-      } catch {
-        return false
-      }
-    }
-    const mainnetChainIds = [
-      ...new Set(accounts.filter((account) => !isChainTestnet(account.chain_id)).map((a) => a.chain_id)),
-    ]
-    const allChainIds = [...new Set(accounts.map((a) => a.chain_id))]
-    const scopeChainIds = mainnetChainIds.length > 0 ? mainnetChainIds : allChainIds
-    const spendScope: 'mainnet' | 'testnet' = mainnetChainIds.length > 0 ? 'mainnet' : 'testnet'
+    const { scope: spendScope, chainIds: scopeChainIds } = spendScopeForAccounts(accounts)
 
     const [
       spendGroups,
@@ -354,47 +531,16 @@ export default async function dashboardRoutes(
     // `null` — the wire distinguishes "no rate" from a 0 rate (owner decision
     // 1: a NULL-booked-fiat row is priced at today's rate and the total is
     // marked ≈, so a rate must never silently undercount).
-    const chainToken = (
-      chainKey: number,
-      tokenKey: string,
-    ): { symbol: string; decimals: number } | null => {
-      try {
-        return (
-          getChainData(chainKey).tokens.find(
-            (t) => t.address !== null && t.address.toLowerCase() === tokenKey.toLowerCase(),
-          ) ?? null
-        )
-      } catch {
-        return null
-      }
-    }
-    const rateBySymbol = new Map<string, TokenRates | null>()
+    const symbols = new Set<string>()
     for (const group of spendGroups) {
       const symbol = chainToken(group.chain_key, group.token_key)?.symbol
-      if (symbol && !rateBySymbol.has(symbol)) rateBySymbol.set(symbol, null)
+      if (symbol) symbols.add(symbol)
     }
     for (const budgets of budgetsByAgent.values()) {
-      for (const budget of budgets) {
-        if (!rateBySymbol.has(budget.token_symbol)) rateBySymbol.set(budget.token_symbol, null)
-      }
+      for (const budget of budgets) symbols.add(budget.token_symbol)
     }
-    for (const symbol of rateBySymbol.keys()) {
-      try {
-        const price = await getTokenPrice(symbol)
-        const pick = (value: number): number | null => (value > 0 ? value : null)
-        rateBySymbol.set(symbol, { usd: pick(price.usd), eur: pick(price.eur), sek: pick(price.sek) })
-      } catch {
-        rateBySymbol.set(symbol, null)
-      }
-    }
-    const rates = new Map<string, GroupPricing>()
-    for (const group of spendGroups) {
-      const symbol = chainToken(group.chain_key, group.token_key)?.symbol ?? null
-      rates.set(`${group.chain_key}:${group.token_key}`, {
-        symbol,
-        rates: symbol ? (rateBySymbol.get(symbol) ?? null) : null,
-      })
-    }
+    const rateBySymbol = await loadTokenRates(symbols)
+    const rates = groupPricing(spendGroups, rateBySymbol)
     // spotRates: the BUDGET tokens only — the caption-currency rates the
     // client has no other way to get.
     const curKey = currency.toLowerCase() as 'usd' | 'eur' | 'sek'
@@ -878,6 +1024,140 @@ export default async function dashboardRoutes(
       // partial when this instant cuts its own local day, so the boundary is
       // the server's, never a client clock re-derivation.
       activityWindowStart: from7Iso,
+    }
+  })
+
+  /**
+   * #4709 — the "Since your last visit" figures (epic #4701 decision 4).
+   *
+   * The window is `(after, through]`: `after` is the PREVIOUS entry's instant
+   * and `through` this entry's, both returned by `POST /user/visits`. A
+   * payment confirmed exactly on a boundary is counted in exactly one of two
+   * consecutive windows, and a payment confirmed after `through` belongs to
+   * the next entry.
+   *
+   * The figures are #3803's NET definition with the #3755 netting, over the
+   * SAME `spend.scope` the 7-day block uses (`spendScopeForAccounts`), in the
+   * user's display currency — so the line cannot disagree with the sentence
+   * below it. Display-only: nothing here is read by a payment path.
+   */
+  app.get<{ Querystring: { after: string; through: string; tz?: string } }>('/since', async (request, reply) => {
+      const { sub } = request.user as { sub: string }
+      const { after, through, tz } = request.query
+
+      // The spec declares both as required `date-time` query parameters and
+      // the request-validation plugin is enforced for this module, so the
+      // handler only has to reject an unparseable instant (and a missing one,
+      // which `new Date(undefined)` already is) — no `typeof` ladder, which
+      // the request-schema ratchet counts as residue.
+      const parseInstant = (value: string): Date | null => {
+        const parsed = new Date(value)
+        return Number.isNaN(parsed.getTime()) ? null : parsed
+      }
+      const afterDate = parseInstant(after)
+      const throughDate = parseInstant(through)
+      if (!afterDate || !throughDate) {
+        return reply.code(400).send({ error: 'after and through must be ISO timestamps' })
+      }
+      if (afterDate.getTime() >= throughDate.getTime()) {
+        return reply.code(400).send({ error: 'after must be before through' })
+      }
+      // Same validation and the same refusal wording as the overview's `tz`
+      // (never echo the raw query value).
+      if (tz !== undefined && !isValidActivityTimeZone(tz)) {
+        return reply.code(400).send({ error: 'unsupported tz' })
+      }
+
+      const accounts = await listDashboardAccounts(sub)
+      const { chainIds } = spendScopeForAccounts(accounts)
+      const groups = await listDashboardSinceGroups(
+        sub,
+        chainIds,
+        afterDate.toISOString(),
+        throughDate.toISOString(),
+      )
+      const currency = await resolveTransactionCurrency(sub)
+      const bucket = currency.toLowerCase() as 'usd' | 'eur' | 'sek'
+      const netKey = bucket === 'usd' ? 'netUsd' : bucket === 'eur' ? 'netEur' : 'netSek'
+
+      const symbols = new Set<string>()
+      for (const group of groups) {
+        const symbol = chainToken(group.chain_key, group.token_key)?.symbol
+        if (symbol) symbols.add(symbol)
+      }
+      const rates = groupPricing(groups, await loadTokenRates(symbols))
+
+      const byAgent = new Map<string, { id: string; name: string; figures: SpendWindowFigures }>()
+      for (const group of groups) {
+        const entry = byAgent.get(group.agent_id) ?? {
+          id: group.agent_id,
+          name: group.agent_name,
+          figures: emptySpendWindow(),
+        }
+        accumulateWindow(entry.figures, group, group.chain_key, group.token_key, rates)
+        byAgent.set(group.agent_id, entry)
+      }
+
+      const agents = [...byAgent.values()]
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          netSpend: entry.figures[netKey],
+          payments: entry.figures.payments,
+        }))
+        .sort((a, b) => b.netSpend - a.netSpend || a.name.localeCompare(b.name))
+
+      return {
+        after: afterDate.toISOString(),
+        through: throughDate.toISOString(),
+        // The fixed "Since …" word, spoken in the caller's zone — the reason
+        // `tz` is on this route at all. The sentence around it is assembled
+        // from fixed templates in the frontend.
+        timeWord: sinceTimeWord(afterDate.toISOString(), throughDate.toISOString(), tz ?? 'UTC'),
+        currency,
+        payments: agents.reduce((sum, agent) => sum + agent.payments, 0),
+        net: agents.reduce((sum, agent) => sum + agent.netSpend, 0),
+        agents,
+      }
+  })
+
+  // #4707: the first agent payment, named. A small route of its own rather
+  // than an overview field — see `FirstAgentPaymentResponse`.
+  app.get('/first-agent-payment', async (request): Promise<FirstAgentPaymentResponse> => {
+    const { sub } = request.user as { sub: string }
+
+    const row = await findFirstAgentPayment(sub)
+    if (!row) return { payment: null }
+
+    // Counterparty naming, the same two sources the overview's merchant slot
+    // reads: contacts win, then merchant receipts. The raw address is a lookup
+    // key only — it never reaches the wire (#3810 rule 4).
+    let merchantName: string | null = null
+    if (row.merchant_address) {
+      const key = row.merchant_address.toLowerCase()
+      const contacts = await listContactsForUser(sub)
+      merchantName = contacts.find((c) => c.address.toLowerCase() === key)?.name ?? null
+      if (merchantName === null) {
+        const receiptNames = await listReceiptMerchantNamesForUser(sub, [row.merchant_address])
+        merchantName = receiptNames.get(key) ?? null
+      }
+    }
+
+    return {
+      payment: {
+        id: row.id,
+        agentName: row.agent_name,
+        amountHuman: row.amount_human,
+        amountRaw: row.amount_raw,
+        tokenSymbol: row.token_symbol,
+        chainId: row.chain_id,
+        confirmedAt: row.confirmed_at.toISOString(),
+        usdValue: row.usd_value == null ? null : Number(row.usd_value),
+        eurValue: row.eur_value == null ? null : Number(row.eur_value),
+        sekValue: row.sek_value == null ? null : Number(row.sek_value),
+        merchantName,
+        x402ResourceUrl: row.x402_resource_url,
+      },
     }
   })
 }

@@ -31,6 +31,12 @@ export function renderMarkdownSummary(report: EvalReport): string {
   lines.push('| Task | Category | Pass rate | pass^k | Median session | Cost (USD) |')
   lines.push('|---|---|---|---|---|---|')
   for (const t of report.tasks) {
+    if (t.skipped) {
+      // A skipped task ran nothing: never a pass, and never a 0% that reads
+      // as a failure (#4678).
+      lines.push(`| ${t.id} | ${t.category} | skipped | no | — | — |`)
+      continue
+    }
     const rate = `${Math.round(t.passRate * 100)}%`
     // The drainer runs ONE trial on purpose — its pass^k is not comparable
     // with the k-trial tasks', so the cell says so instead of yes/no.
@@ -38,6 +44,27 @@ export function renderMarkdownSummary(report: EvalReport): string {
     const costs = t.trials.map((r) => r.costUsd).filter((c): c is number => c !== undefined)
     const cost = costs.length > 0 ? usd(costs.reduce((a, b) => a + b, 0) / costs.length) : '—'
     lines.push(`| ${t.id} | ${t.category} | ${rate} | ${passK} | ${ms(t.medianSessionMs)} | ${cost} |`)
+  }
+  const skipped = report.tasks.filter((t) => t.skipped)
+  if (skipped.length > 0) {
+    lines.push('')
+    lines.push(
+      `**Skipped (${skipped.length}):** ${skipped.map((t) => `\`${t.id}\` — ${t.skipReason ?? 'not run on this lane'}`).join('; ')}. A skipped task never counts as passed.`,
+    )
+  }
+  // #4680: the numeric readings, per trial. A scoring task's pass/fail alone
+  // hides a band that fell from 3 to 2, so the numbers are printed beside it.
+  const scored = report.tasks.filter((t) => t.trials.some((r) => r.scores !== undefined))
+  if (scored.length > 0) {
+    lines.push('')
+    lines.push('**Scores** (each trial\'s numeric reading)')
+    lines.push('')
+    for (const t of scored) {
+      const perTrial = t.trials.map((r) =>
+        r.scores === undefined ? '—' : Object.entries(r.scores).map(([k, v]) => `${k}=${v}`).join(', '),
+      )
+      lines.push(`- \`${t.id}\`: ${perTrial.join(' | ')}`)
+    }
   }
   // Failed trials, with the public-safe tool trace (names + error codes
   // only), so a failure can be diagnosed from the run page itself.

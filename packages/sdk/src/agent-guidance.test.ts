@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { AGENT_README_SECTION_MD, HAVEN_AGENT_RUNBOOK_MD } from './agent-guidance.js'
+import { AGENT_CLIENT_UPDATE_SENTENCE, AGENT_README_SECTION_MD, HAVEN_AGENT_RUNBOOK_MD } from './agent-guidance.js'
 
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..')
 
@@ -140,5 +140,19 @@ describe('§ How to verify: needs_approval names its three causes (#4355, #4352)
         'ask your user again — there is no queue. Rows, all spent: it refills at `budgetRefillsAt`',
     )
     expect(HAVEN_AGENT_RUNBOOK_MD).not.toContain('the connector finished, nobody approved yet')
+  })
+})
+
+describe('§ If something breaks: the release-record pointer leads the paragraph (#4746)', () => {
+  // A summarising fetch kept only the paragraph's opening ~110 characters in
+  // run 42607525433, trial 3, and dropped the trailing pointer — so the agent
+  // never reached /releases. The pointer goes first, in the owner-approved
+  // words (2026-11-09, option a on #4746), and the old trailing copy is gone.
+  it('opens the section with the pointer, then the client-update sentence, whole', () => {
+    const section = HAVEN_AGENT_RUNBOOK_MD.split('\n## If something breaks\n\n')[1] ?? ''
+    const firstParagraph = section.split('\n')[0]
+    expect(firstParagraph).toBe(
+      `Client out of date? What changed: [/releases](/releases). ${AGENT_CLIENT_UPDATE_SENTENCE}`,
+    )
   })
 })

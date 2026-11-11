@@ -11,21 +11,45 @@
 //   node scripts/docs/audit-staleness.mjs             # human-readable report
 //   node scripts/docs/audit-staleness.mjs --json      # JSON to stdout
 //   node scripts/docs/audit-staleness.mjs --top=10    # limit rows
+//   node scripts/docs/audit-staleness.mjs --figures-report figures.txt
+//
+// `--figures-report` appends the doc-figure section `scan-remeasure.mjs
+// --doc-figures-only --out` wrote, under the ranking (#4631). The audit's run
+// step has no `GH_TOKEN`, so it does not read the runner's standing issue: the
+// same job runs the runner first and hands it the file, which keeps the
+// figures at the same SHA as the ranking instead of six days behind it.
+// Without the flag the audit prints one line saying the report was not
+// supplied — a true statement, distinguishable from a failed read.
 //
 // Always exits 0 — it reports, the humans (or the cron issue) prioritize.
 // Run weekly by .github/workflows/docs-audit.yml, which upserts the report
 // into a tracking issue.
 
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { REPO_ROOT, ROOT_DOCS, walk, parseFrontMatter } from './validate-frontmatter.mjs'
 import { GOVERNED_PACKAGE_DOCS } from './package-docs.mjs'
 
+/** `--name=value` or `--name value`; undefined when absent. */
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
-  return hit ? hit.slice(name.length + 3) : undefined
+  if (hit) return hit.slice(name.length + 3)
+  const i = process.argv.indexOf(`--${name}`)
+  if (i !== -1 && process.argv[i + 1] !== undefined && !process.argv[i + 1].startsWith('--')) return process.argv[i + 1]
+  return undefined
+}
+
+/** The doc-figure section, or the one line that says it was not supplied. */
+export function figuresSection(reportPath) {
+  if (!reportPath) return 'doc-figure report not supplied (run scan-remeasure.mjs --doc-figures-only)'
+  try {
+    const text = readFileSync(reportPath, 'utf8').trimEnd()
+    return text === '' ? `doc-figure report is empty: ${reportPath}` : text
+  } catch (err) {
+    return `doc-figure report unreadable: ${reportPath} — ${err.message}`
+  }
 }
 
 /** A covers entry → git pathspec (globs need the :(glob) magic prefix). */
@@ -113,20 +137,41 @@ async function main() {
     return
   }
 
+  const lines = []
   if (ranked.length === 0) {
-    console.log('Docs audit: every covered doc is verified at or after its covered code\'s last change. ✨')
-    return
+    lines.push("Docs audit: every covered doc is verified at or after its covered code's last change. ✨")
+  } else {
+    lines.push(`Docs audit: ${ranked.length} doc(s) whose covered code changed after last-verified:\n`)
+    for (const f of ranked) {
+      const mark = f.contract ? ' [contract]' : ''
+      lines.push(`  ${String(f.commits).padStart(3)} commit(s)  ${f.doc}${mark}  (last verified ${f.lastVerified})`)
+      lines.push(`               latest: ${f.latest}`)
+    }
+    lines.push('\nFor each: re-verify the doc against the code and bump `last-verified`, or update it.')
   }
-  console.log(`Docs audit: ${ranked.length} doc(s) whose covered code changed after last-verified:\n`)
-  for (const f of ranked) {
-    const mark = f.contract ? ' [contract]' : ''
-    console.log(`  ${String(f.commits).padStart(3)} commit(s)  ${f.doc}${mark}  (last verified ${f.lastVerified})`)
-    console.log(`               latest: ${f.latest}`)
-  }
-  console.log('\nFor each: re-verify the doc against the code and bump `last-verified`, or update it.')
+  // #4631: the doc-figure section sits under the ranking, at the same SHA.
+  lines.push('')
+  lines.push(figuresSection(arg('figures-report')))
+  console.log(lines.join('\n'))
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   main().catch((err) => {
     console.error('audit-staleness error (non-fatal):', err)
     process.exit(0)

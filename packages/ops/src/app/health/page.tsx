@@ -5,7 +5,8 @@
  * glance — sweepable intents (in_window and past_horizon), stuck passport
  * revocations, stuck outbound lanes with a copyable `outbound_txs.id`,
  * delegate balances (the monitor's last report, or
- * `not_available_on_this_replica`), and the `/health/ops` diagnostics.
+ * `not_available_on_this_replica`), the `/health/ops` diagnostics, and (#4720)
+ * a named warning when a passport chain issues without a verifier.
  *
  * Items link to the customer page where a link exists — lanes deliberately
  * have none (`outbound_txs` carries no user column, #3514). The page makes
@@ -18,6 +19,7 @@ import { useOpsClient } from '../../components/useOpsClient'
 import { PageStates } from '../../components/PageStates'
 import type { OpsReadError } from '../../lib/ops-client'
 import type { OpsHealth } from '../../lib/ops-types'
+import { PassportReadinessWarning } from '../../components/health/PassportReadinessWarning'
 import { ageLine, chainName, formatAtomic, utcLine } from '../../lib/format'
 
 function SectionCard({
@@ -104,6 +106,9 @@ function HealthView({ client }: { client: ReturnType<typeof useOpsClient> }) {
               Read at {utcLine(health.generated_at)}. The delegate-balance section is the monitor's last
               report — requesting a health read never triggers a scan.
             </p>
+
+            {/* #4720: the half-configured passport state, named — empty renders nothing. */}
+            <PassportReadinessWarning passport={health.ops_diagnostics?.passport} />
 
             <SectionCard
               title="Sweepable payment intents"

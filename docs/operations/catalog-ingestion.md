@@ -6,6 +6,7 @@ covers:
   - packages/backend/src/infra/repositories/catalog-submissions.ts
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/index.ts
+  - packages/backend/src/background-jobs.ts
   - packages/backend/src/db/migrations/068_catalog_lifecycle.ts
   - packages/backend/src/db/migrations/088_merchants.ts
   - packages/backend/src/db/migrations/066_catalog_submissions.ts
@@ -142,7 +143,7 @@ All in `packages/backend/src/modules/catalog/lifecycle.ts` (and the probe's
 
 | Knob | Value | Effect |
 |---|---|---|
-| Monitor tick | 5 min (`CATALOG_INGEST_INTERVAL_MS`, index.ts) | How often the leader scans the queue |
+| Monitor tick | 5 min (`CATALOG_INGEST_INTERVAL_MS`, `background-jobs.ts`) | How often the leader scans the queue |
 | Probe cooldown | 15 min / host (`DEFAULT_HOST_COOLDOWN_MS`) | The cooldown is per process: the monitor (`createCatalogIngestMonitor`) holds one for the process lifetime, so the window spans that process's ticks (#4407), and a restart starts it empty. The leader lock is taken per tick, so with more than one replica the tick can land on a different replica, and each replica holds its own window: a host is probed at most once per window per replica, off by at most the replica count |
 | Re-verification cadence | 24 h (`REVERIFY_CADENCE_MS`) | `verified_payable` entries are re-probed when `last_verified_at` is older. A failed re-probe does not move `last_verified_at`, so the row stays due and is probed again as soon as the per-host cooldown allows, until it passes or degrades |
 | Failure threshold | 3 (`FAIL_AFTER_CONSECUTIVE_FAILURES`) | Consecutive probe failures before a row degrades to `failed` |
@@ -225,10 +226,10 @@ required unless the mass-failure alarm fires (above).
 ### Turning the pipeline off for an incident
 
 There is no kill switch and no runtime knob. `CATALOG_INGEST_INTERVAL_MS` is a
-constant in `index.ts`, not an environment variable, so a different cadence is
-a code change and a deploy. `SELECT pg_advisory_unlock` from another session is
-not a lever either: the lock is session-scoped and held by the leader's own
-connection. Unsetting `CATALOG_OWNERSHIP_SECRET` stops rows leaving
+constant in `background-jobs.ts`, not an environment variable, so a different
+cadence is a code change and a deploy. `SELECT pg_advisory_unlock` from another
+session is not a lever either: the lock is session-scoped and held by the
+leader's own connection. Unsetting `CATALOG_OWNERSHIP_SECRET` stops rows leaving
 `submitted` (fail-closed, above), but the probe stage still runs for
 `ownership_verified` and due `verified_payable` rows. For a genuine emergency,
 stop the backend and gate `POST /catalog/submit` via WAF until the incident is

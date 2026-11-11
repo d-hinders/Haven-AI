@@ -30,3 +30,14 @@ export * from './prepare-failure.js'
 // SponsoredUserOpOutcome, SponsoredUserOpGasRecord) exist nowhere else in
 // the barrel.
 export * from './sponsored-gas.js'
+// #4760 (epic #4759 slice 1): the `POST /payments` create flow, moved out of
+// routes/payments.ts. Exports are disjoint from the re-exports above:
+// createPayment, CreatePaymentInput, CreatePaymentBody, CreatePaymentLog and
+// resolveToken exist nowhere else in the barrel.
+export * from './create-payment.js'
+// #4761 (epic #4759 slice 2): the `POST /payments/:id/sign` submit state
+// machine, moved out of routes/payments.ts. Exports are disjoint from the
+// re-exports above: signPayment, SignPaymentInput, SignPaymentBody,
+// SignPaymentLog and SignPaymentMppCollaborators exist nowhere else in the
+// barrel.
+export * from './sign-payment.js'

@@ -339,6 +339,11 @@ its title in the house `Card.Header` band, one hairline above step 1
 the two budget wires (#4004) and the funding targets — never asserted.
 Coming-soon and no-offer merchants show no panel.
 
+One step is current at a time (#4646): the open ring marks the first step
+that is not done, every step after it is later, so a blocked step 2 is the
+one to act on and step 3 opens only once steps 1 and 2 are done, and while
+either wire is loading no step wears the ring.
+
 1. **Connect an agent.** Done when the user has at least one ACTIVE agent —
    "Atlas is connected on Base Sepolia"; with several, the count names one.
    Open when there are none: "Connect an agent to buy from <merchant>" with

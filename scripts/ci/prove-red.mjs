@@ -37,6 +37,9 @@
 //                                               run (asserted with a git stub)
 //   7  node_modules resolving workspace       → refused before any cell
 //      packages into another checkout
+//   8  a restore's copy gave the file a new  → the restore puts the journalled
+//      mtime, so a same-package cell left       mtime back, after the post-restore
+//      src/ newer than dist/ (2026-11-10)       rebuild when one ran (#4769)
 //
 // Exit codes: 0 every cell caught (census: every selected cell ran);
 // 1 a cell was not caught, or was refused at its baseline; 2 refused with
@@ -65,6 +68,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
   writeSync,
 } from 'node:fs'
@@ -434,10 +438,13 @@ export function parseCandidates(text) {
 }
 
 /**
- * Pick the census sample. Pure. Candidates arrive newest landing first (the
- * census command walks `git log` from the tip); files that no longer exist at
- * HEAD are skipped, the first CENSUS_BUDGET distinct live files get one census
- * cell each (M1…M5), and up to PROBE_BUDGET probe cells follow (M6, M7).
+ * Pick the census sample. Pure. Candidates arrive in the order the census
+ * command lists them, and the runner takes them in that order whatever it is:
+ * quality-scan block 1 lists money-path guard files that carry no recorded
+ * mutation, oldest first, and falls back to the newest-landing sample when none
+ * is left. Files that no longer exist at HEAD are skipped, the first
+ * CENSUS_BUDGET distinct live files get one census cell each (M1…M5), and up to
+ * PROBE_BUDGET probe cells follow (M6, M7).
  */
 export function selectCensus(entries, cells, exists) {
   const errors = []
@@ -558,7 +565,7 @@ export function censusTable(selection, resultsById, { head, declared }) {
   }
   lines.push('')
   lines.push(
-    `Census at \`${head}\`: ${declared} candidate guard files; ${selection.rows.length} census mutations (one per file, newest landing first) + ${selection.probes.length} probes. ` +
+    `Census at \`${head}\`: ${declared} candidate guard files; ${selection.rows.length} census mutations (one per file, in the census order) + ${selection.probes.length} probes. ` +
       `${counts.caught} caught, ${counts.survived} survived, ${counts.shadowed} shadowed, ${counts['mutation-red']} mutation-red, ${counts.refused} refused, ${counts['not run']} not run.`,
   )
   if (selection.notSampled.length) lines.push(`Not sampled (budget is ${CENSUS_BUDGET}): ${selection.notSampled.map((e) => `\`${e.file}\``).join(', ')}.`)
@@ -1011,7 +1018,9 @@ async function runCell(ctx, cell, origin) {
     rmSync(backup, { force: true })
     throw refuse(`${cell.id}: the backup at ${backup} did not verify; nothing was mutated`)
   }
-  const fileMode = statSync(abs).mode & 0o7777
+  const st = statSync(abs)
+  const fileMode = st.mode & 0o7777
+  const fileMtimeMs = st.mtimeMs
   const journal = {
     version: 1,
     pid: process.pid,
@@ -1025,6 +1034,7 @@ async function runCell(ctx, cell, origin) {
     origSha,
     mutantSha,
     fileMode,
+    fileMtimeMs,
     rebuildPackage: pkg,
     phase: 'mutated',
     buildDirty: false,
@@ -1074,7 +1084,30 @@ async function runCell(ctx, cell, origin) {
   return res
 }
 
-/** Restore the in-flight cell: verified backup → cp → sha256 → rebuild if one ran → empty porcelain. */
+/**
+ * Put the file's mtime back to the value journalled before the mutation. The
+ * restore copies the verified backup over the file, and a copy stamps the file
+ * with the current time: for a same-package cell no rebuild runs, so the
+ * package's `src/` would read newer than its `dist/` and every consuming
+ * package's `check-dist-freshness` globalSetup would refuse to start (#4769).
+ * The restored content is byte-identical (the sha256 is verified), so the
+ * `dist/` is not stale.
+ *
+ * Call it only once the post-restore rebuild has succeeded, when one ran: a
+ * failed rebuild leaves a mutant `dist/` behind, and an old `src/` beside it
+ * would read fresh. A journal written before #4769 has no mtime and is
+ * tolerated, as `fileMode` is.
+ */
+function restoreMtime(abs, mtimeMs, label) {
+  if (!Number.isFinite(mtimeMs)) return
+  try {
+    utimesSync(abs, new Date(mtimeMs), new Date(mtimeMs))
+  } catch (e) {
+    throw restoreFailed(`${label}: putting the mtime back to ${new Date(mtimeMs).toISOString()} failed (${e.code ?? e.message}); the journal is kept`)
+  }
+}
+
+/** Restore the in-flight cell: verified backup → cp → sha256 → rebuild if one ran → mtime → empty porcelain. */
 async function restoreCurrent(ctx) {
   const cur = ctx.current
   if (!cur) return
@@ -1111,6 +1144,9 @@ async function restoreCurrent(ctx) {
     journal.buildDirty = false
     writeJournal(ctx, journal)
   }
+  // Only after the rebuild: a failed one above leaves a mutant dist/ behind,
+  // and an old src beside it would read fresh (#4769).
+  restoreMtime(abs, journal.fileMtimeMs, `${cell.id}: ${cell.file}`)
   const dirty = porcelain(ctx.root)
   if (dirty.length) throw restoreFailed(`${cell.id}: the source is restored (sha256 and mode verified) but the tree is not clean: ${dirty.join(', ')}. ${dirtyHint(ctx.root)} The journal is kept; recover clears it once the tree is clean.`)
   rmSync(backup, { force: true })
@@ -1317,6 +1353,10 @@ async function modeRecover(ctx) {
     writeJournal(ctx, j)
     say(`recover: rebuilt packages/${j.rebuildPackage}`)
   }
+  // Whenever the journal has one and the content matches the original — the
+  // no-copy branch included — and only after the rebuild, for the reason in
+  // restoreMtime (#4769).
+  restoreMtime(abs, j.fileMtimeMs, `recover: ${j.file}`)
   const dirty = porcelain(ctx.root)
   if (dirty.length) throw restoreFailed(`recover: the source is restored but the tree is not clean: ${dirty.join(', ')}. ${dirtyHint(ctx.root)} The journal is kept.`)
   rmSync(j.backup, { force: true })
@@ -1388,7 +1428,23 @@ async function main(argv) {
   }
 }
 
-const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+const invokedDirectly = isEntryPoint()
 if (invokedDirectly) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),

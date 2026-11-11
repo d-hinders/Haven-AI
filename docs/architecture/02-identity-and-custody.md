@@ -34,7 +34,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-10-23"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -304,59 +304,4 @@ and [`docs/exit/README.md`](../exit/README.md)
 ([delegation rail](../../packages/backend/src/rails/delegation-rail.ts),
 [delegation policy](../../packages/backend/src/rails/delegation-policy.ts)).
 
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-retirement and custody claims above were re-checked against the code at this
-head. Migration 084's `user_safes` → `smart_accounts` rename (#2941) and
-#2911's follow-up migrations are on dev, so the doc's Safe-row language ("rows
-persist but reach no screen") describes a renamed-but-present table, which is
-what the code still shows. The remaining safe-retirement remainder items named
-by the 2026-09-13 scan (#2851, the P3 rename) are both CLOSED COMPLETED.
-`connect/src/runtime.ts` still registers the agent by public
-delegate address and API-key hash only (`middleware/agentAuth.ts`), and
-`signer/src/core.ts` still holds the delegate key locally. The intervening
-commits (#3167 labels, #3127 currency preference, #3151 `--unwire`
-recovery-credential guard) touched covered files and none moved a custody
-boundary; nothing here needed rewriting.
-
-Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`): the
-custody claims re-checked at this head — `routes/agents.ts` and
-`middleware/agentAuth.ts` still handle `delegate_address` + API-key
-hash/prefix only; `connect/src/rekey.ts` and `routes/agent-rekey.ts` still
-exist with the explicit `refuseAgentCaller` guard (an agent still cannot
-re-key itself); `infra/repositories/user-passkeys.ts` still stores
-`credential_id`, `public_key_x/y`, signer address, chain and the raw
-attestation unverified (POC, as written); `disableDelegation` still backs
-revocation and revoke-all in `routes/agent-delegations.ts`; the signer-set
-ops still live in `rails/hybrid-signer-actions.ts` behind existing-signer
-signing; and `signer/src/core.ts` still keeps the delegate key local. The
-week's drift (#3444 sub-budgets — the stored delegation graph now also holds
-child re-delegations, protected like the parent copies; #3423 receive-side;
-#3479 settlement recording; #3451 re-key activation; #3386 re-key merchant
-label) widened the delegation surface but moved no zone, invariant or custody
-boundary; nothing here needed rewriting.
-
-Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
-the Connect provisioning bullet separates credential material (hash/prefix,
-delegate address, proof) from the non-secret setup metadata the
-registration also sends (`connect/src/runtime.ts`); the passkey bullet says
-the enrolment route (`POST /passkeys`) was deleted with #2847 and only the
-read remains (`routes/passkeys.ts`); the delegation-rail section no longer
-says the agent receives the signed delegation through the credential
-channel — the owner signs it to the agent's delegate account, Haven stores it
-and embeds it in every redemption it prepares (the direct-payment UserOp,
-`rails/delegation-rail.ts` `buildRedemptionCall`; on erc7710 the
-`payment_header` the agent forwards, `modules/x402/x402-delegation.ts`
-`assembleSettlementPayload`), and no connector credential file stores it
-(`connect/src/storage.ts`). Review round 1 (#4377) added the setup token and
-challenge id to the registration's list, the dashboard manual-credential
-path, and the exact `hybrid_account_passkeys` columns. Review round 2 made
-the delegation-exposure bullets say the delegation is not secret after first use
-on every rail (public calldata; the erc7710 header; Haven's evidence copy) and that the
-delegate key alone can spend within the caveat stack once it is. Re-checked without change: `identity.json` /
-`signer.json`, the manual `/agents` key (`routes/agents.ts`), the re-key
-split and `refuseAgentCaller` (`connect/src/rekey.ts`,
-`routes/agent-rekey.ts`), relayer deployment (`rails/hybrid-provisioning.ts`),
-`X402_BINDING_PRIVATE_KEY` (`infra/chain/x402-binding-signer.ts`), the
-platform-level encryption at rest for `agent_delegations` (migration 042),
-and the signer-set ops (`rails/hybrid-signer-actions.ts`,
-`hybrid_account_passkeys`).
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

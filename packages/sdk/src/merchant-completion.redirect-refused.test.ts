@@ -110,6 +110,9 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
           retry_body: null,
           refusal: 'redirect_cross_origin_body',
           redirect_location: elsewhere,
+          // #4552: a refused redirect carries no merchant body and no
+          // headers, so the field is present and null — never absent.
+          merchant_reported_error: null,
         }),
       }),
     )
@@ -128,6 +131,23 @@ describe('MerchantCompletion.retryRequest — a refused redirect on the paid del
     expect((err as Error).message).toContain('erc7710 has no funding leg')
     expect((err as Error).message).toContain('Do not pay again')
     expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('#4754: an x402 v1 payment (no `accepted` in the header) reads as EIP-3009 — the funded-leg account, never "no funding leg"', async () => {
+    const { completion } = completionWith(redirectElsewhere)
+    const v1Receipt = {
+      ...receiptFor(accepted3009),
+      // The library's v1 encoding: top-level scheme/network, no `accepted`.
+      paymentHeader: btoa(JSON.stringify({ x402Version: 1, scheme: 'exact', network: 'base', payload: {} })),
+    } as unknown as X402Receipt
+    const result = await settle(
+      completion.retryRequest(paidUrl, { method: 'POST', body: '{"q":1}' }, paymentRequired, v1Receipt),
+    )
+    expect(result.ok).toBe(false)
+    const err = result.ok ? undefined : result.error
+    expect(err).toMatchObject({ paymentId: 'pay_1', settlementScheme: 'eip3009' })
+    expect((err as Error).message).toContain('Check haven_get_payment_status before anything else')
+    expect((err as Error).message).not.toContain('erc7710 has no funding leg')
   })
 
   it('under a policy, a redirect on a paid POST is refused at the answering URL: refused_url, not a redirect target', async () => {

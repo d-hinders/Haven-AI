@@ -23,7 +23,7 @@ import { checkTextForSecrets, MAX_FEEDBACK_TEXT_LENGTH } from './secret-check.js
 export const DEFAULT_API = 'https://havenbackend-production-8a00.up.railway.app'
 // Self-reported CLI version. Owned by scripts/release-bump.mjs, which rewrites
 // the string literal below on every release — keep it a bare quoted literal.
-export const CLI_VERSION = '0.13.0-alpha.0'
+export const CLI_VERSION = '0.14.0-alpha.0'
 
 /** #3303: the `X-Haven-Client` value every Haven API request from this CLI carries. */
 export const CLI_CLIENT_IDENTITY = `@haven_ai/cli/${CLI_VERSION}`
@@ -82,7 +82,7 @@ export const COMMANDS = [
   'budget show', 'budget grant', 'budget revoke',
   'activity list', 'activity export',
   'catalog list',
-  'contacts list', 'contacts add', 'contacts remove',
+  'contacts list',
   'feedback submit',
 ] as const
 
@@ -252,10 +252,9 @@ async function dispatch(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
     case 'activity export': return cmdActivityExport(args, d)
     case 'catalog list': return cmdCatalogList(args, d)
     case 'contacts list': return cmdContactsList(args, d)
-    case 'contacts add': return cmdContactsAdd(args, d)
-    case 'contacts remove': return cmdContactsRemove(args, d)
     case 'feedback submit': return cmdFeedbackSubmit(args, d)
     default:
+      if (key === 'contacts add' || key === 'contacts remove') refuseContactWrite()
       throw new UsageError(`Unknown command: ${key}.`, 'Run `haven --help` for the command list.')
   }
 }
@@ -1537,34 +1536,26 @@ async function cmdContactsList(args: ParsedArgs, d: ResolvedDeps): Promise<numbe
   return EXIT.ok
 }
 
-async function cmdContactsAdd(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
-  const [address, ...nameParts] = [...args.positionals].reverse()
-  // positionals are <name...> <address>; address is last, name is the rest.
-  const name = nameParts.reverse().join(' ').trim()
-  if (!name || !address) throw new UsageError('Usage: haven contacts add <name> <address>')
-  const { api } = await authed(args, d)
-  const contact = await api.post<Contact>('/contacts', { name, address })
-  emit(d, args.flags.json, contact, () => `Added contact "${contact.name}" (${truncateAddress(contact.address)}).`)
-  return EXIT.ok
-}
-
-async function cmdContactsRemove(args: ParsedArgs, d: ResolvedDeps): Promise<number> {
-  const id = args.positionals[0]
-  if (!id) throw new UsageError('Usage: haven contacts remove <id>')
-  const { api } = await authed(args, d)
-  await api.del(`/contacts/${id}`)
-  emit(d, args.flags.json, { ok: true, contact_id: id, removed: true }, () => `Contact ${id} removed.`)
-  return EXIT.ok
+/**
+ * Saved contacts are the owner's, from the dashboard (owner decision,
+ * 2026-11-04). An agent drives this CLI, and a contact is a name the owner trusts
+ * when paying, so the backend refuses these writes from a device-code session.
+ * The two verbs stay as a clear answer rather than an unknown-command error,
+ * because older docs and agents still reach for them.
+ */
+function refuseContactWrite(): never {
+  throw new HavenCliError(
+    'Contacts can only be added or removed in the Haven dashboard. `haven contacts list` still works.',
+    EXIT.refused,
+  )
 }
 
 // ── Feedback ──────────────────────────────────────────────────────────
 
 /**
  * `haven feedback submit "<text>"` (#3597). Several unquoted words are
- * JOINED into one text with a single space between them — the same
- * convention `contacts add <name...> <address>` already uses for its own
- * free-text argument — rather than refused, so a bug report does not have to
- * be hand-quoted.
+ * JOINED into one text with a single space between them, rather than refused,
+ * so a bug report does not have to be hand-quoted.
  *
  * `authed` runs FIRST (a command with no session refuses before anything
  * else, same as every other command), then the secret check runs — and it

@@ -7,6 +7,7 @@ import {
   ConnectionNotActivatableError,
   ConnectionSettingsError,
   InvalidApiKeyError,
+  MultiCompanyGrantError,
   MultiCompanyKeyError,
   OAUTH_STATE_PURPOSE,
   OAUTH_STATE_TTL_SECONDS,
@@ -77,10 +78,12 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
   // #2864: a connect refused because the company books in another currency
   // is the one failure the user can act on differently (pick another
   // company), so the redirect names it: `&reason=unsupported_currency`.
+  // #4518: so is a grant that reaches several companies (approve one):
+  // `&reason=multi_company`.
   const redirect = (
     provider: string,
     outcome: 'connected' | 'denied' | 'error',
-    reason?: 'unsupported_currency' | 'feature_off',
+    reason?: 'unsupported_currency' | 'feature_off' | 'multi_company',
   ) =>
     `${accountingUrl}?provider=${encodeURIComponent(provider)}&connect=${outcome}${reason ? `&reason=${reason}` : ''}`
 
@@ -123,12 +126,14 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
       if (!PROVIDER_ID_RE.test(provider)) return reply.code(404).send({ error: 'Unknown accounting provider.', error_code: 'UNKNOWN_PROVIDER' })
       // The payload type is fixed to { sub, email } by the jwt plugin; the
       // state carries different claims at runtime, hence the cast.
+      const claims = newOAuthStateClaims(sub, provider)
       const state = app.jwt.sign(
-        newOAuthStateClaims(sub, provider) as unknown as { sub: string; email: string },
+        claims as unknown as { sub: string; email: string },
         { expiresIn: `${OAUTH_STATE_TTL_SECONDS}s` },
       )
       try {
-        return { url: connectUrlFor(provider, state) }
+        // #4517: the `jti` also keys the PKCE verifier, for a provider that uses it.
+        return { url: connectUrlFor(provider, state, claims.jti) }
       } catch (err) {
         const refusal = providerRefusal(err)
         if (refusal) return reply.code(refusal.status).send(refusal.body)
@@ -183,7 +188,7 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
       }
 
       try {
-        await completeProviderOAuthCallback(provider, claims.sub, code)
+        await completeProviderOAuthCallback(provider, claims.sub, code, claims.jti)
       } catch (err) {
         // The redirect is the same for every failure class — the user sees
         // "error" either way — but an operator must be able to tell them
@@ -194,6 +199,8 @@ export default async function accountingConnectionsRoutes(app: FastifyInstance):
           'accounting oauth callback failed after state verification',
         )
         if (err instanceof UnsupportedBaseCurrencyError) return reply.redirect(redirect(provider, 'error', 'unsupported_currency'))
+        // #4518: the grant reaches several companies — the frontend names it (#4520).
+        if (err instanceof MultiCompanyGrantError) return reply.redirect(redirect(provider, 'error', 'multi_company'))
         return reply.redirect(redirect(provider, 'error'))
       }
       return reply.redirect(redirect(provider, 'connected'))

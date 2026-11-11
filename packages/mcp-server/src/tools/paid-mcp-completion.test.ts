@@ -75,11 +75,16 @@ describe('haven_settle_mcp_tool', () => {
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
     })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
+    // #4688: a well-formed merchant settlement hash AND a CONFIRMED
+    // settlement-evidence outcome — `settled: true` is no longer implied by
+    // the merchant's 2xx.
+    const SETTLE_HASH = '0x' + 'cd'.repeat(32)
     const spy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200,
       ok: true,
       body: { jsonrpc: '2.0', id: 'x', result: { content: [{ type: 'text', text: 'a joke' }] } },
-      settlementTxHash: '0xsettle',
+      settlementTxHash: SETTLE_HASH,
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{ payment_id: string; funding_tx_hash: string; settled: boolean; settlement_tx_hash: string | null }>(
@@ -109,7 +114,7 @@ describe('haven_settle_mcp_tool', () => {
     expect(result.data.payment_id).toBe('pay_x402')
     expect(result.data.funding_tx_hash).toBe('0xfund')
     expect(result.data.settled).toBe(true)
-    expect(result.data.settlement_tx_hash).toBe('0xsettle')
+    expect(result.data.settlement_tx_hash).toBe(SETTLE_HASH)
     expect(JSON.stringify(recordedCalls())).not.toContain(DELEGATE_KEY)
   })
 
@@ -1047,9 +1052,11 @@ describe('haven_settle_mcp_tool', () => {
   // The zero-hash ban lives at the SHARED response boundary
   // (deliverMerchantPayment), not in the erc7710 branch: a facilitator that
   // accepts but does not settle produces the same sentinel on the eip3009 arm
-  // (AuthorizationAlreadyUsedError shape). settled stays true there — funding
-  // DID confirm on-chain above, which is what 3009's settled means — but the
-  // sentinel is collapsed to null, never rendered as a transaction.
+  // (AuthorizationAlreadyUsedError shape). #4688: that sentinel is the demo
+  // merchant's own "delivered, not settled" marker, so on the eip3009 arm it
+  // is now an UNVERIFIED settlement — `settled: false`, DELIVERED_UNSETTLED,
+  // and the sentinel collapsed to null, never rendered as a transaction. The
+  // funding leg DID confirm on-chain, but funding is not settlement.
   it('never emits the zero hash as settlement_tx_hash on the eip3009 arm either (#2968 response-level ban)', async () => {
     const ZERO_HASH = '0x' + '0'.repeat(64)
     stubFetch({
@@ -1084,9 +1091,92 @@ describe('haven_settle_mcp_tool', () => {
     )
     const data = result.data as Record<string, any>
 
-    expect(data.settled).toBe(true)
+    // #4688: a zero hash is no settlement evidence at all — the merchant
+    // delivered, the money is unproven.
+    expect(data.settled).toBe(false)
+    expect(data.code).toBe('DELIVERED_UNSETTLED')
+    expect(data.delivered).toBe(true)
     expect(data.settlement_tx_hash).toBeNull()
+    expect(data.agent_summary.purchase_summary).toBeUndefined()
+    expect(data.next_tool_name).toBe('haven_get_payment_status')
+    expect(data.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'SETTLEMENT_UNCONFIRMED' })]),
+    )
   })
+
+  // #4688: all four settlement-evidence outcomes, pinned together. Restoring
+  // the unconditional `settled: true` in the EIP-3009 arm turns this red.
+  const SETTLEMENT_OUTCOMES: Array<
+    [string, Record<string, unknown> | undefined, boolean, string | undefined]
+  > = [
+    ['confirmed', { outcome: 'confirmed' }, true, undefined],
+    ['retryable', { outcome: 'retryable', statusCode: 503 }, false, 'SETTLEMENT_PENDING'],
+    ['refused', { outcome: 'refused', statusCode: 409 }, false, 'DELIVERED_UNSETTLED'],
+    ['never posted (no hash or a zero hash)', undefined, false, 'DELIVERED_UNSETTLED'],
+  ]
+
+  it.each(SETTLEMENT_OUTCOMES)(
+    'settled follows the settlement-evidence outcome: %s (#4688)',
+    async (_label, outcome, settled, code) => {
+      const MERCHANT_HASH = '0x' + 'ab'.repeat(32)
+      stubFetch({
+        'POST /payments/pay_4688/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+      })
+      const haven = keylessClient()
+      vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
+        new HavenApiError('No stored merchant call context for this intent', 409),
+      )
+      vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+      vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+        status: 200,
+        ok: true,
+        body: { result: 'ok' },
+        settlementTxHash: MERCHANT_HASH,
+        ...(outcome ? { settlementEvidenceOutcome: outcome } : {}),
+      } as never)
+      vi.spyOn(haven, 'getPostPurchaseAllowanceSummary').mockResolvedValue({
+        allowance: null,
+        warnings: [],
+        payment: { status: 'delivered' },
+      } as never)
+
+      const result = ok<Record<string, any>>(
+        await createToolHandlers(haven).haven_settle_mcp_tool({
+          payment_id: 'pay_4688',
+          signature: SIG,
+          merchant_url: 'http://merchant.test/mcp',
+          tool_name: 'create_text',
+          arguments: { prompt: 'Hello' },
+          payment_header: VALID_PAYMENT_HEADER_REF.v1,
+        }),
+      )
+      const data = result.data
+
+      expect(data.settled).toBe(settled)
+      expect(data.code).toBe(code)
+      if (settled) {
+        expect(data.settlement_tx_hash).toBe(MERCHANT_HASH)
+        expect(data.agent_summary.purchase_summary.status).toBe('settled')
+        expect(data.next_action).toBe('none')
+        return
+      }
+      // Every unverified arm: the goods are real, the money is unproven, and
+      // the agent is sent to the status read — never `next_action: none`.
+      expect(data.delivered).toBe(true)
+      expect(data.settlement_tx_hash).toBeNull()
+      expect(data.agent_summary.purchase_summary).toBeUndefined()
+      expect(data.agent_summary.status).not.toBe('settled')
+      expect(data.next_action).not.toBe('none')
+      expect(data.warnings).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'SETTLEMENT_UNCONFIRMED' })]),
+      )
+      expect(data.reason).toContain(
+        'The goods were delivered; the merchant settlement is not verified',
+      )
+      expect(data.reason).toContain('merchant_settlement_recorded')
+      expect(data.reason).toContain('haven_sweep_delegate')
+    },
+  )
 
   /**
    * #3000 (follow-up from #2983's review): the timeout branch had the same
@@ -1215,6 +1305,9 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+      // #4688: `settled: true` now requires a CONFIRMED settlement-evidence
+      // outcome — a merchant 2xx alone is delivery, not money.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
     return haven
   }
@@ -1284,6 +1377,9 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     }
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: merchantResult, settlementTxHash: '0xsettle',
+      // #4688: a CONFIRMED settlement-evidence outcome is what makes this arm
+      // `settled: true`; the merchant's 2xx alone is not.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{
@@ -1336,7 +1432,10 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         resourceUrl: null, merchantAddress: null, txHash: '0xfund', expiresAt: '2099-01-01T00:00:00.000Z',
         chainId: 8453, message: 'Confirmed', asset: null, network: null,
       })
-    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: merchantResult })
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({ status: 200, ok: true, body: merchantResult,
+      // #4688: the settled arm requires a CONFIRMED settlement-evidence
+      // outcome; the merchant blob's own claims never supply it.
+      settlementEvidenceOutcome: { outcome: 'confirmed' } })
 
     const result = ok<{ result: unknown; agent_summary: { purchase_summary: Record<string, unknown> } }>(
       await createToolHandlers(haven).haven_settle_mcp_tool(settleArgs()),
@@ -1402,6 +1501,9 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     })
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: {}, settlementTxHash: 'merchant-receipt-reference',
+      // #4688: the settled arm requires a CONFIRMED settlement-evidence
+      // outcome; the merchant's receipt reference is evidence, not proof.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{ agent_summary: { purchase_summary: Record<string, unknown> } }>(
@@ -1609,6 +1711,9 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
     })
     const completeSpy = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+      // #4688: `settled: true` now requires a CONFIRMED settlement-evidence
+      // outcome — a merchant 2xx alone is delivery, not money.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{ settled: boolean }>(
@@ -1743,6 +1848,9 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
     )
     const merchant = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+      // #4688: `settled: true` now requires a CONFIRMED settlement-evidence
+      // outcome — a merchant 2xx alone is delivery, not money.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
     const handlers = createToolHandlers(haven)
 
@@ -1807,6 +1915,9 @@ describe('haven_settle_mcp_tool: merchant-call context is checked BEFORE funding
     })
     const merchant = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+      // #4688: `settled: true` now requires a CONFIRMED settlement-evidence
+      // outcome — a merchant 2xx alone is delivery, not money.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{ settled: boolean }>(
@@ -1957,6 +2068,9 @@ describe('mcp_transport shape is refused loudly (#2282)', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const merchant = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200, ok: true, body: { result: 'ok' }, settlementTxHash: '0xsettle',
+      // #4688: `settled: true` now requires a CONFIRMED settlement-evidence
+      // outcome — a merchant 2xx alone is delivery, not money.
+      settlementEvidenceOutcome: { outcome: 'confirmed' },
     })
 
     const result = ok<{ settled: boolean }>(

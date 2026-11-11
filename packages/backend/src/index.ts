@@ -12,20 +12,17 @@ import fastifyJwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
 import { rateLimitKeyFor } from './middleware/rate-limit.js'
 import { SharedRateLimitStore, setRateLimitDegradedReporter } from './middleware/shared-rate-limit-store.js'
-import { deleteExpiredRateLimits } from './infra/repositories/rate-limit-counters.js'
-import { deleteExpiredFeedback } from './infra/repositories/feedback.js'
 import { probeDatabase } from './infra/repositories/health-probe.js'
 import { runMigrations } from './db/migrate.js'
-import { runDelegateBalanceMonitor } from './infra/delegate-balance-monitor.js'
-import { lastDelegateBalanceReport } from './infra/delegate-balance-report-store.js'
-import { PASSPORT_STUCK_REVOKE_SECONDS } from './infra/passport-stuck-revoke-seconds.js'
 import { reencryptPlaintextSecretsAtBoot } from './modules/accounting/index.js'
-import { runRelayerBalanceMonitor, getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
-import { sendDelegateAlertFromEnv } from './infra/delegate-alert-webhook.js'
-import { runIfLeader, LEADER_LOCK_KEYS } from './platform/leader-lock.js'
-import { SETTLEMENT_SWEEP_INTERVAL_MS } from './modules/x402/index.js'
+import { lastDelegateBalanceReport } from './infra/delegate-balance-report-store.js'
+import { getRelayerBalanceStatus } from './infra/relayer-balance-monitor.js'
 import { deployableChainIds, SUPPORTED_CHAIN_IDS } from './domain/chains.js'
-import { relayerKeysFromEnv } from './infra/relayer-env-keys.js'
+import { relayerKeyEntriesFromEnv, relayerKeysFromEnv } from './infra/relayer-env-keys.js'
+import { assertBindingKeyNotReused } from './infra/binding-key-collision.js'
+// #4764: the background jobs are one importable table beside this composition
+// root, started from one entry point — see `src/background-jobs.ts`.
+import { startBackgroundJobs } from './background-jobs.js'
 import discoveryRoutes from './routes/discovery.js'
 import { buildApiRootDocument } from './routes/root-document.js'
 import authRoutes from './routes/auth.js'
@@ -65,12 +62,6 @@ import {
   setReceiptSigningKey,
   passportReadiness,
   logPassportReadiness,
-  retryPendingPassports,
-  repairAnchoredUids,
-  reconcilePendingRevocations,
-  reconcilePendingReanchors,
-  listStuckReanchors,
-  listStuckRevocations,
 } from './modules/passport/index.js'
 import passportVerifyRoutes from './routes/passport-verify.js'
 import agentConnectionSetupRoutes from './routes/agent-connection-setups.js'
@@ -111,21 +102,15 @@ import accountingRoutes from './routes/accounting.js'
 import accountingConnectionsRoutes from './routes/accounting-connections.js'
 import accountingFeedRoutes from './routes/accounting-feed.js'
 import accountingWebhookRoutes from './routes/accounting-webhooks.js'
-import { registerConnector, startRetrySweep, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
-import { AccountedConnector } from './modules/accounting/index.js'
+import { registerConnector, getAccountingOpsCounters, setOpsEventSink } from './modules/accounting/index.js'
+import { AccountedConnector, igdrasilConnectorIfConfigured } from './modules/accounting/index.js'
 import { FortnoxConnector } from './modules/accounting/index.js'
 import { fortnoxConfigured } from './modules/accounting/index.js'
-import {
-  createCatalogIngestMonitor,
-  deliverCatalogAlerts,
-  refreshCatalog,
-  type QueryableLike,
-} from './modules/catalog/index.js'
-import { ingestDiscoveredCatalog } from './modules/catalog/index.js'
+import type { QueryableLike } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerClientCompatHooks } from './middleware/client-compat.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
-// dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and hands it to the leader-gated catalog jobs at boot; it wires infrastructure rather than running tenant SQL
+// dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and injects it into `startBackgroundJobs` at boot (catalog refresh needs it); it wires infrastructure rather than running tenant SQL
 import pool from './db.js'
 
 const app = Fastify({
@@ -507,6 +492,17 @@ setReceiptSigningKey(process.env.PASSPORT_RECEIPT_SIGNING_KEY ?? null, [
   config.relayerPrivateKey,
   ...relayerKeysFromEnv(),
 ])
+// #4655 (owner decision 2): the x402 binding key is a third server key role —
+// it authenticates expected context and sweep authorizations, and its address is
+// published as HAVEN_X402_BINDING_SIGNER for installed signers to pin. Refuse to
+// boot when an operator pasted a relayer or receipt key into it. Unset stays
+// allowed (a deployment that does not sign binding context has no key to
+// collide), and the refusal names the variables, never the values.
+assertBindingKeyNotReused(process.env.X402_BINDING_PRIVATE_KEY, [
+  { variable: 'RELAYER_PRIVATE_KEY', value: config.relayerPrivateKey },
+  ...relayerKeyEntriesFromEnv(),
+  { variable: 'PASSPORT_RECEIPT_SIGNING_KEY', value: process.env.PASSPORT_RECEIPT_SIGNING_KEY },
+])
 // Warn — once, at boot — when this deployment anchors passports it cannot
 // verify (#1151). Silent in every other combination. Must run AFTER the signer
 // is installed above, or it would warn on every deployment.
@@ -618,60 +614,16 @@ if (fortnoxConfigured()) {
 // whole exposure decision. #3018 is the push half: the receipt underlag is
 // uploaded as one WORM document, delivery proven by sha256 echo.
 registerConnector(new AccountedConnector())
+// #4518 (epic #2875): the Igdrasil adapter, credential-gated like Fortnox —
+// Haven's OAuth app is per deployment (IGDRASIL_CLIENT_ID / _SECRET /
+// _REDIRECT_URI). Registered, it makes `configured: true`; the descriptor
+// stays `coming_soon` until the live run (#4519), so nothing can connect yet.
+const igdrasilConnector = igdrasilConnectorIfConfigured()
+if (igdrasilConnector) registerConnector(igdrasilConnector)
 // #1328: the legacy /demo/mpp/* MPP demo route is retired (see
 // modules/mpp/challenge.ts's mppDemoRetired() for the authorize-side refusal).
 
 // --- Start ---
-const CATALOG_REFRESH_INTERVAL_MS = 60 * 60 * 1000 // hourly
-
-/**
- * Catalogue ingestion (#1714, epic #1717): the leader-locked tick that walks
- * self-submitted queue rows through ownership proof -> verification probe and
- * keeps the table bounded. Slow cadence on purpose: each probe is bounded by
- * the 15-minute per-hostname cooldown, which `createCatalogIngestMonitor`
- * holds across ticks (#4407), and re-verification is at most daily.
- */
-const CATALOG_INGEST_INTERVAL_MS = 5 * 60 * 1000
-
-/**
- * Ops webhook, same Slack-compatible `{ text }` shape as the
- * delegate/relayer monitors — via the shared sender (#3345), which checks
- * `res.ok`: a 4xx/5xx or network error logs a warning with the status (never
- * the URL — it is a credential) and reports `failed`, so the catalog tick
- * above can re-arm the alarm and retry on the next tick. A failed alert
- * still never affects the tick itself.
- */
-async function sendCatalogOpsAlert(text: string): Promise<'delivered' | 'failed' | 'no-webhook'> {
-  return sendDelegateAlertFromEnv(text, app.log, 'catalog-ingestion')
-}
-
-/**
- * #1680: the sweep only reclaims space — every read already filters on expiry,
- * so a late run costs dead rows, never a wrong count. Five minutes keeps the
- * table small without adding a chatty query to a busy database.
- */
-const RATE_LIMIT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
-/**
- * #3597: same reasoning as the rate-limit sweep immediately above — every
- * read already filters `expires_at > NOW()`, so a late run only costs dead
- * rows, never a wrong read. Feedback volume is far lower than rate-limit
- * counters (one submission per CLI call, rate-limited per user), so there is
- * no pressure to run this more often.
- */
-const FEEDBACK_SWEEP_INTERVAL_MS = 5 * 60 * 1000
-const DELEGATE_MONITOR_INTERVAL_MS = 60 * 60 * 1000 // hourly (#714)
-// Every 5 minutes, not hourly: this sweep carries revocation reconciliation,
-// and the backoff schedule it drives starts at 30s. An hourly tick would flatten
-// that to an hour, leaving a revoked agent's attestation live on-chain far
-// longer than the retry policy intends (#973).
-const PASSPORT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
-/**
- * A revoke still unreconciled after this long is an incident, not a retry.
- * The alarm threshold's one definition lives in
- * `infra/passport-stuck-revoke-seconds.ts` (#3514): `index.ts` and
- * `/ops/health` read the same constant, so they cannot drift.
- */
-
 const start = async () => {
   try {
     await runMigrations()
@@ -686,364 +638,12 @@ const start = async () => {
     await app.listen({ port: config.port, host: '0.0.0.0' })
     app.log.info(`Haven backend running on port ${config.port}`)
 
-    // Every periodic tick below runs behind a Postgres advisory lock
-    // (runIfLeader) so a multi-replica deployment executes each scan exactly
-    // once per tick instead of once per replica — the monitors' edge-trigger
-    // alert state is per-process memory, so N replicas would otherwise send
-    // up to N copies of every webhook alert.
-
-    // Catalog price verification: probe listed merchants hourly so the
-    // catalog never advertises stale prices or dead endpoints. Best-effort —
-    // a failed run logs and waits for the next tick.
-    const runCatalogRefresh = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.catalogRefresh, async () => {
-          // Opt-in: pull fresh candidates from the x402 Bazaar and probe-ingest
-          // them before re-verifying the catalog, so newly discovered merchants are
-          // included in the same run. Best-effort — discovery failure never blocks
-          // the refresh of already-listed entries.
-          if (config.catalogDiscoveryEnabled) {
-            try {
-              const discovery = await ingestDiscoveredCatalog(pool as unknown as QueryableLike)
-              app.log.info(discovery, 'Merchant catalog discovery complete')
-            } catch (err) {
-              app.log.warn({ err }, 'Merchant catalog discovery failed')
-            }
-          }
-          const { verified, degraded, deferred } = await refreshCatalog()
-          // #4300: `deferred` rows hit the run budget and come first next run.
-          app.log.info({ verified, degraded, deferred }, 'Merchant catalog refreshed')
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Merchant catalog refresh failed')
-      }
-    }
-    void runCatalogRefresh()
-    setInterval(runCatalogRefresh, CATALOG_REFRESH_INTERVAL_MS).unref()
-
-    // Catalogue ingestion (epic #1717, #1714): walk submitted queue rows
-    // through ownership proof and the SSRF-hardened verification probe, and
-    // bound the table. Leader-locked like every tick here — probes must run
-    // once per interval, not once per replica. Alerts are edge-triggered by
-    // the lifecycle module, so a sustained condition alarms once instead of
-    // on every interval. Built ONCE, outside the tick (#4407): the monitor
-    // owns the per-host probe cooldown, so building it per tick would reset
-    // the cooldown every 5 minutes and let a failing merchant be probed on
-    // every tick.
-    const catalogIngestMonitor = createCatalogIngestMonitor()
-    const runCatalogIngest = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.catalogIngest, async () => {
-          const report = await catalogIngestMonitor.tick()
-          if (report.acted) app.log.info(report, 'Catalog ingestion tick')
-          for (const text of report.alerts) {
-            app.log.warn({ text }, 'Catalog ingestion alert')
-          }
-          // Delivery decides the re-arm (#3345): a 'failed' send (4xx/5xx or
-          // network error — logged by the shared sender with the status,
-          // never the URL) rolls the lifecycle edge back so the alarm
-          // re-fires on the next tick while the condition persists.
-          // Delivered alarms stop, edge-triggered as before; 'no-webhook' is
-          // log-only mode — the warn above is the whole alert and the
-          // episode counts as handled.
-          await deliverCatalogAlerts(report.alerts, (text) =>
-            sendCatalogOpsAlert(text),
-          )
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Catalog ingestion failed')
-      }
-    }
-    void runCatalogIngest()
-    setInterval(runCatalogIngest, CATALOG_INGEST_INTERVAL_MS).unref()
-
-    // Expired rate-limit counters (#1680): nothing else removes them, and the
-    // table is written by UNAUTHENTICATED traffic — so without a sweep,
-    // unbounded growth is reachable by anyone with a script and a supply of
-    // source addresses. Leader-gated like every tick here; a missed run only
-    // leaves dead rows, never a wrong count, because every read filters on
-    // expiry.
-    const runRateLimitSweep = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.rateLimitSweep, async () => {
-          const deleted = await deleteExpiredRateLimits()
-          if (deleted > 0) app.log.debug({ deleted }, 'Swept expired rate-limit counters')
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Rate-limit counter sweep failed')
-      }
-    }
-    void runRateLimitSweep()
-    setInterval(runRateLimitSweep, RATE_LIMIT_SWEEP_INTERVAL_MS).unref()
-
-    // Expired feedback rows (#3597): nothing else removes them. Leader-gated
-    // like every tick here; a missed run only leaves dead rows, never a wrong
-    // read, because every reader filters `expires_at > NOW()` itself.
-    const runFeedbackSweep = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.feedbackSweep, async () => {
-          const deleted = await deleteExpiredFeedback()
-          if (deleted > 0) app.log.debug({ deleted }, 'Swept expired feedback rows')
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Feedback sweep failed')
-      }
-    }
-    void runFeedbackSweep()
-    setInterval(runFeedbackSweep, FEEDBACK_SWEEP_INTERVAL_MS).unref()
-
-    // Delegate balance monitor (#714): hourly read-only scan of every active
-    // agent's delegate USDC balance — WARNs on lingering (sweepable) balances
-    // and on aggregate dust past the threshold. Best-effort: a failed scan
-    // logs and waits for the next tick. It never moves funds.
-    const runDelegateMonitor = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.delegateBalanceMonitor, async () => {
-          await runDelegateBalanceMonitor(app.log)
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Delegate balance monitor scan failed')
-      }
-    }
-    void runDelegateMonitor()
-    setInterval(runDelegateMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
-
-    // Relayer balance monitor: hourly read-only scan of the relayer EOA's
-    // native balance per served chain — structured warning + edge-triggered
-    // webhook alert below the low-water mark, cached status served by
-    // /health/ops. The relayer going dry previously surfaced only as failing
-    // payments. Deliberately NOT behind runIfLeader: the scan result feeds
-    // each replica's own /health/ops response, and the alert edge-trigger is the
-    // per-chain lowAlerted set inside the monitor, so duplicate alerts are
-    // bounded by replica count only on the low→ok→low transition.
-    const runRelayerMonitor = async () => {
-      try {
-        await runRelayerBalanceMonitor(app.log)
-      } catch (err) {
-        app.log.warn({ err }, 'Relayer balance monitor scan failed')
-      }
-    }
-    void runRelayerMonitor()
-    setInterval(runRelayerMonitor, DELEGATE_MONITOR_INTERVAL_MS).unref()
-
-    // Outbound-tx bump/replacement worker (#1558, epic #1554): per served
-    // chain, close broadcast rows the chain has already decided, replace the
-    // truly stuck ones with bumped fees, and adopt orphaned queued rows from
-    // a submitter that died mid-flight. Leader-locked: replacements are
-    // same-nonce broadcasts, and two replicas bumping the same lane would
-    // race each other's replacements.
-    const OUTBOUND_BUMP_INTERVAL_MS = 60_000
-    const runOutboundBump = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.outboundBump, async () => {
-          const { runOutboundBumpTick, productionBumpDeps } = await import('./infra/outbound-bump-worker.js')
-          const deps = await productionBumpDeps()
-          const chains = deployableChainIds()
-          for (const chainId of chains) {
-            const tick = await runOutboundBumpTick(chainId, deps, app.log)
-            if (tick.bumped || tick.closedMined || tick.closedFailed || tick.rebroadcastOrphans || tick.alerted) {
-              app.log.info({ chainId, ...tick }, 'Outbound bump tick acted')
-            }
-          }
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Outbound bump tick failed')
-      }
-    }
-    void runOutboundBump()
-    setInterval(runOutboundBump, OUTBOUND_BUMP_INTERVAL_MS).unref()
-
-    // Passive settlement observation for BOTH x402 schemes. On erc7710 direct
-    // settlement the merchant redeems the chain and Haven submits nothing, so
-    // an intent stays `submitted` until an AGENT reports the settlement hash.
-    // When that report never comes — no `PAYMENT-RESPONSE` transaction, or
-    // the generic plain-HTTP flow (#2041) where Haven never sees the header —
-    // the payment has no evidence row and is therefore permanently absent
-    // from the Fortnox feed. This tick finds such a settlement by looking its
-    // intent-unique settlement child (#2094) up in the pinned
-    // DelegationManager's `RedeemedDelegation` logs and completes it through
-    // the same seam the agent-reported path uses.
-    //
-    // On the eip3009 bridge (#3888) the merchant's settlement is a second
-    // transaction Haven never submits, and since #3888 its EIP-3009 nonce is
-    // derived from the payment id — so a settlement the agent never reported
-    // is found the same way: `AuthorizationUsed(delegate, derived nonce)` on
-    // the pinned token, handed to the same verifier and the same recording
-    // order (base row, verified hash, ONE feed fire) as an agent report.
-    //
-    // Neither pass ever guesses: attribution is only ever a chain event that
-    // names this intent's own key — the manager's child redemption, the
-    // token's burned authorization nonce — never transfer shape. Bounded RPC,
-    // and an outage confirms nothing and waits for the next tick.
-    const runSettlementSweep = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.settlementSweep, async () => {
-          const { runSettlementSweepTick, runEip3009SettlementSweepTick } = await import(
-            './modules/x402/index.js'
-          )
-          // Two passes under one leader gate — the builder decision #3888
-          // left open. Each with its own boundary, so a failure in one
-          // cannot silence the other.
-          try {
-            await runSettlementSweepTick(app.log)
-          } catch (err) {
-            app.log.warn({ err }, 'erc7710 settlement sweep pass failed')
-          }
-          try {
-            await runEip3009SettlementSweepTick(app.log)
-          } catch (err) {
-            app.log.warn({ err }, 'eip3009 settlement sweep pass failed')
-          }
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Settlement sweep tick failed')
-      }
-    }
-    void runSettlementSweep()
-    setInterval(runSettlementSweep, SETTLEMENT_SWEEP_INTERVAL_MS).unref()
-
-    // Submission reconciliation (#3564). A direct payment whose UserOp was
-    // SENT but whose receipt was never confirmed is booked outcome-pending
-    // (`submitted`, never `failed` — the funds may have moved), with the
-    // userOpHash recorded on the row. This tick resolves such a row from the
-    // bundler's receipt index for that hash: landed+succeeded → confirmed
-    // with its tx_hash; landed+reverted → failed with the cause; still not
-    // found inside the bounded window → failed with that cause. A read
-    // failure confirms nothing and writes nothing — the next tick is the
-    // retry, which is what keeps an outage from becoming a wrong terminal
-    // booking.
-    const RECONCILE_INTERVAL_MS = 60_000
-    const runSubmissionReconcile = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.submissionReconcile, async () => {
-          const { runSubmissionReconcileTick } = await import('./modules/payments/index.js')
-          const tick = await runSubmissionReconcileTick(app.log)
-          if (tick.confirmed || tick.failedReverted || tick.failedWindowElapsed) {
-            app.log.info(tick, 'Submission reconcile tick acted')
-          }
-        })
-      } catch (err) {
-        app.log.warn({ err }, 'Submission reconcile tick failed')
-      }
-    }
-    void runSubmissionReconcile()
-    setInterval(runSubmissionReconcile, RECONCILE_INTERVAL_MS).unref()
-
-    // L0 passport anchor sweep (#972 / #973). Both halves of issuance are
-    // fire-and-forget by design — an EAS write must never block agent creation
-    // or an owner's revoke — which only holds because something later retries
-    // what the in-request attempt dropped. This is that something; without it
-    // "best-effort + retryable" is just "best-effort".
-    //
-    // The revocation half is the one that matters for safety: an agent revoked
-    // in Haven's DB whose attestation is still live on-chain is precisely the
-    // divergence #973 exists to close, and a merchant checking only the chain
-    // would still see it as valid. So a revoke that stays unreconciled past
-    // the alarm threshold is logged as an operational incident rather than
-    // retried silently forever.
-    // The three phases are INDEPENDENT. Sequencing them under one try/catch
-    // meant a throw in the issuance retry skipped both the revocation
-    // reconciliation and the stuck-revoke alarm for that tick — and since the
-    // queues are oldest-first, one poison row would be first on every tick and
-    // silence the safety-critical half permanently. The alarm especially must
-    // run even when everything above it is failing: that is when it matters.
-    const phase = async (name: string, fn: () => Promise<void>) => {
-      try {
-        await fn()
-      } catch (err) {
-        app.log.warn({ err, phase: name }, 'Passport sweep phase failed')
-      }
-    }
-
-    const runPassportSweep = async () => {
-      try {
-        await runIfLeader(LEADER_LOCK_KEYS.passportSweep, async () => {
-          await phase('issuance', async () => {
-            const issuance = await retryPendingPassports()
-            if (issuance.attempted) app.log.info(issuance, 'Passport issuance retries')
-            if (issuance.needingAttention) {
-              app.log.warn(
-                { needingAttention: issuance.needingAttention },
-                'Passport issuance rows past the attention threshold — investigate, the backoff is capped',
-              )
-            }
-          })
-          // #3294: rows anchored before the fix store the staticCall-predicted
-          // UID, which never existed on-chain — revocation of such a row loops
-          // on `NotFound()` while the agent's REAL attestation stays live. The
-          // repair re-derives each row's UID from its anchor receipt; the
-          // revocation half below (and the retire's own repair gate) then
-          // converges on the real credential. Batched and paced here; the
-          // phase split keeps a failure here away from the safety-critical
-          // revocation half, exactly as for issuance above.
-          await phase('anchor-repair', async () => {
-            const repairs = await repairAnchoredUids()
-            if (repairs.attempted) app.log.info(repairs, 'Passport anchor UID repairs')
-            // #3342: every row the repair could not answer is reported BY
-            // AGENT — agent_id and reason — not folded into a count. These
-            // are the lines an operator checks first when a row refuses to
-            // converge (see docs/operations/stuck-revoke-alarm.md).
-            if (repairs.unrepairable) {
-              // #3395: a REPAIRED row is an answer, not a question — it left
-              // the queue on the same write (its marker is stamped), so it
-              // does not belong in the operator's unanswered set. Only
-              // `unrepairable` and `deferred` do.
-              app.log.warn(
-                {
-                  unrepairable: repairs.unrepairable,
-                  rows: repairs.rows.filter((r) => r.outcome !== 'confirmed' && r.outcome !== 'repaired'),
-                },
-                'Passport anchor UID repairs left rows unanswered — investigate the reasons',
-              )
-            }
-          })
-          await phase('revocation', async () => {
-            const revocations = await reconcilePendingRevocations()
-            if (revocations.attempted) app.log.info(revocations, 'Passport revocation reconciliation')
-          })
-          // #1699: a re-key rotates the delegate key underneath a live
-          // attestation. Its own phase, not folded into 'revocation': the two
-          // queues are mutually exclusive by agent status, and folding them
-          // would let a failure in one silence the other — the exact coupling
-          // the phase split above exists to prevent.
-          await phase('reanchor', async () => {
-            const reanchors = await reconcilePendingReanchors()
-            if (reanchors.attempted) app.log.info(reanchors, 'Passport re-anchor reconciliation')
-          })
-          await phase('alarm', async () => {
-            const stuck = await listStuckRevocations(PASSPORT_STUCK_REVOKE_SECONDS)
-            if (stuck.length > 0) {
-              app.log.warn(
-                { count: stuck.length, agents: stuck.slice(0, 10) },
-                'Passport revocations unreconciled past threshold — agents revoked in Haven still hold a live attestation on-chain',
-              )
-            }
-          })
-          await phase('reanchor-alarm', async () => {
-            const stuck = await listStuckReanchors(PASSPORT_STUCK_REVOKE_SECONDS)
-            if (stuck.length > 0) {
-              app.log.warn(
-                { count: stuck.length, agents: stuck.slice(0, 10) },
-                'Passport re-anchors unreconciled past threshold — live agents hold an attestation naming a retired delegate key',
-              )
-            }
-          })
-        })
-      } catch (err) {
-        // Only leader-election itself reaches here now.
-        app.log.warn({ err }, 'Passport sweep failed')
-      }
-    }
-    void runPassportSweep()
-    setInterval(runPassportSweep, PASSPORT_SWEEP_INTERVAL_MS).unref()
-
-    // Accounting feed retry sweep (#2866, epic #2858): re-feeds failed /
-    // skipped / stale-pending sync rows whose backoff has elapsed, one
-    // connection at a time under Fortnox's 25 / 5 s floor. The interval is
-    // registered (and `unref()`ed) inside `startRetrySweep`, which returns
-    // null — registering nothing — when `HAVEN_ACCOUNTING_ENABLED` is off.
-    // Leader-locked on its own key like every tick above.
-    startRetrySweep({ log: app.log })
+    // #4764: every periodic tick lives in ONE importable table
+    // (`src/background-jobs.ts`) and is started from ONE entry point, so the
+    // wiring is testable without booting this file. The pool is injected here
+    // because catalog refresh needs it and `pg-only-in-infra` allows no new
+    // importer of `db.ts`.
+    startBackgroundJobs({ log: app.log, pool: pool as unknown as QueryableLike })
   } catch (err) {
     app.log.error(err)
     process.exit(1)

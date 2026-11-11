@@ -11,8 +11,10 @@ covers:
   - .github/ISSUE_TEMPLATE/loop-epic.md
   - .agents/skills/ship-next/SKILL.md
   - .agents/skills/new-task/SKILL.md
+  - .agents/skills/review-issue/SKILL.md
   - .claude/commands/ship-next.md
   - .claude/commands/new-task.md
+  - .claude/commands/review-issue.md
 last-verified: "2026-10-25"
 ---
 
@@ -35,9 +37,10 @@ and only comes back to you for a real decision, a blocking review finding, a
 live work overlap, or stuck CI.
 
 Pieces:
-- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path, plus a Design system brief for `area:frontend`), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit, and **every** filed issue — single task or epic — gets one independent spec-review pass plus a verdict comment before it is queued, shipped or announced — the skill's [§ *Issue review*](../../.agents/skills/new-task/SKILL.md#issue-review).
+- **`new-task`** ([canonical skill](../../.agents/skills/new-task/SKILL.md)) — **capture**: turns a one-line description into a well-formed backlog issue (Scope + Acceptance + Surface + Money-path, plus a Design system brief for `area:frontend`), backlog-only by default, and the default route for **every** issue an agent files — never a bare `gh issue create`. Code claims in a filed body are measured commands at a named commit. It delegates its mandatory post-filing review to `review-issue`.
+- **`review-issue`** ([canonical skill](../../.agents/skills/review-issue/SKILL.md)) — **review**: reviews an existing issue or epic for specification quality and queue readiness, and is the single canonical issue-review workflow — the rubric, the three questions, the isolation and delta rules, the verdict contract, and the registered re-measurement live there. Review-only by default: it comments only when asked and repairs only when explicitly authorized. **Every** filed issue — single task or epic — gets one independent pass plus a verdict comment before it is queued, shipped or announced.
 - **`ship-next`** ([canonical skill](../../.agents/skills/ship-next/SKILL.md)) — **execute**: does **one** PR end-to-end, then stops. `ship-next "<task>"` is `new-task` + ship in one go.
-- **Client adapters** — Claude Code exposes thin `/new-task` and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
+- **Client adapters** — Claude Code exposes thin `/new-task`, `/review-issue`, and `/ship-next` wrappers; `/loop /ship-next` re-invokes one item at a time. Other clients invoke the canonical skills through their supported skill and delegation mechanisms.
 - **haven-reviewer** — the per-PR quality gate.
 - **Docs acceptance gate** — `docs:check` and `docs:test` are **CI required checks** on every PR ([#1023](https://github.com/d-hinders/Haven-AI/issues/1023) — the *Docs front-matter & agent skills* job), so a PR with invalid front-matter or an unresolved `covers:` glob cannot reach auto-merge no matter how it was opened. `ship-next` still runs them locally before pushing, but only to save a round trip — it is no longer the thing that enforces them. Same shape for **Design-system coupling (strict)**.
 - **haven-doc-reviewer** — per-PR check that the docs describing the changed code are still accurate (see `docs/contributing/docs-quality-system.md`). Running it after implementation is a **hard definition-of-done step in the loop**, and the docs whose `covers:` front-matter maps to the changed code are the floor of what it reviews, not the scope — the pass derives that from the diff's claims (#2499): `ship-next` must review those docs and, in the same PR, update the stale claims (or genuinely re-verify and bump `last-verified`) before opening the PR. This is a loop requirement enforced by the skill, independent of GitHub required-checks — the **docs↔code** coupling comment (`docs-coupling.yml`) stays advisory and does not by itself block auto-merge, except for docs marked `contract: true`. A wrong claim (now-wrong, or newly written by the diff) about custody, signing, spend authority or money movement is **blocking** in any doc, whether or not it is `contract: true` (#4174). (Not to be confused with the *design-system* coupling gate one bullet up, which does block.)
@@ -90,7 +93,6 @@ issue and stops.
 Then leave it running: it opens PRs, auto-merges the safe ones on green CI, and
 pings you only for a real decision, a blocking review finding, a live work
 overlap, or stuck CI.
-
 
 ## Feeding work in
 
@@ -608,26 +610,6 @@ Without this, `ship-next` can open PRs but cannot auto-merge them.
    gh api repos/d-hinders/Haven-AI/rules/branches/main
    ```
 
-   Re-verified **2026-10-13** (#3798): the strict flags, the required-check
-   lists (15 on `dev`, 19 on `main`), the merge methods and the code-owner
-   requirements are unchanged. Re-verified **2026-10-25** (#4372) with the same
-   commands: three active rulesets; 16 required contexts on `dev` and 19 on
-   `main`; strict only on *Dev gate*; squash only on `dev` and merge only on
-   `main`; code-owner review on *Haven automerge rules* and *Dev gate*, not on
-   *Dev merge*; PR ownership gate still not required. The 2026-10-09 authenticated read also shows
-   `Dev gate` with **no bypass actors** (the admin-role `always` bypass lives
-   only on *Haven automerge rules*) — see
-   [`branch-and-release-flow.md`](branch-and-release-flow.md) § *Promotion to
-   production*.
-   The `rules/branches/{main,dev}` form is the fastest way to re-check the
-   effective branch rules without admin UI access: it reports each rule once per
-   matching ruleset, which is the union above seen from the other side. Two
-   rulesets match each branch, so both report `pull_request`, `deletion` and
-   `non_fast_forward` twice. Since the External intake gate went on *Dev
-   merge*, `required_status_checks` also comes back **twice** on each branch:
-   on `dev` from *Haven automerge rules* and *Dev merge*, on `main` from that
-   ruleset and *Dev gate*.
-
    **How a red push run gets noticed (#3890).** Nothing watched that run.
    #3886 is the case: #3855's merge broke `MCP server checks` on its own push,
    and nobody noticed for about five hours (job failed 09:47Z; #3886 filed
@@ -800,3 +782,5 @@ least twice.
   change to existing money-path behavior. Since #1024 that requirement is
   backstopped by the reviewer pass rather than by a human seeing the PR before
   merge — a real reduction in independence, accepted knowingly.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

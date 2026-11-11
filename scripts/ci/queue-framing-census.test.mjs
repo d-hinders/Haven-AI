@@ -149,9 +149,8 @@ const GUARDED_FILES = [
   // Slash commands and installed skill files. NOT reachable by the docs
   // coupling gate at all: no `covers:` glob names them, and `docs:check`'s
   // skill validator checks structure, not claims. This is the class #2103
-  // fixed after `qa-dev.md` spent weeks telling a QA agent that a correct
+  // fixed after a QA command spent weeks telling a QA agent that a correct
   // on-chain refusal was a FAILURE — in a run that feeds `qa-freshness`.
-  '.claude/commands/qa-dev.md',
   '.claude/commands/qa-explore-ui.md',
   '.agents/skills/haven-agent-workflow/references/backend-worker.md',
   '.agents/skills/haven-agent-workflow/references/workflow-coordinator.md',
@@ -219,7 +218,10 @@ const GUARDED_FILES = [
  *                                              that says the rail *is retired*
  *   docs/architecture/06-hosted-mcp-connect-   the hit is inside its own
  *   flow.md                                    `last-verified` note recording
- *                                              the #2102 fix
+ *                                              the #2102 fix, which #4613
+ *                                              moved to
+ *                                              docs/archive/re-verification-
+ *                                              notes-2026-11.md
  *   frontend custody/page.tsx                  names the module inside the
  *                                              LEGACY-rail branch (#2106),
  *                                              where it is the right answer

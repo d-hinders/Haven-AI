@@ -407,6 +407,21 @@ export const BANNED = [
   // what a matcher can hold.
   ['haven signs and settles', "the real actor: 'signed by your agent's key and constrained by the budget you approved'"],
   ['haven gave you', 'the credential is generated on the user’s device; Haven never receives the signing key'],
+  // ── The 2026-10-30 copy rules (#4563) ─────────────────────────────────────
+  // Two of the five rules added that day have an unambiguous multi-word
+  // phrase, so they get a literal here; the rest (British spellings, the
+  // destructive-verb table, "…" vs "...", the "Try again" retry label) are
+  // bare tokens and stay documentation-only — see `copy-guidelines.md`
+  // § Enforcement, "Bare tokens are out of reach, by design (CG:688)".
+  //
+  // Measured before adding, at `31c07cd49`: one occurrence of each, both
+  // reworded in this same change, so no baseline entry and no false-positive
+  // cost. `all signers in settings` is the link text the owner's 2026-10-30
+  // decision overrides (the Settings section is "Passkeys and wallets");
+  // `unspent allowance` is the jargon the mapping table already replaces with
+  // "budget" (Allowance module → Rules / budget controls).
+  ['all signers in settings', "'Passkeys and wallets'"],
+  ['unspent allowance', "'unused budget'"],
 ]
 
 const IGNORE = 'copy-lint-ignore'
@@ -608,6 +623,22 @@ async function main() {
   )
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   runGate('frontend-copy-lint', main)
 }

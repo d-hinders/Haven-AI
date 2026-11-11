@@ -3,10 +3,27 @@
  * that makes "a policy refusal without a ledger write" impossible to add
  * silently in the two enumerated files.
  *
- * ## Scope (exactly two files, by the epic decision)
+ * ## Scope (four files: the epic's two, plus the two moved payment flows)
  *
  * - `src/modules/x402/delegation-authorize.ts`
  * - `src/routes/payments.ts`
+ * - `src/modules/payments/create-payment.ts`
+ * - `src/modules/payments/sign-payment.ts`
+ *
+ * #4760 (epic #4759 slice 1) moved the `POST /payments` create flow out of
+ * `routes/payments.ts` into `modules/payments/create-payment.ts`, verbatim.
+ * The census follows the code: the create flow's six ledger writers and two
+ * no-writer sites are enumerated against the new file, and the route keeps
+ * the sign route's seven. Leaving the new file out would have made every
+ * create-flow refusal invisible to this guard — the exact silent gap the
+ * census exists to close.
+ *
+ * #4761 (slice 2) moved the `POST /payments/:id/sign` submit state machine out
+ * of the same route into `modules/payments/sign-payment.ts`, verbatim. The
+ * census follows it the same way: the sign flow's one ledger writer (the
+ * relayer-budget 429) and six no-writer answers are enumerated against the new
+ * file, and `routes/payments.ts` now holds no `refuse(` site at all — it is
+ * kept in the list so a refusal added back to the route is still seen.
  *
  * Explicitly OUT of scope, named so a later worker does not enumerate them
  * as residue (owner verdict on #3056, note 4): everything in
@@ -71,7 +88,12 @@ const BACKEND_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '
 
 const POLICY_STATUSES = new Set([403, 429, 502])
 
-const TARGET_FILES = ['src/modules/x402/delegation-authorize.ts', 'src/routes/payments.ts'] as const
+const TARGET_FILES = [
+  'src/modules/x402/delegation-authorize.ts',
+  'src/routes/payments.ts',
+  'src/modules/payments/create-payment.ts',
+  'src/modules/payments/sign-payment.ts',
+] as const
 
 /**
  * Every refuse( call site at the guarded head, in file order:
@@ -137,95 +159,50 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     { line: 1021, code: 502, ledger: 'skipped' }, // delegate-account deploy failure — infrastructure, allowlisted
   ],
   'src/routes/payments.ts': [
-    // #3531 added the recipient-history import and the `classifyRecipient`
-    // helper (+46 above the create handler, with the replay-branch hunk),
-    // then the pre-insert classification in the create handler (+11 more
-    // below it): every site below shifts by +46 or +57.
-    // #3271 shifted every line below by +3: `replayIntentBody`'s delegation
-    // branch now shares `buildDirectSignData` (`modules/payments/
-    // direct-sign-context.ts`) with the new GET /:id/sign-context route,
-    // and its doc comment grew by three lines to say so.
-    // Chronology of shifts in src/routes/payments.ts: #3307 +1 (the
-    // `toCanonicalAddress` import), #3329's task-budget imports/refusal-consts/
-    // resolution block, then #3031's schema restructure — the hand-rolled
-    // shape rungs in the prepare handler became the request schema's (−2 on
-    // the 502/403 pair) and replayIntentBody collapsed the same way (+1 on
-    // the 429/skipped pair) — then #3392 shifted every line below by
-    // +12/+13: `mismatch()` gained the task_budget comparison (comment +
-    // widened signature + branch), the doc comment lost the stale
-    // same-contract sentence, both findPaymentReplay call sites gained the
-    // `taskBudgetId` line, and the second (23505-catch) site sits below the
-    // first two shifts. Pins re-derived against the merged file; the
-    // census re-checks them against the live source, so a wrong pin reddens
-    // here, not in production. Chronology of shifts: #3416 added the one-line
-    // delegation-rail import (+1) and the chain-unavailable branch inside the
-    // prepare catch; #3330's sub-budget branch (the refused pair + sub_budget
-    // resolution) then shifted every site below by +121, and the sites below
-    // the sub_budget resolution block by +123 — the #3416 503 row (inside the
-    // prepare catch) and the 502/403 pair ride the same +121.
-    // #3500 added the task-budget cap pre-check (605) after the task budget
-    // resolves and the transfer-cap revert fallback (708) inside the prepare
-    // catch, shifting every site below by +52 to +62.
-    // #3503 added two imports (+2) and the period budget pre-check (770)
-    // before the UserOp is built, plus its revert fallback (811) inside the
-    // prepare catch, shifting every site below by +93 to +102.
-    // #3528 added the self-transfer domain import pair and the prepare
-    // success response's additive self-transfer warning block, then #3560
-    // REVERTED #3528 entirely — net zero shift from that round-trip, so the
-    // pins below are the #3503 baseline numbers again.
-    // #3494 added imports for isAccountValidationRevert/boundFailureMessage
-    // and new refuse( sites inside the sign route's failure catch
-    // (signature-rejected, account-validation-failed, task-budget and
-    // period-budget reverts confirmed at submit, and the generic fallback) —
-    // all 502, all routed through refuse(..., null): the catch already books
-    // the failure on the intent row via failSubmittedIntent before
-    // classifying, so none of these is a policy refusal the ledger owns.
-    // Review round 1 (#3494) widened the delegation-rail import to include
-    // SubmittedUserOpFailedError — net +5 above every site below.
-    // #3564 reworked that same catch: the receipt-unconfirmed variant now
-    // books outcome-PENDING and answers its own 502 BEFORE the terminal
-    // booking (so the #3494 submission-outcome-unknown site is GONE, not
-    // moved), and the typed sites below it shift by the classification
-    // block's +40; the other four #3494 sites keep their relative order.
-    // #3564 review round 2 hoisted `boundedFailureMessage(errorMsg)` above
-    // the booking split (+6) and added the outcome-pending body's fixed
-    // remedy `message` (+5) — the outcome-pending site shifts +6 and every
-    // typed site below it +12; no site was added or removed.
-    // #3618 rewired the authorize-time path onto the #3616 resolver: the
-    // inline task-budget/sub-budget resolution, the duplicated refusal
-    // tables, the link pre-check, the period 403 body and both ledger
-    // `detail` objects moved into the budget-scope module — refuse( calls
-    // stay in THIS file, so TARGET_FILES is unchanged. The five sites at the
-    // guarded head shift up by −55 (task-cap pre-check row) and −135 (period
-    // pre-check row); every site below shifts by −135.
-    // #3837 added the sponsored-gas import (+1 to every site below), the
-    // recording block on the submit seam (+17 more to sites below it) and
-    // the catch-arm recording block before the classification (+21 more to
-    // the sites inside/after the failure catch). No refuse( site was added
-    // or removed — the recorder is not a refusal.
-    // #4533 added the accounting-feed import (+5) above every site, and the
-    // fire-and-forget feed call after `confirmSubmittedIntent` (+6) above the
-    // sign route's failure catch: sites before the call shift +5, sites in
-    // that catch shift +11. No refuse( site was added or removed.
-    { line: 619, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
-    { line: 701, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
-    { line: 725, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
-    { line: 734, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
-    { line: 743, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
-    // #3609 split the prepare catch's 502 in two: the unbooked
-    // prepare_failed (896, infrastructure) and the booked classified-revert
-    // branch (898); with the one-line import and the operator log every site
-    // shifts by +1 to +22.
-    { line: 767, code: 502, ledger: 'skipped' }, // #3609 prepare catch: not a revert (bundler/RPC) — prepare_failed, allowlisted
-    { line: 769, code: 502, ledger: 'row' }, // prepare catch: classified revert (#2945) — prepare_reverted, or prepare_failed for a non-execution revert, since #3609
-    { line: 790, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
-    { line: 1123, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 1189, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
-    { line: 1241, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 1267, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 1316, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 1355, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 1409, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+    // #4760 (epic #4759 slice 1) moved the `POST /payments` create flow — and
+    // with it six ledger writers and two no-writer sites — into
+    // `modules/payments/create-payment.ts`. #4761 (slice 2) then moved the
+    // `POST /payments/:id/sign` submit state machine — one ledger writer (the
+    // relayer-budget 429) and six allowlisted no-writer answers — into
+    // `modules/payments/sign-payment.ts`. The route holds no `refuse(` site
+    // now; it stays in TARGET_FILES so a refusal added back here is still
+    // seen. The chronology below is kept for the sites that stayed; the
+    // create-flow pins live under the new file.
+    // #3494 added the sign route's typed 502 sites (signature-rejected,
+    // account-validation-failed, task-budget and period-budget reverts
+    // confirmed at submit, and the generic fallback) — all routed through
+    // refuse(..., null): the catch already books the failure on the intent
+    // row via failSubmittedIntent before classifying, so none of these is a
+    // policy refusal the ledger owns.
+    // #3564 reworked that catch: the receipt-unconfirmed variant books
+    // outcome-PENDING and answers its own 502 BEFORE the terminal booking.
+    // #3837 added the sponsored-gas recording blocks; #4533 the accounting
+    // feed. Neither is a refusal.
+  ],
+  'src/modules/payments/sign-payment.ts': [
+    // #4761: the sign flow, moved verbatim out of routes/payments.ts. One
+    // ledger writer and six allowlisted no-writer sites, in the order the
+    // state machine decides them.
+    { line: 360, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 426, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
+    { line: 478, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 504, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 553, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 592, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 646, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+  ],
+  'src/modules/payments/create-payment.ts': [
+    // #4760: the create flow, moved verbatim out of routes/payments.ts. Six
+    // ledger writers and two allowlisted no-writer sites, in the order the
+    // flow decides them.
+    { line: 557, code: 403, ledger: 'row' }, // #3500 task budget cap exhausted — pre-check before the UserOp is built
+    { line: 639, code: 403, ledger: 'row' }, // #3503 period budget exhausted — pre-check before the UserOp is built
+    { line: 663, code: 503, ledger: 'skipped' }, // #3416 no bundler credential for this chain — configuration, allowlisted
+    { line: 672, code: 403, ledger: 'row' }, // #3500 transfer-cap revert confirmed against the task budget's own spent figure
+    { line: 681, code: 403, ledger: 'row' }, // #3503 period-budget revert confirmed by a fresh remaining-budget read
+    { line: 705, code: 502, ledger: 'skipped' }, // #3609 prepare catch: not a revert (bundler/RPC) — prepare_failed, allowlisted
+    { line: 707, code: 502, ledger: 'row' }, // prepare catch: classified revert (#2945) — prepare_reverted, or prepare_failed for a non-execution revert, since #3609
+    { line: 728, code: 403, ledger: 'row' }, // no active budget delegation (#2945)
   ],
 }
 
@@ -250,6 +227,8 @@ const RAW_ALLOWLIST: Record<(typeof TARGET_FILES)[number], { line: number; code:
     },
   ],
   'src/routes/payments.ts': [],
+  'src/modules/payments/create-payment.ts': [],
+  'src/modules/payments/sign-payment.ts': [],
 }
 
 const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; reason: string }[]> = {
@@ -261,37 +240,40 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
     { line: 1017, reason: 'RelayerBudgetExceededError — the sponsorship budget is exhausted (capacity), not a guardrail refusal' },
     { line: 1021, reason: 'ensureHybridDeployed failed — delegate-account deploy infrastructure, not spend policy' },
   ],
-  'src/routes/payments.ts': [
+  'src/routes/payments.ts': [],
+  'src/modules/payments/create-payment.ts': [
     {
-      line: 725,
+      line: 663,
       reason: '#3416 DelegationRailChainUnavailableError — this deployment has no bundler credential for the chain (configuration), not a guardrail refusal',
     },
     {
-      line: 767,
+      line: 705,
       reason: '#3609 the prepare failed without a revert (bundler/RPC/transport) — prepare_failed, infrastructure, not a guardrail refusal',
     },
+  ],
+  'src/modules/payments/sign-payment.ts': [
     {
-      line: 1189,
+      line: 426,
       reason: '#3564 the receipt-unconfirmed submit — the row is booked outcome-pending (never failed) and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
     },
     {
-      line: 1241,
+      line: 478,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1267,
+      line: 504,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1316,
+      line: 553,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1355,
+      line: 592,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 1409,
+      line: 646,
       reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],
@@ -308,10 +290,15 @@ const ALIAS_PINS: Record<(typeof TARGET_FILES)[number], { fragment: string; coun
     { fragment: 'return replayed', count: 3, why: 'delegationReplay passthroughs — replay.ts owns the code (200/409/201)' },
   ],
   'src/routes/payments.ts': [
-    { fragment: 'retired.statusCode', count: 5, why: 'retired-rail tombstones — execution-rail.ts owns the code (410)' },
-    { fragment: 'reply.code(replay.code)', count: 2, why: 'findPaymentReplay passthrough — the helper owns the code' },
     { fragment: 'reply.code(code).send', count: 1, why: 'resume_state computed status (422/409 decision at the site)' },
+  ],
+  'src/modules/payments/sign-payment.ts': [
+    { fragment: 'retired.statusCode', count: 3, why: 'retired-rail tombstones — execution-rail.ts owns the code (410)' },
+  ],
+  'src/modules/payments/create-payment.ts': [
+    { fragment: 'retired.statusCode', count: 2, why: 'retired-rail tombstones — execution-rail.ts owns the code (410)' },
     { fragment: 'code: agentPaymentStatusHttpCode(status)', count: 1, why: 'statusReplay computed code inside findPaymentReplay' },
+    { fragment: 'return replay', count: 2, why: 'findPaymentReplay passthrough — the helper owns the code (201/409/status)' },
   ],
 }
 
@@ -361,6 +348,20 @@ function replySendStatus(sendCall: ts.CallExpression): { status: number | null }
   return { status: numericStatus(target.arguments[0]) }
 }
 
+/**
+ * `decided(<status>, <body>)` — the reply-free decided-response helper the
+ * moved payment modules use (#4760/#4761). It is the same `{ code, body }`
+ * pair a `reply.code(n).send(body)` chain produces, so the census must read
+ * its status the same way; otherwise every refusal in those files would be
+ * classified `null` and the status predicate would go blind exactly where the
+ * money-path code now lives.
+ */
+function decidedHelperStatus(call: ts.CallExpression): number | null {
+  const expr = call.expression
+  if (!ts.isIdentifier(expr) || expr.text !== 'decided') return null
+  return numericStatus(call.arguments[0])
+}
+
 function analyze(source: ts.SourceFile): { refuseCalls: RefuseCallInfo[]; rawSites: RawSiteInfo[] } {
   const refuseCalls: RefuseCallInfo[] = []
   const rawSites: RawSiteInfo[] = []
@@ -389,7 +390,7 @@ function analyze(source: ts.SourceFile): { refuseCalls: RefuseCallInfo[]; rawSit
           code = decidedCode(responseArg)
         } else if (responseArg && ts.isCallExpression(responseArg)) {
           const replyStatus = replySendStatus(responseArg)
-          code = replyStatus ? replyStatus.status : null
+          code = replyStatus ? replyStatus.status : decidedHelperStatus(responseArg)
         }
         const ledgerArg = node.arguments[1]
         const ledger = ledgerArg && ledgerArg.kind === ts.SyntaxKind.NullKeyword ? 'skipped' : 'row'
@@ -410,6 +411,14 @@ function analyze(source: ts.SourceFile): { refuseCalls: RefuseCallInfo[]; rawSit
           if (!insideRefuse(arg)) {
             rawSites.push({ line: lineOf(source, arg), code, kind: 'decided' })
           }
+        }
+      } else if (arg && ts.isCallExpression(arg)) {
+        // The reply-free `decided(<status>, …)` form: an unwrapped policy
+        // status returned this way is exactly as invisible as a bare
+        // `reply.code(n).send(...)`, so it joins the raw-site census.
+        const code = decidedHelperStatus(arg)
+        if (code !== null && POLICY_STATUSES.has(code) && !insideRefuse(arg)) {
+          rawSites.push({ line: lineOf(source, arg), code, kind: 'decided' })
         }
       }
     }
@@ -472,11 +481,13 @@ describe('refusal census — every policy refusal in the enumerated files goes t
       const source = ts.createSourceFile(rel, src, ts.ScriptTarget.Latest, true)
       rows += analyze(source).refuseCalls.filter((r) => r.ledger === 'row').length
     }
-    // 15 ledger writers (8 in delegation-authorize + 7 in payments.ts; #3500
-    // added three, #3503 two, #4352 the two expired-only-budget rows) plus 14
-    // no-writer sites (6 + 8: #3416, the #3494/#3564 sign-failure answers and
-    // #3609's two prepare_failed branches among them) = 29 refuse( call sites
-    // total.
+    // 15 ledger writers (8 in delegation-authorize + 6 in create-payment.ts
+    // + 1 in sign-payment.ts; #3500 added three, #3503 two, #4352 the two
+    // expired-only-budget rows) plus 14 no-writer sites (6 + 2 + 6: #3416,
+    // the #3494/#3564 sign-failure answers and #3609's two prepare_failed
+    // branches among them) = 29 refuse( call sites total. #4761 moved the
+    // route's one writer and six no-writer sites into sign-payment.ts; the
+    // totals are unchanged by the move.
     expect(rows).toBe(15)
   })
 })

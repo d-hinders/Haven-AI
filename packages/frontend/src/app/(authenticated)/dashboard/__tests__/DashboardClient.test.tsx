@@ -67,6 +67,49 @@ vi.mock('@/hooks/useAttentionDismissals', () => ({
   useAttentionDismissals: () => mockUseAttentionDismissals(),
 }))
 
+// #4710: the still-connecting row's own read. Per-test state, reset in
+// beforeEach; `null` is UNKNOWN and fires nothing.
+const mockPendingSetupsState: { data: unknown } = { data: null }
+const mockRefetchPendingSetups = vi.fn()
+vi.mock('@/hooks/usePendingConnectionSetups', () => ({
+  usePendingConnectionSetups: () => ({
+    data: mockPendingSetupsState.data,
+    loading: false,
+    error: null,
+    refetch: mockRefetchPendingSetups,
+  }),
+}))
+
+// #4710: "Start again" reads the setup and cancels it through the API client.
+const mockApiGet = vi.fn()
+const mockApiPost = vi.fn()
+vi.mock('@/lib/api', () => ({
+  api: {
+    get: (...args: unknown[]) => mockApiGet(...args),
+    post: (...args: unknown[]) => mockApiPost(...args),
+  },
+  ApiRequestError: class ApiRequestError extends Error {
+    status: number
+    constructor(message: string, status: number) {
+      super(message)
+      this.status = status
+    }
+  },
+}))
+
+
+// #4707: the first-agent-payment read is a hook with its own suite — here the
+// dashboard tests pin the WIRING (the card renders only when a row came back,
+// and only while the setup facts say it should). Reset in beforeEach.
+const mockFirstAgentPaymentState: { payment: unknown } = { payment: null }
+vi.mock('@/hooks/useFirstAgentPayment', () => ({
+  useFirstAgentPayment: () => ({
+    payment: mockFirstAgentPaymentState.payment,
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}))
 
 vi.mock('@/components/DashboardOnboardingGuide', () => ({
   // #3818: the mock prints the inputs the dashboard derives, so the wiring
@@ -81,7 +124,7 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
     hasFirstAgentPayment: boolean
     usdcFunded: boolean | null
     hasSetUpAgent: boolean
-    pendingAgent?: { name: string; moreCount: number } | null
+    pendingAgent?: { name: string; moreCount: number; budgetEndedOn?: string | null } | null
   }) => (
     <div>
       <span>Onboarding guide</span>
@@ -89,18 +132,47 @@ vi.mock('@/components/DashboardOnboardingGuide', () => ({
       <span>{`usdc-${String(usdcFunded)}`}</span>
       <span>{hasSetUpAgent ? 'agent-set-up' : 'agent-not-set-up'}</span>
       {pendingAgent ? <span>{`pending-${pendingAgent.name}-${pendingAgent.moreCount}`}</span> : null}
+      {pendingAgent?.budgetEndedOn ? <span>{`ended-${pendingAgent.budgetEndedOn}`}</span> : null}
     </div>
   ),
-  SetupCompleteLine: () => <span>Setup complete line</span>,
+}))
+
+// #4707: the milestone card is its own component with its own suite; here the
+// mock prints the row it was handed and offers the dismiss, so the dashboard's
+// wiring is assertable without importing the real card.
+vi.mock('@/components/FirstAgentPaymentCard', () => ({
+  default: ({
+    payment,
+    onDismiss,
+  }: {
+    payment: { agentName: string }
+    onDismiss: () => void
+  }) => (
+    <div>
+      <span>First agent payment card</span>
+      <span>{`first-payment-${payment.agentName}`}</span>
+      <button onClick={onDismiss}>Dismiss first payment</button>
+    </div>
+  ),
 }))
 
 vi.mock('@/components/ConnectAgentModal', () => ({
-  default: () => null,
+  // #4710: the mock prints the prefill it was handed, so "Start again" wiring
+  // (the flow opens with the old setup's inputs) is assertable here without
+  // rendering the real dialog.
+  default: ({ open, prefill }: { open: boolean; prefill?: { name: string } | null }) =>
+    open ? (
+      <div data-testid="connect-modal">
+        <span>{`prefill-${prefill?.name ?? 'none'}`}</span>
+      </div>
+    ) : null,
 }))
 
 // #4094: the picker mock prints its action and account count and offers a
-// one-click pick, so the dashboard's ASK-FIRST wiring (multi-account) is
-// assertable here without importing the real picker.
+// one-click pick per account, so the dashboard's ASK-FIRST wiring
+// (multi-account) is assertable here without importing the real picker.
+// #4642: one button per account, so a mixed valid/null-chain set can pick the
+// account that can actually sign.
 vi.mock('@/components/DashboardActionPickerModal', () => ({
   default: ({
     open,
@@ -116,17 +188,53 @@ vi.mock('@/components/DashboardActionPickerModal', () => ({
     open ? (
       <div data-testid="action-picker">
         <span>{`picker-${action}-${accounts.length}`}</span>
-        <button onClick={() => onSelect(accounts[0].id)}>Pick {accounts[0].name}</button>
+        {accounts.map((account) => (
+          <button key={account.id} onClick={() => onSelect(account.id)}>
+            Pick {account.name}
+          </button>
+        ))}
       </div>
     ) : null,
 }))
 
 // The one Receive dialog (#4094): a marker, so the wiring tests can tell
 // "opened for the chosen account" from "not mounted".
-vi.mock('@/components/ReceiveDialog', () => ({
-  default: ({ open, account }: { open: boolean; account: { name?: string } | null }) =>
-    open ? <div data-testid="receive-dialog">{account?.name ?? ''}</div> : null,
-}))
+// #4705: it also reports the account it shows (as the real dialog does, on
+// open and on close), offers an "Announce arrival" button standing in for the
+// watch seeing a deposit, and prints whether the host offered Connect.
+vi.mock('@/components/ReceiveDialog', async () => {
+  const { useEffect } = await import('react')
+  return {
+    default: function MockReceiveDialog({
+      open,
+      account,
+      onConnectFirstAgent,
+      onShowingAccountChange,
+      onArrived,
+      onClose,
+    }: {
+      open: boolean
+      account: { id?: string; name?: string } | null
+      onClose: () => void
+      onConnectFirstAgent?: () => void
+      onShowingAccountChange?: (accountId: string | null) => void
+      onArrived?: (accountId: string) => void
+    }) {
+      const showing = open ? account?.id ?? null : null
+      useEffect(() => {
+        onShowingAccountChange?.(showing)
+      }, [showing, onShowingAccountChange])
+      return open ? (
+        <div data-testid="receive-dialog">
+          {account?.name ?? ''}
+          {onConnectFirstAgent ? <span>offers-connect-first-agent</span> : null}
+          <button onClick={() => account?.id && onArrived?.(account.id)}>Announce arrival</button>
+          <button onClick={onClose}>Close receive</button>
+        </div>
+      ) : null
+    },
+  }
+})
 
 // The dashboard's Send is the delegation rail's owner-send (#4094): a marker
 // carrying the account it would sign for, so the tests can pin WHICH account
@@ -162,7 +270,7 @@ vi.mock('@/components/ui/Toast', async () => {
   }
 })
 
-import DashboardClient from '../DashboardClient'
+import DashboardClient, { formatUsdcArrival } from '../DashboardClient'
 import type { DashboardAgentPreview, DashboardOverviewResponse } from '@/types/dashboard'
 
 const SAFE = {
@@ -251,6 +359,8 @@ describe('DashboardClient', () => {
   beforeEach(() => {
     mockBudgetRemainingState.data = null
     mockBudgetRemainingState.loading = false
+    mockFirstAgentPaymentState.payment = null
+    mockPendingSetupsState.data = null
     vi.clearAllMocks()
     window.localStorage.clear()
     window.sessionStorage.clear()
@@ -706,6 +816,23 @@ describe('DashboardClient', () => {
       accounts: [FUNDED_ACCOUNT],
       onboardingProgress: { hasFirstAgentPayment: true },
     })
+    // #4707: the qualifying row the card names. Without it the card renders
+    // nothing, which is the honest answer for a payment whose merchant leg is
+    // not proven.
+    mockFirstAgentPaymentState.payment = {
+      id: 'payment-1',
+      agentName: 'Research agent',
+      amountHuman: '0.05',
+      amountRaw: '50000',
+      tokenSymbol: 'USDC',
+      chainId: 8453,
+      confirmedAt: '2026-11-08T12:00:00.000Z',
+      usdValue: 0.05,
+      eurValue: 0.046,
+      sekValue: 0.54,
+      merchantName: null,
+      x402ResourceUrl: 'https://research.example/paper',
+    }
   }
 
   it('holds the empty card back while budget reads load, then shows the achievement once they are known (#3902)', () => {
@@ -733,21 +860,32 @@ describe('DashboardClient', () => {
     expect(screen.getByRole('heading', { level: 3, name: "You're all caught up" })).toBeInTheDocument()
   })
 
-  it('shows one "You\'re set up" line, not the steps, once all three are done', () => {
+  it('shows the first-agent-payment card, not the steps, once all three are done (#4707)', () => {
     mockCompletedSetup()
     render(<DashboardClient />)
-    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+    expect(screen.getByText('First agent payment card')).toBeInTheDocument()
+    expect(screen.getByText('first-payment-Research agent')).toBeInTheDocument()
+    expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
+  })
+
+  it('renders nothing for the card when the qualifying row has not come back (#4707)', () => {
+    // `hasFirstAgentPayment` is true — the merchant leg is not proven yet, so
+    // the read answers null. No card, no success copy, no Peak.
+    mockCompletedSetup()
+    mockFirstAgentPaymentState.payment = null
+    render(<DashboardClient />)
+    expect(screen.queryByText('First agent payment card')).not.toBeInTheDocument()
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
   })
 
   it('does not flash the guide for completed setup after the completion banner was dismissed', () => {
     // The pre-#3818 banner's key is read as is: an owner who dismissed the
-    // old banner does not see the new line either.
+    // old banner does not see the new card either.
     window.localStorage.setItem('haven-onboarding-complete-dismissed:user-1', '1')
     mockCompletedSetup()
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-    expect(screen.queryByText('Setup complete line')).not.toBeInTheDocument()
+    expect(screen.queryByText('First agent payment card')).not.toBeInTheDocument()
   })
 
   it('does not show the guide before first-payment progress is known', () => {
@@ -766,9 +904,23 @@ describe('DashboardClient', () => {
       accounts: [{ ...FUNDED_ACCOUNT, usdcBalanceAtomic: null, funded: null }],
       onboardingProgress: { hasFirstAgentPayment: true },
     })
+    mockFirstAgentPaymentState.payment = {
+      id: 'payment-1',
+      agentName: 'Research agent',
+      amountHuman: '0.05',
+      amountRaw: '50000',
+      tokenSymbol: 'USDC',
+      chainId: 8453,
+      confirmedAt: '2026-11-08T12:00:00.000Z',
+      usdValue: 0.05,
+      eurValue: 0.046,
+      sekValue: 0.54,
+      merchantName: null,
+      x402ResourceUrl: 'https://research.example/paper',
+    }
     render(<DashboardClient />)
     expect(screen.queryByText('Onboarding guide')).not.toBeInTheDocument()
-    expect(screen.getByText('Setup complete line')).toBeInTheDocument()
+    expect(screen.getByText('First agent payment card')).toBeInTheDocument()
   })
 
   it('a balance-read error mid-setup does not collapse the page into the focused view (#3818 review)', () => {
@@ -777,7 +929,7 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     // The full layout keeps the activity section.
-    expect(screen.getByRole('heading', { name: 'Activity' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
   })
 
   it('before the first agent payment the spending block says what will appear there, not three zeros (#3818)', () => {
@@ -849,11 +1001,69 @@ describe('DashboardClient', () => {
     render(<DashboardClient />)
 
     expect(screen.getByText('agent-not-set-up')).toBeInTheDocument()
-    // The newest waiting agent is the one step 2 names…
-    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
-    // …so its "Needs setup" row is not repeated; the other agent keeps its row.
+    // The newest waiting agent is the one step 2 names, with NO "and 1 more":
+    // Alpha's own row names it (#4744 — it used to read "Beta and 1 more"
+    // above "Alpha is waiting to be set up")…
+    expect(screen.getByText('pending-Beta-0')).toBeInTheDocument()
+    // …and Beta's "Needs setup" row is not repeated; Alpha keeps its row.
     expect(screen.queryByText('Beta is waiting to be set up')).not.toBeInTheDocument()
     expect(screen.getByText('Alpha is waiting to be set up')).toBeInTheDocument()
+  })
+
+  it('a waiting agent whose row was dismissed is named by step 2\'s "and 1 more" instead (#4744)', () => {
+    const pending = (id: string, name: string): DashboardAgentPreview => ({
+      ...setUpAgentPreview(),
+      id,
+      name,
+      status: 'pending_approval',
+      budgets: [],
+    })
+    // Alpha's "Needs setup" was dismissed for good (#3813), so no row names it.
+    mockUseAttentionDismissals.mockReturnValue({
+      acknowledgements: new Map([
+        ['needs-setup:agent-a', { acknowledgedAt: '2026-10-09T00:00:00.000Z', acknowledgedPeriodEnd: null }],
+      ]),
+      dismiss: mockDismissOnServer,
+    })
+    mockBaseState([pending('agent-a', 'Alpha'), pending('agent-b', 'Beta')], {
+      accounts: [FUNDED_ACCOUNT],
+    })
+    mockUseAgents.mockReturnValue({
+      agents: [
+        { id: 'agent-a', name: 'Alpha', created_at: '2026-10-01T00:00:00Z' },
+        { id: 'agent-b', name: 'Beta', created_at: '2026-10-08T00:00:00Z' },
+      ],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.queryByText('Alpha is waiting to be set up')).not.toBeInTheDocument()
+    expect(screen.getByText('pending-Beta-1')).toBeInTheDocument()
+  })
+
+  it('step 2\'s agent whose budget ENDED: no "Budget ended" row in the card; step 2 carries the date (#4744)', () => {
+    const ended: DashboardAgentPreview = {
+      ...setUpAgentPreview(),
+      id: 'agent-e',
+      name: 'Delegate',
+      status: 'active',
+      budgets: [],
+      budgetEndedAt: '2026-11-02T09:00:00.000Z',
+    }
+    mockBaseState([ended], { accounts: [FUNDED_ACCOUNT] })
+    mockUseAgents.mockReturnValue({
+      agents: [{ id: 'agent-e', name: 'Delegate', created_at: '2026-10-01T00:00:00Z' }],
+      loading: false,
+      refetch: vi.fn(),
+    })
+
+    render(<DashboardClient />)
+
+    expect(screen.getByText('pending-Delegate-0')).toBeInTheDocument()
+    expect(screen.getByText('ended-2 Nov 2026')).toBeInTheDocument()
+    expect(screen.queryByText("Delegate's budget ended 2 Nov 2026")).not.toBeInTheDocument()
   })
 
   it('a completed step 2 names nobody; the waiting agent keeps its row — funded (#3976)', () => {
@@ -924,7 +1134,7 @@ describe('DashboardClient', () => {
     expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
     // The agents and activity sections wait until the account is funded.
     expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Activity' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Transactions' })).not.toBeInTheDocument()
     // #3897 (changed on purpose, the mockup's new-user card): the spending
     // half stays, explaining what it will show — never zero tiles.
     const spending = screen.getByRole('region', { name: 'Spending' })
@@ -1079,6 +1289,41 @@ describe('DashboardClient', () => {
       // never applied here: nothing dead-ends, the account is simply not
       // signable until its chain resolves.
       expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    })
+
+    it('with a mixed account set, the picker no longer dead-ends: the valid account opens Send (#4642)', () => {
+      // #4642: the picker used to list a null-chain account as clickable, so
+      // choosing it set `sendOpen` and rendered nothing. The picker now marks
+      // that row non-interactive, and the valid account still reaches the rail.
+      mockBaseState([], { onboardingProgress: { hasFirstAgentPayment: true } })
+      const NULL_CHAIN = {
+        ...SAFE,
+        id: 'safe-2',
+        name: 'Fresh account',
+        chain_id: undefined as unknown as number,
+        is_default: false,
+      }
+      mockUseAuth.mockReturnValue({
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          accounts: [NULL_CHAIN, SAFE],
+        },
+      })
+      render(<DashboardClient />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      const picker = screen.getByTestId('action-picker')
+      expect(picker).toHaveTextContent('picker-send-2')
+      expect(screen.queryByTestId('delegation-send-modal')).not.toBeInTheDocument()
+
+      fireEvent.click(within(picker).getByRole('button', { name: 'Pick Main account' }))
+
+      const send = screen.getByTestId('delegation-send-modal')
+      expect(send).toHaveTextContent(`${SAFE.account_address}|${SAFE.chain_id}`)
     })
   })
 
@@ -1435,43 +1680,284 @@ describe('DashboardClient', () => {
     })
   })
 
-  describe('first-arrival welcome toast', () => {
-    it('fires a welcome toast and clears the flag when arriving from onboarding', () => {
+  describe('formatUsdcArrival (#4704)', () => {
+    it('formats whole tokens with at least two decimals and reads malformed input as unknown', () => {
+      expect(formatUsdcArrival('25000000', 6)).toBe('25.00')
+      expect(formatUsdcArrival('500', 6)).toBe('0.0005')
+      expect(formatUsdcArrival('1234567890000', 6)).toBe('1,234,567.89')
+      expect(formatUsdcArrival(null, 6)).toBeNull()
+      expect(formatUsdcArrival('25000000', null)).toBeNull()
+      expect(formatUsdcArrival('abc', 6)).toBeNull()
+      expect(formatUsdcArrival('0', 6)).toBeNull()
+      // A malformed exponent must not throw inside the toast effect.
+      expect(() => formatUsdcArrival('25000000', -1)).not.toThrow()
+      expect(() => formatUsdcArrival('25000000', 1.5)).not.toThrow()
+      expect(formatUsdcArrival('25000000', -1)).toBeNull()
+      expect(formatUsdcArrival('25000000', 1.5)).toBeNull()
+    })
+  })
+
+  // #4704: "You're in" has just said it, so the dashboard no longer repeats
+  // a welcome toast — and no "just onboarded" flag exists to read.
+  describe('no welcome toast on arrival (#4704)', () => {
+    it('does not toast a welcome, even when a stale pre-#4704 flag is in the session', () => {
       window.sessionStorage.setItem('haven-just-onboarded', '1')
-
       render(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalledWith(expect.stringContaining('Welcome to Haven'))
+      window.sessionStorage.removeItem('haven-just-onboarded')
+    })
+  })
 
+  // #4704: the funds toast is true — one account's own USDC going from
+  // known-empty to funded, with the amount and the account named.
+  describe('funds toast (#4704)', () => {
+    const ACCOUNT = {
+      accountId: 'safe-1',
+      chainId: 8453,
+      isTestnet: false,
+      usdcDecimals: 6,
+      needs_backup_recommendation: false,
+      usdcPace7dAtomic: '0',
+    }
+    function withAccount(usdcBalanceAtomic: string | null, funded: boolean | null) {
+      mockBaseState([], { accounts: [{ ...ACCOUNT, usdcBalanceAtomic, funded }] })
+    }
+
+    it('fires on false → true with the amount and the account', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
       expect(mockToastSuccess).toHaveBeenCalledOnce()
-      expect(mockToastSuccess).toHaveBeenCalledWith(
-        'Welcome to Haven, Ada — your account is live.',
-      )
-      // Flag is consumed so a refresh later in the session does NOT re-fire.
-      expect(window.sessionStorage.getItem('haven-just-onboarded')).toBeNull()
+      expect(mockToastSuccess).toHaveBeenCalledWith('25.00 USDC arrived in Main account')
     })
 
-    it('does not fire the welcome toast on a normal dashboard render', () => {
-      // No session flag set.
+    it('does not fire on null → true: the first successful read is not money arriving', () => {
+      withAccount(null, null)
+      const { rerender } = render(<DashboardClient />)
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
+
+    it('does not fire on first load of an already funded account, nor on a later top-up', () => {
+      withAccount('25000000', true)
+      const { rerender } = render(<DashboardClient />)
+      withAccount('40000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
+
+    it('with two accounts, only the one that went false → true toasts, named by its own id', () => {
+      const second = { ...ACCOUNT, accountId: 'acct-2' }
+      // `reversed` swaps the overview's account order between renders, so a
+      // funded-map keyed by position would compare the wrong accounts.
+      const twoAccounts = (a: [string, boolean], b: [string, boolean], reversed = false) => {
+        const rows = [
+          { ...ACCOUNT, usdcBalanceAtomic: a[0], funded: a[1] },
+          { ...second, usdcBalanceAtomic: b[0], funded: b[1] },
+        ]
+        mockBaseState([], { accounts: reversed ? rows.reverse() : rows })
+      }
+      // The second account is listed FIRST in the session user's accounts, so
+      // a name lookup by position would name the wrong one.
+      const sessionUser = {
+        user: {
+          id: 'user-1',
+          name: 'Ada',
+          email: 'ada@example.com',
+          wallet_address: '0x5555555555555555555555555555555555555555',
+          accounts: [{ ...SAFE, id: 'acct-2', name: 'Savings' }, SAFE],
+        },
+      }
+      twoAccounts(['0', false], ['7000000', true])
+      mockUseAuth.mockReturnValue(sessionUser)
+      const { rerender } = render(<DashboardClient />)
+      twoAccounts(['3000000', true], ['7000000', true], true)
+      mockUseAuth.mockReturnValue(sessionUser)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).toHaveBeenCalledOnce()
+      expect(mockToastSuccess).toHaveBeenCalledWith('3.00 USDC arrived in Main account')
+    })
+
+    // #4705: money Receive covers is Receive's to announce.
+    it('stays silent while Receive is open on that account', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.getByTestId('receive-dialog')).toBeInTheDocument()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
+
+    it('stays silent for an arrival Receive already showed, when the dashboard sees it after close', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Announce arrival' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Close receive' }))
+      expect(screen.queryByTestId('receive-dialog')).not.toBeInTheDocument()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+    })
+
+    it('an announcement is consumed: a later drain and refill with Receive closed toasts', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Announce arrival' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Close receive' }))
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      withAccount('0', false)
+      rerender(<DashboardClient />)
+      withAccount('5000000', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).toHaveBeenCalledOnce()
+      expect(mockToastSuccess).toHaveBeenCalledWith('5.00 USDC arrived in Main account')
+    })
+
+    it('Receive offers Connect your first agent only while no agent exists', () => {
+      withAccount('0', false)
+      mockUseAgents.mockReturnValue({ agents: [], loading: false, refetch: vi.fn() })
+      const first = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.getByText('offers-connect-first-agent')).toBeInTheDocument()
+      first.unmount()
+
+      withAccount('0', false)
+      const second = render(<DashboardClient />)
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.queryByText('offers-connect-first-agent')).not.toBeInTheDocument()
+      second.unmount()
+
+      // A failed agents read is not "no agents".
+      withAccount('0', false)
+      mockUseAgents.mockReturnValue({ agents: [], loading: false, error: 'Failed to load agents', refetch: vi.fn() })
       render(<DashboardClient />)
-
-      expect(mockToastSuccess).not.toHaveBeenCalledWith(
-        expect.stringContaining('Welcome to Haven'),
-      )
+      fireEvent.click(screen.getByRole('button', { name: 'Receive' }))
+      expect(screen.queryByText('offers-connect-first-agent')).not.toBeInTheDocument()
     })
 
-    it('falls back silently when sessionStorage is unavailable', () => {
-      // Simulate private-browsing-style failure on read.
-      const getSpy = vi
-        .spyOn(window.sessionStorage.__proto__, 'getItem')
-        .mockImplementation(() => {
-          throw new Error('sessionStorage disabled')
-        })
+    it('any funded read records first money on this device (#4705)', () => {
+      window.localStorage.removeItem('haven-first-money-seen:user-1')
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      expect(window.localStorage.getItem('haven-first-money-seen:user-1')).toBeNull()
+      withAccount('25000000', true)
+      rerender(<DashboardClient />)
+      expect(window.localStorage.getItem('haven-first-money-seen:user-1')).toBe('1')
+      window.localStorage.removeItem('haven-first-money-seen:user-1')
+    })
 
-      expect(() => render(<DashboardClient />)).not.toThrow()
-      expect(mockToastSuccess).not.toHaveBeenCalledWith(
-        expect.stringContaining('Welcome to Haven'),
+    it('never says the agents can spend now', () => {
+      withAccount('0', false)
+      const { rerender } = render(<DashboardClient />)
+      withAccount('500', true)
+      rerender(<DashboardClient />)
+      expect(mockToastSuccess).toHaveBeenCalledWith('0.0005 USDC arrived in Main account')
+      for (const call of mockToastSuccess.mock.calls) {
+        expect(String(call[0])).not.toMatch(/can spend now/i)
+      }
+    })
+  })
+
+  /**
+   * #4710: closing the connect dialog before the agent registers leaves a
+   * "still connecting" row. It shows during the first-run guide too — that is
+   * when a new user is most likely to have closed the dialog — and its two
+   * actions are Open (the resume link) and Start again (cancel + reopen
+   * prefilled, creating nothing until the user submits).
+   */
+  describe('still connecting (#4710)', () => {
+    const SETUP_ID = '11111111-1111-1111-1111-111111111111'
+    const PENDING = {
+      setup_id: SETUP_ID,
+      name: 'Research agent',
+      expires_at: '2099-01-01T00:00:00.000Z',
+    }
+
+    function setupStatus(status: string) {
+      return {
+        setup_id: SETUP_ID,
+        status,
+        agent: { name: 'Research agent', description: null },
+        haven_wallet: {
+          id: SAFE.id,
+          name: SAFE.name,
+          address: SAFE.account_address,
+          chain_id: SAFE.chain_id,
+          network: 'Base',
+        },
+        agent_budget: [
+          {
+            token_address: '0x0000000000000000000000000000000000000000',
+            token_symbol: 'USDC',
+            allowance_amount: '10000000',
+            reset_period_min: 1440,
+          },
+        ],
+      }
+    }
+
+    it('shows the row during the first-run guide', () => {
+      mockPendingSetupsState.data = [PENDING]
+      render(<DashboardClient />)
+      expect(screen.getByText('Onboarding guide')).toBeInTheDocument()
+      expect(screen.getByText('Research agent is still connecting')).toBeInTheDocument()
+    })
+
+    it('Start again reads the setup, cancels it, and opens the flow prefilled — no create POST', async () => {
+      const user = userEvent.setup()
+      mockPendingSetupsState.data = [PENDING]
+      mockApiGet.mockResolvedValue(setupStatus('awaiting_connection'))
+      mockApiPost.mockResolvedValue({ success: true })
+
+      render(<DashboardClient />)
+      await user.click(screen.getByRole('button', { name: 'Start again' }))
+
+      expect(mockApiGet).toHaveBeenCalledWith(`/agent-connection-setups/${SETUP_ID}`)
+      expect(mockApiPost).toHaveBeenCalledWith(
+        `/agent-connection-setups/${SETUP_ID}/cancel`,
+        {},
       )
+      // The replacement is created only when the user submits the reopened
+      // flow — Start again itself never POSTs a second setup.
+      expect(
+        mockApiPost.mock.calls.some(([path]) => path === '/agent-connection-setups'),
+      ).toBe(false)
+      expect(screen.getByTestId('connect-modal')).toHaveTextContent('prefill-Research agent')
+    })
 
-      getSpy.mockRestore()
+    it('creates nothing when the setup has moved on — it opens the resume link instead', async () => {
+      const user = userEvent.setup()
+      mockPendingSetupsState.data = [PENDING]
+      mockApiGet.mockResolvedValue(setupStatus('connected_local'))
+      const assign = vi.fn()
+      const original = window.location
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...original, assign },
+      })
+
+      try {
+        render(<DashboardClient />)
+        await user.click(screen.getByRole('button', { name: 'Start again' }))
+
+        // #4709: the dashboard also POSTs `/user/visits` on mount, so this
+        // asserts the setup surface specifically — Start again creates no
+        // second setup.
+        expect(
+          mockApiPost.mock.calls.some(([path]) => path === '/agent-connection-setups'),
+        ).toBe(false)
+        expect(assign).toHaveBeenCalledWith(`/agents?setup=${SETUP_ID}`)
+        expect(screen.queryByTestId('connect-modal')).not.toBeInTheDocument()
+      } finally {
+        Object.defineProperty(window, 'location', { configurable: true, value: original })
+      }
     })
   })
 })

@@ -23,6 +23,17 @@ export interface ToolDescription {
   /** Natural-language user intents that should make an agent prefer this
    * tool over adjacent tools. Empty or omitted when the summary is enough. */
   selectionGuidance?: string
+  /**
+   * #4796: the same guidance for ONE MCP surface, where the shared sentence
+   * names a tool that surface does not register. The local MCP
+   * (`@haven_ai/mcp`) and the hosted MCP do not have the same tools — local
+   * has no `haven_check_funds`, hosted has no `haven_pay_x402` — so a sentence
+   * that says "use <tool>" has to name a tool the agent reading it can call.
+   * `composeDescription(d, surface)` uses this in place of
+   * `selectionGuidance` when the surface has an entry; with no surface (the
+   * SDK's own direct tool definitions) the shared text is used unchanged.
+   */
+  selectionGuidanceFor?: Partial<Record<McpSurface, string>>
   /** Concrete behaviour the tool performs end-to-end, including which
    * non-custodial guarantee applies. */
   behavior: string
@@ -31,14 +42,19 @@ export interface ToolDescription {
   nextActionGuidance: string
 }
 
+/** The two MCP surfaces that register `haven_*` tools (#4796). */
+export type McpSurface = 'local' | 'hosted'
+
 /**
  * Build a single description string from the three fragments. Joined with
  * spaces so consumers can split on the summary substring if they need to.
+ *
+ * Pass the MCP `surface` the description is served on, so a fragment that
+ * names a surface-specific tool resolves to that surface's wording (#4796).
  */
-export function composeDescription(d: ToolDescription): string {
-  return [d.summary, d.selectionGuidance, d.behavior, d.nextActionGuidance]
-    .filter(Boolean)
-    .join(' ')
+export function composeDescription(d: ToolDescription, surface?: McpSurface): string {
+  const selection = (surface && d.selectionGuidanceFor?.[surface]) ?? d.selectionGuidance
+  return [d.summary, selection, d.behavior, d.nextActionGuidance].filter(Boolean).join(' ')
 }
 
 /**
@@ -79,7 +95,7 @@ export const toolDescriptions = {
     selectionGuidance:
       'Prefer this over the quote+pay split when the agent just wants the paid resource and does not need to inspect the price first. If you already have a quote from haven_quote_x402, use haven_pay_x402_quote instead. Do not use for read-only allowance, budget, spend-limit, remaining-amount, reset-period, or what-can-I-spend questions; use the allowance lookup tool instead.',
     behavior:
-      'Calls the URL, parses any HTTP 402 x402 challenge (or, since #3118, a native-MCP payment-required tool result under HTTP 200), signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT on the EIP-3009 path only) and returns the merchant response. On the EIP-3009 path, when the owner opted this agent in, the same retry also carries the agent-signed buyer tax declaration in X-Tax-Declaration — signed by the same local delegate key, sent to the seller only, and omitted when the declaration is not available or on the direct-settlement (erc7710) scheme. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status with no payment-required tool result, returns it unchanged without contacting Haven.',
+      'Calls the URL, parses any HTTP 402 x402 challenge (or, since #3118, a native-MCP payment-required tool result under HTTP 200), signs the payment locally, then retries the original request with the signed payment header (sent under PAYMENT-SIGNATURE, plus the legacy X-PAYMENT only for an x402 v1 challenge) and returns the merchant response. On the EIP-3009 path, when the owner opted this agent in, the same retry also carries the agent-signed buyer tax declaration in X-Tax-Declaration — signed by the same local delegate key, sent to the seller only, and omitted when the declaration is not available or on the direct-settlement (erc7710) scheme. Settlement is either direct account-to-merchant with no funding leg, or a bridge that first redeems the agent\'s budget delegation to fund the delegate wallet for an EIP-3009 authorization. A payment outside the on-chain budget is declined before any money moves; nothing is queued for a human to approve later. If the resource returns a non-402 status with no payment-required tool result, returns it unchanged without contacting Haven.',
     nextActionGuidance:
       'Preserve the returned resume_state or paymentId — either identifies this payment if you need to ask about it later. ' +
       'This tool performs the merchant retry itself, so do not wait on a signal while the call is in flight. ' +
@@ -90,7 +106,7 @@ export const toolDescriptions = {
     summary:
       'Resume an x402 payment whose Haven-side authorization already succeeded but whose merchant retry did not complete.',
     behavior:
-      'Accepts either resume_state or payment_id, validates the x402 details against the authorized funding, and retries the merchant request with the signed payment header (PAYMENT-SIGNATURE, plus legacy X-PAYMENT on EIP-3009 only; also params._meta on an MCP tools/call body). On the EIP-3009 scheme the retry also carries the agent-signed buyer tax declaration in X-Tax-Declaration when the owner opted this agent in and the declaration is available — signed locally by the same delegate key, sent to the seller only. No new Haven payment is created.',
+      'Accepts either resume_state or payment_id, validates the x402 details against the authorized funding, and retries the merchant request with the signed payment header (PAYMENT-SIGNATURE, plus legacy X-PAYMENT only for an x402 v1 challenge; also params._meta on an MCP tools/call body). On the EIP-3009 scheme the retry also carries the agent-signed buyer tax declaration in X-Tax-Declaration when the owner opted this agent in and the declaration is available — signed locally by the same delegate key, sent to the seller only. No new Haven payment is created.',
     nextActionGuidance:
       'Only call this after haven_get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded, most often because the process crashed between funding and the merchant retry. ' +
       'Any other nextAction reports a conflict instead of retrying, so do not call this speculatively. ' +
@@ -179,6 +195,15 @@ export const toolDescriptions = {
       'Prefer this over haven_pay_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
       'Use haven_pay_x402 for arbitrary HTTP resources. ' +
       'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
+    selectionGuidanceFor: {
+      // The hosted surface has no one-shot haven_pay_x402: an arbitrary HTTP
+      // resource starts at haven_quote_x402 there.
+      hosted:
+        'Use this when the agent wants to call a specific tool on an MCP merchant (e.g. Soundside, Coinbase Bazaar) and payment is required. ' +
+        'Prefer this over haven_quote_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
+        'Use haven_quote_x402 for arbitrary HTTP resources. ' +
+        'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
+    },
     behavior:
       'Builds the JSON-RPC tools/call envelope, runs the MCP Streamable-HTTP initialize handshake automatically (if the endpoint is MCP-shaped), ' +
       'pays any HTTP 402 x402 challenge against the agent\'s on-chain budget delegation, and retries the request, returning the JSON-RPC result (the actual merchant output) on success. ' +
@@ -229,6 +254,15 @@ export const toolDescriptions = {
       'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
       'Do NOT use for normal payments — use haven_pay_x402. ' +
       'Do NOT use to read balances only — use haven_get_allowances, or haven_check_funds for whether the account holds funds.',
+    selectionGuidanceFor: {
+      // The local surface has no check of funds against an amount, and a live
+      // budget is not proof that funds are held — so haven_get_allowances is
+      // named for the one signal it does carry (fundsCoverRemaining), no more.
+      local:
+        'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
+        'Do NOT use for normal payments — use haven_pay_x402. ' +
+        'Do NOT use to read balances only: haven_get_allowances reports the budget, and its fundsCoverRemaining: false flags an account balance that cannot back it — no tool on this surface checks funds against an amount.',
+    },
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating account (hardcoded destination). ' +
       'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
@@ -248,6 +282,23 @@ export const toolDescriptions = {
       'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
       'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
+    selectionGuidanceFor: {
+      // The local surface has no check of funds against an amount, and a live
+      // budget is not proof that funds are held — so haven_get_allowances is
+      // named for the one signal it does carry (fundsCoverRemaining), no more.
+      local:
+        'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+        'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
+        'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
+        'No tool on this surface checks funds against an amount before sending: a live budget is spend authority, not proof of a balance — haven_get_allowances\' fundsCoverRemaining: false flags a balance that cannot back the remaining budget.',
+      // The hosted surface has no one-shot haven_pay_x402: an x402 endpoint
+      // starts at haven_quote_x402 there.
+      hosted:
+        'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+        'Do NOT use for x402 paid endpoints — use haven_quote_x402 instead. ' +
+        'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
+        'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
+    },
     behavior:
       'Sends the amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
       'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves or any signing — never queued for a human to approve. ' +

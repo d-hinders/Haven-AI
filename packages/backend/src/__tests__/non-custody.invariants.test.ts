@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertBindingKeyNotReused } from '../infra/binding-key-collision.js'
 
 /**
  * Non-custody perimeter invariants (design: docs/research/non-custody-verification.md).
@@ -55,8 +56,8 @@ describe('non-custody invariants', () => {
     expect(migrations).toMatch(/api_key_hash/)
   })
 
-  // Invariant 3 — "no signer capable of spending". Two server-side signers
-  // exist, and the list is exhaustive on purpose: adding a third is a
+  // Invariant 3 — "no signer capable of spending". Three server-side signers
+  // exist, and the list is exhaustive on purpose: adding a fourth is a
   // non-custody decision, not an implementation detail.
   //
   //   infra/relayer.ts        — the gas-only relayer (pinned below).
@@ -64,9 +65,27 @@ describe('non-custody invariants', () => {
   //     MESSAGE signer: no provider, no transaction, and its key is dedicated
   //     (PASSPORT_RECEIPT_SIGNING_KEY, never the relayer's). The next test
   //     enforces that confinement rather than taking this comment's word for it.
-  it('instantiates exactly two server-side signers — and no others', () => {
-    const withSigner = productionFiles().filter((f) => /new Wallet\(/.test(readFileSync(f, 'utf8')))
-    expect(withSigner.map(rel).sort()).toEqual(['infra/relayer.ts', 'modules/passport/receipt.ts'])
+  //   infra/chain/x402-binding-signer.ts — signs the x402 expected context and
+  //     the sweep authorization binding (#4655, owner decision 1). Also a
+  //     MESSAGE signer, on a dedicated key (X402_BINDING_PRIVATE_KEY), and the
+  //     ONE place that wallet is constructed: `rails/sweep.ts` broadcasts
+  //     through the relayer, so it cannot be asserted message-only at file
+  //     level. The test after the receipt's enforces the same confinement.
+  //
+  // The scan matches every key-to-signer constructor, not just `new Wallet(`:
+  // two production signers used `new ethers.Wallet(` and the old regex never
+  // saw them (#4655). It counts FILES, so a second construction in an already
+  // listed file is invisible — and it reads raw text, comments included, so no
+  // comment in an unlisted file may contain a constructor literal.
+  it('instantiates exactly three server-side signers — and no others', () => {
+    const constructors =
+      /new (ethers\.)?Wallet\(|new (ethers\.)?SigningKey\(|new BaseWallet\(|Wallet\.fromEncryptedJson/
+    const withSigner = productionFiles().filter((f) => constructors.test(readFileSync(f, 'utf8')))
+    expect(withSigner.map(rel).sort()).toEqual([
+      'infra/chain/x402-binding-signer.ts',
+      'infra/relayer.ts',
+      'modules/passport/receipt.ts',
+    ])
   })
 
   it('keeps the receipt signer message-only — no provider, no transaction', () => {
@@ -79,6 +98,17 @@ describe('non-custody invariants', () => {
     expect(receipt).not.toMatch(/sendTransaction|\.connect\(|getProvider|JsonRpcProvider/)
     // And it is fed a dedicated key, never the relayer's.
     expect(receipt).not.toMatch(/RELAYER_PRIVATE_KEY|relayerPrivateKeyForChain|getRelayer/)
+  })
+
+  it('keeps the x402 binding signer message-only — no provider, no transaction', () => {
+    // #4655: the binding wallet signs messages and is never connected to a
+    // provider. Same confinement as the receipt's, plus `.provider` — the
+    // binding signer must not even reach for a connected wallet's provider.
+    const binding = readFileSync(join(SRC, 'infra', 'chain', 'x402-binding-signer.ts'), 'utf8')
+    expect(binding).toMatch(/signMessage/)
+    expect(binding).not.toMatch(/sendTransaction|\.connect\(|getProvider|JsonRpcProvider|\.provider/)
+    // And it is fed a dedicated key, never the relayer's.
+    expect(binding).not.toMatch(/RELAYER_PRIVATE_KEY|relayerPrivateKeyForChain|getRelayer/)
   })
 
   it('keeps the relayer a gas-only signer (derived from the relayer gas key)', () => {
@@ -95,6 +125,103 @@ describe('non-custody invariants', () => {
     const keygen = /createRandom|generatePrivateKey|Wallet\.fromPhrase|fromMnemonic|HDNodeWallet/
     const offenders = productionFiles().filter((f) => keygen.test(readFileSync(f, 'utf8')))
     expect(offenders.map(rel), 'server-side key generation — see Red Line #1/#2').toEqual([])
+  })
+})
+
+/**
+ * Boot refusal for the binding key (#4655, owner decision 2).
+ *
+ * The binding key is a third server key role, and until #4655 the only thing
+ * stopping an operator from pasting a relayer or receipt key into it was the
+ * wording of an error inside the signer — advice, not a check. There is no
+ * harness that boots `src/index.ts` (`domain/__tests__/boot-without-chain-100.test.ts:15`),
+ * so the refusal is covered twice: the function itself here, and a static pin
+ * that `index.ts` calls it with the relayer and receipt keys.
+ */
+describe('binding-key collision refusal (#4655)', () => {
+  // Hardhat account #1 — never used for real funds.
+  const BINDING = '0x59c6995e998f97a5a0044966f094538797afad9453b9c9d87f1977948421179d'
+
+  function refusal(bindingKey: string | null | undefined, forbidden: Parameters<typeof assertBindingKeyNotReused>[1]): string {
+    try {
+      assertBindingKeyNotReused(bindingKey, forbidden)
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err)
+    }
+    return ''
+  }
+
+  it('refuses a binding key that equals a relayer key — naming the variable, never the value', () => {
+    const message = refusal(BINDING, [{ variable: 'RELAYER_PRIVATE_KEY_8453', value: BINDING }])
+    expect(message).toMatch(/X402_BINDING_PRIVATE_KEY/)
+    expect(message).toMatch(/RELAYER_PRIVATE_KEY_8453/)
+    // An error surface is the last place a private key may appear.
+    expect(message).not.toContain(BINDING)
+    expect(message).not.toContain(BINDING.slice(2))
+  })
+
+  it('refuses a binding key that equals the receipt key', () => {
+    const message = refusal(BINDING, [
+      { variable: 'RELAYER_PRIVATE_KEY', value: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' },
+      { variable: 'PASSPORT_RECEIPT_SIGNING_KEY', value: BINDING },
+    ])
+    expect(message).toMatch(/PASSPORT_RECEIPT_SIGNING_KEY/)
+    expect(message).not.toContain(BINDING.slice(2))
+  })
+
+  it('compares the key VALUE, not its text — casing and the 0x prefix do not hide a paste', () => {
+    const pasted = BINDING.slice(2).toUpperCase()
+    expect(refusal(pasted, [{ variable: 'RELAYER_PRIVATE_KEY', value: BINDING }])).toMatch(
+      /RELAYER_PRIVATE_KEY/,
+    )
+    expect(refusal(`  ${BINDING}  `, [{ variable: 'RELAYER_PRIVATE_KEY', value: BINDING }])).toMatch(
+      /RELAYER_PRIVATE_KEY/,
+    )
+  })
+
+  it('allows an unset or blank binding key — a deployment that signs no binding context', () => {
+    const forbidden = [{ variable: 'RELAYER_PRIVATE_KEY', value: BINDING }]
+    for (const unset of [undefined, null, '', '   ']) {
+      expect(refusal(unset, forbidden)).toBe('')
+    }
+  })
+
+  it('allows a distinct binding key, and ignores unset forbidden keys', () => {
+    expect(refusal(BINDING, [{ variable: 'RELAYER_PRIVATE_KEY', value: undefined }])).toBe('')
+    expect(refusal(BINDING, [{ variable: 'RELAYER_PRIVATE_KEY', value: '' }])).toBe('')
+    expect(
+      refusal(BINDING, [
+        { variable: 'RELAYER_PRIVATE_KEY', value: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' },
+      ]),
+    ).toBe('')
+  })
+
+  it('pins the boot call site: index.ts passes the relayer and receipt keys', () => {
+    // Static pin, because nothing boots `src/index.ts` in a test. Deleting any
+    // one of these arguments must turn this red (prove-red cell M4).
+    const index = readFileSync(join(SRC, 'index.ts'), 'utf8')
+    const marker = 'assertBindingKeyNotReused('
+    const start = index.indexOf(marker)
+    expect(start, 'index.ts must call assertBindingKeyNotReused at boot').toBeGreaterThan(-1)
+    // The whole call, by paren depth — a reformat cannot silently empty the pin.
+    let depth = 0
+    let end = -1
+    for (let i = start + marker.length - 1; i < index.length; i += 1) {
+      if (index[i] === '(') depth += 1
+      else if (index[i] === ')') {
+        depth -= 1
+        if (depth === 0) {
+          end = i + 1
+          break
+        }
+      }
+    }
+    expect(end, 'the assertBindingKeyNotReused call must be closed').toBeGreaterThan(-1)
+    const args = index.slice(start, end)
+    expect(args, 'the binding key itself').toMatch(/X402_BINDING_PRIVATE_KEY/)
+    expect(args, 'the global relayer key').toMatch(/config\.relayerPrivateKey/)
+    expect(args, 'the per-chain relayer keys').toMatch(/relayerKeyEntriesFromEnv\(\)/)
+    expect(args, 'the receipt key').toMatch(/PASSPORT_RECEIPT_SIGNING_KEY/)
   })
 })
 

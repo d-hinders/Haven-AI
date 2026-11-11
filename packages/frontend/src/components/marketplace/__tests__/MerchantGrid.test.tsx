@@ -109,7 +109,7 @@ describe('MerchantGrid', () => {
     unmount()
 
     render(<MerchantGrid merchants={[]} loading={false} error="boom" onSubmit={vi.fn()} />)
-    expect(screen.getByText('Could not load the marketplace')).toBeDefined()
+    expect(screen.getByText('The marketplace could not load')).toBeDefined()
   })
 
   it('renders the card on the entity-card idiom with the product focus ring, footer pinned', () => {

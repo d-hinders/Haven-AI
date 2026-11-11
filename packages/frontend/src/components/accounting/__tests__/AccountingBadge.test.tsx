@@ -124,18 +124,18 @@ describe('AccountingBadge', () => {
     expect(isRecordOnlyProvider('igdrasil', [descriptor('fortnox', true)])).toBe(true)
   })
 
-  it('pending → "Feeding…"', () => {
+  it('pending → "Sending…"', () => {
     renderWithLocale(<AccountingBadge accounting={accounting({ status: 'pending', externalRef: null })} />)
-    expect(screen.getByRole('link')).toHaveTextContent('Feeding…')
+    expect(screen.getByRole('link')).toHaveTextContent('Sending…')
     expect(screen.getByRole('link')).toHaveAttribute('data-status', 'pending')
   })
 
-  it.each(['failed', 'skipped'] as const)('%s → "Not fed", with the reason on hover', (status) => {
+  it.each(['failed', 'skipped'] as const)('%s → "Not sent", with the reason on hover', (status) => {
     renderWithLocale(
       <AccountingBadge accounting={accounting({ status, externalRef: null, error: 'Fortnox 502' })} />,
     )
     const link = screen.getByRole('link')
-    expect(link).toHaveTextContent('Not fed')
+    expect(link).toHaveTextContent('Not sent')
     expect(link).toHaveAttribute('data-status', status)
     expect(screen.queryByRole('tooltip')).toBeNull()
 
@@ -220,7 +220,7 @@ describe('AccountingBadge in the detail drawer', () => {
   it('shows an Accounting section with the badge when the row carries one', () => {
     renderPanel(tx({ accounting: accounting({ status: 'pending', externalRef: null }) }))
     expect(screen.getByText('Accounting')).toBeInTheDocument()
-    expect(screen.getByTestId('accounting-badge')).toHaveTextContent('Feeding…')
+    expect(screen.getByTestId('accounting-badge')).toHaveTextContent('Sending…')
   })
 
   it('shows no Accounting section without one', () => {

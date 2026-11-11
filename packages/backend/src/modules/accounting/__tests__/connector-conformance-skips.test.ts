@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest'
 import { caseSkipped, conformanceSkipsFor, skippableCases, type ConformanceHarness } from './connector-conformance.js'
 import type { AccountingProvider } from '../provider.js'
-import { ACCOUNTED, FORTNOX } from '../registry.js'
+import { ACCOUNTED, FORTNOX, IGDRASIL } from '../registry.js'
 
 const FULL_CAPABILITIES = { attachments: true, verify: true, revoke: true, companyInfo: true }
 /** Every case number the runner can skip — the runner registers them itself. */
@@ -80,6 +80,14 @@ describe('connector conformance skip decisions (#3018)', () => {
     // ACTUAL decisions: 3, 4, 6, 7, 7b, 7c, 7d skipped — nothing else.
     // (6b runs: the pre-push refusal is proven through the real api-key
     // connector's own error map, so it needs no capability.)
+    expect(executedSkips(skips)).toEqual(['3', '4', '6', '7', '7b', '7c', '7d'])
+  })
+
+  it('Igdrasil (#4518) skips exactly the same set as Accounted — document-only, verify-from-record, currency-null — and nothing else', () => {
+    const skips = conformanceSkipsFor(harnessFor(IGDRASIL, { baseCurrency: false }))
+    expect(skips.reasons).toHaveLength(3)
+    // Revoke is DECLARED (unlike Accounted), so case 5 runs with one revoke call; it has no skip predicate.
+    expect(IGDRASIL.capabilities.revoke).toBe(true)
     expect(executedSkips(skips)).toEqual(['3', '4', '6', '7', '7b', '7c', '7d'])
   })
 

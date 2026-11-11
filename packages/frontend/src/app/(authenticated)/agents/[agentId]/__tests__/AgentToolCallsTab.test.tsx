@@ -259,6 +259,16 @@ describe('AgentToolCallsTab (#4227)', () => {
     expect(screen.getByText('Period:')).toBeInTheDocument()
   })
 
+  it('a failed read is the load-error shape, and Try again calls refresh (#4569)', () => {
+    const refresh = vi.fn()
+    seedLog([], { error: 'boom', refresh })
+    renderTab()
+    expect(screen.getByRole('heading', { name: 'Tool calls could not load' })).toBeInTheDocument()
+    expect(screen.getByText("This agent's tool-call log is unchanged.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
   it('day bands are the shared headers and rows carry no bright dividers', () => {
     seedLog([
       toolCall({ id: 'tc-2', created_at: '2026-06-01T11:00:00Z' }),

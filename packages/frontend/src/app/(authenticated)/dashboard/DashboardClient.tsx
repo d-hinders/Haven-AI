@@ -1,22 +1,20 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Address } from 'viem'
 import { useAuth } from '@/context/AuthContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useAgents } from '@/hooks/useAgents'
 import { useAggregatedBalances } from '@/hooks/useAggregatedPortfolio'
 import { useDashboardOverview } from '@/hooks/useDashboardOverview'
+import { useLastVisit } from '@/hooks/useLastVisit'
+import { useFirstAgentPayment } from '@/hooks/useFirstAgentPayment'
 import { useBalances } from '@/hooks/useBalances'
 import { useAccountFunding } from '@/hooks/useAccountFunding'
-import { useAccountOperationGate } from '@/hooks/useAccountOperationGate'
-import { displayName } from '@/lib/user'
-import DashboardOnboardingGuide, { SetupCompleteLine } from '@/components/DashboardOnboardingGuide'
+import DashboardOnboardingGuide from '@/components/DashboardOnboardingGuide'
+import FirstAgentPaymentCard from '@/components/FirstAgentPaymentCard'
 import UsingYourAgentInfo from '@/components/UsingYourAgentInfo'
 import ConnectAgentModal from '@/components/ConnectAgentModal'
-import DashboardActionPickerModal from '@/components/DashboardActionPickerModal'
-import ReceiveDialog from '@/components/ReceiveDialog'
-import DelegationSendModal from '@/components/DelegationSendModal'
+import { useMoneyActionLauncher } from '@/components/MoneyActionLauncher'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import MoneyPanel from './MoneyPanel'
@@ -28,11 +26,18 @@ import {
   computeAttentionItems,
   DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
+  isAgentSetupItem,
+  unnamedWaitingAgentCount,
   type AttentionRuleItem,
 } from '@/lib/dashboard-attention'
 import { useBudgetRemaining } from '@/hooks/useBudgetRemaining'
 import { useAttentionDismissals } from '@/hooks/useAttentionDismissals'
+import { usePendingConnectionSetups } from '@/hooks/usePendingConnectionSetups'
 import NeedsYou from './NeedsYou'
+import { formatUsdcArrival } from '@/lib/usdc-arrival'
+import { markFirstMoneySeen } from '@/lib/first-money'
+import { api } from '@/lib/api'
+import { startAgainSetup, type SetupStatusResponse, type StartAgainPrefill } from '@/lib/start-again'
 
 // #3127 (finding 6): the per-currency formatting itself lives in ONE place —
 // `lib/format.ts`'s `formatFiat`, shared with /accounts and /accounts/[id].
@@ -48,7 +53,7 @@ export default function DashboardClient() {
   const { toast } = useToast()
   const accounts = user?.accounts ?? []
   const { currency } = usePreferences()
-  const { agents, loading: agentsLoading, refetch: refetchAgents } = useAgents()
+  const { agents, loading: agentsLoading, error: agentsError, refetch: refetchAgents } = useAgents()
   const {
     balances,
     loading: balancesLoading,
@@ -56,6 +61,14 @@ export default function DashboardClient() {
     refetch: refetchAggregatedBalances,
   } = useAggregatedBalances()
   const { data: overview, loading: overviewLoading, error: overviewError, refetch: refetchOverview } = useDashboardOverview()
+  // #4709: the "Since your last visit" window and its figures. One entry per
+  // tab, opened once; a reload or a return from another page reads the stored
+  // bounds and makes no call.
+  const lastVisit = useLastVisit(user?.id ?? null)
+  // #4710: setups still awaiting a connector — the "still connecting" row.
+  // Its own read: the overview is about agents and accounts, and a setup has
+  // no agent yet.
+  const { data: pendingSetups, refetch: refetchPendingSetups } = usePendingConnectionSetups()
 
   const hasAnyBalance = balances.some((balance) => {
     try {
@@ -114,8 +127,9 @@ export default function DashboardClient() {
   // shared rules module — the same per-account USDC (#3803) and agent list the
   // "Needs attention" rules read, so the guide and the card cannot disagree. Step 1
   // is USDC on the account (agents spend USDC; ETH dust does not count), step 2
-  // an agent that can actually pay. `hasFunds` above stays as it is: the hero,
-  // the funded toast and the focused view read it.
+  // an agent that can actually pay. `hasFunds` above stays as it is: the hero
+  // and the focused view read it (#4704 moved the funds toast onto the
+  // per-account `funded` read below).
   const createdAtById = useMemo(
     () => Object.fromEntries(agents.map((agent) => [agent.id, agent.created_at])),
     [agents],
@@ -170,15 +184,23 @@ export default function DashboardClient() {
   // what is here: nothing dead-ends.
 
   const [connectAgentOpen, setConnectAgentOpen] = useState(false)
-  const [pickerAction, setPickerAction] = useState<'receive' | 'send' | null>(null)
-  const [receiveOpen, setReceiveOpen] = useState(false)
-  const [sendOpen, setSendOpen] = useState(false)
+  // #4710: "Start again" on a still-connecting row seeds the connect flow
+  // with the old setup's inputs. Cleared when the dialog closes, so the
+  // ordinary "Connect agent" button opens a blank flow.
+  const [startAgainPrefill, setStartAgainPrefill] = useState<StartAgainPrefill | null>(null)
   const [agentUsageOpen, setAgentUsageOpen] = useState(false)
-  // Set true the first time the user opens Receive in this session. Combined
-  // with !hasFunds it drives the hero's "Watching for incoming deposits…"
-  // hint so the user knows the dashboard is actively listening.
-  const [hasOpenedReceive, setHasOpenedReceive] = useState(false)
-  const [actionAccountId, setActionAccountId] = useState<string | null>(null)
+  // #4642: Send / Receive and the account question they ask first live in ONE
+  // shared launcher, consumed here and by Contacts. The dashboard's behaviour
+  // is unchanged; the launcher's own header records the null-chain fix.
+  // #4705: Receive's first-deposit primary opens Connect agent — offered only
+  // while there is no agent to connect yet (and the agent list has loaded —
+  // a failed read is not "no agents").
+  const offerConnectFirstAgent = hasDelegationAccounts && !agentsLoading && !agentsError && agents.length === 0
+  const launcher = useMoneyActionLauncher({
+    accounts,
+    onSent: refreshDashboardData,
+    onConnectFirstAgent: offerConnectFirstAgent ? openConnectAgent : undefined,
+  })
   // #3818: "Hide for now" survives a reload. Stored per user WITH the number
   // of completed steps at the time; the guide comes back as soon as another
   // step completes. A per-device convenience in browser storage — not the
@@ -200,11 +222,6 @@ export default function DashboardClient() {
   const completeDismissed = completeDismissalReady
     ? completeDismissalState.dismissed
     : false
-
-  useEffect(() => {
-    if (actionAccountId && accounts.some((account) => account.id === actionAccountId)) return
-    setActionAccountId(defaultAccount?.id ?? null)
-  }, [actionAccountId, defaultAccount?.id, accounts])
 
   // Read the persisted setup-complete dismissal once the user is known.
   useEffect(() => {
@@ -239,51 +256,8 @@ export default function DashboardClient() {
   const setupHidden =
     setupHideState.hiddenAtCount !== null && completedCount <= setupHideState.hiddenAtCount
 
-  // Celebrate the first-fund moment: when hasFunds flips false → true, fire
-  // a success toast. Only after data is ready, to avoid firing on initial
-  // mount before the balances hook has resolved.
-  const previousFundedRef = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (!dataReady) return
-    if (previousFundedRef.current === false && hasFunds) {
-      toast.success('Funds received — your agents can spend now')
-    }
-    previousFundedRef.current = hasFunds
-  }, [dataReady, hasFunds, toast])
-
-  // First arrival from the onboarding wizard — fire a single welcome toast
-  // so the moment of arrival nods to the achievement without shouting. The
-  // session flag is set by the wizard's "Go to dashboard" CTA and cleared
-  // here so a refresh later in the same session doesn't re-fire.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!user) return
-    let justOnboarded = false
-    try {
-      justOnboarded = window.sessionStorage.getItem('haven-just-onboarded') === '1'
-      if (justOnboarded) {
-        window.sessionStorage.removeItem('haven-just-onboarded')
-      }
-    } catch {
-      // sessionStorage can throw in private mode — bail out silently. No
-      // user-facing impact, the dashboard still renders.
-      return
-    }
-    if (!justOnboarded) return
-    const firstName = displayName(user).split(' ')[0]
-    toast.success(`Welcome to Haven, ${firstName} — your account is live.`)
-    // Intentionally fire once per session. The dependency array is empty
-    // because we want this effect to run only on first mount after
-    // arriving from onboarding; user identity is captured in the closure.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const selectedActionAccount = accounts.find((account) => account.id === actionAccountId) ?? defaultAccount
-  const actionGate = useAccountOperationGate({
-    accountAddress: selectedActionAccount?.account_address as Address | undefined,
-    chainId: selectedActionAccount?.chain_id,
-  })
-  const requiresOtherDevice = actionGate.kind === 'passkey_on_other_device'
+  const selectedActionAccount = launcher.selectedAccount
+  const requiresOtherDevice = launcher.requiresOtherDevice
   // The per-account balance/details reads existed only to populate `SendModal`,
   // which is deleted (#1989). They stay wired but permanently disabled so the
   // dashboard makes no chain-fed request it cannot use; `refetchSelectedBalances`
@@ -344,10 +318,19 @@ export default function DashboardClient() {
     completeDismissalReady &&
     setupHideReady &&
     !requiresOtherDevice
-  // #3818: while setup is in progress the guide IS the "Needs attention" card; once
-  // done, one "You're set up" line takes its place until dismissed.
+  // #3818: while setup is in progress the guide IS the "Needs attention" card.
+  // #4707: once done, the milestone is its OWN card — "Needs attention" goes
+  // back to meaning what it says, and shows its existing empty state when
+  // nothing else applies.
   const showSetupSteps = setupGuideEligible && !allOnboardingComplete && !setupHidden
-  const showSetupComplete = setupGuideEligible && allOnboardingComplete && !completeDismissed
+  // The card takes over `showSetupComplete`'s conditions unchanged: the setup
+  // facts are ready, every step is done, and the owner has not dismissed it.
+  const showFirstAgentPaymentCard =
+    setupGuideEligible && allOnboardingComplete && !completeDismissed
+  // #4707: the qualifying row is the ONLY thing that can claim success.
+  // `hasFirstAgentPayment` can be true while the merchant is still unpaid, so
+  // it only says when to look; the read stops as soon as a row comes back.
+  const { payment: firstAgentPayment } = useFirstAgentPayment(showFirstAgentPaymentCard)
 
   // ── #3808: the "Needs attention" items ─────────────────────────────────────────
   // One definition: `lib/dashboard-attention.ts` — the same rules #3809 (badges)
@@ -374,11 +357,48 @@ export default function DashboardClient() {
     () => Object.fromEntries(accounts.map((account) => [account.id, account.name])),
     [accounts],
   )
+
+  // #4704: the funds toast tells the truth. It fires when ONE account's own
+  // USDC goes from known-empty to funded (`funded` false → true on the
+  // overview's per-account read, #3803) and names the amount and the account.
+  // `null` is unknown (#3295) and never fires: null → true is the first
+  // successful read, not money arriving. It does not say the agents can spend
+  // now — before an agent exists that was false. Every update of an already
+  // funded account stays quiet.
+  //
+  // #4705: money Receive covers is Receive's to announce — the toast stays
+  // silent while the dialog is open on that account, and for an arrival it
+  // already showed (`receiveCovers`, asked on every funded read so a stale
+  // announcement is consumed). Any funded read also records first money on
+  // this device (`lib/first-money.ts`), so a deposit seen here and then
+  // drained and refilled with Receive open is a Step there, never a Peak.
+  const overviewAccounts = overview?.accounts
+  const receiveCovers = launcher.receiveCovers
+  const previousFundedByAccountRef = useRef<Map<string, boolean | null> | null>(null)
+  useEffect(() => {
+    if (!overviewAccounts) return
+    if (user?.id && overviewAccounts.some((account) => account.funded === true)) {
+      markFirstMoneySeen(user.id)
+    }
+    const previous = previousFundedByAccountRef.current
+    const next = new Map<string, boolean | null>()
+    for (const account of overviewAccounts) {
+      next.set(account.accountId, account.funded)
+      const covered = account.funded === true && receiveCovers(account.accountId)
+      if (previous?.get(account.accountId) !== false || account.funded !== true) continue
+      if (covered) continue
+      const amount = formatUsdcArrival(account.usdcBalanceAtomic, account.usdcDecimals)
+      if (!amount) continue
+      toast.success(`${amount} USDC arrived in ${accountNames[account.accountId] ?? 'your account'}`)
+    }
+    previousFundedByAccountRef.current = next
+  }, [overviewAccounts, accountNames, toast, receiveCovers, user?.id])
   const attentionItems = useMemo(() => {
     if (!overview) return []
     return computeAttentionItems({
       overview,
       budgetRemaining: budgetRemaining ?? null,
+      pendingSetups: pendingSetups ?? null,
       accountNames,
       acknowledgements,
       dismissedIds: sessionDismissedIds,
@@ -387,7 +407,7 @@ export default function DashboardClient() {
       // The zero-USDC warning waits while step 1 is open: the step says it.
       holdBackLowBalance: showSetupSteps && usdcFunded !== true,
     })
-  }, [overview, budgetRemaining, accountNames, acknowledgements, sessionDismissedIds, showSetupSteps, usdcFunded])
+  }, [overview, budgetRemaining, pendingSetups, accountNames, acknowledgements, sessionDismissedIds, showSetupSteps, usdcFunded])
   // #3902: what the card says with no items — decided from measured facts,
   // never from the list being empty, and held back while the budget reads
   // load (an unknown read must not become "agents have room").
@@ -404,25 +424,53 @@ export default function DashboardClient() {
     [overview, budgetRemaining, budgetRemainingLoading, acknowledgements],
   )
   // The agent step 2 names is not listed twice: while the steps show AND step
-  // 2 is open, its "Needs setup" row drops. Other waiting agents keep theirs.
-  // #3976: with step 2 complete, `stepTwoAgent` is null, so nothing is
-  // dropped and the waiting agent's row renders again (the guide no longer
-  // names it, either).
+  // 2 is open, its setup row drops — "Needs setup", or "Budget ended" when its
+  // budget ended (#4744; step 2's body then carries the date). Other waiting
+  // agents keep theirs. #3976: with step 2 complete, `stepTwoAgent` is null,
+  // so nothing is dropped and the waiting agent's row renders again (the
+  // guide no longer names it, either).
   const cardItems = useMemo(
     () =>
       showSetupSteps && stepTwoAgent
-        ? attentionItems.filter((item) => item.id !== `needs-setup:${stepTwoAgent.id}`)
+        ? attentionItems.filter((item) => !isAgentSetupItem(item, stepTwoAgent.id))
         : attentionItems,
     [attentionItems, showSetupSteps, stepTwoAgent],
   )
+  // #4744: step 2's "and N more" counts only the waiting agents the card
+  // names nowhere else. Decided here, against the items: the items depend on
+  // the guide showing, so `firstRunSetupState` cannot see them.
+  const stepTwoGuideAgent = useMemo(
+    () =>
+      stepTwoAgent
+        ? {
+            ...stepTwoAgent,
+            moreCount: unnamedWaitingAgentCount(firstRun?.awaitingAgentIds ?? [], stepTwoAgent.id, attentionItems),
+          }
+        : null,
+    [stepTwoAgent, firstRun, attentionItems],
+  )
 
   const attentionVisible = Boolean(overview) || Boolean(overviewError)
+
+  // #4707: the milestone card, its own surface. It renders only when the
+  // qualifying row has come back — loading, an error, a 404 from an older
+  // backend and a `null` row all render nothing, and write no Peak marker.
+  const firstAgentPaymentCard =
+    showFirstAgentPaymentCard && firstAgentPayment && user?.id ? (
+      <FirstAgentPaymentCard
+        payment={firstAgentPayment}
+        currency={currency}
+        userId={user.id}
+        onDismiss={dismissCompleteBanner}
+      />
+    ) : null
 
   function refreshDashboardData() {
     refetchOverview()
     refetchAgents()
     refetchAggregatedBalances()
     refetchSelectedBalances()
+    refetchPendingSetups()
   }
 
   function openConnectAgent() {
@@ -430,33 +478,39 @@ export default function DashboardClient() {
     setConnectAgentOpen(true)
   }
 
-  function openHeroAction(action: 'receive' | 'send') {
-    // No accounts: the money card renders "Create Haven account" instead of
-    // these buttons, so this is unreachable from the UI; do nothing rather
-    // than open a dialog about nothing.
-    if (accounts.length === 0) return
-
-    if (accounts.length > 1) {
-      setPickerAction(action)
-      return
+  /**
+   * #4710: "Start again" on a still-connecting row.
+   *
+   * The order is the safety property (`lib/start-again.ts`): read the setup
+   * first, cancel only while it is still `awaiting_connection`, and create
+   * nothing when it has moved on or the cancel answers 409 — open that setup
+   * through the resume link instead. On success the old setup is cancelled
+   * and the flow reopens on step 1 with its name, budget and wallet, so the
+   * user reviews both opt-in checkboxes before a new prompt exists.
+   */
+  async function handleStartAgain(setupId: string) {
+    try {
+      const outcome = await startAgainSetup(setupId, {
+        readSetup: (id) =>
+          api.get<SetupStatusResponse>(`/agent-connection-setups/${encodeURIComponent(id)}`),
+        cancelSetup: (id) =>
+          api.post(`/agent-connection-setups/${encodeURIComponent(id)}/cancel`, {}),
+      })
+      if (outcome.kind === 'resume') {
+        // A full navigation, not a router push: the resume link is the
+        // existing `/agents?setup=<id>` entry point (#2522), and the agents
+        // page owns opening the modal from it.
+        window.location.assign(`/agents?setup=${encodeURIComponent(setupId)}`)
+        return
+      }
+      setStartAgainPrefill(outcome.prefill)
+      setConnectAgentOpen(true)
+      refetchPendingSetups()
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'We could not start this setup again.',
+      )
     }
-
-    setActionAccountId(defaultAccount?.id ?? null)
-    if (action === 'receive') {
-      setHasOpenedReceive(true)
-      setReceiveOpen(true)
-    }
-    if (action === 'send') setSendOpen(true)
-  }
-
-  function handleActionAccountSelected(accountId: string) {
-    setActionAccountId(accountId)
-    if (pickerAction === 'receive') {
-      setHasOpenedReceive(true)
-      setReceiveOpen(true)
-    }
-    if (pickerAction === 'send') setSendOpen(true)
-    setPickerAction(null)
   }
 
   // The hide and dismiss buttons unmount themselves; focus moves to the
@@ -482,12 +536,6 @@ export default function DashboardClient() {
     if (typeof window !== 'undefined' && user?.id) {
       window.localStorage.setItem(`haven-onboarding-complete-dismissed:${user.id}`, '1')
     }
-  }
-
-  function openAddFundsForAccount(accountId: string) {
-    setActionAccountId(accountId)
-    setHasOpenedReceive(true)
-    setReceiveOpen(true)
   }
 
   function handleDismissAttention(item: AttentionRuleItem) {
@@ -526,11 +574,17 @@ export default function DashboardClient() {
       hasAccounts={accounts.length > 0}
       hasFunds={hasFunds}
       fundingStateKnown={fundingStateKnown}
-      watchingForDeposit={fundingStateKnown && !hasFunds && hasOpenedReceive}
+      watchingForDeposit={fundingStateKnown && !hasFunds && launcher.hasOpenedReceive}
       requiresOtherDevice={requiresOtherDevice}
       noPaymentsYet={firstAgentPaymentKnown && !hasFirstAgentPayment}
-      onReceive={() => openHeroAction('receive')}
-      onSend={() => openHeroAction('send')}
+      onReceive={() => launcher.openAction('receive')}
+      onSend={() => launcher.openAction('send')}
+      countUpUserId={user?.id ?? null}
+      // #4709: the "Since your last visit" line — the window's figures and the
+      // previous entry's instant (null on a first ever visit, which shows no
+      // line).
+      since={lastVisit.figures}
+      sincePrevious={lastVisit.bounds?.previous ?? null}
       // #4167: the ONE primary-button rule — Send primary once any account
       // holds USDC (`usdcFunded`), Receive primary with Send disabled when
       // known empty, Send primary while the read is loading or failed.
@@ -565,21 +619,20 @@ export default function DashboardClient() {
           <DashboardOnboardingGuide
             usdcFunded={usdcFunded}
             hasSetUpAgent={hasSetUpAgent}
-            pendingAgent={stepTwoAgent}
+            pendingAgent={stepTwoGuideAgent}
             hasFirstAgentPayment={hasFirstAgentPayment}
             funding={fundingForOnboarding}
-            onAddFunds={() => openHeroAction('receive')}
+            onAddFunds={() => launcher.openAction('receive')}
             onAddAgent={openConnectAgent}
             onShowAgentUsage={() => setAgentUsageOpen(true)}
           />
-        ) : showSetupComplete ? (
-          <SetupCompleteLine onDismiss={dismissCompleteBanner} />
         ) : null
       }
       hasOverviewError={Boolean(overviewError)}
       onRetry={refetchOverview}
       onDismiss={handleDismissAttention}
-      onAddFunds={openAddFundsForAccount}
+      onAddFunds={launcher.openReceiveForAccount}
+      onStartAgain={handleStartAgain}
     />
   ) : null
 
@@ -626,6 +679,7 @@ export default function DashboardClient() {
           the row is the only place the agent is named. */}
       <div className="space-y-6">
         {moneyPanel}
+        {firstAgentPaymentCard}
         {attentionPanel}
         {isFocusedView ? null : activityGrid}
       </div>
@@ -634,47 +688,19 @@ export default function DashboardClient() {
         open={connectAgentOpen}
         onClose={() => {
           setConnectAgentOpen(false)
+          setStartAgainPrefill(null)
         }}
         accountId={defaultAccount?.id ?? null}
+        prefill={startAgainPrefill}
         onSetupUpdated={() => {
           refreshDashboardData()
         }}
       />
 
-      <DashboardActionPickerModal
-        open={pickerAction !== null}
-        action={pickerAction ?? 'receive'}
-        accounts={accounts}
-        onClose={() => setPickerAction(null)}
-        onSelect={handleActionAccountSelected}
-      />
-
-
-      <ReceiveDialog
-        open={receiveOpen}
-        account={selectedActionAccount}
-        // #4167: with several accounts the dialog's card is a picker, so a
-        // wrong pre-pick is one switch away; one account renders no card.
-        accounts={accounts}
-        onClose={() => setReceiveOpen(false)}
-      />
-
-      {/*
-        Mount the send modal only while open so its wallet hooks
-        (useDelegationSend backs wagmi wallet-client subscriptions) don't run
-        in the background on every dashboard view — the same pattern the
-        account detail page uses. Needs an account with a resolved chain: the
-        delegation send signs on a network.
-      */}
-      {sendOpen && selectedActionAccount?.account_address && selectedActionAccount.chain_id != null && (
-        <DelegationSendModal
-          open
-          onClose={() => setSendOpen(false)}
-          accountAddress={selectedActionAccount.account_address}
-          chainId={selectedActionAccount.chain_id}
-          onSent={refreshDashboardData}
-        />
-      )}
+      {/* #4642: the picker, Receive and Send mounts travel with the shared
+          launcher — Contacts renders the same three, and a second copy of the
+          null-chain guard is what this extraction exists to prevent. */}
+      {launcher.dialogs}
 
       <UsingYourAgentInfo
         open={agentUsageOpen}
@@ -683,3 +709,7 @@ export default function DashboardClient() {
     </div>
   )
 }
+
+// #4705: lifted to `lib/usdc-arrival.ts` (Receive's arrived state reads the
+// same amount); re-exported so the dashboard's callers and tests keep it.
+export { formatUsdcArrival }

@@ -32,7 +32,7 @@ covers:
   - packages/frontend/src/lib/agent-skill-index.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: 2026-10-25
+last-verified: "2026-11-10"
 ---
 
 # Haven UX Copy Guidelines
@@ -338,6 +338,103 @@ known wallet, they can manage remaining permissions through Safe's own interface
 for a passkey-only or unknown owner, do not promise that self-serve path. Removing
 a funding permission does not recover an agent-wallet balance, so present sweep or
 recovery as a separate action where relevant.
+
+### British spelling (owner decision 2026-10-30)
+
+Haven's copy is British English. Use **organisation**, **cancelled**,
+**colour**, **behaviour** — and the rest of the family with them: authorise,
+prioritise, recognise, licence (noun), centre, catalogue, analyse, favour,
+labelled, travelling.
+
+The rule covers **copy**, not code identifiers. `useOrganizations`,
+`avatar_tint`, an API field named `color`, a CSS token, a database column and a
+third-party SDK's own spelling keep whatever the code needs. The test is who
+reads it: a string a user sees is copy; a name a developer types is code. Where
+a code identifier is rendered verbatim, the copy around it carries the British
+spelling and the identifier is left alone.
+
+`npm run lint:copy` cannot hold this rule — see § Enforcement, bare tokens.
+
+### Destructive verbs — one per meaning (owner decision 2026-10-30; Disconnect added 2026-11-02)
+
+Five verbs, five meanings. Do not use one for another, and do not invent a
+sixth.
+
+| verb | means | examples |
+|---|---|---|
+| **Remove** | take something out of your list; the thing itself survives | an agent, an account, a wallet |
+| **Delete** | permanently erase a record you created | a contact, a label, an organisation |
+| **Stop** | end a budget | "Stop budget", "Stop this budget?" |
+| **Revoke** | the on-chain act, shown only where the user must know it | "Revoke", "Revoked on-chain" |
+| **Disconnect** | end a live connection; the thing on the other side survives | a browser wallet on this device, an accounting connection |
+
+"Remove" is the default for taking something off a surface, because it is
+honest about reversibility: the agent still exists, it is no longer in your
+list. "Delete" is reserved for a record the user created and that is gone for
+good — say so in the confirmation. "Stop" is the budget verb and only the
+budget verb; a budget that ends is stopped, never deleted or removed. "Revoke"
+names the on-chain act, so it appears only where the user has to understand
+that authority is being withdrawn on-chain — not as a synonym for "remove" in a
+menu. "Disconnect" ends a live connection and says nothing about the other
+side: the wallet still exists on the device, the accounting provider still
+holds the books — only Haven's link to it ends (#4608, owner decision
+2026-11-02).
+
+**A menu item that opens a confirmation ends in "…"** — "Stop budget…",
+"Delete contact…", "Remove agent…". The ellipsis says a dialog follows; a menu
+item that acts immediately carries no ellipsis.
+
+### Busy and retry copy (owner decision 2026-10-30)
+
+**Use "…" (U+2026), never "..." (three full stops).** That covers busy labels
+("Sending…", "Preparing…", "Issuing…"), menu items that open a dialog, and any
+sentence that trails off. Three periods are a different character sequence and
+render differently in every typeface the app uses.
+
+**The retry label is "Try again".** Not "Retry", not "Try Again", not "Reload",
+not "Refresh" — unless the action really is a page reload, in which case say
+"Refresh page". "Try again" is the label on every load-error state
+(`docs/product/design-system.md` § EmptyState, the load-error shape) and on
+every inline retry.
+
+`npm run lint:copy` cannot hold either rule — see § Enforcement, bare tokens.
+
+### The Settings section is "Passkeys and wallets" (owner decision 2026-10-30)
+
+The Settings section that lists what can approve for the account is called
+**Passkeys and wallets**. Links to it and sentences about it use that name.
+
+Never "signers" (CG:129), never "Signers", never "All signers in Settings".
+This **overrides** the "All signers in Settings" link text in the
+owner-approved mockup v9 (#4474): the mockup's shape stands, its label does not.
+
+Prefer:
+- "Passkeys and wallets"
+- "Manage your passkeys and wallets in Settings"
+- "Add a passkey or a wallet"
+
+Avoid:
+- "All signers in Settings"
+- "Signers"
+- "Manage signers"
+
+`npm run lint:copy` bans the multi-word form, `all signers in settings`.
+
+### Marketplace "Coming soon" is the one placeholder exception (owner decision D2, 2026-10-30)
+
+The no-placeholders rule from the Settings epic (#4356) holds everywhere in the
+product: a surface does not ship with a stub, a "coming soon" tile, or a
+disabled control standing in for a feature that does not exist.
+
+**The marketplace is the one exception.** Coming-soon merchants are **real
+merchants** — businesses that exist and will accept payments once their
+integration lands — not unfinished Haven features. They stay on the marketplace
+surface, and they sit **below** the payable ones, so the list reads as "these
+work now, these are next" rather than as a wall of stubs.
+
+The exception is scoped to merchants on the marketplace. It does not license a
+"Coming soon" badge anywhere else, and it does not license a coming-soon
+merchant appearing above a payable one.
 
 ## Copy examples
 
@@ -687,6 +784,21 @@ never a README copy — the shared-prose rule this epic follows throughout.
 
 These guidelines are enforced on frontend copy, not just documented. `npm run lint:copy` (`scripts/frontend-copy-lint.mjs`) scans user-facing source (`packages/frontend/src/app/**` + `components/**` + `hooks/**` since #3884, and `packages/ui/src`) for the unambiguous **multi-word** banned phrases drawn from this guide and **fails the PR on any new occurrence** (#902). It is deliberately conservative — only multi-word phrases, never bare words like "safe"/"owner"/"deploy" — so false positives stay near zero. Its `BANNED` list covers the mapping table's unambiguous multi-word rows (smart account, smart wallet, passkey signer, enroll signer, spending policy, allowance module, session key, transaction hash), adds others (e.g. "policy engine", "smart contract wallet", "webauthn credential"), and leaves some rows out ("Safe deployed", "Owner type", "Safe address", "delegate address" have no entry), and it does **not** reach `packages/backend/**` — rules about strings that live there are documentation-only. The i18n message catalog (`src/lib/i18n/messages/en.ts`, the app's copy) **is** scanned (#3347): it is in the script's `SCAN_FILES` allowlist, and any other `.ts` file in that directory counts as convention copy, so a new locale fails the run until it is listed.
 
+- **Bare tokens are out of reach, by design (CG:688).** The matcher is a
+  multi-word, lowercase phrase matcher and never a bare word, because a bare
+  word is a legitimate identifier somewhere in the scanned set — "signer" in
+  `useAccountSigners`, "colour" in a CSS token, "Retry" in a component name.
+  So four of the rules above are **documentation-only** and no gate holds them:
+  the British spellings (organisation, cancelled, colour, behaviour), the
+  destructive-verb table (Remove / Delete / Stop / Revoke), the "…" (U+2026)
+  rule, and the "Try again" retry label. Holding them needs a JSX-text-aware
+  mode that reads rendered strings rather than source lines, which is out of
+  scope for this gate. Where a rule has an unambiguous multi-word phrase, it
+  **is** in `BANNED` — `all signers in settings` and `unspent allowance` are
+  the two this guide added on 2026-10-30 — and the rest is a human-review
+  obligation, named here so nobody reads a green `lint:copy` as evidence that
+  the spelling, verb, ellipsis or retry rules were checked.
+
 - **Prose outside those directories is scanned only if it is named (#2317).** `src/lib` is excluded by directory on purpose (`src/hooks` was too, until #3884) — there the banned phrases are legitimate code identifiers, and widening the rule would bury a blocking check in false positives. But a handful of `lib/` files hold nothing but user-facing prose, and for those the gate was green while reading none of them: `agent-skill-bundle.ts` is downloaded verbatim as `SKILL.md` from the connect-agent success screen, and `agent-pause-copy.ts` / `stranded-funds-copy.ts` are single sentences extracted out of `components/` so two surfaces agree (#2195, #2230). Those files, plus `agent-handoff.ts`, `passkeyLabels.ts`, `transaction-labels.ts` / `transaction-presentation.tsx` (#2333) and the SDK's canonical `packages/sdk/src/skill-content.ts`, are listed individually in the script's `SCAN_FILES` allowlist. **The script is the list, not this sentence** — the enumeration above had drifted three entries behind it by #2926 (`agent-onboarding-prompt.ts`, the SDK's `agent-guidance.ts`, `public/for-agents.md`), which is what an enumeration in prose does; `npm run lint:copy` prints the live count in its own summary line. **If you add a prose file under `lib/`, the gate will not see it until you add it there** — a green check on a PR that touched only such a file carries no information about it. Entries must resolve to real files; an emptied allowlist or a path matching nothing fails the run rather than passing quietly.
 
 - **Name extracted copy so the gate can ask for it (#2333).** A hand-maintained list nobody is prompted to extend is a slower version of the hole it closes: the #2195/#2230 extraction pattern — pull a shared sentence out of `components/` into `lib/` so two surfaces say one fact identically — takes copy out of scope **every time it is applied**, and #2333 found three more unscanned modules a fortnight after #2317 added four. So the naming is now normative and enforced: **extracted UI copy under `src/lib` is named `*-copy.ts`, `*-labels.ts` or `*Labels.ts`, and any `.tsx` there renders by definition.** Since #3347 the rule also covers **any `.ts` file in `src/lib/i18n/messages/`** — a directory rule, not a name rule — because the message catalog is the app's copy. A file matching those shapes or that directory that is not in `SCAN_FILES` fails the run, naming the file, at the moment it lands — or is exempted in `CONVENTION_EXEMPT` with a written reason. **Its ceiling, stated as a fact:** it matches names, not content, so calling the next extraction `transactionText.ts` still evades it. What it changes is that following the convention is enforced and evading it is deliberate; it is not a content classifier for `src/lib`, and #2332 (`passkey.ts`, a genuine utility carrying a banned phrase in a developer-facing `throw`) is the standing counter-example for why one would be wrong. It is also not a substitute for reading the copy: the first human pass over the newly-scanned files found a real defect the matcher cannot see — bare "delegate" rendered on the primary transaction row (#2356), invisible because the matcher is multi-word-literal by design and "delegate" is a legitimate identifier everywhere else in the frontend.
@@ -701,51 +813,6 @@ These guidelines are enforced on frontend copy, not just documented. `npm run li
 - **Escape hatch.** For a legitimate advanced/developer-facing surface where the technical term is correct, add `// copy-lint-ignore` on the offending line (or the line directly above). Use it sparingly; it is for developer surfaces, not a way around writing good user copy.
 - Docs under `docs/product` are separately checked by the Vale `Haven.Terminology` rule (`.vale.ini`). Vale is **advisory** — `level: suggestion`, and the docs workflow runs it `continue-on-error` — so it nudges, it does not block.
 - Where the lint and this guide disagree, **this guide wins**. Known divergence: the lint rewrites "session key(s)" to "agent credential(s)", which pulls copy toward the very framing "Separate authentication from payment signing" warns against; the correct replacement is "private signing key" per the mapping table.
-
-Re-verified 2026-10-02 (#3596, the agent-skills index and step files): this
-PR touches `packages/sdk/src/agent-guidance.ts` (three cross-reference fixes
-inside `HAVEN_AGENT_RUNBOOK_MD`, so no standalone step file points at another
-section by position) and adds no new agent-facing prose file under `lib/` — the new
-`packages/frontend/src/lib/agent-skill-steps.ts` and `agent-skill-index.ts`
-hold slug/title/description metadata and JSON-builder code, not rendered
-copy, so neither belongs in `SCAN_FILES`. No wording constraint in this guide
-or `casp-risk-guardrails.md` § Product Copy Rules is affected: all three are
-cross-reference fixes (a dangling "(below)"; a "Steps 1-3 … as above" that
-leaned on two other sections once split; a "the setup above"), not changes to
-what the runbook claims. Nothing else in this document was re-verified.
-
-Re-verified 2026-10-10 (#3882): the 2026-10-02 call above is reversed for
-the agent-skills index. Its slugs and builder code are not copy, but each
-step's `description`, the index's own first entry and its `mcp.note` are
-agent-read prose served in `/.well-known/agent-skills/index.json` that
-appears nowhere else (no description is in the runbook), which is the bar
-`agent-guidance.ts` and `for-agents.md` already meet. `agent-skill-steps.ts`
-and `agent-skill-index.ts` are now in `SCAN_FILES`, with four more `lib/`
-prose files the naming convention could not catch: `dashboard-attention.ts`
-(the "Needs attention" titles, subtitles and empty-state lines), `agent-list-filters.ts` (agent-list filter
-and sort labels), `agent-credential.ts` (the `notes` prose in the downloaded
-credential file) and `sub-budget.ts` (form validation and error copy). A pin
-test keeps all six listed. `src/hooks` prose (step headings, `setError`
-strings) stays unscanned — a separate follow-up. The script's `SCAN_FILES`
-is the list; the named files in the bullets above are examples.
-
-Re-verified 2026-10-10 (#3884): that follow-up landed. `src/hooks` is now a
-scanned directory. Measured first: 49 files, two hits, both code rather than
-copy (a regex in `useAgentRekey.ts`, a JSDoc comment in
-`useAccountSigners.ts`), held as permanent reviewed entries in
-`packages/frontend/copy-lint-baseline.json` — the reason is on `SCAN_DIRS` in
-the script, since the baseline file cannot carry one. Nothing else in this
-document was re-verified.
-
-Re-verified 2026-09-21 (weekly docs audit #3206, at dev `7f17c9f3`): the
-enforcement claims above match the code at this head: `npm run lint:copy` /
-`lint:copy:update` in the root `package.json`, the scan set (`src/app`,
-`src/components`, plus the explicit `SCAN_FILES` allowlist for prose-holding
-`lib/` files), the cannot-add ratchet in `scripts/lib/ratchet.mjs` (#2728), and
-the baseline file (currently one entry: `page.tsx` "policy engine"). The
-biggest intervening commit (#3167, per-user labels) followed exactly this
-procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
-`SCAN_FILES`.
 
 ## Writing rules
 
@@ -764,20 +831,31 @@ procedure: its shared label copy lives in `lib/label-copy.ts` and is named in
 
 The live reference is `components/NewAccountDialog.tsx`. A further account is
 secured by a passkey the user already has, so the dialog asks for **one**
-passkey prompt and no new passkey. Before that prompt it states three facts,
-each as an outcome:
+passkey prompt and no new passkey. Before that prompt it states two facts, each
+as an outcome, in **two sentences** ([#4571](https://github.com/d-hinders/Haven-AI/issues/4571)
+compressed the three paragraphs #4024 shipped):
 
 ```text
-Secured by the passkey you use next. Your device asks for it once, and it
+Secured by the passkey you use next: your device asks for it once, and it
 becomes the only way to approve actions in the new account.
 
-Backups don't carry over. A backup passkey or wallet on another account
-doesn't protect this one, so add one on the new account's page.
-Signers, in Settings, shows which accounts each passkey and wallet approves.
-
-Nothing is set up on Base yet. That happens the first time you use the
-account, for example to give an agent a budget. You can add funds before then.
+Backups don't carry over: add one on the new account's page; Signers, in
+Settings, shows which accounts each passkey and wallet approves.
 ```
+
+The bold lead-in ends in a colon, not a full stop, so each item is one
+sentence. The third fact #4024 shipped — "Nothing is set up on {network} yet.
+That happens the first time you use the account, for example to give an agent a
+budget. You can add funds before then." — moved to the dialog's **created**
+state, which is the new account's first screen: it describes the account that
+now exists, not the choice the form asks for. It is not repeated on
+`/accounts/<id>`, whose own empty states ("No funds yet.", "No agents
+connected") carry the next step.
+
+The backups sentence now names the Settings section itself — "Passkeys and
+wallets, in Settings, shows which accounts each one approves." — per the
+2026-10-30 decision that "signers" never appears in user copy (#4570). The
+clause is the only part of the paragraph that changed.
 
 The waiting labels are onboarding's (`Waiting for your passkey…`,
 `Setting up your account…`). A dismissed passkey prompt returns to the form
@@ -929,3 +1007,5 @@ precedents:
   throughout.
 
 Correct these in product-copy changes; do not weaken this guide to match them.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

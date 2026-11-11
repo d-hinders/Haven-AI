@@ -1063,7 +1063,11 @@ export function createPlainHttpX402Handlers(
                   safeToContinue: false,
                   reason:
                     (priceDiffers
-                      ? `The merchant's quoted price (${quote.amount} ${quote.asset}) does not match ` +
+                      // #4754: the symbol, not the contract address. This reason is only
+                      // built when `decimals !== null` (the expected-amount compare needs
+                      // them), so the address arm is a defensive fallback that today
+                      // never runs — `token` is an unverified label when decimals are null.
+                      ? `The merchant's quoted price (${quote.amount} ${quote.decimals !== null ? quote.token : quote.asset}) does not match ` +
                         `the expected price (${args.expected_amount as string}) stated with this quote. `
                       : '') +
                     (overBudget && budget
@@ -1749,6 +1753,14 @@ export function createPlainHttpX402Handlers(
           // was anchored to — and see that the agent did not choose it.
           tx_hash: report.txHash,
           resource_url: report.resourceUrl,
+          // #4552: the merchant's own reason for refusing, echoed from the
+          // SDK's parse — the MCP server never parses the body itself. It is
+          // merchant-claimed data, never something Haven verified, and it is
+          // present on a rejection only, so an accepted report's shape is
+          // byte-identical to before.
+          ...(report.outcome === 'rejected'
+            ? { merchant_reported_error: report.merchantReportedError ?? null }
+            : {}),
           // #3727: present only when the caller supplied evidence — calls
           // without evidence answer the pre-existing shape, byte for byte.
           ...(settlementEvidence ? { settlement_evidence: settlementEvidence } : {}),
@@ -1791,10 +1803,12 @@ export function createPlainHttpX402Handlers(
                   ? 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
                     'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
                     'the same purchase. The settlement evidence you attached was not used: it is only ' +
-                    'recorded with an accepted outcome.'
+                    'recorded with an accepted outcome. merchant_reported_error, when set, is the ' +
+                    "merchant's own claim, not something Haven verified."
                   : 'Recorded. The merchant refused the paid retry, so the funding may be stranded on ' +
                     'the delegate wallet — recover it with haven_sweep_delegate. Do NOT pay again for ' +
-                    'the same purchase.'
+                    'the same purchase. merchant_reported_error, when set, is the ' +
+                    "merchant's own claim, not something Haven verified."
                 : settlementEvidence
                   ? evidenceReason(settlementEvidence)
                   : offerSettlementEvidence

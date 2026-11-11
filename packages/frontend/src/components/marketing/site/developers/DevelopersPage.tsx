@@ -1,8 +1,7 @@
-import Link from 'next/link'
 import { Header } from '../Header'
 import { Footer } from '../Footer'
 import { SiteSection, SITE_TYPE } from '../SiteSection'
-import { CodePrompt, SiteCode, SiteCopy, SiteCtaRow, SiteHero, SiteLede, SiteSplit } from '../blocks'
+import { CodePrompt, SiteCode, SiteCopy, SiteCtaRow, SiteHero, SiteInlineLink, SiteLede, SiteSplit } from '../blocks'
 import { BrandBandButton } from '@/components/marketing/BrandBandButton'
 import {
   ARCHITECTURE,
@@ -242,12 +241,7 @@ export function DevelopersPage() {
           </div>
           <p className="mt-4 text-[13.5px] text-[var(--v2-ink-2)]">
             Versions and update commands:{' '}
-            <Link
-              href="/releases"
-              className="rounded-[4px] font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--v2-bg)]"
-            >
-              /releases
-            </Link>
+            <SiteInlineLink href="/releases" ground="tint">/releases</SiteInlineLink>
             .
           </p>
           <div className="mt-6">

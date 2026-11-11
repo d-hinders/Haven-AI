@@ -343,7 +343,7 @@ test.describe('mobile viewport', () => {
     // `design-system.visual.spec.ts`. One page load measured at four widths,
     // instead of four loads — worth it here because the row's content is
     // identical at every width and only its layout changes.
-    for (const width of [320, 390, 393, 430] as const) {
+    for (const width of [320, 375, 390, 393, 430] as const) {
       await page.setViewportSize({ width, height: 844 })
       // Let the row re-layout before reading rectangles off it.
       await page.waitForTimeout(200)

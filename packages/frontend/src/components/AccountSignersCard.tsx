@@ -14,7 +14,7 @@
  * longer renders on the agent page.
  *
  * #4474 (mockup v9): the card is the section's CONTENT only. Its heading
- * ("Who can approve") and the "All signers in Settings" link live on the page
+ * ("Who can approve") and the "Passkeys and wallets" link live on the page
  * above it (`SectionHeading`, #4475), so the card carries no heading, no intro
  * sentence and no in-card Settings row. Inside: the single-signer warning
  * (owner decision 2026-10-27 — a warning about one section's own content may
@@ -24,7 +24,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
-import { KeyRound, Wallet } from 'lucide-react'
+import { KeyRound, Plus, Wallet } from 'lucide-react'
 import { useAccountSigners } from '@/hooks/useAccountSigners'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
@@ -232,13 +232,12 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
                 variant={onlyOneWay ? 'primary' : 'ghost'}
                 disabled={busy || !ready}
                 onClick={() => void handle(enrollBackupPasskey(), 'Backup added.')}
+                leadingIcon={Plus}
               >
-                <Icon icon={KeyRound} className="h-4 w-4" />
                 {busy ? 'Working…' : 'Add a backup passkey'}
               </Button>
               {!signers.owner_address ? (
-                <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)}>
-                  <Icon icon={Wallet} className="h-4 w-4" />
+                <Button variant="ghost" disabled={busy || !ready} onClick={() => setShowWallet((v) => !v)} leadingIcon={Plus}>
                   Add a wallet
                 </Button>
               ) : null}
@@ -313,9 +312,9 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
             ways to approve, then remove the lost one above.
           </p>
           <p>
-            Haven can&apos;t do this for you: every change is approved by a signer you already
-            hold. If an account ever has just one way to approve and that&apos;s lost, it can&apos;t
-            be recovered — by you or by us. That&apos;s why the backup above matters.{' '}
+            Haven can&apos;t do this for you: every change is approved by a passkey or wallet you
+            already hold. If an account ever has just one way to approve and that&apos;s lost, it
+            can&apos;t be recovered — by you or by us. That&apos;s why the backup above matters.{' '}
             <a
               href="https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/account-recovery.md"
               target="_blank"

@@ -24,14 +24,21 @@ vi.mock('../../db.js', () => ({
 
 // The passport module is mocked so the creation-path guarantee can be tested
 // directly: a passport problem must never fail, delay, or roll back the agent.
-const { mockRequestPassport, mockIssueBestEffort } = vi.hoisted(() => ({
+type AccountFacts = { chain_id: number | null; account_type: string | null; execution_rail?: string | null }
+const issuableHere = (a: AccountFacts) =>
+  a.chain_id === 84532 && (a.account_type === 'delegator_hybrid' || a.execution_rail === 'delegation')
+const { mockRequestPassport, mockIssueBestEffort, mockIssuableForAccount } = vi.hoisted(() => ({
   mockRequestPassport: vi.fn(),
   mockIssueBestEffort: vi.fn(),
+  // #4719: the account answer (issuable rail + passport chain + schema UID +
+  // verifier). Defaults to "a delegator_hybrid Base Sepolia account is
+  // issuable here"; a test flips it.
+  mockIssuableForAccount: vi.fn(),
 }))
 vi.mock('../../modules/passport/index.js', () => ({
   requestPassport: (...a: unknown[]) => mockRequestPassport(...a),
   issuePassportBestEffort: (...a: unknown[]) => mockIssueBestEffort(...a),
-  PASSPORT_CHAIN_IDS: new Set([84532]),
+  isPassportIssuableForAccount: (account: AccountFacts) => mockIssuableForAccount(account),
 }))
 
 vi.mock('../../middleware/auth.js', () => ({
@@ -456,10 +463,11 @@ describe('agent creation — passport opt-in never breaks creation', () => {
     mockQuery.mockReset()
     mockRequestPassport.mockReset().mockResolvedValue(true)
     mockIssueBestEffort.mockReset()
+    mockIssuableForAccount.mockReset().mockImplementation(issuableHere)
   })
 
   /** Mock the create path's queries: safe lookup, BEGIN, INSERT, safe info, COMMIT. */
-  function mockCreateFlow() {
+  function mockCreateFlow(accountType: string | null = 'delegator_hybrid') {
     mockQuery.mockImplementation(async (sql: string) => {
       if (/SELECT id FROM smart_accounts/.test(sql)) return { rows: [{ id: SAFE_UUID }] }
       if (/INSERT INTO agents/.test(sql)) {
@@ -468,7 +476,7 @@ describe('agent creation — passport opt-in never breaks creation', () => {
         return { rows: [{ id: AGENT_UUID, name: 'A', description: null, delegate_address: VALID_DELEGATE, account_id: SAFE_UUID, api_key_prefix: 'sk_a', status: 'active', created_at: '2026-07-26T00:00:00.000Z', organization_id: null, tax_declaration_enabled: false, avatar_tint: 1, mcp_last_seen_at: null }] }
       }
       if (/SELECT account_address, name AS account_name/.test(sql)) {
-        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', account_name: 'Main', account_chain_id: 84532 }] }
+        return { rows: [{ account_address: '0x2222222222222222222222222222222222222222', account_name: 'Main', account_chain_id: 84532, account_type: accountType, execution_rail: accountType === 'delegator_hybrid' ? 'delegation' : 'allowance_module' }] }
       }
       return { rows: [] }
     })
@@ -498,6 +506,50 @@ describe('agent creation — passport opt-in never breaks creation', () => {
     const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
     expect(res.statusCode).toBe(201)
     expect(mockQuery.mock.calls.some(([sql]) => /ROLLBACK/.test(String(sql)))).toBe(false)
+  })
+
+  it('requests and issues a passport when opted in on a chain this deployment can issue and verify on', async () => {
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(true)
+    expect(mockIssuableForAccount).toHaveBeenCalledWith({ chain_id: 84532, account_type: 'delegator_hybrid', execution_rail: 'delegation' })
+    // The rail columns are read for the predicate only — never echoed.
+    expect(res.json()).not.toHaveProperty('execution_rail')
+    expect(mockRequestPassport).toHaveBeenCalledWith(AGENT_UUID, 84532)
+    expect(mockIssueBestEffort).toHaveBeenCalledWith(AGENT_UUID, 'user-1')
+  })
+
+  it('#4719: an opt-in on a chain this deployment cannot issue on records NO passport row, and the agent is still created', async () => {
+    // Before #4719 an unregistered schema still recorded a `pending` row
+    // "deferred to the sweep" that this deployment could never anchor.
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow()
+    mockIssuableForAccount.mockReturnValue(false)
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockRequestPassport).not.toHaveBeenCalled()
+    expect(mockIssueBestEffort).not.toHaveBeenCalled()
+  })
+
+  it('#4719: an opt-in on a retired-rail account records NO passport row (not even a failed one)', async () => {
+    // Before #4719 the route checked only the chain, so a legacy account on
+    // 84532 got a row that the #2138 gate then marked `failed`.
+    const app = Fastify({ logger: false })
+    await app.register(agentRoutes, { prefix: '/agents' })
+    mockCreateFlow('legacy_safe')
+
+    const res = await app.inject({ method: 'POST', url: '/agents', payload: body })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().passport_requested).toBe(false)
+    expect(mockIssuableForAccount).toHaveBeenCalledWith(expect.objectContaining({ account_type: 'legacy_safe' }))
+    expect(mockRequestPassport).not.toHaveBeenCalled()
   })
 
   it('does not request a passport unless explicitly opted in', async () => {

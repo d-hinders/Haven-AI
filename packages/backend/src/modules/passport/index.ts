@@ -98,6 +98,8 @@ export {
 export {
   passportReadiness,
   logPassportReadiness,
+  isPassportIssuableOnChain,
+  isPassportIssuableForAccount,
   type PassportChainState,
   type PassportChainReadiness,
   type PassportReadiness,
@@ -142,7 +144,7 @@ export {
   listStuckReanchors,
 } from './reanchor.js'
 
-// x402 passport-reference delivery (#976, `X-Agent-Passport` header) — #998
+// x402 passport-reference delivery (#976; rides Haven's settle response) — #998
 // added this re-export so `modules/x402/settle.ts` (the only external
 // consumer) stops reaching past the barrel into a private file.
 export { passportReferenceFor, type PassportReference } from './x402-delivery.js'

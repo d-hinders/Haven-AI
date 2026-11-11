@@ -1,6 +1,6 @@
 {
   "name": "@haven_ai/mcp",
-  "version": "0.13.0-alpha.0",
+  "version": "0.14.0-alpha.0",
   "description": "Haven MCP server for local, non-custodial AI-agent payments — pay x402 (HTTP 402) APIs within on-chain-enforced budgets.",
   "engines": {
     "node": ">=22"
@@ -31,6 +31,7 @@
   "scripts": {
     "build": "npm --prefix ../sdk run build && tsup",
     "test": "npm --prefix ../sdk run build && vitest run",
+    "snapshot:regen": "npm --prefix ../sdk run build && UPDATE_LOCAL_TOOL_CONTRACT=1 vitest run src/local-tool-contract.test.ts",
     "typecheck": "npm --prefix ../sdk run build && tsc --noEmit"
   },
   "keywords": [
@@ -54,7 +55,7 @@
     "directory": "packages/mcp"
   },
   "dependencies": {
-    "@haven_ai/sdk": "0.13.0-alpha.0",
+    "@haven_ai/sdk": "0.14.0-alpha.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25.76"
   },

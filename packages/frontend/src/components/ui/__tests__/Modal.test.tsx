@@ -11,7 +11,7 @@ function ModalHarness() {
       <button type="button" onClick={() => setOpen(true)}>
         Open modal
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Example modal" showCloseButton>
+      <Modal open={open} onClose={() => setOpen(false)} title="Example modal">
         <button type="button">First action</button>
         <button type="button">Last action</button>
       </Modal>
@@ -44,13 +44,19 @@ describe('Modal', () => {
 
     const firstAction = screen.getByRole('button', { name: 'First action' })
     const lastAction = screen.getByRole('button', { name: 'Last action' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus())
+    const closeButton = screen.getByRole('button', { name: 'Close' })
 
+    // #4562: the ✕ is on by default, but open-time focus goes to the BODY's
+    // first focusable — not to the header ✕.
+    await waitFor(() => expect(firstAction).toHaveFocus())
+
+    // The ✕ is still inside the trap, at the head of the panel's Tab order.
+    closeButton.focus()
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
     expect(lastAction).toHaveFocus()
 
     fireEvent.keyDown(document, { key: 'Tab' })
-    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+    expect(closeButton).toHaveFocus()
 
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -85,6 +91,84 @@ describe('Modal', () => {
     fireEvent.click(closeButton)
 
     expect(dialog).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * #4562: the dialog anatomy — a close button by default, and open-time focus
+ * in the body rather than on that ✕.
+ *
+ * The ✕ sits in the header, ahead of the body in DOM order, so a panel-wide
+ * first-focusable query would land on it in every dialog that does not pass
+ * `initialFocusRef`. Send, the contacts editor and ApiKeyConnect are exactly
+ * that shape: their first keystroke would dismiss the dialog instead of
+ * filling its first field.
+ */
+describe('Modal dialog anatomy (#4562)', () => {
+  it('renders the header close button by default', () => {
+    render(
+      <Modal open onClose={() => {}} title="Send">
+        <p>Body</p>
+      </Modal>,
+    )
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
+
+  it('hides the close button only when a caller opts out', () => {
+    // The one legitimate opt-out: a confirmation's Cancel IS the dismiss.
+    render(
+      <Modal open onClose={() => {}} title="Revoke agent" showCloseButton={false}>
+        <p>Body</p>
+      </Modal>,
+    )
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument()
+  })
+
+  it("puts open-time focus on the body's first focusable, not on the close button", () => {
+    render(
+      <Modal open onClose={() => {}} title="Send">
+        <input aria-label="Amount" />
+        <button type="button">Send</button>
+      </Modal>,
+    )
+    expect(screen.getByLabelText('Amount')).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Close' })).not.toHaveFocus()
+  })
+
+  it('skips a disabled control in the body, which cannot take focus', () => {
+    render(
+      <Modal open onClose={() => {}} title="Issue sub-budget">
+        <select aria-label="Agent to share with" disabled>
+          <option>Choose an agent</option>
+        </select>
+        <input aria-label="Sub-budget amount" />
+      </Modal>,
+    )
+    // A disabled control cannot take focus, so a query that returns one leaves
+    // focus on `<body>` — outside the dialog the user is looking at.
+    expect(screen.getByLabelText('Sub-budget amount')).toHaveFocus()
+  })
+
+  it('falls back to the close button when the body has nothing focusable', () => {
+    render(
+      <Modal open onClose={() => {}} title="Lost a device?">
+        <p>Body copy only.</p>
+      </Modal>,
+    )
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+  })
+
+  it('disables the close button while a request is in flight', () => {
+    const onClose = vi.fn()
+    render(
+      <Modal open onClose={onClose} title="Connect Accounted" closeButtonDisabled>
+        <input aria-label="API key" />
+      </Modal>,
+    )
+    const closeButton = screen.getByRole('button', { name: 'Close' })
+    expect(closeButton).toBeDisabled()
+    fireEvent.click(closeButton)
     expect(onClose).not.toHaveBeenCalled()
   })
 })

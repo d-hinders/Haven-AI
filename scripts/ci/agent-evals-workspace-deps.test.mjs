@@ -18,7 +18,9 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -28,6 +30,40 @@ const workflow = readFileSync(path.join(ROOT, '.github/workflows/agent-evals.yml
 /** The live (non-comment) lines of the workflow, in order. */
 const live = workflow.split('\n').filter((line) => !/^\s*#/.test(line))
 const lineOf = (re) => live.findIndex((line) => re.test(line))
+
+/**
+ * The workflow's folded `QA_EVAL_CLAUDE_CODE_COMMAND` block, joined into one
+ * string (#4680). The guards below bind PER TEMPLATE: the lane's template and
+ * every task file's `commandTemplate` are checked separately, so a second
+ * profile cannot pass on the first one's line.
+ */
+function laneCommandTemplate() {
+  const start = live.findIndex((line) => /^\s+QA_EVAL_CLAUDE_CODE_COMMAND:\s*>-\s*$/.test(line))
+  assert.notEqual(start, -1, 'agent-evals.yml has no QA_EVAL_CLAUDE_CODE_COMMAND block — update this guard')
+  const indent = live[start].match(/^\s*/)[0].length
+  const body = []
+  for (const line of live.slice(start + 1)) {
+    if (line.trim() === '') continue
+    if (line.match(/^\s*/)[0].length <= indent) break
+    body.push(line.trim())
+  }
+  return body.join(' ')
+}
+
+/** Every per-task command template in the task files (#4680). */
+function taskCommandTemplates() {
+  const dir = path.join(ROOT, 'packages/qa-agent/src/evals/tasks')
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => ({ file: f, task: JSON.parse(readFileSync(path.join(dir, f), 'utf8')) }))
+    .filter(({ task }) => typeof task.commandTemplate === 'string')
+    .map(({ file, task }) => ({ name: `tasks/${file}`, text: task.commandTemplate }))
+}
+
+/** Every command template the lane can run, bound per template. */
+function allCommandTemplates() {
+  return [{ name: 'the lane template', text: laneCommandTemplate() }, ...taskCommandTemplates()]
+}
 
 // mcp-server is the package whose build imports `@haven_ai/core`
 // (src/tools/contracts.ts, paid-mcp-completion.ts, plain-http-x402.ts).
@@ -97,9 +133,17 @@ test('the report is written where the summary and upload steps read it', () => {
 })
 
 test('claude runs from an empty directory with only the wired MCP servers', () => {
-  const cmd = live.join('\n')
-  assert.ok(/cd "\$RUNNER_TEMP\/claude-cwd" &&/.test(cmd), 'claude does not run from an empty directory, so the repo CLAUDE.md reaches the agent under test')
-  assert.ok(cmd.includes('--strict-mcp-config'), 'claude is not limited to the MCP servers the workflow wires (--strict-mcp-config)')
+  // #4680: bound PER TEMPLATE. The old check joined every live line, so the
+  // login-check step's own `cd "$RUNNER_TEMP/claude-cwd"` satisfied it even
+  // with the eval template removed — and a second profile would have passed
+  // on the first one's line.
+  for (const t of allCommandTemplates()) {
+    assert.ok(
+      /cd "\$(?:RUNNER_TEMP|QA_EVAL_TRIAL_HOME)\/claude-cwd" &&/.test(t.text),
+      `${t.name} does not run from an empty directory, so the repo CLAUDE.md reaches the agent under test`,
+    )
+    assert.ok(t.text.includes('--strict-mcp-config'), `${t.name} is not limited to the MCP servers it wires (--strict-mcp-config)`)
+  }
 })
 
 // Actions runs `bash -e`, so a failing `claude` ends the login-check step
@@ -307,22 +351,44 @@ test('the evals job keeps environment: agent-evals', () => {
 })
 
 test('the claude tool allowlist is unchanged', () => {
-  assert.ok(live.some((line) => /^\s+--allowedTools mcp__haven-eval mcp__haven-signer-eval\s*$/.test(line)), 'the --allowedTools line changed')
+  // #4680: bound PER TEMPLATE. `live.some` let a wider second profile pass on
+  // the first one's line; each template must carry its own explicit allowlist
+  // and the same deny list (Bash stays denied in every profile).
   const DENY =
     'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
-  assert.ok(live.some((line) => line.trim() === `--disallowedTools ${DENY}`), 'the --disallowedTools list changed')
+  // The cold profile ALLOWS WebFetch, so its deny list is the lane's minus it.
+  // Only a profile that cannot pay may: redact-sessions uploads WebFetch's text
+  // with no merchant-body check beyond the keyed forms.
+  const COLD_DENY = DENY.replace('WebFetch,', '')
+  for (const t of allCommandTemplates()) {
+    assert.ok(/--allowedTools \S+/.test(t.text), `${t.name} has no --allowedTools — headless mode would deny every tool`)
+    const deny = t.text.includes('mcp__eval-command') ? COLD_DENY : DENY
+    assert.ok(t.text.includes(`--disallowedTools ${deny}`), `${t.name} does not deny the built-in tools (Bash included)`)
+  }
+  // The lane template's allowlist is exactly the Haven pair.
+  assert.ok(
+    /--allowedTools mcp__haven-eval mcp__haven-signer-eval\s/.test(laneCommandTemplate()),
+    'the lane template --allowedTools line changed',
+  )
+  // A cold-profile template allows the eval command tool and WebFetch, and
+  // nothing else.
+  const cold = taskCommandTemplates().filter((t) => t.text.includes('mcp__eval-command'))
+  assert.ok(cold.length >= 1, 'no task file carries a cold-profile command template — update this guard')
+  for (const t of cold) {
+    assert.ok(/--allowedTools mcp__eval-command WebFetch\s/.test(t.text), `${t.name} does not allow exactly the eval command tool and WebFetch`)
+  }
 })
 
 // ── #4218: the optional tasks input travels through an env var and is ──────
 // validated BEFORE anything is written or echoed; the run step passes
 // "--task=$TASKS" quoted and emits no --limit when it is set.
 
-test('no run: block inlines inputs.tasks — it travels through an env var', () => {
+test('no run: block inlines an input — each travels through an env var', () => {
   for (const step of steps) {
     const runIdx = step.findIndex((line) => /^\s+run:/.test(line))
     if (runIdx === -1) continue
     const body = step.slice(runIdx).join('\n')
-    assert.ok(!/inputs\.tasks/i.test(body), `a run: block inlines inputs.tasks (workflow-command injection surface): ${step[0].trim()}`)
+    assert.ok(!/\binputs\s*[.[]/i.test(body), `a run: block inlines an input (workflow-command injection surface): ${step[0].trim()}`)
   }
 })
 
@@ -332,7 +398,9 @@ test('the slice step validates the tasks input before it writes GITHUB_OUTPUT or
   const runIdx = slice.findIndex((line) => /^\s+run:/.test(line))
   assert.ok(runIdx !== -1, 'the slice step has no run: block')
   const body = slice.slice(runIdx)
-  const control = body.findIndex((line) => line.includes('*[![:print:]]*'))
+  // Bound to $TASKS: the step has other control-character checks since #4716,
+  // and matching the first of any would pass with this one deleted.
+  const control = body.findIndex((line) => line.includes('"$TASKS" == *[![:print:]]*'))
   const regex = body.findIndex((line) => line.includes('^[a-z0-9-]+(,[a-z0-9-]+)*$'))
   const firstWrite = body.findIndex((line) => line.includes('GITHUB_OUTPUT') || line.includes('::notice::'))
   assert.ok(control !== -1, 'the slice step does not reject control characters in the tasks input')
@@ -344,6 +412,258 @@ test('the slice step validates the tasks input before it writes GITHUB_OUTPUT or
   assert.ok(body.some((line) => /::notice::.*\$FILTER_NOTE/.test(line)), 'the run notice does not print the task filter')
 })
 
+// ── #4716: dev_landing_url and trials are validated before anything is written ──
+//
+// These cells run the step's real shell, extracted from the workflow, because
+// the property is about what bash does with a multi-line value and a static
+// read cannot show that. A rejected value must fail the step, write nothing to
+// $GITHUB_OUTPUT and never reach the step's own output. (The runner prints the
+// step's env in its own header, which is outside what this step controls.)
+
+/** The inputs the harness supplies, with the workflow's fallback for each. */
+const SLICE_INPUTS = {
+  INPUT_SUITE: { input: 'suite', fallback: 'subset' },
+  INPUT_TRIALS: { input: 'trials', fallback: '1' },
+  INPUT_TASKS: { input: 'tasks', fallback: '' },
+  INPUT_DEV_LANDING_URL: { input: 'dev_landing_url', fallback: '' },
+}
+
+test('the slice step gets each input from its own env var, as the harness below supplies them', () => {
+  const slice = stepNamed(/Decide the slice/)
+  assert.ok(slice, 'agent-evals.yml has no "Decide the slice" step — update this guard')
+  const wired = {}
+  for (const line of slice) {
+    const m = line.match(/^\s+(INPUT_\w+): \$\{\{ github\.event\.inputs\.(\w+) \|\| '([^']*)' \}\}$/)
+    if (m) wired[m[1]] = { input: m[2], fallback: m[3] }
+  }
+  assert.deepEqual(wired, SLICE_INPUTS)
+})
+
+/** Run the "Decide the slice" step the way Actions does (`bash -e`). */
+function runSliceStep(inputs) {
+  const slice = stepNamed(/Decide the slice/)
+  assert.ok(slice, 'agent-evals.yml has no "Decide the slice" step — update this guard')
+  const runIdx = slice.findIndex((line) => /^\s+run: \|\s*$/.test(line))
+  assert.notEqual(runIdx, -1, 'the slice step has no `run: |` block — update this guard')
+  const script = slice.slice(runIdx + 1).map((line) => line.replace(/^ {10}/, '')).join('\n')
+  const dir = mkdtempSync(path.join(tmpdir(), 'agent-evals-slice-'))
+  const output = path.join(dir, 'output')
+  writeFileSync(output, '')
+  try {
+    const result = spawnSync('bash', ['-e', '-c', script], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_OUTPUT: output,
+        ...Object.fromEntries(Object.entries(SLICE_INPUTS).map(([name, { fallback }]) => [name, fallback])),
+        ...inputs,
+      },
+    })
+    return { status: result.status, log: result.stdout + result.stderr, written: readFileSync(output, 'utf8') }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+// What the step prints is fixed, whatever the value. Output equal to one of
+// these proves the value never reached it, which a substring search cannot do
+// for a value such as `0` or `https://` that the message itself contains. It
+// also proves the input check did the rejecting: under `set -u`, a forgotten env
+// var would exit non-zero with nothing written too.
+// Computed on first use, so a guard failure in the harness fails these cells
+// without stopping the rest of this file from reporting.
+const once = (compute) => {
+  let value
+  return () => (value ??= compute())
+}
+const landingUrlRejections = once(() => [
+  runSliceStep({ INPUT_DEV_LANDING_URL: 'sentinel' }).log,
+  runSliceStep({ INPUT_DEV_LANDING_URL: 'sentinel\n' }).log,
+])
+const trialsRejection = once(() => runSliceStep({ INPUT_TRIALS: 'sentinel' }).log)
+const suiteRejection = once(() => runSliceStep({ INPUT_SUITE: 'sentinel' }).log)
+const tasksControlRejection = once(() => runSliceStep({ INPUT_TASKS: 'sentinel\n' }).log)
+const tasksShapeRejection = once(() => runSliceStep({ INPUT_TASKS: 'SENTINEL' }).log)
+
+test('the fixed rejection messages come from the input checks and differ per check', () => {
+  assert.match(landingUrlRejections()[0], /^::error::dev_landing_url input must be one https origin [^\n]*\n$/)
+  assert.match(landingUrlRejections()[1], /^::error::dev_landing_url input contains control characters [^\n]*\n$/)
+  assert.match(trialsRejection(), /^::error::trials input must be a positive integer [^\n]*\n$/)
+  assert.match(suiteRejection(), /^::error::suite input must be subset or full [^\n]*\n$/)
+  assert.match(tasksControlRejection(), /^::error::tasks input contains control characters [^\n]*\n$/)
+  assert.match(tasksShapeRejection(), /^::error::tasks input must be a comma-separated list [^\n]*\n$/)
+})
+
+const REJECTED_LANDING_URLS = {
+  'a second line that sets another output': 'https://a.example\ntask_filter=evil',
+  'a trailing newline': 'https://a.example\n',
+  'a carriage return': 'https://a.example\r',
+  'a tab': 'https://a.example\t',
+  'an escape character': 'https://a.example\u001b',
+  'plain http': 'http://a.example',
+  'two URLs': 'https://a.example https://b.example',
+  'a leading space': ' https://a.example',
+  'credentials': 'https://a.example@b.example',
+  'a path': 'https://a.example/landing',
+  'a query': 'https://a.example?x=1',
+  'a fragment': 'https://a.example#x',
+  'no host': 'https://',
+  'a host with no dot': 'https://localhost',
+  'a double trailing slash': 'https://a.example//',
+  'an uppercase host': 'https://A.example',
+  'a port': 'https://a.example:8443',
+  'a non-ASCII host': 'https://\u0430.example',
+  'a workflow command': '::error::injected',
+}
+
+for (const [name, value] of Object.entries(REJECTED_LANDING_URLS)) {
+  test(`the slice step rejects a dev_landing_url with ${name}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_DEV_LANDING_URL: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.ok(landingUrlRejections().includes(log), `the log is not one of the input check's fixed messages: ${log}`)
+  })
+}
+
+const REJECTED_TRIALS = {
+  'a second line': '1\ndev_landing_url=https://evil.example',
+  'a workflow command': '::error::injected',
+  'zero': '0',
+  'a negative': '-1',
+  'a fraction': '1.5',
+  'a word': 'three',
+  'a leading zero': '01',
+  'an exponent': '1e3',
+  'a plus sign': '+1',
+  'nothing': '',
+}
+
+for (const [name, value] of Object.entries(REJECTED_TRIALS)) {
+  test(`the slice step rejects trials of ${name}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_TRIALS: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.equal(log, trialsRejection(), 'the log is not the input check\'s fixed message')
+  })
+}
+
+const REJECTED_SUITES = {
+  'a second line': 'subset\nlimit_arg=--limit=999',
+  'another word': 'everything',
+  'a workflow command': '::error::injected',
+}
+
+for (const [name, value] of Object.entries(REJECTED_SUITES)) {
+  test(`the slice step rejects a suite of ${name}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_SUITE: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.equal(log, suiteRejection(), 'the output is not the input check\'s fixed message')
+  })
+}
+
+test('the slice step rejects a multi-line tasks value before it writes anything', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, tasksControlRejection(), 'the output is not the input check\'s fixed message')
+})
+
+for (const value of ['A_Task', '::error::injected']) {
+  test(`the slice step rejects a tasks value of ${value}, and writes nothing`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_TASKS: value })
+    assert.equal(status, 1, `the step accepted it: ${log}`)
+    assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+    assert.equal(log, tasksShapeRejection(), 'the output is not the input check\'s fixed message')
+  })
+}
+
+test('the slice step accepts a tasks list, and a filtered run has no --limit', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task,b-task' })
+  assert.equal(status, 0, `the step rejected it: ${log}`)
+  const lines = written.split('\n')
+  assert.ok(lines.includes('task_filter=a-task,b-task'), 'the filter is not written')
+  assert.ok(lines.includes('limit_arg='), 'a filtered run still has a --limit')
+})
+
+// A filtered run is the documented route to a cold task (tasks + dev_landing_url)
+// and to one task end to end (tasks + trials), so the checks must not be skipped there.
+test('the slice step still rejects a bad dev_landing_url on a filtered run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task', INPUT_DEV_LANDING_URL: 'https://a.example\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.ok(landingUrlRejections().includes(log), `the output is not one of the input check's fixed messages: ${log}`)
+})
+
+test('the slice step still rejects bad trials on a filtered run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task', INPUT_TRIALS: '1\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, trialsRejection(), 'the output is not the input check\'s fixed message')
+})
+
+test('the slice step still rejects a bad suite on a filtered run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_TASKS: 'a-task', INPUT_SUITE: 'subset\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, suiteRejection(), 'the output is not the input check\'s fixed message')
+})
+
+// A full run is the release dispatch, and the one suite whose whole run reads the URL.
+test('the slice step still rejects a bad dev_landing_url on a full run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_SUITE: 'full', INPUT_DEV_LANDING_URL: 'https://a.example\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.ok(landingUrlRejections().includes(log), `the output is not one of the input check's fixed messages: ${log}`)
+})
+
+test('the slice step still rejects bad trials on a full run', () => {
+  const { status, log, written } = runSliceStep({ INPUT_SUITE: 'full', INPUT_TRIALS: '1\nmode=evil' })
+  assert.equal(status, 1, `the step accepted it: ${log}`)
+  assert.equal(written, '', 'the step wrote to GITHUB_OUTPUT before rejecting the value')
+  assert.equal(log, trialsRejection(), 'the output is not the input check\'s fixed message')
+})
+
+test('the slice step accepts the release dispatch: a full run with the dev alias', () => {
+  const url = 'https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app'
+  const { status, log, written } = runSliceStep({ INPUT_SUITE: 'full', INPUT_DEV_LANDING_URL: url })
+  assert.equal(status, 0, `the step rejected it: ${log}`)
+  assert.ok(written.split('\n').includes(`dev_landing_url=${url}`), 'the URL is not written as given')
+})
+
+// `limit_arg` is what makes subset a slice: without it a subset run takes every task.
+for (const [suite, limitArg] of [['subset', '--limit=5'], ['full', '']]) {
+  test(`the slice step accepts a suite of ${suite}, with limit_arg=${limitArg}`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_SUITE: suite })
+    assert.equal(status, 0, `the step rejected it: ${log}`)
+    const lines = written.split('\n')
+    assert.ok(lines.includes(`mode=${suite}`), 'the suite is not written as the mode')
+    assert.ok(lines.includes(`limit_arg=${limitArg}`), 'the suite does not write its limit')
+  })
+}
+
+// The hosts a run really uses, from the repo's deployment statuses: a preview
+// must stay allowed, because #4713's re-run may use one.
+const ACCEPTED_LANDING_URLS = {
+  'no URL': '',
+  'the dev alias': 'https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app',
+  'a hashed preview': 'https://haven-ai-frontend-a1b2c3d4e-daniels-projects-f3327ba2.vercel.app',
+  'a short hashed preview': 'https://haven-a1b2c3d4e-daniels-projects-f3327ba2.vercel.app',
+  'a trailing slash': 'https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app/',
+}
+
+for (const [name, value] of Object.entries(ACCEPTED_LANDING_URLS)) {
+  test(`the slice step accepts a dev_landing_url of ${name}, and writes it as given`, () => {
+    const { status, log, written } = runSliceStep({ INPUT_DEV_LANDING_URL: value, INPUT_TRIALS: '12' })
+    assert.equal(status, 0, `the step rejected it: ${log}`)
+    assert.deepEqual(
+      written.split('\n').filter((line) => /^(dev_landing_url|trials)=/.test(line)),
+      ['trials=12', `dev_landing_url=${value}`],
+    )
+  })
+}
+
 test('the run step passes --task=$TASKS quoted and NO --limit when tasks is set', () => {
   const run = stepNamed(/Run the eval slice/)
   assert.ok(run, 'agent-evals.yml has no "Run the eval slice" step — update this guard')
@@ -352,4 +672,107 @@ test('the run step passes --task=$TASKS quoted and NO --limit when tasks is set'
   assert.ok(body.includes('FILTER_ARGS+=("--task=$TASKS")'), 'the run step does not pass "--task=$TASKS" quoted when tasks is set')
   assert.ok(body.includes('"${FILTER_ARGS[@]}"'), 'the run step does not expand the filter args array')
   assert.ok(!/\$LIMIT_ARG(?!\})/.test(body) || body.includes('elif [ -n "$LIMIT_ARG" ]'), 'the LIMIT_ARG handling changed — a task filter must emit no --limit')
+})
+
+// ── #4678: the per-trial exact-value secret manifest ──────────────────────
+//
+// The throwaway identity creates five secrets no env var names (owner key,
+// delegate key, signup password, signup bearer token, agent API key). They
+// enter a mode-0600 manifest the redactor consumes fail-closed. These guards
+// prove the manifest cannot be PRINTED or UPLOADED, and that it is deleted
+// after the scan.
+
+const MANIFEST_ENV = 'QA_EVAL_SECRET_MANIFEST'
+const manifestLine = live.find((line) => new RegExp(`^\\s+${MANIFEST_ENV}:`).test(line))
+const manifestPath = manifestLine?.replace(new RegExp(`^\\s+${MANIFEST_ENV}:\\s*`), '').trim() ?? ''
+const manifestDir = manifestPath.replace(/\/[^/]+$/, '')
+
+test('the eval step sets QA_EVAL_SECRET_MANIFEST, and the redactor consumes it with --manifest=', () => {
+  assert.ok(manifestLine, `agent-evals.yml does not set ${MANIFEST_ENV} — the throwaway secrets would never reach the redactor`)
+  assert.match(manifestPath, /^\$\{\{ runner\.temp \}\}\/[A-Za-z0-9._/-]+$/, 'the manifest path is not under ${{ runner.temp }}')
+  assert.ok(redact, 'no redact step — update this guard')
+  assert.ok(
+    redact.some((line) => /^\s+--manifest="\$RUNNER_TEMP\/[^"]+"\s*$/.test(line)),
+    'the redact step does not pass --manifest="$RUNNER_TEMP/..." — the manifest would be ignored',
+  )
+})
+
+test('the manifest lives OUTSIDE every report and upload path', () => {
+  assert.ok(manifestDir, 'no manifest directory — update this guard')
+  // Reports are written into the workspace; the manifest must not be there.
+  assert.ok(!manifestPath.includes('GITHUB_WORKSPACE'), 'the manifest is written into the workspace, where the report upload reads')
+  for (const step of uploadSteps) {
+    for (const p of uploadPaths(step)) {
+      assert.ok(!p.includes(manifestDir.replace('${{ runner.temp }}', '')), `an upload path includes the manifest directory: ${p}`)
+      assert.ok(!p.includes('eval-secret-manifest'), `an upload path names the manifest: ${p}`)
+    }
+  }
+  // And it is not inside the redactor's upload directory either.
+  assert.ok(REDACT_OUT && !manifestPath.includes(REDACT_OUT), 'the manifest sits inside the redactor upload directory')
+})
+
+test('no step prints the manifest — it is never cat/echo/head/tail/grep-ed', () => {
+  const printers = /\b(cat|echo|printf|head|tail|less|more|grep|rg|awk|sed|tee|cp|mv|scp|curl)\b/
+  for (const step of steps) {
+    const text = step.join('\n')
+    if (!text.includes('eval-secret-manifest') && !text.includes(MANIFEST_ENV)) continue
+    // The only steps allowed to name it are the eval step (sets the env), the
+    // redactor (reads it by flag) and the delete step (removes it).
+    const isEval = step === stepNamed(/Run the eval slice/)
+    const isRedact = step === redact
+    const isDelete = step === stepNamed(/Delete the per-trial secret manifest/)
+    assert.ok(isEval || isRedact || isDelete, `a step other than the eval/redact/delete steps names the manifest: ${step[0].trim()}`)
+    if (isDelete) {
+      assert.ok(!printers.test(text.replace(/rm -rf/g, '')), 'the delete step prints the manifest instead of deleting it')
+    }
+  }
+})
+
+test('the manifest is deleted in an always() step AFTER the scan', () => {
+  const del = stepNamed(/Delete the per-trial secret manifest/)
+  assert.ok(del, 'agent-evals.yml has no "Delete the per-trial secret manifest" step — the throwaway secrets would stay on the runner')
+  assert.equal(fieldOf(del, 'if'), 'always()', 'the manifest delete step must run even when the eval or redact step failed')
+  assert.ok(del.some((line) => /rm -rf .*eval-secret-manifest/.test(line)), 'the delete step does not remove the manifest directory')
+  assert.ok(steps.indexOf(del) > steps.indexOf(redact), 'the manifest is deleted BEFORE the redactor scans it')
+})
+
+// The throwaway task files carry their own command template (the lane's
+// single env template cannot point --mcp-config at a per-trial config). The
+// allowlist and denylist must be the SAME as the workflow's, or a throwaway
+// trial would run with a different tool surface than the lane it claims.
+//
+// #4680: bound PER PROFILE. A cold-profile task deliberately carries a
+// DIFFERENT allowlist (the eval command tool + WebFetch, no Haven MCP), so
+// the guard checks each template against the profile it declares rather than
+// demanding the lane's list everywhere.
+test('every per-task command template carries its profile allowlist and the lane denylist', () => {
+  const DENY =
+    'Bash,BashOutput,KillShell,Read,Edit,Write,NotebookEdit,Glob,Grep,WebFetch,WebSearch,TodoWrite,Task,SlashCommand,ExitPlanMode,Skill,Workflow,ToolSearch,Monitor,CronCreate,CronDelete,CronList,ScheduleWakeup,SendMessage,ListAgents,TaskStop,EnterWorktree,ExitWorktree,PushNotification'
+  // The cold profile ALLOWS WebFetch, so its deny list is the lane's minus it.
+  // Only a profile that cannot pay may: redact-sessions uploads WebFetch's text
+  // with no merchant-body check beyond the keyed forms.
+  const COLD_DENY = DENY.replace('WebFetch,', '')
+  const dir = path.join(ROOT, 'packages/qa-agent/src/evals/tasks')
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json'))
+  let checked = 0
+  let cold = 0
+  for (const file of files) {
+    const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'))
+    if (task.commandTemplate === undefined) continue
+    checked += 1
+    assert.ok(task.commandTemplate.includes('{instruction}'), `${file}: commandTemplate has no {instruction}`)
+    if (task.profile === 'cold') {
+      cold += 1
+      assert.ok(task.commandTemplate.includes('--allowedTools mcp__eval-command WebFetch'), `${file}: a cold-profile template must allow exactly the eval command tool and WebFetch`)
+      assert.ok(!task.commandTemplate.includes('mcp__haven-eval'), `${file}: a cold-profile template must not wire a Haven MCP server`)
+      assert.ok(task.commandTemplate.includes(`--disallowedTools ${COLD_DENY}`), `${file}: a cold-profile template does not deny the built-in tools (Bash included)`)
+    } else {
+      assert.ok(task.commandTemplate.includes('--allowedTools mcp__haven-eval mcp__haven-signer-eval'), `${file}: commandTemplate does not carry the lane allowlist`)
+      assert.ok(task.commandTemplate.includes(`--disallowedTools ${DENY}`), `${file}: commandTemplate does not carry the lane denylist`)
+    }
+    assert.ok(task.commandTemplate.includes('--mcp-config "$QA_EVAL_TRIAL_MCP_CONFIG"'), `${file}: commandTemplate does not point at the trial's own MCP config`)
+    assert.ok(task.commandTemplate.includes('--strict-mcp-config'), `${file}: commandTemplate does not use --strict-mcp-config`)
+  }
+  assert.ok(checked >= 3, `expected at least the three #4678 throwaway tasks to carry a commandTemplate, found ${checked}`)
+  assert.ok(cold >= 2, `expected the two #4680 cold-profile tasks to carry a commandTemplate, found ${cold}`)
 })

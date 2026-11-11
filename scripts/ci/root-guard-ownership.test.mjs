@@ -428,23 +428,24 @@ describe('cross-package source imports route the importing job (#2743)', () => {
   })
 })
 
-describe('generated copies route the jobs that verify them (#2743)', () => {
+describe('pinned runbook copies route the jobs that verify them (#2743)', () => {
   // The COPY direction of the same boundary. The block above asserts that a
   // change to a canonical SOURCE reaches the job holding its pin; this asserts
-  // the reverse — that a hand-edit of a generated COPY reaches a job that runs
+  // the reverse — that a hand-edit of a pinned COPY reaches a job that runs
   // the check comparing it back.
   //
   // Both directions had to be written, because closing one says nothing about
   // the other and the copy direction was the worse hole: `for-agents.md` is a
-  // generated artifact that happens to be Markdown, so the DOC_ONLY `*.md` arm
-  // (whose `*` crosses `/`) swallowed it and an edit routed NOTHING — not even
-  // `code` — while its CLI sibling routed `cli` and its NON-MARKDOWN siblings
-  // in public/ routed `frontend`. Stated that way deliberately: the first
-  // draft said "any other file in public/", which was false — `402.md` is
-  // swallowed by the same arm, and believing the looser sentence is what made
-  // a one-file fix look like a directory-wide one.
+  // hand-kept, byte-pinned copy that happens to be Markdown, so the DOC_ONLY
+  // `*.md` arm (whose `*` crosses `/`) swallowed it and an edit routed
+  // NOTHING — not even `code` — while its CLI sibling routed `cli` and its
+  // NON-MARKDOWN siblings in public/ routed `frontend`. Stated that way
+  // deliberately: the first draft said "any other file in public/", which
+  // was false — `402.md` is swallowed by the same arm, and believing the
+  // looser sentence is what made a one-file fix look like a directory-wide
+  // one.
   //
-  // Derived from the generator's OWN list, so a third copy added to
+  // Derived from the generator's OWN list, so a new copy added to
   // GENERATED_COPIES fails here until it routes, rather than joining silently.
 
   const copies = GENERATED_COPIES.map((c) => path.relative(ROOT, c.file).split(path.sep).join('/'))
@@ -452,13 +453,13 @@ describe('generated copies route the jobs that verify them (#2743)', () => {
   test('the copy list is the generator’s, and it is not empty', () => {
     // Positive control: an import that silently resolved to [] would make every
     // assertion below a vacuous pass.
-    assert.ok(copies.length >= 2, `expected the generated copies, saw ${copies.length}`)
+    assert.ok(copies.length >= 2, `expected the pinned copies, saw ${copies.length}`)
     assert.ok(copies.includes('packages/frontend/public/for-agents.md'))
     assert.ok(copies.includes('packages/cli/src/agent-guidance-text.ts'))
     for (const copy of copies) assert.ok(existsSync(path.join(ROOT, copy)), `${copy} is missing`)
   })
 
-  test('a hand-edit of any generated copy routes a job that runs lint:runbook-parity', () => {
+  test('a hand-edit of any pinned copy routes a job that runs lint:runbook-parity', () => {
     // `lint:runbook-parity` is the check that compares these back, so the copy
     // must reach at least one job that runs it. Read off ci.yml rather than
     // hardcoded, so moving the step between jobs cannot leave this stale.
@@ -472,9 +473,9 @@ describe('generated copies route the jobs that verify them (#2743)', () => {
       const routed = classifyChangedFiles([copy])
       assert.ok(
         verifying.some((flag) => routed[flag]),
-        `${copy} is a generated copy verified by lint:runbook-parity, but editing it routes ` +
+        `${copy} is a copy verified by lint:runbook-parity, but editing it routes ` +
           `none of ${JSON.stringify(verifying)} — so drift in the copy runs no check. ` +
-          'A generated artifact under a doc-only extension needs a DOC_EXCEPTIONS arm.',
+          'A pinned copy under a doc-only extension needs a DOC_EXCEPTIONS arm.',
       )
     }
   })
@@ -522,7 +523,11 @@ describe('the manifest is wired into routing', () => {
     assert.equal(ROOT_GUARD_RULES.length, ROOT_GUARDS.length)
     for (const [i, guard] of ROOT_GUARDS.entries()) {
       assert.deepEqual(ROOT_GUARD_RULES[i].patterns, [guard.path])
-      assert.deepEqual(ROOT_GUARD_RULES[i].surfaces, ['code', ...guard.jobs])
+      // A manifest path under packages/ is also a package source change, so it
+      // carries `packages` too (#4763) — the rule shadows the packages/* arm,
+      // and a shadowing rule that named fewer surfaces would narrow routing.
+      const workspaceWide = guard.path.startsWith('packages/') ? ['packages'] : []
+      assert.deepEqual(ROOT_GUARD_RULES[i].surfaces, ['code', ...guard.jobs, ...workspaceWide])
     }
   })
 

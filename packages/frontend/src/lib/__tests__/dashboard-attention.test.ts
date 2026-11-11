@@ -8,10 +8,14 @@ import {
   BUDGET_ENDING_LEAD_DAYS,
   DISMISSIBLE_ATTENTION_KINDS,
   firstRunSetupState,
+  isAgentSetupItem,
   PAYMENTS_FAILED_DANGER_COUNT,
+  unnamedWaitingAgentCount,
+  type AttentionRuleItem,
   type AttentionAcknowledgement,
   type DashboardBudgetRemaining,
   type DashboardOverview,
+  type PendingConnectionSetup,
 } from '../dashboard-attention'
 
 /**
@@ -349,7 +353,7 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
         tone: 'neutral',
         badge: 'Budget reached',
         title: 'Scout reached its budget',
-        subtitle: 'Its budget stopped a payment in the last 7 days.',
+        subtitle: 'Its budget stopped a payment in the last 7 days. No money moved.',
         actionLabel: 'Review',
         // #4324: Review opens the agent's refused attempts (#4323).
         href: '/agents/a1?tab=activity&status=refused',
@@ -408,7 +412,7 @@ describe('computeAttentionItems — budget reached (rule 3)', () => {
         id: 'budget-usage:a1',
         kind: 'budget-usage',
         tone: 'neutral',
-        badge: 'Budget reached',
+        badge: 'Nearly spent',
         title: 'Scout has used 90% of its budget',
         subtitle: 'Its current budget period is nearly spent.',
         actionLabel: 'Review',
@@ -920,7 +924,8 @@ describe('firstRunSetupState (#3818)', () => {
         makeOverview([{ id: 'p1', name: 'Pending', status: 'pending_approval' }], []),
       )
       expect(state.hasSetUpAgent).toBe(false)
-      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', moreCount: 0, awaiting: 'approval' })
+      expect(state.pendingAgent).toEqual({ id: 'p1', name: 'Pending', awaiting: 'approval', budgetEndedOn: null })
+      expect(state.awaitingAgentIds).toEqual(['p1'])
     })
 
     it('an active agent without a usable budget does not complete it', () => {
@@ -954,7 +959,7 @@ describe('firstRunSetupState (#3818)', () => {
       expect(firstRunSetupState(overview).hasSetUpAgent).toBe(true)
     })
 
-    it('names the NEWEST waiting agent by GET /agents created_at, with "and N more"', () => {
+    it('names the NEWEST waiting agent by GET /agents created_at, and lists every waiting agent newest first', () => {
       const overview = makeOverview(
         [
           { id: 'old', name: 'Old', status: 'pending_approval' },
@@ -968,7 +973,10 @@ describe('firstRunSetupState (#3818)', () => {
         new: '2026-10-09T00:00:00Z',
         mid: '2026-10-05T00:00:00Z',
       })
-      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', moreCount: 2, awaiting: 'approval' })
+      expect(state.pendingAgent).toEqual({ id: 'new', name: 'New', awaiting: 'approval', budgetEndedOn: null })
+      // #4744: how many of the others step 2 counts is decided against the
+      // attention items (`unnamedWaitingAgentCount`), not here.
+      expect(state.awaitingAgentIds).toEqual(['new', 'mid', 'old'])
     })
 
     it('an agent missing from GET /agents is newer than that read, so it is the one named', () => {
@@ -985,6 +993,18 @@ describe('firstRunSetupState (#3818)', () => {
     it('an active agent without a budget is awaiting a budget, not an approval', () => {
       const state = firstRunSetupState(makeOverview([{ id: 'x', name: 'X', status: 'active' }], []))
       expect(state.pendingAgent?.awaiting).toBe('budget')
+    })
+
+    it('#4744: an active agent whose budget ENDED carries the end date, formatted as its "Budget ended" row', () => {
+      const ended = firstRunSetupState(
+        makeOverview([{ id: 'e', name: 'E', status: 'active', budgetEndedAt: '2026-10-20T09:30:00.000Z' }], []),
+      )
+      expect(ended.pendingAgent).toEqual({ id: 'e', name: 'E', awaiting: 'budget', budgetEndedOn: '20 Oct 2026' })
+      // Never had one, or an unreadable end: no date — the same rule as the item.
+      for (const budgetEndedAt of [null, undefined, 'garbage']) {
+        const state = firstRunSetupState(makeOverview([{ id: 'n', name: 'N', status: 'active', budgetEndedAt }], []))
+        expect(state.pendingAgent?.budgetEndedOn).toBeNull()
+      }
     })
 
     it('a pending agent whose setup expired or failed is not offered "Finish setup" (its row says Remove)', () => {
@@ -1321,5 +1341,139 @@ describe('computeAttentionItems — budget ending and budget ended (#4353)', () 
     ])
     expect(items.map((item) => item.kind)).toEqual(['needs-setup'])
     expect(items[0].agentId).toBe('a2')
+  })
+})
+
+/**
+ * #4710: the "still connecting" row. Closing the connect dialog before the
+ * agent registers used to leave no way back in the app; the row is that way
+ * back, and it must end on its own (30 minutes, register or cancel) rather
+ * than be dismissed.
+ */
+describe('computeAttentionItems — still connecting (#4710)', () => {
+  const NOW = Date.parse('2026-11-09T13:00:00.000Z')
+
+  function pending(overrides: Partial<PendingConnectionSetup> = {}): PendingConnectionSetup {
+    return {
+      setup_id: '11111111-1111-1111-1111-111111111111',
+      name: 'Research agent',
+      expires_at: '2026-11-09T13:30:00.000Z',
+      ...overrides,
+    }
+  }
+
+  function run(pendingSetups: PendingConnectionSetup[] | null) {
+    return computeAttentionItems({
+      overview: makeOverview([], []),
+      budgetRemaining: EMPTY_BUDGETS,
+      pendingSetups,
+      nowMs: NOW,
+    })
+  }
+
+  it('renders the exact row text, with the deadline in the user’s timezone', () => {
+    const setup = pending()
+    const items = run([setup])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      id: `connection-pending:${setup.setup_id}`,
+      kind: 'connection-pending',
+      tone: 'brand',
+      badge: 'Connecting',
+      title: 'Research agent is still connecting',
+      actionLabel: 'Open',
+      href: `/agents?setup=${setup.setup_id}`,
+      setupId: setup.setup_id,
+    })
+    // The clock is the runtime zone's, formatted the app's way (en-GB, 24h).
+    const clock = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(setup.expires_at))
+    expect(items[0].subtitle).toBe(`Your setup prompt works until ${clock}.`)
+  })
+
+  it('is not dismissible — it ends on its own within 30 minutes, or on register or cancel', () => {
+    expect(DISMISSIBLE_ATTENTION_KINDS.has('connection-pending')).toBe(false)
+  })
+
+  it('renders one row per setup', () => {
+    const items = run([
+      pending({ setup_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', name: 'Research agent' }),
+      pending({ setup_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', name: 'Ops agent' }),
+    ])
+    expect(items.map((item) => item.title)).toEqual([
+      'Research agent is still connecting',
+      'Ops agent is still connecting',
+    ])
+  })
+
+  it('never claims the setup will finish on its own', () => {
+    const [item] = run([pending()])
+    expect(`${item.title} ${item.subtitle}`).not.toMatch(/will connect|finishes|completes|soon/i)
+  })
+
+  it('drops a setup whose deadline has passed, even from a stale response', () => {
+    expect(run([pending({ expires_at: '2026-11-09T12:59:59.000Z' })])).toEqual([])
+  })
+
+  it('fires nothing on an unknown read (null) or an unparseable deadline', () => {
+    expect(run(null)).toEqual([])
+    expect(run([pending({ expires_at: 'not-a-date' })])).toEqual([])
+  })
+
+  it('sits after the needs-setup items and before low balance', () => {
+    const items = computeAttentionItems({
+      overview: makeOverview(
+        [{ id: 'a1', name: 'Scout', status: 'pending_approval', setupStatus: 'awaiting_connection' }],
+        [{ accountId: 'acct-1', usdcBalanceAtomic: '1000000', usdcPace7dAtomic: '5000000' }],
+      ),
+      budgetRemaining: EMPTY_BUDGETS,
+      pendingSetups: [pending()],
+      nowMs: NOW,
+    })
+    expect(items.map((item) => item.kind)).toEqual([
+      'needs-setup',
+      'connection-pending',
+      'low-balance',
+    ])
+  })
+})
+
+describe('step 2 names each waiting agent once (#4744)', () => {
+  const item = (id: string, kind: AttentionRuleItem['kind'], agentId?: string): AttentionRuleItem => ({
+    id,
+    kind,
+    tone: 'neutral',
+    badge: 'x',
+    title: id,
+    ...(agentId ? { agentId } : {}),
+  })
+
+  it('isAgentSetupItem matches the agent\'s "Needs setup" and "Budget ended" rows only', () => {
+    expect(isAgentSetupItem(item('needs-setup:a', 'needs-setup', 'a'), 'a')).toBe(true)
+    expect(isAgentSetupItem(item('budget-reached:a', 'budget-ended', 'a'), 'a')).toBe(true)
+    // Another agent's row, and another kind for the same agent, stay.
+    expect(isAgentSetupItem(item('needs-setup:b', 'needs-setup', 'b'), 'a')).toBe(false)
+    expect(isAgentSetupItem(item('budget-reached:a', 'budget-reached', 'a'), 'a')).toBe(false)
+    expect(isAgentSetupItem(item('payments-failed:a', 'payments-failed', 'a'), 'a')).toBe(false)
+  })
+
+  it('two waiting agents whose rows both show: no suffix', () => {
+    const items = [item('needs-setup:a', 'needs-setup', 'a'), item('needs-setup:b', 'needs-setup', 'b')]
+    expect(unnamedWaitingAgentCount(['a', 'b'], 'a', items)).toBe(0)
+  })
+
+  it('the second agent\'s row dismissed: it counts as "1 more"', () => {
+    expect(unnamedWaitingAgentCount(['a', 'b'], 'a', [item('needs-setup:a', 'needs-setup', 'a')])).toBe(1)
+  })
+
+  it('a row behind "Show N more" still names its agent, and an item without an agent names nobody', () => {
+    const items = [
+      ...Array.from({ length: 5 }, (_, i) => item(`low-balance:${i}`, 'low-balance')),
+      item('budget-reached:b', 'budget-ended', 'b'),
+    ]
+    expect(unnamedWaitingAgentCount(['a', 'b', 'c'], 'a', items)).toBe(1)
   })
 })

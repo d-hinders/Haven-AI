@@ -5,6 +5,7 @@ import { renderHook } from '@testing-library/react'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
 import type { ReactNode } from 'react'
 import { passkeyStorageKey } from '@/lib/signer'
+import { hasEntered, markEntered } from '@/lib/entry-latch'
 
 // Mock the api module
 vi.mock('@/lib/api', () => {
@@ -99,6 +100,33 @@ describe('AuthContext', () => {
     expect(localStorage.removeItem).toHaveBeenCalledWith('haven_token')
     expect(result.current.user).toBeNull()
     expect(result.current.token).toBeNull()
+  })
+
+  // #4704: signing back in is an entrance again (the balance counts up), so
+  // both ways a session ends clear this tab's entry latches.
+  it('logout() clears the entry latch, so signing back in is an entrance', async () => {
+    mockApi.get.mockRejectedValue(new Error('no token'))
+    const { result } = renderHook(() => useAuth(), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    mockApi.post.mockResolvedValue({ token: 'jwt-token', user: mockUser })
+    await act(async () => {
+      await result.current.login('test@example.com', 'password')
+    })
+    markEntered('count-up', mockUser.id)
+    act(() => {
+      result.current.logout()
+    })
+    expect(hasEntered('count-up', mockUser.id)).toBe(false)
+  })
+
+  it('an expired session clears the entry latch too', async () => {
+    markEntered('count-up', mockUser.id)
+    localStorage.setItem('haven_token', 'expired-token')
+    mockApi.get.mockRejectedValue(new Error('401'))
+    const { result } = renderHook(() => useAuth(), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.token).toBeNull()
+    expect(hasEntered('count-up', mockUser.id)).toBe(false)
   })
 
   it('signup() calls the API and returns response', async () => {

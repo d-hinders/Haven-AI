@@ -202,6 +202,22 @@ function ledgerRows(): HTMLElement[] {
     )
 }
 
+describe('AccountActivityTab — the load-error shape (#4569)', () => {
+  it('a failed read is the load-error shape, and Try again calls the feed refresh', () => {
+    const refresh = vi.fn()
+    const moneyTotalsRefresh = vi.fn()
+    feedMock.mockImplementation(() => ({ ...DEFAULT_FEED, transactions: [], total: 0, error: 'boom', refresh }))
+    totalsMock.mockImplementation(() => ({ ...DEFAULT_TOTALS, refresh: moneyTotalsRefresh }))
+    renderTab()
+
+    expect(screen.getByRole('heading', { name: 'Activity could not load' })).toBeInTheDocument()
+    expect(screen.getByText("This wallet's payments are unchanged.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(moneyTotalsRefresh).toHaveBeenCalledOnce()
+  })
+})
+
 describe('AccountActivityTab — filters in the URL (#4098/#4130)', () => {
   it('seeds the filters from the URL and sends them to the feed with the fixed account', () => {
     urlQuery.value = 'search=coffee&direction=in'

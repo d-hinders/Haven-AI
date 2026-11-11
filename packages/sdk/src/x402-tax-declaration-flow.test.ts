@@ -402,6 +402,27 @@ describe('retryRequest scheme split — EIP-3009 only (#3427)', () => {
     expect(new Headers(delivered[1]?.headers).get(X_TAX_DECLARATION_HEADER)).toBe('tax-header-value')
   })
 
+  it('#4754: an x402 v1 EIP-3009 payment (no `accepted` in the header, both names on the wire) still reads as EIP-3009 — the resolver IS called', async () => {
+    const resolver = vi.fn(async () => ({ header: 'tax-header-value-v1' }) as const)
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    const completion = completionWith(resolver)
+    // The library's v1 encoding: top-level scheme/network, no `accepted`.
+    const v1Receipt: X402Receipt = {
+      ...receiptFor(eip3009Accepted),
+      paymentHeader: encodeBase64Json({ x402Version: 1, scheme: 'exact', network: 'base', payload: {} }),
+    }
+    await completion.retryRequest(MERCHANT_URL, { method: 'GET' }, paymentRequiredFor(eip3009Accepted), v1Receipt)
+    expect(resolver).toHaveBeenCalledTimes(1)
+    const delivered = vi.mocked(globalThis.fetch).mock.calls.at(-1) as unknown as [string, RequestInit]
+    const headers = new Headers(delivered[1]?.headers)
+    expect(headers.get(X_TAX_DECLARATION_HEADER)).toBe('tax-header-value-v1')
+    // Non-vacuity: this really is the two-name v1 shape.
+    expect(headers.get('X-PAYMENT')).toBe(v1Receipt.paymentHeader)
+  })
+
   it('a hosted/keyless completion (no resolver, no key) never resolves — the hosted path is structurally header-free', async () => {
     const resolver = vi.fn(async () => ({ header: 'should-not-be-solved' }) as const)
     vi.spyOn(globalThis, 'fetch').mockImplementation(

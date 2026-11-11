@@ -193,6 +193,122 @@ export async function hasFirstAgentPayment(
   return Boolean(result.rows[0]?.has_first_agent_payment)
 }
 
+// ── The first agent payment, named (#4707) ───────────────────────────────────
+
+/**
+ * The row behind `GET /dashboard/first-agent-payment` (#4707).
+ *
+ * `HAS_FIRST_AGENT_PAYMENT_SQL` above answers yes/no and stays exactly as it
+ * is. This statement answers WHICH payment, and it is deliberately stricter,
+ * because the card it feeds claims a real event ("your agent paid a merchant")
+ * rather than a milestone reached.
+ *
+ * What it excludes, and why each exclusion is load-bearing:
+ *
+ * - **Not confirmed, or no `tx_hash`** — nothing moved. Same two facts the
+ *   boolean read uses.
+ * - **`funded_but_unsettled`** — an open
+ *   `merchant_retry_rejected_after_payment` reconciliation event means the
+ *   merchant was asked after the funding leg and refused. The money left the
+ *   account and the merchant did not take it; naming that as a payment would
+ *   be false. Same predicate `FIND_INTENT_STATUS_ROW_SQL` computes.
+ * - **The EIP-3009 merchant leg not yet proven** — a confirmed EIP-3009 row
+ *   can mean the delegate was funded and the merchant has not pulled yet
+ *   (`isFundedX402AwaitingMerchantLeg`, `modules/payments/agent-payment-status.ts`).
+ *   The card requires POSITIVE proof of the merchant leg — a recorded,
+ *   on-chain-verified `machine_metadata.merchant_settlement_tx_hash`, or a
+ *   `machine_payment_evidence` row recording the merchant's answer — using the
+ *   same facts that predicate reads. It is stricter than "not awaiting": a row
+ *   still inside the merchant-report grace window is also unproven, and the
+ *   card must not claim it. Every other rail (erc7710, direct, mpp) has no
+ *   separate merchant pull, so confirmation IS the payment there.
+ * - **Retired-rail agents** — `DELEGATION_RAIL_JOIN`, the same filter every
+ *   other dashboard agent read carries. A legacy Safe agent is never named.
+ * - **Other users' rows** — `pi.user_id = $1`, the tenant scope.
+ *
+ * Ordering is `confirmed_at` ASC (the EARLIEST qualifying payment — "its first
+ * payment"), with `id` as a deterministic tiebreak for rows confirmed in the
+ * same instant.
+ *
+ * Counterparty identity is `COALESCE(merchant_address, x402_merchant_address,
+ * to_address)` — the same expression `DASHBOARD_MERCHANTS_SQL` uses. It is
+ * returned as a lookup key only; the route resolves a display name from it and
+ * the raw address never reaches the wire.
+ *
+ * No migration: `payment_intents` has no index including `user_id`, and this
+ * statement is a single per-user scan bounded by `LIMIT 1`. The PR records the
+ * `EXPLAIN` the real-DB test captures.
+ */
+export const FIND_FIRST_AGENT_PAYMENT_SQL = `SELECT pi.id, pi.agent_id, a.name AS agent_name,
+           pi.token_symbol, pi.amount_human, pi.amount_raw, pi.chain_id, pi.confirmed_at,
+           pi.usd_value, pi.eur_value, pi.sek_value,
+           COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address) AS merchant_address,
+           pi.x402_resource_url
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      -- The same tenant scope on the joined table: implied by the payment's
+      -- own user_id for well-formed data, and it is what lets the planner
+      -- reach idx_agents_user_id instead of scanning every agent.
+      AND a.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.tx_hash IS NOT NULL
+      AND pi.confirmed_at IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM machine_payment_reconciliation_events mpre
+        WHERE mpre.payment_intent_id = pi.id
+          AND mpre.event_type = 'merchant_retry_rejected_after_payment'
+          AND mpre.status = 'open'
+      )
+      AND (
+        COALESCE(pi.payment_rail, pi.source, 'direct') <> 'x402'
+        OR pi.machine_metadata->>'settlement_scheme' IS DISTINCT FROM 'eip3009'
+        OR pi.machine_metadata->>'merchant_settlement_tx_hash' IS NOT NULL
+        OR EXISTS (
+          SELECT 1 FROM machine_payment_evidence mpe
+          WHERE mpe.payment_intent_id = pi.id
+            AND mpe.proof_status IN ('merchant_response_observed', 'protocol_receipt_attached')
+        )
+      )
+    ORDER BY pi.confirmed_at ASC, pi.id ASC
+    LIMIT 1`
+
+export interface FirstAgentPaymentRow {
+  id: string
+  agent_id: string
+  agent_name: string
+  token_symbol: string
+  /** The token amount as stored — the card's figure when fiat would read $0.00. */
+  amount_human: string
+  amount_raw: string | null
+  chain_id: number
+  /** pg returns TIMESTAMPTZ as a Date. */
+  confirmed_at: Date
+  /** Booked fiat at settle time; NULL when the row was never priced. */
+  usd_value: string | null
+  eur_value: string | null
+  sek_value: string | null
+  /** Lookup key for the display name — never rendered. */
+  merchant_address: string | null
+  x402_resource_url: string | null
+}
+
+/**
+ * The earliest qualifying first agent payment, or `null` when there is none.
+ *
+ * `userId` is REQUIRED — tenant scope. `null` is the honest answer for a user
+ * whose only confirmed payment is still awaiting its merchant leg; the caller
+ * renders nothing rather than a weaker claim.
+ */
+export async function findFirstAgentPayment(
+  userId: string,
+  db: Executor = pool,
+): Promise<FirstAgentPaymentRow | null> {
+  const result = await db.query<FirstAgentPaymentRow>(FIND_FIRST_AGENT_PAYMENT_SQL, [userId])
+  return result.rows[0] ?? null
+}
+
 // ── Allowances ───────────────────────────────────────────────────────────────
 // #2020: `LIST_DASHBOARD_ALLOWANCES_SQL` / `listDashboardAllowances` are gone —
 // the dashboard shows the active delegation set for delegation-rail agents and
@@ -528,6 +644,125 @@ export async function listDashboardSpendGroups(
     from30,
     from7,
     to,
+    chainIds,
+  ])
+  return result.rows
+}
+
+/**
+ * The "Since your last visit" figures (#4709, epic #4701): the user's
+ * confirmed agent payments with `confirmed_at` in `(after, through]`, grouped
+ * by (agent, token, chain) so the route can price NULL-booked rows at today's
+ * rate exactly as the 7-day block does.
+ *
+ * The window is HALF-OPEN ON THE LEFT and CLOSED ON THE RIGHT — the opposite
+ * of the 7/30-day statements above, and deliberately so: `after` is the
+ * PREVIOUS entry's instant and `through` this entry's, so a payment confirmed
+ * exactly on a boundary is counted in exactly one of two consecutive windows
+ * (it belongs to the window whose `through` it is).
+ *
+ * Everything else is #3803's definition, unchanged: `status = 'confirmed'`,
+ * delegation-rail agents only, chain-scoped to $4 (the same `spend.scope` the
+ * 7-day figures use), and the #3755 netting applied through
+ * `spendNetFactorSql` against the sweeps submitted in the SAME window. A
+ * payment confirmed after `through` belongs to the next entry.
+ */
+export const DASHBOARD_SINCE_GROUPS_SQL = `WITH legs AS (
+    SELECT pi.agent_id,
+           a.name AS agent_name,
+           LOWER(pi.token_address) AS token_key,
+           COALESCE(pi.chain_id, 0) AS chain_key,
+           CASE WHEN pi.amount_raw ~ '^[0-9]+$' THEN pi.amount_raw::numeric END AS atomic,
+           COALESCE(pi.amount_human, '0')::numeric AS amount_human,
+           pi.usd_value,
+           pi.eur_value,
+           pi.sek_value
+    FROM payment_intents pi
+    JOIN agents a ON a.id = pi.agent_id
+    ${DELEGATION_RAIL_JOIN}
+    WHERE pi.user_id = $1
+      AND pi.status = 'confirmed'
+      AND pi.confirmed_at > $2
+      AND pi.confirmed_at <= $3
+      AND COALESCE(pi.chain_id, 0) = ANY($4)
+  ), swept AS (
+    SELECT ds.agent_id,
+           LOWER(ds.token_address) AS token_key,
+           ds.chain_id AS chain_key,
+           SUM(ds.value_atomic) AS swept_window
+    FROM delegate_sweeps ds
+    WHERE ds.user_id = $1
+      AND ds.status = 'submitted'
+      AND ds.tx_hash IS NOT NULL
+      AND COALESCE(ds.submitted_at, ds.created_at) > $2
+      AND COALESCE(ds.submitted_at, ds.created_at) <= $3
+      AND COALESCE(ds.chain_id, 0) = ANY($4)
+    GROUP BY ds.agent_id, LOWER(ds.token_address), ds.chain_id
+  ), grouped AS (
+    SELECT l.agent_id, l.agent_name, l.token_key, l.chain_key,
+           SUM(l.atomic) AS atomic_w,
+           SUM(COALESCE(l.usd_value, 0)) AS usd_w,
+           SUM(COALESCE(l.eur_value, 0)) AS eur_w,
+           SUM(COALESCE(l.sek_value, 0)) AS sek_w,
+           SUM(CASE WHEN l.usd_value IS NULL THEN l.amount_human ELSE 0 END) AS fb_usd_w,
+           SUM(CASE WHEN l.eur_value IS NULL THEN l.amount_human ELSE 0 END) AS fb_eur_w,
+           SUM(CASE WHEN l.sek_value IS NULL THEN l.amount_human ELSE 0 END) AS fb_sek_w,
+           COUNT(*) AS legs_w
+    FROM legs l
+    GROUP BY l.agent_id, l.agent_name, l.token_key, l.chain_key
+  )
+  SELECT g.agent_id,
+         g.agent_name,
+         g.token_key,
+         g.chain_key,
+         COALESCE(g.usd_w, 0)::text AS gross_usd,
+         (COALESCE(g.usd_w, 0) * ${spendNetFactorSql('g.atomic_w', 's.swept_window')})::numeric(20, 6)::text AS net_usd,
+         COALESCE(g.eur_w, 0)::text AS gross_eur,
+         (COALESCE(g.eur_w, 0) * ${spendNetFactorSql('g.atomic_w', 's.swept_window')})::numeric(20, 6)::text AS net_eur,
+         COALESCE(g.sek_w, 0)::text AS gross_sek,
+         (COALESCE(g.sek_w, 0) * ${spendNetFactorSql('g.atomic_w', 's.swept_window')})::numeric(20, 6)::text AS net_sek,
+         COALESCE(g.fb_usd_w, 0)::text AS fb_usd,
+         COALESCE(g.fb_eur_w, 0)::text AS fb_eur,
+         COALESCE(g.fb_sek_w, 0)::text AS fb_sek,
+         g.legs_w::text AS payments
+  FROM grouped g
+  LEFT JOIN swept s
+    ON s.agent_id = g.agent_id
+   AND s.token_key = g.token_key
+   AND s.chain_key = g.chain_key`
+
+export interface DashboardSinceGroupRow {
+  agent_id: string
+  agent_name: string
+  token_key: string
+  chain_key: number
+  gross_usd: string
+  net_usd: string
+  gross_eur: string
+  net_eur: string
+  gross_sek: string
+  net_sek: string
+  fb_usd: string
+  fb_eur: string
+  fb_sek: string
+  payments: string
+}
+
+/**
+ * `userId` is REQUIRED. `chainIds` is the same testnet-scope chain set the
+ * 7-day figures use; `after`/`through` are ISO timestamps, `(after, through]`.
+ */
+export async function listDashboardSinceGroups(
+  userId: string,
+  chainIds: number[],
+  after: string,
+  through: string,
+  db: Executor = pool,
+): Promise<DashboardSinceGroupRow[]> {
+  const result = await db.query<DashboardSinceGroupRow>(DASHBOARD_SINCE_GROUPS_SQL, [
+    userId,
+    after,
+    through,
     chainIds,
   ])
   return result.rows

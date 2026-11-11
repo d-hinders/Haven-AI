@@ -5,7 +5,8 @@ covers:
   - packages/backend/src/modules/passport/readiness.ts
   - packages/backend/src/modules/passport/receipt.ts
   - packages/backend/src/routes/passport-verify.ts
-last-verified: "2026-09-04"
+  - packages/backend/src/modules/passport/__tests__/passport-sdk-cross-check.test.ts
+last-verified: "2026-11-07"
 ---
 
 # Passport verification setup
@@ -33,11 +34,15 @@ four states — and one of them is a trap:
 | set | set | `ready` | Fully operational. |
 
 `issuance_only` is not cosmetic. On the **EIP-3009** settlement path — the one
-with actual merchant reach — `GET /passport/verify?address=…` is the *only*
-delivery mechanism (`modules/passport/x402-delivery.ts`), so a 3009 merchant has
-no way to learn a passport exists at all. On **erc7710**, settle responses still
-carry `attestation_uid` + `chain_id` (which is what a merchant should resolve
-independently anyway), but `verify_url` is silently omitted.
+with actual merchant reach — `GET /passport/verify?address=…` is the only way a
+merchant can check a passport (`modules/passport/x402-delivery.ts`). An
+advertised `haven-passport` extension (#4722) can carry the UID, but the UID
+cannot be verified while the verifier is off. On **erc7710**, settle responses still
+carry `attestation_uid` + `chain_id`, but `verify_url` is silently omitted. The
+UID alone is not enough: an attestation under a schema with no resolver proves
+nothing until the merchant checks its attester against Haven's, and Haven does
+not publish that address yet (see *Availability* in
+[`docs/product/agent-passport.md`](../product/agent-passport.md)).
 
 Dev sat in `issuance_only` with three anchored passports and nobody noticed for
 days ([#1151](https://github.com/d-hinders/Haven-AI/issues/1151)). Since then the
@@ -92,7 +97,10 @@ Restart the service — the signer is installed at boot.
 
 ## Check the state
 
-`GET /health/ops` reports it to an operator using `HAVEN_OPS_TOKEN`. The public
+Three places report it. The ops console's health page shows a warning when any
+chain is `issuance_only` (#4720). The boot log carries one warning naming the
+chain(s) (below). And `GET /health/ops` reports it to an operator using
+`HAVEN_OPS_TOKEN`. The public
 `GET /health` deliberately carries only status, timestamp, and database health.
 The diagnostics contain booleans plus the already-published issuer address only
 — no key material, no schema UID:
@@ -113,7 +121,7 @@ curl -s -H "X-Haven-Ops-Token: $HAVEN_OPS_TOKEN" \
 ```
 
 A non-empty `unverifiableChainIds` is the trap state, and the backend also logs
-one warning at boot naming the chain. Both are silent when the deployment is
+one warning at boot naming the chain(s). All three are silent when the deployment is
 `ready`, `unconfigured`, or `verification_only` — a warning that fires when
 things are fine is a warning people scroll past.
 
@@ -154,11 +162,17 @@ Both must succeed. Reading them:
   from *this* environment's database.
 - **`issuer` differs from what a merchant pinned** — the key was rotated.
   Merchants pinning the old address will reject every receipt until they re-pin;
-  treat rotation as a breaking change, not an operational tweak.
+  treat rotation as a breaking change, not an operational tweak. The demo
+  merchant is one such consumer: it pins the address in
+  `MERCHANT_PASSPORT_ISSUER` (#4723) and answers `not_signed_by_issuer` until
+  that value is updated.
 
 You can verify a receipt offline exactly as a merchant would, with
 `verifyReceipt` from `modules/passport` — a verification path only Haven can
-execute proves nothing.
+execute proves nothing. A merchant uses `verifyPassportReceipt` /
+`checkPassport` from `@haven_ai/sdk`, which is the same canonicalizer and the
+same verifier; the cross-check test lives in
+`packages/backend/src/modules/passport/__tests__/passport-sdk-cross-check.test.ts`.
 
 ## Related
 

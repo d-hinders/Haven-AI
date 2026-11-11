@@ -31,8 +31,14 @@ export const en = {
      * says what actually happened (#2870's naming rule).
      */
     evidenceArchived: 'Evidence archived',
-    feeding: 'Feeding…',
-    notFed: 'Not fed',
+    /**
+     * A pushed row on a deployment whose live connector is not configured
+     * (#4567): nothing left Haven, so the row may not claim delivery. SR:1583
+     * — "Preview/local tracking must say `Tracked`".
+     */
+    tracked: 'Tracked',
+    sending: 'Sending…',
+    notSent: 'Not sent',
     /** Accessible name for the badge link — the label, then where it goes. */
     openAccounting: (label: string) => `${label}. Open accounting.`,
   },
@@ -190,7 +196,7 @@ export const en = {
       edit: 'Edit',
       cancel: 'Cancel',
       save: 'Save',
-      saving: 'Saving...',
+      saving: 'Saving…',
       saved: 'Name updated.',
       helperText: 'Use the name you want shown in Haven.',
       errorEmpty: 'Enter a name for your Haven account.',
@@ -254,10 +260,10 @@ export const en = {
       noAccounts: 'Approves no account yet.',
       accountFallbackName: 'Account',
       showAddress: 'Show address',
-      loading: 'Loading your signers…',
-      loadError: 'Haven could not load your signers.',
+      loading: 'Loading your passkeys and wallets…',
+      loadError: 'Haven could not load your passkeys and wallets.',
       retry: 'Try again',
-      empty: 'No signers yet. Your first passkey is added when you create an account.',
+      empty: 'No passkeys or wallets yet. Your first passkey is added when you create an account.',
       connectionConnected: (connector: string) => `${connector} is connected on this device.`,
       connectionNone: 'Approve with a browser wallet? Connect it on this device.',
       connect: 'Connect wallet',
@@ -297,10 +303,13 @@ export const en = {
        */
       disclaimer:
         'Haven provides data tooling, not accounting or tax advice. Payments are fed as drafts — you and your accountant remain responsible for coding, correctness, and filing.',
-      loadError: 'We could not load accounting connections. Try again in a moment.',
+      loadError: 'Accounting connections could not load.',
       // #4359: the card's footer link — the feed page keeps the sync rows;
       // the link is only rendered when at least one connector shows.
-      seeSyncedPayments: 'See synced payments on Accounting',
+      // #4601 (N4): the link names the Accounting section, whose text now says
+      // "sent" (the row chips already did, #4567). The identifier keeps its
+      // name — it is not user-facing.
+      seeSyncedPayments: 'See sent payments on Accounting',
       /**
        * One line per coming-soon provider — listed, never endorsed. The chip
        * and the disabled action already say it is not connectable, so the
@@ -450,7 +459,7 @@ export const en = {
         confirm: 'Continue',
         /** The footer's way out — the same no-op as "Feed from now". */
         notNow: 'Not now',
-        working: 'Feeding…',
+        working: 'Sending…',
         /**
          * #2915: `fed` is what the sync actually pushed, `total` what it
          * enumerated — the sentence never claims a payment that did not land.
@@ -526,7 +535,7 @@ export const en = {
       // flag-off erasure path).
       purpose:
         'Optional. For a sole trader, the organisation number is your personal identity number. You can remove these details here at any time.',
-      loadError: 'We could not load your company details. Try again in a moment.',
+      loadError: 'Your company details could not load.',
       retry: 'Try again',
 
       // #4359: the "Not added yet" state — one line, then the reveal.
@@ -588,6 +597,9 @@ export const en = {
           'This deletes your legal name, country, organisation number and VAT number from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
         confirm: 'Remove',
         cancel: 'Keep details',
+        // #4570: the confirm button's own verb while the delete is in flight,
+        // instead of ConfirmDialog's generic "Working…".
+        deleting: 'Removing…',
         error: 'We could not remove your company details. Try again in a moment.',
         // Design review 6: announced (role=status) after a successful delete.
         removed: 'Company details removed.',

@@ -138,6 +138,16 @@ describe('TransactionsLedgerRow — badges', () => {
     expect(within(row).getByText('Failed')).toBeInTheDocument()
   })
 
+  it('a confirmed row carries NO status badge (#3810) — the panel is where "Sent" lives (#4567)', () => {
+    const row = renderRow(contactSend)
+    // The list row's rule: a confirmed row's direction is already the sign and
+    // tone of the amount, so it names no state. The detail panel's anatomy
+    // carries the badge, and it says "Sent".
+    for (const label of ['Sent', 'Executed', 'Confirmed']) {
+      expect(within(row).queryByText(label)).toBeNull()
+    }
+  })
+
   it('carries the accounting badge beside the status', () => {
     const row = renderRow(
       tx({
@@ -212,7 +222,7 @@ describe('TransactionsLedgerRow — activation', () => {
       { onOpen },
     )
     const badge = within(row).getByTestId('accounting-badge')
-    expect(badge).toHaveTextContent('Not fed')
+    expect(badge).toHaveTextContent('Not sent')
     expect(row.querySelectorAll('a, button, [role="button"], [tabindex]:not([tabindex="-1"])')).toHaveLength(0)
     fireEvent.click(badge)
     expect(onOpen).toHaveBeenCalledTimes(1)

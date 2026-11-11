@@ -309,8 +309,8 @@ has the check and the skip reasons.
 ## Choose The Version
 
 Pass an explicit version string, never a bump type. `scripts/README.md`
-§ *Which version string* has the convention and the one case that departs from
-it — including when you are retrying a failed publish rather than releasing.
+§ *Which version string* has the convention and the cases that depart from
+it — a patch release, and a second cut of a version that was never published.
 Read it there; nothing about the choice lives here.
 
 ## Cut The Bump
@@ -335,44 +335,56 @@ rather than greps. If the guard fires, read what it names.
 
 ## Satisfy The Contract-Doc Gate
 
-**A bump implicates FIVE contract docs.** This step said two until
-2026-09-16, and three until 2026-09-29, when #3454 moved `SIGNER_VERSION` into
-the signer's `tools.ts`, which two more docs cover. The blocking
-`Contract-doc coupling` check fails without all five, and forgetting one is the
-single most common way a release PR goes red.
-Measured rather than remembered — the gate's own answer for the files every
-bump writes:
+**A bump implicates ONE contract doc that needs action: `casp-risk-guardrails.md`,
+cleared by the CASP shard.** This step said five until 2026-11-02, three until
+2026-09-29, and two until 2026-09-16. The five was right for the gate as it
+stood: every bump rewrote `SIGNER_VERSION` in `packages/signer/src/tools.ts` and
+`CONNECTOR_VERSION` in `packages/connect/src/runtime.ts`, so the security model
+and the package-dev-channel doc were implicated by a diff that changed nothing
+but a version string. #4612 removed that — a file whose **entire** diff is
+release-version constants does not implicate a doc.
+
+Measured rather than remembered. Run it over the range a release PR actually
+has; a bare `--changed=` list carries no diff, so it treats every file as
+behavioural and still reports the old five:
 
 ```sh
-node scripts/docs/coupling-gate.mjs --strict \
-  --changed=packages/connect/src/runtime.ts,packages/sdk/package.json,packages/signer/src/tools.ts
-# BLOCKING: 5 contract doc(s) … 04-x402-payment-sequence.md,
-#           mcp-runtime-compatibility.md, package-dev-channel.md,
-#           casp-risk-guardrails.md, delegation-rail-security-model.md
+BASE_SHA=<base> HEAD_SHA=<head> node scripts/docs/coupling-gate.mjs --strict
+# BLOCKING: 1 contract doc(s) cover changed code but were not touched in this PR:
+#   - docs/regulatory/casp-risk-guardrails.md — or add a verification shard …
 ```
 
-Three must be **edited directly** (none carries `satisfied-by:`, so no shard
-clears them); the other two are cleared by the shard you write anyway:
+On a simulated `0.13.1-alpha.0` bump, 13 files partition as *version literal
+only — not implicating*: the six `package.json`s (`cli`, `connect`, `mcp`,
+`mcp-server`, `sdk`, `signer` — `VERSIONED_PACKAGES` is the published five plus
+`mcp-server`), `package-lock.json`, and the six source constants. The one
+blocking doc is `casp-risk-guardrails.md`, implicated by two files:
+`packages/connect/src/runtime-manifest.ts` and `packages/signer/CHANGELOG.md`.
+`runtime-manifest.ts` does **not** partition — its `sdkVersion`/`signerVersion`
+literals are property assignments, not `export const` lines, so they match none
+of the gate's version-line shapes; the CHANGELOG heading is prose, not a version
+literal either.
 
 1. `docs/operations/mcp-runtime-compatibility.md` — the *Supported Runtime
    Manifest* table is re-pinned by the bump (#1790); update its
    `last-verified` date only after reading the table. Record the release's
    verification evidence in the PR and release shard rather than front matter.
-2. `docs/operations/package-dev-channel.md` — **the one the old wording
-   dropped.** The bump rewrites `CONNECTOR_VERSION`
-   (`packages/connect/src/runtime.ts`), which is in this doc's `covers:`, so
-   every release couples it. It was never optional: the 0.1.37, 0.2.0 and
-   0.2.1 releases all touched it, the first two by bumping `last-verified`
-   alone. Prefer a scoped note saying what you actually re-verified — and if
-   `last-verified` already reads today from an earlier change, say so and do
-   NOT re-stamp it, because a rubber-stamped date is worse than a stale one
-   (#1366).
-3. `docs/security/delegation-rail-security-model.md`: the bump rewrites
-   `SIGNER_VERSION` in `packages/signer/src/tools.ts`, which this doc covers.
-   It has no `satisfied-by:`, so add a scoped *Re-verified* note saying that
-   the release's edit to that file is the version literal only. Name any
-   signing-surface change in the range as already re-verified where it merged,
-   or re-verify it now.
+2. `docs/operations/package-dev-channel.md` — **no edit needed.** The bump
+   rewrites `CONNECTOR_VERSION` (`packages/connect/src/runtime.ts`) and
+   `MCP_VERSION` (`packages/mcp/src/server.ts`), both in this doc's `covers:`,
+   and both diffs are version literals only, so the gate partitions them out
+   (#4612). The exception is a release that changes the connector **channel**:
+   `connector-channel.ts` then changes too, that is not a version literal, and
+   the doc is implicated again — edit it, or record the re-read with a
+   `Re-verified-unchanged:` trailer.
+3. `docs/security/delegation-rail-security-model.md` — **no edit needed**, for
+   the same reason: the bump's only edit to `packages/signer/src/tools.ts` is the
+   `SIGNER_VERSION` literal. A release that changes signing behaviour in that
+   file implicates the doc again, and then it needs an edit or a
+   `Re-verified-unchanged: docs/security/delegation-rail-security-model.md @ <sha>`
+   trailer on a commit in the PR. **Name any signing-surface change in the range
+   in the release shard**, which is where a release's real signing-surface
+   changes are recorded.
 4. `docs/regulatory/casp-changelog/YYYY-MM-DD-<version>-release.md` — a new
    shard ending in a perimeter verdict. The **version**, not the PR number
    (#1789): the shard must exist before the PR is opened, because the gate blocks
@@ -380,7 +392,8 @@ clears them); the other two are cleared by the shard you write anyway:
    This shard is what clears `casp-risk-guardrails.md` and
    `docs/architecture/04-x402-payment-sequence.md`, whose front matter both
    declare `satisfied-by: docs/regulatory/casp-changelog/**`. That is why
-   neither needs an edit of its own.
+   neither needs an edit of its own. It is the one hand-written artifact a
+   release PR still owes.
 
 **The shard's Shipped delta figures come from `npm run release:records`, not
 from you.** It prints the file count, the `+/−` line counts, the per-package
@@ -576,12 +589,21 @@ sequence, why a promotion merges with a merge commit rather than a squash, and
 why it merges BEHIND with no sync-back (owner decision, 2026-09-26; since
 2026-10-09 any of the three maintainers merges it — #3798). Do not restate it;
 read it. The one-page operator checklist — every step doable by any of the
-three maintainers — is
+three maintainers, except starting the optional eval step's approval, which
+only the owner can give and which never holds a release — is
 [`docs/operations/release-checklist.md`](../../../docs/operations/release-checklist.md).
 
 **Promotion preflight** — run before opening the promotion PR; each line cost
 0.5.0-alpha.1 (#3325) a round-trip with the owner.
 
+- [ ] **Run the owed-issues selector.** Every issue filed under the `Next release`
+      convention that this promotion carries belongs in the PR body. The selector
+      is defined once in
+      [`branch-and-release-flow.md` § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main)
+      — run it there, do not restate it. For each issue it returns, check that the
+      issue's prerequisite is in `origin/main..origin/dev` and link it from the
+      promotion PR as `Refs #<n>`. An issue whose prerequisite is not in range is
+      carried to the next promotion, with the reason recorded on the issue.
 - [ ] **BEHIND is expected, not noise.** `git rev-list --count origin/dev..origin/main`
       non-zero plus `strict_required_status_checks_policy: true` on `Dev gate`
       (`curl -sS https://api.github.com/repos/d-hinders/Haven-AI/rules/branches/main`)
@@ -596,6 +618,22 @@ three maintainers — is
       a re-run replays the old payload; a label added later takes a
       close/reopen, which is a maintainer decision — any of the three
       (#3798, 2026-10-09) — never an agent's.
+- [ ] **Optional, non-blocking: run the agent evals.** `gh workflow run
+      agent-evals.yml --repo d-hinders/Haven-AI --ref dev -f suite=full
+      -f dev_landing_url=https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+      (or `-f suite=subset`, or `-f tasks=<ids>` for an exact list). That URL
+      is the branch-tracking preview of `dev`, a stable hostname listed in
+      [`dev-environment.md`](../../../docs/operations/dev-environment.md). A
+      full run, or a `tasks` list naming a cold task, needs it: without it the
+      eval CLI exits 2 before the first task, so nothing runs and the owner's
+      approval is wasted. `subset` leaves the cold tasks out, so it can stay
+      empty, though a malformed value still fails the slice step. Only the
+      owner can approve the `agent-evals` environment, and the run never holds
+      the release: it is manual-only, not a required check and not
+      wired into `dev-gate.yml`. A second full run in one budget period exits 3 ("not
+      run") because a full run drains the eval agent's period budget on
+      purpose — wait for the refill before running again. Details:
+      `docs/operations/agent-evals.md` § *Running the suite*.
 - [ ] **Any of the three maintainers merges from the web UI** — the ordinary
       **Merge pull request** button with the merge-commit form; the PR showing
       BEHIND is expected. `gh pr merge --merge` from a terminal works too.
@@ -623,12 +661,20 @@ UI. This PR showing as BEHIND `main` is expected — merge it anyway (no sync-ba
 <one paragraph: the packages/version bumps in range, or "no version bump —
 publishes nothing"; paste `npm run release:scope` output>
 
+## Owed at this release
+
+<one line per issue the selector returned that this promotion carries:
+`Refs #<n>` — <what is owed, and the prerequisite that puts it in range>.
+"None" when the selector returns nothing. An issue carried to the next
+promotion is not listed here; its reason is recorded on the issue.>
+
 ## Preflight
 
 - [ ] `dev` held while this PR is open (no merges to `dev`)
 - [ ] Migrations in range: <list, or "none"> → prod DB snapshot taken before deploy, or "not taken" with any data precondition a migration states run against prod (recommended, not a gate)
 - [ ] Code-owner approval (someone other than the PR author) — migrations in range
 - [ ] Money-flow QA green at this head, or `qa-override` applied at open
+- [ ] Agent evals run (optional, non-blocking) — <run id, or "not run">
 - [ ] Docs staleness audit dispositions recorded on this PR
 
 ## After merge
@@ -636,6 +682,7 @@ publishes nothing"; paste `npm run release:scope` output>
 - [ ] `npm view @haven_ai/<pkg> dist-tags` — all five on `alpha` and `latest`
 - [ ] Closeout log check passed — deployment identity = the merge SHA, both boot markers present, no unset-public-RPC warning (or the manual check recorded)
 - [ ] Real-payment canary
+- [ ] Owed issue #<n>: <the step> — result recorded on the issue, `operator-verify` removed, issue closed (one box per owed issue)
 ```
 
 What it leaves to you:
@@ -685,6 +732,14 @@ checklist; work them there rather than from here. They cover watching the
 Railway and Vercel deploys land, the closeout log check, the prod smoke itself,
 which Vercel hostnames are production and which is the trap, and the rollback
 path.
+
+**The promotion is not closed out while an owed issue is open and not carried.**
+Every issue the promotion PR lists under *Owed at this release* is worked here:
+record the result on the issue, remove `operator-verify` and close it. An issue
+whose prerequisite did not reach prod is carried to the next promotion with the
+reason recorded on the issue — never silently dropped. The convention and its
+selector are defined once in
+[`branch-and-release-flow.md` § *Promotion to production*](../../../docs/contributing/branch-and-release-flow.md#promotion-to-production-dev--main).
 
 **The two log checks are machine-read, and bound to the merge SHA.** Run
 

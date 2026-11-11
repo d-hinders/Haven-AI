@@ -113,8 +113,10 @@ describe('the table is well-formed', () => {
   test('every per-surface CI job has a table entry', () => {
     // The other direction: a job whose package is absent from the table can
     // never be a fan-out target, so a change to what it builds routes nowhere.
+    // `packages` is excluded like `code`/`full`: it is a workspace-wide flag
+    // (#4763), not a package, so it has a job and no table entry by design.
     const jobFlags = OUTPUT_NAMES.filter(
-      (f) => f !== 'code' && f !== 'full' && workflow.includes(`\n  ${f}_checks:\n`),
+      (f) => f !== 'code' && f !== 'full' && f !== 'packages' && workflow.includes(`\n  ${f}_checks:\n`),
     )
     assert.deepEqual([...PACKAGE_JOBS].sort(), jobFlags.sort())
   })
@@ -192,19 +194,21 @@ describe('the fan-out the issue specifies', () => {
     return rule ? [...rule.then].sort() : []
   }
 
-  test('full fans out to every package job', () => {
+  test('full fans out to every package job, plus the workspace-wide cycle pass', () => {
     const full = PROPAGATION_RULES.find((r) => r.when.includes('full'))
     assert.deepEqual(
       [...full.then].sort(),
-      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'ops', 'qa_agent', 'sdk', 'signer', 'ui'],
+      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'ops', 'packages', 'qa_agent', 'sdk', 'signer', 'ui'],
     )
   })
 
-  test('sdk fans out to backend, connect, mcp, mcp_server, signer and qa_agent', () => {
+  test('sdk fans out to backend, connect, demo_merchant, mcp, mcp_server, signer and qa_agent', () => {
     // qa_agent joined in #3005 — the QA harness's tests import the SDK and its
     // job runs those tests, exactly the shape that put mcp_server here in
-    // #2348.
-    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'signer'])
+    // #2348. demo_merchant joined in #4723: the demo merchant imports the SDK's
+    // merchant-side passport verifier at runtime, and demo_merchant_checks runs
+    // its suite.
+    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'demo_merchant', 'mcp', 'mcp_server', 'qa_agent', 'signer'])
   })
 
   test('mcp fans out to connect AND mcp_server', () => {

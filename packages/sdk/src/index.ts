@@ -6,9 +6,37 @@ export { signHash,
 export { verifyPaymentReceipt, RECEIPT_VERSION } from './receipt.js'
 export type { PaymentReceipt, ReceiptVerification } from './receipt.js'
 
+// #4723 (epic #4718): the merchant-side Agent Passport verifier. Named apart
+// from the PAYMENT receipt exports above (`RECEIPT_VERSION` is
+// `haven-receipt-1`; `ReceiptVerification` is the payment receipt's) so the two
+// vocabularies cannot be confused at a call site.
+export {
+  PASSPORT_RECEIPT_VERSION,
+  PASSPORT_CHECK_TIMEOUT_MS,
+  canonicalizePassportReceipt,
+  verifyPassportReceiptSignature,
+  verifyPassportReceipt,
+  checkPassport,
+} from './passport.js'
+export type {
+  PassportReceipt,
+  SignedPassportReceipt,
+  PassportStanding,
+  PassportAnchorState,
+  PassportControlSummary,
+  PassportSignatureReason,
+  PassportSignatureVerification,
+  PassportCheckReason,
+  PassportCheckResult,
+  PassportVerifyBody,
+  PassportReference,
+  PassportVerifyOptions,
+  CheckPassportOptions,
+} from './passport.js'
+
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
 export { catalogFundingLegExpected, type CatalogFundingLegHint } from './catalog-funding-leg.js'
-export type { ToolDescription, SharedToolKey } from './tool-descriptions.js'
+export type { ToolDescription, SharedToolKey, McpSurface } from './tool-descriptions.js'
 
 export { HAVEN_SKILL_MD, HAVEN_SKILL_BODY_MD, SKILL_FOLDER_NAME } from './skill-content.js'
 export {
@@ -136,6 +164,7 @@ export type {
   MachinePaymentRail,
   HavenAgent,
   HavenAgentSupersession,
+  HavenAgentPassport,
   HavenAgentSummary,
   HavenAgentAllowanceSummary,
   HavenAgentReadiness,
@@ -195,6 +224,10 @@ export {
   toStandardPaymentRequirements,
   x402AuthorizationAmount,
   x402V2PaymentEnvelope,
+  HAVEN_PASSPORT_EXTENSION,
+  advertisesHavenPassport,
+  withHavenPassportExtension,
+  type HavenPassportExtensionFields,
   // #3727: the live header-name rule and the ready-made retry headers built
   // from it.
   x402PaymentHeaderNamesFor,
@@ -238,7 +271,8 @@ export type { EvidenceReportOutcome } from './merchant-completion.js'
 export { isZeroSettlementTxHash } from './merchant-completion.js'
 // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses —
 // it takes `transaction` (or its aliases) only and never surfaces `payer`.
-export { parseMerchantSettlement } from './merchant-completion.js'
+// #4763: it lives in merchant-answer.ts, the leaf both sides can import.
+export { parseMerchantSettlement } from './merchant-answer.js'
 // #3888: the shared EIP-3009 nonce derivation (also on the edge surface).
 export { deriveX402PaymentNonce, X402_PAYMENT_NONCE_TAG } from './x402-nonce.js'
 export {

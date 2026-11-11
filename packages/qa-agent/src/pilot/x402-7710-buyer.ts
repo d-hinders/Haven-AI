@@ -52,7 +52,6 @@ import { createx402DelegationProvider } from '@metamask/smart-accounts-kit/exper
 import { x402Erc7710Client } from '@metamask/x402'
 import { wrapFetchWithPayment, x402Client, decodePaymentResponseHeader } from '@x402/fetch'
 import type { Network, SchemeNetworkClient } from '@x402/core/types'
-import { pathToFileURL } from 'node:url'
 
 /**
  * Chain selection (#1458): everything chain-specific lives in one row so a
@@ -329,11 +328,25 @@ async function main(): Promise<void> {
   console.log('   paste the tx link on #452.')
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// test) never runs the CLI. Both paths are resolved before they are compared:
+// Node resolves symlinks for a module's own URL and not for `process.argv[1]`,
+// so an unresolved comparison is false through any symlink (#4776, #4786).
+function isEntryPoint(): boolean {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // Import-safe: the unit test imports `createPilotClient` from this module, and
 // a module-scope `main()` would run the whole pilot (env reads, RPC, bundler)
 // on import.
-const isEntrypoint =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+const isEntrypoint = isEntryPoint()
 
 if (isEntrypoint) {
   main().catch((e) => {

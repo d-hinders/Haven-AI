@@ -567,6 +567,23 @@ export const NOT_GATE_RULES = Object.freeze([
 export const DB_SKIP_MARKER = /real-DB suites SKIPPED/i
 
 /**
+ * The backend harness's own signal that the ops read-only role suite (#3510)
+ * did not run because the database role cannot create roles (#4767).
+ *
+ * A second, narrower skip than `DB_SKIP_MARKER`: the database IS reachable and
+ * every other real-DB suite ran, but this one needs `CREATEROLE` (or a
+ * superuser) and a native/Homebrew server usually does not grant it. Listed
+ * apart from the green count for the same reason the real-DB skip is — a skip
+ * is not a pass, and folding it into `✓ N gate(s) green` is how a builder
+ * concludes the grants were proven when they were not.
+ *
+ * Exported and case-insensitive so the coupling is CHECKABLE: a test asserts
+ * this matches the literal in `db-availability.ts`, because a reword there
+ * would otherwise make this detector silently stop detecting.
+ */
+export const OPS_ROLE_SKIP_MARKER = /ops-role suites SKIPPED/i
+
+/**
  * Cap on the output a gate may emit before the harness stops reading it.
  *
  * Node's default `maxBuffer` for `spawnSync`/`execFile*` is 1 MiB, and the
@@ -1192,10 +1209,11 @@ export async function runBattery(
   const redAlone = results.filter((r) => r.queued && !r.rerun.ok)
   const greenAlone = results.filter((r) => r.queued && r.rerun.ok)
   const skippedDb = results.filter((r) => DB_SKIP_MARKER.test((r.rerun ?? r).output ?? ''))
+  const skippedOpsRole = results.filter((r) => OPS_ROLE_SKIP_MARKER.test((r.rerun ?? r).output ?? ''))
   let code = EXIT.GREEN
   if (red.length > 0 || redAlone.length > 0) code = EXIT.RED
   else if (greenAlone.length > 0) code = EXIT.RED_UNDER_LOAD
-  return { code, results, red, redAlone, greenAlone, skippedDb }
+  return { code, results, red, redAlone, greenAlone, skippedDb, skippedOpsRole }
 }
 
 const describeLoad = (attempted) => `${attempted.load.toFixed(2)} on ${attempted.cpus} CPU(s)`
@@ -1229,7 +1247,7 @@ export function timeoutEvidence(output, { maxLines = 8, tailLines = 5, maxWidth 
  * The end-of-run summary as `{ out, err }` line arrays, so the test reads the
  * text the builder reads.
  */
-export function summarize({ code, results, red, redAlone, greenAlone, skippedDb }, { staticOnly = false } = {}) {
+export function summarize({ code, results, red, redAlone, greenAlone, skippedDb, skippedOpsRole = [] }, { staticOnly = false } = {}) {
   const out = []
   const err = []
   const tail = (output) => (output ?? '').split('\n').slice(-25).join('\n')
@@ -1336,6 +1354,24 @@ export function summarize({ code, results, red, redAlone, greenAlone, skippedDb 
         '! real-DB files did not execute; CI has a database and will run them.\n' +
         '! `docker compose up -d postgres`, then re-run, before calling this green.',
       ...skippedDb.map((r) => `!   ${r.command}`),
+    ]
+    ;(code === EXIT.GREEN ? out : err).push(...lines)
+  }
+
+  // The ops read-only role suite (#3510) needs a database role that can
+  // `CREATE ROLE`. `docker compose up -d postgres` provides one; a native or
+  // Homebrew server usually does not, and there the suite skips with a stated
+  // reason instead of reddening 20 tests for an environment reason (#4767).
+  // Listed APART from the green count, like the real-DB skip above: a skip is
+  // not a pass, and it never changes the exit code.
+  if (code !== EXIT.RED && skippedOpsRole.length > 0) {
+    const lines = [
+      `\n! ${skippedOpsRole.length} gate(s) reported "ops-role suites SKIPPED" — the database\n` +
+        '! role cannot create roles (needs CREATEROLE or superuser). The ops read-only\n' +
+        '! role suite (#3510) did not execute; CI runs the compose service, where `haven`\n' +
+        '! is POSTGRES_USER and therefore a superuser, and will run it. `docker compose\n' +
+        '! up -d postgres`, then re-run, before calling this green.',
+      ...skippedOpsRole.map((r) => `!   ${r.command}`),
     ]
     ;(code === EXIT.GREEN ? out : err).push(...lines)
   }
@@ -1539,7 +1575,23 @@ function reportRulesetComparison(plan) {
   )
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((error) => {

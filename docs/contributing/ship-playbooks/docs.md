@@ -19,17 +19,4 @@ Loaded by `ship-next` for `area:docs` issues, and for any diff touching code tha
 - **No test assertions over freeform prose ([#2163](https://github.com/d-hinders/Haven-AI/issues/2163)).** Guard the code that *generates* agent-facing text; for hand-maintained prose, a blanket `not.toContain(<literal>)` is acceptable where the file has no legitimate use of the literal. An assertion that must *interpret a sentence* is out of scope — human review is the control there. The line is prose-interpretation, not string-matching: this is never a licence to drop cheap literal guards. Full rule, its stopping-rule sibling, and the evidence: [ship-next § Rework caps](../../../.agents/skills/ship-next/SKILL.md#rework-caps-2163).
 - **haven-doc-reviewer (hard step).** Running it after implementation is a definition-of-done step, not optional, and the `covers:`-implicated files are the floor, not the scope (#2499) — the pass derives its scope from the diff's claims and sweeps files no `covers:` map reaches: review and update the implicated docs in the same PR before opening it (see [Independent Review](../../../.agents/skills/ship-next/SKILL.md#independent-review)).
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: the front-matter line names the one exemption `docs:check` makes —
-> the CASP changelog shards (`scripts/docs/validate-frontmatter.mjs`,
-> `docFilesFrom`, #1366). Re-checked without change: the `docs:check`,
-> `docs:test` and `docs:coupling` scripts (`package.json`; the bare
-> `coupling-gate.mjs` exits 0, `--strict` is the CI form), the ship-next
-> Acceptance Gate, Independent Review and Rework caps (#2163) anchors, the
-> #4174 custody carve-out, #2323, #2681, #2499, and the Monday weekly audit
-> (`.github/workflows/docs-audit.yml`).
->
-> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** The front-matter
-> line is reworded so it cannot read as exempting the gravity files: they
-> carry front matter (`AGENTS.md`, `CLAUDE.md`; `validate-frontmatter.mjs`
-> checks them), and only the shards are exempt.
+Historical verification records for this document are kept in the [archive](../../archive/re-verification-notes-2026-11.md).

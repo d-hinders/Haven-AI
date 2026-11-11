@@ -9,7 +9,7 @@ covers:
   - scripts/ci/vocabulary-map.json
   - scripts/ci/vocabulary-divergence.mjs
   - packages/sdk/src/payment-mappers.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # CLI `--json` conventions
@@ -112,7 +112,6 @@ Result commands emit `{ "ok": true, … }` with snake_case identifiers:
 ```json
 { "ok": true, "agent_id": "…", "status": "revoked" }
 { "ok": true, "account_id": "…", "name": "…" }
-{ "ok": true, "contact_id": "…", "removed": true }
 { "ok": true, "signed_out": true }
 ```
 
@@ -251,7 +250,7 @@ entry there that *is* enforced, and the section says so.)
 Three things make that claim hold rather than merely sound right:
 
 - The census keys on the **literal**, not on a `{ "ok": true` prefix. Seven of
-  the eighteen emitters carry no `ok` key at all — `wallets balances`,
+  the seventeen emitters carry no `ok` key at all — `wallets balances`,
   `whoami`, both prepared-action emits, `agents connect --run` and the two
   `activity export` branches — so a prefix-keyed census could not see them, and
   it could not see a literal wrapped across lines either, which is how the
@@ -295,23 +294,6 @@ refusals exit 4. `output.ts`'s `failure()`
 spreads them BEFORE the shared fields, so a command's own fields can never
 shadow `code`, `message` or `hint`.
 
-Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). No claim
-needed rewriting. `npm run lint:vocabulary` exits green at this head with the
-same census the doc describes (31 receipt fields, 35 transaction fields, 11
-declared concepts, 0 open, 17 CLI envelope emitters). Re-read in code: the
-`wallets balances` `chainId` re-map is still the one CLI-chosen casing on a
-forwarded value (`commands.ts` `emit(d, …, { …, chainId: safe.chain_id, … })`);
-the auth envelope's mixed `expires_at` beside `apiBaseUrl`, the pure-snake
-`--no-wait` device envelope, `guide`'s `{ ok, format: 'markdown', content }`,
-`agents connect --run`'s `connector_command`/`connector_exit_code`/`relay`
-snake result, and the grant/revoke prepared-action key sets are all verbatim
-as documented; the CSV header row is unchanged (all twelve names, in order);
-the `safe_address` permanent fallback in the connector's doctor
-(`doctor.ts` `has('safe_address')` path) is as written. The covered-file
-commits since the last verification touched no envelope: `#3415` changed
-upgrade-hint TEXT only, and the 0.7.0-alpha.0 release bump is the version
-constant.
-
 **#3597 (2026-10-02).** `feedback submit`'s secret-check refusal is the
 first command to add typed fields (`layer`, `reason`) beside the shared
 failure shape — the two paragraphs above now say a command may do this, and
@@ -320,27 +302,4 @@ command's `extra` BEFORE `code`/`message`/`hint`, not after). No other
 envelope in this document changed. `last-verified` is not bumped: this is a
 scoped addition, not a re-read of the whole document.
 
-Re-verified 2026-10-19 (weekly docs audit #3645, at dev `cf88627c`).
-`npm run lint:vocabulary` is green with 31 receipt fields, 40 transaction
-fields, 11 declared concepts, 0 open and 18 CLI envelope emitters. Changed:
-the census counts eighteen emitters (`cmdFeedbackSubmit`, #3597); the revoke
-envelope's `live_delegations` (#3729) and `feedback submit`'s envelope are
-documented; the device flow's ok-less pending object (exit 3) is documented;
-the five `Transaction` fields added since (#3763, #3778, #3824) are named;
-and the failure section lists the two further typed refusals (#3729, #3933).
-Run here: `haven guide --json` (the `{ ok, format, content }` envelope) and
-`whoami --json` / `activity list --json` signed out (the failure shape, exit
-3). Re-read in code and unchanged: the `wallets balances` re-map, the auth
-literals, the grant/revoke key sets, the CSV header row, and the doctor's
-`safe_address` fallback.
-
-Re-verified 2026-10-25 (#4372 part H, at dev `e778da444`). `npm run
-lint:vocabulary` is green with 31 receipt fields, 42 transaction fields, 11
-declared concepts, 0 open and 18 CLI envelope emitters. Changed: the two
-`Transaction` fields #4319 added (`settlementTracking`, `settlementProof`) are
-named, so the count above is seven. Since `cf88627c` the only change to
-`commands.ts` is the `CLI_VERSION` constant, and `output.ts` and `doctor.ts`
-are unchanged, so every envelope, key set, the CSV header row, the
-`wallets balances` re-map and the doctor's `safe_address` fallback stand as
-the 2026-10-19 read left them. The seven no-`ok` emitters were re-counted
-from the map's `cliConventions.envelopes`.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

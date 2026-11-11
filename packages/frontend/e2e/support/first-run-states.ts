@@ -9,9 +9,14 @@
  * default is the FINISHED state (funded, set up, first payment made), which
  * is why these overlays exist — `hasFirstAgentPayment: true` is never
  * pre-seeded for the earlier states.
+ *
+ * #4707: the finished state's milestone is its OWN card now, fed by
+ * `GET /dashboard/first-agent-payment`. Every state serves that route: the row
+ * for `set-up`, `null` for the rest (a user who has not paid has no row, and
+ * the card renders nothing for `null`).
  */
 import type { Page, Route } from '@playwright/test'
-import { dashboardOverview } from '../fixtures/haven-api'
+import { dashboardFirstAgentPayment, dashboardOverview } from '../fixtures/haven-api'
 
 export type FirstRunState = 'no-funds' | 'funded' | 'agent-needs-setup' | 'agent-set-up' | 'set-up'
 
@@ -57,6 +62,11 @@ export function firstRunOverview(state: FirstRunState) {
   }
 }
 
+/** The first-agent-payment row for a state — the row only once setup is done. */
+export function firstRunFirstAgentPayment(state: FirstRunState) {
+  return state === 'set-up' ? dashboardFirstAgentPayment : { payment: null }
+}
+
 /** Serves `/dashboard/overview` for whatever `current()` returns at request time. */
 export async function serveFirstRunOverview(page: Page, current: () => FirstRunState) {
   await page.route('**/api/dashboard/overview**', async (route: Route) => {
@@ -64,6 +74,15 @@ export async function serveFirstRunOverview(page: Page, current: () => FirstRunS
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(firstRunOverview(current())),
+    })
+  })
+  // #4707: the milestone card's own read. Served for every state so the
+  // dashboard never falls through to the unmocked-route 599.
+  await page.route('**/api/dashboard/first-agent-payment**', async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(firstRunFirstAgentPayment(current())),
     })
   })
 }

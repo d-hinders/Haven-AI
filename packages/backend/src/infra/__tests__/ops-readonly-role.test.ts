@@ -5,11 +5,19 @@
  * The script is applied to this worker's schema under a per-worker role name
  * (roles are cluster-wide; schemas are per worker). The role is NOLOGIN here,
  * so every "as the role" check runs inside a transaction after `SET ROLE`.
+ *
+ * `describeOpsRole`, not `describeDb`: the script issues `CREATE ROLE` and
+ * `ALTER ROLE`, so the suite needs a database role that can create roles. The
+ * compose service's `haven` is `POSTGRES_USER` and therefore a superuser; a
+ * native/Homebrew server usually is not, and there the suite skips with a
+ * stated reason instead of reddening 20 tests for an environment reason
+ * (#4767). In CI it FAILS rather than skips — see `decideRoleMode` in
+ * `helpers/db-availability.ts`.
  */
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../db.js'
-import { describeDb, initDbHarness, resetDb } from './helpers/db-harness.js'
+import { describeOpsRole, initDbHarness, resetDb } from './helpers/db-harness.js'
 import { workerSchemaName } from './helpers/worker-schema.js'
 import {
   buildOpsReadonlyRoleSql,
@@ -110,7 +118,7 @@ const ALLOWLIST = Object.entries(OPS_READONLY_GRANTS)
   .flatMap(([table, cols]) => cols.map((c) => `${table}.${c}`))
   .sort()
 
-describeDb('ops read-only role (#3510)', () => {
+describeOpsRole('ops read-only role (#3510)', () => {
   beforeAll(async () => {
     await initDbHarness()
   })

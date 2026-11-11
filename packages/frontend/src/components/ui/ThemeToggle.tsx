@@ -32,10 +32,10 @@
  * ## The animation honours the preference
  *
  * The icon swap cross-fades under `prefers-reduced-motion: no-preference` and
- * snaps under `reduce`, following the `.animate-check-pop` /
- * `.animate-pending-pulse` idiom: the keyframes live in `globals.css` behind
- * the media query, and the component does not even opt in to the class when
- * the OS says reduce (belt and braces). The preference is read on mount and
+ * snaps under `reduce`, following the `ui/Milestone` / `.animate-pending-pulse`
+ * idiom: the keyframes live in `globals.css` behind the media query, and the
+ * component does not even opt in to the class when the OS says reduce (belt
+ * and braces). The preference is read on mount and
  * tracked through the MediaQueryList's `change` event, the same way
  * `ThemeContext` tracks `prefers-color-scheme`, so a live flip in the OS
  * panel updates the swap without a reload.

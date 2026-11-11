@@ -30,13 +30,14 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   TransactionActivityDayHeader,
   transactionDayGroups,
-  transactionDayKey,
 } from '@/components/haven'
+import { dayKeyInZone } from '@/lib/format'
 import { Row } from '@/components/ui/Row'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Skeleton } from '@/components/ui/Skeleton'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListCount, ListNoun } from '@/components/ui/list-controls-copy'
@@ -54,7 +55,7 @@ import {
 } from '@/hooks/useAgentActivity'
 import { api } from '@/lib/api'
 import { errorCodeLabel, toolCallLabel } from '@/lib/tool-call-labels'
-import { timeAgo } from '@/lib/format'
+import { formatClockTime } from '@/lib/format'
 import { periodToBounds } from './AgentActivityTab'
 
 interface AgentToolCallsTabProps {
@@ -124,7 +125,7 @@ export interface ToolCallRun {
  * Fold consecutive same-tool, same-result, same-day calls into one row. The
  * feed is newest-first, so the run's representative is its most recent call
  * and its timestamp is what the row shows. A run breaks on tool, result, OR
- * day — the day key is the day bands' own (`transactionDayKey`), so the fold
+ * day — the day key is the day bands' own (`dayKeyInZone`), so the fold
  * and the bands can never disagree about what "same day" means.
  */
 export function foldToolCallRuns(
@@ -137,7 +138,7 @@ export function foldToolCallRuns(
       current &&
       current.item.tool_name === item.tool_name &&
       current.item.result_status === item.result_status &&
-      transactionDayKey(current.item.created_at) === transactionDayKey(item.created_at)
+      dayKeyInZone(current.item.created_at) === dayKeyInZone(item.created_at)
     ) {
       current.count += 1
     } else {
@@ -281,8 +282,8 @@ export default function AgentToolCallsTab({
               {[0, 1, 2].map((index) => (
                 <div key={index} className="flex items-center gap-3 px-5 py-3.5">
                   <div className="min-w-0 flex-1">
-                    <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                    <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
+                    <Skeleton variant="text" className="h-3.5 w-40" />
+                    <Skeleton variant="text" className="mt-1.5 h-2.5 w-56" />
                   </div>
                 </div>
               ))}
@@ -290,8 +291,9 @@ export default function AgentToolCallsTab({
           ) : error ? (
             <div className="p-6">
               <EmptyState
+                bare
                 title="Tool calls could not load"
-                body={error}
+                body="This agent's tool-call log is unchanged."
                 className="py-8"
                 action={
                   <Button variant="ghost" size="sm" onClick={() => void refresh()}>
@@ -305,6 +307,7 @@ export default function AgentToolCallsTab({
             // being empty is a fact about the agent, not a dead surface.
             <div className="p-6" data-testid="tool-calls-empty">
               <EmptyState
+                bare
                 title="No tool calls"
                 body="When this agent's MCP runtime calls Haven, each call shows here."
                 className="py-8"
@@ -411,7 +414,9 @@ function ToolCallRow({
           {badged ? (
             <StatusBadge tone={resultTone(item.result_status)}>{item.result_status}</StatusBadge>
           ) : null}
-          <span className="text-xs text-[var(--v2-ink-3)]">{timeAgo(item.created_at)}</span>
+          {/* #4572: the row sits under a day band, so it shows the clock
+              time — the band already states the day. */}
+          <span className="text-xs text-[var(--v2-ink-3)]">{formatClockTime(item.created_at)}</span>
         </span>
       }
       className={

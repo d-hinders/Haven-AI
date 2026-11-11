@@ -30,7 +30,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
     <>
       {flow.hasMultipleAccounts && (
         <div>
-          <label htmlFor="connect-agent-safe" className="mb-1.5 block text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">
+          <label htmlFor="connect-agent-safe" className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">
             Spend from
           </label>
           <Select
@@ -49,7 +49,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       )}
 
       <div>
-        <p className="mb-1.5 text-xs uppercase tracking-wide text-[var(--v2-ink-3)]">Agent budget</p>
+        <p className="mb-1.5 block text-sm font-medium text-[var(--v2-ink)]">Agent budget</p>
         <div className="grid grid-cols-3 gap-2">
           <div
             aria-label="Budget token"
@@ -91,13 +91,19 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
       /* ink-2, NOT ink-3: the label sits one tier above the step's ink-3
           eyebrow and summary line — an on-chain attestation is a decision,
           not a footnote (design review, #1411). */}
-      <Checkbox
-        checked={flow.issuePassport}
-        onChange={(event) => flow.setIssuePassport(event.target.checked)}
-        className="py-1 text-xs text-[var(--v2-ink-2)]"
-        label="Issue an Agent Passport"
-        disabled={flow.creating}
-      />
+      {/* #4719: offered only where this deployment can issue the selected
+          wallet's agents a passport a merchant can verify (the session
+          payload's `passport_issuable`). Elsewhere the box is not rendered at
+          all — an opt-in the backend would drop is not a choice. */}
+      {flow.passportIssuable ? (
+        <Checkbox
+          checked={flow.issuePassport}
+          onChange={(event) => flow.setIssuePassport(event.target.checked)}
+          className="py-1 text-xs text-[var(--v2-ink-2)]"
+          label="Issue an Agent Passport"
+          disabled={flow.creating}
+        />
+      ) : null}
 
       {/* #3688: the confirmation the deleted ReviewStep carried, as one
           always-mounted summary line — #1381 forbids anything mounting below
@@ -143,7 +149,7 @@ export function PolicyStep({ flow }: { flow: AgentConnectionSetupFlow }) {
           }
           className="flex-1"
         >
-          {flow.creating ? 'Creating setup...' : 'Create setup prompt'}
+          {flow.creating ? 'Creating setup…' : 'Create setup prompt'}
         </Button>
       </DialogActions>
     </>

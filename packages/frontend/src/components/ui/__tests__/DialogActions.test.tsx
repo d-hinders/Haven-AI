@@ -23,4 +23,38 @@ describe('DialogActions', () => {
     const buttons = screen.getAllByRole('button')
     expect(buttons.map((b) => b.textContent)).toEqual(['Back', 'Create setup prompt'])
   })
+
+  // The Set budget dialog passed a ghost Cancel without `flex-1`: 78px beside
+  // a 308px primary at 1288px. The equal split is the component's, not each
+  // caller's, so a bare Button child still gets it.
+  it('gives every child an equal share from sm up, even one without flex-1', () => {
+    render(
+      <DialogActions>
+        <Button variant="ghost">Cancel</Button>
+        <Button>Set budget</Button>
+      </DialogActions>,
+    )
+    const row = screen.getByRole('button', { name: 'Cancel' }).parentElement!
+    expect(row).toHaveClass('sm:[&>*]:flex-1')
+    expect(screen.getByRole('button', { name: 'Cancel' })).not.toHaveClass('flex-1')
+  })
+
+  // In Modal's footer — a `justify-end` flex row — a pair with no width of its
+  // own shrank to its content: the /design-system alternative-footer demo
+  // never showed equal halves. A minimum, so a negative-margin outdent still
+  // widens it (ROW_FOOTER_OUTDENT_CLASS). jsdom does no layout, so this pins
+  // the class; the wrapper only mirrors Modal's footer for the reader.
+  it('spans the full width of a flex-row footer without a caller className', () => {
+    render(
+      <div className="flex justify-end">
+        <DialogActions>
+          <Button variant="ghost">Cancel</Button>
+          <Button>Save budget</Button>
+        </DialogActions>
+      </div>,
+    )
+    const row = screen.getByRole('button', { name: 'Cancel' }).parentElement!
+    expect(row).toHaveClass('min-w-full')
+    expect(row).not.toHaveClass('w-full')
+  })
 })

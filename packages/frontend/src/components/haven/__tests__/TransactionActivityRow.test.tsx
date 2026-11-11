@@ -1,13 +1,14 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
+  TransactionActivityRowSkeleton,
   transactionDayGroups,
-  transactionDayKey,
   transactionDayLabel,
 } from '../TransactionActivityRow'
+import { dayKeyInZone } from '@/lib/format'
 
 /**
  * Ledger mode (#4096, epic #4093): the row opens the detail panel from a
@@ -88,6 +89,42 @@ describe('TransactionActivityRow same-day divider (#4165)', () => {
   })
 })
 
+describe('TransactionActivityRow phone layout (#4572)', () => {
+  it('places the amount on the title row and the timestamp on the description row', () => {
+    const { container } = renderRow({ density: 'compact', timestamp: '14:05' })
+    const row = container.firstElementChild as HTMLElement
+    // One grid, three columns: mark | text | amount.
+    expect(row.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
+    // The text and amount blocks dissolve below `sm` (`display: contents`), so
+    // their children become grid items of the row itself — that is what lets
+    // the amount sit on the title line and the time on the description line.
+    expect(row.querySelectorAll('.contents')).toHaveLength(2)
+    const amount = screen.getByText('12.00 USDC').closest('p')!
+    expect(amount.className).toContain('row-start-1')
+    const time = screen.getByText('14:05')
+    expect(time.className).toContain('row-start-2')
+  })
+
+  it('puts badges on a subordinate line below `sm`, back on the title line at `sm`', () => {
+    const { container } = renderRow({ status: 'Pending', countLabel: '×3' })
+    const badgeLine = container.querySelector('.w-full')
+    expect(badgeLine, 'the badges should share one subordinate line').not.toBeNull()
+    // `sm:contents` restores the pre-#4572 desktop title line exactly.
+    expect(badgeLine!.className).toContain('sm:contents')
+    expect(badgeLine!.textContent).toContain('×3')
+    expect(badgeLine!.textContent).toContain('Pending')
+  })
+
+  it('keeps the title truncating rather than pushing the amount down', () => {
+    const { container } = renderRow({ density: 'compact' })
+    const title = container.querySelector('p')!
+    expect(title.className).toContain('truncate')
+    // `flex-1` below `sm` (fill the title line), the flex default at `sm`+.
+    expect(title.className).toContain('flex-1')
+    expect(title.className).toContain('sm:flex-initial')
+  })
+})
+
 describe('transactionDayGroups', () => {
   const today = new Date()
   const iso = (date: Date) => date.toISOString()
@@ -116,16 +153,16 @@ describe('transactionDayGroups', () => {
     ]
     const groups = transactionDayGroups(items, (item) => item.at)
     expect(groups.map((group) => group.dayKey)).toEqual([
-      transactionDayKey(iso(today)),
-      transactionDayKey(iso(lastWeek)),
-      transactionDayKey(iso(yesterday)),
+      dayKeyInZone(iso(today)),
+      dayKeyInZone(iso(lastWeek)),
+      dayKeyInZone(iso(yesterday)),
     ])
   })
 })
 
 describe('transactionDayLabel', () => {
   it('names today, yesterday, and older days by short date', () => {
-    const format = (date: Date) => transactionDayKey(date.toISOString())
+    const format = (date: Date) => dayKeyInZone(date.toISOString())
     const today = new Date()
     const yesterday = new Date(today)
     yesterday.setDate(today.getDate() - 1)
@@ -189,5 +226,137 @@ describe('TransactionActivityRow move direction (#4264)', () => {
       fiat: { amount: 12, currency: 'SEK' },
     })
     expect(container.querySelector('span.v2-tabular')!.textContent).toMatch(/^[-+\u2212]/)
+  })
+})
+
+/**
+ * The ledger-row placeholder (#4568) — one shape, four call sites, two
+ * densities. The compact variant is the dashboard preview's, and the two
+ * properties that make it a different shape are pinned here: the amount
+ * placeholder and the 72px desktop height (#1833).
+ */
+describe('TransactionActivityRowSkeleton (#4568)', () => {
+  it('comfortable is the icon square and two bars, with no amount column', () => {
+    const { container } = render(<TransactionActivityRowSkeleton />)
+    const row = container.firstElementChild!
+    expect(row.className).toContain('flex')
+    expect(row.className).toContain('px-5')
+    expect(row.className).toContain('py-3.5')
+    // The dashboard's grid and height pin belong to the compact variant only.
+    expect(row.className).not.toContain('sm:h-[72px]')
+    expect(row.className).not.toContain('sm:grid-cols-[minmax(0,1fr)_auto]')
+
+    const blocks = row.querySelectorAll('[aria-hidden="true"]')
+    expect(blocks).toHaveLength(3)
+    expect(blocks[0].className).toContain('h-9')
+    expect(blocks[0].className).toContain('w-9')
+    expect(blocks[0].className).toContain('rounded-[10px]')
+    expect(blocks[1].className).toContain('h-3.5')
+    expect(blocks[2].className).toContain('h-2.5')
+  })
+
+  it('compact keeps the responsive grid and the 72px desktop height', () => {
+    const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
+    const row = container.firstElementChild!
+    expect(row.className).toContain('grid')
+    // #4572: the same three-column grid the loaded row uses — mark, text,
+    // amount — so the amount placeholder rides the title line below `sm`.
+    expect(row.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
+    expect(row.className).toContain('sm:items-center')
+    expect(row.className).toContain('sm:h-[72px]')
+    // Below `sm` the row sizes to its content — the same breakpoint scope the
+    // loaded row uses, so the two never disagree about where the pin applies.
+    expect(row.className).toContain('py-3')
+    expect(row.className).toContain('sm:py-0')
+  })
+
+  it('compact adds the amount placeholder the ledgers do not have', () => {
+    const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
+    const row = container.firstElementChild!
+    const blocks = row.querySelectorAll('[aria-hidden="true"]')
+    // mark + title bar + amount placeholder + description bar.
+    expect(blocks).toHaveLength(4)
+    const amount = blocks[2]
+    expect(amount.className).toContain('h-4')
+    expect(amount.className).toContain('w-24')
+    expect(amount.className).toContain('sm:justify-self-end')
+    // #4572: the amount placeholder sits on the title row, the description bar
+    // on the second band — the loaded row's two-band phone shape.
+    expect(amount.className).toContain('row-start-1')
+    expect(blocks[3].className).toContain('row-start-2')
+  })
+
+  it('every block is a Skeleton — no inline animate-pulse div survives', () => {
+    const { container } = render(<TransactionActivityRowSkeleton density="compact" />)
+    const blocks = container.querySelectorAll('[aria-hidden="true"]')
+    for (const block of blocks) {
+      expect(block.className).toContain('animate-pulse')
+      expect(block.className).toContain('bg-[var(--v2-surface-2)]')
+    }
+  })
+})
+
+/**
+ * #4708: the row gains the means to play Live, opt-in. The caller decides
+ * WHEN (the shared `lib/live-rows` comparison); the row only forwards it to
+ * `Milestone`, which owns what playing looks like and drops the class under
+ * `prefers-reduced-motion: reduce`.
+ *
+ * The suite-wide stub answers `reduce`, so both answers are exercised
+ * explicitly — the point is that the class is absent under `reduce`, and that
+ * is only visible if the no-preference case is rendered too.
+ */
+function setReducedMotion(reduce: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: reduce && query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+}
+
+afterEach(() => {
+  // Restore the suite-wide stub so a later file is not left on no-preference.
+  setReducedMotion(true)
+})
+
+describe('TransactionActivityRow Live (#4708)', () => {
+  it('plays the row fade when live is set and motion is allowed', () => {
+    setReducedMotion(false)
+    const { container } = renderRow({ live: true })
+    expect(container.querySelector('.v2-animate-live')).not.toBeNull()
+  })
+
+  it('plays nothing under prefers-reduced-motion: reduce — the class is absent', () => {
+    setReducedMotion(true)
+    const { container } = renderRow({ live: true })
+    expect(container.querySelector('.v2-animate-live')).toBeNull()
+    // The row itself still renders, in its final state.
+    expect(screen.getByText('api.vendor.com')).toBeInTheDocument()
+  })
+
+  it('is opt-in: a row without the prop never plays, even with motion allowed', () => {
+    setReducedMotion(false)
+    const { container } = renderRow()
+    expect(container.querySelector('.v2-animate-live')).toBeNull()
+  })
+
+  it('keeps the row a block-level element — the wrapper is a div, not a span', () => {
+    setReducedMotion(false)
+    const { container } = renderRow({ live: true })
+    const wrapper = container.firstElementChild as HTMLElement
+    expect(wrapper.tagName).toBe('DIV')
+    expect(wrapper.className).toContain('relative')
+    expect(wrapper.className).toContain('block')
+    // The row's own grid is inside it, unchanged.
+    expect(wrapper.firstElementChild?.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
   })
 })

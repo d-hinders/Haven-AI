@@ -49,7 +49,14 @@
  * role — the same rule `PASSPORT_SCHEMA_REGISTRAR_KEY` follows.
  */
 
-import { Wallet, verifyMessage } from 'ethers'
+import { Wallet } from 'ethers'
+import {
+  PASSPORT_RECEIPT_VERSION,
+  canonicalizePassportReceipt,
+  verifyPassportReceiptSignature,
+} from '@haven_ai/sdk'
+import { parseEnvPrivateKey } from '../../infra/chain/env-private-key.js'
+import { sameKey } from '../../infra/key-identity.js'
 import type { AnchorState, Standing } from './revocation.js'
 import { AssuranceLevel } from './schema.js'
 
@@ -77,8 +84,14 @@ export const RECEIPT_TTL_SECONDS = 300
  * `policyEnforcedOnchain` produced byte-identical signatures. `/1` was never
  * released; the version is bumped anyway so any receipt minted against it can
  * never verify.
+ *
+ * #4723: the constant and the canonicalizer now live in `@haven_ai/sdk`
+ * (`PASSPORT_RECEIPT_VERSION`, `canonicalizePassportReceipt`), because a
+ * merchant has to verify with the same bytes Haven signs and a second copy is
+ * the `/1` failure family. Re-exported here so this module's public surface is
+ * unchanged.
  */
-export const RECEIPT_VERSION = 'haven-passport-receipt/2'
+export const RECEIPT_VERSION = PASSPORT_RECEIPT_VERSION
 
 /**
  * The enforced controls, as a SUMMARY.
@@ -168,59 +181,16 @@ export interface SignedPassportReceipt {
 /**
  * Deterministic serialization — every key sorted, at every depth, no whitespace.
  *
- * The signature is over a STRING, so a verifier that re-serializes differently
- * gets a different digest and rejects a perfectly good receipt. Sorting the
- * keys makes the bytes reproducible from the parsed object alone, which is what
- * lets a merchant verify without keeping our exact wire ordering.
- *
- * ## Do not "simplify" this to `JSON.stringify(obj, Object.keys(obj).sort())`
- *
- * That was the first implementation and it was a security hole. The array form
- * of `JSON.stringify`'s replacer is a **recursive property allow-list**, not a
- * key ordering: nested objects have their keys filtered against the same
- * top-level array. `controls`'s keys are not top-level names, so it serialized
- * as `{}` — and the field the whole receipt is about (`policyEnforcedOnchain`)
- * was excluded from the signed bytes entirely. Two receipts differing only in
- * their control summary signed identically, so anyone could flip an ungoverned
- * agent to `policyEnforcedOnchain: true` and the documented offline check
- * would still pass.
- *
- * Rebuilding the object explicitly is the point: it is the only form where
- * "what is signed" equals "what is in the object", which is the property a
- * merchant is relying on.
+ * #4723: the implementation is `@haven_ai/sdk`'s `canonicalizePassportReceipt`,
+ * and this is a delegation, not a copy. The signature is over a STRING, so a
+ * verifier that re-serializes differently gets a different digest and rejects a
+ * perfectly good receipt; a second canonicalizer is how the `/1` bug (see
+ * `RECEIPT_VERSION`) reaches a merchant. The SDK's docblock carries the full
+ * warning about `JSON.stringify(obj, Object.keys(obj).sort())` — read it there
+ * before touching either side.
  */
 export function canonicalize(receipt: PassportReceipt): string {
-  return JSON.stringify(sortDeep(receipt))
-}
-
-/**
- * Rebuild `value` with every object's keys in sorted order, recursively.
- *
- * Refuses anything that is not a plain object, array, or JSON primitive. That
- * guard is the same lesson as the bug above, applied forward: a `Date` (or a
- * `Map`, or a class instance) is `typeof 'object'` with NO own enumerable keys,
- * so it would serialize as `{}` and drop out of the signature silently —
- * exactly how `controls` became forgeable. No receipt field is a `Date` today;
- * this makes the day someone adds one a loud failure rather than a quiet hole.
- *
- * `Array.prototype.sort()` with no comparator is UTF-16 code-unit ordering,
- * which the spec fixes — not locale-sensitive, so the bytes are reproducible in
- * any language a merchant verifies from.
- */
-function sortDeep(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortDeep)
-  if (value === null || typeof value !== 'object') return value
-  const proto = Object.getPrototypeOf(value)
-  if (proto !== Object.prototype && proto !== null) {
-    throw new Error(
-      `passport receipt: cannot canonicalize a ${value.constructor?.name ?? 'non-plain'} value — ` +
-        'it would serialize as {} and be excluded from the signature. Use a primitive.',
-    )
-  }
-  const source = value as Record<string, unknown>
-  const out: Record<string, unknown> = {}
-  for (const key of Object.keys(source).sort()) out[key] = sortDeep(source[key])
-  return out
+  return canonicalizePassportReceipt(receipt)
 }
 
 let signerKey: string | null = null
@@ -260,15 +230,12 @@ export function setReceiptSigningKey(
 /**
  * Do two env values denote the SAME private key?
  *
- * Compared on the key's VALUE, not its text. The threat is an operator pasting
- * one key into two variables, and a paste routinely differs in casing or the
- * `0x` prefix while being cryptographically identical — a text comparison would
- * wave exactly the mistake it exists to catch straight through.
+ * The implementation lives in `infra/key-identity.ts` (#4655): the binding-key
+ * boot refusal is in `infra/` and cannot import a module's private file, so the
+ * comparison moved to a neutral home and is re-exported here to keep this
+ * module's public surface unchanged.
  */
-function sameKey(a: string, b: string): boolean {
-  const normalize = (k: string) => k.trim().toLowerCase().replace(/^0x/, '')
-  return normalize(a) === normalize(b)
-}
+export { sameKey }
 
 export function isReceiptSigningConfigured(): boolean {
   return signerKey !== null
@@ -281,7 +248,10 @@ export function isReceiptSigningConfigured(): boolean {
 export function receiptIssuerAddress(): string | null {
   if (!signerKey) return null
   try {
-    return new Wallet(signerKey).address
+    // #4654: the same helper as the signing path, so both accept exactly the
+    // same input. The fail-closed contract is unchanged: a bad key returns null
+    // here, never a throw.
+    return new Wallet(parseEnvPrivateKey('PASSPORT_RECEIPT_SIGNING_KEY', signerKey)).address
   } catch {
     return null
   }
@@ -299,7 +269,11 @@ export async function signReceipt(receipt: PassportReceipt): Promise<SignedPassp
   if (!signerKey) {
     throw new Error('passport receipt signing is not configured (PASSPORT_RECEIPT_SIGNING_KEY)')
   }
-  const signature = await new Wallet(signerKey).signMessage(canonicalize(receipt))
+  // #4654: validate the string first — ethers echoes an unparseable value into
+  // the error it throws, and that error reaches the logs.
+  const signature = await new Wallet(
+    parseEnvPrivateKey('PASSPORT_RECEIPT_SIGNING_KEY', signerKey),
+  ).signMessage(canonicalize(receipt))
   return { receipt, signature }
 }
 
@@ -331,24 +305,10 @@ export function verifyReceipt(
   expectedIssuer: string,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): ReceiptVerification {
-  if (signed.receipt.version !== RECEIPT_VERSION) {
-    return { valid: false, reason: 'unsupported_version' }
-  }
-  let recovered: string
-  try {
-    recovered = verifyMessage(canonicalize(signed.receipt), signed.signature)
-  } catch {
-    // Structurally invalid — not a signature at all, so nothing was recovered.
-    return { valid: false, reason: 'malformed_signature' }
-  }
-  if (recovered.toLowerCase() !== expectedIssuer.toLowerCase()) {
-    return { valid: false, reason: 'not_signed_by_issuer' }
-  }
-  // Checked AFTER authenticity, deliberately. An expired receipt that also
-  // fails authentication is a forgery, and reporting it as merely "expired"
-  // would invite a merchant to retry rather than treat it as an attack.
-  if (nowSeconds > signed.receipt.expiresAt) {
-    return { valid: false, reason: 'expired' }
-  }
-  return { valid: true, issuer: recovered }
+  // #4723: delegated to the SDK, which is the ONE canonicalizer and the ONE
+  // verifier a merchant runs. Haven's own tests therefore check exactly what a
+  // merchant would run — a verification path only we can execute proves
+  // nothing. The vocabulary and the ordering (authenticity before expiry) are
+  // the SDK's, unchanged.
+  return verifyPassportReceiptSignature(signed, expectedIssuer, nowSeconds)
 }

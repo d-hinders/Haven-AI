@@ -27,7 +27,7 @@ covers:
   - packages/frontend/src/lib/signer.ts
   - packages/ops/**
   - packages/backend/src/routes/ops.ts
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # Haven — System Context
@@ -125,7 +125,7 @@ flowchart LR
   SIGNER -.->|controls| DELEGATE
   AGENT -->|request paid resource| RESOURCE
   RESOURCE -->|402 Payment Required| AGENT
-  AGENT -->|retry with signed payment header: PAYMENT-SIGNATURE + X-PAYMENT| RESOURCE
+  AGENT -->|retry with signed payment header: PAYMENT-SIGNATURE (+ X-PAYMENT for x402 v1 only)| RESOURCE
 
   %% Haven execution
   BE -->|reads chain state<br/>and builds payload hashes| RPC

@@ -232,8 +232,8 @@ describe('the hooks are actually wired into the app', () => {
    * the runbook without falling back to `robots.txt` or guessing.
    *
    * That is the regression the cold-agent scenario scores as band 3 -> 2
-   * (`docs/operations/qa-explore-ui-cadence.md` § Second scenario). Scoring it
-   * weekly in a report is worth having; catching it here is better.
+   * (`docs/operations/agent-evals.md` § *The cold-agent onboarding tasks*).
+   * Scoring it in a run is worth having; catching it here is better.
    */
   it('a landing-HTML hook actually REACHES the agent runbook, not just some file', async () => {
     const layout = read('src/app/layout.tsx')
@@ -243,7 +243,7 @@ describe('the hooks are actually wired into the app', () => {
     const { render } = await import('@testing-library/react')
     const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
     const { container, unmount } = render(createElement(NewSiteHome))
-    const sentence = Array.from(container.querySelectorAll('p')).find((p) =>
+    const sentence = Array.from(container.querySelectorAll('section#hero p')).find((p) =>
       (p.textContent ?? '').includes('If you are an AI agent reading this for your user'),
     )
     const sentenceHref = sentence?.querySelector('a')?.getAttribute('href') ?? undefined
@@ -357,8 +357,11 @@ describe('the hooks are actually wired into the app', () => {
     const { render } = await import('@testing-library/react')
     const { NewSiteHome } = await import('@/components/marketing/site/home/HomeSections')
     const { container, unmount } = render(createElement(NewSiteHome))
-    const text = container.textContent
-    const llmsLink = container.querySelector('a[href="/llms.txt"]')
+    // Scoped to the hero (#4713): How it works links /llms.txt too, so a
+    // page-wide query would stay green with the hero's link deleted.
+    const hero = container.querySelector('section#hero')
+    const text = hero?.textContent
+    const llmsLink = hero?.querySelector('a[href="/llms.txt"]') ?? null
     unmount() // see the chain test above: no tree may outlive the environment
     expect(text).toContain('If you are an AI agent reading this for your user')
     expect(llmsLink).not.toBeNull()

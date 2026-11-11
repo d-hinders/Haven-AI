@@ -54,8 +54,7 @@ import { apiBaseUrl } from '../domain/request-origin.js'
 import {
   requestPassport,
   issuePassportBestEffort,
-  isPassportConfigured,
-  PASSPORT_CHAIN_IDS,
+  isPassportIssuableForAccount,
 } from '../modules/passport/index.js'
 
 interface AllowanceInput {
@@ -449,6 +448,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     let delegateAddress = ''
     let issuePassportForSetup = false
     let setupChainId = 0
+    let setupAccountType: string | null = null
     let setupUserId = ''
     let setupSource: string | null = null
     let setupVia: string | null = null
@@ -516,6 +516,7 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
         setupId = setup.id
         issuePassportForSetup = setup.issue_passport === true
         setupChainId = setup.account_chain_id
+        setupAccountType = setup.account_type ?? null
         setupUserId = setup.user_id
         setupSource = setup.source ?? null
         setupVia = setup.via ?? null
@@ -591,19 +592,18 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
     // registration — same discipline as POST /agents. `issuePassportForSetup`
     // was recorded when the setup was created; the agent row (and its chain)
     // only exists now.
+    // #4719: the account-level answer the dashboard reads as
+    // `passport_issuable` — an issuable rail on a chain whose schema UID and
+    // verifier are configured here. Otherwise no row is recorded at all.
     const passportChainId =
-      issuePassportForSetup && PASSPORT_CHAIN_IDS.has(setupChainId) ? setupChainId : null
+      issuePassportForSetup &&
+      isPassportIssuableForAccount({ chain_id: setupChainId, account_type: setupAccountType })
+        ? setupChainId
+        : null
     if (passportChainId != null) {
       try {
         await requestPassport(agentId, passportChainId)
-        if (isPassportConfigured(passportChainId)) {
-          issuePassportBestEffort(agentId, setupUserId)
-        } else {
-          request.log.info(
-            { agentId, chainId: passportChainId },
-            'passport requested but schema not registered — deferred to the sweep',
-          )
-        }
+        issuePassportBestEffort(agentId, setupUserId)
       } catch (err) {
         request.log.warn({ err, agentId }, 'passport request failed; agent registered')
       }
@@ -665,6 +665,37 @@ export default async function agentConnectionSetupRoutes(app: FastifyInstance): 
 
       const allowances = await loadSetupAllowances(setup.id)
       return buildConnectorStatusResponse(setup, allowances)
+    },
+  )
+
+  // ── GET /pending — the dashboard's "still connecting" row (#4710) ──
+  //
+  // Closing the connect dialog before the agent registers used to leave no way
+  // back in the app: setups were readable only by id, and the prompt exists
+  // only in the create response. This read lists the signed-in user's setups
+  // that are still awaiting a connector and unexpired, so the dashboard can
+  // offer Open (the existing resume link) and Start again.
+  //
+  // Tenant scope is the authenticated `sub`, never a caller-supplied id. The
+  // projection is deliberately narrow — id, name, deadline — and carries no
+  // token, hash, challenge or prompt. `source = 'cli'` is excluded in the
+  // repository: a CLI run has no dialog to have closed.
+  //
+  // Registered as a STATIC path beside `/:setupId`; Fastify's router prefers
+  // the static segment, so `pending` is never read as a setup id.
+  app.get(
+    '/pending',
+    { onRequest: [authMiddleware] },
+    async (request) => {
+      const { sub } = request.user as { sub: string }
+      const rows = await setups.listPendingSetupsForUser(sub)
+      return {
+        setups: rows.map((row) => ({
+          setup_id: row.id,
+          name: row.name,
+          expires_at: row.setup_token_expires_at,
+        })),
+      }
     },
   )
 

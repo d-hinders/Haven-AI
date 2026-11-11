@@ -49,6 +49,7 @@ import {
   CircleDollarSign,
   Coins,
   Gauge,
+  Loader,
   ShieldAlert,
   CirclePause,
   TriangleAlert,
@@ -70,6 +71,7 @@ const MAX_VISIBLE_ITEMS = 4
 
 const KIND_ICON: Record<AttentionRuleItem['kind'], LucideIcon> = {
   'needs-setup': Bot,
+  'connection-pending': Loader,
   'low-balance': Coins,
   'zero-usdc': Coins,
   'budget-reached': Gauge,
@@ -85,8 +87,28 @@ const KIND_ICON: Record<AttentionRuleItem['kind'], LucideIcon> = {
 function itemAction(
   item: AttentionRuleItem,
   onAddFunds?: (accountId: string) => void,
+  onStartAgain?: (setupId: string) => void,
 ): AttentionListItem['action'] {
   if (!item.actionLabel) return undefined
+  // #4710: an unfinished connect offers TWO actions. Open is the existing
+  // resume link (`/agents?setup=<id>`); Start again cancels the old setup and
+  // reopens the flow prefilled. The row is not dismissible — it ends on its
+  // own within 30 minutes, or on register or cancel.
+  if (item.kind === 'connection-pending' && item.setupId) {
+    const setupId = item.setupId
+    return (
+      <div className="flex items-center gap-2">
+        {item.href ? (
+          <Button variant="ghost" size="sm" href={item.href}>
+            {item.actionLabel}
+          </Button>
+        ) : null}
+        <Button variant="ghost" size="sm" onClick={() => onStartAgain?.(setupId)}>
+          Start again
+        </Button>
+      </div>
+    )
+  }
   // "Add funds" targets a specific account — the caller opens its modal
   // pre-selected, so the button carries the account through the callback
   // instead of a route.
@@ -118,6 +140,7 @@ export default function NeedsYou({
   onRetry,
   onDismiss,
   onAddFunds,
+  onStartAgain,
   headingId = 'needs-attention-heading',
   title = 'Needs attention',
   titleMeta = null,
@@ -137,6 +160,13 @@ export default function NeedsYou({
   onDismiss: (item: AttentionRuleItem) => void
   /** Opens the Add-funds modal pre-selected to this account. */
   onAddFunds?: (accountId: string) => void
+  /**
+   * #4710: "Start again" on a still-connecting row. The caller reads the
+   * setup, cancels it only while it is still awaiting a connector, and
+   * reopens the connect flow prefilled — or opens the resume link when the
+   * setup moved on.
+   */
+  onStartAgain?: (setupId: string) => void
   headingId?: string
   /** The card's heading — "Get started" while the first-run guide is the card (#3818). */
   title?: string
@@ -175,7 +205,7 @@ export default function NeedsYou({
     tone: item.tone,
     badge: item.badge,
     icon: KIND_ICON[item.kind],
-    action: itemAction(item, onAddFunds),
+    action: itemAction(item, onAddFunds, onStartAgain),
     // #3813: only the owner-approved kinds offer the control — the rules
     // layer is the one definition of which those are.
     dismissible: DISMISSIBLE_ATTENTION_KINDS.has(item.kind),
@@ -231,6 +261,15 @@ export default function NeedsYou({
           the heading — an unmounted list runs no effect, and focus would
           drop to <body> with the vanished X. */}
       <div className={count > 0 && (hasOverviewError || guide) ? 'border-t border-[var(--v2-border)]' : ''}>
+        {/* #4744: under the numbered steps, the first item read as step 4. A
+            caption, not a heading and not the brand-coloured Eyebrow role:
+            the card keeps its one `h2`. Only when both show — alone, the
+            items are the card and need no caption. */}
+        {guide && count > 0 ? (
+          // -mb-1 groups the caption with the rows it heads: the first row's own
+          // py-3 otherwise left it nearer the rule above (#4744 design review).
+          <p className="-mb-1 px-5 pt-4 text-xs font-medium text-[var(--v2-ink-3)]">Also needs you</p>
+        ) : null}
         <AttentionList
           items={listItems}
           headingId={headingId}

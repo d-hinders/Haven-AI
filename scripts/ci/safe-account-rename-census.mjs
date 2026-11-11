@@ -97,6 +97,8 @@ const ALLOWED = [
     'packages/connect/src/storage.ts',
     'packages/connect/src/doctor.ts',
   ].map((f) => [f, 'PERMANENT credential-FILE fallback — a file on disk never rewrites itself']),
+  ['packages/sdk/src/credential-file.ts',
+   'the ONE shared copy of the PERMANENT credential-FILE fallback and the retired-env refusal (#4792) — moved here from packages/mcp/src/credentials.ts and packages/signer/src/credentials.ts, which now re-export it'],
   ['packages/signer/src/audit.ts',
    'the persisted audit JSONL key; same permanent-format reasoning as a credential file'],
   ['packages/frontend/src/lib/signer.ts',
@@ -205,14 +207,24 @@ export const ALLOWED_CEILING = new Map([
   // prose into a refusal list. Ignoring them silently left `expectedSafe`
   // undefined, which SKIPS the sweep-destination cross-check in
   // `signer/src/core.ts` — a money-path check lost with no signal.
-  ['packages/mcp/src/credentials.ts', 8],
+  // 8 -> 3 (#4792): the readers and the refusal list moved to
+  // `packages/sdk/src/credential-file.ts`, which carries its own ceiling. What
+  // is left here is the raw-file shape and the doc sentence naming the retired
+  // env spellings.
+  ['packages/mcp/src/credentials.ts', 3],
   ['packages/qa-agent/src/seed.ts', 1],
   ['packages/sdk/src/account-naming.ts', 2],
+  // 7 (#4792): the ONE shared copy of the credential-file fallback and the
+  // retired-env refusal, moved here from the two `credentials.ts` files. Every
+  // hit names a spelling the file must keep reading or refusing.
+  ['packages/sdk/src/credential-file.ts', 7],
   ['packages/sdk/src/types.ts', 1],
   ['packages/signer/README.md', 2],
   ['packages/signer/src/audit.ts', 3],
   ['packages/signer/src/core.ts', 1],
-  ['packages/signer/src/credentials.ts', 7],
+  // 7 -> 2 (#4792): the readers and the refusal list moved to
+  // `packages/sdk/src/credential-file.ts`. What is left is the raw-file shape.
+  ['packages/signer/src/credentials.ts', 2],
 ])
 
 /** The first ALLOWED reason matching `file`, or null when nothing allows it. */
@@ -381,8 +393,24 @@ function main() {
   console.log(`\n✓ every one of the ${total} surviving hit(s) is in an ALLOWED path class, and no allow-listed file grew.`)
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // Only run as a CLI when invoked directly — importing `runCensus` for a test
 // must not also execute `main()` and print/exit on the test's behalf.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isEntryPoint()) {
   main()
 }

@@ -19,8 +19,12 @@ import {
   X402_RETRY_REJECTED_STATUS,
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
-import { x402PaymentHeaderNamesSent, x402PaymentHeaderNamesFor } from './x402.js'
-import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
+import { x402PaymentHeaderNamesSent, x402PaymentHeaderSchemeOf } from './x402.js'
+import { decidePostFundingMerchantAnswer, parseProtocolReceiptHeader } from './merchant-answer.js'
+// #4763: the two receipt parsers live in merchant-answer.ts now — the leaf both
+// sides can import — so this module's export surface is unchanged while the
+// runtime cycle between the two files is gone.
+export { parseMerchantSettlement, parseProtocolReceiptHeader } from './merchant-answer.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
@@ -63,9 +67,98 @@ export interface X402MerchantOutcomeReport {
   /** Haven's own recorded resource URL — likewise never caller-supplied. */
   resourceUrl: string
   recorded: 'reconciliation_event' | 'evidence'
+  /**
+   * #4552: the merchant's own reason for refusing, as a code — the parse
+   * result, merchant-claimed and never something Haven verified. Present on a
+   * rejected report only (the code, or `null` when the body carried none).
+   */
+  merchantReportedError?: string | null
 }
 
 const MERCHANT_BODY_SNIPPET_LIMIT = 1000
+
+/**
+ * #4552: the shape of a merchant-reported reason CODE.
+ *
+ * x402 merchants have started saying WHY they refused a paid request. A
+ * verify-stage refusal returns `{"error": "<reason>"}` in the 402 body
+ * (x402-foundation/x402#3795 for the TypeScript core and express, #3882 for
+ * Go), where the reason is the facilitator's `invalidReason` — a snake_case
+ * code such as `invalid_exact_evm_non_canonical_signature`. A stock
+ * settlement failure returns an EMPTY body and carries the reason only in the
+ * `PAYMENT-RESPONSE` header (`errorReason`); merchants from before #3795
+ * carry it only in `PAYMENT-REQUIRED` (`error`). The same `error` field
+ * sometimes holds a sentence instead of a code ("No matching payment
+ * requirements", a thrown message), so a value is accepted only when it looks
+ * like one. The longest code in @x402/core and evm 2.29 is 63 characters.
+ */
+const MERCHANT_REASON_CODE = /^[a-z0-9_]{1,64}$/
+
+function reasonCodeOf(value: unknown): string | null {
+  return typeof value === 'string' && MERCHANT_REASON_CODE.test(value) ? value : null
+}
+
+/** The `error` of a JSON-object body, when it is a code. Never throws. */
+function reasonCodeFromBody(body: string | null | undefined): string | null {
+  if (!body) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    // Non-JSON, or a body cut off mid-object — the snippet limit truncates.
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  return reasonCodeOf((parsed as { error?: unknown }).error)
+}
+
+/** One base64-JSON merchant header's named field, when it is a code. Never throws. */
+function reasonCodeFromHeader(
+  headers: Record<string, string> | null | undefined,
+  headerName: string,
+  field: string,
+): string | null {
+  if (!headers) return null
+  try {
+    // Header names are case-insensitive. `captureMerchantResponse` lowercases
+    // them, but a caller-built record need not.
+    const key = Object.keys(headers).find((name) => name.toLowerCase() === headerName.toLowerCase())
+    if (!key) return null
+    const raw = headers[key]
+    if (!raw) return null
+    const decoded = decodeBase64Json<unknown>(raw)
+    if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) return null
+    return reasonCodeOf((decoded as Record<string, unknown>)[field])
+  } catch {
+    // Undecodable base64 or JSON — a merchant header is untrusted input.
+    return null
+  }
+}
+
+/**
+ * #4552: the merchant-reported reason code for a refusal, or `null`.
+ *
+ * The body is read FIRST and must be the UNTRUNCATED one (up to 4096
+ * characters on the report path, the SDK's captured body on the retry paths):
+ * a code cut at the snippet limit is not a code. When the caller holds the
+ * merchant's headers, the reason falls back to `PAYMENT-RESPONSE.errorReason`
+ * and then `PAYMENT-REQUIRED.error` — the two places a stock x402 merchant
+ * puts it when the body is empty.
+ *
+ * TOTAL by contract: this runs inside `recordRetryRejected`'s swallowing
+ * `try`, where a throw would silently drop the stranded-funds event. Every
+ * failure path returns `null`.
+ */
+export function merchantReportedError(
+  body: string | null | undefined,
+  headers?: Record<string, string> | null,
+): string | null {
+  return (
+    reasonCodeFromBody(body) ??
+    reasonCodeFromHeader(headers, 'PAYMENT-RESPONSE', 'errorReason') ??
+    reasonCodeFromHeader(headers, 'PAYMENT-REQUIRED', 'error')
+  )
+}
 
 /**
  * Evidence-report retry policy for a RETRYABLE refusal (#2117).
@@ -172,10 +265,12 @@ export class MerchantCompletion {
     }
 
     // #3427: the buyer-side tax declaration rides the PAID retry only, and
-    // only on the EIP-3009 scheme. The scheme test is the same one the wire
-    // already uses for the payment header names (`x402PaymentHeaderNamesFor`
-    // → `isErc7710Option` on the decoded `accepted` entry), so the two
-    // scheme decisions cannot drift apart. Resolution happens here — the one
+    // only on the EIP-3009 scheme. The scheme is read from the payload
+    // (`x402PaymentHeaderSchemeOf` → `isErc7710Option` on the decoded
+    // `accepted` entry, the same predicate the header-name rule uses), never
+    // from how many names the header goes out under: since #4754 a v2
+    // EIP-3009 payload is sent under ONE name, and counting names would read
+    // it as erc7710 and silently drop the declaration. Resolution happens here — the one
     // seam `fetch`, `payX402Quote` and `resumeX402Payment` all reach — with
     // a resolved `undefined` (not available / older backend / erc7710)
     // meaning the retry proceeds exactly as before. The header is attached
@@ -185,8 +280,7 @@ export class MerchantCompletion {
     // merchant, and nothing else reads them.
     let retryInit = initialInit
     if (this.getTaxDeclarationHeader && this.delegateKey) {
-      const scheme = x402PaymentHeaderNamesFor(receipt.paymentHeader)
-      const isEip3009 = scheme.length > 1
+      const isEip3009 = x402PaymentHeaderSchemeOf(receipt.paymentHeader) === 'eip3009'
       if (isEip3009) {
         // A refusal thrown by the builder (content not exactly the local
         // shape, an unnamable network, a bad key) propagates as the signing
@@ -542,7 +636,10 @@ export class MerchantCompletion {
     paymentHeader: string,
     hasBody: boolean,
   ): Promise<MerchantEgressRefusedError> {
-    const scheme = x402PaymentHeaderNamesFor(paymentHeader).length > 1 ? 'eip3009' : 'erc7710'
+    // #4754: read from the payload, not from the name count — a v2 EIP-3009
+    // payload now goes out under one name, and calling it erc7710 here would
+    // tell the agent there is no funding leg to sweep on a funded payment.
+    const scheme = x402PaymentHeaderSchemeOf(paymentHeader)
     const status = err.redirectStatus ?? 0
     await this.recordRetryRejected({
       rail: 'x402',
@@ -603,6 +700,13 @@ export class MerchantCompletion {
           retry_status: input.merchant.merchant_status,
           retry_body: input.merchant.merchant_body.slice(0, MERCHANT_BODY_SNIPPET_LIMIT) || null,
           ...input.details,
+          // #4552: the merchant's own reason, parsed from the UNTRUNCATED body
+          // and then its headers. Set AFTER the spread so a caller cannot
+          // override it — the value is always present, the code or `null`.
+          merchant_reported_error: merchantReportedError(
+            input.merchant.merchant_body,
+            input.merchant.merchant_headers,
+          ),
         },
       })
     } catch {
@@ -723,6 +827,10 @@ export class MerchantCompletion {
 
     const txHash = status.txHash
     if (input.outcome === 'rejected') {
+      // #4552: the merchant's own reason, parsed from the UNTRUNCATED body —
+      // the report path holds no merchant headers (accepting them would be a
+      // tool-contract change), so the body is the only route.
+      const reportedError = merchantReportedError(input.merchantBody)
       await this.post('/machine-payments/reconciliation-events', {
         paymentId: status.paymentId,
         rail: 'x402',
@@ -734,9 +842,18 @@ export class MerchantCompletion {
           retry_status: input.merchantStatus,
           retry_body: input.merchantBody?.slice(0, MERCHANT_BODY_SNIPPET_LIMIT) || null,
           reported_by: 'agent_manual_retry',
+          // #4552: always present — the code, or `null`.
+          merchant_reported_error: reportedError,
         },
       })
-      return { paymentId: status.paymentId, outcome: 'rejected', txHash, resourceUrl, recorded: 'reconciliation_event' }
+      return {
+        paymentId: status.paymentId,
+        outcome: 'rejected',
+        txHash,
+        resourceUrl,
+        recorded: 'reconciliation_event',
+        merchantReportedError: reportedError,
+      }
     }
 
     await this.post('/machine-payments/evidence', {
@@ -1060,45 +1177,6 @@ export function isZeroSettlementTxHash(hash: string | null | undefined): boolean
   return typeof hash === 'string' && /^0x0+$/i.test(hash)
 }
 
-export function parseMerchantSettlement(header: string | null): {
-  settlementTxHash?: string | null
-} {
-  if (!header) return {}
-  const parsed = parseProtocolReceiptHeader(header)
-  const tx =
-    typeof parsed?.transaction === 'string'
-      ? parsed.transaction
-      : typeof parsed?.txHash === 'string'
-        ? parsed.txHash
-        : typeof parsed?.tx_hash === 'string'
-          ? parsed.tx_hash
-          : null
-  return { settlementTxHash: tx }
-}
-
-
-/**
- * Digest of a delegation-rail signing payload, or `undefined` when there is
- * none (#1138).
- *
- * Guarded because a payload that cannot be hashed is not a recoverable
- * condition to paper over: the edge signer derives this same digest before
- * signing, so an unhashable payload can never be signed by anyone. Surfacing it
- * as a named Haven error beats letting a raw viem type error escape from the
- * middle of intent construction.
- */
-
-export function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
-  try {
-    return decodeBase64Json<Record<string, unknown>>(value)
-  } catch {
-    try {
-      return JSON.parse(value) as Record<string, unknown>
-    } catch {
-      return undefined
-    }
-  }
-}
 
 /** #4257: why a paid request's redirect was not followed, worded per refusal (completes "…with a redirect"). */
 function unfollowedRedirect(err: MerchantEgressRefusedError): string {

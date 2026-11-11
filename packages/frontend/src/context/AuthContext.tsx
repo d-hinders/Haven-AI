@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { api, type ListPasskeysResponse } from '@/lib/api'
 import { LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
+import { clearEntryLatches } from '@/lib/entry-latch'
 import {
   PASSKEY_SCHEMA_VERSION,
   clearStoredPasskeySigner,
@@ -47,6 +48,13 @@ export interface SmartAccount {
   needs_backup_recommendation?: boolean | null
   /** #1205: same single home for chain classification (testnets are false). */
   value_bearing_chain?: boolean
+  /**
+   * #4719: server-computed — whether this deployment can issue this
+   * account's agents a passport a merchant can verify. The passport opt-in is
+   * shown only when this is exactly `true`; absent (an older backend) reads as
+   * not issuable, so the gate fails closed.
+   */
+  passport_issuable?: boolean
 }
 
 export interface User {
@@ -190,6 +198,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         // Token invalid or expired
         localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+        // #4704: an expired session is a sign-out too — the next sign-in is an entrance.
+        clearEntryLatches()
         setToken(null)
         setPasskeys([])
       })
@@ -248,6 +258,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // #3719 retired the global active account; the key is no longer written,
     // but a browser that ran an earlier build may still hold one.
     localStorage.removeItem(LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY)
+    // #4704: signing back in is an entrance again (the balance counts up).
+    clearEntryLatches()
     setToken(null)
     setUser(null)
     setPasskeys([])
@@ -275,6 +287,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   )
+}
+
+/**
+ * The auth state, or `null` outside an `AuthProvider` — for a shared component
+ * that only needs the user as an optional input (#4705: `ReceiveDialog`'s
+ * first-money marker), so a host or a test without the provider still renders.
+ */
+export function useOptionalAuth(): AuthState | null {
+  return useContext(AuthContext)
 }
 
 export function useAuth(): AuthState {

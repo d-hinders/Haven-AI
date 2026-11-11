@@ -1247,7 +1247,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Sign per the response guidance (payment_id-only), then settle with haven_settle_mcp_tool. ' +
     'Exceptional states: on expiry re-run with the SAME idempotency_key; include_signing_payload=true on a re-run returns the inline signing payload for an older signer — and a merchant that repriced in between makes the signer refuse the stale copy: re-quote fresh.',
   nextActionGuidance: 'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool.',
-})
+}, 'hosted')
 
 const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
@@ -1287,27 +1287,28 @@ const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
     'Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result.',
   behavior:
-    'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — Haven rehydrates them by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
-    'Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
-    'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before the call, so relay the secret to the owner yourself. ' +
-    'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true) when funding expired first; MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded delegate funds — verify with haven_get_payment_status before haven_sweep_delegate (the merchant may still settle late). erc7710 settles via haven_settle_mcp_tool.',
+    'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — rehydrated by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
+    'Merchant-issued credentials in `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
+    'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before the call. ' +
+    'On a settled x402 payment the allowance block reports remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (same names/values as haven_get_agent) beside the deprecated snake_case spellings. ' +
+    'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, delivered:true, code SETTLEMENT_PENDING or DELIVERED_UNSETTLED, SETTLEMENT_UNCONFIRMED warning, null settlement_tx_hash, no purchase_summary — poll haven_get_payment_status after ~3 minutes; sweep only if merchant_settlement_recorded is still not true. ' +
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded funds — verify with haven_get_payment_status before haven_sweep_delegate. erc7710 settles via haven_settle_mcp_tool.',
   nextActionGuidance:
-    'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
+    'On success no further Haven tool is needed — return the merchant result to the user. If the output was unusable or partly usable, say so with haven_report_delivery_quality (evidence only; moves no money).',
 })
 
 const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, then deliver the merchant payment header and return the merchant tool result.',
+    'Fast-path final step of the x402 MCP purchase: fund and settle in one call — relay the funding signature, deliver the merchant payment header, return the merchant tool result.',
   behavior:
-    'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome for reconciliation via haven_list_receipts / haven_get_payment_status. ' +
-    'Merchant-issued credentials in the returned `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
+    'Pass payment_id, signature, and (EIP-3009 shape only) payment_header; merchant/tool fields are optional — rehydrated by payment_id. If funding does not confirm it returns { payment_id, settled: false, funding_status } without contacting the merchant. Echoes payment_id on every outcome. ' +
+    'Merchant-issued credentials in `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
     'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before funding, so relay the secret to the owner yourself. ' +
-    'On a settled x402 payment the allowance block reports the canonical names remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (the SAME names and values haven_get_agent reports) beside the deprecated snake_case spellings (remaining_atomic, remaining_display, token_symbol, token_address, reset_period), kept for a deprecation window. ' +
-    'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, SETTLEMENT_UNCONFIRMED, null settlement_tx_hash. ' +
-    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds: verify with haven_get_payment_status before haven_sweep_delegate (the merchant may still settle late); erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled.',
+    'On a settled x402 payment the allowance block reports remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (same names/values as haven_get_agent) beside the deprecated snake_case spellings. ' +
+    'settled:true only after on-chain verification, never a merchant 2xx; unverified (eip3009 or erc7710): settled:false, delivered:true, code SETTLEMENT_PENDING or DELIVERED_UNSETTLED, SETTLEMENT_UNCONFIRMED warning, null settlement_tx_hash, no purchase_summary — poll haven_get_payment_status after ~3 minutes; sweep only if merchant_settlement_recorded is still not true. ' +
+    'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 — stranded funds: verify with haven_get_payment_status before haven_sweep_delegate; erc7710: nothing to sweep — check haven_get_payment_status after the window; re-quote only if unsettled.',
   nextActionGuidance:
-    'On success no further Haven tool is needed — return the merchant result to the user. If the delivered output was unusable or only partially usable, say so with haven_report_delivery_quality (evidence only; it moves no money).',
+    'On success no further Haven tool is needed — return the merchant result to the user. If the output was unusable or partly usable, say so with haven_report_delivery_quality (evidence only; moves no money).',
 })
 
 // #3739: the shared nextActionGuidance ("Haven re-uses the captured request
@@ -1341,7 +1342,7 @@ const PAY_X402_QUOTE_DESCRIPTION = [
   'haven_sign_x402 (named in the guidance) returns payment_header INLINE with the',
   'signature — do NOT call haven_x402_sign_header afterwards; it can only refuse. Relay the',
   'signature via haven_submit, then retry the merchant YOURSELF with that payment_header,',
-  'setting PAYMENT-SIGNATURE (v2); X-PAYMENT (v1) unless erc7710.',
+  'setting exactly its retry_headers (PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1).',
   'Haven never sends the paid request or holds the key. The header is built before funding',
   'confirms, so its validity window starts at signing: retry promptly, and on',
   'PAYMENT_WINDOW_EXPIRED re-run this tool with the same arguments (request mode: the same',
@@ -1424,19 +1425,18 @@ const RESUME_X402_DESCRIPTION = [
 const REPORT_X402_OUTCOME_DESCRIPTION = [
   'Report what a plain-HTTP x402 merchant answered to a retry YOU made; Haven never sends it the',
   'paid request, so nothing else can. Pass payment_id, outcome ("accepted" for a 2xx, else "rejected"),',
-  'merchant_status, optional merchant_body. A rejection surfaces stranded funds on your next',
-  'haven_get_payment_status instead of a 15-minute wait. On an accepted outcome you may fold the',
+  "merchant_status, optional merchant_body — on a rejection pass the merchant's body so its reason is recorded. A rejection surfaces stranded funds on your next",
+  'haven_get_payment_status, not after 15 minutes. On an accepted outcome you may fold the',
   'settlement evidence into this call: pass the raw base64 PAYMENT-RESPONSE header as',
-  'payment_response and/or the settlement_tx_hash, plus payment_header (the header you retried',
-  'with; a reported settlement is recorded only with it). Haven reads only the transaction from',
-  'payment_response, verifies the hash on-chain BEFORE recording (a mismatch is refused), and the',
-  'purchase is complete with no further tool. A rejected outcome records no evidence.',
+  'payment_response and/or settlement_tx_hash, plus payment_header (the header you retried',
+  'with; a reported settlement is recorded only with it). Haven reads only the transaction',
+  'from payment_response, verifies the hash on-chain BEFORE recording (a mismatch is refused), and the',
+  'purchase is complete with no further tool. A rejection records no evidence.',
   'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant',
-  'delivered (product, order id) shown on the owner\'s receipt; code/token/key shapes are refused,',
-  'so relay the secret to the owner yourself.',
-  'Evidence only, your own payments only: it moves no money. Not for merchants Haven',
-  'called for you — haven_complete_mcp_tool and haven_settle_mcp_tool already record what they',
-  'observed.',
+  "delivered (product, order id) on the owner's receipt; code/token/key shapes are refused,",
+  'so relay the secret to the owner.',
+  'Evidence only, your own payments: moves no money. Not for merchants Haven',
+  'called for you — haven_complete_mcp_tool and haven_settle_mcp_tool record what they saw.',
 ].join(' ')
 
 // #3770: the delivery-quality report. A settled payment's `settled: true` is
@@ -1526,7 +1526,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
-  haven_send: composeDescription(sharedDescriptions.send),
+  haven_send: composeDescription(sharedDescriptions.send, 'hosted'),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
   haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,

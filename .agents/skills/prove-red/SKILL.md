@@ -109,8 +109,8 @@ one tree at once — the runner cannot see it.
    run the target test unmutated; refuse the cell unless it is green and reports
    every `expect_red` test, and refuse the run if that test wrote into the tree.
 2. Back up to `$SCRATCH/<file>.<issue>.<role>.<cell>.bak` (`role` is `author` or
-   `review`) and verify its sha256; journal the cell — hashes and file mode — in
-   the tree's git dir.
+   `review`) and verify its sha256; journal the cell — hashes, file mode and
+   mtime — in the tree's git dir.
 3. Apply the edits; assert `git diff --numstat` and `git status` name only that file.
 4. When the mutated file's `packages/<pkg>/` differs from the test's — or a
    Playwright cell mutates app source — run `npm run build -w packages/<pkg>`.
@@ -123,7 +123,10 @@ one tree at once — the runner cannot see it.
    restore by `cp` from the verified backup and put the file mode back, check the
    sha256 and the mode, **rebuild again if step 4 ran** (`dist/` is gitignored, so `git status` cannot see a mutant build;
    the journal marks the tree dirty until this build succeeds), then require an
-   empty `git status --porcelain`.
+   empty `git status --porcelain`. The restore also puts the file's mtime back to
+   the value journalled before the mutation — after that rebuild, when one ran —
+   so a same-package cell does not leave `src/` newer than `dist/` and make the
+   next package's dist check refuse (#4769).
 
 Every test run and build runs in its own process group, journalled while a cell
 is in flight, so a signal or a timeout reaches what it spawned. It never stages,
@@ -217,9 +220,11 @@ there first.
 Input: the saved output of the census command in
 [`dimensions.md` § 1](../quality-scan/references/dimensions.md) (it must keep its
 `candidate guard files: N` line). The runner skips files absent at `HEAD`, takes
-the first five distinct files — newest landing first — and runs the one `census`
-cell written for each, then up to two probe cells; anything else is listed as out
-of budget and not run. It prints the block-1 table
+the first five distinct files **in the order the census lists them** — quality-scan
+block 1 lists money-path guard files that carry no recorded mutation, oldest
+first, and falls back to the newest-landing sample when none is left — and runs
+the one `census` cell written for each, then up to two probe cells; anything else
+is listed as out of budget and not run. It prints the block-1 table
 (`| # | Guard file | Mutation | Baseline → mutant |`) for the scan report and the
 ledger. A survivor's diagnosis is still the author's; the table leaves the slot.
 

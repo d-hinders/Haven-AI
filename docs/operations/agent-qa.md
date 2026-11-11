@@ -6,16 +6,20 @@ covers:
   - .env.dev.example
   - .github/workflows/qa-dev.yml
   - .github/workflows/qa-balances.yml
+  - .github/workflows/qa-purge-throwaways.yml
+  - scripts/ci/qa-purge-throwaways-workflow.test.mjs
+  - packages/backend/scripts/purge-qa-throwaways.ts
+  - packages/backend/src/infra/repositories/qa-throwaway-purge.ts
   - scripts/ci/qa-failure-issue.mjs
   - scripts/ci/dev-push-health.mjs
   - scripts/ci/qa-balance-issue.mjs
+  - packages/backend/src/modules/mpp/allowances.ts
   - scripts/ci/qa-retry.mjs
   - scripts/ci/qa-freshness.mjs
   - scripts/ci/guard-freshness.mjs
   - .github/workflows/docs-audit.yml
   - .github/workflows/qa-live.yml
   - .github/workflows/dev-gate.yml
-  - .claude/commands/qa-dev.md
   - .claude/commands/qa-explore-ui.md
   - packages/qa-agent/**
   - packages/frontend/package.json
@@ -31,7 +35,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-09"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -47,10 +51,9 @@ production credentials, a mainnet RPC, or real funds.
 
 | Operation | Local terminal | GitHub Actions | When to use it |
 |---|---:|---:|---|
-| Seed the QA user, Hybrid account, agent, and budget delegation | Yes | No | First-time setup or identity replacement |
+| Seed the QA user, Hybrid account, agent, and budget delegation | Yes | No | First-time setup, identity replacement, or a [lapsed budget](#the-qa-budget-ended) |
 | Deterministic money-flow QA (`qa-dev.yml`) | Yes | Yes | Local debugging or shared repeatable evidence |
 | Live deployed-UI smoke (`qa-live.yml`) | Yes | Yes | Verify a deployed frontend (the `dev` host or an opt-in `preview/*` deployment) against the dev backend |
-| Exploratory agent/merchant QA (Layer 2b, `/qa-dev`) | Yes | No | Payment / MCP coverage that needs LLM judgment |
 | Browser UI exploration (Layer 3, `/qa-explore-ui`) | Yes | No | Dashboard UX / visual coverage that needs LLM judgment |
 
 Use **GitHub Actions** for the normal shared money-flow run after the identity,
@@ -123,12 +126,17 @@ SEED_RESET_MIN=1440
 ```
 
 The seed accepts the delegate **address**, not its private key. Haven must never
-receive or store the owner or delegate private key.
+receive or store the owner or delegate private key. The Railway copy described in
+[Restore the QA identity file](#restore-the-qa-identity-file) is operator storage
+that no Haven service should read.
 
 `SEED_ALLOWANCE_USDC` and `SEED_RESET_MIN` keep their AllowanceModule-era names
 so an existing operator env keeps working; since #2007 they set the **budget
 delegation's** period budget and period length. `SEED_RPC_URL` is no longer read
-— the seed sends nothing on-chain and opens no RPC connection.
+— the seed opens no RPC connection and sends no transaction itself. Haven's
+relayer deploys the account at the first grant, and a later plain grant sends
+nothing on-chain. Replacing a live grant also submits an owner-signed Stop of
+each old grant through Haven.
 
 ### 3. Fund the required testnet accounts
 
@@ -330,7 +338,11 @@ agent with the configured delegate address:
 2. Provision or reuse the Base Sepolia **Hybrid DeleGator** account
    (`POST /accounts/hybrid`).
 3. Create or reuse the QA agent.
-4. Build, owner-sign and activate the USDC **budget delegation**.
+4. Build, owner-sign and activate the USDC **budget delegation**. A live open
+   budget of the same amount is left alone; an expired one counts as no budget,
+   so the seed grants a new one. A seeded grant lasts 364 days, a day short of
+   the build route's cap. Before signing, the seed refuses an owner key that is
+   not this account's owner.
 
 If that delegate address instead belongs to a paused, revoked, or unknown-status
 agent, the seed stops before it creates or reuses an agent, or grants a budget
@@ -457,6 +469,7 @@ way the 2026-07-18 live proof did):
    private key for `QA_DELEGATION_DELEGATE_PRIVATE_KEY`.
 3. Grant an **open** budget delegation (e.g. 2 USDC / 24h, recipient unpinned),
    owner-signed, then activate it — the relayer deploys the treasury, sponsored.
+   Send `expires_at`, or the grant [ends after 90 days](#the-qa-budget-ended).
 4. Fund the treasury with a little Base Sepolia USDC.
 
 The three EIP-3009 scenarios assert more than "the purchase worked". `x402-delegation-3009`
@@ -772,33 +785,39 @@ or the leg skips and the Coverage completeness step turns that red:
 - `QA_HOSTED_MCP_URL`
 - `QA_X402_BINDING_SIGNER`
 
-**The delegation-rail QA identity (#1063).** Provisioned 2026-08-05 on the
-dev backend: a dedicated QA user owning a Hybrid DeleGator treasury on Base
-Sepolia with an **open (unpinned) 5 USDC/day budget delegation**. Open rather
+**The delegation-rail QA identity (#1063).** Provisioned on the dev backend on
+2026-11-04, replacing the identity from 2026-08-05, whose grant ended and whose
+owner key could not be found: a dedicated QA user owning a Hybrid DeleGator
+treasury (`0xE86524a9b1c7E0fC1710b1DAa6141239b433e0B7`) on Base Sepolia with an
+**open (unpinned) 5 USDC/day budget delegation**. Open rather
 than pinned is structural, not preference: 3009-mode funds the delegate EOA
 from the budget, and a recipient-pinned delegation cannot pay the EOA — a
 pinned identity would make both legs skip for a third reason. The treasury
-holds testnet USDC (~0.9 at provisioning). A full run spends ~0.034 USDC
+holds testnet USDC (20 at provisioning). A full run spends ~0.034 USDC
 (`TREASURY_RUN_COST_ATOMIC` in `packages/qa-agent/src/lib/preflight.ts`, which
-names each leg's share); most legs spend 0.001 USDC each.
+names each leg's share); most legs spend 0.001 USDC each. The grant ends about
+2027-11-03: see [The QA budget ended](#the-qa-budget-ended).
 
 - **Top-up:** send Base Sepolia USDC
-  (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address in
-  the operator's `~/.haven/qa-delegation.env` (`QA_DELEGATION_TREASURY`) —
-  any source works; the budget refills itself daily. The daily
+  (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the treasury address above,
+  which every run's preflight also prints — any source works; the budget refills
+  itself daily. The daily
   [QA wallet balances](#qa-wallet-balances-standing-issue) check warns about
   7 days before it runs dry.
-- **Rotation:** the full identity (user credentials, owner key, delegate key,
-  API key, treasury address) lives in the operator's
-  `~/.haven/qa-delegation.env`. To rotate the delegate key: create a fresh
-  agent for the same account (new delegate + API key), update both repo
-  secrets, revoke the old agent. To rotate everything: re-provision a fresh
-  identity (signup → hybrid account → agent → open-budget grant → activate →
-  fund), update the secrets, and update the env file. Never reuse
-  `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
+- **Where the credentials are:** the owner key, QA user email and password,
+  delegate address and delegate key are in `~/.haven/qa-delegation.env`, with a
+  copy in Railway: see [Restore the QA identity file](#restore-the-qa-identity-file).
+  The API key and delegate key that GitHub runs use are repo secrets. GitHub
+  secrets can't be read back, so a lost API key can only be rotated.
+- **Rotate the delegate key:** see [Rotate only the delegate key](#rotate-only-the-delegate-key).
+- **Rotate everything:** see [Rotate the whole QA identity](#rotate-the-whole-qa-identity).
+- Never reuse `RELAYER_PRIVATE_KEY`, `SETTLEMENT_PRIVATE_KEY`, or any non-QA key.
+  A grant built by hand needs `expires_at` too, or it ends after 90 days: see
+  [The QA budget ended](#the-qa-budget-ended). The seed sets it for you.
 
-If the dotenv file contains exactly those five required entries, upload them
-with:
+If `/secure/path/qa-run.env` contains exactly the five required entries listed
+above, upload them with the command below. Never upload the identity file, which
+holds the owner key:
 
 ```bash
 gh secret set -f "/secure/path/qa-run.env" --repo d-hinders/Haven-AI
@@ -853,11 +872,12 @@ and preflight output reaches only a run log.
 
 `qa-balances.yml` runs once a day (06:00 UTC, and on `workflow_dispatch`). It
 calls `npm run qa:balances -w packages/qa-agent`, which reads five wallets on
-Base Sepolia and may request testnet faucet ETH for the demo merchant's
-settlement wallet and the dev relayer, and testnet faucet USDC for the two
-agent-eval accounts (#3997). Then
+Base Sepolia and when the QA budget grant ends (#4666), and may request testnet
+faucet ETH for the demo merchant's settlement wallet and the dev relayer, and
+testnet faucet USDC for the two agent-eval accounts (#3997). Then
 `scripts/ci/qa-balance-issue.mjs` keeps **one standing issue**, `QA wallet
-balances low` (label `qa-funding`):
+balances low` (label `qa-funding`). Its title stays as it is when the grant is
+what raised it, because the script finds its issue by that exact title.
 
 | Wallet | Unit | Where the address comes from |
 |---|---|---|
@@ -886,6 +906,31 @@ readings exist, a fixed fallback floor decides, and the row says so:
 run's cost: 0.034 USDC for the treasury, the merchant's `fail_floor`, 0.01 ETH
 for the relayer, or below one night's eval budget (3 USDC). `unknown` means a
 missing config value or a failed read.
+
+**The QA budget grant.** Money-flow QA was red from 2026-11-03 to 2026-11-04
+because the grant behind the standing identity's budget ended, and a balance
+reading cannot see that. So the check also reads
+`GET /machine-payments/allowances` with the QA agent key and takes
+`budget_expires_at` from the identity's open USDC budget: USDC with no recipient
+pin. A pinned budget neither satisfies nor raises the check. A re-keyed agent has
+a carry and a steady row, so the later end decides. The grant is reported beside
+the wallet table, not as a row in it, because it has no balance, burn or top-up:
+
+- `warn`: 30 days or fewer before it ends;
+- `critical`: 7 days or fewer, or no live open USDC budget. With no live budget
+  at all on the chain, the issue names the API's `budget_ended_at` when it
+  carries one, which is the latest ended budget of any token or pin, not
+  necessarily this one. A live pinned row keeps that field null, so the issue
+  names no date in that state;
+- `unknown`: an HTTP error, a read failure or timeout, a response with no
+  allowances list, or a live open budget with no usable `budget_expires_at`,
+  which includes a backend from before this field. With no QA API URL or agent
+  key it is `unknown` with the reason `config missing`, as on the treasury row.
+
+To clear it, [renew the QA budget before it ends](#renew-the-qa-budget-before-it-ends);
+with no live budget, follow [The QA budget ended](#the-qa-budget-ended).
+While the grant is `warn`, the standing issue stays open even with every wallet
+healthy, so read its lead paragraph before assuming a wallet is low.
 
 **How the issue behaves.**
 
@@ -932,12 +977,15 @@ missing config value or a failed read.
     the balance falls below the merchant's critical floor (3 days at the old
     0.002 ETH target), and a balance below that floor is `critical` whatever
     the history says.
-- **Any wallet `warn` or `critical`:** the body is rewritten, and the issue is
-  reopened (or created once). Each row carries the full address, balance, burn
-  per day, runway and a link to the matching top-up heading below.
-- **A comment is posted only when a wallet's band changes.**
-- **When no wallet is `warn` or `critical`:** the final balances are commented
-  and the issue closes itself.
+- **Any wallet or the grant `warn` or `critical`:** the body is rewritten, and
+  the issue is reopened (or created once). Each wallet row carries the full
+  address, balance, burn per day, runway and a link to the matching top-up
+  heading below. A grant alarm leads the body with the end date and a link to
+  [renew it](#renew-the-qa-budget-before-it-ends) or, with no live budget, a link
+  to [The QA budget ended](#the-qa-budget-ended).
+- **A comment is posted only when a band changes.**
+- **When nothing is `warn` or `critical`:** the final state is commented and the
+  issue closes itself.
 - **`unknown` never opens the issue and never blocks a close.**
 - **A *missing config* `unknown` turns the run red,** so GitHub notifies the
   owner. A failed read (an RPC or `/healthz` outage) does not.
@@ -954,10 +1002,9 @@ delegate private key nor a CDP Wallet Secret.
 ### Top up the delegation treasury
 
 Send Base Sepolia USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`) to the
-treasury address the issue names, from any source. It is the same address as
-`QA_DELEGATION_TREASURY` in the operator's `~/.haven/qa-delegation.env`, and the
-**Top-up** bullet under the delegation-rail QA identity above. A full run spends
-~0.034 USDC.
+treasury address the issue names, from any source. It is the same address as in
+the **Top-up** bullet under the delegation-rail QA identity above. A full run
+spends ~0.034 USDC.
 
 ### Top up the demo-merchant settlement wallet
 
@@ -1060,6 +1107,124 @@ has no environment and cannot read that variable). Until it is set, the row is
    line with accepted USDC claims, a post-top-up balance reflecting them, and
    the on-chain USDC transfer landing in the Hybrid DeleGator eval account —
    record the tx hash on #3997 before closing it.
+
+## Purging throwaway QA identities (dev only)
+
+Five deterministic money-flow scenarios provision a throwaway identity on every
+run (`packages/qa-agent/src/lib/throwaway-identity.ts`) and only revoke its
+agent when they end. The user, account, agent, budget and payment rows stay, so
+they accumulate — and #4678 adds more scenarios. No route deletes a user, and
+`DELETE /user/accounts/:id` only unlinks, so the clean-up is a manual workflow
+against the **dev** database: `/ops` stays read-only (epic #3507) and no delete
+route ships in the backend, which production shares (owner decision
+2026-11-05).
+
+The workflow is `.github/workflows/qa-purge-throwaways.yml`; the script is
+`packages/backend/scripts/purge-qa-throwaways.ts` (logic in
+`packages/backend/src/infra/repositories/qa-throwaway-purge.ts`, tested against
+real Postgres in `src/infra/__tests__/qa-throwaway-purge.test.ts`).
+
+### What it deletes, and what it must never touch
+
+A row matches only when **both** conditions hold:
+
+- the email is `qa-%@haven.test`, and
+- the name is `QA <label> (throwaway)`.
+
+The email pattern alone is not enough. The recipe in
+[Rotate the whole QA identity](#rotate-the-whole-qa-identity) writes
+`SEED_QA_EMAIL=qa-delegation-<hex>@haven.test`, which fits `qa-%@haven.test` and
+has the same shape as the harness's `qa-<label>-<rand>@haven.test`. Deleting it
+would remove the user, agent and budget that `qa-dev.yml` and the release gate
+depend on. The seed's user is named `QA Bot`, so the name condition excludes it
+at any age. Eval accounts are created from the dashboard, not by the harness,
+and do not match either.
+
+Deletion order, measured from a migrated database (`pg_constraint`): payment
+intents, then delegations, then rekeys, then organizations (leaves first), then
+agents, then the user. Everything else cascades. The restricting references
+that force that order are `payment_intents.user_id` and `.agent_id`,
+`agent_rekeys.initiated_by_user_id`, `agent_delegations.rekey_id`,
+`payment_intents.task_budget_id` and `.sub_budget_id`, and
+`agent_organizations.parent_organization_id`. The test reads `pg_constraint`,
+so a future restricting reference to `users` or `agents` turns it red.
+
+**What stays, on purpose:**
+
+- `machine_payment_receipts` and `accounting_webhook_deliveries` survive via
+  `ON DELETE SET NULL` — the receipt keeps its tx hash and amount, it just
+  loses the link to the deleted intent or user.
+- The gas ledgers (`relayer_gas_events`, `sponsored_userop_gas_events`) have no
+  foreign key and are never touched, so dev's gas accounting stays true.
+- On-chain state stays. The throwaway's owner key was ephemeral and is gone, so
+  any test USDC left on its account is stranded; the purge cannot and does not
+  move it.
+
+### Guards
+
+1. `workflow_dispatch` only, and the job refuses any ref but `dev`.
+2. The job runs inside the protected **`qa-purge-dev`** environment. That
+   environment holds the dev-only database credential and the allowlisted
+   target tuple; neither is committed, because the repo is public. Required
+   reviewers on the environment are what let any of the three maintainers
+   approve a run.
+3. The credential is the primary guard. The secondary guard identifies the
+   **database, not only its endpoint**: the script compares the URL's exact
+   host, port and database name with the allowlisted tuple (exact equality, not
+   a shared proxy suffix), then — after connecting and before any query, dry
+   run included — verifies the server's own identity: `current_database()` and
+   `pg_control_system().system_identifier`. The system identifier is there
+   because Railway's default database is called `railway` in both the dev and
+   the production project, so the name alone proves nothing.
+4. **Dry run is the default.** Deleting needs `dry_run: false` explicitly.
+5. Retention is validated as an integer from 1 to 365 before connecting. `0`,
+   negative and malformed values are refused; there is no zero-day override.
+6. Both inputs reach the step as `env:` values and are read as quoted shell
+   variables, never as `${{ inputs.* }}` inside `run:` (#4740). An inlined
+   expression is pasted into the script before bash parses it, so a crafted
+   `retention_days` would run as shell beside the credential, before guard 5
+   sees it — or, with no shell command at all, put `--apply` into the
+   arguments and defeat guard 4. Only the exact string `false` adds `--apply`.
+   `scripts/ci/qa-purge-throwaways-workflow.test.mjs` runs the step's real
+   `run:` body under bash and fails on an inlined input.
+
+### Operator steps (once, then per run)
+
+1. Create the GitHub environment `qa-purge-dev` (Settings → Environments),
+   add the three maintainers as required reviewers, and restrict its
+   deployment branches to `dev`. Guard 1's ref check is a step in the workflow,
+   and a dispatch from another branch runs that branch's copy of it; the
+   branch policy is what holds there.
+2. Add the environment **secret** `QA_PURGE_DATABASE_URL`: the dev database
+   connection string, using the post-rotation credential from epic #4484.
+3. Add the environment **variables** for the allowlisted tuple:
+   `QA_PURGE_ALLOWED_HOST`, `QA_PURGE_ALLOWED_PORT`,
+   `QA_PURGE_ALLOWED_DATABASE`, and `QA_PURGE_ALLOWED_SYSTEM_IDENTIFIER`.
+   Read the last one from the dev database itself:
+
+   ```sql
+   SELECT current_database(), (SELECT system_identifier FROM pg_control_system());
+   ```
+
+   `pg_control_system()` is restricted to superusers by default; Railway's
+   default Postgres user is one. If the credential is not, grant it
+   `EXECUTE` on the function rather than weakening the guard.
+4. Dispatch **QA — purge throwaway identities (dev)** from `dev` with
+   `dry_run: true` (the default) and the retention you want (default 7 days).
+   Read the summary: candidates, and rows per table. Nothing is deleted.
+5. Re-dispatch with `dry_run: false` only when the dry-run counts look right.
+   The summary then reports users deleted and users failed.
+
+### Reading the result
+
+The job summary reports counts per table in both modes, and never prints an
+email, API key or address — the repo is public. Each user is deleted in its own
+transaction: a failure leaves that user whole, the run continues so the summary
+is complete, and **the job exits nonzero if any user failed**. A partly failed
+destructive run cannot look green. A user that keeps failing is usually one
+whose organization is the parent of another user's organization
+(`agent_organizations.parent_organization_id` is `ON DELETE RESTRICT`); that
+reference is not a throwaway's to break, so the run reports it and leaves it.
 
 ## Automation & gating
 
@@ -1279,7 +1444,6 @@ The skip reason is worth reading too, since the run title carries it: a
 (`34339884272`), and that one is refused by the environment filter and by
 ancestry, not by de-duplication.
 
-
 #### Provenance — why a curl can no longer mute the alarm (#2271)
 
 The old trigger's confirmation command (`gh api …/dispatches -f
@@ -1374,9 +1538,6 @@ them is a string a caller supplies:
   reach further back), plus the lookup accounting (attempted/failed/cached) —
   the diagnostics that would have told the leading hypothesis apart from a
   failed lookup at the time, rather than only after the fact.
-  > **Re-verified #3321 (2026-09-30):** the guard-freshness listing-coherence
-  > / page-1 retry passage only; nothing else in this document was
-  > re-verified.
 
   **A transient stale read is now retried, for both guard kinds (#3321).**
   #3409's leading hypothesis — an anomalous listing page — went from a guess
@@ -1636,8 +1797,8 @@ history **within `QA_FRESHNESS_HOURS`** (default **30h** — covers one missed
 nightly), and covered the money-path code being promoted (#1030, #2404 — the
 rules are in *Automation & gating* above). No recent green run → the gate fails
 with instructions to dispatch one. Only the
-deterministic money-flow harness gates; the LLM-agent layer (2b, #577) and browser
-exploration (Layer 3, #579) stay **non-gating**.
+deterministic money-flow harness gates; browser exploration (Layer 3, #579) and the eval
+suite stay **non-gating**.
 
 Both `qa-freshness` and the branch-source `gate` have been **required status
 checks on `main` since 2026-07-27** (`dev-environment.md`). They need the `QA_*`
@@ -1714,37 +1875,19 @@ npm run test:e2e:live -w packages/frontend
 GitHub uploads the Playwright report, screenshots, video, and trace as a
 seven-day artifact when the run completes.
 
-## Layer 2b — exploratory agent QA (`/qa-dev`, #577)
+## The retired exploratory agent QA command (#4681)
 
-An LLM agent drives **natural-language payment goals** through the **real Haven
-MCP** with the dev QA credentials, using the agent session's own model (no
-`ANTHROPIC_API_KEY` in CI), and files a run report under
-[`bug-reports/`](../bug-reports/). It exercises the live tool surface + runtime
-wiring the deterministic harness (2a) can't. Because the tester is an LLM, it is
-**never a deploy gate** — #575/#576 are repeatable checks, while 2b is
-exploratory.
+The exploratory agent-driven QA command was retired on 2026-11-05. The eval
+suite covers its goals deterministically, and the deterministic money-flow
+harness (`qa-dev.yml`) is unchanged — this section is a pointer, not a
+procedure.
 
-- **When to run:** before a promotion, or after a risky change to the payment / MCP surface.
-- **How findings feed back:** the report's *Friction* and *Notes for the coding agent* sections (and any issues it files) are the loop #419/#420 call for.
-- **Claude Code:** run `/qa-dev` ([`.claude/commands/qa-dev.md`](../../.claude/commands/qa-dev.md)).
-
-**Codex / generic runtime (pasteable prompt):**
-
-> You are running exploratory QA against Haven's **dev** environment (testnet / Base
-> Sepolia, capped QA delegate — never prod). Using the already-connected Haven MCP
-> (or connect with `npx -y <connector_package> --setup <QA setup token> --api <dev backend URL>`, where `<connector_package>` is the `connector_package` value the dev backend's own setup response returns (the same package is named inside its `connector_command`, which is the whole `npx -y … --setup … --api …` string — do not paste that in here) — NOT necessarily `@alpha` since #2422; the token and URL are owner-provisioned, see "QA identity, funding & secrets" below). A default connect names its own pair from the agent's display name (#3737) and installs alongside anything already wired, so it does not refuse; if it DOES refuse with `wiring_collision` (#2551 — the run targeted the bare `haven` / `haven-signer` pair, via `--bare`/`--replace`, on a machine that already holds a spend-capable Haven agent), relay the refusal to the owner and stop; do not add `--replace` or `--name` on your own — on the dedicated QA runner the owner's usual answer is `--replace`, on a developer machine `--name`:
-> 1. `haven_get_agent` + `haven_get_allowances` — confirm the dev QA agent and note the live remaining budget.
-> 2. Pay the demo-merchant x402 call **within** budget (`haven_pay_x402` on the local `@haven_ai/mcp` server; the hosted server the connector installs has no tool by that name — there, `haven_quote_mcp_tool` then `haven_pay_mcp_tool`) → expect settlement + a receipt.
-> 3. Use direct `haven_pay` for an amount **over** the remaining budget → expect it to be
-> **refused before it becomes signable**. Assert all three: no settlement, nothing
-> queued or pending approval, and nothing silently spent. The refusal IS the pass —
-> the delegation rail has no approval queue, so do not record the decline as a failure.
-> 4. Make a priced call **above the max price** → expect a `PRICE_EXCEEDS_MAX` rejection.
-> 5. `haven_list_receipts`, then `haven_get_receipt { payment_id }` + `haven_verify_receipt` on the step-2 payment. `haven_get_receipt` returns the signed bundle (`{ receipt }`, settled payments only); `haven_verify_receipt` accepts the `GET /payments/:id/receipt` response (`HavenClient.getReceipt`) as-is, not a list row — a row carries no signature and returns `not_a_signed_receipt`. A signed erc7710 bundle verifies; a direct or eip3009 bundle returns `not_verifiable_offline` (the signed user operation is not in the bundle).
-> Stop at the first failed step. Then write a run report from
-> `docs/bug-reports/_run-report-template.md` (per-goal pass/fail + friction; set
-> `status: record` in the copy's front-matter) and file
-> concrete bugs as issues. This is non-gating exploratory coverage.
+Every goal the command had, and the eval task that covers it — or the written
+reason it has none — is
+[`agent-evals.md` § *The retired exploratory command's goals*](agent-evals.md#the-retired-exploratory-commands-goals-against-the-suite).
+The cold-agent onboarding scenario that ran beside it is now the
+`onboarding-cold-setup` and `onboarding-client-out-of-date` eval tasks
+([`agent-evals.md`](agent-evals.md) § *The cold-agent onboarding tasks*).
 
 ## Layer 3 — AI-driven browser exploration (`/qa-explore-ui`, #579)
 
@@ -1752,12 +1895,12 @@ An LLM agent drives a **real browser** (via **Playwright MCP**, reusing the
 existing Chromium/Playwright setup) over the **dev dashboard**, using the agent
 session's own model (no `ANTHROPIC_API_KEY` in CI). It adds agentic coverage of
 the **UI itself** — layout breakage, horizontal overflow, confusing states, dead
-ends, console errors, and secret leakage that fixed-selector specs miss. Like
-Layer 2b it is **never a deploy gate**; it is **read-oriented** exploration (no
+ends, console errors, and secret leakage that fixed-selector specs miss. It is
+**never a deploy gate**; it is **read-oriented** exploration (no
 money movement beyond what the existing testnet flows already cover) that files a
 findings report under [`bug-reports/`](../bug-reports/).
 
-- **When to run:** before a promotion, or after a risky change to the dashboard UI — **and on a recurring weekly cadence** as the design system's UX-discovery heartbeat, where each material finding becomes a deduped `/new-task` backlog issue for `/ship-next`. That cadence and its finding→backlog→ship-next loop are specified in [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) (#903).
+- **When to run:** on demand — before a promotion, or after a risky change to the dashboard UI. There is no recurring schedule and no CI job: the pass is a discovery tool, never a deploy gate, and the finding→backlog loop below is what turns its report into work (#903).
 - **Target:** a **non-production** Vercel deployment (`NEXT_PUBLIC_HAVEN_ENV=dev`)
   re-pointed at the shared dev backend with `?apiBaseUrl=` — same convention as the
   [live UI smoke](#live-deployed-ui-smoke). A production build ignores the override
@@ -1777,7 +1920,7 @@ findings report under [`bug-reports/`](../bug-reports/).
 
 > You are running exploratory **UI** QA against Haven's **dev** dashboard (testnet /
 > Base Sepolia — never prod), read-oriented. Attach a Playwright MCP browser driver
-> (`npx @playwright/mcp@latest`, reusing the installed Chromium). Open the given
+> (`npx @playwright/mcp@0.0.84`; by default it drives the system Google Chrome, not the repo's installed browser). Open the given
 > **non-production** Vercel URL with `?apiBaseUrl=https://havenbackend-dev-8b95.up.railway.app`
 > appended, sign in as the seeded QA user, and confirm the `DEV` badge + real dev data.
 > Then explore the dashboard, transactions + detail panel, agents + connect-agent
@@ -1795,33 +1938,35 @@ findings report under [`bug-reports/`](../bug-reports/).
 > front-matter), run the secret review before committing, and file
 > concrete UI bugs as issues. This is non-gating exploratory coverage.
 
-## Layer 3b — the cold-agent onboarding scenario (`/qa-explore-agent-onboarding`, #2538)
+### Finding → backlog → ship-next loop
 
-The same cadence, pointed the other way. Layer 3 explores Haven **signed in**; this
-scenario measures whether an agent that has **never seen Haven** can get its user set
-up — the path epic [#2519](https://github.com/d-hinders/Haven-AI/issues/2519) exists to
-make work, and the one whose only measurement is the
-[A0 cold test of 2026-09-04](../bug-reports/agent-first-cold-test-2026-09-04.md).
+The pass is on demand, but what happens to its findings is fixed (#903):
 
-A fresh agent is given a dev URL and "set it all up so my agent can pay for things",
-and nothing else — **the prompt names no path**, because score 1 asks whether it found
-`/for-agents.md` by following the hooks the HTML advertises rather than by guessing the
-convention, which is what A0 had to do. It scores four things (discovery, the human
-steps its first reply names, tool calls to the login wall, and whether it produced the
-`haven login` and `haven agents connect` commands correctly) and writes
-`docs/bug-reports/qa-explore-agent-onboarding-<date>.md` with each score beside the
-previous run's and A0's.
-
-- **When to run:** weekly on the cadence, owner-armed as a Routine — never as a CI job.
-  Beyond the cadence's own non-gating rule, **a cold agent cannot be cold inside this
-  repository's runner**: score 1 is only valid if the agent does not know the path.
-- **Guardrails:** never a password, a passkey, an approval or a payment. It stops at each
-  human step and writes the hand-off message it would have sent; those messages are the
-  report's most useful content.
-- **Scenario, rubric and scoring bands:**
-  [`qa-explore-agent-onboarding`](../../.claude/commands/qa-explore-agent-onboarding.md).
-  Cadence and how to read a moved score:
-  [`qa-explore-ui-cadence.md`](qa-explore-ui-cadence.md) § *Second scenario*.
+1. **Report first.** `/qa-explore-ui` writes a run report under
+   [`bug-reports/`](../bug-reports/) from `_run-report-template.md`. That report
+   is the raw output; it is not itself the backlog.
+2. **Triage each finding for materiality.** A *material* finding is a real
+   UX/layout/console/dead-end/clarity problem a user could hit — not a
+   subjective taste call, not a duplicate of a known issue, not a transient
+   dev-data artifact. Drop the rest; note in the report that they were
+   considered and dropped.
+3. **Dedupe against open issues before filing.** Search open issues
+   (`gh issue list --search "<surface/keywords>"`) for a materially equivalent
+   report. If one exists, add a comment linking the new evidence instead of
+   opening a duplicate.
+4. **File genuinely-new findings with [`/new-task`](../../.agents/skills/new-task/SKILL.md)**
+   — backlog-only (no `code-quality`), labeled `area:frontend` (add
+   `money-path` only if the finding is on a money-movement surface, which routes
+   it through `money.md` and its characterization-test bar). Let `new-task` write
+   the Scope / Acceptance / Files / Surface fields; seed it from the report row
+   (surface, expected vs actual, evidence).
+5. **Link back.** Every filed issue is linked from the run report's findings
+   table, so the report is the audit trail of what became an issue and what was
+   dropped.
+6. **Burn down separately.** The backlog issues are now ordinary `/ship-next`
+   candidates — `ship-next` picks them up when they're queued (add
+   `code-quality` or make them epic sub-issues). The pass never ships its own
+   findings; discovery and delivery stay decoupled.
 
 ## Reading results and filing bugs
 
@@ -1898,6 +2043,9 @@ agent must never ask for a key, and an operator must never paste one.
 
 ### Classify the failure
 
+If the legs read `this budget ended on` or `DELEGATION_EXPIRED`, whatever the
+class, go to [The QA budget ended](#the-qa-budget-ended).
+
 The standing `qa-failure` issue (#2767) records a class for the run and for each failing
 leg, with an excerpt of the line around the matched signature (URLs and key-labelled
 values scrubbed;
@@ -1934,6 +2082,231 @@ Its author is mentioned on the episode's first comment only when the run class i
 [Automated failure reporting](#automated-failure-reporting)). Several PRs, or an
 `open-ended` or `unavailable` window, leave the bisect to you; see
 [Automated failure reporting](#automated-failure-reporting) for what each form means.
+
+### The QA budget ended
+
+The budget refills each period, but the grant itself ends. A grant built with no
+`expires_at` lasts 90 days, which is how the standing identity's 2026-08-05 grant
+came to end on 2026-11-03. A seeded grant lasts 364 days, so the current one ends
+about 2027-11-03. The daily
+[QA wallet balances](#qa-wallet-balances-standing-issue) run warns 30 days ahead
+and is critical from 7 days ahead, through its standing issue, so
+[renew it](#renew-the-qa-budget-before-it-ends) before this section applies.
+
+Every spending leg goes red at once. These two wordings are specific to an ended
+grant:
+
+- `this budget ended on <date>; ask the owner to set a new one`
+- `DELEGATION_EXPIRED`
+
+Other legs say the same thing less exactly, and these two can have other causes
+when they appear alone:
+
+- `precondition: the agent has no USDC budget — nothing to be over`
+- `Agent has no active budget delegation for USDC to this recipient`
+
+`task-budget-lifecycle` still passes, because it funds nothing. The failure issue
+may class the run `mixed` and call a leg `haven`.
+
+**Recovery needs the owner key.** It is in `~/.haven/qa-delegation.env`, along
+with every other value the seed needs. If that file is not on your machine,
+[restore it](#restore-the-qa-identity-file) first. Then, from an up-to-date `dev`
+checkout with [dependencies installed](#1-prepare-a-clean-dev-checkout), run the
+seed:
+
+```bash
+(set -a; source ~/.haven/qa-delegation.env; set +a; npm run seed -w packages/qa-agent)
+```
+
+Look for `✓ budget granted`. The owner signs locally and the seed activates the
+grant. The agent, API key, delegate key, treasury and repo secrets all stay as
+they are, so no secret needs uploading. Then start a fresh run:
+
+```bash
+gh workflow run qa-dev.yml --repo d-hinders/Haven-AI --ref dev
+```
+
+Use this identity's own values. A different `SEED_QA_EMAIL` provisions a separate
+identity with an empty treasury, a different `SEED_DELEGATE_ADDRESS` creates a new
+agent and leaves the real one lapsed, and the seed refuses an owner key that is
+not this account's owner. If the owner key is lost, follow
+[Rotate the whole QA identity](#rotate-the-whole-qa-identity).
+
+### Renew the QA budget before it ends
+
+The seed leaves a live budget of the same amount alone: it prints
+`already granted — skipping`, and the warning stays. To renew before it ends,
+set any amount other than the live one, which replaces the live grant. It needs
+the owner key, as above. Set the amount after the `source`, because the file also sets it:
+
+```bash
+(set -a; source ~/.haven/qa-delegation.env; SEED_ALLOWANCE_USDC=6; set +a; npm run seed -w packages/qa-agent)
+```
+
+That also changes the budget amount, and going back to `5` replaces the grant
+again. The next run of QA wallet balances clears the warning, or dispatch it:
+
+```bash
+gh workflow run qa-balances.yml --repo d-hinders/Haven-AI --ref dev
+```
+
+### Restore the QA identity file
+
+GitHub QA runs don't need `~/.haven/qa-delegation.env`. Renewing the budget and
+rotating the identity do. A local QA run needs the delegate key from this file
+plus the API key, which is only in the repo secrets and can't be read back. Rotating
+the API key for a local run stops the old one working at once, so replace the repo
+secret in the same sitting or every GitHub run loses its spending legs.
+
+A copy of the file is in Railway as `QA_DELEGATION_ENV_B64`, a shared variable in
+the **dev** environment that no service should reference. The value looks like one
+long unreadable string because it is base64. That is an encoding, not encryption,
+so treat it as a secret. To turn it back into the readable file on macOS:
+
+1. In Railway, copy the value of `QA_DELEGATION_ENV_B64`.
+2. Decode it into place:
+
+   ```bash
+   test -e ~/.haven/qa-delegation.env && echo "already there, nothing changed" || (umask 077; mkdir -p ~/.haven; t=~/.haven/qa-delegation.env.restore; pbpaste | base64 -d > "$t"; if grep -Eq '^SEED_OWNER_PRIVATE_KEY=0x[0-9a-fA-F]{64}$' "$t" && grep -Eq '^QA_DELEGATION_DELEGATE_PRIVATE_KEY=0x[0-9a-fA-F]{64}$' "$t"; then mv "$t" ~/.haven/qa-delegation.env; cut -d= -f1 ~/.haven/qa-delegation.env; else rm -f "$t"; echo "not restored: the clipboard did not hold the backup"; fi)
+   ```
+
+   On success it prints the variable names, never their values: they include
+   `SEED_OWNER_PRIVATE_KEY` and `QA_DELEGATION_DELEGATE_PRIVATE_KEY`. It refuses a
+   clipboard that is empty, cut off or something else. The file is readable only by
+   you, and the command never overwrites an existing file.
+3. Clear your clipboard:
+
+   ```bash
+   pbcopy < /dev/null
+   ```
+
+The result is a plain text file of `NAME=value` lines. Keep its contents out of
+chats and issues.
+
+To check that the Railway copy matches a file you already have, copy the value
+from Railway and run this, then clear your clipboard again:
+
+```bash
+pbpaste | base64 -d | cmp - ~/.haven/qa-delegation.env && echo "backup matches"
+```
+
+#### Update the Railway copy
+
+After changing the file, run this to put the new value on your clipboard. Paste it
+over the old value in the variable's value field, not Railway's Raw Editor, then
+clear your clipboard:
+
+```bash
+base64 -i ~/.haven/qa-delegation.env | tr -d '\n' | pbcopy
+```
+
+### Rotate the whole QA identity
+
+Use this when the owner key is lost or a key may have been exposed. It creates a
+new user, account, agent and treasury. Run these from an up-to-date `dev` checkout
+with [dependencies installed](#1-prepare-a-clean-dev-checkout).
+
+1. If `~/.haven/qa-delegation.env` exists, rename it, because
+   [retiring the old identity](#retire-the-old-identity) needs its values. If a key
+   may have been exposed, stop the old budget now.
+2. Generate new keys and a new login. This writes the file with private
+   permissions, refuses to overwrite one, and prints only the two addresses.
+   `SEED_PAYMENT_TO` is required, but the seed only prints it back, so this sets it
+   to the owner's address.
+
+   ```bash
+   node -e 'const {ethers}=require("ethers"),fs=require("fs"),os=require("os"),c=require("crypto");fs.mkdirSync(os.homedir()+"/.haven",{recursive:true,mode:0o700});const p=os.homedir()+"/.haven/qa-delegation.env";if(fs.existsSync(p))throw new Error("already exists: "+p);const o=ethers.Wallet.createRandom(),d=ethers.Wallet.createRandom();fs.writeFileSync(p,["SEED_HAVEN_API_URL=https://havenbackend-dev-8b95.up.railway.app","SEED_OWNER_PRIVATE_KEY="+o.privateKey,"SEED_DELEGATE_ADDRESS="+d.address,"SEED_PAYMENT_TO="+o.address,"SEED_QA_EMAIL=qa-delegation-"+c.randomBytes(4).toString("hex")+"@haven.test","SEED_QA_PASSWORD=Qa-"+c.randomBytes(18).toString("hex"),"SEED_ALLOWANCE_USDC=5","SEED_RESET_MIN=1440","QA_DELEGATION_DELEGATE_PRIVATE_KEY="+d.privateKey,""].join("\n"),{mode:0o600});console.log("owner",o.address,"\ndelegate",d.address)'
+   ```
+
+3. [Update the Railway copy](#update-the-railway-copy) now, so the new owner key is
+   backed up before any funds arrive.
+4. Run the seed, keeping its output in a private log, because it prints the new API
+   key once:
+
+   ```bash
+   (umask 077; set -a; source ~/.haven/qa-delegation.env; set +a; npm run seed -w packages/qa-agent 2>&1 | tee -a ~/.haven/qa-delegation-seed.log)
+   ```
+
+   Look for `✓ budget granted` and note the `Account` address on the last lines.
+   Keep the log out of chats and issues.
+5. Send at least 2 test USDC on Base Sepolia to that account. Less than that soon
+   raises the daily balance warning.
+6. Replace the two repo secrets. The first command sets nothing unless the log holds
+   a real API key. If it says the key is missing, the seed never showed one, so
+   rotate it with `POST /agents/:id/rotate-key`.
+
+   ```bash
+   if grep -q '^QA_DELEGATION_AGENT_API_KEY=sk_agent_' ~/.haven/qa-delegation-seed.log; then grep '^QA_DELEGATION_AGENT_API_KEY=sk_agent_' ~/.haven/qa-delegation-seed.log | tail -1 | cut -d= -f2- | tr -d '\n' | gh secret set QA_DELEGATION_AGENT_API_KEY --repo d-hinders/Haven-AI; else echo "API key missing from the log, nothing set"; fi
+   ```
+
+   ```bash
+   grep -m1 '^QA_DELEGATION_DELEGATE_PRIVATE_KEY=' ~/.haven/qa-delegation.env | cut -d= -f2- | tr -d '\n' | gh secret set QA_DELEGATION_DELEGATE_PRIVATE_KEY --repo d-hinders/Haven-AI
+   ```
+
+   Once both have succeeded, delete the log:
+
+   ```bash
+   rm ~/.haven/qa-delegation-seed.log
+   ```
+
+7. [Retire the old identity](#retire-the-old-identity).
+8. Start a run and confirm it is green:
+
+   ```bash
+   gh workflow run qa-dev.yml --repo d-hinders/Haven-AI --ref dev
+   ```
+
+9. In a PR, update the provisioning date, treasury address, starting balance and the
+   grant's end date in this runbook. They appear under
+   [the delegation-rail QA identity](#configure-github-actions) and in
+   [The QA budget ended](#the-qa-budget-ended).
+
+#### Retire the old identity
+
+Log in as the old user with `POST /auth/login`, using the old file's email and
+password. Then, in this order:
+
+1. **Stop the budget** with the old owner key: `POST /agents/:id/delegations/revoke-all`
+   and `.../revoke-all/submit`, or per grant with
+   `/agents/:id/delegations/:hash/revoke` and `.../revoke/submit`.
+   `stopReplacedBudget` in `packages/qa-agent/src/seed.ts` shows the signing.
+2. **Move the remaining USDC** to the new treasury once it exists:
+   `POST /accounts/hybrid/:address/transfers/prepare?chain_id=84532`, then
+   `/submit?chain_id=84532`.
+3. **Revoke the agent:** `POST /agents/:id/revoke`. This needs only the login, and it
+   does not stop the budget, which is why step 1 comes first.
+
+Without the old owner key, you can't do steps 1 or 2: the grant keeps its authority
+until it ends, and you can't move its USDC with an owner signature.
+
+### Rotate only the delegate key
+
+Use this when only the delegate or API key may have been exposed and you still have
+the owner key. The account, treasury and login stay the same, and you get a new agent
+with a new budget. Run these from an up-to-date `dev` checkout with
+[dependencies installed](#1-prepare-a-clean-dev-checkout).
+
+1. Put a new delegate key in the identity file. This prints the old and new delegate
+   addresses, never the keys. Note the old one for step 4:
+
+   ```bash
+   node -e 'const {ethers}=require("ethers"),fs=require("fs"),os=require("os");const p=os.homedir()+"/.haven/qa-delegation.env",d=ethers.Wallet.createRandom();let s=fs.readFileSync(p,"utf8");const old=s.match(/^SEED_DELEGATE_ADDRESS=(.*)$/m)[1];s=s.replace(/^SEED_DELEGATE_ADDRESS=.*$/m,"SEED_DELEGATE_ADDRESS="+d.address).replace(/^QA_DELEGATION_DELEGATE_PRIVATE_KEY=.*$/m,"QA_DELEGATION_DELEGATE_PRIVATE_KEY="+d.privateKey);fs.writeFileSync(p,s,{mode:0o600});console.log("old delegate",old,"\nnew delegate",d.address)'
+   ```
+
+2. [Update the Railway copy](#update-the-railway-copy).
+3. Follow steps 4 and 6 of [Rotate the whole QA identity](#rotate-the-whole-qa-identity):
+   run the seed, then replace both repo secrets. The seed creates the new agent,
+   grants its budget and prints its API key once. If a key has to be rotated here,
+   rotate the new agent's.
+4. Stop the old agent's budget, then revoke that agent, using steps 1 and 3 of
+   [Retire the old identity](#retire-the-old-identity) with the current file's login.
+   Skip step 2, because the treasury hasn't changed. Both agents have the same name,
+   so find the old one in `GET /agents` by its `delegate_address`, the old address
+   from step 1, ignoring upper and lower case. **Check this carefully:** stopping the wrong agent ends the new
+   budget and leaves the old key live. Revoking an agent alone doesn't stop its
+   budget.
+5. Start a run and confirm it is green, then update the grant's end date in this
+   runbook in a PR, because the new grant has a new one.
 
 ### `ERR_MODULE_NOT_FOUND ... @haven_ai/sdk/dist/index.js`
 
@@ -2000,8 +2373,9 @@ Check balances by role:
    on its first erc7710 authorize, and submits the gasless EIP-3009 sweep. The
    payment UserOps are paymaster-sponsored and never use it (#3264, the
    funding table above).
-3. Owner: **no ETH needed since #2007.** Reseeding on the delegation rail sends
-   nothing on-chain; the owner only signs.
+3. Owner: **no ETH needed since #2007.** A plain re-grant on the delegation rail
+   sends nothing on-chain; the owner only signs. Replacing a live grant also
+   submits an owner-signed Stop of each old grant through Haven.
 
 Do not repeatedly rerun a money-moving harness while the cause is unknown; each
 run consumes test allowance and test USDC.
@@ -2196,40 +2570,4 @@ the observer reads 10-block `eth_getLogs` windows (`GET_LOGS_MAX_RANGE` in
 - [`dev-environment.md`](./dev-environment.md) — shared dev topology
 - [`promoting-dev-to-main.md`](./promoting-dev-to-main.md) — promotion checks
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: the scenario table now follows `SCENARIOS` in
-> `packages/qa-agent/src/run.ts` (the text says "in order"), and
-> `x402-erc7710-hosted` names its two sibling legs instead of "the two legs
-> above"; the sweep fixture spends 0.0005 USDC, not 0.001 (`storage_50gb`'s
-> `price_usdc: 500n`); an unconfigured `x402-delegation-3009` skip fails the
-> run under `QA_REQUIRE_ALL_LEGS=1`, which is set; the 3009 legs run live
-> (qa-dev run 40048064262 passed all three); the wire-contract test pins v2
-> only, v1 retired by #3272; #2268 closed on 2026-09-02; the exploratory
-> prompt's within-budget step names the hosted tools beside the local
-> `haven_pay_x402`; the dev relayer does not sponsor UserOps (#3264).
-> Re-checked without change: every file path and `npm run` script the
-> document names, the seed's routes and reuse rules, the preflight floors
-> (`TREASURY_RUN_COST_ATOMIC`, `MIN_SETTLEMENT_HEADROOM_FAIL`/`_WARN`), the
-> merchant's `/healthz` and 503 bodies, the #4119 record check and its
-> 45 s / 60 s / 120 s timings, the qa-dev and qa-balances workflows (secrets,
-> variables, cron, concurrency, the green-close step), the balance and faucet
-> constants, the freshness gate and guard constants, the window line's
-> budgets, the failure classifier's signatures, the sign-failure codes and
-> their 300-character bound, `SWEEP_MIN_USDC`, the merchant session TTL and
-> #3171 data, the RPC probe flags and the observer's 10-block range, and all
-> 137 cited issues with `gh api` (#3933 and #4215 are open, `landed-partial`;
-> the text describes their shipped parts).
->
-> **Review round 1 (haven-doc-reviewer @ `344d7ea91`).** Also changed:
-> `x402-erc7710-sdk` names `x402-erc7710-settle` rather than "the leg above",
-> and its hosted variant is `x402-erc7710-hosted` (#1456 is closed); the
-> post-deploy trigger's history is no longer "exactly one deploy" (2,685
-> `deployment_status` runs created 2026-10-01 → 10-23, 0 to 265 a day, from
-> per-day `created=` counts; rounds 2 and 3 corrected an earlier 2500, the
-> filtered listing's cap, and a "hundreds a day" drawn from one peak day); the 3009 scenarios run in every `qa-dev` money-flow job, not
-> every run; the dev relayer deploys the treasury at first activation and a
-> fresh agent's delegate account at its first erc7710 authorize; #2268 is the
-> issue that reported the old trigger never fired; and two stale conditionals
-> found re-scanning for the same class — the catalog leg is no longer "NEW",
-> and #3171 is deployed (dev's demo merchant answers an unknown session with
-> its data, probed 2026-10-24).
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

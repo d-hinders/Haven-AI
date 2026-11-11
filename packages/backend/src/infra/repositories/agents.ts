@@ -117,6 +117,9 @@ export interface AccountInfoRow {
   account_address: string | null
   account_name: string | null
   account_chain_id: number | null
+  /** #4719: the passport predicate's rail leg. Not part of the creation response. */
+  account_type?: string | null
+  execution_rail?: string | null
 }
 
 export interface DelegateAgentRow {
@@ -596,7 +599,8 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
                    -- here is the honest answer, not a placeholder.
                    NULL::text AS mcp_server_name`
 
-export const FIND_ACCOUNT_INFO_SQL = `SELECT account_address, name AS account_name, chain_id AS account_chain_id
+export const FIND_ACCOUNT_INFO_SQL = `SELECT account_address, name AS account_name, chain_id AS account_chain_id,
+                    account_type, execution_rail
              FROM smart_accounts WHERE id = $1`
 
 export interface NewAgent {

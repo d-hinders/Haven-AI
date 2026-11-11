@@ -834,8 +834,8 @@ test('#2839: the REQUIRED job never opts out of an event, the advisory one skips
   )
 
   // The advisory job is free to skip, and should: nothing in it reads the pull
-  // request, so re-running ~130 external URL checks on a reworded description
-  // buys nothing.
+  // request, so re-running the link check on a reworded description buys
+  // nothing.
   const advisory = blockUnder(jobs, 'advisory', 2)
   assert.ok(advisory, '`advisory` is still a separate job')
   const advisoryIf = directChildren(advisory).find((l) => /^\s*if\s*:/.test(l))

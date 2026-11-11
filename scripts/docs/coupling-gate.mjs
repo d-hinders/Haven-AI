@@ -24,7 +24,6 @@
 
 import { readFile, writeFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import {
   REPO_ROOT,
@@ -34,6 +33,22 @@ import {
   globToRegExp,
 } from './validate-frontmatter.mjs'
 import { packageDocRecords } from './package-docs.mjs'
+// #4612: the version-literal partition is the QA freshness gate's (#2164), not a
+// second implementation of it, and the constant set is the one the release bump
+// owns. Both are imported rather than restated so a constant added to the bump
+// reaches this gate without anyone remembering to copy it.
+import { partitionVersionOnly } from '../ci/qa-freshness.mjs'
+import { ALL_VERSION_CONSTANT_FILES } from '../release-version-constants.mjs'
+
+/** The `export const` names a version-literal-only diff may rewrite (#4612). */
+export const VERSION_CONSTANT_NAMES = ALL_VERSION_CONSTANT_FILES.map(([name]) => name)
+
+/**
+ * `Re-verified-unchanged: <doc path> @ <sha>` (#4612). Case-insensitive because
+ * git trailers are, and anchored to the whole line so a sentence that merely
+ * mentions the trailer cannot satisfy the gate.
+ */
+const RE_VERIFIED_TRAILER = /^Re-verified-unchanged:\s*(\S+)\s*@\s*(\S+)\s*$/i
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
@@ -167,6 +182,120 @@ export function changedFilesWithProvenance() {
     ])].sort(),
     computed: false,
     added,
+  }
+}
+
+/**
+ * #4612: the diff range this run can read, or null when it has none.
+ *
+ * CI sets BASE_SHA/HEAD_SHA (both `docs-coupling.yml` jobs do, and the shared
+ * advisory action passes them too), so the strict job and the comment job see
+ * the same range. A bare `--changed=` list carries no range — it is a local
+ * debugging affordance — and a local run without one uses `origin/dev..HEAD`,
+ * which is the same candidate set `changedFilesWithProvenance` already builds.
+ *
+ * Returning null is the fail-closed direction: no range means no diff, which
+ * means every file is behavioural and no trailer can satisfy anything.
+ */
+export function diffRange() {
+  const base = process.env.BASE_SHA
+  if (base) return { base, head: process.env.HEAD_SHA || 'HEAD', local: false }
+  if (arg('changed') !== undefined) return null
+  return { base: 'origin/dev', head: 'HEAD', local: true }
+}
+
+/** `git` stdout, or null when the command fails — never a partial answer. */
+function gitText(args) {
+  try {
+    return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * #4612 mechanism 1: split the changed set into files whose ENTIRE diff is
+ * release-version constants and files that carry behaviour.
+ *
+ * Reuses the partition the QA freshness gate already applies (#2164) rather than
+ * writing a second one: `isVersionOnlyDiff` pairs every changed line's symbol
+ * within its hunk, so a deletion, a rename, a dependency swap or a move all fail
+ * it. The constant set is the wider one `scripts/release-version-constants.mjs`
+ * owns, because the files this gate partitions are not the money-path files that
+ * gate looks at.
+ *
+ * A file whose diff cannot be read is behavioural — `partitionVersionOnly`
+ * treats null that way, and `gitText` returns null on any failure. That is the
+ * direction that keeps a real code change implicating its doc.
+ */
+export function versionOnlyPartition(changed, range = diffRange()) {
+  if (!range) return { behavioural: changed, versionOnly: [] }
+  const diffFor = (file) => {
+    if (!range.local) return gitText(['diff', `${range.base}..${range.head}`, '--', file])
+    // Local: committed-vs-origin/dev PLUS the worktree, matching the candidate
+    // set `changedFilesFromWorktree` builds. An untracked file has neither diff,
+    // so it stays behavioural.
+    const committed = gitText(['diff', `${range.base}...${range.head}`, '--', file])
+    const worktree = gitText(['diff', 'HEAD', '--', file])
+    return [committed, worktree].filter((d) => d && d.trim()).join('\n')
+  }
+  return partitionVersionOnly(changed, diffFor, VERSION_CONSTANT_NAMES)
+}
+
+/**
+ * #4612 mechanism 2: `Re-verified-unchanged: <doc path> @ <sha>` on any commit
+ * in the PR.
+ *
+ * A trailer rather than a PR body because the body is fork-injectable when
+ * interpolated into a shell step, is not re-run when edited, and is absent from
+ * git after a squash merge. `squash_merge_commit_message: COMMIT_MESSAGES` keeps
+ * commit bodies, so the record survives the merge and cannot be edited after it.
+ *
+ * Parsing is deliberately dumb: it finds the line, and every judgement about
+ * whether the trailer COUNTS (governed doc, no `satisfied-by:`, ancestor of
+ * head) happens in `main()` where the doc records and the range are known.
+ */
+export function parseReVerifiedTrailers(logText) {
+  const trailers = []
+  for (const record of String(logText).split('\x1e')) {
+    const sep = record.indexOf('\x1f')
+    if (sep === -1) continue
+    const commit = record.slice(0, sep).trim()
+    if (!/^[0-9a-f]{40}$/.test(commit)) continue
+    for (const line of record.slice(sep + 1).split('\n')) {
+      const m = RE_VERIFIED_TRAILER.exec(line.trim())
+      if (m) trailers.push({ doc: m[1], sha: m[2], commit })
+    }
+  }
+  return trailers
+}
+
+/** Every trailer in the range's commits, or [] when there is no range. */
+export function readReVerifiedTrailers(range = diffRange()) {
+  if (!range) return []
+  const log = gitText(['log', '--format=%H%x1f%B%x1e', `${range.base}..${range.head}`])
+  if (!log) return []
+  return parseReVerifiedTrailers(log)
+}
+
+/**
+ * Is `sha` a commit that is an ancestor of `head`?
+ *
+ * The ancestor requirement is what makes the trailer a record of a read that
+ * happened, not a claim about a commit the PR never contained: a SHA from
+ * another branch, or one invented outright, resolves to nothing here.
+ */
+export function isAncestorOfHead(sha, head) {
+  const resolved = gitText(['rev-parse', '--verify', '--quiet', `${sha}^{commit}`])
+  if (!resolved || !resolved.trim()) return false
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', resolved.trim(), head], {
+      cwd: REPO_ROOT,
+      stdio: 'ignore',
+    })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -561,10 +690,64 @@ async function main() {
   docs.push(...packageDocRecords())
 
   const docsByPath = new Map(docs.map((d) => [d.doc, d]))
-  const findings = implicatedDocs(changed, docs, { strict, added })
+
+  // #4612 mechanism 1: a file whose whole diff is release-version constants does
+  // not implicate a doc. Partitioned BEFORE `implicatedDocs`, so a release bump
+  // stops implicating the security model and the package-dev-channel doc without
+  // either doc being edited — and a real code change to `tools.ts` or
+  // `runtime.ts` still implicates them, because the partition is per-file and
+  // per-hunk, not per-path.
+  const range = diffRange()
+  const { behavioural, versionOnly } = versionOnlyPartition(changed, range)
+
+  const findings = implicatedDocs(behavioural, docs, { strict, added })
   const reverseFindings = reverseImplications(changed, docs)
+
+  // #4612 mechanism 2: a commit trailer records a re-read that found the doc
+  // correct. Three judgements, each of which can only ever REFUSE to satisfy:
+  //   - the doc must be governed (a trailer naming a path that is not a doc is
+  //     ignored, not an error — a typo must not silently clear anything);
+  //   - a doc declaring `satisfied-by:` is never trailer-satisfied, so the CASP
+  //     shard requirement is untouched by construction;
+  //   - the SHA must be an ancestor of the PR head, so the record points at a
+  //     commit this PR actually contains.
+  const reVerified = new Map()
+  const ignoredTrailers = []
+  for (const t of readReVerifiedTrailers(range)) {
+    const record = docsByPath.get(t.doc)
+    if (!record) {
+      ignoredTrailers.push({ ...t, reason: 'not a governed doc' })
+    } else if (record.satisfiedBy?.length) {
+      ignoredTrailers.push({
+        ...t,
+        reason: 'declares `satisfied-by:` — a shard is the only satisfaction path',
+      })
+    } else if (!isAncestorOfHead(t.sha, range.head)) {
+      ignoredTrailers.push({ ...t, reason: `\`${t.sha}\` is not an ancestor of the PR head` })
+    } else {
+      reVerified.set(t.doc, t)
+    }
+  }
+  for (const f of findings) {
+    const t = reVerified.get(f.doc)
+    if (t) f.reVerifiedBy = { sha: t.sha, commit: t.commit }
+  }
+  // A trailer naming a doc this diff does not implicate is ignored and printed:
+  // it is not evidence about anything, and silence would let a stale trailer sit
+  // in a commit body looking like it did something.
+  const implicated = new Set(findings.map((f) => f.doc))
+  for (const [doc, t] of reVerified) {
+    if (!implicated.has(doc)) {
+      ignoredTrailers.push({ ...t, reason: 'this PR does not implicate it' })
+    }
+  }
+
   const hasForwardFindings = findings.length > 0
-  const hasFindings = hasForwardFindings || reverseFindings.length > 0
+  const hasFindings =
+    hasForwardFindings ||
+    reverseFindings.length > 0 ||
+    versionOnly.length > 0 ||
+    ignoredTrailers.length > 0
   // #2323: a doc cleared by an ADDED shard is reported but never blocks. This
   // is the ONLY place that decides what blocks, so the two claims the gate used
   // to conflate are now separated in exactly one line: "the coupling
@@ -572,7 +755,12 @@ async function main() {
   // (which no gate can check, and which is why the finding below exists).
   const shardFindings = findings.filter((f) => f.satisfiedByShard?.length)
   const coverFindings = findings.filter((f) => !f.satisfiedByShard?.length)
-  const contractFindings = coverFindings.filter((f) => f.contract)
+  // #4612: a trailer-satisfied doc is reported, never blocking — the same shape
+  // as a shard-satisfied one, and for the same reason: the gate cannot verify a
+  // re-read, so it records who claims one and refuses to hide the doc.
+  const reVerifiedFindings = coverFindings.filter((f) => f.reVerifiedBy)
+  const openFindings = coverFindings.filter((f) => !f.reVerifiedBy)
+  const contractFindings = openFindings.filter((f) => f.contract)
 
   const line = (f) => {
     const age = ageDays(f.lastVerified)
@@ -582,18 +770,38 @@ async function main() {
   let outputBody = ''
   if (hasForwardFindings) {
     let body = '<!-- docs-coupling-gate -->\n'
-    if (coverFindings.length > 0) {
+    if (openFindings.length > 0) {
       body += '### 📝 Docs that may need updating\n\n'
       body +=
         'This PR changes code that the docs below describe (via their `covers:` ' +
         'front-matter), but those docs were not touched. Please confirm each is ' +
-        'still accurate — or update it and bump `last-verified`. ' +
+        'still accurate — or update it and bump `last-verified`, or record the ' +
+        're-read in a commit trailer (`Re-verified-unchanged: <doc path> @ <sha>`). ' +
         'Docs marked ⚠️ are **contract docs** — the blocking check fails until ' +
         'they are touched in this PR; the rest are advisory.\n\n'
-      for (const f of coverFindings) {
+      for (const f of openFindings) {
         const mark = f.contract ? '⚠️ ' : ''
         body += `- ${mark}\`${f.doc}\` ${line(f)}\n`
         for (const m of f.matched) body += `  - matched \`${m}\`\n`
+      }
+      body += '\n'
+    }
+    // #4612: a trailer-satisfied doc gets its own section for the same reason
+    // #2323 gave the shard one — the finding's whole content is "a green tick is
+    // not evidence here", and folding it into the list above is how it gets
+    // skimmed past.
+    if (reVerifiedFindings.length > 0) {
+      body += '### ✅ Docs re-verified unchanged by a commit trailer\n\n'
+      body +=
+        'Each doc below is implicated by this diff and was **not** edited. A ' +
+        'commit in this PR carries `Re-verified-unchanged: <doc path> @ <sha>`, ' +
+        'recording that the doc was re-read against this diff and found correct. ' +
+        'The gate cannot verify a re-read — it records the claim and the commit ' +
+        'that makes it, which is what a reviewer can check.\n\n'
+      for (const f of reVerifiedFindings) {
+        body += `- \`${f.doc}\` ${line(f)}\n`
+        body += `  - re-verified unchanged by commit \`${f.reVerifiedBy.commit.slice(0, 7)}\`\n`
+        for (const m of f.matched) body += `  - re-read against \`${m}\`\n`
       }
       body += '\n'
     }
@@ -626,9 +834,17 @@ async function main() {
       body += '\n'
     }
     outputBody = body
-    if (coverFindings.length > 0) {
-      console.log(`Coupling gate: ${coverFindings.length} doc(s) may need updating.`)
-      for (const f of coverFindings) console.log(`  - ${f.contract ? '[contract] ' : ''}${f.doc}`)
+    if (openFindings.length > 0) {
+      console.log(`Coupling gate: ${openFindings.length} doc(s) may need updating.`)
+      for (const f of openFindings) console.log(`  - ${f.contract ? '[contract] ' : ''}${f.doc}`)
+    }
+    if (reVerifiedFindings.length > 0) {
+      console.log(
+        `Coupling gate: ${reVerifiedFindings.length} doc(s) re-verified unchanged by a commit trailer:`,
+      )
+      for (const f of reVerifiedFindings) {
+        console.log(`  - [trailer-satisfied] ${f.doc} (commit ${f.reVerifiedBy.commit.slice(0, 7)})`)
+      }
     }
     if (shardFindings.length > 0) {
       console.log(
@@ -643,8 +859,54 @@ async function main() {
     console.log('Coupling gate: no covered docs implicated by the changed files.')
   }
 
+  // #4612: the partition is PRINTED, never silent (#2323). A release bump that
+  // clears both docs by partition must say so, or the next reader sees a green
+  // tick and no reason for it. Each file is re-run through `implicatedDocs` on
+  // its own, so the section names the docs the partition actually cleared rather
+  // than asserting that it cleared none.
+  if (versionOnly.length > 0) {
+    let body = outputBody ? '\n' : '<!-- docs-coupling-gate -->\n'
+    body += '### ⏭️ Version literal only — not implicating\n\n'
+    body +=
+      'The files below changed, but their entire diff is release-version ' +
+      'constants (`scripts/release-version-constants.mjs`), so no doc is ' +
+      'implicated by them. A behavioural change to any of these files still ' +
+      'implicates its doc — the partition is per-file and per-hunk, not per-path.\n\n'
+    for (const f of versionOnly) {
+      body += `- \`${f}\`\n`
+      // Contract docs only: those are the ones whose absence from the blocking
+      // list a reader needs explained. The advisory ones would be noise here.
+      for (const d of implicatedDocs([f], docs, { strict, added })) {
+        if (d.contract) body += `  - would have implicated \`${d.doc}\`\n`
+      }
+    }
+    outputBody += body
+    console.log(`Coupling gate: ${versionOnly.length} file(s) version literal only — not implicating:`)
+    for (const f of versionOnly) console.log(`  - [version-only] ${f}`)
+  }
+
+  // #4612: a trailer that cleared nothing is printed with the reason. Silence
+  // would let a stale or malformed trailer sit in a commit body looking like it
+  // did something.
+  if (ignoredTrailers.length > 0) {
+    let body = outputBody ? '\n' : '<!-- docs-coupling-gate -->\n'
+    body += '### 🚫 Commit trailers that cleared nothing\n\n'
+    body +=
+      'A `Re-verified-unchanged:` trailer only satisfies a doc that this PR ' +
+      'implicates, that does not declare `satisfied-by:`, and whose SHA is an ' +
+      'ancestor of the PR head. These did not, so they satisfied nothing.\n\n'
+    for (const t of ignoredTrailers) {
+      body += `- \`${t.doc}\` @ \`${t.sha}\` in commit \`${t.commit.slice(0, 7)}\` — ${t.reason}\n`
+    }
+    outputBody += body
+    console.log(`Coupling gate: ${ignoredTrailers.length} Re-verified-unchanged trailer(s) cleared nothing:`)
+    for (const t of ignoredTrailers) {
+      console.log(`  - [trailer-ignored] ${t.doc} @ ${t.sha} — ${t.reason}`)
+    }
+  }
+
   if (reverseFindings.length > 0) {
-    let body = hasForwardFindings ? '\n' : '<!-- docs-coupling-gate -->\n'
+    let body = outputBody ? '\n' : '<!-- docs-coupling-gate -->\n'
     body += '### 🔁 Covered files in changed docs — re-check the claims\n\n'
     body +=
       'This PR changes the docs below. Their `covers:` declarations name the ' +
@@ -696,13 +958,33 @@ async function main() {
         )
       }
     }
-    console.error('Update each doc (or re-verify it and bump `last-verified`) and push again.')
+    console.error(
+      'Update each doc, re-verify it and bump `last-verified`, or add a ' +
+      '`Re-verified-unchanged: <doc path> @ <sha>` trailer to a commit in this ' +
+      'PR, and push again.',
+    )
     process.exit(1)
   }
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // Run as CLI only when invoked directly, not when imported by tests.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isEntryPoint()) {
   main().catch((err) => {
     // Advisory posture: log and exit 0 so it can never block a PR. In
     // --strict mode the gate IS blocking, so a crash must fail closed — a

@@ -13,8 +13,17 @@
  * precedent: a decoupled copy, byte-pinned by a test, for a package that must
  * stay installable on its own.
  *
- *   node packages/cli/scripts/sync-agent-guidance.mjs           # write
- *   node packages/cli/scripts/sync-agent-guidance.mjs --check   # verify only
+ *   node packages/cli/scripts/sync-agent-guidance.mjs                   # write
+ *   node packages/cli/scripts/sync-agent-guidance.mjs --check           # verify only
+ *   node packages/cli/scripts/sync-agent-guidance.mjs --print-runbook   # runbook to stdout
+ *
+ * `packages/frontend/public/for-agents.md` is the one copy this script
+ * verifies but never writes (since #2727; recorded in #3596): it is a
+ * hand-kept byte copy of the runbook, and `--check` compares it like the
+ * others. Restore it with
+ * `--print-runbook > packages/frontend/public/for-agents.md`, the command
+ * `--check` prints when that copy drifts. `--print-runbook` writes the
+ * evaluated runbook, nothing else, to stdout and touches no file.
  *
  * The pin test (`src/agent-guidance-text.test.ts`) fails if this file is not
  * re-run after the SDK string changes, so the copy cannot drift silently —
@@ -117,6 +126,11 @@ function nextLinkSuffix(next) {
  * computes what that extraction must equal from the canonical runbook —
  * defaulting to the whole runbook for the whole-string copies, and to one
  * slice plus its generated next-link for a step file.
+ *
+ * `restore` is set only on a copy this script does NOT write — today just
+ * `for-agents.md` (see the header). It is the exact command that puts the
+ * canonical bytes back, and `--check` prints it instead of the "regenerate"
+ * instruction, which would leave that copy as it was.
  */
 export const GENERATED_COPIES = [
   {
@@ -132,6 +146,8 @@ export const GENERATED_COPIES = [
     label: 'frontend (packages/frontend/public/for-agents.md)',
     file: join(here, '..', '..', 'frontend', 'public', 'for-agents.md'),
     extract: (text) => text,
+    restore:
+      'node packages/cli/scripts/sync-agent-guidance.mjs --print-runbook > packages/frontend/public/for-agents.md',
   },
   ...STEPS.map((step, i) => ({
     label: `frontend step (packages/frontend/public/agent-skills/${step.slug}.md)`,
@@ -161,7 +177,23 @@ export async function readCanonicalRunbook() {
   return new Function(`${source.replace(/^export /gm, '')}\nreturn HAVEN_AGENT_RUNBOOK_MD;`)()
 }
 
-const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+const invokedDirectly = isEntryPoint()
 
 const header = `/**
  * The agent onboarding runbook — GENERATED, do not edit by hand.
@@ -213,15 +245,35 @@ if (invokedDirectly) {
           `      copy     ${excerpt(embedded)}`,
       )
     }
+    // One instruction per KIND of copy that drifted (#4748). Regenerating
+    // rewrites only the copies without a `restore` command, so naming it for a
+    // drifted for-agents.md sent the reader to a command that left it stale.
+    const generated = drifted.filter((copy) => !copy.restore)
+    const handKept = drifted.filter((copy) => copy.restore)
+    if (generated.length > 0) {
+      console.error(
+        `\n${generated.length} generated copy/copies are stale. Regenerate with:\n` +
+          '    node packages/cli/scripts/sync-agent-guidance.mjs',
+      )
+    }
+    for (const copy of handKept) {
+      console.error(
+        `\n${copy.label} is stale, and this script does not write it. Restore it with:\n` +
+          `    ${copy.restore}`,
+      )
+    }
     if (drifted.length > 0) {
       console.error(
-        `\n${drifted.length} generated copy/copies are stale. Regenerate with:\n` +
-          '    node packages/cli/scripts/sync-agent-guidance.mjs\n' +
-          '  and update any hand-asserted size figures the pin tests carry — a content\n' +
-          '  change invalidates those too, so regenerating alone does not go green.',
+        '\nThen update any hand-asserted size figures the pin tests carry — a content\n' +
+          'change invalidates those too, so restoring the copies can still leave a pin test red.',
       )
       process.exitCode = 1
     }
+  } else if (process.argv.includes('--print-runbook')) {
+    // Before the write branch, which is the fallthrough: without this arm the
+    // flag would be ignored, the CLI copy and step files rewritten, and
+    // for-agents.md overwritten with their "wrote …" log lines.
+    process.stdout.write(runbook)
   } else {
     const body = `${header}\nexport const HAVEN_AGENT_RUNBOOK_MD = ${JSON.stringify(runbook)}\n`
     await writeFile(TARGET, body)
@@ -229,8 +281,8 @@ if (invokedDirectly) {
 
     // The step files regenerate too — same canonical source, same reason the
     // CLI copy does. `for-agents.md` is deliberately NOT written here: it
-    // never has been (see the file header), and nothing in this change
-    // extends that.
+    // never has been, and `--print-runbook` is how it is restored (see the
+    // file header).
     const slices = sliceRunbookSteps(runbook)
     for (let i = 0; i < STEPS.length; i++) {
       const file = join(STEP_FILES_DIR, `${STEPS[i].slug}.md`)

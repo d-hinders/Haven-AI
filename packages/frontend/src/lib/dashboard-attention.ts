@@ -18,7 +18,8 @@
  * ── Item order ────────────────────────────────────────────────────────────
  *
  * The returned array follows the issue's fixed order: needs setup (or, for
- * an agent whose only budget ended, "Budget ended", #4353), low balance /
+ * an agent whose only budget ended, "Budget ended", #4353), still connecting
+ * (#4710, one per setup), low balance /
  * zero USDC (per account), budget reached, 90% used, budget ending and scope
  * refusals (per agent), Haven paused sponsored payments, payments failed (per agent), no
  * backup signer (per account). Renderers must not re-sort.
@@ -62,10 +63,13 @@
 
 import type { ApiSchema } from '@haven_ai/core'
 import { hasPositiveCap, receivedBudgetLine } from './agent-budget'
+import { formatClockTime } from './format'
 import { formatSubBudgetDate } from './sub-budget'
 
 export type DashboardOverview = ApiSchema<'DashboardOverviewResponse'>
 export type DashboardBudgetRemaining = ApiSchema<'DashboardBudgetRemainingResponse'>
+/** #4710: one setup still awaiting a connector, from `GET /agent-connection-setups/pending`. */
+export type PendingConnectionSetup = ApiSchema<'PendingAgentConnectionSetup'>
 type DashboardAgent = DashboardOverview['agents'][number]
 type DashboardAccount = DashboardOverview['accounts'][number]
 type BudgetRemainingEntry = DashboardBudgetRemaining['budgets'][number]
@@ -83,6 +87,7 @@ export type AttentionTone = 'neutral' | 'brand' | 'warning' | 'danger'
  */
 export type AttentionItemKind =
   | 'needs-setup'
+  | 'connection-pending'
   | 'low-balance'
   | 'zero-usdc'
   | 'budget-reached'
@@ -109,6 +114,11 @@ export interface AttentionRuleItem {
   agentId?: string
   accountId?: string
   /**
+   * #4710: the setup a `connection-pending` row is about. The row's two
+   * actions (Open, Start again) both need it; no other kind carries one.
+   */
+  setupId?: string
+  /**
    * `budget-usage` only: the firing budget's `period_end` (#4324). An
    * acknowledgement stores it, and the item re-arms once that budget's
    * period has moved past it.
@@ -130,6 +140,14 @@ export interface DashboardAttentionInput {
   overview: DashboardOverview
   /** #3804's response. `null` (load failed / not yet fetched) never fires the ≥90% rule. */
   budgetRemaining: DashboardBudgetRemaining | null
+  /**
+   * #4710: setups still awaiting a connector. `null`/absent is UNKNOWN (the
+   * read has not landed or failed) and fires nothing — the unknown-value rule
+   * (#3295). The server already excludes expired, cancelled, registered and
+   * CLI setups; the rule re-checks the deadline against `nowMs` so a stale
+   * cached response cannot offer a prompt that no longer works.
+   */
+  pendingSetups?: PendingConnectionSetup[] | null
   /**
    * accountId → display name. The overview's account block (#3803) carries no
    * name, and a two-account user's low-balance item must NAME the short
@@ -338,11 +356,22 @@ export interface FirstRunSetupState {
   usdcFunded: boolean | null
   hasSetUpAgent: boolean
   /**
-   * The most recently connected agent awaiting "Finish setup", and how many
-   * more do. `awaiting` says which half is missing: the budget approval of a
-   * `pending_approval` agent, or a budget for an active agent with none.
+   * The most recently connected agent awaiting "Finish setup". `awaiting`
+   * says which half is missing: the budget approval of a `pending_approval`
+   * agent, or a budget for an active agent with none. `budgetEndedOn` (#4744)
+   * is the formatted end date when that agent's budget ENDED — the same
+   * condition and format as its "Budget ended" item, which the card drops
+   * for this agent.
    */
-  pendingAgent: { id: string; name: string; moreCount: number; awaiting: 'approval' | 'budget' } | null
+  pendingAgent: { id: string; name: string; awaiting: 'approval' | 'budget'; budgetEndedOn: string | null } | null
+  /**
+   * #4744: every agent awaiting "Finish setup", newest first (`pendingAgent`
+   * is the first). How many of the OTHERS step 2's "and N more" counts is
+   * decided against the attention items (`unnamedWaitingAgentCount`), which
+   * this function cannot see: the items depend on the guide showing, and the
+   * guide on this state.
+   */
+  awaitingAgentIds: string[]
 }
 
 /**
@@ -390,11 +419,47 @@ export function firstRunSetupState(
       ? {
           id: newest.id,
           name: newest.name,
-          moreCount: awaiting.length - 1,
           awaiting: newest.status === 'pending_approval' ? 'approval' : 'budget',
+          budgetEndedOn: agentBudgetEndedOn(newest),
         }
       : null,
+    awaitingAgentIds: awaiting.map((agent) => agent.id),
   }
+}
+
+/**
+ * #4353: the formatted end date of an active agent's ENDED budget — the
+ * condition under which the rules emit its "Budget ended" item instead of
+ * "has no budget" — or `null`.
+ */
+function agentBudgetEndedOn(agent: DashboardAgent): string | null {
+  if (agent.status !== 'active' || hasUsableBudget(agent)) return null
+  const endedAt = unixSeconds(agent.budgetEndedAt)
+  return endedAt === null ? null : formatSubBudgetDate(endedAt)
+}
+
+/**
+ * #4744: is this the setup item for `agentId` — its "Needs setup" or its
+ * "Budget ended" row? While the first-run guide shows with step 2 open, the
+ * card drops these for the agent step 2 names, so that agent is named once.
+ */
+export function isAgentSetupItem(item: AttentionRuleItem, agentId: string): boolean {
+  return item.agentId === agentId && (item.kind === 'needs-setup' || item.kind === 'budget-ended')
+}
+
+/**
+ * #4744: step 2's "and N more" — the waiting agents other than `namedAgentId`
+ * that have NO item in `items`. An agent with a row (shown, or behind
+ * "Show N more") is named by that row; only one with none — its "Needs setup"
+ * dismissed, say — would otherwise go unmentioned.
+ */
+export function unnamedWaitingAgentCount(
+  awaitingAgentIds: readonly string[],
+  namedAgentId: string,
+  items: readonly AttentionRuleItem[],
+): number {
+  const withRow = new Set(items.map((item) => item.agentId).filter((id): id is string => Boolean(id)))
+  return awaitingAgentIds.filter((id) => id !== namedAgentId && !withRow.has(id)).length
 }
 
 function accountLabel(
@@ -488,7 +553,7 @@ function firingUsageBudget(
  * only when its condition holds on KNOWN values.
  */
 export function computeAttentionItems(input: DashboardAttentionInput): AttentionRuleItem[] {
-  const { overview, budgetRemaining, accountNames, acknowledgements, dismissedIds, holdBackLowBalance } = input
+  const { overview, budgetRemaining, accountNames, acknowledgements, dismissedIds, holdBackLowBalance, pendingSetups } = input
   const nowMs = input.nowMs ?? Date.now()
   /** #4353: agents shown "Budget ended" — their "reached its budget" item is dropped. */
   const endedAgentIds = new Set<string>()
@@ -554,6 +619,34 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
     }
   }
 
+  // ── 1b. Still connecting (#4710) — one item per setup ───────────────────
+  // A setup has no agent yet, so it is not in the overview's agent list. The
+  // row exists because closing the connect dialog before the agent registers
+  // used to leave no way back in the app. It is NOT dismissible: it ends on
+  // its own within 30 minutes, or on register or cancel.
+  //
+  // The words never claim it will finish on its own — a registered agent
+  // still waits at `pending_approval` for the owner's budget approval, which
+  // is why the row offers Open (the resume link, which moves into approval
+  // live) and Start again.
+  for (const setup of pendingSetups ?? []) {
+    const expiresMs = instant(setup.expires_at)
+    // An unparseable deadline is unknown (#3295); an expired one is no longer
+    // a way back in. Neither fires.
+    if (expiresMs === null || expiresMs <= nowMs) continue
+    items.push({
+      id: `connection-pending:${setup.setup_id}`,
+      kind: 'connection-pending',
+      tone: 'brand',
+      badge: 'Connecting',
+      title: `${setup.name} is still connecting`,
+      subtitle: `Your setup prompt works until ${formatClockTime(setup.expires_at)}.`,
+      actionLabel: 'Open',
+      href: `/agents?setup=${encodeURIComponent(setup.setup_id)}`,
+      setupId: setup.setup_id,
+    })
+  }
+
   // ── 2. Low balance / zero USDC (warning) — per account, USDC only ───────
   // Agents cannot spend another account's money or ETH, so the account's
   // registry USDC is the only balance that can strand a payment.
@@ -611,7 +704,7 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         tone: 'neutral',
         badge: 'Budget reached',
         title: `${agent.name} reached its budget`,
-        subtitle: 'Its budget stopped a payment in the last 7 days.',
+        subtitle: 'Its budget stopped a payment in the last 7 days. No money moved.',
         actionLabel: 'Review',
         href: refusedAttemptsHref(agent.id),
         agentId: agent.id,
@@ -631,7 +724,9 @@ export function computeAttentionItems(input: DashboardAttentionInput): Attention
         id: `budget-usage:${agent.id}`,
         kind: 'budget-usage',
         tone: 'neutral',
-        badge: 'Budget reached',
+        // #4703: the budget has NOT been reached at 90% — the badge says what
+        // is true, and the refusal item keeps "Budget reached".
+        badge: 'Nearly spent',
         title: `${agent.name} has used 90% of its budget`,
         subtitle: 'Its current budget period is nearly spent.',
         actionLabel: 'Review',

@@ -15,6 +15,134 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.14.0-alpha.0 — 2026-11-11
+
+### Fixed
+
+- **An x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone, on either scheme (#4754).** `x402PaymentHeaderNamesFor` now decides by the payload's `x402Version`: v2 → `PAYMENT-SIGNATURE` only; v1 (and an unreadable header) → both `PAYMENT-SIGNATURE` and `X-PAYMENT`, as before. EIP-3009 used to get both names, but the #2361 extensions echo had grown that header to 5–6.5 KB, and a merchant answered HTTP 431 to a doubled one after the funding leg confirmed. `haven.fetch()`, `deliverPayment`, `x402RetryHeadersFor` and `x402PaymentHeaderNamesSent` all follow the rule, and the evidence record's `paymentProofHeaderName` reads `PAYMENT-SIGNATURE` for a v2 EIP-3009 payment. An internal helper now reads the scheme from the payload; the #3427 tax declaration and the paid-delivery refusal text use it instead of counting header names. Owner decision 2026-11-09: a merchant that issues a v2 challenge but reads only `X-PAYMENT` is the accepted residual. Release lever: this SDK release, and a `@haven_ai/connect` release that bumps `runtime-manifest.ts` so `--doctor` installs it. No update needed to keep paying, but the update removes the 431 on large-extension merchants.
+
+### Added
+
+- **Shared tool descriptions can be worded per MCP surface (#4796).** `composeDescription(description, surface?)` takes an optional `'local' | 'hosted'`, and a description may carry `selectionGuidanceFor` for a sentence that names a tool only one surface registers. The `McpSurface` type is exported. With no surface the shared text is unchanged, so `havenTools` and existing callers are unaffected. No update needed.
+- **The delegate-key credential-file handling is shared, on `@haven_ai/sdk/edge`
+  (#4792).** The local MCP and the edge signer each carried a copy of the code
+  that reads the agent's credential file — the file that holds the delegate
+  private key — and about half of the signer's copy matched the local MCP's line
+  for line. The common part is now one module, exported from the edge entry
+  only (the barrel does not re-export it): `stringField`,
+  `readAccountAddressField`, `readAccountAddressEnv`, `permissiveMode`,
+  `warnIfFilePermissiveWithPrefix`, and the types `RawAccountAddressFields`,
+  `PermissiveFile` and `PermissionLog`. Behaviour is unchanged in both packages,
+  including the exact warning text and the symlink handling: `permissiveMode`
+  still defaults to `'nofollow'`, and both credential checks pass `'follow'`
+  because a credential reached through a symlink is judged by its target. The
+  module is on the money-path perimeter — it is how the key is read — so a later
+  change to it owes a covering QA run. No update needed to keep paying.
+
+- **A merchant can verify an agent's Agent Passport (#4723).** Two new
+  merchant-side functions on the main entry: `verifyPassportReceipt(body,
+  options)` — a pure verifier of a `GET /passport/verify` body against a
+  **pinned** issuer — and `checkPassport(options)` — a fetch-and-verify wrapper
+  with a 1500 ms timeout. Both return `{ ok, standing, reason, checked_at }`.
+  The reasons are the backend's own `verifyReceipt` vocabulary
+  (`not_signed_by_issuer`, `malformed_signature`, `expired`,
+  `unsupported_version`), the verifier's `found: false` answers
+  (`no_passport`, `unsupported_assurance_level`), `not_active`,
+  `subject_mismatch`, and `unavailable` (503, 429, timeout, network, non-JSON).
+  `checkPassport` never throws and never refuses anything.
+
+  The lookup is by **payer address**, never by the UID the payment carried: a
+  UID is public on EAS, so a UID-only lookup would let any payer present another
+  active agent's passport. The reference's `attestation_uid` is a hint,
+  cross-checked against the receipt's `evidenceUid`; the receipt's own `issuer`
+  field is never trusted. `rail` selects which bound address the payer must
+  match (`agentEoa` on EIP-3009, `smartAccount` on erc7710); omitted, either
+  matches.
+
+  New exports: `PASSPORT_RECEIPT_VERSION`, `PASSPORT_CHECK_TIMEOUT_MS`,
+  `canonicalizePassportReceipt`, `verifyPassportReceiptSignature`,
+  `verifyPassportReceipt`, `checkPassport`, and the types `PassportReceipt`,
+  `SignedPassportReceipt`, `PassportStanding`, `PassportAnchorState`,
+  `PassportControlSummary`, `PassportSignatureReason`,
+  `PassportSignatureVerification`, `PassportCheckReason`, `PassportCheckResult`,
+  `PassportVerifyBody`, `PassportReference`, `PassportVerifyOptions` and
+  `CheckPassportOptions`. The names are deliberately distinct from the PAYMENT
+  receipt's `RECEIPT_VERSION` / `ReceiptVerification`. The backend's
+  `canonicalize` and `verifyReceipt` now delegate to these, so there is one
+  canonicalizer rather than two that can drift.
+
+- **A merchant can ask for the agent's Agent Passport in the payment (#4722).**
+  When a merchant's x402 v2 402 advertises the `haven-passport` extension, the
+  EIP-3009 envelope the SDK builds adds `attestation_uid` and `chain_id` to it
+  (inside its `info` when present), never overwriting a field the merchant set.
+  Merchants that do not advertise the key receive exactly today's bytes, and the
+  agent's passport is read only for those that do, bounded to 1500 ms. New
+  exports: `withHavenPassportExtension` (the merge rule), `advertisesHavenPassport`,
+  `HAVEN_PASSPORT_EXTENSION` and the type `HavenPassportExtensionFields`.
+  `x402V2PaymentEnvelope` takes an optional fourth argument; three-argument
+  callers are unchanged. Reaching agents needs an `@haven_ai/sdk` +
+  `@haven_ai/mcp` release (mcp pins the SDK exactly); the hosted erc7710 path
+  gets it with the backend deploy, and the hosted + `@haven_ai/signer`
+  EIP-3009 path does not carry it yet.
+
+- **The agent can read its own Agent Passport reference (#4721). BREAKING only for TypeScript code that builds a `HavenAgent` literal.**
+  `HavenAgent.passport` (raw `passport` on `GET /machine-payments/agent`) is
+  `{ attestationUid, chainId, verifyUrl? }` for an agent with an anchored
+  passport, and `null` otherwise: no passport, a pending or failed one, a
+  failed lookup, or an older backend that sends nothing. `getAgentSummary()`
+  and `haven_get_agent` carry it too. A malformed body maps to `null`, never to
+  a reference an agent would present. The field is **required** on the
+  `HavenAgent` type (`| null`), like `supersededBy`, so code that builds a
+  `HavenAgent` literal, test doubles for example, must add `passport: null`.
+  New type export: `HavenAgentPassport`.
+
+- **The parent purchase receipt is named for what it holds (#4577).**
+  `HavenPaymentReceipt.parentReceiptId` (raw `parent_receipt_id`) carries the
+  parent purchase receipt's `id` — the `machine_payment_evidence` row id of the
+  purchase leg a fee call paid for. It joins to the receipt's `id`, not to
+  `paymentId`, which is why the old name was wrong: `parentPaymentId` sat beside
+  a `paymentId` that is a payment-intent id, so a join on the two names found
+  nothing. `parentPaymentId` still maps the same value and is now
+  `@deprecated`; it is kept because 0.13.0-alpha.0 shipped it, and removing it
+  is a breaking change that needs its own release decision. Both keys are
+  per-row: a backend that does not send one leaves it absent, never a
+  fabricated null. Additive and optional on a type that is only returned, so
+  existing consumers keep compiling. No update needed.
+
+- **The merchant's own reason for refusing a paid retry is recorded and
+  echoed (#4552).** x402 merchants have started saying WHY they refused: a
+  verify-stage refusal returns `{"error": "<reason>"}` in the 402 body, a
+  stock settlement failure carries it only in the `PAYMENT-RESPONSE` header
+  (`errorReason`), and merchants from before x402-foundation/x402#3795 carry
+  it only in `PAYMENT-REQUIRED` (`error`). A new total parser
+  (`merchantReportedError`) accepts only a code-shaped value
+  (`^[a-z0-9_]{1,64}$`) from the untruncated body, then falls back to those
+  two headers, and never throws — it runs inside `recordRetryRejected`'s
+  swallowing `try`, where a throw would silently drop the stranded-funds
+  event. Both writers now record `details.merchant_reported_error` (the code,
+  or `null`, never absent), and `reportMerchantOutcome` returns it as the
+  optional `merchantReportedError` on `X402MerchantOutcomeReport`, which
+  `haven_report_x402_outcome` echoes as `merchant_reported_error`. The value
+  is merchant-claimed, never something Haven verified, and the handoff stays
+  `haven_sweep_delegate` for every reason. `retry_body` is unchanged.
+  Additive and optional on a type that is only returned, so existing
+  consumers keep compiling. No update needed.
+
+### Changed
+
+- **The agent runbook says signup is passkey-only (#4675).** The account step
+  and the signup hand-off script said "a passkey or a wallet"; signup offers a
+  passkey, and a wallet joins an existing account's signer set later. The
+  later-signer wording ("signs with their passkey or wallet") is unchanged.
+  Wording only; no update needed.
+
+- **The agent runbook's "If something breaks" section starts with the
+  release-record link (#4746).** It now opens "Client out of date? What
+  changed: [/releases](/releases).", where the link used to end the paragraph.
+  A summarising fetch that kept only the paragraph's opening dropped the link,
+  and the agent never reached `/releases`. `AGENT_CLIENT_UPDATE_SENTENCE` is
+  unchanged. Wording only; no update needed.
+
 ## 0.13.0-alpha.0 — 2026-10-30
 
 ### Added

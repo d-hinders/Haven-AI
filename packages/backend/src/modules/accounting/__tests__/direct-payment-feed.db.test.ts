@@ -183,6 +183,10 @@ describeDb('direct payments produce an accounting underlag (#4533)', () => {
     expect(entry!.counterparty.address).toBe(OUTSIDE)
     expect(entry!.resourceUrl).toBeNull()
     expect(entry!.amountSek).toBe('0.1042')
+    // #4578: a direct payment is a transfer, labelled with its counterparty's
+    // canonical address — not `Unknown merchant (unclassified)`.
+    expect(entry!.transactionKind).toBe('transfer')
+    expect(entry!.transactionDescription).toBe(`${OUTSIDE} (transfer)`)
     // The book-time capture on the intent is recovered as a rate map, so a
     // non-SEK ledger can book this payment exactly as it books an x402 one.
     expect(entry!.fxRates?.SEK).toBeCloseTo(10.42, 6)
@@ -202,6 +206,10 @@ describeDb('direct payments produce an accounting underlag (#4533)', () => {
     expect(tx.counterparty.address).toBe(OUTSIDE)
     expect(tx.resourceUrl).toBeNull()
     expect(tx.amountLedger).toBe('0.1042')
+    // The feed payload carries the same two values as the document, so the
+    // payload and the attachment cannot disagree (#4532/#4578).
+    expect(tx.transactionKind).toBe('transfer')
+    expect(tx.description).toBe(`${OUTSIDE} (transfer)`)
 
     // The receipt renders a TRANSFER: the recipient as counterparty, and no
     // Resource line at all (a direct payment buys no resource).
@@ -214,6 +222,12 @@ describeDb('direct payments produce an accounting underlag (#4533)', () => {
     // about the RENDERED line, which starts with `(Resource`.
     expect(pdf).not.toContain('(Resource')
     expect(pdf).toContain(TX_HASH)
+    // #4578: the rendered document says WHAT it is. Before this the line read
+    // `Transaction    unknown` / `Description    Unknown merchant
+    // (unclassified)` for every direct payment. Parens are PDF-escaped in the
+    // content stream (see pdfEscape), as at receipt-underlag.test.ts:158.
+    expect(pdf).toContain('Transaction    transfer')
+    expect(pdf).toContain(`Description    ${OUTSIDE} \\(transfer\\)`)
   })
 
   it('AC 4: firing the hook twice still leaves exactly one row and one document', async () => {
@@ -316,6 +330,10 @@ describeDb('direct payments produce an accounting underlag (#4533)', () => {
     // The evidence branch still answers from `fx_rates`/`amount_sek`, not from
     // the intent's fiat columns.
     expect(entry!.amountSek).not.toBeNull()
+    // #4578 CONTROL: the evidence branch emits `FALSE::BOOLEAN` for the
+    // direct-payment signal, so the new rung does not fire for a protocol
+    // payment — its kind is unchanged.
+    expect(entry!.transactionKind).not.toBe('transfer')
 
     for (let attempt = 0; attempt < 40 && (await readSyncs(userId)).length === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25))

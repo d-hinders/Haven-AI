@@ -1,11 +1,11 @@
 'use client'
 
-import { ChevronRight, X } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
-import { useRef } from 'react'
+import { StatusBadge } from '@/components/ui/StatusBadge'
+import { Modal } from '@/components/ui/Modal'
+import { Row } from '@haven_ai/ui/Row'
 import { resolveChainOrNull } from '@/lib/chains'
-import { useEscapeToClose } from '@/hooks/useEscapeToClose'
-import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { SmartAccount } from '@/context/AuthContext'
 
 interface Props {
@@ -16,6 +16,31 @@ interface Props {
   onSelect: (accountId: string) => void
 }
 
+/**
+ * Pick the Haven account a money action runs on (#4094).
+ *
+ * #4566: the shell is `ui/Modal` — the shared anatomy instead of a hand-built
+ * overlay. It is a single-screen chooser with no action row of its own: the
+ * account rows ARE the actions, so the footer stays empty and the ✕ (on by
+ * default) plus the backdrop and Escape are the dismissals.
+ *
+ * #4601 (N5): the options are `Row`s, not hand-styled `<button>`s. The old
+ * buttons carried a tinted `--v2-surface` fill and no `focus-visible` style, so
+ * keyboard focus fell back to the browser's default outline (measured on dev at
+ * 375 px: `outline: rgb(229, 151, 0) auto 1px`). `Row` with `onClick` renders a
+ * full-width `<button>` with the shared `focus-visible:ring-2 ring-inset
+ * ring-brand/80`, and its `title` slot takes the Default `StatusBadge`. `Row`
+ * has no border of its own, so the divided container below supplies the
+ * separation the per-button borders used to.
+ *
+ * #4642: an account with no resolved `chain_id` cannot sign a send, and the
+ * Send dialog's mount guard skips it — so listing it as clickable was a silent
+ * dead end (the row set `sendOpen` and nothing rendered). For the `send` action
+ * such an account is a NON-interactive `Row` (no `onClick`) carrying the reason
+ * as its subtitle. `Row` has no disabled state, so a static row is the existing
+ * pattern. Receive is unaffected: an account can receive on a chain it has not
+ * resolved yet, and the Receive dialog names the network itself.
+ */
 export default function DashboardActionPickerModal({
   open,
   action,
@@ -23,12 +48,6 @@ export default function DashboardActionPickerModal({
   onClose,
   onSelect,
 }: Props) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useEscapeToClose(open, onClose)
-  useFocusTrap(panelRef, open)
-
-  if (!open) return null
-
   // #4094: the money verbs are Send / Receive everywhere. The 'add-funds'
   // action merged into 'receive' — one Receive dialog now serves both old
   // funding dialogs — and 'send' is back for the DELEGATION rail's owner-send
@@ -41,54 +60,45 @@ export default function DashboardActionPickerModal({
       : 'Choose an account to send from'
 
   return (
-    // `v2-safe-overlay` with no gutter of its own (#2730): this overlay has
-    // never had one, so every side is exactly its safe-area inset — 0 in any
-    // browser without a notch, and the clearance the home indicator needs in
-    // the installed shell.
-    <div className="fixed inset-0 z-[var(--v2-z-modal)] flex items-center justify-center v2-safe-overlay">
-      <div className="absolute inset-0 v2-modal-backdrop" onClick={onClose} />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Choose an action" className="relative w-full max-w-md mx-4 rounded-xl border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-modal max-h-[calc(90vh-var(--v2-safe-top)-var(--v2-safe-bottom))] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--v2-border)]">
-          <div>
-            <h2 className="text-base font-semibold text-[var(--v2-ink)]">{title}</h2>
-            <p className="text-xs text-[var(--v2-ink-3)] mt-1">Money actions stay explicit when you have multiple accounts.</p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1 rounded-md text-[var(--v2-ink-3)] hover:text-[var(--v2-ink)] hover:bg-[var(--v2-surface-2)] transition-colors"
-          >
-            <Icon icon={X} className="w-5 h-5" />
-          </button>
-        </div>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={title}
+      subtitle="Money actions stay explicit when you have multiple accounts."
+      width="md"
+    >
+      <div className="divide-y divide-[var(--v2-border)] overflow-hidden rounded-lg border border-[var(--v2-border)]">
+        {accounts.map((account) => {
+          const titleSlot = (
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{account.name}</span>
+              {account.is_default ? <StatusBadge tone="brand">Default</StatusBadge> : null}
+            </span>
+          )
 
-        <div className="p-4 space-y-2">
-          {accounts.map((account) => (
-            <button
+          // #4642: no resolved chain, no send. A static row says why instead of
+          // accepting a click that renders nothing.
+          if (action === 'send' && account.chain_id == null) {
+            return (
+              <Row
+                key={account.id}
+                title={titleSlot}
+                subtitle="No network yet. You can't send from this account."
+              />
+            )
+          }
+
+          return (
+            <Row
               key={account.id}
               onClick={() => onSelect(account.id)}
-              className="w-full rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] px-4 py-3 text-left transition-colors hover:border-brand/30 hover:bg-[var(--v2-brand-soft)]"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-[var(--v2-ink)] truncate">{account.name}</span>
-                    {account.is_default && (
-                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--v2-brand-soft)] text-[var(--v2-brand)]">
-                        Default
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-[var(--v2-ink-3)] mt-1">
-                    {resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
-                  </p>
-                </div>
-                <Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)] flex-shrink-0" />
-              </div>
-            </button>
-          ))}
-        </div>
+              title={titleSlot}
+              subtitle={resolveChainOrNull(account.chain_id)?.name ?? `Chain ${account.chain_id}`}
+              trailing={<Icon icon={ChevronRight} className="w-4 h-4 text-[var(--v2-ink-3)]" />}
+            />
+          )
+        })}
       </div>
-    </div>
+    </Modal>
   )
 }

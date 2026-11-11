@@ -192,7 +192,13 @@ spending:
   \`budgetEndedAt\`, nobody approved a budget yet; with rows (all at remaining 0) the
   budget is spent for this period, and \`budgetRefillsAt\` says when it refills
   (\`null\`: it ends before it refills) — tell the user, then wait or ask them
-  to raise it.
+  to raise it. \`passport\` is this agent's own Agent Passport reference
+  (\`attestationUid\`, \`chainId\`), or \`null\` when it has none. Give those two
+  fields to a merchant that asks for them; never present \`verifyUrl\` as proof,
+  because a merchant checks the UID against a Haven verifier it already trusts.
+  Presenting the UID lets anyone link your delegate address to your treasury on
+  EAS, so give it only to a merchant that asks. A passport says the agent is
+  governed and revocable — never call it "verified".
 - \`mcp__haven__haven_get_allowances\` — detailed per-token breakdown
   (configured, spent, reset window) when you need more than the summary.
 - \`mcp__haven__haven_check_funds\` — whether the account actually HOLDS at
@@ -334,9 +340,10 @@ on the **EIP-3009** scheme (the pay result names
 building the header, so the call can only refuse. Then tell Haven what the
 merchant answered: \`mcp__haven__haven_report_x402_outcome\` with the
 \`payment_id\`, \`outcome\` (\`"accepted"\` for a 2xx, else \`"rejected"\`)
-and the \`merchant_status\` you got. Because Haven never sent that paid
-request, this is the only way it can learn the purchase failed — without it a
-failed purchase reads as complete for fifteen minutes. If the merchant's
+and the \`merchant_status\` you got. On a rejection, also pass the merchant's
+body as \`merchant_body\` so its reason is recorded. Because Haven never sent
+that paid request, this is the only way it can learn the purchase failed —
+without it a failed purchase reads as complete for fifteen minutes. If the merchant's
 \`PAYMENT-RESPONSE\` header names a \`transaction\`, pass that raw header as
 \`payment_response\` on the SAME \`mcp__haven__haven_report_x402_outcome\`
 call, together with \`payment_header\`: the exact header you retried the
@@ -391,8 +398,9 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   it receives, so the challenge never passes through you.
 - **The retry repeats the request.** YOU send the paid request: the same
   method, body and \`Content-Type\` to \`retry_url\`, plus the
-  \`payment_header\` (as \`PAYMENT-SIGNATURE\`, and also \`X-PAYMENT\` on
-  EIP-3009). A retry without the body fails after the funding leg has already
+  \`payment_header\` under exactly the headers the signer's \`retry_headers\`
+  names (\`PAYMENT-SIGNATURE\`; \`X-PAYMENT\` too only for an x402 v1
+  challenge). A retry without the body fails after the funding leg has already
   moved money.
 - **If you pass \`payment_required\` instead, copy it verbatim.** Hand the
   merchant's \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\`

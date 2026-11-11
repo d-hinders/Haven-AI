@@ -15,6 +15,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.14.0-alpha.0 — 2026-11-11
+
+### Changed
+
+- **The runtime this connector installs moves to `0.14.0-alpha.0`.** A setup, a re-run or a `--doctor` repair now wires the `@haven_ai/sdk` and `@haven_ai/signer` releases that send an x402 v2 payment under `PAYMENT-SIGNATURE` alone (#4754). Nothing in connect itself changes. No update needed.
+
 ## 0.13.0-alpha.0 — 2026-10-30
 
 ## 0.12.0-alpha.0 — 2026-10-29

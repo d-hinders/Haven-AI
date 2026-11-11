@@ -867,19 +867,24 @@ const sessionAccountProperties = {
     description:
       'Delegation-rail accounts only (null otherwise): whether to RECOMMEND a backup signer. A recommendation, never a gate (#1153) — nothing refuses a single-signer account.',
   },
+  passport_issuable: {
+    type: 'boolean',
+    description:
+      "Whether THIS deployment can issue this account's agents an Agent Passport a merchant can verify (#4719): an issuable rail, a passport chain, the chain's schema UID registered here, and the receipt verifier on. The dashboard offers the passport opt-in only when this is true.",
+  },
 } as const
 
 /**
  * An account as the session payloads carry it. `sessionAccountPayload` STRIPS
  * owner_address and passkey_count — the raw signer inputs — and replaces them
- * with the two derived answers the UI actually needs. The deprecated alias
+ * with the derived answers the UI actually needs (#4719 added `passport_issuable`). The deprecated alias
  * schema went with #2914.
  */
 const sessionAccount = {
   type: 'object',
   required: [
     'id', 'account_address', 'chain_id', 'name', 'is_default', 'created_at',
-    'account_type', 'value_bearing_chain', 'needs_backup_recommendation',
+    'account_type', 'value_bearing_chain', 'needs_backup_recommendation', 'passport_issuable',
   ],
   properties: { ...sessionAccountProperties },
 } as const
@@ -4101,7 +4106,7 @@ export const openapiSpec = {
         operationId: 'requestAgentPassport',
         summary: 'Opt an existing agent in to a passport.',
         description:
-          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. The rail refusal is ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
+          "Owner action, never agent-authenticated: an agent must not be able to issue itself a credential. Records the request synchronously and returns **202** — the EAS write is fire-and-forget, so poll the GET (or the public verifier) for the anchored state. Idempotent: an already-anchored passport returns **200** with `already_issued: true` rather than minting a second attestation. Refusals are shaped by whose problem it is — a revoked agent is a 409 (terminal, and anchoring now would spend gas on an attestation that must be revoked immediately), an account on a RETIRED rail is also a 409 (#2138: passports are issued on the delegation rail only, because a rail that cannot transact has no spending for a contract to govern), an unbound or unsupported chain is a 400, and a deployment that has not configured issuance is a 503, because that is the operator's gap and not the caller's mistake. So is a deployment whose receipt verifier is off (#4719): a passport issued there could not be verified by any merchant. The rail refusal and the verifier refusal are ordered AFTER the idempotency check, so a passport already anchored on a legacy account still returns 200 — existing passports are left alone rather than revoked. A PAUSED agent is deliberately not blocked: pausing is reversible and `standing` already reports it as suspended.",
         security: [{ DashboardJwt: [] }],
         parameters: [{ $ref: '#/components/parameters/AgentId' }],
         responses: {
@@ -4140,7 +4145,7 @@ export const openapiSpec = {
             description:
               'Agent is revoked (terminal), or its account is on a retired rail — passports are issued on the delegation rail only (#2138).',
           },
-          '503': { ...errorResponse, description: 'Passport issuance is not configured on this deployment.' },
+          '503': { ...errorResponse, description: 'Passport issuance, or the receipt verifier (#4719), is not configured on this deployment.' },
         },
       },
     },
@@ -4802,6 +4807,38 @@ export const openapiSpec = {
         },
       },
     },
+    // #4709 (epic #4701 decision 4): the "Since your last visit" marker. The
+    // client generates `entry_id` and stores it BEFORE calling, so a retry
+    // after a lost response returns the same window instead of erasing it.
+    '/user/visits': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'openUserVisit',
+        summary: 'Open (or re-open) one visit entry and return its window.',
+        description:
+          'One atomic write under the row lock. The window a "Since your last visit" line describes is `(previous, current]`: `previous` is the instant the PREVIOUS entry opened (null on the first ever visit) and `current` this one. The same `entry_id` returns the same bounds without moving the marker; a different id opens a new entry, and `current` never goes backwards. Two near-simultaneous entries get consecutive windows that do not overlap. Display-only: this marker is never read by a payment path.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UserVisitInput' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The entry’s window.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/UserVisitResponse' } },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The account no longer exists.' },
+        },
+      },
+    },
     // #2847 (epic #1440): the /user/owners directory is deleted. It probed
     // each linked account's owners over the Safe ABI and answered
     // { owners: [], partialFailure: true } on every delegation account, and
@@ -5258,7 +5295,7 @@ export const openapiSpec = {
         operationId: 'listAccountingProviders',
         summary: 'The accounting providers Haven knows about, live or coming soon.',
         description:
-          'Four today: Fortnox and Accounted (`live` — Fortnox over OAuth2, Accounted over a pasted API key) and Light, Igdrasil (`coming_soon` — listed by product decision before any code exists for them). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
+          'Four today: Fortnox and Accounted (`live` — Fortnox over OAuth2, Accounted over a pasted API key) and Light, Igdrasil (`coming_soon` — listed by product decision; Light has no connector yet, and Igdrasil\'s connector exists but is not yet live-verified). Only a `live` provider accepts a connect. `configured` says whether THIS deployment can connect it.',
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -6761,7 +6798,10 @@ export const openapiSpec = {
                     status: { type: 'string', enum: ['submitted'] },
                     payment_header: { type: 'string', description: 'The merchant X-PAYMENT header. Single-use and bound to this amount and merchant.' },
                     resource_url: { type: ['string', 'null'] },
-                    passport: { description: 'Optional passport reference for the paying agent.' },
+                    passport: {
+                      description: 'The paying agent\'s passport reference, or null when it has no anchored passport (#976).',
+                      anyOf: [{ $ref: '#/components/schemas/AgentPassportReference' }, { type: 'null' }],
+                    },
                   },
                 },
               },
@@ -7010,6 +7050,27 @@ export const openapiSpec = {
           '401': errorResponse,
           '409': errorResponse,
           '410': errorResponse,
+        },
+      },
+    },
+    '/agent-connection-setups/pending': {
+      get: {
+        tags: ['Connect Agent 2'],
+        operationId: 'listPendingAgentConnectionSetups',
+        summary: "List the signed-in user's setups still awaiting a connector.",
+        description:
+          'Returns the setups that are still `awaiting_connection` and unexpired, newest first, so the dashboard can offer a way back into a connect dialog that was closed before the agent registered (#4710). Tenant-scoped to the authenticated user. The projection carries no setup token, token hash, challenge or prompt — the prompt exists only in the create response. Setups created by the CLI (`source: "cli"`) are excluded: a CLI run has no dialog to have closed.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The user’s unexpired setups still awaiting a connector.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PendingAgentConnectionSetupsResponse' },
+              },
+            },
+          },
+          '401': errorResponse,
         },
       },
     },
@@ -9228,6 +9289,52 @@ export const openapiSpec = {
         },
       },
     },
+    // #4709 (epic #4701 decision 4): the figures behind the "Since your last
+    // visit" line. The window is `(after, through]` — the bounds
+    // `POST /user/visits` returned — so a payment confirmed exactly on a
+    // boundary is counted in exactly one of two consecutive windows.
+    '/dashboard/since': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardSince',
+        summary: 'Confirmed agent payments in one visit window, grouped by agent.',
+        description:
+          'The user’s confirmed agent payments with `confirmed_at` in `(after, through]`, grouped by agent, on the same NET definition and `spend.scope` as the 7-day figures, in the display currency — so the line cannot disagree with the sentence below it. A payment confirmed after `through` belongs to the next entry. Display-only: nothing here is read by a payment path.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          {
+            name: 'after',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', format: 'date-time' },
+            description: 'The PREVIOUS entry’s instant (exclusive lower bound), from `POST /user/visits`.',
+          },
+          {
+            name: 'through',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', format: 'date-time' },
+            description: 'This entry’s instant (inclusive upper bound), from `POST /user/visits`.',
+          },
+          {
+            name: 'tz',
+            in: 'query',
+            schema: { type: 'string' },
+            description: 'IANA time-zone name the client renders the time word in. Defaults to UTC; an invalid zone is refused with 400.',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'The window’s figures.',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DashboardSinceResponse' } },
+            },
+          },
+          '400': { ...errorResponse, description: 'Missing or malformed `after`/`through`, `after` not before `through`, or an invalid `tz`.' },
+          '401': errorResponse,
+        },
+      },
+    },
     '/dashboard/budget-remaining': {
       get: {
         tags: ['Dashboard'],
@@ -9241,6 +9348,23 @@ export const openapiSpec = {
           '200': {
             description: 'Per-budget remaining amounts with sub-budget spend attribution.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardBudgetRemainingResponse' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/dashboard/first-agent-payment': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getDashboardFirstAgentPayment',
+        summary: 'The first agent payment the dashboard names, or null.',
+        description:
+          'The earliest QUALIFYING agent payment for the user, or `payment: null`. Qualifying means: confirmed with a tx_hash, on the delegation rail, not funded-but-unsettled (no open merchant_retry_rejected_after_payment event), and — for an EIP-3009 x402 row — the merchant leg is PROVEN (a recorded on-chain-verified settlement hash, or a recorded merchant answer). A confirmed EIP-3009 row whose merchant has not pulled yet is excluded, because the card claims a real event. The counterparty is named through the existing rules: contact name, else receipt-merchant name, else the x402 resource host; a raw address is never returned. Read-only: it moves no money and grants no authority.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The first qualifying agent payment, or null.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/DashboardFirstAgentPaymentResponse' } } },
           },
           '401': errorResponse,
         },
@@ -11733,7 +11857,8 @@ export const openapiSpec = {
           },
           issue_passport: {
             type: 'boolean',
-            description: 'Opt in to an L0 Agent Passport for the agent this setup creates. Default false.',
+            description:
+              'Opt in to an L0 Agent Passport for the agent this setup creates. Default false. Ignored, and no passport row is recorded, when the account is not `passport_issuable` (#4719).',
           },
           source: {
             type: 'string',
@@ -11917,7 +12042,28 @@ export const openapiSpec = {
           approval_url: { type: 'string', format: 'uri' },
           passport_requested: {
             type: 'boolean',
-            description: 'True when the setup opted in and its chain issues L0 passports.',
+            description: 'True when the setup opted in and its account is `passport_issuable` on this deployment (#4719): an issuable rail on a passport chain whose schema UID and receipt verifier are both configured here.',
+          },
+        },
+        additionalProperties: false,
+      },
+      PendingAgentConnectionSetup: {
+        type: 'object',
+        required: ['setup_id', 'name', 'expires_at'],
+        properties: {
+          setup_id: uuid,
+          name: { type: 'string' },
+          expires_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      PendingAgentConnectionSetupsResponse: {
+        type: 'object',
+        required: ['setups'],
+        properties: {
+          setups: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PendingAgentConnectionSetup' },
           },
         },
         additionalProperties: false,
@@ -12311,7 +12457,9 @@ export const openapiSpec = {
               /**
                * #1445: whether an Agent Passport attestation was requested for
                * this agent (#970). Always present on creation — false when the
-               * caller did not opt in, or the chain has no passport support.
+               * caller did not opt in, or this deployment cannot issue on the
+               * account's chain (#4719: no schema UID or no receipt verifier
+               * here counts too).
                * Governance metadata, never spend authority.
                */
               passport_requested: { type: 'boolean' },
@@ -12949,9 +13097,23 @@ export const openapiSpec = {
           { $ref: '#/components/schemas/MppResumeState' },
         ],
       },
+      AgentPassportReference: {
+        type: 'object',
+        required: ['attestation_uid', 'chain_id'],
+        description:
+          "An anchored passport's compact reference (#976, #4721). A merchant resolves the payer's standing against a Haven verifier it already pins (`GET /passport/verify?address=<payer>`); `attestation_uid` + `chain_id` are only a hint, because a UID is public on EAS and a UID alone cannot bind the passport to the payer. Never resolve against `verify_url`, which reaches the merchant through the agent and is a convenience, not a root of trust.",
+        properties: {
+          attestation_uid: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+          chain_id: { type: 'integer' },
+          verify_url: {
+            type: 'string',
+            description: 'Present only when this deployment has a configured base URL AND a live verifier.',
+          },
+        },
+      },
       MachinePaymentAgent: {
         type: 'object',
-        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail', 'superseded_by'],
+        required: ['id', 'name', 'status', 'account_address', 'delegate_address', 'delegate_account_address', 'chain_id', 'execution_rail', 'superseded_by', 'passport'],
         properties: {
           id: uuid,
           name: { type: 'string' },
@@ -12967,6 +13129,15 @@ export const openapiSpec = {
            */
           delegate_account_address: { anyOf: [address, { type: 'null' }] },
           superseded_by: { $ref: '#/components/schemas/AgentSupersession' },
+          /**
+           * #4721 (epic #4718): the agent's OWN passport reference, so it can
+           * present it to a merchant that asks. Null when the agent has no
+           * anchored passport (none, pending or failed) and when the bounded
+           * lookup failed — metadata, never authority.
+           */
+          passport: {
+            anyOf: [{ $ref: '#/components/schemas/AgentPassportReference' }, { type: 'null' }],
+          },
           chain_id: { type: 'integer' },
           execution_rail: {
             type: 'string',
@@ -13030,8 +13201,10 @@ export const openapiSpec = {
             description:
               '#4352 (decision 5, additive): when the agent\u2019s only budgets for this chain have ENDED, ' +
               'the latest ended budget\u2019s expiry (ISO 8601) — read by the same narrow expired-row query ' +
-              'the refusal answers use. `null` when no expired row exists; the field NEVER reports a ' +
-              'live budget. Lets an agent whose `allowances[]` is empty tell \u201cnobody approved yet\u201d from ' +
+              'the refusal answers use. `null` whenever `allowances[]` has a row for this chain: a live ' +
+              'or dormant budget is never reported as ended, even when an older ended row exists beside ' +
+              'it. The date is answered only when `allowances[]` is empty and an expired row exists. ' +
+              'Lets an agent whose `allowances[]` is empty tell \u201cnobody approved yet\u201d from ' +
               '\u201cthe budget ended on this date\u201d. Optional on the schema so an older backend that omits it stays valid.',
           },
           allowances: {
@@ -13096,6 +13269,15 @@ export const openapiSpec = {
                     '#4355: when THIS budget next refills — the end of its current period, from its own start date and period (ISO 8601). ' +
                     '`null` when it never refills again: the period boundary falls at or after the budget\'s end date, so it ends first. ' +
                     'With `onchain.remaining` 0 it tells an agent its budget is spent for this period and when it refills, as opposed to never approved. ' +
+                    'Optional on the schema so an older backend that omits it stays valid.',
+                },
+                budget_expires_at: {
+                  type: ['string', 'null'],
+                  format: 'date-time',
+                  description:
+                    '#4666: when THIS budget\'s validity ends (ISO 8601), after which it never refills and cannot pay. ' +
+                    'Read-only reporting: the delegation\'s expiry caveat is what enforces it. ' +
+                    '`null` when the stored expiry is not a representable timestamp. ' +
                     'Optional on the schema so an older backend that omits it stays valid.',
                 },
                 onchain: {
@@ -13379,6 +13561,41 @@ export const openapiSpec = {
           amount_human: { type: 'string' },
           challenge_id: { type: ['string', 'null'] },
           idempotency_key: { type: ['string', 'null'] },
+          // #4579: the challenge the payment answered, stored as JSONB. The
+          // database enforces no shape on the column, so the schema asserts
+          // none — an open object or null.
+          challenge_payload: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#4579: the challenge the payment answered, stored as JSONB. The database enforces no shape on this column, so the schema states none.',
+          },
+          // #4579: the payment option the agent selected out of the challenge,
+          // also JSONB with no database-enforced shape.
+          selected_payment: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              '#4579: the payment option the agent selected from the challenge, stored as JSONB. The database enforces no shape on this column, so the schema states none.',
+          },
+          // #4579: the header NAMES only. The header VALUES are the payment
+          // proof and the merchant receipt — never returned on any read.
+          payment_proof_header_name: {
+            type: ['string', 'null'],
+            description:
+              '#4579: the header name the merchant expects the payment proof in; null when the challenge named none. The header VALUE is never returned.',
+          },
+          protocol_receipt_header_name: {
+            type: ['string', 'null'],
+            description:
+              '#4579: the header name the merchant returns its protocol receipt in; null when the challenge named none. The header VALUE is never returned.',
+          },
+          // #4579: merchant-controlled and relayed VERBATIM (#3125) — the
+          // merchant's PAYMENT-RESPONSE object. Nothing inside it is Haven's
+          // record, and the schema must not assert a shape the merchant owns.
+          protocol_receipt_payload: {
+            anyOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }],
+            description:
+              "#4579: the merchant's PAYMENT-RESPONSE object, relayed verbatim (#3125) and merchant-controlled — nothing inside it is Haven's record. Stored as JSONB with no database-enforced shape, so the schema states none.",
+          },
           merchant_status: { type: ['integer', 'null'] },
           // #3770: the paying agent's evidence-only delivery verdict, when
           // reported. Nullable = not reported; never gates anything and the
@@ -13386,13 +13603,37 @@ export const openapiSpec = {
           delivery_quality: { type: ['string', 'null'], enum: ['ok', 'unusable', 'partial', null] },
           delivery_note: { type: ['string', 'null'] },
           delivery_reported_at: { type: ['string', 'null'], format: 'date-time' },
+          // #4579: the non-secret delivery pointer, echoed on the receipt
+          // (#3778). Same semantics as the activity feed's field at the top of
+          // this file; the 512-character cap is the evidence request's write
+          // bound (`MachinePaymentEvidenceRequest.deliveryReference`).
+          delivery_reference: {
+            type: ['string', 'null'],
+            maxLength: 512,
+            description:
+              '#3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write.',
+          },
           // #4534: the purchase correlation key. `purchase_group_id` is the
           // merchant's own invoice/order id (or an agent-supplied group key)
-          // shared by every payment of one purchase; `parent_payment_id` is the
-          // purchase payment a fee call paid for. Both null on an ungrouped
-          // payment — which is fed exactly as before, never withheld.
+          // shared by every payment of one purchase; `parent_receipt_id` is the
+          // purchase's receipt (evidence) id — the `id` of the parent purchase
+          // receipt, NOT a payment id. Both null on an ungrouped payment — which
+          // is fed exactly as before, never withheld.
           purchase_group_id: { type: ['string', 'null'] },
-          parent_payment_id: { anyOf: [uuid, { type: 'null' }] },
+          parent_receipt_id: {
+            anyOf: [uuid, { type: 'null' }],
+            description:
+              "The parent purchase receipt's `id` — the `machine_payment_evidence` row id of the purchase leg a fee call paid for. Null on the purchase itself and on every ungrouped payment. Joins to `id`, not to `payment_id`.",
+          },
+          // #4577: the same value under its old name, kept because the SDK
+          // shipped `parentPaymentId` in 0.13.0-alpha.0. It holds a RECEIPT id,
+          // not a payment id — prefer `parent_receipt_id`.
+          parent_payment_id: {
+            anyOf: [uuid, { type: 'null' }],
+            deprecated: true,
+            description:
+              'Deprecated: same value as `parent_receipt_id`. The name is wrong — it holds a receipt (evidence) id, not a payment id. Prefer `parent_receipt_id`.',
+          },
           confirmed_at: { anyOf: [isoDateTime, { type: 'null' }] },
           created_at: isoDateTime,
           updated_at: isoDateTime,
@@ -14059,6 +14300,65 @@ export const openapiSpec = {
         },
         additionalProperties: false,
       },
+      // #4709 (epic #4701 decision 4): the "Since your last visit" marker and
+      // the figures behind its line. Display-only — never read by a payment
+      // path.
+      UserVisitInput: {
+        type: 'object',
+        required: ['entry_id'],
+        properties: {
+          entry_id: { ...uuid, description: 'The client-generated entry id, stored in `sessionStorage` BEFORE the call so a retry re-opens the same entry.' },
+        },
+        additionalProperties: false,
+      },
+      UserVisitResponse: {
+        type: 'object',
+        required: ['previous', 'current'],
+        properties: {
+          previous: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'The PREVIOUS entry’s instant — the exclusive lower bound of the window. Null on the first ever visit.',
+          },
+          current: {
+            ...isoDateTime,
+            description: 'This entry’s instant — the inclusive upper bound of the window. Never goes backwards.',
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardSinceAgent: {
+        type: 'object',
+        required: ['id', 'name', 'netSpend', 'payments'],
+        properties: {
+          id: uuid,
+          name: { type: 'string' },
+          netSpend: { type: 'number', description: 'The agent’s NET spend in the window, in the display currency (#3803’s definition with the #3755 netting).' },
+          payments: { type: 'integer', description: 'Confirmed payments the agent made in the window.' },
+        },
+        additionalProperties: false,
+      },
+      DashboardSinceResponse: {
+        type: 'object',
+        required: ['after', 'through', 'timeWord', 'currency', 'payments', 'net', 'agents'],
+        properties: {
+          after: { ...isoDateTime, description: 'The window’s exclusive lower bound, echoed from the request.' },
+          through: { ...isoDateTime, description: 'The window’s inclusive upper bound, echoed from the request.' },
+          timeWord: {
+            type: 'string',
+            description: 'The fixed “Since …” word, spoken in the request’s `tz`: “Since earlier today”, “Since yesterday”, “Since Tuesday” (within six local days), or a date past six days (“Since 3 November”). The sentence around it is assembled from fixed templates in the frontend.',
+          },
+          currency: { type: 'string', enum: ['SEK', 'USD', 'EUR'], description: 'The display currency `net` and every agent’s `netSpend` are struck in.' },
+          payments: { type: 'integer', description: 'Confirmed payments in the window, across every agent.' },
+          net: { type: 'number', description: 'The window’s NET spend in the display currency.' },
+          agents: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/DashboardSinceAgent' },
+            description: 'Agents with at least one confirmed payment in the window, largest net spend first.',
+          },
+        },
+        additionalProperties: false,
+      },
       DashboardOverviewResponse: {
         type: 'object',
         required: ['totals', 'change', 'actionableApprovals', 'pendingApprovals', 'onboardingProgress', 'agents', 'agentCount', 'accounts', 'spotRates', 'spend'],
@@ -14350,6 +14650,75 @@ export const openapiSpec = {
           budgets: {
             type: 'array',
             items: { $ref: '#/components/schemas/DashboardBudgetRemainingEntry' },
+          },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * #4707: the one payment the first-agent-payment card names.
+       *
+       * `payment` is `null` when the user has no QUALIFYING payment — not only
+       * when they have never paid. A confirmed EIP-3009 row whose merchant leg
+       * is not yet proven (no recorded settlement hash, no merchant answer) is
+       * excluded, because the card claims a real event. The client renders
+       * nothing for `null`, never a weaker claim.
+       */
+      DashboardFirstAgentPaymentResponse: {
+        type: 'object',
+        required: ['payment'],
+        properties: {
+          payment: {
+            oneOf: [
+              { $ref: '#/components/schemas/DashboardFirstAgentPayment' },
+              { type: 'null' },
+            ],
+          },
+        },
+        additionalProperties: false,
+      },
+      DashboardFirstAgentPayment: {
+        type: 'object',
+        required: [
+          'id',
+          'agentName',
+          'amountHuman',
+          'amountRaw',
+          'tokenSymbol',
+          'chainId',
+          'confirmedAt',
+          'usdValue',
+          'eurValue',
+          'sekValue',
+          'merchantName',
+          'x402ResourceUrl',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          agentName: { type: 'string', description: 'The agent that made the payment — the card\'s heading.' },
+          amountHuman: {
+            type: 'string',
+            description:
+              'The token amount as stored. The card renders this (with `tokenSymbol`) whenever the booked fiat figure would read 0.00 — a sub-cent payment never reads "$0.00" (#3897 rule 3).',
+          },
+          amountRaw: { type: ['string', 'null'], description: 'The atomic amount, when the row carries one.' },
+          tokenSymbol: { type: 'string' },
+          chainId: { type: 'integer' },
+          confirmedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'When the funding leg confirmed. The card says "just now" for a recent row and the date for an older one.',
+          },
+          usdValue: { type: ['number', 'null'], description: 'Booked USD at settle time; null when the row was never priced.' },
+          eurValue: { type: ['number', 'null'], description: 'Booked EUR at settle time; null when the row was never priced.' },
+          sekValue: { type: ['number', 'null'], description: 'Booked SEK at settle time; null when the row was never priced.' },
+          merchantName: {
+            type: ['string', 'null'],
+            description:
+              'Contact name, else receipt-merchant name, for the counterparty. Null when neither exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4).',
+          },
+          x402ResourceUrl: {
+            type: ['string', 'null'],
+            description: 'The x402 resource URL, whose HOST is the last displayable counterparty name. Null on a non-x402 payment.',
           },
         },
         additionalProperties: false,

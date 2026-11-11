@@ -229,7 +229,7 @@ warning. Operator response:
    node packages/backend/dist/ops/cancel-stuck-lane.js <outbound-row-id>
    ```
 
-   The command re-verifies the row is really the wedge before sending anything
+   The command verifies the row is really the wedge before sending anything
    (fail-closed: it refuses a young/slow broadcast, an already-mined one, a
    row already cancelled, or a rebroadcast-safe row the bump worker still owns
    because its lane is below the bump cap — and it closes a mined row from the
@@ -402,23 +402,4 @@ silently serves the LAST healthy build (symptom: new routes 404 while
 debugging "route missing on dev", check WHICH build generation is live by
 probing a route from each recent merge before suspecting the code.
 
-> **Re-verified 2026-10-24 (#4372 part F, at dev `6d87ddf95`), a full re-read.**
-> Changed: the relayer bullet names the two deploys — the treasury at grant
-> activation (`ensureHybridDeployed`) and the agent's delegate Hybrid at its
-> first erc7710 authorize (`ensureDelegateHybridDeployed`, #4023) — instead
-> of one "delegator/treasury" deploy, and the blast-radius lines follow; the
-> `SESSION_RAIL_*` variables are read nowhere, not "except the probe"; the
-> pinned set has 9 enforcers (the `redeemer`, #1058), not 8; the SDK is
-> pinned by the lockfile, its `package.json` ranges are `^1.6.0`; #830 is
-> closed. Re-checked without change: the 502 and 429 deploy answers
-> (`modules/x402/delegation-authorize.ts`), `max_x402_per_hour` default 100
-> with replays exempt, the per-chain resolver and its chain guard
-> (`delegationRailBundlerUrl`), the typed 503 on `/payments` and the funding
-> leg, `prepare_failed` (#3609) and the hosted MCP mapping, the #3371 RPC
-> scrub, every consumer passing `DELEGATION_RAIL_SPONSORSHIP_POLICY_ID`, the
-> 120 s deploy and attest waits (#1722, #1735), the bump worker's three log
-> lines and its cap of 3, the rebroadcast-safe set, migration 061's partial
-> index, the `ops:cancel-stuck-*` scripts and their built form in the
-> `--omit=dev` image, the probes' exit codes and `CHECK_BUNDLER_CHAIN_ID`,
-> the #908 mainnet pins, and `dependency-parity.test.ts`. Every cited issue
-> was read with `gh api`; all are closed.
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

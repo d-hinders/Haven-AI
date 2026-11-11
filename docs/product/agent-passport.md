@@ -46,14 +46,15 @@ on-chain**, and can be **revoked**.
 > universal. Read the claims below as describing what Haven **issues**; read the
 > receipt for what a specific passport **asserts**.
 
-Four claims, each independently checkable:
+Four claims. The right-hand column says what a merchant can check today
+without taking Haven's word for it, and what is Haven's signed assertion:
 
-| Claim | What it means |
-|---|---|
-| **Issued** | A known operator provisioned this agent. It did not appear from nowhere. |
-| **Bound to a treasury** | The account whose funds it may spend is named. Its reach is finite and stated. |
-| **Governed** | The limits on it are enforced by the chain during the payment, not by a service that could be bypassed or misconfigured. True by construction: Haven issues only on the rail where that holds. |
-| **Revocable** | Authority can be withdrawn, and the withdrawal takes effect immediately — not when a cache expires. |
+| Claim | What it means | What a merchant can check without trusting Haven |
+|---|---|---|
+| **Issued** | A known operator provisioned this agent. It did not appear from nowhere. | Only with Haven's attester address, which Haven does not publish yet. Until then this is Haven's signed receipt. The schema has no resolver, so an attestation under it proves nothing by itself. |
+| **Bound to a treasury** | The account whose funds it may spend is named. Its reach is finite and stated. | The `treasury` field is public in the on-chain attestation, subject to the same attester caveat. |
+| **Governed** | The limits on it are enforced by the chain during the payment, not by a service that could be bypassed or misconfigured. True by construction: Haven issues only on the rail where that holds. | On an erc7710 payment, the merchant sees the delegation itself during redemption. On an EIP-3009 payment it is a boolean in Haven's signed receipt (`controls.policyEnforcedOnchain`). The `policyUri` field (`haven:agent:<id>`) resolves nowhere. |
+| **Revocable** | Authority can be withdrawn, and the withdrawal takes effect immediately — not when a cache expires. | By design, Haven's verifier is the authority. The on-chain revoke follows and may lag (see the schema doc). |
 
 **Revocable is the load-bearing one.** A credential that cannot be withdrawn is
 a claim about the past. A merchant checking a passport is asking about *now*.
@@ -115,9 +116,41 @@ database refuses to store a tier above L0, and the verifier refuses to report a
 tier it cannot issue rather than quietly describing it as L0. A tier that is
 merely *intended* to stay unreachable eventually gets reached.
 
+## Availability
+
+- **Base Sepolia only.** Base mainnet is not a passport chain, and no mainnet
+  passport exists.
+- **Verification is a per-deployment setting.** It needs
+  `PASSPORT_RECEIPT_SIGNING_KEY`. Where it is off, `GET /passport/issuer` and
+  `GET /passport/verify` answer 503 and no signed answer is available. The
+  operator procedure is
+  [Passport verification setup](../operations/passport-verification-setup.md).
+
+## Where the dashboard offers it
+
+The opt-in appears only where this deployment can issue a passport that a
+merchant can then verify. Each session account carries `passport_issuable`
+(#4719), computed by the backend. It is true only when all four hold:
+
+- the account is a delegation-rail account (`delegator_hybrid`, or `execution_rail` `delegation`);
+- its chain is a passport chain (Base Sepolia today);
+- the chain's schema UID is registered on this deployment;
+- the receipt verifier is on.
+
+Everywhere else, the connect flow shows no checkbox, and the agent's Settings
+row says passports are not available for that wallet. Both agent-creation
+paths (`POST /agents` and connect-setup registration) record no passport for
+such an account. The explicit `POST /agents/:id/passport` also refuses with 503
+while the verifier is off, and the retry sweep does not anchor a request
+recorded before this gate until the verifier is on. A passport anchored before
+this gate renders as it always did. A request that failed on a wallet that
+cannot issue reads **Not available** with that same reason line, not as an
+error.
+
 ## For merchants
 
-You get a signed answer covering four things: the agent's current standing, its
+Where the deployment's verifier is on, you get a signed answer covering four
+things: the agent's current standing, its
 assurance tier, the addresses it is bound to, and how long the answer is good
 for.
 
@@ -130,6 +163,14 @@ for.
 - **An agent with no passport is a normal answer**, not an error. Issuance is
   opt-in, so most agents have none. Read it as "no claim made" and apply
   whatever policy you would apply to any unknown counterparty.
+
+**To receive a passport reference with the payment**, advertise the
+`haven-passport` x402 extension in your 402. The payment then echoes it with
+the agent's `attestation_uid` and `chain_id` added. The two fields come from
+the agent, so treat them as a hint: resolve the passport for the address that
+actually paid (`GET /passport/verify?address=<payer>`) against a Haven verifier
+you pin. The developer detail is in
+[the passport schema doc](../architecture/11-agent-passport-schema.md).
 
 What a passport does not do is replace your own controls. It narrows uncertainty
 about governance. It does not remove it, and it is silent on the other questions
@@ -155,10 +196,17 @@ build on the first and cannot safely build on the second.
 
 ## How it works, briefly
 
-The attestation lives on-chain, so anyone can read it without asking Haven. Live
-standing — revoked or not — comes from Haven, because the chain lags and
-revocation has to be immediate. An agent can carry a pointer to its own passport
-alongside a payment, so a merchant **verifies** rather than **discovers**.
+The attestation lives on-chain, so anyone can read it. Reading it proves
+something only once the reader checks the attester against Haven's address,
+which Haven does not publish yet (see *Availability*). Live standing — revoked or
+not — comes from Haven, because the chain lags and revocation has to be
+immediate. The goal is that an agent carries a pointer to its own passport
+alongside a payment, so a merchant **verifies** rather than **discovers**. A
+merchant that wants it asks for it: when its x402 402 advertises the
+`haven-passport` extension, the payment carries the passport's UID and chain id
+(#4722). That works on erc7710 payments and on EIP-3009 payments the SDK or
+local `@haven_ai/mcp` builds. The default hosted+signer EIP-3009 path does not
+carry it yet.
 
 No personal data is in the attestation; everything person-shaped stays behind
 the API. One trade-off is deliberate and worth stating plainly: the on-chain

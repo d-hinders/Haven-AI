@@ -16,6 +16,12 @@
  * per-run cost is the wrong denominator. Until {@link MIN_READINGS} daily
  * readings exist, each wallet falls back to a fixed floor and says so.
  *
+ * One thing here is not a wallet: the QA budget grant (#4666). Money-flow QA
+ * was red from 2026-11-03 to 2026-11-04 because the standing identity's grant
+ * reached its expiry, which this check could not see. {@link readBudgetGrant}
+ * reports it beside the wallet rows, never as one: a grant has no balance,
+ * burn, runway or top-up.
+ *
  * Nothing here signs or moves Haven or customer funds. The caller may request
  * testnet ETH for the demo merchant's settlement wallet and the dev relayer,
  * and testnet USDC for the eval accounts, between the first reading and
@@ -82,7 +88,7 @@ export const TREASURY_FALLBACK_FLOOR_ATOMIC = 1_000_000n
  * the Hermes lane's eval agent carries a **3 USDC Daily** budget
  * (`allowance_amount: 3000000`, `reset_period_min: 1440`, checked 2026-10-15),
  * and the Claude Code lane is provisioned to the same size — both lanes run
- * the same 11-task suite, and its drainer (`direct-send-full-remaining`) can
+ * the same task suite, and its drainer (`direct-send-full-remaining`) can
  * spend the WHOLE remaining budget in one night, so one night's budget is the
  * Daily allowance itself.
  *
@@ -277,7 +283,7 @@ export type Reading =
 
 export interface BalanceSources {
   /** `QA_DELEGATION_AGENT_API_KEY` resolved into an API, or null when unset. */
-  api: Pick<HavenApi, 'getAgent'> | null
+  api: Pick<HavenApi, 'getAgent' | 'getAllowances'> | null
   /** `QA_DEMO_MERCHANT_URL`, or undefined when unset. */
   demoMerchantUrl?: string
   /**
@@ -438,6 +444,105 @@ export async function readEvalAccount(
 export const readEvalHermes = (src: BalanceSources): Promise<Reading> => readEvalAccount(src, 'eval-hermes')
 export const readEvalClaude = (src: BalanceSources): Promise<Reading> => readEvalAccount(src, 'eval-claude')
 
+/** A grant ending in this many days or fewer is `warn` (#4666). Inclusive, unlike runway's `<`. */
+export const GRANT_WARN_DAYS = 30
+/** A grant ending in this many days or fewer is `critical` (#4666). */
+export const GRANT_CRITICAL_DAYS = 7
+/** The band marker's key for the grant; deliberately not a {@link WalletKey}. */
+export const BUDGET_GRANT_KEY = 'qa-budget'
+export const BUDGET_GRANT_NAME = 'QA budget grant (USDC)'
+const DAY_MS = 86_400_000
+
+/**
+ * The standing identity's USDC budget grant, beside the wallet rows. It shares
+ * `key`, `name`, `band` and `reason` with a {@link BalanceRow}, so the issue's
+ * alarm and band-memory logic need no second path.
+ */
+export interface BudgetGrantRow {
+  key: typeof BUDGET_GRANT_KEY
+  name: string
+  band: Band
+  /** ISO 8601: when the live grant ends, or when the latest ended budget ended. */
+  endsAt?: string
+  /** Days to `endsAt`, one decimal, rounded up so that it reads ≤ 7 only when it is. */
+  daysLeft?: number
+  /** True when no live open USDC budget exists. `endsAt` is then the latest ended budget of ANY token or pin. */
+  noLiveBudget?: boolean
+  reason?: string
+  configMissing?: boolean
+}
+
+/** The band for a live grant ending at `endsMs`. Bands on exact milliseconds; both edges are inclusive. */
+export function classifyGrant(endsMs: number, nowMs: number): Exclude<Band, 'unknown'> {
+  const left = endsMs - nowMs
+  if (left <= GRANT_CRITICAL_DAYS * DAY_MS) return 'critical'
+  if (left <= GRANT_WARN_DAYS * DAY_MS) return 'warn'
+  return 'ok'
+}
+
+const grantRow = (fields: Omit<BudgetGrantRow, 'key' | 'name'>): BudgetGrantRow => ({
+  key: BUDGET_GRANT_KEY,
+  name: BUDGET_GRANT_NAME,
+  ...fields,
+})
+
+const parseIso = (value: unknown): number | null => {
+  if (typeof value !== 'string' || value === '') return null
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? null : ms
+}
+
+/**
+ * The budget QA actually spends from, via `GET /machine-payments/allowances`
+ * (the only budget read the agent's API key can reach): the same open USDC
+ * slot the seed's `ensureBudget` manages — USDC by address, no recipient pin.
+ * A pinned row pays only its pin, and the EIP-3009 bridge needs an open budget,
+ * so it neither satisfies nor raises this. A re-keyed agent's budget is a carry/steady pair, so the LATEST end in
+ * the slot is when QA loses its budget.
+ *
+ * - no live open row, from a real list → `critical`;
+ * - anything that does not answer the question → `unknown`, like a wallet read
+ *   failure: an HTTP error, a 200 with no list (a proxy page parses to `{ raw }`,
+ *   which must not read as "no budget"), or a live open row whose field is
+ *   absent (a backend from before #4666) or unusable.
+ */
+export async function readBudgetGrant(src: BalanceSources, now: Date = new Date()): Promise<BudgetGrantRow> {
+  if (!src.api) {
+    return grantRow({ band: 'unknown', reason: 'config missing: QA_DELEGATION_AGENT_API_KEY', configMissing: true })
+  }
+  try {
+    const { ok, status, data } = await src.api.getAllowances()
+    if (!ok) return grantRow({ band: 'unknown', reason: `GET /machine-payments/allowances returned HTTP ${status}` })
+    if (!Array.isArray(data.allowances)) {
+      return grantRow({ band: 'unknown', reason: 'GET /machine-payments/allowances carries no allowances list' })
+    }
+    const slot = data.allowances.filter(
+      (a) => a.token_address?.toLowerCase() === SEPOLIA_USDC.toLowerCase() && (a.recipient_address ?? null) === null,
+    )
+    if (slot.length === 0) {
+      const endedMs = parseIso(data.budget_ended_at)
+      return grantRow({
+        band: 'critical',
+        noLiveBudget: true,
+        ...(endedMs !== null ? { endsAt: new Date(endedMs).toISOString() } : {}),
+        reason: 'no live open USDC budget',
+      })
+    }
+    const ends = slot.map((a) => parseIso(a.budget_expires_at))
+    if (ends.some((ms) => ms === null)) {
+      return grantRow({ band: 'unknown', reason: 'a live open USDC budget reports no usable budget_expires_at' })
+    }
+    const endsMs = Math.max(...(ends as number[]))
+    return grantRow({
+      band: classifyGrant(endsMs, now.getTime()),
+      endsAt: new Date(endsMs).toISOString(),
+      daysLeft: Math.ceil(((endsMs - now.getTime()) / DAY_MS) * 10) / 10,
+    })
+  } catch (error) {
+    return grantRow({ band: 'unknown', reason: safeReason('read failed', error) })
+  }
+}
+
 const META: Record<WalletKey, { name: string; unit: Unit; decimals: number; token?: string }> = {
   treasury: { name: 'Delegation treasury', unit: 'USDC', decimals: USDC_DECIMALS, token: SEPOLIA_USDC },
   merchant: { name: 'Demo-merchant settlement wallet', unit: 'ETH', decimals: 18 },
@@ -497,6 +602,8 @@ export interface BalancesReport {
   configMissing: boolean
   /** The Base Sepolia faucet outcome per wallet, when the CLI evaluated it (#3836). */
   topUps?: Partial<Record<TopUpWallet, TopUpOutcome>>
+  /** The QA budget grant (#4666), when the CLI read it. Not a row: see {@link BudgetGrantRow}. */
+  budgetGrant?: BudgetGrantRow
 }
 
 /**

@@ -21,6 +21,7 @@
 
 import { formatUnits } from 'viem'
 import { BudgetMeter } from './BudgetMeter'
+import { EmptyState } from '@/components/ui/EmptyState'
 import type { ApiSchema } from '@haven_ai/core'
 
 export type DashboardBudgetRemainingEntry = ApiSchema<'DashboardBudgetRemainingEntry'>
@@ -83,7 +84,7 @@ function BudgetRemainingRow({ budget }: { budget: DashboardBudgetRemainingEntry 
 
 export function BudgetRemainingList({ budgets }: BudgetRemainingListProps) { // design-system-exempt: a live-data wire composite (#3804) — its visual pieces (BudgetMeter, the v2 tokens) are the registered primitives; the list itself renders GET /dashboard/budget-remaining's entries and its unknown state, which no static gallery section can exercise
   if (budgets.length === 0) {
-    return <p className="text-sm text-[var(--v2-ink-3)]">No budgets yet.</p>
+    return <EmptyState size="inline" title="No budgets yet." />
   }
   return (
     <ul className="space-y-3">

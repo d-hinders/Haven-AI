@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/authorize.ts
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
-last-verified: "2026-10-23"
+last-verified: "2026-11-02"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract
@@ -162,10 +162,6 @@ delegation in step 5.
 
 ## Direct payment
 
-> **Re-verified #3495 (2026-09-30):** step 2's result shape and step 3's
-> recovery route, for the compact-by-default result and its opt-in relay.
-> Nothing else in this file was re-verified in this pass.
-
 1. `haven_pay` asks the backend to construct a payment intent.
 2. Within the remaining budget, it returns a COMPACT result (#3495, mirroring
    the x402 quote tools' #1272 contract) — `payment_id`, `status`, an
@@ -241,14 +237,6 @@ haven_quote_x402 / haven_pay_x402_quote
   → merchant retry  → haven_report_settlement_evidence { payment_id, settlement_tx_hash }
                                        (#3774: the next_tool after the erc7710 haven_submit)
 ```
-
-> **Re-verified (#3475 follow-up, 2026-09-30, passage only).** The added
-> `haven_report_settlement_evidence` step above is the hosted next-step
-> answer, not a new tool: `haven_report_x402_outcome`'s response names it
-> when the fact warrants it (eip3009, accepted, unsettled), and the tool
-> itself now accepts a bare `payment_id` as a well-formed no-op when the
-> merchant returned no hash. `last-verified` unchanged — nothing else in this
-> file's scope was re-checked.
 
 **Merchant-issued credentials in the settled result
 ([#3768](https://github.com/d-hinders/Haven-AI/issues/3768)).** The `result`
@@ -447,43 +435,6 @@ requests or their responses, and nothing here relays, submits, or broadcasts:
   budget live on-chain. Legacy Safe permissions require action by the Safe owner
   outside Haven.
 
-Re-verified 2026-10-05 (weekly docs audit #3645, at dev `cdb91d86`), a full
-re-read of everything except the dated notes. Changed: the recommended
-paid-MCP path shows the erc7710 shape beside the EIP-3009 bridge; the
-`POST /payments` comparison under the pre-checks now reflects its own #3503
-period pre-check and typed `403`; the hosted direct-payment paragraph says
-the legacy branch answers `410` (deleted in #1987) instead of "serves both
-rails"; the tool-surface list drops the retired MPP tools, gives
-`haven_check_funds`'s `covered` its null case and adds the reports, catalog
-submission and task budgets; the strict-input count (stale at 22 of 24) is
-replaced by the rule it counted; and the signer paragraph and `haven_sign` row
-name the task- and sub-budget sign-contexts. Re-checked without change: the
-connect steps and what registration sends, the boot-time key guard, the
-`run_mode` refusal, the collision prompt, one budget per signature, the
-direct-payment fields and recovery text, the erc7710 pre-check and its 201
-shape, the `/x402/authorize` 410, the merchant-receipt capture, and the
-custody summary.
-
-
-Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read. Changed:
-the signer section names all five tools — `haven_sign_siwx` (#3728) was
-missing from the table and from the never-reaches-the-network list
-(`SignerToolName`, `packages/signer/src/tools.ts`); the manual-credential
-paragraph says the key pair is generated in the browser and separates its
-credential material (and the setup token and challenge id that authenticate
-the call, added in review round 1 of #4377) from the setup metadata it also
-sends
-(`hooks/useAgentConnectionSetup.ts`). Re-checked without change: the hosted
-egress limits (`HOSTED_MAX_GET_REDIRECTS = 3`, non-GET redirects refused,
-the DNS residual, all in the SDK's merchant egress policy), the boot-time key
-guard (`mcp-server/src/cli.ts`, `server.ts`), the #4065 containers, the
-registration payload, the `run_mode` 400, `approval_url`, the #3772 report
-window (30 minutes) and `superseded_by` reads, the erc7710 `haven_sign`
-next step (`tools/catalog-purchase.ts`), the #3768 redaction and
-`include_merchant_credentials`, the 15-minute grace window
-(`domain/merchant-report-grace.ts`), and both authorize pre-checks with
-their fail-open shapes (`modules/x402/delegation-authorize.ts`).
-
 ## Related docs
 
 - [x402 payment sequence](04-x402-payment-sequence.md)
@@ -493,3 +444,5 @@ their fail-open shapes (`modules/x402/delegation-authorize.ts`).
   policy every hosted merchant request runs under — https-only public hosts,
   re-checked GET redirects, while-reading byte caps; the accepted DNS residual)
 - [CASP / MiCA guardrails](../regulatory/casp-risk-guardrails.md)
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

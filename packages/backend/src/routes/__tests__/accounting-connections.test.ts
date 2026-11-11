@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectMatchesSpec } from '../../openapi/response-shape.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
@@ -33,9 +33,27 @@ const { configMock } = vi.hoisted(() => ({
     // feature ON. The gate describe block below flips these two.
     hosted: true,
     accountingEnabled: true,
+    // #4517: the PKCE verifier's key — the same secret that signs the state
+    // in production (`app.jwt` below is registered with it too).
+    jwtSecret: 'test-secret',
   },
 }))
 vi.mock('../../config.js', () => ({ config: configMock }))
+
+// #4517: no live provider uses PKCE yet (Igdrasil will), so the PKCE wiring
+// is driven through Fortnox's route with the opt-in switched on. Off by
+// default: every other test here sees Fortnox's real, PKCE-free config.
+const pkceSwitch = vi.hoisted(() => ({ on: false }))
+vi.mock('../../modules/accounting/fortnox.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/accounting/fortnox.js')>()
+  return {
+    ...actual,
+    fortnoxOAuth2Config: (...args: Parameters<typeof actual.fortnoxOAuth2Config>) => ({
+      ...actual.fortnoxOAuth2Config(...args),
+      ...(pkceSwitch.on ? { pkce: 'S256' as const } : {}),
+    }),
+  }
+})
 
 // In-memory `accounting_connections`: keyed (user, provider). The repository's
 // SQL is covered on the real database elsewhere; the routes need only the
@@ -144,6 +162,7 @@ import { installRequestValidation } from '../../openapi/request-validation.js'
 import {
   AccountedConnector,
   InMemoryConnector,
+  MultiCompanyGrantError,
   MultiCompanyKeyError,
   OAUTH_STATE_PURPOSE,
   UnsupportedBaseCurrencyError,
@@ -153,6 +172,7 @@ import {
   registerTestProvider,
   type AccountingConnector,
 } from '../../modules/accounting/index.js'
+import { pkceChallengeFor, pkceVerifierFor } from '../../modules/accounting/oauth-pkce.js'
 
 const ACCESS_TOKEN = 'LEAKED_ACCESS_TOKEN_3f9a'
 const REFRESH_TOKEN = 'LEAKED_REFRESH_TOKEN_b71c'
@@ -388,6 +408,50 @@ describe('accounting connection routes (#2862)', () => {
     })
   })
 
+  describe('PKCE (#4517)', () => {
+    afterEach(() => {
+      pkceSwitch.on = false
+    })
+
+    async function connectUrl(): Promise<URL> {
+      const res = await authed('POST', '/accounting/connections/fortnox/connect-url')
+      expect(res.statusCode).toBe(200)
+      return new URL(res.json().url)
+    }
+
+    it('one state, one verifier: the consent URL carries its challenge, the callback hands the flow the verifier, and the state never carries it', async () => {
+      pkceSwitch.on = true
+      const url = await connectUrl()
+      const state = url.searchParams.get('state')!
+      const claims = app.jwt.verify<Record<string, unknown>>(state)
+      const verifier = pkceVerifierFor(String(claims.jti), 'test-secret')
+
+      expect(url.searchParams.get('code_challenge')).toBe(pkceChallengeFor(verifier))
+      expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+      // Not in the state: its claims are exactly the #1640/#2862 set, and no
+      // value — nor the URL as a whole — contains the verifier.
+      expect(Object.keys(claims).sort()).toEqual(['exp', 'iat', 'jti', 'provider', 'purpose', 'sub'])
+      expect(JSON.stringify(claims)).not.toContain(verifier)
+      expect(url.toString()).not.toContain(verifier)
+
+      const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=auth-code&state=${state}` })
+      expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=connected')
+      // MUTATION TARGET: a callback that derives from anything but this
+      // state's jti hands the flow a verifier the provider will refuse.
+      expect(flowMocks.completeOAuth2Connect.mock.calls[0][0]).toMatchObject({ code: 'auth-code', pkceVerifier: verifier })
+      expect(leaks(res.headers.location as string)).toBe(false)
+    })
+
+    it('a provider without PKCE gets no challenge and no verifier', async () => {
+      const url = await connectUrl()
+      expect(url.searchParams.get('code_challenge')).toBeNull()
+      expect(url.searchParams.get('code_challenge_method')).toBeNull()
+      const state = url.searchParams.get('state')!
+      await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=auth-code&state=${state}` })
+      expect(flowMocks.completeOAuth2Connect.mock.calls[0][0].pkceVerifier).toBeUndefined()
+    })
+  })
+
   describe('GET /accounting/connections/:provider/callback', () => {
     async function issueState(provider = 'fortnox'): Promise<string> {
       const res = await authed('POST', `/accounting/connections/${provider}/connect-url`)
@@ -501,6 +565,16 @@ describe('accounting connection routes (#2862)', () => {
       const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
       expect(res.statusCode).toBe(302)
       expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=unsupported_currency')
+      expect(rows.size).toBe(0)
+      expect(leaks(res.headers.location as string)).toBe(false)
+    })
+
+    it('#4518: a grant that reaches SEVERAL companies is named — connect=error&reason=multi_company, nothing stored', async () => {
+      const state = await issueState()
+      flowMocks.completeOAuth2Connect.mockRejectedValueOnce(new MultiCompanyGrantError('fortnox', 2))
+      const res = await app.inject({ method: 'GET', url: `/accounting/connections/fortnox/callback?code=c&state=${state}` })
+      expect(res.statusCode).toBe(302)
+      expect(res.headers.location).toBe('https://app.test/accounting?provider=fortnox&connect=error&reason=multi_company')
       expect(rows.size).toBe(0)
       expect(leaks(res.headers.location as string)).toBe(false)
     })

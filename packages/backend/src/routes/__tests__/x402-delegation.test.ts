@@ -1529,7 +1529,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
   })
 
   /** Drive a settle to completion with a valid prepared erc7710 state. */
-  async function settleOk(passportRows: Record<string, unknown>[] = []) {
+  async function settleOk(passportRows: Record<string, unknown>[] = [], machineMetadata?: Record<string, unknown>) {
     const childFixture = JSON.parse(JSON.stringify(buildBudgetDelegation({
         agentId: 'agent-1', chainId: 84532, treasuryAddress: '0x' + 'aa'.repeat(20) as `0x${string}`,
         delegateAccountAddress: DELEGATE_ACCT as `0x${string}`, tokenAddress: USDC as `0x${string}`,
@@ -1548,6 +1548,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
           prepared_user_op: JSON.parse(preparedState), chain_id: 84532,
           x402_resource_url: 'https://merchant.example/resource',
           to_address: '0x' + 'cc'.repeat(20), amount_raw: '1000', token_address: USDC,
+          ...(machineMetadata ? { machine_metadata: machineMetadata } : {}),
         }] })
       }
       if (/FROM agent_passports/.test(String(sql))) return Promise.resolve({ rows: passportRows })
@@ -1574,8 +1575,14 @@ describe('x402 delegation-rail settlement (#830)', () => {
   // Haven's OWN response body, never the header. This pins that boundary: if a
   // later change widens the wire payload, it fails here rather than at a
   // merchant.
-  it('CHARACTERIZATION: the X-PAYMENT payload carries exactly the erc7710 keys', async () => {
-    const res = await settleOk()
+  // #4722: scoped to "the merchant did not advertise `haven-passport`" — the
+  // fixture has no stored challenge at all — and run WITH an anchored
+  // passport, so the absence of the reference is the advertisement rule's
+  // doing, not merely the absence of a passport.
+  it('CHARACTERIZATION (merchant did not advertise haven-passport): the X-PAYMENT payload carries exactly the erc7710 keys', async () => {
+    const res = await settleOk([
+      { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: '0x' + 'ab'.repeat(32) },
+    ])
     expect(res.statusCode).toBe(200)
     const decoded = JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
     // v2 since #1064: the accepted-requirements echo rides alongside the
@@ -1793,7 +1800,9 @@ describe('x402 delegation-rail settlement (#830)', () => {
       ])
       expect(res.statusCode).toBe(200)
       // The UID and the chain id are the substance — the pair a merchant can
-      // resolve against a verifier it already pins, or against EAS directly.
+      // resolve against a verifier it already pins, or against EAS directly
+      // with the attester check (the schema has no resolver). Until Haven
+      // publishes its attester address, its verifier is the supported path.
       // `verify_url` is a convenience that this deployment may or may not be
       // able to emit honestly (it needs a configured base URL AND a live
       // verifier), so its two branches are pinned where the decision is made,
@@ -1892,15 +1901,77 @@ describe('x402 delegation-rail settlement (#830)', () => {
       expect(call?.[1]).toEqual(['agent-1'])
     })
 
-    it('keeps the reference OUT of the merchant-facing header', async () => {
+    it('keeps the reference OUT of the merchant-facing header when the merchant did not advertise haven-passport', async () => {
       // The boundary the characterization test above exists to protect: a
-      // facilitator we do not control parses that payload.
+      // facilitator we do not control parses that payload. Since #4722 the
+      // reference enters the header ONLY for a merchant that asked for it.
       const res = await settleOk([
         { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: UID },
       ])
       const raw = Buffer.from(res.json().payment_header, 'base64').toString('utf8')
       expect(raw).not.toContain(UID)
       expect(raw).not.toContain('passport')
+    })
+  })
+
+  // ── #4722: the `haven-passport` x402 extension on the erc7710 header ──────
+  describe('haven-passport extension on the erc7710 header (#4722)', () => {
+    const UID = '0x' + 'ab'.repeat(32)
+    const ANCHORED = [{ agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: UID }]
+    const metadataWith = (extensions: Record<string, unknown>) => ({
+      settlement_scheme: 'erc7710',
+      payment_required: { x402Version: 2, resource: { url: 'https://merchant.example/resource' }, accepts: [], extensions },
+    })
+    const decodedHeader = (res: { json: () => { payment_header: string } }) =>
+      JSON.parse(Buffer.from(res.json().payment_header, 'base64').toString('utf8'))
+
+    it('a stored challenge with other extensions but no haven-passport is echoed byte-identical', async () => {
+      const extensions = { bazaar: { info: { method: 'GET' }, schema: { v: 1 } } }
+      const res = await settleOk(ANCHORED, metadataWith(extensions))
+      expect(res.statusCode).toBe(200)
+      expect(JSON.stringify(decodedHeader(res).extensions)).toBe(JSON.stringify(extensions))
+      expect(Buffer.from(res.json().payment_header, 'base64').toString('utf8')).not.toContain(UID)
+    })
+
+    it('an advertised haven-passport gains the reference inside info; every other extension is untouched', async () => {
+      const extensions = { bazaar: { info: { method: 'GET' } }, 'haven-passport': { info: { purpose: 'gate' } } }
+      const res = await settleOk(ANCHORED, metadataWith(extensions))
+      expect(res.statusCode).toBe(200)
+      const decoded = decodedHeader(res)
+      expect(Object.keys(decoded.extensions)).toEqual(['bazaar', 'haven-passport'])
+      expect(JSON.stringify(decoded.extensions.bazaar)).toBe(JSON.stringify(extensions.bazaar))
+      expect(decoded.extensions['haven-passport']).toEqual({
+        info: { purpose: 'gate', attestation_uid: UID, chain_id: 84532 },
+      })
+      // The response body still carries it too (#976).
+      expect(res.json().passport).toMatchObject({ attestation_uid: UID, chain_id: 84532 })
+    })
+
+    it('an advertised haven-passport with no anchored passport is echoed byte-identical', async () => {
+      const extensions = { 'haven-passport': { info: {} } }
+      const res = await settleOk([], metadataWith(extensions))
+      expect(res.statusCode).toBe(200)
+      expect(JSON.stringify(decodedHeader(res).extensions)).toBe(JSON.stringify(extensions))
+    })
+
+    // The #976 ordering rule still holds with the reference now feeding the
+    // header: the lookup runs before the intent is marked submitted, so a
+    // lookup hang can never strand a submitted intent without its header.
+    it('looks the passport up BEFORE the intent is marked submitted', async () => {
+      const res = await settleOk(ANCHORED, metadataWith({ 'haven-passport': {} }))
+      expect(res.statusCode).toBe(200)
+      const sqls = mockQuery.mock.calls.map((c) => String(c[0]))
+      const lookup = sqls.findIndex((q) => /FROM agent_passports/.test(q))
+      const submit = sqls.findIndex((q) => /SET status = 'submitted'/.test(q))
+      expect(lookup).toBeGreaterThanOrEqual(0)
+      expect(submit).toBeGreaterThan(lookup)
+    })
+
+    it('never overwrites: an advertised attestation_uid is echoed verbatim', async () => {
+      const extensions = { 'haven-passport': { info: { attestation_uid: 'merchant-set' } } }
+      const res = await settleOk(ANCHORED, metadataWith(extensions))
+      expect(res.statusCode).toBe(200)
+      expect(JSON.stringify(decodedHeader(res).extensions)).toBe(JSON.stringify(extensions))
     })
   })
 

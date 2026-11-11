@@ -4,6 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { x402ResourceServer } from '@x402/core/server'
+import { x402V2PaymentEnvelope, type X402PaymentOption, type X402PaymentRequired } from '@haven_ai/sdk'
 import {
   AuthorizationAlreadyUsedError,
   createX402PaymentProcessor,
@@ -570,6 +571,100 @@ describe('x402 payment verification and settlement', () => {
       )
       expect(settled.txHash).toBe(TX_HASH)
       expect(submit).toHaveBeenCalledTimes(1)
+    })
+
+    // #4723 spec review, finding 2: the merchant is NOT append-only — it
+    // refuses unless EVERY advertised key is present and deep-equal. The
+    // clients are the append-only side. These two pin the real contract, and
+    // the env-flip window it creates (a 402 quoted before the flip and paid
+    // after it is refused, after funding on the EIP-3009 bridge).
+    describe('with haven-passport advertised (#4723)', () => {
+      const PASSPORT = {
+        baseUrl: 'https://haven.test',
+        issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+      }
+
+      function passportProcessor() {
+        const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
+        const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
+        const processor = createX402PaymentProcessor(
+          { submit, waitForReceipt },
+          { passport: PASSPORT },
+        )
+        return { processor, submit }
+      }
+
+      function passportRequired(): PaymentRequired {
+        return passportProcessor().processor.buildPaymentRequired({
+          merchantAddress: MERCHANT,
+          amountUsdc: 1_000n,
+          resource: 'https://merchant.test/mcp',
+          description: 'NordShield VPN Basic',
+        })
+      }
+
+      it('advertises both keys', () => {
+        expect(Object.keys(passportRequired().extensions as Record<string, unknown>)).toEqual([
+          'haven-demo',
+          'haven-passport',
+        ])
+      })
+
+      it('refuses a payload echoing only haven-demo', async () => {
+        const { processor, submit } = passportProcessor()
+        const pr = passportRequired()
+        const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+        ;(payload as { extensions?: Record<string, unknown> }).extensions = { ...DEMO_MERCHANT_EXTENSIONS }
+
+        await expect(processor.verifyAndSettle(settleInput(pr, encodePaymentSignatureHeader(payload))))
+          .rejects.toThrow('append-only, never delete or overwrite')
+        expect(submit).not.toHaveBeenCalled()
+      })
+
+      it('accepts an x402V2PaymentEnvelope echo carrying the passport reference', async () => {
+        const { processor, submit } = passportProcessor()
+        const pr = passportRequired()
+        const decoded = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+        const envelope = x402V2PaymentEnvelope(
+          pr as unknown as X402PaymentRequired,
+          decoded.accepted as unknown as X402PaymentOption,
+          decoded.payload,
+          { passport: { attestation_uid: `0x${'ab'.repeat(32)}`, chain_id: 8453 } },
+        )
+
+        const settled = await processor.verifyAndSettle(
+          settleInput(pr, encodePaymentSignatureHeader(envelope as unknown as PaymentPayload)),
+        )
+        expect(settled.txHash).toBe(TX_HASH)
+        expect(submit).toHaveBeenCalledTimes(1)
+        // The reference is carried on the settled payment for the purchase
+        // response — and nowhere on the wire.
+        expect(settled.passportReference).toEqual({
+          attestation_uid: `0x${'ab'.repeat(32)}`,
+          chain_id: 8453,
+        })
+      })
+
+      it('carries no reference when the client echoes the advertised empty info', async () => {
+        const { processor } = passportProcessor()
+        const pr = passportRequired()
+        const settled = await processor.verifyAndSettle(settleInput(pr, await signedHeader(pr)))
+        expect(settled.passportReference).toBeNull()
+      })
+
+      it('carries a malformed reference through so the check can refuse it', async () => {
+        const { processor } = passportProcessor()
+        const pr = passportRequired()
+        const payload = decodePaymentSignatureHeader(await signedHeader(pr)) as PaymentPayload
+        ;(payload as { extensions?: Record<string, unknown> }).extensions = {
+          ...DEMO_MERCHANT_EXTENSIONS,
+          'haven-passport': { info: { attestation_uid: '0xnothex', chain_id: 8453 } },
+        }
+        const settled = await processor.verifyAndSettle(
+          settleInput(pr, encodePaymentSignatureHeader(payload)),
+        )
+        expect(settled.passportReference).toEqual({ attestation_uid: '0xnothex', chain_id: 8453 })
+      })
     })
 
     // #2403: the branches below were documented in the README (#2383) from

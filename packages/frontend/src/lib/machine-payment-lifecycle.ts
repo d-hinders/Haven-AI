@@ -17,7 +17,11 @@ export interface MachinePaymentLifecyclePresentation {
  * `paid` is deliberately unbadged: a settled machine payment renders as a
  * normal transaction row.
  */
-const PRESENTATION: Record<MachinePaymentFlowStatus, MachinePaymentLifecyclePresentation | null> = {
+/**
+ * Exported for `lib/__tests__/status-vocabulary.test.ts`, which walks this map
+ * and `docs/product/design-system.md` § StatusBadge together (#4567).
+ */
+export const MACHINE_PAYMENT_PRESENTATION: Record<MachinePaymentFlowStatus, MachinePaymentLifecyclePresentation | null> = {
   paid: null,
   confirming_merchant: { label: 'Confirming', tone: 'warning' },
   needs_attention: { label: 'Needs attention', tone: 'warning' },
@@ -29,7 +33,7 @@ const PRESENTATION: Record<MachinePaymentFlowStatus, MachinePaymentLifecyclePres
  * the one-line stadium rule: these labels land in the narrowest column the app
  * has, and `needs_attention`'s two words were the first to wrap there.
  */
-export const PRESENTATION_LABELS: readonly string[] = Object.values(PRESENTATION)
+export const PRESENTATION_LABELS: readonly string[] = Object.values(MACHINE_PAYMENT_PRESENTATION)
   .filter((p): p is MachinePaymentLifecyclePresentation => p !== null)
   .map((p) => p.label)
 
@@ -37,5 +41,5 @@ export function machinePaymentLifecyclePresentation(
   tx: Pick<Transaction | AggregatedTransaction, 'paymentFlowStatus'>,
 ): MachinePaymentLifecyclePresentation | null {
   if (!tx.paymentFlowStatus) return null
-  return PRESENTATION[tx.paymentFlowStatus]
+  return MACHINE_PAYMENT_PRESENTATION[tx.paymentFlowStatus]
 }

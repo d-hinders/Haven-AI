@@ -25,7 +25,9 @@ Approval to file is not approval to implement or ship.
   Blocks 1–6 are the classes the 2026-09-03 retrospective measured the
   600-issue wave to consist of; blocks 8 and 9 come from the 2026-10-27
   measurement of the 537 non-epic issues created 2026-09-20..2026-10-26 by
-  discovery channel.
+  discovery channel; block 10 comes from the purchase QA of 2026-11-09
+  (#4754, #4755). The reference also carries the residual-archaeology probe,
+  which is not a numbered block.
 - [`references/discovery-method.md`](references/discovery-method.md) — the
   code-quality discovery method: how to run a pass, the discovery prompts, the
   coverage summary and the verification baseline. Moved here from
@@ -143,7 +145,9 @@ Report at most five concrete opportunities. For each, state:
 
 ```bash
 # routing (the CI surfaces these files turn on), then the money-path verdict over globs + controlGlobs (the positive control `sweep.ts` must print money-path)
-node -e 'import("./scripts/ci/change-classifier.mjs").then(m=>{const r=m.classifyChangedFiles(process.argv.slice(1));console.log(Object.keys(r).filter(k=>r[k]===true).join(" ")||"(none)")})' <file>...
+# `node -e <code> <arg>` puts the first <arg> in `process.argv[1]`, which the imported script reads to decide whether it is the entry point.
+# Keep that argument a fixed word (`files` below, `sweep.ts` on the next line), never the script's own path.
+node -e 'import("./scripts/ci/change-classifier.mjs").then(m=>{const r=m.classifyChangedFiles(process.argv.slice(2));console.log(Object.keys(r).filter(k=>r[k]===true).join(" ")||"(none)")})' files <file>...
 node -e 'import("./scripts/ci/qa-freshness.mjs").then(q=>{const g=[...q.loadMoneyPathGlobs(),...q.loadMoneyPathControlGlobs()];for(const f of process.argv.slice(1))console.log(f,g.some(x=>q.matchesGlob(f,x))?"money-path":"off")})' packages/backend/src/rails/sweep.ts <file>...
 ```
 
@@ -178,9 +182,28 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
 ## Method
 
 1. Read `docs/quality/scan-ledger.md`; collect prior findings + dispositions.
-2. Size the repo: lines per package, largest files, per-layer
+   Then read the standing issue *Quality-scan re-measurement (weekly)*
+   (label `scan-remeasure`, #4625): its table is this scan's starting delta —
+   every manifest figure re-run at a recent `dev` SHA by
+   `scripts/docs/scan-remeasure.mjs`, with flagged rows, failed rows, failed
+   controls and refused rows listed apart. A flagged or failed row is where
+   to look first, not a finding.
+2. **Escape analysis — which defects got past the last scan, and which block
+   should have seen them.** List the defect issues created since the previous
+   whole-repo entry whose `Found by` is not `quality-scan`, and for each say
+   which block should have seen it, or `no block` with the class. Record the
+   count per class in the entry: a class that recurs is the argument for the
+   next block. "The previous whole-repo entry" means the previous entry whose
+   heading says `whole repo`, a `partial` one included. Until `Found by` lines
+   exist, read what the issue itself says about its origin (a bug-report link,
+   a PR or review it names) and say how many issues you could not classify.
+3. Size the repo: lines per package, largest files, per-layer
    source-vs-test ratios.
-3. Probe the dimensions where structural problems live: test architecture and
+4. Probe the dimensions where structural problems live (the numbered blocks
+   are `references/dimensions.md`; their machine-readable commands and last
+   figures are `docs/quality/scan-baselines.json`, which the weekly job
+   re-runs — start each block from its row's re-run, then go beyond it):
+   test architecture and
    what is mocked away; validation and contract enforcement; data-layer
    coverage; cross-package duplication; fat controllers; `any` density;
    **incident clustering** — group the recent issue history by failure class
@@ -202,8 +225,10 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    backend's own recorded answers become at the hosted mapper. Then take the
    numbered **measurement blocks** — blocks 1–6 are the classes the 600-issue
    wave was measured to consist of, blocks 8 and 9 the two classes the
-   2026-10-27 channel measurement found came mostly from live purchases — each
-   as its numbered block in [`references/dimensions.md`](references/dimensions.md),
+   2026-10-27 channel measurement found came mostly from live purchases, and
+   block 10 the catalog-conformance class the 2026-11-09 purchase QA found no
+   block looked for — each as its numbered block in
+   [`references/dimensions.md`](references/dimensions.md),
    which states the command, the sample and what clean looks like, so the
    number is quotable as evidence or as a `Probed clean` baseline:
    1. **Guard falsifiability by execution** — mutate what a sampled guard
@@ -234,6 +259,11 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
       the agent's read routes with the `raw.<key>` set each SDK mapper reads;
       report keys emitted but never read and keys read but never emitted
       (#4469).
+   10. **Catalog conformance** — the catalog row against the merchant's own
+      402, and the payment header the SDK would build from it, by unpaid probe.
+      Two tiers: the offline fixture controls plus one unauthenticated read of
+      the dev listing every run, and third-party probes only when the person
+      starting the scan asks for them (#4754, #4755).
 
    **When the scope asks for a live exercise.** "Runtime-UX stays out of
    scope" above means the scan does not hunt UX defects by clicking through a
@@ -263,20 +293,51 @@ If tracking cannot be checked, disclose that limit and mark novelty unverified.
    Live calls stay read-only unless the owner authorises one, and a refusal
    proves reachability as well as a success does.
 
-4. Read the comment archaeology: `TODO`s, issue-number references, and
-   repeated warning comments are where a codebase names its own recurring
-   pain. A warning copy-pasted across files is a structural finding announcing
-   itself.
-5. Evaluate opportunities against the appropriate output level; preserve
+   **Standing permission for unpaid reads (owner decisions, 2026-11-10, on
+   #4757).** A whole-repo scan may send unpaid, unauthenticated or
+   dev-agent-authenticated **read** requests to hosted Haven on **dev** without
+   the scope asking for it. Unpaid requests to third-party merchants are sent
+   only when the person starting the scan asks for them. A scan session may hold
+   a **dev** agent key and never a production one. Nothing here is a payment:
+   no payment header, no signer, no Haven payment tool. The rules above still
+   apply — record the deployed revision before the first call, and read-only.
+
+5. **Residual archaeology — what merged PRs say they did not solve.** The
+   repository names its unsolved problems in PR bodies, not in comments: the
+   `TODO` grep returns 0 files at `49747fac3` (control, the same command with
+   `import` → 2,303), and the 2026-10-30 run's three product candidates each
+   cite a merged PR's own statement of a residual. Read the PRs merged to `dev`
+   in the scan window — bounded by instants, with the count quoted beside the
+   time it was taken — and collect the inline `Residual risk:` lines and each
+   residual heading's bullets. Report the residuals that cite no issue number,
+   grouped by surface, with the PR number; each is a lead for a candidate, not
+   a finding. The `TODO` grep stays as a one-line control (the
+   `comment-archaeology-markers` manifest row with its `import` control row),
+   not as a step. The command, the sample and the false-positive classes are in
+   [`references/dimensions.md`](references/dimensions.md) § *Probe: residual
+   archaeology*.
+6. Evaluate opportunities against the appropriate output level; preserve
    the ledger exclusions for both. Check tracking before presenting new work.
-6. Report **Structural findings** (up to two): evidence, demonstrated cost,
+7. Report **Structural findings** (up to two): evidence, demonstrated cost,
    and disjoint proposed slices. Report **Improvement candidates** (up to
    five) using the fields above. Include the coverage record and qualify
    conclusions to the sample actually examined.
-7. Append the run to the ledger and open the report and the entry as a pull
+8. Append the run to the ledger and open the report and the entry as a pull
    request. The report's front-matter reads `status: record` (#4459): it is a
    dated record of the scan, so the staleness audit never ranks it, while its
-   `covers:` still route it. The ledger stays `current`. **Run its independent review before presenting anything for
+   `covers:` still route it. The ledger stays `current`. **A whole-repo
+   scan updates `docs/quality/scan-baselines.json` in the same PR as its
+   entry**: run `node scripts/docs/scan-remeasure.mjs --sha <entry sha>` and
+   give **every element of `rows`** the figures it printed and the entry's
+   `sha` — the run is cheap, so no row keeps a SHA its figures were not taken
+   at — and a row whose instrument changed its new `command`
+   (`scripts/docs/scan-baselines.test.mjs` pins every row's `sha` to the
+   newest whole-repo entry with a `Probed clean` section). The manifest's
+   `docFigures` array is **not** refreshed by a scan: a figure quoted in a
+   current doc moves in the PR that changes the sentence, because refreshing a
+   doc row without touching the doc would mark a stale figure unchanged for
+   good (#4631). A scoped scan — a
+   scope is a filter — does not update the manifest. **Run its independent review before presenting anything for
    decision** — the `haven-reviewer` pass `CLAUDE.md` § *How shipping is
    governed* makes mandatory on every pull request, briefed explicitly to
    re-derive every figure and every claim about a past event from its
@@ -354,9 +415,16 @@ A real report must replace the fixture revision and results with its own evidenc
 
 ## Cadence
 
-Manual only — no cron, no CI wiring, no cadence doc. Findings at this
-altitude do not accumulate weekly, and a schedule would bias the scan toward
-small findings to have something to report.
+Owner-invoked — no cron, no CI wiring, no cadence doc, and no schedule or
+interval rule. The practice is what the ledger records: **10 whole-repo runs in
+six weeks** (`git grep -c "^## 2026-.*whole repo" 49747fac3 --
+docs/quality/scan-ledger.md` → 10, 2026-09-22 to 2026-11-02), one every four
+days.
+
+**A run that leaves block 1, 8 or 9 unexamined is titled `partial`** in its
+ledger heading and its report filename, the way the 2026-09-08 entry is
+("partial: dimension 1 and sizing only"). Block 10 is not in that list: a run
+whose third-party tier was not requested is not `partial` for that reason.
 
 The natural invocation points, kept as heuristics rather than schedule: when
 the `ship-next` queue runs empty, or when a scan-born epic just closed. Both

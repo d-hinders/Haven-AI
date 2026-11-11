@@ -5,6 +5,8 @@ covers:
   - .agents/skills/quality-scan/SKILL.md
   - .agents/skills/quality-scan/references/dimensions.md
   - scripts/test-support/guard-cli.mjs
+  - scripts/docs/scan-remeasure.mjs
+  - docs/quality/scan-baselines.json
 last-verified: "2026-10-27"
 ---
 
@@ -45,6 +47,20 @@ entries predate them and stand as written):
   Blocks 8 and 9 need Postgres, the core/SDK builds and about 288 s, so a run
   that skips them writes `block 8 → not examined → needs the backend suite's
   database and builds` (and the same for block 9), never a zero.
+- **`partial` in the heading (#4757, binding for entries from 2026-11-11
+  on):** a run that leaves block 1, 8 or 9 unexamined is titled `partial` in
+  its heading and its report filename, the way the 2026-09-08 entry is
+  (`partial: dimension 1 and sizing only`). Block 10 is not in that list: a run
+  whose third-party tier was not requested is not `partial` for that reason.
+- **Machine-readable figures (#4625, binding for entries from 2026-11-03
+  on):** the `Probed clean` lines here are prose. The commands and their
+  latest figures live in `docs/quality/scan-baselines.json`, which
+  `scripts/docs/scan-remeasure.mjs` runs weekly at one SHA into a standing
+  issue. A whole-repo entry updates `figures` and `sha` for every element of
+  `rows` in the same PR, from a runner pass at its SHA; a scoped entry does
+  not. The manifest's `docFigures` array is **not** refreshed by a scan: a
+  figure quoted in a current doc moves in the PR that changes the sentence
+  (#4631). No entry above is edited for it.
 - **Candidate decisions (#3025):** apply the same exclusions to both output
   levels. Append pending owner decisions, later dispositions and approved
   issue links without rewriting runs. Implementation progress belongs in
@@ -2289,3 +2305,758 @@ share the prose-only shape stay as they are (expired bodies only). The scan PR
   decided in that entry's disposition.
 
 Drive: `ship-next epic=#4349` (C1 is its only open slice), `ship-next 4459`.
+
+---
+
+## 2026-10-30 — whole repo, weighted to the landings since 2026-10-26
+
+Full report: `docs/bug-reports/quality-scan-2026-10-30-whole-repo.md`.
+Measured on frozen `origin/dev` @ `99ef8d063`; window
+`b9f9f1e47..99ef8d063` → **51** first-parent landings / 438 changed files /
++22,263 −2,230 lines. Two isolated read-only worktrees took the repository and
+GitHub/history samples. No live call, mutation, database suite or browser run.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None materially worsened in the re-measured dimensions.
+
+**Structural findings:** none in the examined sample.
+
+**Improvement candidates (one PR each), pending owner decision:**
+
+- **C1 — block 2's contract-doc selector reads a body example as front
+  matter.** Exact selector: 8 documents / 19 raw misses; actual front-matter
+  sample: 7 documents / 15 literal misses across 5, equal at the prior scan
+  SHA. The 2026-10-26 entries' "17 across 6 of 8" (18 across 6 of 8 in the
+  2026-09-25 to 10-21 entries) is these 15 plus the false document's two
+  real-path misses. One shared selector plus a
+  body-example counter-control. Routing `(none)`, off money-path.
+- **C2 — accounting purchase parents and public payment ids use different UUID
+  domains.** `parent_payment_id` stores the purchase evidence/receipt id while
+  the feed's `paymentId` is the intent id. PR #4544 records that joining the
+  two misses. Decide intent id versus an explicit receipt-domain name.
+  Routing `code backend`; `mpp/evidence.ts`, `mpp/purchase-group.ts` and
+  `infra/repositories/machine-payments.ts` are **money-path**, `entry.ts` off.
+- **C3 — a direct payment is classified as an unknown merchant.** The new
+  direct-feed branch supplies none of the classifier's route/document signals
+  (its MCP tool name is selected but null in practice), so execution returns
+  `unknown / none` and “Unknown merchant (unclassified)” although the closed
+  enum includes `transfer`. PR #4546 records the residual.
+- **C4 — the served receipt schema omits a live field the SDK consumes.**
+  `delivery_reference` is emitted by the backend and mapped by the SDK but
+  absent from the OpenAPI `MachinePaymentReceipt` and generated core type;
+  `additionalProperties: true` hides the gap. PR #4479 records the follow-up.
+- **C5 — two sibling PR gates retain the concurrency group proven to create
+  empty suites.** PR ownership and Baseline change still use a per-PR group
+  (with `cancel-in-progress: true`) on `pull_request_target`, bursting through
+  `opened` + `edited` rather than labels. The group alone cancels pending runs
+  (#4524 *Verified* 3), so the remedy is removing it or `queue: max`. PR #4526
+  names both as planned follow-up; #4524's operator verify (probe PR #4528)
+  recorded the 5/5 burst after the fix. PR ownership gate is the pending 17th
+  required context on `dev`.
+
+**Probed clean** (block → coverage → command → result, at `99ef8d063`;
+parentheses are the 2026-10-26 entry at `b9f9f1e47`):
+
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`
+  → backend 120,895 / 160,644 (119,096 / 158,650); frontend 77,394 / 84,225
+  (75,800 / 81,996); sdk 19,621 / 22,603; core 25,730 / 985 (24,096
+  generated); qa-agent 15,133 / 13,283; mcp-server 14,114 / 25,456; signer
+  5,564 / 9,363; connect 12,436 / 15,676; cli 3,207 / 3,609; ops 3,143 /
+  2,222; ui 2,603 / 2,057; mcp 2,817 / 5,038; demo-merchant-mcp 3,788 /
+  4,210. Fat controllers: census only → 50 route files, 4 ≥ 1,000 lines,
+  `grep -oE '\b(app|ownerApp)\.(get|post|put|patch|delete|route)\b'` → 212
+  registrations; largest route file payments 1,572 lines (1,561). No
+  material structural delta.
+- block 1 → not examined → no dependencies/mutation run under this bounded
+  four-day scan.
+- block 2 → examined → 8 / 19 raw, corrected 7 documents / 15 literal gaps
+  across 5 (C1); coupling baseline green, 124 pairs / 33 docs.
+- block 3 → partial → positive control 3/3; the reference's two `rg` lines
+  over the 25 newest shards (`2026-10-25-4372` … `2026-10-30-4552`) → **16
+  figure lines, 2 with a command** (7 / 0); 12 of the 16 are measured
+  figures, 7 of those on or directly under the two commanded release-shard
+  lines. *First reading corrected in review:* 7/0 was the `b9f9f1e47`
+  sample. `any` 39 (39); DB mocks 54 / 270 / 57 (unchanged).
+- block 4 → examined → positive control 36; 196 files, 47 historical / 149
+  live; prose ratchet green 32 / 30; unchanged.
+- block 5 → examined → since 2026-08-10: 282 merge / 1,396 squash / 1,681
+  total; merge count unchanged, current window squash-only.
+- block 6 → examined, all four halves → copy lint **66 unscanned / 4 with
+  hits** (64 / 4; script unchanged, +2 new files `frontend/src/lib/agent-facet.ts`
+  and `sdk/src/test-support/low-s.ts`); money perimeter 32 / 20, visual gate
+  15 of 27, docs boundary 43 (all unchanged).
+- block 8 → not examined → requires builds, Postgres and backend recording.
+- block 9 → not examined → shares block 8's recording prerequisite.
+- incident clustering → examined → 81 issues created since 2026-10-26, 25
+  open / 56 closed; large clusters already tracked.
+- workflow archaeology → examined → newest 100 CI runs 82 success / 11
+  cancelled / 7 failed, no sampled `dev` failure; five sampled QA money-flow
+  jobs passed every leg on attempt 1/2.
+- comment archaeology → examined → 0 TODO/FIXME/HACK/XXX package-source hits;
+  positive control `import` 2,204 files.
+- cross-package duplication / validation / data-layer coverage → partial;
+  live exercise → not examined.
+- novelty → the full ledger, `docs/bug-reports/`, open GitHub issues and the
+  source PRs (#4544, #4546, #4479, #4526) and issue #4524; none of C1–C5 is
+  a prior ledger item or has an open issue.
+
+**Review:** `haven-reviewer` at `7141367` re-derived every local figure; no
+blocking, four should-fix (block 3 reading, the 257-registration figure, the
+missing *Verified at scan* field, block 6 "all unchanged"), six nits. All
+applied in place; corrected figures are marked above and in the report's §5.
+
+**Disposition: pending owner decision** (C1–C5).
+
+**Disposition (owner, 2026-10-30): file all five; C2 as the rename, C5 as
+removing the group.** The owner answered in the captain's session. C2: name the
+parent field for what it holds (a receipt id) additively, and keep storing the
+evidence id. C5: remove the two gates' concurrency group, as #4526 did. Every
+issue went through new-task with an independent spec review; none has an open
+owner question, and `pending-review` is lifted on all five. The scan PR is
+#4575, merged before this disposition (stacked PR #4581).
+
+- C1 → [#4576](https://github.com/d-hinders/Haven-AI/issues/4576)
+  (`area:docs`). Spec review re-ran 11 claims: 9 reproduced, 2 wrong and
+  fixed; 9 corrections. One wrong claim was also in this entry and the report:
+  the ledger's block-2 series is 18 across 6 of 8 from 2026-09-25 to 10-21
+  (09-22: 17 across 5), and 17 across 6 of 8 only in the 2026-10-26 entries.
+  It was corrected in place on #4575 before merge (its first correction also
+  misdated the start as 10-03; the review of #4581 caught that). Among the other corrections: a fixture-based
+  counter-control, the `set -f` constraint on the selector, and a stated
+  17 → 15 series conversion.
+- C2 → [#4577](https://github.com/d-hinders/Haven-AI/issues/4577)
+  (`money-path`, `area:backend`, `area:sdk`, `area:docs`). Spec review re-ran
+  15 claims: 14 reproduced, 1 wrong and fixed (`FeedTransaction` is internal,
+  so only the receipts API/SDK and the PDF are public; the internal types are
+  renamed in place, no alias); 12 corrections. Among them: `Receipt ref` only
+  on protocol underlags, a line-array (not byte) identity probe, SDK mapper
+  tests, ten live comment copies, and the Accounted re-file risk stated and
+  accepted.
+- C3 → [#4578](https://github.com/d-hinders/Haven-AI/issues/4578)
+  (`area:backend`, `area:docs`). Spec review re-ran 12 claims: 11 reproduced,
+  1 wrong and fixed; 10 corrections. Among them: a CASP shard joins the scope;
+  the label is the canonical address only (contact names are out, since they
+  would change Fortnox's supplier); exact-string pins; prose copies of the
+  rung list.
+- C4 → [#4579](https://github.com/d-hinders/Haven-AI/issues/4579)
+  (`area:backend`, `area:sdk`, `area:docs`). Spec review found one blocking
+  issue: **six** emitted receipt keys are undeclared, not one (39 emitted /
+  33 declared). The scope now declares all six behind an empty-allowlist
+  guard, and the title is updated. 11 claims re-run, 10 reproduced, 1 wrong
+  and fixed; 8 corrections.
+- C5 → [#4580](https://github.com/d-hinders/Haven-AI/issues/4580)
+  (`area:ci`). Spec review re-ran 12 claims: 9 reproduced, 3 wrong or
+  incomplete and fixed; 9 corrections. Among them: re-run-the-newest wording,
+  the no-`if:` pin, the payload-safety argument with a `types:` pin, a
+  re-anchored permissions slice, and an operator-verify instrument.
+
+Drive: `ship-next 4576`, `ship-next 4577`, `ship-next 4578`, `ship-next 4579`,
+`ship-next 4580`. C2 and C4 both edit `MachinePaymentReceipt`; whichever lands
+second regenerates `api-types.ts`.
+
+## 2026-11-02 — whole repo, weighted to the landings since 2026-10-30
+
+Full report: `docs/bug-reports/quality-scan-2026-11-02-whole-repo.md` (it
+carries the file:line evidence; this entry stays path-free). Measured on
+`origin/dev` @ `e0617aa9f` by one agent in the main checkout (the branch tip
+equals `origin/dev`, no linked worktree), `npm ci`'d under Node 24 with core,
+the SDK, the signer and the hosted MCP built; the clone arrived shallow and was
+unshallowed before any history figure. The window is `99ef8d063..e0617aa9f` →
+**24** first-parent landings / 334 files / +11,033 −3,385. Blocks 8 and 9
+recorded the backend suite against a disposable local Postgres 16 database;
+the block-1 census ran through the repo's mutation runner, which restored and
+verified each file. One read-only worker took the GitHub Actions reads. GitHub
+was read-only. No live Haven, MCP, dev or production call was made.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. None is re-surfaced and none of the re-measured figures worsened
+materially. C1 sits beside the retired block 7 and the 2026-10-26 run B's C2
+(#4459, `shipped`): that candidate took dated records out of the audit's
+ranking and forbade re-check sections on them; C1 is the same growth on the
+docs the audit still ranks, which no prior entry measured.
+
+**Structural findings:** none in the examined sample. The window is one
+tracked frontend epic (13 slices, 4 walkthrough rounds) plus the builds of the
+2026-10-30 candidates.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the weekly docs audit regrows the retired `last-verified` chain as body
+  prose on the docs it still ranks. #2681 (2026-09-07) retired the per-doc
+  chain — "a plain `last-verified: <date>` and nothing else", because "prose
+  to prove prose was checked" had reached 20 % of governed prose — and #2775
+  archived it verbatim. Since the second audit after that (2026-09-21; the
+  first added none), audit closings append a dated `Re-verified …` paragraph
+  to docs they re-verified, and the #4372 re-verify epic adopted the shape: at
+  the scan SHA **69 paragraphs in 30 non-archive docs** (65 in 28
+  `status: current` docs, 4 in 2 records), 68,773 bytes in the current docs;
+  by the wider shape (heading, bold, blockquote or bare opener) 92 openers in
+  42 docs (73 in 28 current, 19 in 14 records). Control: 0 at the parent of
+  the first landing that added the shape, 9 at it; 22 landings added one (3 in
+  September, 18 in October, 1 in November) — 40 from 9 weekly-audit closings,
+  23 from 8 #4372 parts, 6 from 5 unrelated landings. The architecture
+  overview is 35 % re-verification prose by bytes (7,533 of 21,626). Cost on
+  record: #2938 (2026-09-13), a re-verification blockquote in a served doc
+  carried a literal `covers:` and turned the required *Frontend checks* red
+  queue-wide; the guard that failed then still reads served bodies, and one of
+  the four docs served to agents carries one such paragraph today (1,573
+  bytes). Nothing requires the shape: the audit issue asks only for a
+  re-verify and a date bump; the release skill's items 2 and 3 are the only
+  instructions that ask for a scoped *Re-verified* note. One PR: a guard
+  beside the front-matter validator refusing the wide shape in a
+  `status: current` body (with fixture controls; records left as written per
+  #4459), the rule stated once, and the 73 current-doc notes moved verbatim to
+  the #2775 archive or deleted — the owner's call; two PRs if the migration
+  goes apart. *Corrected in review:* first written as "the first audit after",
+  "each audit … every doc", "the 69 paragraphs" and "step 3". Off the
+  money path, except that a guard placed inside the validator itself lands on
+  a control glob (#2200).
+- C2 — block 6's copy-lint perimeter command cannot see the SDK's top-level
+  files. Its `git ls-files '…/src/**/*.ts'` globs need a separator after `**`,
+  so `grep -cE '^packages/sdk/src/[^/]+\.ts$'` over the reference's list → 0
+  against 46 non-test files at the SHA (and the frontend's `middleware.ts`).
+  The figure nine prior entries quote (**66 unscanned / 4 with hits** today,
+  72 / 5 at `893d74f6`, when that level held 26 files) becomes **111 / 14**
+  over a `git ls-tree` list
+  with the same exclusions; the 10 newly visible hit files carry 16 hits, 6 in
+  agent-facing strings (two tool descriptions, three refusal texts, one
+  next-step message) and 10 in JSDoc, the documented false-positive class. The
+  lint's own `SCAN_FILES` names two files at that level, so the level is
+  inside the lint's content class by its own allowlist. Same instrument class
+  as the 2026-10-30 C1 (#4576). One PR to the dimensions reference: a pinned
+  `ls-tree` listing, a re-baseline at 111 / 14 with the split, and a non-zero
+  control line; whether the six strings join `SCAN_FILES` is the lint's
+  decision under #2317, not part of this PR unless the owner says so. Routing
+  `(none)`, off the money path.
+- Notes, not proposed: block 8 prints three unmarked typed codes on agent
+  payment routes (`rail_not_supported` 422, `budget_requires_recipient` 409,
+  `balance_changed` 409) and 8 rows (5 codes) on the two x402 context reads —
+  named so
+  the next run can tell new from baseline, since the 2026-10-27 baseline
+  counted its 13 payment-route codes without naming them; four dialogs
+  outside the shared Modal still set `role="dialog"` after the epic's
+  bespoke-dialog slice (no cost evidence; the epic's walkthrough rounds are
+  deciding them); two backend files are environment-red in this container
+  (the enforcer probe's RPC denied by the proxy, an IPv6 loopback listen).
+
+**Dispositions observed (upkeep):** 2026-10-26 A C1 → #4456 closed
+2026-10-26 via PR #4463 → `shipped`. 2026-10-26 B C1 → #4458 closed
+2026-10-26 via PR #4465 → `shipped`; C2 → #4459 closed 2026-10-26 via PR #4464
+(`807e6d5c1`) → `shipped`. 2026-10-30 C1 → #4576 closed 2026-10-30 after PR
+#4584 (`a254800`, `Refs`; `landed-partial`, a label #4458 and #4459 carry
+too) → `shipped`; C2 → #4577 via PR
+#4583 (`69d5f98`) → `shipped`; C3 → #4578 via PR #4585 (`c787bd3`) →
+`shipped`; C4 → #4579 via PR #4587 (`1406e9c`) → `shipped`; C5 → #4580 open,
+built by PR #4582 (`f11274a`, `Refs`), its operator-verify burst outstanding.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `e0617aa9f`; parentheses are the 2026-10-30 entry at `99ef8d063`):
+- sizing → examined → the 09-22 command pinned with `git ls-tree`/`git show`
+  → backend 121,063 / 160,892 (120,895 / 160,644); frontend 78,593 / 86,898
+  (77,394 / 84,225); sdk 19,642 / 22,647; core 25,754 / 985; qa-agent 15,133 /
+  13,283; mcp-server 14,114 / 25,456; signer 5,564 / 9,363; connect 12,436 /
+  15,676; cli 3,207 / 3,609; ops 3,143 / 2,222; ui 2,822 / 2,328; mcp 2,817 /
+  5,038; demo-merchant-mcp 3,788 / 4,210. Fat controllers: census only → 50
+  route files, 4 ≥ 1,000 lines, 212 registrations, largest 1,572 (unchanged).
+- block 1 (guard falsifiability) → examined → the census script → **1**
+  candidate file over 1 of the last 20 landings; runner: 1 census mutation +
+  2 probes → **3 caught**, 0 survived, 0 shadowed, 0 mutation-red (an
+  undeclared emitted receipt key, 2 red of 65; the deprecated parent alias
+  emitting null, 1 of 7 on the real database — pinned only there; a
+  count-preserving skeleton swap, 1 of 23 — the pin reads the column, so it
+  is not count-only). The first cells file was refused whole (family `other`
+  is not a census family); nothing was mutated by it.
+- block 2 (`covers:` completeness) → examined → front-matter selector, both
+  fixture controls pass → 7 contract docs; the loop under bash with `set -f`,
+  each miss confirmed with the strict gate → **15 across 5 of 7**
+  (unchanged); `npm run docs:covers-gaps` → 124 pairs / 33 docs (unchanged).
+- block 3 (stale numbers) → partial → positive control 3 / 3; the 25 newest
+  shards (`2026-10-26-4429` … `2026-11-02-4601`) → **13 figure lines, 2 with a
+  command** (16 / 2); `any` 39 (39); db-mock gauge 54 / 270 / 57 (unchanged);
+  zod 0; guard scripts 78 (75 on 10-26); non-spawning self-tests 25 of 78.
+- block 4 (retired vocabulary) → examined → positive control 36 shards; 196
+  files, 47 historical / 149 live (unchanged); ratchet green 32 / 30; code
+  half unchanged.
+- block 5 (merge-method drift) → examined → since 2026-08-10T00:00:00Z →
+  **282 merge-commit / 1,420 squash / 1,705** (282 / 1,396 / 1,681); since
+  2026-10-30T00:00:00Z → 0 / 29 / 29; the window 0 / 24. *First reading
+  corrected:* the shallow clone read 0 / 50 / 50.
+- block 6 (nets with holes) → examined, all four halves → copy lint **66 / 4**
+  by the reference command (unchanged; corrected 111 / 14 is C2); money
+  perimeter 32 / 20; visual gate 15 of 27; docs boundary 43; freshness-gate
+  exit branches unchanged (all unchanged).
+- block 8 (refusal census) → examined → 549 files, 547 green, 2 environment
+  reds, 6,921 tests, 472 s; **2,203 rows; 1,614 error rows; 574 keys; 142
+  typed rows reach the generic branch** (142 after #4468), 3 unmarked on agent
+  payment routes (notes); 5xx transient 36; non-answers 2; SDK error sites 31
+  (26 literal / 5 variable; 41 on 2026-10-27); positive control passed.
+- block 9 (field round-trip) → examined → emitted-never-read **5** (the same
+  five as after #4469); read-never-emitted **13** (12 + one status key emitted
+  in an unreached state); positive control passed; the #4577 pair round-trips.
+- incident clustering → examined → issues created since 2026-10-30T00:00:00Z
+  → **29** (4 open / 25 closed): UX-consistency epic 18, the 2026-10-30
+  scan's 5, release process 2, SDK/x402 3, docs audit 1; open PRs 1. No
+  untracked recurring mechanism.
+- workflow archaeology → examined → `ci.yml` newest 100 → **77 / 14 / 9**; 5
+  with attempt > 1, all feature branches; `dev` 37 → 33 / 4 cancelled / 0
+  failure; failed jobs: visual regression 7, frontend checks 1, browser smoke
+  1 (3 of the 9 one branch in 20 minutes). qa-dev at the `money-flow` job
+  level → 173 runs since 2026-10-30, money-flow ran in **33 (33 success on
+  attempt 1/2, 17 of 17 legs)**, gate-skipped in 140.
+- comment archaeology → examined → TODO / FIXME / HACK / XXX → 0 (control
+  `import` → 2,223 files); most-repeated comment 25 copies of one
+  request-validation boilerplate line.
+- cross-package duplication → partial (one status-literal census with its
+  command in the report, 40 files across 8 packages — first written as 20 /
+  six without one — not read further); validation / contracts → partial
+  (blocks 8, 9 and M1); data-layer coverage → partial (gauge, the recording's
+  real-DB run, P1); live exercise → not examined.
+- novelty → the full ledger, the bug reports' names, GitHub searches per
+  candidate; bug-report bodies not otherwise re-read.
+
+Instrument lessons: unshallow the cloud clone before block 5, every time; a
+git pathspec `**/` never matches a file directly under the directory it
+follows (C2); the census runner accepts `census` and the two probe kinds only;
+the real-DB harness reads `DATABASE_URL` from the runner's environment; the
+container's proxy denies the Base Sepolia RPC and its loopback has no IPv6.
+
+**Review:** `haven-reviewer` at head `410384353`, bound through the
+review-isolation guard, re-derived every quoted command; no blocking, five
+should-fix (the first-audit label and the per-doc overstatement in C1, C2's
+"eight scans / 45 files", a three-versus-two red count, the C1 guard's shape
+versus its migration, a census figure with no command), four nits. All
+applied in place; corrected figures are marked above and in the report's § 5.
+
+**Disposition: pending owner decision** (C1, C2).
+
+**Disposition (owner, 2026-11-02): file both.** The owner answered "Both" in
+the captain's session, then the four follow-up questions the filing raised.
+The scan PR is #4609 (reviewed at `410384353`, corrected at `b7eb36a4a`), merged
+or merging before this disposition (stacked PR). Every issue went through
+new-task with an independent spec review; no owner question is open and
+`pending-review` is lifted on all of them.
+
+- C1 → epic [#4610](https://github.com/d-hinders/Haven-AI/issues/4610)
+  (`epic`, `area:docs`, `area:ci`, `money-path`), slices #4612 (gate), #4613
+  (archive), #4614 (guard). **The scan's C1 figures understate the class by
+  an order of magnitude, found by the spec reviews:** the report's headline
+  figure was the bare-paragraph shape (69 paragraphs / 30 docs / 72,877 bytes
+  by its own method; 68,773 in the current docs), and its wider regex (92
+  openers / 42 docs) still missed the `> **Re-verified …` blockquote-bold
+  shape — the #2938 incident's — which the first review found; the second
+  found `Re-verification (#N …)`, `Recent re-verification`, `#N
+  re-verification`, `Re-read, not rubber-stamped` and `Re-verified, …`; the
+  review of this PR found paragraphs after a bare `>` line inside a blockquote
+  run (149 more). By the paragraph-start census the epic now defines (a line
+  after a blank line or a bare `>` line, a heading line, or the first line of
+  a blockquote run, whose first 70 characters say re-verif / re-check /
+  re-read / rubber-stamp, outside fences; the reference script is in #4613's
+  Method block, and every census figure here is its output — the doc totals
+  and byte totals come from the status read beside it), `status: current`
+  docs carry **686 openers in 51 of 79 docs, 751,135 of 3,755,152 bytes
+  (20.0 %)** at `e0617aa9f` — more than the 461 KB #2681 retired; 123 of the
+  686 are coupling-gate `Re-verified unchanged` notes (a first reading of 688
+  counted two wrapped `#NNNN …` body lines as headings; the delta review of
+  this PR caught it); the agent-served
+  security model is 158 openers, 182,157 of its 299,914 bytes. The largest
+  source is not the
+  weekly audit but code PRs satisfying the strict contract-doc coupling gate,
+  which needs an edit to the doc, so the candidate became three PRs on the
+  owner's word: the gate first (a version-literal-only diff never implicates;
+  a `Re-verified-unchanged:` commit trailer records a re-read, never for a
+  `satisfied-by:` doc — a PR-body marker and a `*-release.md` `satisfied-by`
+  glob were both rejected by review as forgeable), then the archive (verbatim,
+  hashed, records left as written), then the `docs:check` guard by the same
+  census rule. Owner decisions the same day: archive verbatim; include the
+  release bump's printed guidance and the scripts README among the
+  instruction sites; the partition and the trailer; the slice-1 threat model
+  confirmed. Two spec-review passes (4 blocking / 5 should-fix / 6 nits on the
+  single-task form; 4 blocking / 13 should-fix on the epic); verdict on #4610,
+  Corrections: 31, plus the census amendment above recorded there after this
+  PR's review.
+- C2 → [#4611](https://github.com/d-hinders/Haven-AI/issues/4611)
+  (`area:docs`) → **`shipped`** the same day: closed 2026-11-02 via PR #4615
+  (`3d348ef93`, into `dev`) by a partner pipeline, 80 minutes before this
+  entry was first written — the next scan's block 6 reads the pinned
+  `ls-tree` command only. Owner decision: reference only — the six SDK files stay out
+  of the copy lint's `SCAN_FILES` (the lint's decision under #2317). Spec
+  review re-ran 14 claims: 12 reproduced, 2 wrong and fixed (the glob line's
+  exclusion filter changed in `fe491ac24`; the docs-boundary command is not
+  pinned, only its prose says to pin); 11 corrections, among them: the
+  acceptance grep re-anchored to the command line, the content read pinned
+  with `git show <sha>:<file>`, the "nine entries" instrument replaced (the
+  figures wrap, so a single-line grep finds 2), the control run after the
+  filter with a frontend twin.
+
+Block-3 note for the next run: the 2026-11-02 report's C1 figures are
+superseded by #4610's census — cite the epic, not the report, for that
+class — and block 6's copy-lint figure steps from 66 / 4 to the `ls-tree`
+command's reading by #4615's selector change, not by new files.
+
+Drive: `ship-next epic=#4610` (slice order #4612 → #4613 → #4614).
+
+**Disposition upkeep (2026-11-03):** all three slices shipped the same night
+by partner pipelines — #4612 via PR #4619 (`850e48023`), #4613 via PR #4620
+(`383908c3a`), #4614 via PR #4621 (`bd05485ea`); the epic stays open for its
+promotion checklist. The scan record (#4609, `c9a2eca51`) merged after #4621
+without a re-run against the new base and turned the required docs job red
+on `dev`: #4613's test pins the record-doc census at 25 and the record's own
+bullet about #2938 carries "re-verification" on its opening line (26). The pin moves to 26 in
+the PR carrying this entry (#4617), with the reason beside it.
+
+## 2026-11-09 — architecture (scoped; owner request 2026-11-09, "architectural improvements")
+
+Full report: `docs/bug-reports/quality-scan-2026-11-09-architecture.md` (it
+carries the commands and file:line evidence). Measured at `49747fac3` (the
+branch tip, an ancestor of `origin/dev`) by one agent, `npm ci
+--ignore-scripts`, nothing built, no suite run, no database; the clone arrived
+shallow and was deepened to 2026-08-01 before any history figure. A scoped
+scan: `docs/quality/scan-baselines.json` is not updated. GitHub read-only; no
+live Haven call.
+
+**Excluded this run:** every prior finding and candidate. The hand-written SDK
+types beside the generated wire types (epics #1442, #3028) and the hosted
+tool-contract file (epic #2806) both rank in this run's churn table and are
+not re-surfaced. S1 is adjacent to the 2026-10-03 S1 (epic #3615), which took
+the budget-scope question out of the payment entrypoints; S1 here is the
+lifecycle that stayed in the route closures, which no prior entry measured.
+
+**Structural finding (pending owner decision):**
+- S1 — the direct-payment lifecycle is orchestrated inside route closures in
+  the backend's `routes/payments.ts`, and boundary rule 5 (routes import
+  module entry points only) has never been enabled. `POST /payments` is one
+  closure of 478 lines and `POST /payments/:id/sign` one of 530 — 1,008 of the
+  file's 1,572 lines; the sign closure awaits 17 distinct functions. The x402
+  route is 210 lines over a 17-file module and the MPP route 397 over 16,
+  both split by epic #980 (#996, #997), which did not list this route. The
+  file measured 898 lines before 2026-09-15 and 1,561 before 2026-10-15. Same
+  shape in `routes/agent-delegations.ts` (1,389 lines, an 8-statement
+  `pg-only-in-infra` waiver), `routes/agent-rekey.ts` (1,276) and
+  `routes/agent-connection-setups.ts` (1,556). Across the 50 route files:
+  90 repository imports, 71 module imports, 33 rail imports. Incident
+  clustering, not causation: seven issues 2026-09-30 → 2026-10-29 on the
+  direct entrypoint (#3494, #3500, #3503, #3564, #3609, #4354, #4533),
+  classified by title and label only; #4354 runs the other way and #3609's
+  fix spanned payments, x402 and MCP. The cost criterion is the weakest leg.
+  Five slices proposed: create flow, sign state machine, grant lifecycle,
+  rekey stages, a shrink-only ratchet. Slices 1–4 are money-path.
+  *Corrected in review (`569cbd792`):* first recorded rules 2 and 5, closures
+  of 481 / 542 / 1,023, "Cost", and slices 1 and 2 only.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — `no-circular` runs on 2 of 13 packages (the dependency lint's
+  `SCAN_ROOTS`); a one-rule probe over the other eleven finds 1 runtime cycle,
+  the SDK's `merchant-answer.ts` ↔ `merchant-completion.ts`, and 0 in the
+  other ten.
+- C2 — the backend's `src/index.ts` hand-wires 10 `setInterval` jobs (9
+  leader-gated; an eleventh registers itself in `startRetrySweep`) and their
+  wiring is asserted by regex over the file's source
+  (`catalog-ingest-monitor-wired.test.ts`, `anchor-seams-wired.test.ts`), the
+  technique #4411 showed can go blind; the file took 51 of 1,229 first-parent
+  landings since 2026-09-01.
+- C3 — `machine_metadata` is re-parsed by 8 private helpers and
+  `settlementSchemeOf` is defined in 4 backend files with 3 distinct bodies
+  (`x402/intent-by-key.ts`, `x402/settlement-observed.ts`,
+  `payments/agent-payment-status.ts`, `mpp/budget-precheck.ts`). No
+  disagreement on a stored row was shown.
+
+**Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
+- sizing → partial → largest non-test files by `wc -l` only; no per-package
+  total is recorded (the run's ad-hoc count is not the manifest's sizing
+  instrument). *Corrected in review:* totals first recorded here were removed.
+- backend boundaries → examined → `npm run lint:deps` → 0 violations across
+  522 files, 15 waived edges, inline-SQL gauge 35 at ceiling 35.
+- cycles outside backend/core → examined → one-rule `depcruise` probe per
+  package → 1 (`sdk`) / 0 in ten.
+- cross-package duplication → partial → backend function-name duplicates only
+  (46 names); local vs hosted MCP vs signer tool definitions not compared.
+- frontend architecture → partial → largest files and cycle probe (0);
+  data-access sites not examined. *Corrected in review:* a fetch-site census
+  first recorded here did not reproduce and was removed.
+- churn → examined → first-parent landings since 2026-09-01 per production
+  file → 1,229 landings.
+- incident clustering → partial → seven direct-payment issues, title and
+  label only.
+- workflow archaeology → not examined → out of scope.
+- block 1 → not examined → scope is architecture.
+- block 2 → not examined → scope is architecture.
+- block 3 → not examined → scope is architecture.
+- block 4 → not examined → scope is architecture.
+- block 5 → not examined → scope is architecture.
+- block 6 → not examined → scope is architecture.
+- block 8 → not examined → needs the backend suite's database and builds;
+  scope is architecture.
+- block 9 → not examined → needs the backend suite's database and builds;
+  scope is architecture.
+- weekly re-measurement (#4635 at `f03f90102`) → read → no flagged, failed or
+  refused row.
+
+**Disposition: pending owner decision** (S1, C1, C2, C3).
+
+**Disposition (owner, 2026-11-09): file all four.** The owner's words in the
+captain's session were "file all four as you suggest", the suggestion being:
+C1, C2 and C3 as standalone tasks, and S1 as an epic limited to the two
+closures in the direct-payment route plus a ratchet, with the three other
+large routes noted and unscheduled. Every issue went through new-task with an
+independent spec review; the four reviews required 42 body corrections in
+all, and none was ready as first filed.
+
+- S1 → epic [#4759](https://github.com/d-hinders/Haven-AI/issues/4759)
+  (`epic`, `area:backend`, `money-path`), slices #4760 (create flow), #4761
+  (sign state machine), #4762 (route line ceiling). Verdict `ready` after
+  repair, 16 corrections; `pending-review` lifted on all four. The review's
+  blocking finding: both moves would have taken the code off the money-path
+  perimeter.
+- C1 → [#4763](https://github.com/d-hinders/Haven-AI/issues/4763). **The
+  scan's C1 figure holds for runtime imports only**, found by the spec
+  review: the repo's rule counts type-only imports, and under it the eleven
+  unscanned packages hold 10 cycles in 5 packages, not 1. Verdict `blocked on
+  owner decision`, 9 corrections; `pending-review` stays on for one owner
+  question (runtime cycles only, or the full definition as an epic).
+- C2 → [#4764](https://github.com/d-hinders/Haven-AI/issues/4764). Verdict
+  `ready` after repair, 8 corrections; `pending-review` lifted. The review's
+  blocking finding: every criterion could pass while the catalog-ingest
+  monitor was rebuilt per tick.
+- C3 → [#4765](https://github.com/d-hinders/Haven-AI/issues/4765). **The
+  scan's C3 figures understate the class**, found by the spec review: 15
+  parse sites and 8 scheme reads (5 scheme readers), not 8 parsers and 4
+  definitions. Verdict `ready` after repair, 9 corrections; `pending-review`
+  lifted.
+
+## 2026-11-09 (run B) — the two MCPs (scoped; owner request 2026-11-09, "scan both MCPs")
+
+Full report: `docs/bug-reports/quality-scan-2026-11-09-mcp.md` (it carries the
+commands and file:line evidence). Scope: the published local MCP package, the
+hosted MCP, and what they share or duplicate, the signer included. Measured
+at `49747fac3` (equal to `origin/dev`) by one agent, `npm ci
+--ignore-scripts`, with core, the SDK, the local MCP, the signer and the
+hosted MCP built; no suite run, no database. A scoped scan: the baselines
+manifest is not updated. GitHub read-only apart from the filing above; one
+public npm registry read; no live Haven call.
+
+**Excluded this run:** every prior finding and candidate. The hosted tool
+files (epic #2806), the budget-scope keys on both surfaces (epic #3615) and
+the doubled post-funding merchant decision in the SDK (2026-10-19 C3) are not
+re-surfaced. S1 revisits a question the 2026-08-18 entry refused ("local/
+hosted MCP tool mirroring (already parity-tested)") on evidence that
+post-dates it, and sits beside the 2026-09-17 F1 (epic #3105), whose slice 5
+pinned handoff parity — the arguments an agent copies from a response — and
+not the two surfaces' input contracts tool by tool. **Withdrawn in review:**
+a candidate on the local MCP package and the money-path perimeter. The
+2026-09-17 C1 raised it and #3098 decided it (the package is pinned doc-only
+by the perimeter's own test); the draft's "no recorded decision" was false.
+
+**Structural finding (pending owner decision):**
+- S1 — one agent surface is implemented twice with no shared contract, and
+  the nets cover the hosted side. Local 20 tools, hosted 29, 19 shared names;
+  8 of the 19 have different input key sets or required sets (types not
+  compared) and 10 different descriptions; 46 of the 55 first-parent landings on the local package since
+  2026-09-01 also touched the hosted one. The tools/list snapshot, contract
+  fingerprint, next-arguments corpus and refusal census exist for the hosted
+  package only, and the QA agent does not depend on the local package. Cost:
+  #2348, with #2312 as the class it was found through, closed with per-key
+  pins; the architecture doc records the `haven_send` idempotency-key case as
+  "Total loss". *Corrected in review:* #2349, #2353 and #3411 were first
+  cited too and are not divergence incidents. The decision under it is the local package's support level
+  (first-class, deliberately smaller, or frozen). Three slices proposed: a
+  parity manifest, one typed-refusal table, a local tools/list snapshot.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the local MCP's error mapper answers a typed backend refusal with a
+  generic code and no reason field: by execution with a stubbed SDK client,
+  ten backend error codes gave a typed code on the hosted mapper for 9 and
+  the omitted-reason field for 10, and on the local `haven_send` handler the
+  generic API error and no omitted-reason field for all 10. The step itself
+  is passed through from the backend body when present. *Corrected in
+  review:* a claimed step divergence on the two budget codes was an artifact
+  of the stub body. Residue of epic #3105 slice 4 on the error path.
+- C2 — delegate-key credential loading and consent are written twice (local
+  MCP and signer): 128 matching lines (110 non-blank) of the signer's
+  233-line credentials file, 92 (81 non-blank) of its 208-line consent file;
+  no behavioural difference shown.
+
+**Probed clean** (dimension → examined / partial / not examined → command → number, all at `49747fac3`):
+- tool sets → examined → the local tool keys and the hosted snapshot's keys →
+  20 / 29 / 19 shared.
+- contract comparison → examined → built local zod shapes against the hosted
+  snapshot → 11 equal / 8 different key-and-required sets; 9 equal
+  descriptions.
+  Output shapes not compared.
+- error mapping → partial → ten codes by execution through one local handler;
+  the full block 8 recording not run.
+- co-change → examined → first-parent landings since 2026-09-01 → 55 local,
+  46 of them also hosted; 150 hosted.
+- duplication with the signer → partial → credentials, consent and the three
+  error mappers.
+- hosted tool-file internals → not examined → prior finding, excluded.
+- block 1 → not examined → out of scope.
+- block 2 → not examined → out of scope.
+- block 3 → not examined → out of scope.
+- block 4 → not examined → out of scope.
+- block 5 → not examined → out of scope.
+- block 6 → partial → one perimeter check, which found the #3098 decision;
+  gate allowlists not walked.
+- block 8 → partial → ten synthetic codes against both mappers; needs the
+  backend suite's database for the recorded set.
+- block 9 → not examined → needs the backend suite's database and builds.
+
+**Disposition: pending owner decision** (S1, C1, C2).
+
+**Disposition upkeep (2026-11-10), run A (architecture):** the one open owner
+question on #4763 is answered — "runtime cycles only" — recorded on the issue
+under `## Owner decisions`, and `pending-review` is lifted, so #4763 is
+unblocked. Five of the run's issues had already shipped by then: #4760,
+#4761, #4762, #4764 and #4765 were closed as completed between 01:07 and
+04:11 UTC on 2026-11-10; the epic #4759 stays open as their tracking issue.
+The scan PR is #4758, merged 2026-11-10 as `51e66d281`.
+
+**Disposition (owner, 2026-11-10), run B (the two MCPs): file all three.** The
+owner's words in the captain's session were "file all three MCP findings". Every issue went through
+new-task with an independent spec review; the two reviews (the epic's with a
+delta re-review) required 31 body corrections, and none was ready as first
+filed.
+
+- S1 → epic [#4788](https://github.com/d-hinders/Haven-AI/issues/4788)
+  (`epic`, `area:mcp`, `area:docs`, `money-path`), slices #4789 (parity
+  manifest), #4790 (typed refusals on the local MCP), #4791 (local tools/list
+  snapshot). Verdict `ready` after repair, 19 corrections; `pending-review`
+  lifted on all four. The scan's support-level question (first-class,
+  deliberately smaller, or frozen) is recorded on the epic as unanswered and
+  holds nothing.
+- C1 → slice #4790 of that epic, not a standalone issue: it is one of the
+  epic's three remedies. **Its remedy changed in spec review.** The scan
+  proposed one refusal table in the SDK read by both mappers; the hosted
+  mapper has no single table (20 typed codes, 10 through branches with
+  logic a flat table cannot hold, the rest typed off the workspace-private
+  core package). The filed slice leaves the hosted mapper untouched and
+  teaches the local one the same answers — the smaller remedy the scan also
+  offered — and the spec review added a parity test over the hosted suite's
+  fixture bodies to pin the two together.
+- C2 → [#4792](https://github.com/d-hinders/Haven-AI/issues/4792) (`area:mcp`,
+  `area:sdk`, `money-path`). Verdict `ready` after repair, 12 corrections;
+  `pending-review` lifted. The review confirmed the two permission checks
+  behave the same (no defect) and narrowed what moves; it also found that
+  chain-id parsing does differ between the two copies — lenient in the local
+  MCP, throwing in the signer — and that stays per package.
+
+**A scan figure corrected by the epic's spec review:** S1's count of shared
+tools with different input key sets or required sets, recorded above as 8 of
+the 19, is **7**, with no required-ness difference at all. The scan's comparison read required-ness
+from the zod type name on the local side and from the JSON-Schema `required`
+list on the hosted side, and so counted a tool whose one field is declared
+identically on both. Re-measured with one instrument on both sides (the zod
+`isOptional()` of each field of both registries) at `51e66d281` → 12 equal,
+7 different. The report and the entry above stay as written; this line is
+the correction. The tool counts were re-taken at `51e66d281` for the epic:
+20 / 29 / 19, unchanged.
+
+**A second instrument fault, found by this entry's review:** the co-change
+figure's command used a bare date (`--since=2026-09-01`), which git reads as
+that date at the current time of day, so the count moved with the hour it was
+run: 46 of 55 when the scan ran it, 48 of 57 when the epic was filed, both
+partly artifacts. Pinned to `--since=2026-09-01T00:00:00Z`: **47 of 57** at
+`49747fac3` and **48 of 58** at `51e66d281` — one landing between the two,
+and it touched both packages. The conclusion (about five in six local
+landings also change the hosted package) is unchanged.
+
+**Disposition upkeep (2026-11-11), both 2026-11-09 runs: every filed slice and
+standalone issue is `shipped`; run A's epic stays open (below).** Each was
+closed by a pull request merged to `dev`.
+
+- Run A (architecture): S1's slices #4760 via PR #4777 (`9b809188`), #4761
+  via PR #4780 (`36378243`) and #4762 via PR #4783 (`c9201556`); C1 → #4763 —
+  runtime cycles only, per the owner — via PR #4802 (`d314d6d7`); C2 → #4764
+  via PR #4778 (`4346e70f`); C3 → #4765 via PR #4782 (`0cbcdff6`) →
+  `shipped`. S1's epic #4759 stays open: its promotion checklist names a qa-dev observation nobody has
+  recorded on it yet.
+- Run B (the two MCPs): S1 → epic #4788, closed 2026-11-11 with its promotion
+  check linked on the issue; slices #4789 via PR #4795 (`149a3313`), #4790
+  (which is also C1) via PR #4801 (`ba1bf134`), #4791 via PR #4794
+  (`039556e3`) → `shipped`. C2 → #4792 via PR #4803 (`8486093d`) → `shipped`.
+- A fourth slice was added to epic #4788 after the 2026-11-10 run-B
+  disposition was written, found
+  by slice 1's build rather than by the scan: #4796, four tool descriptions
+  that named a tool their own surface does not register, via PR #4798
+  (`0423db37`) → `shipped`. The same defect on three other surfaces (the
+  SDK's direct tool definitions, the signer's descriptions, backend response
+  prose) is recorded on the epic and is not filed.
+
+## 2026-11-11 — the two flagged rows of the weekly re-measurement (scoped; #4635)
+
+Scoped to the two rows the weekly job flagged at `039556e38` (#4625's table in
+#4635): `sizing` ("flagged — shrank (expected to grow)") and `docs boundary`
+("flagged — moved (exact)", 43 → 45). Measured at `origin/dev` @
+`8486093dfc6039dda4a892290d87e34bb871facf` (the tip at pickup; the table's own
+SHA is `039556e38`), in a linked worktree, no `npm ci` needed for either
+instrument. A scoped scan: `docs/quality/scan-baselines.json` is not updated
+(skill § Method), so the manifest keeps `43` @ `e0617aa9f`; the next whole-repo
+entry records the new count. GitHub read-only; no live Haven, MCP, dev or
+production call.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. Neither row re-surfaces one.
+
+**Structural findings:** none. The scope is two instruments, not a sweep.
+
+**Improvement candidate (one PR), filed:** the docs-boundary instrument counts
+test fixtures as ungoverned Markdown — see the row below, filed as
+[#4804](https://github.com/d-hinders/Haven-AI/issues/4804).
+
+**Probed clean** (coverage record; scoped, so only the two rows are examined):
+
+- sizing → examined → the row's command (`sizing-source-test-lines` in
+  `docs/quality/scan-baselines.json`: pinned `git ls-tree`/`git show`, 13
+  packages, `.test.`/`__tests__`/`.spec.` split) → at `8486093df`: backend
+  124,177 / 167,496; frontend 83,583 / 93,776; sdk 20,628 / 23,627; core
+  26,142 / 985; qa-agent 20,292 / 18,508; mcp-server 14,330 / 26,323; signer
+  5,488 / 9,545; connect 12,436 / 15,676; cli 3,196 / 3,611; ops 3,199 / 2,266;
+  ui 2,849 / 2,402; mcp 3,010 / 5,449; demo-merchant-mcp 4,105 / 4,591. Totals
+  323,435 source / 374,255 test (323,104 / 373,222 at `039556e38`; 308,076 /
+  352,607 at `e0617aa9f`). Against the recorded baseline: +3,114 / +6,604;
+  +4,990 / +6,878; +986 / +980; +388 / 0; +5,159 / +5,225; +216 / +867;
+  −76 / +182; 0 / 0; −11 / +2; +56 / +44; +27 / +74; +193 / +411;
+  +317 / +381. Three figures shrank, each traced to the commit that did it:
+  cli source −11 = `f6fdb2620` (#4662), `args.ts` −2 and `commands.ts` −9 net;
+  signer test −1 = `ae192d597` (#4756), `x402-sign-header-transport.test.ts`
+  +2/−3; signer source −76 = `8486093df` (#4792), `credentials.ts` −57 net and
+  `file-mode.ts` −19 net, with the handling moved to a new SDK module (+187)
+  and a +183 characterization test. Verdict: real deletions and a
+  cross-package move, not instrument rot. No finding.
+- block 6 → partial → the docs-boundary half only → the row's pinned listing
+  (`block6-docs-boundary`: `git ls-tree -r --name-only $SHA | grep -E '\.md$' | grep -vE
+  '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l`) → **52** at
+  `8486093df` (43 at `e0617aa9f`, 45 at `039556e38`). Composition at the tip:
+  `.agents/skills` 24, `.claude/commands` 8, `.claude/agents` 7, `scripts` 8,
+  `.github` 3, `.claude/hooks` 1, `.agents/README.md` 1. The 43 → 45 move is
+  `586cd8e8c` (#4727, the review-issue skill: `SKILL.md` + 2 references +
+  `.claude/commands/review-issue.md`, 4 files) less `e9275701d` (#4694, the two
+  retired qa commands, 2 files) — the same class as the baseline's
+  `.agents/skills` and `.claude` files, no new class. The 45 → 52 move is
+  **7 test fixtures**: `scripts/docs/fixtures/issue-method/*.md`, added by
+  `68efd71dd` (#4797) as inputs to the issue-method checker's test
+  (`FIXTURES = join(HERE, 'fixtures', 'issue-method')`, line 38). They are not
+  documentation, and the row's `tolerance` is 0, so every fixture addition
+  flags the weekly row as `moved (exact)` — a false positive. **Finding filed:
+  #4804** (`area:docs`, `area:ci`, `pending-review`): exclude Markdown under a
+  `fixtures/` directory from the pinned listing, state the exclusion in
+  `dimensions.md` § 6, and keep the row's `43` @ `e0617aa9f` — the exclusion is
+  a no-op at that SHA (0 fixture files there), so the pin stays valid.
+- blocks 1–5, 8, 9, comment archaeology, incident clustering, workflow
+  archaeology, cross-package duplication, data-layer coverage, live exercise →
+  not examined → out of this scope (the two flagged rows).
+
+**Controls.** The sizing instrument reproduces both recorded readings exactly:
+at `e0617aa9f` it prints the 26 recorded figures (26/26) and at `039556e38` the
+26 figures of #4635's table (26/26), so the deltas above are the instrument's,
+not a reconstruction. The docs-boundary listing's arithmetic holds: 962 `.md`
+at the SHA − 906 under `docs/` or `packages/` − 4 root files = 52, and the
+listing reaches a known top-level file (`.agents/skills/quality-scan/SKILL.md`
+→ 1). The proposed exclusion's control: the same listing without it prints 52
+at `8486093df`, with it 45, and the 7-file difference is exactly the fixture
+directory.
+
+**Doc figures.** All three `docFigures` rows measured again at `8486093df` and
+unchanged: `ds-button-variant-distribution` 205 / 33 / 8 / 4,
+`ds-icon-rung-12px` 16, `frontend-settings-tabs-dark-baseline` 1. No doc
+sentence moves, so no row is refreshed (#4631).
+
+**Disposition: finding filed** (#4804, `pending-review` until its independent
+review-issue pass). The sizing row needs no decision.

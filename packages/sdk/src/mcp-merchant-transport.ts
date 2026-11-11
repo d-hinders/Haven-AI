@@ -573,10 +573,11 @@ export class McpMerchantTransport {
    * all, while on the EIP-3009 bridge the funding leg had already moved the
    * money.
    *
-   * #2341: WHICH names go on is per-payload, not always both — see
-   * `x402PaymentHeaderNamesFor`. Both for EIP-3009; `PAYMENT-SIGNATURE` alone
-   * for erc7710, whose header carries a whole delegation chain and answered
-   * HTTP 431 when duplicated. The decision is made here rather than by the
+   * #2341 / #4754: WHICH names go on is per-payload, not always both — see
+   * `x402PaymentHeaderNamesFor`. `PAYMENT-SIGNATURE` alone for every x402 v2
+   * payload (erc7710's delegation chain, and since the #2361 extensions echo
+   * an EIP-3009 header too, answered HTTP 431 when duplicated); both names
+   * for a v1 payload. The decision is made here rather than by the
    * caller so every path inherits it, and it is read from the payload rather
    * than passed in, because a flag a caller supplies is a flag a caller can
    * get wrong.
@@ -584,7 +585,7 @@ export class McpMerchantTransport {
    * Always `set`, never `append`, so a stale header on the caller's `init` is
    * replaced rather than added to — a merchant that reads the first of two
    * values would otherwise verify a superseded authorization. The name NOT
-   * being sent is deleted for the same reason: on erc7710 a stale `X-PAYMENT`
+   * being sent is deleted for the same reason: on a v2 payload a stale `X-PAYMENT`
    * left in place would be a superseded authorization we chose not to
    * overwrite, which is worse than the duplicate this change removes.
    */

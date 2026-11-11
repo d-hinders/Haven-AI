@@ -340,7 +340,7 @@ const SUBMIT_DESCRIPTION = [
  * guidance lands in both places at once and a parity test can catch drift.
  */
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
-  haven_send: composeDescription(sharedDescriptions.send),
+  haven_send: composeDescription(sharedDescriptions.send, 'local'),
   haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
@@ -350,7 +350,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
-  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate),
+  haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate, 'local'),
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_list_receipts: composeDescription(sharedDescriptions.listReceipts),
@@ -739,7 +739,9 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
                         'no Haven tool follows: the quoted price does not match the stated ' +
                         'expectation — the user decides before any payment',
                       reason:
-                        `The merchant's quoted price (${data.amount} ${data.asset}) does not match ` +
+                        // #4754: the symbol, not the contract address. Only reachable with
+                        // `decimals !== null`; the address arm is a defensive fallback.
+                        `The merchant's quoted price (${data.amount} ${data.decimals !== null ? data.token : data.asset}) does not match ` +
                         `the expected price (${args.expected_amount as string}) stated with this quote. ` +
                         'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
                         'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +
@@ -1415,6 +1417,245 @@ function discoveryMissError(
   return new HavenApiError(`${base}${guidance}`, response.status || 400)
 }
 
+/**
+ * #4790 (epic #4788 slice 2): the ten payment-scope refusal codes the backend
+ * answers a payment that names a task budget or a sub-budget with. The hosted
+ * MCP's `normalizeError` types all ten off `@haven_ai/core`'s
+ * `PAYMENT_SCOPE_REFUSAL_CODES`; this package cannot import that
+ * workspace-private union (`@haven_ai/mcp` depends on the SDK only), so the
+ * table is written here and held equal to the hosted answers by
+ * `packages/mcp-server/src/local-hosted-refusal-parity.test.ts`. A member added
+ * to the core union without a row here turns that test red.
+ *
+ * The `Object.hasOwn` guard is load-bearing, not defensive noise: the lookup is
+ * keyed by an arbitrary body string, so a body carrying
+ * `error_code: "constructor"` (or `toString`, `valueOf`, `hasOwnProperty`,
+ * `__proto__`) would otherwise return a truthy non-answer and the branch would
+ * emit `code: undefined` — breaking `ToolFailure.code: string`.
+ */
+const PAYMENT_SCOPE_REFUSAL_ANSWERS: Record<string, { code: string; reason: string }> = {
+  task_budget_not_found: {
+    code: 'TASK_BUDGET_NOT_FOUND',
+    reason:
+      'no task budget with this id belongs to this agent, so the payment was refused before anything moved; check the id with haven_get_task_budget, and pay without it only after telling the user',
+  },
+  task_budget_not_open: {
+    code: 'TASK_BUDGET_NOT_OPEN',
+    reason:
+      'the task budget is not open — a pending one is your own unsigned row (sign it and submit it with haven_submit), while a closed or expired one needs a new task budget, opened after telling the user; haven_get_task_budget says which, and paying without it is allowed only after telling the user',
+  },
+  task_budget_token_mismatch: {
+    code: 'TASK_BUDGET_TOKEN_MISMATCH',
+    reason:
+      "the payment's token differs from the token the task budget was opened for, so it cannot be charged to it; pay in the task budget's token, or pay without it only after telling the user",
+  },
+  task_budget_recipient_mismatch: {
+    code: 'TASK_BUDGET_RECIPIENT_MISMATCH',
+    reason:
+      'the payment recipient differs from the recipient pinned on the task budget, so it cannot be charged to it; pay the pinned recipient, or pay without it only after telling the user',
+  },
+  task_budget_parent_mismatch: {
+    code: 'TASK_BUDGET_PARENT_MISMATCH',
+    reason:
+      'the budget delegation this task budget was carved from is not active or is outside its window, so the task budget cannot authorize a payment and there is no other id to offer; the wallet owner has to restore that delegation, and paying without the task budget is allowed only after telling the user',
+  },
+  sub_budget_not_found: {
+    code: 'SUB_BUDGET_NOT_FOUND',
+    reason:
+      "no sub-budget with this id belongs to this agent, so the payment was refused before anything moved; the grant is the issuer's — ask the issuer for the right id, and pay without it only after telling the user",
+  },
+  sub_budget_not_open: {
+    code: 'SUB_BUDGET_NOT_OPEN',
+    reason:
+      "the sub-budget is not open (closed, closing, pending or expired), so it cannot authorize a payment; the grant is the issuer's, not yours — ask the issuer to open it, and pay without it only after telling the user",
+  },
+  sub_budget_token_mismatch: {
+    code: 'SUB_BUDGET_TOKEN_MISMATCH',
+    reason:
+      "the payment's token differs from the token the sub-budget was granted for, so it cannot be charged to it; pay in the granted token, or pay without it only after telling the user",
+  },
+  sub_budget_recipient_mismatch: {
+    code: 'SUB_BUDGET_RECIPIENT_MISMATCH',
+    reason:
+      'the payment recipient differs from the recipient pinned on the sub-budget, so it cannot be charged to it; pay the pinned recipient, or pay without it only after telling the user',
+  },
+  sub_budget_parent_mismatch: {
+    code: 'SUB_BUDGET_PARENT_MISMATCH',
+    reason:
+      "the sub-budget's chain is broken — its parent-child link is closed, or it was not carved from the budget delegation selected for this payment; the grant is the issuer's, so ask the issuer to re-grant it, and pay without it only after telling the user",
+  },
+}
+
+function paymentScopeRefusalAnswer(errorCode: string | undefined): { code: string; reason: string } | undefined {
+  if (!errorCode) return undefined
+  if (!Object.hasOwn(PAYMENT_SCOPE_REFUSAL_ANSWERS, errorCode)) return undefined
+  return PAYMENT_SCOPE_REFUSAL_ANSWERS[errorCode]
+}
+
+/**
+ * #4790: the ten hand-written hosted branches, whose answers a flat table
+ * cannot hold — `submission_outcome_unknown` and `prepare_reverted` change
+ * their step on a body field, and `delegation_expired` is guarded on status
+ * 403. The reason strings are written here rather than imported: they live in
+ * `packages/mcp-server/src/tools/support/errors.ts`, which this package cannot
+ * depend on, and the SDK does not export them. The parity test holds every one
+ * of them equal to the hosted answer.
+ */
+const RAIL_UNAVAILABLE_OMITTED_REASON =
+  "this Haven deployment cannot serve this chain's payments until its operator provisions it; retrying gets the same answer, so tell the user"
+const TASK_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the task budget's cap is spent and is enforced on-chain, so retrying cannot succeed; close it and open a new one, or pay without it, after telling the user"
+const TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON =
+  "the requested cap exceeds the parent budget's remaining, unreserved amount, so no task budget was opened; open a smaller one, or close the open task budgets that reserve it, after telling the user"
+const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
+  "the agent's period budget is spent and is enforced on-chain, so retrying cannot succeed; the wallet owner can raise the budget in Haven or wait for the period to reset; tell the user the remaining and shortfall figures on this failure"
+const DELEGATION_EXPIRED_OMITTED_REASON =
+  "the agent's budget for this token has ENDED and is enforced on-chain, so retrying cannot succeed and waiting will not help; ask the owner to set a new one in Haven; tell the user the end date on this failure"
+const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
+  "the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account's activity or the userOpHash before paying again"
+const ACCOUNT_VALIDATION_FAILED_OMITTED_REASON =
+  'the account rejected this payment during on-chain validation (not a signature cause); retrying this payment_id cannot succeed — create a new payment, after telling the user'
+const SIGNATURE_REJECTED_OMITTED_REASON =
+  'the account rejected this signature during on-chain validation; retrying this payment_id cannot succeed — update the signer, then create a NEW payment, after telling the user'
+const PREPARE_REVERTED_OMITTED_REASON =
+  'the payment reverted during on-chain simulation (see revert_reason); nothing was signed or moved and retrying the same payment reverts again — tell the user the reason; a budget, recipient or expiry caveat is changed by the wallet owner in Haven'
+const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
+  'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
+const ONCHAIN_EXECUTION_FAILED_OMITTED_REASON =
+  'this payment_id already failed on-chain and cannot be retried; tell the user what the message says, and create a new payment if they still want to pay'
+
+/** #4790: one typed refusal answer, in the shape the local envelope emits. */
+interface TypedRefusalAnswer {
+  code: string
+  nextAction: AgentPaymentNextAction
+  /** The tool the agent should call next, or null when none follows. */
+  nextTool: string | null
+  nextArguments?: Record<string, unknown>
+  /** Why no tool follows — null exactly when `nextTool` is set. */
+  nextToolOmittedReason: string | null
+  paymentId?: string
+}
+
+/**
+ * #4790: the typed answer for one of the 20 refusal codes the hosted mapper
+ * types, or `null` for any other code — and for `delegation_expired` at a
+ * status other than 403, where the hosted mapper falls back to the generic
+ * answer and so does this one.
+ */
+function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): TypedRefusalAnswer | null {
+  if (!errorCode) return null
+  const scope = paymentScopeRefusalAnswer(errorCode)
+  if (scope) {
+    return {
+      code: scope.code,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      nextTool: null,
+      nextToolOmittedReason: scope.reason,
+    }
+  }
+  const body = err.body as Record<string, unknown> | undefined
+  switch (errorCode) {
+    case 'rail_unavailable_for_chain':
+      return {
+        code: 'RAIL_UNAVAILABLE_FOR_CHAIN',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: RAIL_UNAVAILABLE_OMITTED_REASON,
+      }
+    case 'task_budget_exceeded':
+      return {
+        code: 'TASK_BUDGET_EXCEEDED',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: TASK_BUDGET_EXCEEDED_OMITTED_REASON,
+      }
+    case 'task_budget_exceeds_remaining':
+      return {
+        code: 'TASK_BUDGET_EXCEEDS_REMAINING',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: TASK_BUDGET_EXCEEDS_REMAINING_OMITTED_REASON,
+      }
+    case 'delegation_budget_exceeded':
+      return {
+        code: 'DELEGATION_BUDGET_EXCEEDED',
+        nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+        nextTool: null,
+        nextToolOmittedReason: DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON,
+      }
+    case 'delegation_expired':
+      // The hosted branch is guarded on 403; at any other status it gets the
+      // generic answer, so this one must too.
+      if (err.statusCode !== 403) return null
+      return {
+        code: 'DELEGATION_EXPIRED',
+        nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+        nextTool: null,
+        nextToolOmittedReason: DELEGATION_EXPIRED_OMITTED_REASON,
+      }
+    case 'submission_outcome_unknown': {
+      const paymentId = typeof body?.payment_id === 'string' ? body.payment_id : undefined
+      // With a payment id the status read is truthful and is named; without
+      // one it cannot be called, so the answer stops and says why no new
+      // payment may be created.
+      return paymentId
+        ? {
+            code: 'SUBMISSION_OUTCOME_UNKNOWN',
+            nextAction: AgentPaymentNextAction.CheckStatusLater,
+            nextTool: 'haven_get_payment_status',
+            nextArguments: { payment_id: paymentId },
+            nextToolOmittedReason: null,
+            paymentId,
+          }
+        : {
+            code: 'SUBMISSION_OUTCOME_UNKNOWN',
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason: SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON,
+          }
+    }
+    case 'account_validation_failed':
+      return {
+        code: 'ACCOUNT_VALIDATION_FAILED',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: ACCOUNT_VALIDATION_FAILED_OMITTED_REASON,
+      }
+    case 'signature_rejected':
+      return {
+        code: 'SIGNATURE_REJECTED',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: SIGNATURE_REJECTED_OMITTED_REASON,
+      }
+    case 'prepare_reverted':
+      // An insufficient-balance revert names the real remedy — fund the
+      // account — instead of the caveat text, which points at the wrong fix.
+      return body?.revert_cause === 'insufficient_balance'
+        ? {
+            code: 'PREPARE_REVERTED',
+            nextAction: AgentPaymentNextAction.FundAccountOrRaiseAllowance,
+            nextTool: null,
+            nextToolOmittedReason: PREPARE_REVERTED_FUNDING_OMITTED_REASON,
+          }
+        : {
+            code: 'PREPARE_REVERTED',
+            nextAction: AgentPaymentNextAction.StopAndTellUser,
+            nextTool: null,
+            nextToolOmittedReason: PREPARE_REVERTED_OMITTED_REASON,
+          }
+    case 'onchain_execution_failed':
+      return {
+        code: 'ONCHAIN_EXECUTION_FAILED',
+        nextAction: AgentPaymentNextAction.StopAndTellUser,
+        nextTool: null,
+        nextToolOmittedReason: ONCHAIN_EXECUTION_FAILED_OMITTED_REASON,
+      }
+    default:
+      return null
+  }
+}
+
 function normalizeError(err: unknown): ToolFailure {
   if (err instanceof MerchantNotReadyError) {
     return {
@@ -1483,6 +1724,27 @@ function normalizeError(err: unknown): ToolFailure {
 
   if (err instanceof HavenApiError) {
     const body = err.body as Record<string, unknown> | undefined
+    // #4790: a typed backend refusal answers with the hosted mapper's typed
+    // code, step and reason instead of the generic API_ERROR below. The
+    // hosted mapper is the reference; `local-hosted-refusal-parity.test.ts`
+    // holds the two equal on the fixture bodies.
+    const typed = typedRefusalAnswer(err, typeof body?.error_code === 'string' ? body.error_code : undefined)
+    if (typed) {
+      return {
+        success: false,
+        code: typed.code,
+        message: err.message,
+        statusCode: err.statusCode,
+        paymentId: err.paymentId ?? typed.paymentId,
+        phase: stringOrUndefined(body?.phase),
+        nextAction: typed.nextAction,
+        next_action: typed.nextAction,
+        ...(typed.nextTool ? { next_tool: typed.nextTool, next_tool_name: typed.nextTool } : {}),
+        ...(typed.nextArguments ? { next_arguments: typed.nextArguments } : {}),
+        ...(typed.nextToolOmittedReason ? { next_tool_omitted_reason: typed.nextToolOmittedReason } : {}),
+        body: err.body,
+      }
+    }
     return {
       success: false,
       code: err.code,

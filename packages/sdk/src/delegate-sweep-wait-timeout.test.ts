@@ -19,6 +19,7 @@ const AGENT: HavenAgent = {
   chainId: 8453,
   executionRail: 'legacy',
   supersededBy: null,
+  passport: null,
 }
 
 /**

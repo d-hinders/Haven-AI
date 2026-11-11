@@ -4,7 +4,7 @@ import {
   extractMcpPaymentRequired,
 } from './mcp-merchant-transport.js'
 import type { McpX402SettlementMeta } from './mcp-merchant-transport.js'
-import { parseMerchantSettlement } from './merchant-completion.js'
+import { decodeBase64Json } from './base64.js'
 
 /**
  * #4120: the ONE post-funding merchant-answer decision, shared by the two
@@ -140,5 +140,54 @@ export function decidePostFundingMerchantAnswer(input: PostFundingMerchantAnswer
     settlementTxHash,
     protocolReceiptHeader,
     protocolReceiptHeaderName,
+  }
+}
+
+/**
+ * The `PAYMENT-RESPONSE` decoder (#3727): the settlement transaction a receipt
+ * header names, under any of the three spellings the protocol and its
+ * implementations use. It reads `transaction` (or its aliases) only and never
+ * surfaces `payer`.
+ *
+ * #4763: moved here from `merchant-completion.ts`, together with
+ * `parseProtocolReceiptHeader` below. `decidePostFundingMerchantAnswer` above
+ * needs this parser, and `merchant-completion.ts` needs the decision — two
+ * value imports pointing at each other, which is a runtime cycle. This module
+ * is the leaf both sides can import: it reaches only `base64.js` and
+ * `mcp-merchant-transport.js`, and neither reaches back. Behaviour is
+ * unchanged; `merchant-completion.ts` re-exports both names so its surface is
+ * the same as before.
+ */
+export function parseMerchantSettlement(header: string | null): {
+  settlementTxHash?: string | null
+} {
+  if (!header) return {}
+  const parsed = parseProtocolReceiptHeader(header)
+  const tx =
+    typeof parsed?.transaction === 'string'
+      ? parsed.transaction
+      : typeof parsed?.txHash === 'string'
+        ? parsed.txHash
+        : typeof parsed?.tx_hash === 'string'
+          ? parsed.tx_hash
+          : null
+  return { settlementTxHash: tx }
+}
+
+/**
+ * Decode a receipt header into its JSON object: base64-encoded JSON first (the
+ * x402 wire form), then a plain JSON string (merchants that send the object
+ * unencoded). `undefined` when neither decodes — a malformed header is not a
+ * recoverable condition here, it is simply no receipt.
+ */
+export function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
+  try {
+    return decodeBase64Json<Record<string, unknown>>(value)
+  } catch {
+    try {
+      return JSON.parse(value) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
   }
 }

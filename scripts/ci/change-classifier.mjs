@@ -10,7 +10,7 @@
 // logic that decides whether a guard runs is exactly the logic that must not
 // be untestable.
 //
-// The contract with ci.yml is the THIRTEEN output names below, emitted as
+// The contract with ci.yml is the SIXTEEN output names below, emitted as
 // `name=value` lines. Nothing here decides what a job does with a flag; this
 // only answers "was this surface touched, or does something it depends on
 // force it true".
@@ -64,6 +64,7 @@ export const OUTPUT_NAMES = Object.freeze([
   'demo_merchant',
   'core',
   'qa_agent',
+  'packages',
   'full',
 ])
 
@@ -153,9 +154,9 @@ export const DOC_ONLY_PATTERNS = Object.freeze(['*.md', 'docs/*', 'AGENTS.md', '
  */
 export const DOC_EXCEPTIONS = Object.freeze([
   { patterns: ['CLAUDE.md'], surfaces: ['code', 'backend'] },
-  // packages/frontend/public/ is SERVED CONTENT, not documentation. Markdown
-  // there is a build artifact an agent fetches over HTTP, but `*.md` above
-  // crosses `/` (see globToRegExp), so it swallowed the whole directory: an
+  // packages/frontend/public/ is SERVED CONTENT, not documentation. Every
+  // tracked .md there is a committed file an agent fetches over HTTP, but
+  // `*.md` above crosses `/` (see globToRegExp), so it swallowed the whole directory: an
   // edit to a served .md routed NOTHING, not even `code`, while every
   // non-Markdown sibling in the same directory routed `frontend`. Both arms
   // below exist because that was measured, not assumed (#2743):
@@ -239,7 +240,15 @@ export const ROOT_GUARDS = Object.freeze(
 export const ROOT_GUARD_RULES = Object.freeze(
   ROOT_GUARDS.map((guard) => ({
     patterns: [guard.path],
-    surfaces: ['code', ...guard.jobs],
+    // A manifest path under packages/ is ALSO a package source change, so it
+    // keeps routing the workspace-wide runtime-cycle pass (#4763). This rule
+    // wins over the packages/* arm below, so a rule that named fewer surfaces
+    // than the arm it shadows would NARROW routing — the #2727 failure shape.
+    surfaces: [
+      'code',
+      ...guard.jobs,
+      ...(guard.path.startsWith('packages/') ? ['packages'] : []),
+    ],
   })),
 )
 
@@ -250,6 +259,14 @@ export const ROOT_GUARD_RULES = Object.freeze(
  * packages/ but polices a package must trigger that package's job, or a PR
  * that only weakens the guard goes green with the guard never running. Those
  * arms are now generated from the manifest above.
+ *
+ * `packages` (#4763) is the one flag that is not a package: it means "some
+ * workspace source changed", and every `packages/*` arm sets it. It gates the
+ * runtime import-cycle pass (`npm run lint:dep-cycles`), which polices all
+ * eleven non-backend/core packages at once — so no per-package flag can stand
+ * in for it. A PR touching only `packages/frontend/src` must run that pass,
+ * and before this flag existed nothing did: `lint:deps` lives in
+ * backend_checks, which such a PR never triggers.
  */
 export const SURFACE_RULES = Object.freeze([
   {
@@ -278,20 +295,20 @@ export const SURFACE_RULES = Object.freeze([
     // beside its siblings: a ui-only change runs the ui job alone (the
     // frontend fans back in through the dependency table).
     patterns: ['packages/ui/*'],
-    surfaces: ['code', 'ui'],
+    surfaces: ['code', 'ui', 'packages'],
   },
   {
     // The private ops console (#3515). Above the packages/* catch-all and
     // beside its siblings: an ops-only change runs the ops job alone (frontend
     // and ui fan back in through the dependency table — ops consumes both).
     patterns: ['packages/ops/*'],
-    surfaces: ['code', 'ops'],
+    surfaces: ['code', 'ops', 'packages'],
   },
-  { patterns: ['packages/frontend/*'], surfaces: ['code', 'frontend'] },
-  { patterns: ['packages/backend/*'], surfaces: ['code', 'backend'] },
-  { patterns: ['packages/sdk/*'], surfaces: ['code', 'sdk'] },
-  { patterns: ['packages/connect/*'], surfaces: ['code', 'connect'] },
-  { patterns: ['packages/mcp/*'], surfaces: ['code', 'mcp'] },
+  { patterns: ['packages/frontend/*'], surfaces: ['code', 'frontend', 'packages'] },
+  { patterns: ['packages/backend/*'], surfaces: ['code', 'backend', 'packages'] },
+  { patterns: ['packages/sdk/*'], surfaces: ['code', 'sdk', 'packages'] },
+  { patterns: ['packages/connect/*'], surfaces: ['code', 'connect', 'packages'] },
+  { patterns: ['packages/mcp/*'], surfaces: ['code', 'mcp', 'packages'] },
   {
     // The hosted tools/list snapshot (#4121). qa-agent's eval graders keep a
     // copy of its tool names, and tools.test.ts holds that copy equal to this
@@ -300,33 +317,33 @@ export const SURFACE_RULES = Object.freeze([
     // exists to catch it. A file arm, above the generic packages/mcp-server/*
     // arm (first match wins), names both jobs.
     patterns: ['packages/mcp-server/src/tools-list.snapshot.json'],
-    surfaces: ['code', 'mcp_server', 'qa_agent'],
+    surfaces: ['code', 'mcp_server', 'qa_agent', 'packages'],
   },
-  { patterns: ['packages/mcp-server/*'], surfaces: ['code', 'mcp_server'] },
-  { patterns: ['packages/signer/*'], surfaces: ['code', 'signer'] },
-  { patterns: ['packages/cli/*'], surfaces: ['code', 'cli'] },
-  { patterns: ['packages/demo-merchant-mcp/*'], surfaces: ['code', 'demo_merchant'] },
+  { patterns: ['packages/mcp-server/*'], surfaces: ['code', 'mcp_server', 'packages'] },
+  { patterns: ['packages/signer/*'], surfaces: ['code', 'signer', 'packages'] },
+  { patterns: ['packages/cli/*'], surfaces: ['code', 'cli', 'packages'] },
+  { patterns: ['packages/demo-merchant-mcp/*'], surfaces: ['code', 'demo_merchant', 'packages'] },
   {
     // The shared kernel (#3005). It has its own job now, so it no longer falls
     // to the catch-all below; frontend and backend fan out to it in reverse
     // through the dependency table, which is what runs THEIR suites on a core
     // change.
     patterns: ['packages/core/*'],
-    surfaces: ['code', 'core'],
+    surfaces: ['code', 'core', 'packages'],
   },
   {
     // The private QA harness (#3005). Its job runs the unit tests, not the
     // qa-dev.yml money-flow runner; sdk and signer fan out to it through the
     // table because the tests import both.
     patterns: ['packages/qa-agent/*'],
-    surfaces: ['code', 'qa_agent'],
+    surfaces: ['code', 'qa_agent', 'packages'],
   },
   {
     // Any other workspace is not individually routed, so it forces the full
     // matrix. With #3005's two entries this is a residual arm again — every
     // packages/* workspace is named above it.
     patterns: ['packages/*'],
-    surfaces: ['code', 'full'],
+    surfaces: ['code', 'full', 'packages'],
   },
 ])
 
@@ -391,22 +408,24 @@ export function dependentsOf(pkg, table = PACKAGE_DEPENDENCIES) {
  * follow see the flags it set.
  */
 export const PROPAGATION_RULES = Object.freeze([
-  { when: ['full'], then: [...PACKAGE_JOBS] },
+  // `packages` rides along with `full`: "run everything" includes the pass
+  // that polices every workspace at once (#4763).
+  { when: ['full'], then: [...PACKAGE_JOBS, 'packages'] },
   ...PACKAGE_JOBS.map((pkg) => ({ when: [pkg], then: dependentsOf(pkg) })).filter(
     (rule) => rule.then.length > 0,
   ),
 ])
 
-/** All thirteen flags false. */
+/** All sixteen flags false. */
 const noSurfaces = () => Object.fromEntries(OUTPUT_NAMES.map((name) => [name, false]))
 
-/** All thirteen flags true — what `workflow_dispatch` forces. */
+/** All sixteen flags true — what `workflow_dispatch` forces. */
 export function allSurfaces() {
   return Object.fromEntries(OUTPUT_NAMES.map((name) => [name, true]))
 }
 
 /**
- * Classify an explicit list of changed paths into the thirteen output flags.
+ * Classify an explicit list of changed paths into the sixteen output flags.
  *
  * `propagationRules` is a seam for tests, not a runtime knob — CI always uses
  * the default. It exists so the characterization matrix can ask "would any
@@ -595,7 +614,23 @@ function main(argv) {
   else process.stdout.write(rendered)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
   try {
     main(process.argv.slice(2))
   } catch (error) {

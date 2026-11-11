@@ -1,17 +1,27 @@
 import type { AgentConnectionSetupStatusResponse } from '@/hooks/useAgentConnectionSetupStatus'
 import { runtimeIsConfigured } from '@/hooks/useAgentConnectionSetup'
+import { formatShortDateTime } from '@/lib/format'
 
 /** Presentation copy helpers for the connect-agent flow. */
+
+/**
+ * #4706: the read-only check the done state offers. The user asks their agent
+ * this, and it answers from `haven_get_agent` / `haven_get_allowances` with its
+ * live budget — nothing is spent. It is the confirmation
+ * `docs/product/screen-recipes.md` step 5 asks for, and the dialog did not
+ * offer it before.
+ */
+export const SAY_HELLO_PROMPT = "What's your Haven budget?"
+
+/** What the prompt does, in one line, under the copy block. */
+export const SAY_HELLO_BODY =
+  'Ask it this. It answers with its live budget, and nothing is spent.'
 
 export function formatAbsoluteDate(value: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  // #4573: the app's one short date-and-time rule, not the device locale.
+  return formatShortDateTime(date)
 }
 
 export function restartCopyForRuntime(runtime: string): string | null {

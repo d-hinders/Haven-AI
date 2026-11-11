@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
+import {
+  TRANSACTION_LIVE_OPTIONS,
+  liveRowKeys,
+  sameLiveKeys,
+  type LiveRowSnapshot,
+} from '@/lib/live-rows'
 import type {
   AggregatedTransaction,
   TransactionFilterState,
@@ -38,9 +44,19 @@ interface UseTransactionsFeedReturn {
    * rows and `total` are a partial view of the history rather than all of it.
    */
   truncated: boolean
+  /**
+   * #4708: the identities (`accountId:hash:type`) of the rows that arrived
+   * while the page was open and should play `Milestone` Live once. Empty on
+   * the first load, on "load more", on a manual refresh and on a filter or
+   * search change — only a silent poll can add to it.
+   */
+  liveKeys: ReadonlySet<string>
   loadMore: () => Promise<void>
   refresh: () => Promise<void>
 }
+
+/** One shared empty set, so a poll that plays nothing does not re-render. */
+const EMPTY_LIVE_KEYS: ReadonlySet<string> = new Set()
 
 /**
  * Serialize the filter state into its URL/export spelling (#4095) — the same
@@ -140,10 +156,17 @@ export function useTransactionsFeed(
   const [partialFailure, setPartialFailure] = useState(false)
   const [failedAccountIds, setFailedAccountIds] = useState<string[]>([])
   const [truncated, setTruncated] = useState(false)
+  const [liveKeys, setLiveKeys] = useState<ReadonlySet<string>>(EMPTY_LIVE_KEYS)
 
   const requestIdRef = useRef(0)
   const filtersRef = useRef(filters)
   const transactionsRef = useRef<AggregatedTransaction[]>([])
+  /**
+   * #4708: the last poll's `identity → outcome` map. `null` means "no poll
+   * yet" — the first load, or a list that has just been reset — and the
+   * shared comparison plays nothing against it.
+   */
+  const liveSnapshotRef = useRef<LiveRowSnapshot | null>(null)
   filtersRef.current = filters
   transactionsRef.current = transactions
 
@@ -194,7 +217,21 @@ export function useTransactionsFeed(
         // at the diff. Defaulting the whole destructure is the fix that does
         // not depend on anyone noticing the next one.
         const rows = data.transactions ?? []
-        setTransactions((prev) => (append ? appendUniqueTransactions(prev, rows) : rows))
+        const merged = append ? appendUniqueTransactions(transactionsRef.current, rows) : rows
+        setTransactions(merged)
+        // #4708: only a SILENT poll can play Live. A first load, "load more",
+        // a manual refresh and a filter or search change all restart the
+        // snapshot from what is now on screen and play nothing — the user
+        // asked for a different list, not for the list to grow under them.
+        // The comparison itself is `lib/live-rows`, shared with the
+        // dashboard's groups.
+        const live = liveRowKeys(
+          merged,
+          silent ? liveSnapshotRef.current : null,
+          TRANSACTION_LIVE_OPTIONS,
+        )
+        liveSnapshotRef.current = live.snapshot
+        setLiveKeys((current) => (sameLiveKeys(current, live.keys) ? current : live.keys))
         setTotal(data.total ?? 0)
         setHasMore(data.hasMore ?? false)
         setPartialFailure(data.partialFailure ?? false)
@@ -238,6 +275,10 @@ export function useTransactionsFeed(
     setTruncated(false)
     setLoadingInitial(true)
     setError(null)
+    // #4708: a filter or search change is a different list, so the Live
+    // snapshot restarts with it — nothing plays from the swap.
+    liveSnapshotRef.current = null
+    setLiveKeys(EMPTY_LIVE_KEYS)
     void fetchPage(0, false, false)
     // #4095: every filter dimension now changes the request, so every one
     // must reset the feed — the old three-field list missed direction (the
@@ -285,6 +326,7 @@ export function useTransactionsFeed(
     partialFailure,
     failedAccountIds,
     truncated,
+    liveKeys,
     loadMore,
     refresh,
   }

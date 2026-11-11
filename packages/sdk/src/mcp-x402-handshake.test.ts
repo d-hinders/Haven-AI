@@ -289,8 +289,10 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     expect(probeHeaders.get('x402-wallet')).toBe(delegateAddress)
     expect(retryHeaders.get('x402-wallet')).toBe(delegateAddress)
 
-    // The retry still carries the merchant-verifiable x402 header.
-    expect(retryHeaders.has('X-PAYMENT')).toBe(true)
+    // The retry still carries the merchant-verifiable x402 header — under the
+    // v2 name alone for this x402 v2 payload (#4754).
+    expect(retryHeaders.has('PAYMENT-SIGNATURE')).toBe(true)
+    expect(retryHeaders.has('X-PAYMENT')).toBe(false)
 
     // SSE was collapsed to the JSON-RPC result — the caller never sees raw SSE,
     // and the transport session id is not leaked back to the caller.
@@ -331,8 +333,8 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     const second = headersOf(fetchMock.mock.calls[10])
     expect(first.get('mcp-session-id')).toBe('sess-abc')
     expect(second.get('mcp-session-id')).toBe('sess-new')
-    expect(first.get('X-PAYMENT')).toBeTruthy()
-    expect(second.get('X-PAYMENT')).toBe(first.get('X-PAYMENT'))
+    expect(first.get('PAYMENT-SIGNATURE')).toBeTruthy()
+    expect(second.get('PAYMENT-SIGNATURE')).toBe(first.get('PAYMENT-SIGNATURE'))
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/machine-payments/reconciliation-events'))).toBe(false)
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ content: [{ type: 'text', text: 'an image' }] })

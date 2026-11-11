@@ -4,6 +4,11 @@ status: current
 covers:
   - .dependency-cruiser.cjs
   - scripts/dep-lint.mjs
+  - scripts/dep-cycles.mjs
+  - scripts/dep-cycles.test.mjs
+  - packages/sdk/src/merchant-answer.ts
+  - scripts/lint-route-line-ceiling.mjs
+  - packages/backend/route-line-ceiling.json
   - packages/core/src/**
   - packages/backend/src/index.ts
   - packages/backend/src/db.ts
@@ -12,7 +17,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-10-25"
+last-verified: "2026-11-10"
 ---
 
 # Module Boundaries
@@ -79,7 +84,8 @@ the core stops being safe to touch.
 
 ```text
 packages/backend/src/
-  platform/   config, db pool, logging, http bootstrap, cache, leader-lock
+  platform/   config, db pool, logging, http bootstrap, cache, leader-lock,
+              job-scheduler
   domain/     PURE: money, address, chains, policy, rail decision, taxonomy
               — no fastify, no pg, no ethers/viem
   modules/    accounts, accounting, agents, budget-scope, catalog, dashboard, fee,
@@ -102,7 +108,7 @@ most maintainable code in the backend. The target generalises them.
 
 | Layer | Holds | Never holds |
 |---|---|---|
-| `platform/` | Process-level concerns: config parsing, the `pg` pool, the Fastify instance, cache, leader-lock | Business rules |
+| `platform/` | Process-level concerns: config parsing, the `pg` pool, the Fastify instance, cache, leader-lock, the generic job scheduler | Business rules |
 | `domain/` | Pure functions and types: money arithmetic, address validation, the chain registry, policy predicates, the rail *decision*, payment-state taxonomy | I/O of any kind |
 | `modules/` | One directory per domain capability, each with a public `index.ts` | Another module's internals |
 | `rails/` | Rail implementations behind one interface, plus the registry that selects between them | Rail selection scattered elsewhere |
@@ -126,7 +132,7 @@ severity and unconditional** (#999). Enforcement status:
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
 | 6. Cross-module imports go through `index.ts` | ✅ two arms, absolute: `no-deep-cross-module-import` (an import into `modules/<name>/` from outside `modules/`) and `no-deep-module-to-module-import` (one module importing another module's private file, #4379 — before it, the first arm's `from` excluded every `modules/` file, so 14 such imports were unchecked). Every `modules/**` directory — zero violations, 3 + 4 inline waivers (see below). `modules/dashboard/` (#3847) is the one directory without an `index.ts`, deliberately: #3804's owner decision makes `routes/dashboard-budget-remaining.ts` the only importer of its display-only budget-remaining cache, through one of the 3 `no-deep-cross-module-import` waivers, and `modules/dashboard/__tests__/budget-remaining-import-guard.test.ts` pins that no other file imports it | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today; `modules/budget-scope/` joined with #3616 (PR #3622) and `modules/dashboard/` with #3847) |
-| 7. The graph is acyclic | ✅ `no-circular` | at zero — held absolutely, and the one rule an inline waiver can never silence |
+| 7. The graph is acyclic | ✅ `no-circular` — two passes, two definitions (#4763): `npm run lint:deps` over `packages/backend` and `packages/core` under the STRICT definition (type-only imports counted), and `npm run lint:dep-cycles` over the other eleven packages under the RUNTIME definition (type-only imports are not edges) | at zero on both — held absolutely, and the one rule an inline waiver can never silence |
 
 `@haven_ai/core` also carries the GENERATED API wire types (#984):
 `src/api-types.ts` is emitted from the backend's OpenAPI spec by
@@ -173,6 +179,41 @@ is the reviewed alternative. Unlike `no-circular`, both are waivable.
 
 Rule 7 is the one to defend hardest. The other six are conventions that can be
 relaxed with an argument; a cycle is a defect regardless of intent.
+
+### Rule 7 has two meanings, and both are enforced (#4763)
+
+The rule is checked on all thirteen packages, but not under one definition:
+
+- **`packages/backend` and `packages/core` — STRICT.** `npm run lint:deps`
+  (`scripts/dep-lint.mjs`) runs the repo's own ruleset, which sets
+  `tsPreCompilationDeps: true` (`.dependency-cruiser.cjs`): a **type-only
+  import is an edge**. Both trees are at zero.
+- **The other eleven — RUNTIME.** `npm run lint:dep-cycles`
+  (`scripts/dep-cycles.mjs`) runs a one-rule `no-circular` pass over each
+  package's `src` with `tsPreCompilationDeps: false`: a **type-only import is
+  not an edge**. It resolves each package's own `tsconfig.json` (so the
+  frontend's `@/` alias is a real edge) and reads `.tsx` as well as `.ts`. All
+  eleven are at zero.
+
+The split is an owner decision (2026-11-10, on
+[#4763](https://github.com/d-hinders/Haven-AI/issues/4763)): **runtime cycles
+only** outside backend and core. Before it, rule 7 was checked on two of the
+thirteen packages, and the eleven unchecked ones held one runtime cycle —
+`packages/sdk/src/merchant-answer.ts` ↔ `merchant-completion.ts`, two value
+imports pointing at each other — which #4763 broke by moving both receipt
+parsers into `merchant-answer.ts`.
+
+**The nine type-only cycles are known and deliberately unenforced.** Measured
+on `origin/dev` @ `49747fac3` with the same one-rule probe at
+`tsPreCompilationDeps: true`: `frontend` 5, `sdk` 2 (one of them the runtime
+cycle above), `connect` 1, `qa-agent` 1, `signer` 1 — ten in total, nine of
+them type-only. They are not defects under the owner's definition, and nothing
+grandfathers them: if one becomes a runtime cycle it fails the pass. Breaking
+them is separate work, not a waiver.
+
+Both passes are **unwaivable**: a `// dep-lint-exempt` comment does not silence
+`no-circular` in either, and `scripts/dep-cycles.test.mjs` pins that with a
+planted value cycle carrying the comment.
 
 ### Two rules that are security properties, not style
 
@@ -261,6 +302,22 @@ another file's cleanup. `node scripts/dep-lint.mjs --update-ceiling` locks in
 a shrink — it refuses to raise the total or any file, so growth and
 redistribution alike mean hand-editing the JSON and defending that in the PR.
 
+A second shrink-only ceiling covers **route file size**. `npm run lint:route-lines`
+(`scripts/lint-route-line-ceiling.mjs`, built on the repo's shared ratchet engine)
+fails when a non-test `.ts` file directly under
+`packages/backend/src/routes/` grows past its committed line count in
+`packages/backend/route-line-ceiling.json`. A route file at or under **400
+lines** counts as zero and needs no entry, so a new small route passes with no
+ceremony and a file that shrinks under the threshold drops out of the baseline
+on `npm run lint:route-lines:update`; a file over the threshold counts as its
+line count, and a file over it with no entry fails. `--update` lowers entries
+and refuses to raise or add one, so growth — and a net-additive fix to a large
+route, a security fix included — means hand-editing the JSON and defending that
+in the PR, exactly as for the call-site ceiling above. The gate exists because
+slices 1 and 2 of epic [#4759](https://github.com/d-hinders/Haven-AI/issues/4759)
+(#4760, #4761) took `routes/payments.ts` from 1572 lines to 291 and nothing
+stopped it growing back.
+
 If a rule turns out to be **wrong** rather than merely unmet — the tree is right
 and the rule is too strict — change the rule and say why. Bending working code
 to satisfy a bad rule is worse than having no rule.
@@ -272,12 +329,12 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Signal | Achieved |
 |---|---|
 | `lib/` layout | Gone (#998) — every former file lives in `platform/`, `domain/`, `infra/`, `rails/`, or a `modules/**` directory, each `modules/**` directory with a public `index.ts` except `modules/dashboard/` (#3847), which deliberately has none: its one file, the display-only budget-remaining cache, is reached only through the waived import in `routes/dashboard-budget-remaining.ts` (#3804) |
-| Largest route | `routes/payments.ts`, 1561 lines, then `routes/agent-connection-setups.ts` at 1525 and `routes/agent-delegations.ts` at 1389 (`routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997; re-measured 2026-10-26 with `wc -l packages/backend/src/routes/*.ts` — further route slimming is post-epic work) |
+| Largest route | `routes/agent-connection-setups.ts`, 1556 lines, then `routes/agent-delegations.ts` at 1389 and `routes/agent-rekey.ts` at 1276 (`routes/payments.ts` fell from 1572 to 291 when slices 1 and 2 of epic #4759 moved the payments lifecycle into `modules/payments/`; `routes/x402.ts` split by #996, `routes/machine-payments.ts` split into `modules/mpp/` by #997; re-measured 2026-11-10 with `wc -l packages/backend/src/routes/*.ts` — further route slimming is post-epic work, and the shrink-only ceiling above now holds the gain) |
 | Inline SQL call sites | 35 `.query(` call sites across 9 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`npm run lint:deps`; re-measured 2026-10-25 by the weekly docs audit, #4418) and capped by the shrink-only ceiling, now also 35 (#1166; `packages/backend/dep-lint-callsite-ceiling.json`, 9 per-file entries). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) and later moves account for the rest; the ceiling was locked down from 58 to 35 by #4044 |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |
 | Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 15 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra`, 3 `no-deep-cross-module-import` and 4 `no-deep-module-to-module-import` (re-measured at #4379: "No dependency-boundary violations across 501 source files (15 import edge(s) waived)") |
-| Dependency cycles | **0** — `no-circular` is absolute and unwaivable |
+| Dependency cycles | **0** on both passes — `no-circular` is absolute and unwaivable. `npm run lint:deps` (backend + core, strict) and `npm run lint:dep-cycles` (the other eleven, runtime-only) both report zero; the nine type-only cycles outside backend/core are known and unenforced by the owner's decision (#4763) |
 
 The gauge exists because the retired baseline was a file-edge count, and that
 was a real limit: `pg-only-in-infra` fired once per file that imported `db.ts`,
@@ -298,72 +355,6 @@ interfaces should do, which is why "what is the delegation rail?" could
 previously only be answered by knowing which of sixty filenames to open. The
 delegation rail is now the nine `rails/delegation-*.ts` and `rails/hybrid-*.ts`
 files, one directory, one thing to open.
-
-Re-verified 2026-09-30 (weekly docs audit #3413, at dev `5b5bd059`). The
-module list gained `modules/sub-budgets/` (#3444) in the target structure and
-the rule-6 row; the largest-route line was re-measured (1451, up from 1379 —
-the request-validation slices #3276/#3405 and the Safe-vocabulary renames
-grew `routes/agent-connection-setups.ts`); the boundary-enforcement row's
-waiver census now names its real split, 9 `pg-only-in-infra` plus the #2881
-deep-cross waiver (the previous "10 pg-only" wording predated that waiver's
-arrival by four days); and the delegation-rail file count in prose is nine,
-not seven (unchanged since the last measure — the count itself was misstated).
-Everything else re-checked at this head against the machinery: `npm run
-lint:deps` prints 40 `.query(` call sites across 10 files (unchanged), the
-ceiling 58, 10 waived edges and 0 violations across 414 files;
-`.dependency-cruiser.cjs`, `scripts/dep-lint.mjs` and the callsite ceiling
-have no commits since 2026-09-15; the session-key seam grep still fires only
-in `rails/execution-rail.ts` (the `routes/payments.ts` mentions are
-`isRetiredRailIntent` comments naming it retired, the documented shape); the
-#2138 passport SQL exception and the rule-4 chain-client port
-(`infra/chain/index.ts` `getChainClient`) are as written.
-
-Re-verified 2026-10-02 (#3597): the module list and rule-6 row both gain
-`modules/feedback/` — the backend half of the CLI feedback channel's secret
-check. It is its own module rather than living in `domain/` (where its CLI
-counterpart's comments might suggest) because it imports `viem/accounts`,
-which `domain-stays-pure` forbids inside `domain/`. Mechanically the linter
-would honour an inline waiver on that rule (`UNWAIVABLE_RULES` in
-`scripts/dep-lint.mjs:39` names only `no-circular`), but by the policy above
-`domain-stays-pure` never carries one, so `domain/` was never an option.
-`lint:deps` fails if the file is ever moved into `domain/`.
-
-
-Re-verified 2026-10-23 (#4372 part B, at dev `2d0713dad`), a full re-read with
-`npm run lint:deps`. Changed: the module lists gain `budget-scope/` (#3616),
-`dashboard/` (#3847) and, in the target structure, `ops/`; the rule-6 row
-says the lint polices importers OUTSIDE `modules/` only (its `from` excludes
-every `modules/<name>/` file), with 14 static module-to-module deep imports
-it does not see; `no-deep-cross-module-import` carries 3 waivers, not none;
-the waiver census is 11 (8 `pg-only-in-infra`, 3 deep-cross); the call-site
-gauge is 35 across 9 files under a ceiling of 35 (locked down by #4044);
-the largest route is `routes/payments.ts` (1561 lines); the passport alias
-check is case-insensitive; the `lib/` row names `modules/dashboard/`'s missing
-`index.ts` (review round 1 of #4377); the package-split sentence no longer implies
-seven packages. (Merged with #4379 on 2026-10-24: the rule-3 row's census, the rule-6 row
-and numbered rule 6, the waiver paragraph and the boundary-enforcement row
-now carry #4379's text — a seventh rule, the module-to-module arm, and 15
-waivers — so this note's rule-6, rule-count and waiver-census items describe
-the doc at `2d0713dad`.) Re-checked without change: the six enabled rules and their
-error severity (`.dependency-cruiser.cjs`), `UNWAIVABLE_RULES` and the
-20-character reason floor (`scripts/dep-lint.mjs`), the nine
-`rails/delegation-*` / `rails/hybrid-*` files, the `session_key` seam (only
-`rails/execution-rail.ts` decides; the other mentions name the retired
-passport enum member), the #2138 exception, `getChainClient` and the
-conformance suite, and five published packages (`scripts/release-bump.mjs`).
-
-Re-verified 2026-10-25 (weekly docs audit #3645, at dev `615686369`): the
-module list and rule-6 lineage gain `modules/budget-scope/` (#3622, the
-one-module link/pre-check/task-cap/refusal resolver); the largest-route line
-was re-measured (`routes/payments.ts` 1561 now leads `routes/agent-connection-setups.ts`
-1525); the gauge re-measured 35 `.query(` call sites across 9 files with the
-ceiling shrunk to 35 (last locked by #4044); and the live lint prints
-0 violations across 505 source files with the same 15 waived edges (8
-`pg-only-in-infra`, 3 `no-deep-cross-module-import`, 4
-`no-deep-module-to-module-import`). `UNWAIVABLE_RULES` still names only
-`no-circular` (`scripts/dep-lint.mjs:39`), the #2138 passport SQL exception
-and the rule-4 port (`infra/chain/index.ts` `getChainClient`) are as
-written.
 
 ## Non-goals
 
@@ -412,3 +403,5 @@ entirely *inside* two of those packages.
   dependency gate runs per PR.
 - [Documentation-quality system](../contributing/docs-quality-system.md) — the
   `covers:` mapping that keeps this doc honest as the tree moves.
+
+Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

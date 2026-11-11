@@ -27,6 +27,7 @@ import {
 } from '../infra/repositories/users.js'
 import { listSessionAccountsForUser } from '../infra/repositories/smart-accounts.js'
 import { sessionAccountPayload } from '../modules/accounts/index.js'
+import { isPassportIssuableForAccount } from '../modules/passport/index.js'
 
 /**
  * #2914 (naming epic #2906 phase 5, the contraction): the session user and
@@ -109,6 +110,18 @@ function normalizeName(name: string): string | null {
   }
 
   return normalized
+}
+
+/**
+ * The session account payload plus the passport answer (#4719). Composed here
+ * rather than inside `sessionAccountPayload` so the accounts module stays free
+ * of passport configuration: the payload function classifies the chain and
+ * signer floor; this adds whether THIS deployment can issue the account's
+ * agents a passport a merchant can verify, so the dashboard never offers an
+ * opt-in the backend will drop or refuse.
+ */
+function sessionAccountWithPassport<T extends Parameters<typeof sessionAccountPayload>[0]>(row: T) {
+  return { ...sessionAccountPayload(row), passport_issuable: isPassportIssuableForAccount(row) }
 }
 
 export default async function authRoutes(
@@ -204,7 +217,7 @@ export default async function authRoutes(
       { expiresIn: '7d' },
     )
 
-    const accounts = (await listSessionAccountsForUser(user.id)).map(sessionAccountPayload)
+    const accounts = (await listSessionAccountsForUser(user.id)).map(sessionAccountWithPassport)
 
     return {
       token,
@@ -235,7 +248,7 @@ export default async function authRoutes(
       throw { statusCode: 404, message: 'User not found' }
     }
 
-    const accounts = (await listSessionAccountsForUser(sub)).map(sessionAccountPayload)
+    const accounts = (await listSessionAccountsForUser(sub)).map(sessionAccountWithPassport)
 
     return { ...profile, accounts }
   })

@@ -10,6 +10,7 @@ import {
   QA_FIXTURE_DESCRIPTION_SUFFIX,
   PaymentError,
   isSkipSettleProduct,
+  type PassportVerifierConfig,
   type SettledPayment,
   type SettlementReadiness,
   type X402PaymentProcessor,
@@ -38,6 +39,12 @@ export interface DemoMerchantServerOptions {
   paymentProcessor: X402PaymentProcessor
   path?: string
   settlementMethods?: readonly SettlementMethod[]
+  /**
+   * #4723: where a settled payment's passport reference is resolved, and which
+   * issuer is pinned. Absent, the merchant advertises only `haven-demo` and
+   * reports `passport: null`.
+   */
+  passport?: PassportVerifierConfig
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -484,6 +491,7 @@ async function getSession(
     baseUrl: options.baseUrl,
     buildPaymentRequired: options.paymentProcessor.buildPaymentRequired,
     settlementMethods: options.settlementMethods,
+    passport: options.passport,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,

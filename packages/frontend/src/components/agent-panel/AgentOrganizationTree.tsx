@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { ChevronDown, Folder, Network, Plus } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import type { Organization } from '@/hooks/useOrganizations'
 import { buildOrganizationTree, flattenOrganizationTree, TOP_LEVEL_OPTION } from '@/lib/agent-organizations'
 
@@ -92,7 +93,7 @@ export function AgentOrganizationTree({
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
         <p className="text-sm text-[var(--v2-ink-3)]" role="status" aria-busy="true" aria-live="polite">
-          Loading organizations…
+          Loading organisations…
         </p>
       </div>
     )
@@ -101,10 +102,17 @@ export function AgentOrganizationTree({
   if (error && organizations.length === 0) {
     return (
       <div className="mb-4 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] p-3 shadow-card">
-        <p className="text-sm text-[var(--v2-ink-2)]">{error}</p>
-        <Button className="mt-2" size="sm" variant="tertiary" onClick={onRetry}>
-          Try again
-        </Button>
+        <EmptyState
+          bare
+          tone="danger"
+          title="Organisations could not load"
+          body="Your organisations are unchanged."
+          action={
+            <Button size="sm" variant="tertiary" onClick={onRetry}>
+              Try again
+            </Button>
+          }
+        />
       </div>
     )
   }
@@ -118,7 +126,7 @@ export function AgentOrganizationTree({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Icon icon={Network} className="h-3.5 w-3.5 text-[var(--v2-ink-3)]" />
-          <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organizations</span>
+          <span className="text-xs font-medium text-[var(--v2-ink-3)]">Organisations</span>
           {/* #3236: a refetch with rows present says so in place — the rows
               stay, so nothing below the tree moves. Deliberately NOT a live
               region: it fires after every agent move, and `aria-busy` on the
@@ -130,9 +138,9 @@ export function AgentOrganizationTree({
             Manage
           </Button>
           {/* The label hides below `sm` so the header stays one line at 390. */}
-          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organization">
+          <Button onClick={onCreate} size="sm" variant="tertiary" aria-label="Add organisation">
             <Icon icon={Plus} className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Add organization</span>
+            <span className="hidden sm:inline">Add organisation</span>
           </Button>
         </div>
       </div>
@@ -140,6 +148,8 @@ export function AgentOrganizationTree({
       {error ? (
         // A failed refetch: the last-known rows stay below, with the error
         // and a retry above them (#3236).
+        // #4607: keeps `role="alert"` — the row holds the retry button, which
+        // `InlineAlert` (a single text line) cannot carry.
         <div className="mt-2 flex flex-wrap items-center gap-2" role="alert">
           {/* The rows below ARE loaded — say the refresh failed and they may
               be out of date, not that nothing could be loaded. */}
@@ -172,9 +182,13 @@ export function AgentOrganizationTree({
       ) : null}
 
       {organizations.length === 0 ? (
-        <p className="mt-2 text-sm text-[var(--v2-ink-3)]">
-          No organizations yet. Add one to start grouping your agents.
-        </p>
+        <EmptyState
+          size="inline"
+          bare
+          align="start"
+          title="No organisations yet. Add one to start grouping your agents."
+          className="mt-2"
+        />
       ) : (
         <div
           id="organization-tree-rows"

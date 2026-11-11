@@ -37,8 +37,10 @@ describe('AgentPassportCard (#1072)', () => {
   it('renders a retryable error — not the opt-in state — when the lookup failed', () => {
     const refetch = vi.fn()
     mockUseAgentPassport.mockReturnValue(state({ loadError: true, refetch }))
-    render(<AgentPassportCard agentId="agent-1" />)
-    expect(screen.getByText(/Couldn.t load passport status/)).toBeTruthy()
+    // #4719 review: issuable, so the assertion that no Issue button renders is
+    // the load-error guard's own, not the fail-closed default's.
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
+    expect(screen.getByText(/Passport status could not load/)).toBeTruthy()
     expect(screen.queryByText(/has no passport/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Issue a passport/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
@@ -61,7 +63,7 @@ describe('AgentPassportCard (#1072)', () => {
       },
     }))
     render(<AgentPassportCard agentId="agent-1" />)
-    expect(screen.queryByText(/Couldn.t load passport status/)).toBeNull()
+    expect(screen.queryByText(/Passport status could not load/)).toBeNull()
     expect(screen.getByText('Issued')).toBeTruthy()
   })
 
@@ -147,9 +149,10 @@ describe('AgentPassportCard (#1072)', () => {
     })
   })
 
-  it('renders the opt-in state when the agent has no passport', () => {
+  it('renders the opt-in state when the agent has no passport and its account is passport_issuable', () => {
     mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" />)
+    // #4719: the answer is passed explicitly — the default is fail-closed.
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
     expect(screen.getByText('Not issued')).toBeTruthy()
     expect(screen.getByRole('button', { name: /issue a passport/i })).toBeTruthy()
     // Naming discipline: never "verified" — reserved for L2.
@@ -164,7 +167,80 @@ describe('AgentPassportCard (#1072)', () => {
 
   it('hides the issue action for a revoked agent', () => {
     mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" agentRevoked />)
+    render(<AgentPassportCard agentId="agent-1" agentRevoked passportIssuable />)
+    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
+  })
+
+  // ── #4719: offered only where this deployment can issue ────────────────
+  it('offers no issue action on an account that is not passport_issuable, and says why', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={false} />)
+    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    expect(screen.getByText('Not issued')).toBeTruthy()
+    expect(screen.getByText('Passports are not available for this wallet yet.')).toBeTruthy()
+    // The reason REPLACES the opt-in sentence; there is no opt-in to describe.
+    expect(screen.queryByText(/Issuing one is optional/)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/verified/i)
+  })
+
+  it('renders neither the opt-in nor the reason while the account is still loading', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={null} />)
+    expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
+    expect(screen.queryByText('Passports are not available for this wallet yet.')).toBeNull()
+    expect(screen.queryByText(/Issuing one is optional/)).toBeNull()
+  })
+
+  // Owner decision 2026-11-07: a failed row on an account that cannot issue
+  // (recorded before the gate, or refused by it) reads as unavailable, in a
+  // neutral tone, never as a danger-tone failure the user cannot act on.
+  it('a failed row on a non-issuable account reads "Not available", neutral, with no error text', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'failed', assurance_level: 0, attestation_uid: null, chain_id: 84532,
+        tx_hash: null, attempts: 1, requested_at: '2026-06-02T10:00:00.000Z', anchored_at: null,
+        last_error: 'passport verifier not configured on this deployment — not anchoring',
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={false} />)
+    expect(screen.queryByText('Issuance failed')).toBeNull()
+    // Neutral tone, never the danger tone (#4719 review r3, N1).
+    expect(screen.getByText('Not available').className).toContain('var(--v2-ink-2)')
+    expect(screen.getByText('Not available').className).not.toContain('var(--v2-danger)')
+    expect(screen.getByText('Passports are not available for this wallet yet.')).toBeTruthy()
+    expect(screen.queryByText(/verifier not configured/)).toBeNull()
+  })
+
+  it('a failed row whose account is unknown (null: loading or missing) keeps "Issuance failed" with its error', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'failed', assurance_level: 0, attestation_uid: null, chain_id: 84532,
+        tx_hash: null, attempts: 1, requested_at: '2026-06-02T10:00:00.000Z', anchored_at: null,
+        last_error: 'rpc timeout',
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" passportIssuable={null} />)
+    expect(screen.getByText('Issuance failed')).toBeTruthy()
+    expect(screen.getByText('rpc timeout')).toBeTruthy()
+    expect(screen.queryByText('Not available')).toBeNull()
+  })
+
+  it('a failed row on an issuable account still reads "Issuance failed" with its error', () => {
+    mockUseAgentPassport.mockReturnValue(state({
+      passport: {
+        status: 'failed', assurance_level: 0, attestation_uid: null, chain_id: 84532,
+        tx_hash: null, attempts: 1, requested_at: '2026-06-02T10:00:00.000Z', anchored_at: null,
+        last_error: 'rpc timeout',
+      },
+    }))
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
+    expect(screen.getByText('Issuance failed')).toBeTruthy()
+    expect(screen.getByText('rpc timeout')).toBeTruthy()
+  })
+
+  it('fails closed: without the answer, no issue action is offered', () => {
+    mockUseAgentPassport.mockReturnValue(state())
+    render(<AgentPassportCard agentId="agent-1" />)
     expect(screen.queryByRole('button', { name: /issue a passport/i })).toBeNull()
   })
 
@@ -216,10 +292,62 @@ describe('AgentPassportCard (#1072)', () => {
     expect(screen.getByText(/on-chain record has not caught up/i)).toBeTruthy()
   })
 
+  // #4571 — the two badges are on two axes and both are true. A non-Active
+  // standing explains itself in words, so "Issued" beside "Suspended" stops
+  // reading as a contradiction. The badge logic itself is unchanged.
+  describe('a non-Active standing explains itself (#4571)', () => {
+    const anchored = (standing: 'active' | 'suspended' | 'revoked' | 'unknown') =>
+      state({
+        passport: {
+          status: 'anchored', assurance_level: 0, attestation_uid: '0x' + '11'.repeat(32),
+          tx_hash: null, chain_id: 84532, attempts: 1, last_error: null,
+          requested_at: '2026-06-02T10:00:00.000Z', anchored_at: '2026-06-02T10:00:12.000Z',
+        },
+        standing: {
+          agentId: 'agent-1', standing, anchor: 'anchored',
+          attestationUid: '0x' + '11'.repeat(32), chainLagging: false, revocationConfirmedAt: null,
+        },
+      })
+
+    it('suspended: says the agent cannot act while the passport stays issued', () => {
+      mockUseAgentPassport.mockReturnValue(anchored('suspended'))
+      render(<AgentPassportCard agentId="agent-1" />)
+
+      // Both badges still render, unchanged — the contradiction is explained,
+      // not hidden.
+      expect(screen.getByText('Issued')).toBeTruthy()
+      expect(screen.getByText('Suspended')).toBeTruthy()
+
+      const description = screen.getByTestId('agent-passport-standing-description')
+      expect(description).toHaveTextContent('The agent cannot act until Haven restores it.')
+      expect(description).toHaveTextContent('Its passport stays issued.')
+    })
+
+    it('revoked: says the agent can no longer act and the passport is a record', () => {
+      mockUseAgentPassport.mockReturnValue(anchored('revoked'))
+      render(<AgentPassportCard agentId="agent-1" />)
+
+      expect(screen.getByText('Issued')).toBeTruthy()
+      expect(screen.getByText('Revoked')).toBeTruthy()
+
+      const description = screen.getByTestId('agent-passport-standing-description')
+      expect(description).toHaveTextContent('The agent can no longer act.')
+      expect(description).toHaveTextContent('Its passport stays as a record of what was issued.')
+    })
+
+    it('active: adds no description — there is nothing to explain', () => {
+      mockUseAgentPassport.mockReturnValue(anchored('active'))
+      render(<AgentPassportCard agentId="agent-1" />)
+
+      expect(screen.getByText('Active')).toBeTruthy()
+      expect(screen.queryByTestId('agent-passport-standing-description')).toBeNull()
+    })
+  })
+
   it('calls issuePassport when the opt-in button is clicked', async () => {
     const { fireEvent } = await import('@testing-library/react')
     mockUseAgentPassport.mockReturnValue(state())
-    render(<AgentPassportCard agentId="agent-1" />)
+    render(<AgentPassportCard agentId="agent-1" passportIssuable />)
     fireEvent.click(screen.getByRole('button', { name: /issue a passport/i }))
     await waitFor(() => expect(mockIssuePassport).toHaveBeenCalledTimes(1))
   })
@@ -252,7 +380,7 @@ describe('AgentPassportCard (#1072)', () => {
     render(<AgentPassportCard agentId="agent-1" />)
     const row = document.querySelector('[data-testid="agent-passport-row"]')
     expect(row).toBeTruthy()
-    expect(row!.textContent).toMatch(/Couldn.t load passport status/)
+    expect(row!.textContent).toMatch(/Passport status could not load/)
     expect(row!.querySelector('button')).toBeTruthy()
     expect(row!.className).not.toContain('rounded-[10px]')
     expect(row!.className).not.toContain('shadow-card')

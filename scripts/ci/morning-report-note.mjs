@@ -316,6 +316,22 @@ export function render({ body, fp, refs, runUrl, actor }) {
   ].join('\n')
 }
 
+// True only when this file is the process's entry point, so importing it (a
+// self-test, a build config) never runs the CLI. Both paths are resolved
+// before they are compared: Node resolves symlinks for a module's own URL and
+// not for `process.argv[1]`, so an unresolved comparison is false through any
+// symlink, and the script would exit 0 without running (#4776).
+function isEntryPoint() {
+  if (!process.argv[1]) return false
+  try {
+    const { realpathSync } = process.getBuiltinModule('node:fs')
+    const { fileURLToPath } = process.getBuiltinModule('node:url')
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // CLI — one invocation, so the workflow does not parse the same JSON three
 // times. Reads the proposed note and the target's existing comments, writes the
@@ -329,7 +345,7 @@ export function render({ body, fp, refs, runUrl, actor }) {
 // failure. Only a genuine error (missing file, bad JSON) exits non-zero.
 // ---------------------------------------------------------------------------
 
-const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`
+const isMain = isEntryPoint()
 
 if (isMain) {
   const { readFileSync, writeFileSync } = await import('node:fs')

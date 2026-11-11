@@ -1,20 +1,30 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { shouldMarkApprox, type ApiSchema } from '@haven_ai/core'
 import { ArrowLeftRight } from 'lucide-react'
 import { Icon } from '@/components/ui/Icon'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TransactionActivityDayHeader, TransactionActivityRow, TransactionMovement, transactionDayKey, transactionDayLabel } from '@/components/haven'
+import { TransactionActivityDayHeader, TransactionActivityRow, TransactionActivityRowSkeleton, TransactionMovement, transactionDayLabel } from '@/components/haven'
 import type { StatusTone } from '@/components/ui/StatusBadge'
-import { timeAgo } from '@/lib/format'
+import { cutsItsDay, dayKeyInZone, formatClockTime } from '@/lib/format'
+import {
+  ACTIVITY_GROUP_LIVE_OPTIONS,
+  activityGroupLiveKey,
+  liveRowKeys,
+  sameLiveKeys,
+  type LiveRowSnapshot,
+} from '@/lib/live-rows'
 import { counterpartyLabel, type CounterpartyFields } from '@/lib/transaction-presentation'
 
 /** One grouped-activity row from `GET /dashboard/overview` (#3824). */
 type ActivityGroup = ApiSchema<'DashboardActivityGroup'>
+
+/** One shared empty set, so a poll that plays nothing does not re-render. */
+const EMPTY_LIVE_KEYS: ReadonlySet<string> = new Set()
 
 /**
  * The dashboard's merchant-first activity list (#3810, epic #3801).
@@ -101,11 +111,28 @@ export function ActivitySection({
   const hasWindowOnlyActivity =
     hasOlderActivity === true && typeof activityWindowDays === 'number'
   const windowEmptyTitle = `No activity in the last ${activityWindowDays} days`
+
+  // #4708: which groups arrived while the page was open. The snapshot is the
+  // last poll's `group key → latestAt`; the comparison is `lib/live-rows`,
+  // shared with `/transactions`. The first non-loading render only SEEDS the
+  // snapshot — a page load plays nothing — and a group plays when it is new
+  // or its `latestAt` advanced (a second payment to the same merchant).
+  const [liveKeys, setLiveKeys] = useState<ReadonlySet<string>>(EMPTY_LIVE_KEYS)
+  const liveSnapshotRef = useRef<LiveRowSnapshot | null>(null)
+  useEffect(() => {
+    // While the card is a skeleton or an error there is no list to compare
+    // against; seeding from either would make the first real poll look new.
+    if (loading || unavailable) return
+    const { keys, snapshot } = liveRowKeys(activity, liveSnapshotRef.current, ACTIVITY_GROUP_LIVE_OPTIONS)
+    liveSnapshotRef.current = snapshot
+    setLiveKeys((current) => (sameLiveKeys(current, keys) ? current : keys))
+  }, [activity, loading, unavailable])
+
   return (
     <div data-testid="dashboard-activity" className="rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-bg)] shadow-card overflow-hidden">
       <Card.Header
         as="h2"
-        title="Activity"
+        title="Transactions"
         actions={
           <Link href="/transactions" className="text-sm font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)] transition-colors">
             View all
@@ -116,24 +143,16 @@ export function ActivitySection({
       {loading ? (
         <div className="divide-y divide-[var(--v2-border)]" role="status" aria-busy="true" aria-live="polite" aria-label="Loading activity">
           {[0, 1, 2].map((item) => (
-            // Same breakpoint-scoped height as the loaded row it stands in
-            // for (#1833): the `sm:`-gated two-column grid pinned to 72px,
-            // sizing to content below `sm`.
-            <div key={item} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 sm:py-0 sm:h-[72px]">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-[10px] bg-[var(--v2-surface-2)] animate-pulse" />
-                <div>
-                  <div className="h-3.5 w-40 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                  <div className="mt-1.5 h-2.5 w-56 rounded bg-[var(--v2-surface-2)] animate-pulse" />
-                </div>
-              </div>
-              <div className="h-4 w-24 rounded bg-[var(--v2-surface-2)] animate-pulse sm:justify-self-end" />
-            </div>
+            // The compact density carries the same breakpoint-scoped height as
+            // the loaded row it stands in for (#1833): the `sm:`-gated
+            // two-column grid pinned to 72px, sizing to content below `sm`.
+            <TransactionActivityRowSkeleton key={item} density="compact" />
           ))}
         </div>
       ) : unavailable ? (
         <div className="p-6">
           <EmptyState
+            bare
             size="compact"
             title="Activity preview unavailable"
             body="Haven could not refresh recent payments right now."
@@ -143,6 +162,7 @@ export function ActivitySection({
       ) : activity.length === 0 && hasWindowOnlyActivity ? (
         <div className="p-6">
           <EmptyState
+            bare
             tone="brand"
             icon={<EmptyActivityIcon />}
             title={windowEmptyTitle}
@@ -157,6 +177,7 @@ export function ActivitySection({
       ) : activity.length === 0 ? (
         <div className="p-6">
           <EmptyState
+            bare
             tone="brand"
             icon={<EmptyActivityIcon />}
             title="No activity yet"
@@ -181,6 +202,7 @@ export function ActivitySection({
           activity={activity}
           accountCount={accountCount}
           activityWindowStart={activityWindowStart}
+          liveKeys={liveKeys}
         />
       )}
     </div>
@@ -191,9 +213,9 @@ export function ActivitySection({
  * Day buckets + rows. The server grouped by the USER's local day already
  * (#3824) — the client only derives each heading from the group's
  * `latestAt`, so the buckets cannot disagree with the grouping. Bucketing
- * and labelling use the ledger's shared `transactionDayKey` /
- * `transactionDayLabel` (#4225): the same helpers the account page's ledger
- * uses, so the two surfaces cannot drift.
+ * and labelling use the shared `dayKeyInZone` / `transactionDayLabel`
+ * (#4225, #4573): the same helpers the account page's ledger uses, so the
+ * two surfaces cannot drift.
  *
  * The oldest heading can cover part of a day (#3975): when
  * `activityWindowStart` is present and cuts its own local day (the
@@ -209,20 +231,23 @@ function ActivityRows({
   activity,
   accountCount,
   activityWindowStart,
+  liveKeys,
 }: {
   activity: ActivityGroup[]
   accountCount: number
   activityWindowStart?: string
+  /** #4708: the group keys that arrived while the page was open. */
+  liveKeys: ReadonlySet<string>
 }) {
   const partialDayKey = useMemo(() => {
     if (activityWindowStart == null || !cutsItsDay(activityWindowStart)) return null
-    return transactionDayKey(activityWindowStart)
+    return dayKeyInZone(activityWindowStart)
   }, [activityWindowStart])
 
   const days = useMemo(() => {
     const buckets = new Map<string, ActivityGroup[]>()
     for (const group of activity) {
-      const key = transactionDayKey(group.latestAt)
+      const key = dayKeyInZone(group.latestAt)
       const bucket = buckets.get(key)
       if (bucket) bucket.push(group)
       else buckets.set(key, [group])
@@ -248,7 +273,12 @@ function ActivityRows({
             const groupKey = `${group.latestAt}-${group.to}-${group.tokenSymbol}-${index}`
             return (
               <Link key={groupKey} href="/transactions" className="block">
-                <ActivityRow group={group} accountCount={accountCount} insetDivider={index > 0} />
+                <ActivityRow
+                  group={group}
+                  accountCount={accountCount}
+                  insetDivider={index > 0}
+                  live={liveKeys.has(activityGroupLiveKey(group))}
+                />
               </Link>
             )
           })}
@@ -262,11 +292,14 @@ function ActivityRow({
   group,
   accountCount,
   insetDivider,
+  live,
 }: {
   group: ActivityGroup
   accountCount: number
   /** #4165: the same-day inset hairline, on every row after a day's first. */
   insetDivider: boolean
+  /** #4708: this group arrived while the page was open — play Milestone Live. */
+  live: boolean
 }) {
   // The group carries the counterparty fields of its NEWEST member (#3824)
   // plus the name the backend resolved for that counterparty. No chain-scoped
@@ -347,10 +380,13 @@ function ActivityRow({
       failed={group.status === 'failed'}
       status={statusLabel(group)}
       statusTone={statusTone(group)}
-      timestamp={timeAgo(group.latestAt)}
+      // #4572: the group sits under a day band, so it shows its latest
+      // payment's clock time rather than repeating the day as "3h ago".
+      timestamp={formatClockTime(group.latestAt)}
       direction={ownTransfer ? 'move' : group.direction}
       density="compact"
       insetDivider={insetDivider}
+      live={live}
     />
   )
 }
@@ -378,19 +414,3 @@ function EmptyActivityIcon() {
   return <Icon icon={ArrowLeftRight} className="w-full h-full" />
 }
 
-/**
- * True when the instant is not local midnight in the runtime zone — a
- * boundary that cuts its day. The analytics page applies the same rule to
- * its range edges (`SpendSection`'s `cutsItsDay`); #3975 applies it to the
- * Activity window's start so the oldest day heading can say "(partial)".
- */
-function cutsItsDay(iso: string): boolean {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(iso))
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
-  return !(get('hour') === '00' && get('minute') === '00' && get('second') === '00')
-}

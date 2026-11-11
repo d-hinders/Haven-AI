@@ -61,6 +61,13 @@ was `rails/allowance-module.ts` until #2850 renamed it to `infra/chain/relayer-r
 the AllowanceModule filename was the last false claim the retired rail left behind.
 The `domain/machine-payment-lifecycle.ts` entry guards the backend re-export shim;
 the code itself lives in `packages/core` (see below, #1905).
+`domain/machine-metadata.ts` is the one reader for
+`payment_intents.machine_metadata` (#4765): fifteen parse sites and eight
+`settlement_scheme` reads across twelve `modules/` files now go through it, and
+`settlement_scheme` selects erc7710 vs the EIP-3009 bridge. The decision moved
+out of `modules/x402/**` and `modules/mpp/**` (both listed whole) into a pure
+`domain/` file, so the glob follows it in the same PR — the #1892
+accident-of-location rule.
 The two `domain/x402-*` entries hold the settlement path's window constants:
 `x402-settlement-timing.ts` (the 600 s settlement-child expiry clamp and the 120 s
 clock skew, moved out of `modules/x402/` by #4379 so a payments file could read
@@ -71,6 +78,7 @@ list before #4379.
 - `packages/backend/src/modules/x402/**`
 - `packages/backend/src/modules/mpp/**`
 - `packages/backend/src/domain/payment-token.ts`
+- `packages/backend/src/domain/machine-metadata.ts`
 - `packages/backend/src/domain/machine-payment-lifecycle.ts`
 - `packages/backend/src/domain/x402-settlement-timing.ts`
 - `packages/backend/src/domain/x402-sweep-window.ts`
@@ -107,14 +115,29 @@ not listed: it is GET only.
 payment (#3271). `submission-reconciler.ts` settles the terminal state of a
 submitted payment whose UserOp may have landed (#3564). `agent-payment-status.ts`
 holds `isFundedX402AwaitingMerchantLeg`, which decides whether x402 sign-context
-re-signs a confirmed payment; a wrong clause can pay a merchant twice. File-level
-on purpose: the rest of the module is the refusal record, receipts and
-prepare-failure reporting, pinned as off-list in `scripts/ci/money-path.test.mjs`
-(#3661).
+re-signs a confirmed payment; a wrong clause can pay a merchant twice.
+`create-payment.ts` is the `POST /payments` create flow itself (#4760, epic
+#4759 slice 1): the retired-rail gate, token and amount resolution, the
+idempotent replay, the budget-scope resolution and its two fail-open
+pre-checks, the delegation-rail prepare and the intent insert. It moved out of
+`routes/payments.ts` verbatim, so the decision it makes is the same one the
+route made — the #1892 accident-of-location rule again: where the create flow
+lives is not what makes it a spend decision. `sign-payment.ts` is the
+`POST /payments/:id/sign` submit state machine (#4761, slice 2): the
+retired-rail gates, the expiry flip, the misdirected-erc7710 guard, the atomic
+claim, the delegation-rail submit, the sponsored-gas recording on each outcome,
+the confirm / fail / outcome-pending booking split and the classified failure
+bodies. It moved out of the same route verbatim, and the order of the claim,
+the submit and the terminal write — the money-path invariant — is untouched.
+File-level on purpose: the rest of the module is the refusal record, receipts
+and prepare-failure reporting, pinned as off-list in
+`scripts/ci/money-path.test.mjs` (#3661).
 
 - `packages/backend/src/modules/payments/direct-sign-context.ts`
 - `packages/backend/src/modules/payments/submission-reconciler.ts`
 - `packages/backend/src/modules/payments/agent-payment-status.ts`
+- `packages/backend/src/modules/payments/create-payment.ts`
+- `packages/backend/src/modules/payments/sign-payment.ts`
 
 ### The rail seam
 
@@ -228,6 +251,28 @@ off by name.
 - `packages/sdk/src/sub-budget-guards.ts`
 - `packages/sdk/src/merchant-completion.ts`
 - `packages/sdk/src/merchant-answer.ts`
+
+### The shared credential-file handling
+
+#4792. The local MCP and the edge signer each carried a copy of the code that
+reads the agent's credential file — the file that holds the delegate private
+key. About half of the signer's `credentials.ts` matched the local MCP's line
+for line. No defect was claimed: the two permission checks behaved identically.
+The risk was that the next hardening of key-file handling would land in one
+package and not the other, so the common part moved here: the account-address
+readers (`account_address ?? safe_address ?? safeAddress`, and the refusal of
+the retired env names) and the permission core that warns when the key file is
+readable beyond its owner.
+
+Runtime, not control, and for the same reason `packages/signer/**` is on this
+list: it is how the key is read. The move would otherwise have taken the
+permission core off the perimeter — `packages/signer/**` covered the signer's
+copy, but the local MCP's copy was on no glob at all, and the shared module
+lives in a package whose only listed files are the signing guards (the #1892
+accident-of-location rule). `packages/sdk/src/edge.ts`, the re-export file,
+stays off, as the #3283 note records.
+
+- `packages/sdk/src/credential-file.ts`
 
 ### The machine-payment domain
 
@@ -343,3 +388,28 @@ runtime list through `infra/repositories/**`.
 
 - `packages/backend/src/modules/catalog/catalog-discovery.ts`
 - `packages/backend/src/modules/catalog/merchant-catalog.ts`
+
+### The operator's lane cancel
+
+#4786. `ops/cancel-stuck-lane.ts` is the file an operator starts in the deployed
+container to burn the nonce of a stuck relayer broadcast; `ops/lane-cancel-command.ts`
+is its code (the argument check, the call into `infra/outbound-lane-cancel.ts`
+with production dependencies, and the exit codes the operator reads); the script
+is the `tsx` wrapper for the same command on a developer machine. The
+implementation they call is on the runtime list through `infra/outbound-*.ts`.
+The command that triggers it matched no glob, so #4786, which changes how that
+command starts, classified it as not money-path.
+
+Control, not runtime (owner decision 2026-11-10, recorded on #4786): the
+money-flow QA harness never runs an operator's lane cancel, so a green run says
+nothing about these files, and a runtime entry would hold promotion on it anyway.
+The entry gives the label, the `money.md` playbook with its characterization bar,
+and the perimeter shard.
+
+The directory is listed whole because it exists for operator commands that must
+run in the deployed container; the next one belongs here for the same reason.
+The wrapper is listed alone because `packages/backend/scripts` holds unrelated
+smoke and check scripts.
+
+- `packages/backend/src/ops/**`
+- `packages/backend/scripts/cancel-stuck-attest-lane.ts`

@@ -2975,7 +2975,8 @@ test fixtures as ungoverned Markdown — see the row below, filed as
 
 **Probed clean** (coverage record; scoped, so only the two rows are examined):
 
-- sizing → examined → the row's command (pinned `git ls-tree`/`git show`, 13
+- sizing → examined → the row's command (`sizing-source-test-lines` in
+  `docs/quality/scan-baselines.json`: pinned `git ls-tree`/`git show`, 13
   packages, `.test.`/`__tests__`/`.spec.` split) → at `8486093df`: backend
   124,177 / 167,496; frontend 83,583 / 93,776; sdk 20,628 / 23,627; core
   26,142 / 985; qa-agent 20,292 / 18,508; mcp-server 14,330 / 26,323; signer
@@ -2993,7 +2994,7 @@ test fixtures as ungoverned Markdown — see the row below, filed as
   and a +183 characterization test. Verdict: real deletions and a
   cross-package move, not instrument rot. No finding.
 - block 6 → partial → the docs-boundary half only → the row's pinned listing
-  (`git ls-tree -r --name-only $SHA | grep -E '\.md$' | grep -vE
+  (`block6-docs-boundary`: `git ls-tree -r --name-only $SHA | grep -E '\.md$' | grep -vE
   '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l`) → **52** at
   `8486093df` (43 at `e0617aa9f`, 45 at `039556e38`). Composition at the tip:
   `.agents/skills` 24, `.claude/commands` 8, `.claude/agents` 7, `scripts` 8,

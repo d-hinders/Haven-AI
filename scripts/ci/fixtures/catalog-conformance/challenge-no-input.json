@@ -1,0 +1,27 @@
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "https://api.fixture-no-input.test/api/v3/x402/onchain/search/pools",
+    "description": "Pool search",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "1000",
+      "asset": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "payTo": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "maxTimeoutSeconds": 300,
+      "extra": { "name": "USD Coin", "version": "2" }
+    }
+  ],
+  "extensions": {
+    "bazaar": {
+      "schema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } }
+      }
+    }
+  }
+}

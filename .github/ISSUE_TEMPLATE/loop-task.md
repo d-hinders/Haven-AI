@@ -19,6 +19,11 @@ so fill in Scope + Acceptance concretely.
 <!-- One paragraph the implementer can act on WITHOUT guessing: state the change
 AND its acceptance criteria. -->
 
+<!-- Defect issues only: add one line, `Found by: <channel>` — one of live
+purchase, review, builder, quality-scan, owner, external, CI, unknown. It
+records which channel found the defect, so a quality-scan run can measure what
+escaped it (#4757). A feature, an epic or a chore carries no such line. -->
+
 ## Acceptance criteria
 
 <!-- The observable bar for "done". E.g.: new tests green; existing backend suite

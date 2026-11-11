@@ -1,0 +1,11 @@
+{
+  "name": "Fixture — pool search (no declared input)",
+  "endpoint_host": "api.fixture-no-input.test",
+  "resource_url": "https://api.fixture-no-input.test/api/v3/x402/onchain/search/pools",
+  "protocol": "http",
+  "source": "operator",
+  "status": "active",
+  "http_method": null,
+  "body_type": null,
+  "body_example": null
+}

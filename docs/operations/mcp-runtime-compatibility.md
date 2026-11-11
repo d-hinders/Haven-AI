@@ -86,8 +86,39 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-09"
+last-verified: "2026-11-11"
 ---
+
+> **Contract change (#4790, 2026-11-11): the local MCP's typed refusal answers.**
+> `packages/mcp/src/tools.ts` is on this contract's cover list. The local
+> `normalizeError`'s `HavenApiError` branch typed none of the 20 backend
+> `error_code`s the hosted mapper answers, so every one reached a local-MCP
+> agent as `code: "API_ERROR"` with no `next_tool_omitted_reason`. It now
+> answers all 20 exactly as the hosted mapper does: the same typed `code`, the
+> same `next_action`, the same `next_tool_name` and `next_arguments` where the
+> hosted answer names a tool, and the same `next_tool_omitted_reason` or the
+> same absence of one — including the body-dependent variants
+> (`submission_outcome_unknown` names `haven_get_payment_status` only when the
+> body carries a `payment_id`; `prepare_reverted` changes its step on
+> `revert_cause`) and the 403 guard on `delegation_expired`. Any other
+> `error_code` keeps the generic `API_ERROR` answer, and a body's own
+> `next_action` is still passed through.
+>
+> **What an installed client sees.** For those 20 refusals the failure
+> envelope's `code` changes from `API_ERROR` to the typed code, and the
+> `next_action` / `next_tool_name` / `next_arguments` /
+> `next_tool_omitted_reason` fields appear where the hosted surface already
+> emits them. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash, `tools-list.snapshot.json` entry or
+> `next-arguments-corpus.json` row changes, and no hosted runtime file changes.
+> The local package's `tools/list` golden is untouched.
+>
+> **How it is held.** A parity test in `packages/mcp-server/src/` drives both
+> mappers with the hosted suite's fixture bodies and fails on any
+> difference in `code`, `next_action`, `next_tool_name`, `next_arguments` or
+> `next_tool_omitted_reason` that its (empty) allowlist does not name, and on a
+> stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
+> `@haven_ai/core`, so a new core code cannot go unanswered locally.
 
 > **No contract change (#4791, 2026-11-10): the local `tools/list` contract
 > gets a golden, as the hosted one has had since #3817.** Tests and one script

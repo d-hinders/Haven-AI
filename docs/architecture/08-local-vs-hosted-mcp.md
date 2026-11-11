@@ -135,6 +135,34 @@ says which list it serves:
   test fixture, not a runtime signal: nothing is sent to the agent, and there
   is still no local fingerprint.
 
+**Both surfaces answer a typed backend refusal the same way (#4790).** When the
+backend refuses a payment with an `error_code`, the hosted `normalizeError`
+(`packages/mcp-server/src/tools/support/errors.ts`) types 20 of them: the ten
+payment-scope codes (a task budget or sub-budget the payment cannot use) through
+one table keyed off `@haven_ai/core`'s `PAYMENT_SCOPE_REFUSAL_CODES`, and ten
+more through hand-written branches whose answers depend on the body —
+`submission_outcome_unknown` names `haven_get_payment_status` with the
+`payment_id` only when the body carries one, `prepare_reverted` changes its step
+on `revert_cause`, and `delegation_expired` is typed only at status 403. The
+local `normalizeError` (`packages/mcp/src/tools.ts`) answers all 20 the same way:
+the same typed `code`, the same `next_action`, the same named tool and arguments
+where one is named, and the same `next_tool_omitted_reason` or the same absence
+of one. Any other `error_code` keeps the generic `API_ERROR` answer on both
+surfaces, and a body's own `next_action` is still passed through locally.
+
+The two implementations are deliberately not merged: the payment-scope rows are
+typed off `@haven_ai/core`, which is workspace-private and not an SDK dependency,
+so moving the logic into the SDK would either leak an unpublished package into
+the SDK's emitted types or drop the guarantee that a new core code cannot go
+unanswered. Instead a parity test in `packages/mcp-server/src/` (the only package
+that can import both `@haven_ai/mcp` and `@haven_ai/core`) drives both mappers
+with the hosted suite's fixture bodies and fails on any difference in `code`,
+`next_action`, `next_tool_name`, `next_arguments` or `next_tool_omitted_reason`
+that its allowlist does not name — and on a stale allowlist entry. It does not
+compare `next_tool`, `next_tool_server` or `next_tool_server_role` (the hosted
+surface qualifies a tool by server; the local one does not), nor hosted-only body
+projections such as `remaining_atomic`.
+
 The full contract and the skew table live in
 [`mcp-runtime-compatibility.md` § Hosted tool lists](../operations/mcp-runtime-compatibility.md#hosted-tool-lists--the-contract-fingerprint-and-the-reconnect-rule-3816).
 

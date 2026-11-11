@@ -113,8 +113,8 @@ last-verified: "2026-11-11"
 > `next-arguments-corpus.json` row changes, and no hosted runtime file changes.
 > The local package's `tools/list` golden is untouched.
 >
-> **How it is held.** `packages/mcp-server/src/local-hosted-refusal-parity.test.ts`
-> drives both mappers with the hosted suite's fixture bodies and fails on any
+> **How it is held.** A parity test in `packages/mcp-server/src/` drives both
+> mappers with the hosted suite's fixture bodies and fails on any
 > difference in `code`, `next_action`, `next_tool_name`, `next_arguments` or
 > `next_tool_omitted_reason` that its (empty) allowlist does not name, and on a
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from

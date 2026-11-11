@@ -85,7 +85,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   gets it with the backend deploy, and the hosted + `@haven_ai/signer`
   EIP-3009 path does not carry it yet.
 
-- **The agent can read its own Agent Passport reference (#4721).**
+- **The agent can read its own Agent Passport reference (#4721). BREAKING only for TypeScript code that builds a `HavenAgent` literal.**
   `HavenAgent.passport` (raw `passport` on `GET /machine-payments/agent`) is
   `{ attestationUid, chainId, verifyUrl? }` for an agent with an anchored
   passport, and `null` otherwise: no passport, a pending or failed one, a

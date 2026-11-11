@@ -191,42 +191,18 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.14.0-alpha.0",
         "date": "2026-11-11",
-        "summary": "The fix for reaches installed agents through runtime-manifest.ts. The next connect release must bump sdkVersion and signerVersion to the releases that send an x402 v2 payment under PAYMENT-SIGNATURE alone; --doctor installs whatever those pin.",
+        "summary": "The runtime this connector installs moves to 0.14.0-alpha.0. A setup, a re-run or a --doctor repair now wires the @haven_ai/sdk and @haven_ai/signer releases that send an x402 v2 payment under PAYMENT-SIGNATURE alone.",
         "summary_segments": [
           {
-            "text": "The fix for reaches installed agents through ",
+            "text": "The runtime this connector installs moves to ",
             "code": false
           },
           {
-            "text": "runtime-manifest.ts",
+            "text": "0.14.0-alpha.0",
             "code": true
           },
           {
-            "text": ". The next connect release must bump ",
-            "code": false
-          },
-          {
-            "text": "sdkVersion",
-            "code": true
-          },
-          {
-            "text": " and ",
-            "code": false
-          },
-          {
-            "text": "signerVersion",
-            "code": true
-          },
-          {
-            "text": " to the releases that send an x402 v2 payment under ",
-            "code": false
-          },
-          {
-            "text": "PAYMENT-SIGNATURE",
-            "code": true
-          },
-          {
-            "text": " alone; ",
+            "text": ". A setup, a re-run or a ",
             "code": false
           },
           {
@@ -234,7 +210,31 @@ export const CLIENT_RELEASE_DATA = {
             "code": true
           },
           {
-            "text": " installs whatever those pin.",
+            "text": " repair now wires the ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/sdk",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "@haven_ai/signer",
+            "code": true
+          },
+          {
+            "text": " releases that send an x402 v2 payment under ",
+            "code": false
+          },
+          {
+            "text": "PAYMENT-SIGNATURE",
+            "code": true
+          },
+          {
+            "text": " alone.",
             "code": false
           }
         ],

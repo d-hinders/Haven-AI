@@ -19,7 +19,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Changed
 
-- **The fix for #4754 reaches installed agents through `runtime-manifest.ts` (#4754).** The next connect release must bump `sdkVersion` and `signerVersion` to the releases that send an x402 v2 payment under `PAYMENT-SIGNATURE` alone; `--doctor` installs whatever those pin. Nothing in connect itself changes. No update needed.
+- **The runtime this connector installs moves to `0.14.0-alpha.0`.** A setup, a re-run or a `--doctor` repair now wires the `@haven_ai/sdk` and `@haven_ai/signer` releases that send an x402 v2 payment under `PAYMENT-SIGNATURE` alone (#4754). Nothing in connect itself changes. No update needed.
 
 ## 0.13.0-alpha.0 — 2026-10-30
 

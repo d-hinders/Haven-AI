@@ -2957,6 +2957,26 @@ partly artifacts. Pinned to `--since=2026-09-01T00:00:00Z`: **47 of 57** at
 and it touched both packages. The conclusion (about five in six local
 landings also change the hosted package) is unchanged.
 
+**Disposition upkeep (2026-11-11), both 2026-11-09 runs: every filed issue is
+`shipped`.** Each was closed by a pull request merged to `dev`.
+
+- Run A (architecture): #4760 via PR #4777 (`9b809188`), #4761 via PR #4780
+  (`36378243`), #4762 via PR #4783 (`c9201556`), #4764 via PR #4778
+  (`4346e70f`), #4765 via PR #4782 (`0cbcdff6`), and #4763 — runtime cycles
+  only, per the owner — via PR #4802 (`d314d6d7`) → `shipped`. The epic #4759
+  stays open: its promotion checklist names a qa-dev observation nobody has
+  recorded on it yet.
+- Run B (the two MCPs): S1 → epic #4788, closed 2026-11-11 with its promotion
+  check linked on the issue; slices #4789 via PR #4795 (`149a3313`), #4790
+  (which is also C1) via PR #4801 (`ba1bf134`), #4791 via PR #4794
+  (`039556e3`) → `shipped`. C2 → #4792 via PR #4803 (`8486093d`) → `shipped`.
+- A fourth slice was added to epic #4788 after this entry was written, found
+  by slice 1's build rather than by the scan: #4796, four tool descriptions
+  that named a tool their own surface does not register, via PR #4798
+  (`0423db37`) → `shipped`. The same defect on three other surfaces (the
+  SDK's direct tool definitions, the signer's descriptions, backend response
+  prose) is recorded on the epic and is not filed.
+
 ## 2026-11-11 — the two flagged rows of the weekly re-measurement (scoped; #4635)
 
 Scoped to the two rows the weekly job flagged at `039556e38` (#4625's table in

@@ -309,7 +309,7 @@ async function modeListing(opts) {
     `block 10 → default tier → examined → ${url} → ${s.entries} entries, ${s.active} active, ` +
       `${s.httpOperator} http/operator, ${s.mcpOperator} mcp/operator, ${s.bazaar} bazaar`,
   )
-  console.log('block 10 → third-party tier → not examined → third-party probes not requested')
+  console.log('block 10 → third-party tier not examined → third-party probes not requested')
 }
 
 async function modeProbe(opts) {

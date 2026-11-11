@@ -186,10 +186,19 @@ describe('check-stale-client-compat CLI', () => {
 
   test('a base without the snapshot file skips with a notice and exits 0', () => {
     const script = fileURLToPath(new URL('./check-stale-client-compat.mjs', import.meta.url))
-    // Any ref that cannot carry the file exercises the skip path; the full
+    // The ROOT commit cannot carry the file, and unlike a fixed depth it stays
+    // that way however many commits the branch adds. `HEAD~500` was the ref
+    // here until #4792: once a branch sat three commits ahead of `dev`,
+    // `HEAD~500` resolved to 826ceb4ca — the commit that ADDED
+    // `tools-list.snapshot.json` — so the skip path stopped being exercised
+    // and the test went red locally on a full-history checkout (CI's
+    // `actions/checkout` is depth 1, so it never saw this). The full
     // committed-goldens compare runs in CI's mcp_server_checks against
     // origin/main.
-    const res = spawnSync('node', [script, '--base', 'HEAD~500'], { encoding: 'utf8' })
+    const root = spawnSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { encoding: 'utf8' })
+      .stdout.trim()
+      .split('\n')[0]
+    const res = spawnSync('node', [script, '--base', root], { encoding: 'utf8' })
     assert.equal(res.status, 0, res.stderr)
     assert.match(res.stdout, /\[NOTICE\]/)
   })

@@ -118,10 +118,10 @@ last-verified: "2026-11-11"
 > **How it is held.** `packages/mcp/src/payment-status-message.test.ts` pins
 > the local replacement with `toBe` in both states, twice per state (the
 > backend's current sentence and an arbitrary string), and proves pass-through
-> elsewhere; `packages/mcp-server/src/payment-status-message.test.ts` proves
-> the hosted agent still reads `haven_report_settlement_evidence`, so a
-> replacement moved into the shared SDK read goes red. `last-verified` is not
-> re-stamped: this block is the scope.
+> elsewhere; an assertion in the MCP server package proves the hosted agent
+> still reads `haven_report_settlement_evidence`, so a replacement moved into
+> the shared SDK read goes red. `last-verified` is not re-stamped: this block
+> is the scope.
 
 > **Contract change (#4790, 2026-11-11): the local MCP's typed refusal answers.**
 > `packages/mcp/src/tools.ts` is on this contract's cover list. The local

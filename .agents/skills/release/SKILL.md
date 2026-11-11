@@ -309,8 +309,8 @@ has the check and the skip reasons.
 ## Choose The Version
 
 Pass an explicit version string, never a bump type. `scripts/README.md`
-§ *Which version string* has the convention and the one case that departs from
-it — including when you are retrying a failed publish rather than releasing.
+§ *Which version string* has the convention and the cases that depart from
+it — a patch release, and a second cut of a version that was never published.
 Read it there; nothing about the choice lives here.
 
 ## Cut The Bump

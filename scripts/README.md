@@ -309,13 +309,15 @@ counted in the patch position (`0.1.36-alpha.0`, `0.1.37-alpha.0`), and this
 paragraph went on saying so for fifteen releases (#4809).
 
 Two releases since then moved the patch position instead, `0.2.1-alpha.0` and
-`0.8.1-alpha.0`. Nothing in the repository writes down when a patch is the
-right call rather than a minor; the release's own shard says which it is and
-why.
+`0.8.1-alpha.0`. No general rule for patch versus minor is written in this file
+or in the release skill. The SDK changelog and the `0.2.0-alpha.0` shard record
+the 0.x convention that a breaking release is a minor bump, and most release
+shards state their own call.
 
 `prerelease` against `0.13.0-alpha.0` produces `0.13.0-alpha.1`, which is valid
 but is not a new release's version. Reserve the `-alpha.N` form for a second
-attempt at a version that failed to publish, as `0.5.0-alpha.1` was.
+cut of a version that was never published, as `0.5.0-alpha.1` was: its
+`alpha.0` was cut but not promoted.
 
 ### The contract-doc gate
 

@@ -809,13 +809,16 @@ test('…and with an unresolved file it still arrives whole, exit 1 (#4809)', ()
   assert.equal(status, 1, 'the exit code survives the change from process.exit to process.exitCode')
 })
 
-// The mutation proof. Pipes are asynchronous in Node on macOS and synchronous on
-// Linux, so restoring `process.exit()` truncates on macOS only: on the Linux CI
-// runner the mutated script still delivers the whole payload, and this test
-// would assert nothing there. It is skipped by name rather than left to pass.
+// The mutation proof. Node documents pipe writes as asynchronous on POSIX, so
+// restoring `process.exit()` should cut the payload on Linux as on macOS — but
+// only macOS was measured (Node v24.17.0: the reader gets exactly the 65 536-byte
+// pipe buffer). The byte window asserted below is that measurement, so the
+// proof runs on darwin and is skipped by name elsewhere rather than asserting a
+// number nobody took there. The two tests above run everywhere, and with
+// `process.exit()` restored in the script itself they are the ones that go red.
 test(
   'the fix is load-bearing: with process.exit() back, the payload is cut at the pipe buffer (#4809)',
-  { skip: process.platform === 'darwin' ? false : 'pipe writes are synchronous on this platform, so process.exit() does not truncate here' },
+  { skip: process.platform === 'darwin' ? false : 'the truncation size is measured on darwin only; the two tests above guard the fix on every platform' },
   () => {
     const { stdout } = runScope({
       changes: bulkChanges(),

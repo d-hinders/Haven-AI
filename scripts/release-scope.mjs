@@ -733,9 +733,9 @@ function main() {
   // An unresolved file means the shipped delta may be an under-count, so the exit
   // code says so rather than leaving a green run to be quoted as a clean measure.
   //
-  // `process.exitCode`, never `process.exit()` here (#4809): a write to a pipe is
-  // asynchronous on macOS, and `process.exit()` ends the process before it
-  // drains. A `--json` payload over the 64 KiB pipe buffer then reached
+  // `process.exitCode`, never `process.exit()` here (#4809): Node documents a
+  // write to a pipe as asynchronous on POSIX, and `process.exit()` ends the
+  // process before it drains (measured on macOS, Node v24.17.0). A `--json` payload over the 64 KiB pipe buffer then reached
   // `release-records.mjs` cut at byte 65 536 and died in `JSON.parse`. Nothing
   // keeps this process alive after `main()` returns — no timer, no handle — so
   // it exits by itself once stdout is flushed. The two refusals above keep

@@ -683,6 +683,7 @@ describe('HavenClient structural boundary', () => {
       'HavenPaymentReceipt',
       'HavenPaymentReceiptsPage', // #3128
       'MachinePaymentRail',
+      'McpSurface', // #4796
       'MerchantEgressPolicy', // #3747
       'MerchantEgressRefusalReason', // #3747
       'MerchantEgressTimeouts', // #3747

@@ -528,11 +528,18 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * under the round-29 pin, so the cap does not move. A first draft at +68
  * crossed it and was cut; PAYMENT-SIGNATURE stays named for the #2330 guard.
  * No tool was added — 29 holds. Shrink-only from here.
+ *
+ * **Re-derived — round 34, #4796 (2026-11-10).** Two hosted descriptions told
+ * the agent to use `haven_pay_x402`, a tool only the LOCAL MCP registers.
+ * `haven_send` (once) and `haven_pay_mcp_tool` (twice) now name
+ * `haven_quote_x402`, the hosted x402 entry point: three names, +2 bytes
+ * each, +6. 31,811 UTF-8 bytes — 1 under the round-29 pin, so the cap is
+ * LOWERED to the measured value (31,812 → 31,811), as #4796 asks. No tool was added — 29 holds. Shrink-only from here.
  */
-const MAX_TOTAL_BYTES = 31_812
-// Mean pin: round 29 (#4355 block above): 31,812 / 29 = 1096.9655…, pinned
-// at the two-decimal ceiling (1096.97). Shrink-only from here.
-const MAX_MEAN_BYTES = 1096.97
+const MAX_TOTAL_BYTES = 31_811
+// Mean pin: round 34 (#4796 block above): 31,811 / 29 = 1096.9310…, pinned
+// at the two-decimal ceiling (1096.94). Shrink-only from here.
+const MAX_MEAN_BYTES = 1096.94
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

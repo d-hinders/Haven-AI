@@ -11,6 +11,7 @@ covers:
   - packages/backend/src/__tests__/connector-upgrade-command-parity.test.ts
   - scripts/ci/upgrade-hint-guard.test.mjs
   - packages/mcp-server/src/tools/**
+  - packages/mcp-server/src/description-tool-references.test.ts
   - packages/sdk/src/x402-erc7710.ts
   - packages/backend/src/modules/payments/direct-sign-context.ts
   - packages/backend/src/modules/x402/sign-context.ts
@@ -119,6 +120,30 @@ last-verified: "2026-11-11"
 > `next_tool_omitted_reason` that its (empty) allowlist does not name, and on a
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
 > `@haven_ai/core`, so a new core code cannot go unanswered locally.
+
+> **Description-only change (#4796, 2026-11-10): four tool descriptions named
+> a tool their own surface does not register.** The shared description text in
+> `packages/sdk/src/tool-descriptions.ts` told a local-MCP agent to use
+> `haven_check_funds` (hosted only) from `haven_send` and
+> `haven_sweep_delegate`, and a hosted-MCP agent to use `haven_pay_x402` (local
+> only) from `haven_send` and `haven_pay_mcp_tool`. `composeDescription` now
+> takes the surface, and those four descriptions are worded for the surface
+> that serves them: the hosted ones point at `haven_quote_x402`; the local ones
+> say the surface has no check of funds against an amount, and, on funds,
+> name `haven_get_allowances` only for its `fundsCoverRemaining` flag, never as
+> such a check (a live budget is spend authority, not proof of a balance).
+> **What moves:** the four `description` strings, in the hosted golden
+> `packages/mcp-server/src/tools-list.snapshot.json` and the local golden
+> `packages/mcp/src/local-tool-contract.golden.json`; the hosted contract
+> fingerprint, which hashes descriptions, so an agent holding the old hosted
+> list is told to reconnect, as designed. **What does not:** no tool name,
+> argument, input schema, strict-input list, expected-context version, consent
+> hash or `next-arguments-corpus.json` row; the stale-client check ignores
+> description-only changes. A new test,
+> `packages/mcp-server/src/description-tool-references.test.ts`, fails when a
+> description on either surface names a tool that surface does not register,
+> a signer tool or one allowlisted reference aside. `last-verified` is not re-stamped: this block is the
+> scope.
 
 > **No contract change (#4791, 2026-11-10): the local `tools/list` contract
 > gets a golden, as the hosted one has had since #3817.** Tests and one script

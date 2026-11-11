@@ -21,6 +21,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
+- **Shared tool descriptions can be worded per MCP surface (#4796).** `composeDescription(description, surface?)` takes an optional `'local' | 'hosted'`, and a description may carry `selectionGuidanceFor` for a sentence that names a tool only one surface registers. The `McpSurface` type is exported. With no surface the shared text is unchanged, so `havenTools` and existing callers are unaffected. No update needed.
 - **The delegate-key credential-file handling is shared, on `@haven_ai/sdk/edge`
   (#4792).** The local MCP and the edge signer each carried a copy of the code
   that reads the agent's credential file — the file that holds the delegate

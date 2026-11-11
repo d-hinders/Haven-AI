@@ -113,8 +113,10 @@ describe('the table is well-formed', () => {
   test('every per-surface CI job has a table entry', () => {
     // The other direction: a job whose package is absent from the table can
     // never be a fan-out target, so a change to what it builds routes nowhere.
+    // `packages` is excluded like `code`/`full`: it is a workspace-wide flag
+    // (#4763), not a package, so it has a job and no table entry by design.
     const jobFlags = OUTPUT_NAMES.filter(
-      (f) => f !== 'code' && f !== 'full' && workflow.includes(`\n  ${f}_checks:\n`),
+      (f) => f !== 'code' && f !== 'full' && f !== 'packages' && workflow.includes(`\n  ${f}_checks:\n`),
     )
     assert.deepEqual([...PACKAGE_JOBS].sort(), jobFlags.sort())
   })
@@ -192,11 +194,11 @@ describe('the fan-out the issue specifies', () => {
     return rule ? [...rule.then].sort() : []
   }
 
-  test('full fans out to every package job', () => {
+  test('full fans out to every package job, plus the workspace-wide cycle pass', () => {
     const full = PROPAGATION_RULES.find((r) => r.when.includes('full'))
     assert.deepEqual(
       [...full.then].sort(),
-      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'ops', 'qa_agent', 'sdk', 'signer', 'ui'],
+      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'ops', 'packages', 'qa_agent', 'sdk', 'signer', 'ui'],
     )
   })
 

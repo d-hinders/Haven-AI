@@ -22,6 +22,21 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 ### Added
 
 - **Shared tool descriptions can be worded per MCP surface (#4796).** `composeDescription(description, surface?)` takes an optional `'local' | 'hosted'`, and a description may carry `selectionGuidanceFor` for a sentence that names a tool only one surface registers. The `McpSurface` type is exported. With no surface the shared text is unchanged, so `havenTools` and existing callers are unaffected. No update needed.
+- **The delegate-key credential-file handling is shared, on `@haven_ai/sdk/edge`
+  (#4792).** The local MCP and the edge signer each carried a copy of the code
+  that reads the agent's credential file — the file that holds the delegate
+  private key — and about half of the signer's copy matched the local MCP's line
+  for line. The common part is now one module, exported from the edge entry
+  only (the barrel does not re-export it): `stringField`,
+  `readAccountAddressField`, `readAccountAddressEnv`, `permissiveMode`,
+  `warnIfFilePermissiveWithPrefix`, and the types `RawAccountAddressFields`,
+  `PermissiveFile` and `PermissionLog`. Behaviour is unchanged in both packages,
+  including the exact warning text and the symlink handling: `permissiveMode`
+  still defaults to `'nofollow'`, and both credential checks pass `'follow'`
+  because a credential reached through a symlink is judged by its target. The
+  module is on the money-path perimeter — it is how the key is read — so a later
+  change to it owes a covering QA run. No update needed to keep paying.
+
 - **A merchant can verify an agent's Agent Passport (#4723).** Two new
   merchant-side functions on the main entry: `verifyPassportReceipt(body,
   options)` — a pure verifier of a `GET /passport/verify` body against a

@@ -1,6 +1,6 @@
 # Quality-scan — measurement blocks (#2501, #4471)
 
-Loaded by [`quality-scan`](../SKILL.md) § *Method* step 3. Each block states
+Loaded by [`quality-scan`](../SKILL.md) § *Method* step 4. Each block states
 the **command**, the **sample** and **what clean looks like**; the figures
 under each block are the run in which the command last produced a number —
 its positive control until the ledger supersedes them. The prose here and in
@@ -16,7 +16,9 @@ purchases — a refusal labelled "transient, retry once" or left untyped (8 of 9
 by title pattern), and one tool's output lost or refused across a hop (8 of
 10). They are numbered 8 and 9, not 7 and 8: the ledger already uses "block 7"
 for the retired *Chain health* block (#2775, `e91bca463`), and its delta rule
-compares blocks by number. Four rules hold for every block:
+compares blocks by number. Block 10 is neither: it comes from the purchase QA of
+2026-11-09 (#4754, #4755), which found two money defects no block looked for,
+both visible from unpaid requests. Four rules hold for every block:
 
 - **Use the instrument that exists; never re-implement it.** The money-path
   matcher is `scripts/ci/qa-freshness.mjs`'s `matchesGlob` (the one
@@ -30,7 +32,8 @@ compares blocks by number. Four rules hold for every block:
   `origin/dev@893d74f6` (2026-09-03), are that control until a later run
   supersedes them in the ledger. Blocks 8 and 9 carry a seeded control of their
   own and their figures were taken at `aad313ad9` (2026-10-27), not at
-  `893d74f6`.
+  `893d74f6`; block 10 carries its own fixture controls and its figures were
+  taken at `8486093df` (2026-11-11).
 - **Run each instrument the way CI runs it, and prove the tools resolve.**
   A gate CI invokes with a flag answers a different question without it:
   `coupling-gate.mjs` runs `--strict` in `docs-coupling.yml`, and strict mode
@@ -68,29 +71,86 @@ mutations → 4 caught); #2444 is the *not load-bearing at the tested
 condition* diagnosis in the wild (a PASS with the payment still on the
 delegate).
 
+**Sample: money-path guard files that carry no recorded mutation, oldest
+first.** A *guard file* is a test file whose path, with `.test.` removed,
+matches a money-path glob (`.github/money-path-globs.json`, through the
+classifier's own matcher) — `packages/backend/src/modules/x402/__tests__/foo.test.ts`
+is one because `…/foo.ts` matches `packages/backend/src/modules/x402/**`.
+*No recorded mutation* is measured against the record of past cells, and the
+record is stated here because it decides the sample.
+
+**What record of past cells exists, and why the sample does not read it.**
+Three were checked at `8486093df`:
+- `prove-red` result files (`$SCRATCH/prove-red-<issue>-<mode>.json`) — the
+  runner's own output, but `$SCRATCH` is per-session and nothing commits them,
+  so no file survives to be read.
+- PR bodies' mutation tables — durable, and 154 of the 300 merged PRs in
+  2026-10-01..2026-11-11 mention a mutation. But a table names a guard by its
+  sentence (`an undeclared hosted-only key fails`), not by path: 0 of the 300
+  carry a `Guard file` column, so no row joins to a file.
+- the ledger's block-1 lines — prose, and the same problem (`bare-hash
+  refusal`, `audit rotation bound`).
+
+No record is usable at file granularity, so the criterion is met the way the
+issue allows: sample money-path guard files **not changed in the last 20
+first-parent landings**, with **N = 20** — the same window the previous sample
+used, so the change is which side of the window, not a new window. A file no
+landing has touched in 20 landings is the code least likely to have been
+mutated already, which is the property the sample wants.
+
 ```bash
-# Sample: test files changed by the last 20 first-parent landings on dev
-# whose diff also touched a money-path file (the classifier's own matcher).
+# Sample: money-path guard files NOT changed by the last 20 first-parent
+# landings on dev, oldest first (the file that has gone longest without a
+# landing goes first). Falls back to the previous sample — test files changed
+# by those landings whose diff also touched a money-path file, newest landing
+# first — when the filtered set is empty.
 node -e '
 import("./scripts/ci/qa-freshness.mjs").then(async (q) => {
   const cp = await import("node:child_process")
+  const git = (...a) => cp.execFileSync("git", a).toString()
   const globs = q.loadMoneyPathGlobs()
-  const shas = cp.execFileSync("git", ["log", "--first-parent", "origin/dev", "-n", "20", "--format=%h"]).toString().trim().split("\n")
+  const landings = git("log", "--first-parent", "origin/dev", "-n", "20", "--format=%h").trim().split("\n")
+  const recent = new Set()
+  for (const s of landings) for (const f of git("show", "--format=", "--name-only", s).trim().split("\n").filter(Boolean)) recent.add(f)
+  const isGuard = (f) => /\.test\.(ts|tsx|mjs)$/.test(f) && globs.some((g) => q.matchesGlob(f.replace(/\.test\.(ts|tsx|mjs)$/, ".$1"), g))
+  const rows = git("ls-files", "packages").trim().split("\n").filter((f) => isGuard(f) && !recent.has(f))
+    .map((f) => ({ f, sha: git("log", "-1", "--format=%h", "--", f).trim(), at: Number(git("log", "-1", "--format=%ct", "--", f).trim()) }))
+    .sort((a, b) => a.at - b.at)
+  if (rows.length) {
+    for (const r of rows) console.log(r.sha, r.f)
+    console.log("candidate guard files:", rows.length)
+    return
+  }
   const seen = new Set()
-  for (const s of shas) {
-    const files = cp.execFileSync("git", ["show", "--format=", "--name-only", s]).toString().trim().split("\n").filter(Boolean)
+  for (const s of landings) {
+    const files = git("show", "--format=", "--name-only", s).trim().split("\n").filter(Boolean)
     if (!files.some((f) => globs.some((g) => q.matchesGlob(f, g)))) continue
     for (const t of files.filter((f) => /\.test\.(ts|tsx|mjs)$/.test(f))) if (!seen.has(t)) { seen.add(t); console.log(s, t) }
   }
   console.log("candidate guard files:", seen.size)
 })'
-# Budget (below): 5 census mutations, one per file, newest landing first,
-# plus up to 2 targeted probes — never promise the whole sample. Per mutation:
-# invert or delete the condition the guard names in its own title. Save the
-# output above to $SCRATCH/census-<scan>.txt, write one `census` cell per
-# sampled file (plus the probes) to $SCRATCH/prove-red-<scan>-cells.json, then:
+# Budget (below): 5 census mutations, one per file, in the order the census
+# lists them (oldest first), plus up to 2 targeted probes — never promise the
+# whole sample. Per mutation: invert or delete the condition the guard names in
+# its own title. Save the output above to $SCRATCH/census-<scan>.txt, write one
+# `census` cell per sampled file (plus the probes) to
+# $SCRATCH/prove-red-<scan>-cells.json, then:
 node scripts/ci/prove-red.mjs census --issue <scan> --candidates "$SCRATCH/census-<scan>.txt"
 ```
+
+**The output is a contract `prove-red` consumes.** `parseCandidates`
+(`scripts/ci/prove-red.mjs:419`) reads `<sha> <file>` lines and a
+`candidate guard files: N` line, and `selectCensus` (`:449`) takes the first
+five listed. The command keeps that shape and lists files in the order the
+runner should take them — oldest first — printing, per file, the commit that
+last touched it. The fallback branch prints the landing that changed the file,
+which is the same field under the old sample's meaning.
+
+**Fallback, not a second sample.** When every money-path guard file changed in
+the last 20 landings, the filtered set is empty and the command prints the
+previous sample instead: test files changed by those landings whose diff also
+touched a money-path file, newest landing first. That branch is the old command
+unchanged; a run that takes it says so in its block-1 line.
 
 [prove-red](../../prove-red/SKILL.md) § *census* picks the sample, runs each
 cell against a green baseline, restores and verifies it, and prints the block-1
@@ -105,9 +165,16 @@ the mutation does not touch), *dead code* (the mutated line is unreachable),
 mutation) — never as a bare count. On `893d74f6`: 9 candidate files; the control mutation
 (#2483's `you should append --json` → `you may append`) took
 `agent-connection-setups.test.ts` from 107 passed to 1 failed; 1 of 1 caught.
+That 9 is the **old** newest-landing sample's figure and stays as its control.
+On `8486093df` the new sample reads **253 candidate guard files**, oldest
+first; the first five are `packages/mcp-server/src/auth.test.ts` (`f5f259f0d`),
+`boot.test.ts` (`48f9fc34a`), `log.test.ts` (`418c8ce96`), `http.test.ts`
+(`78107695c`) and `packages/signer/src/node-version.test.ts` (`ba14f39e4`).
 
-**Budget: 5 census mutations plus up to 2 targeted probes.** A probe is one
-of two kinds, the two that found the 2026-10-19 run's weak guards: the
+**Budget: 5 census mutations plus up to 2 targeted probes.** The five are the
+first five files the census lists, one mutation each, in that order (oldest
+first). A probe is one of two kinds, the two that found the 2026-10-19 run's
+weak guards: the
 *second copy* of a guard a census mutation caught (M5, `client.ts:1936`,
 green in its own package and caught only across a package boundary → C3; M5
 was also that run's fifth census target), and a *count-only pin*, one that
@@ -697,3 +764,222 @@ that remain are `mpp`, `spent_display`, `remaining_display`, `is_live` and
 `endpoint_host`. Read but never emitted is unchanged at 12. The recording is
 unchanged — only the mapper moved — which is what makes the join a measurement
 rather than a snapshot.
+
+**10. Catalog conformance — the row against the merchant's own 402, and the
+header the SDK would build.** No block compared a catalog row with the
+merchant's 402, or measured the payment header the SDK builds from it. The
+purchase QA of 2026-11-09 found two money defects no block looks for, both
+visible from unpaid requests: #4754 (a doubled EIP-3009 payment header answered
+HTTP 431 after funding — 4,969 bytes at Anchor and 6,520 at CoinGecko, because
+the v2 envelope echoes the merchant's `extensions`) and #4755 (the Anchor
+calldata row carries no `http_method` or `body_example`, while the merchant's
+402 to a POST declares `method: POST, bodyType: json`). The same hand probe
+found three more HTTP rows whose 402 declares query parameters the catalog
+cannot carry.
+
+**Two tiers, because of the owner decision of 2026-11-10 on #4757.** A default
+whole-repo scan may send unpaid requests to hosted Haven on dev; unpaid requests
+to third-party merchants happen only when the person starting the scan asks for
+them.
+
+- **Default tier (every run).** The block's offline fixture controls, plus the
+  unauthenticated `GET /catalog` of hosted Haven on **dev**, used only to list
+  which rows are `status: active` and their `protocol`, `source` and
+  `endpoint_host`. Nothing is sent to a merchant.
+- **Third-party tier (only when the starter asks for third-party probes).**
+  Every `status: active`, `source: operator`, `protocol: http` row whose
+  `endpoint_host` is not Haven-operated. The Haven-operated hosts excluded are
+  the demo merchant's two deployments (migration 058):
+  `demo-merchant-dev-84e4.up.railway.app` and
+  `enthusiastic-blessing-production-171f.up.railway.app` — both `protocol: mcp`,
+  which this block does not cover either. The report quotes the request that
+  turned the tier on. Without it the block writes
+  `block 10 → third-party tier not examined → third-party probes not requested`.
+
+**Where the probe target comes from.** The public listing carries neither
+`resource_url` nor the call fields (`PUBLIC_CATALOG_FIELDS`,
+`packages/backend/src/routes/catalog.ts:85-101`). The block states its source: a
+locally migrated database at the scan SHA (the one blocks 8 and 9 already need),
+labelled "seed rows at `<sha>`", or a dev agent's authenticated `GET /catalog`,
+which returns only rows on that agent's own chain (`routes/catalog.ts:340-341`).
+A scan session may hold a **dev** agent key; block 10 uses it for that read
+only. A session never holds a production agent key and never reads hosted Haven
+production. The rows file the third-party tier probes is built by that match:
+each listed row joined to its target on `name` and `endpoint_host` together; a
+listed row with no match, or more than one, is reported as "no probe target" and
+not probed. A row count of 0 from a source is reported the same way, not as
+clean. The live-call rule applies to the listing read: record the deployed
+revision before the first call where it can be read, or write "not
+determinable", which is a coverage limit.
+
+**Probe (third-party tier only).** One unpaid request per row, as the row
+declares it. No payment header, no signer, no Haven payment tool, no credential
+or cookie, redirects not followed, one attempt. Rows with `source: bazaar` are
+never probed: their URLs are seller-chosen and unreviewed, and the backend's own
+refresh reaches them only through its guarded fetch. A row answering anything
+but 402 is reported, not retried.
+
+**Half A, call semantics.** The row's method, body type and body example against
+the 402's `extensions.bazaar.info.input` (method, bodyType, body or
+queryParams). Report rows whose declared shape differs, and rows whose 402
+declares parameters the catalog has no column for. A 402 that carries no
+`extensions.bazaar.info.input` is reported as `no declared input`, a lead and
+never a match: a row with no declared method is probed with GET
+(`merchant-catalog.ts:447`, the refresh's own default), Anchor's GET answer to
+the calldata row carried no input, and the mismatch was in its POST answer
+(#4755). The block does not send a second request with another method.
+
+**Half B, header budget.** For each 402, build the payment header the SDK would
+send, through the real `x402V2PaymentEnvelope` with a fixed dummy authorization,
+and print its byte length, the names `x402RetryHeadersFor` returns, the product
+of the two, and the size of the largest echoed extension. The built header is
+never sent. Live figures exist only in the third-party tier; the default tier
+runs half B over the fixture alone.
+
+- Clean: every product is at or under **6,520 bytes**, the largest header
+  observed to succeed (#4754). A product above **9,938 bytes**, the observed
+  failure (2 × 4,969 against Anchor), is a finding; between the two it is a
+  lead.
+- Since #4756 (merged after this issue's measurement base) a v2 payload goes out
+  under one header name, so at the tip the product equals the header length.
+  Re-read `packages/sdk/src/x402.ts` at the scan SHA and say so in the block's
+  line.
+
+```bash
+# Prerequisite: the SDK build — half B goes through the real envelope.
+npm run build -w packages/sdk
+# Default tier, every run: the offline fixture controls, then the dev listing.
+node scripts/ci/catalog-conformance.mjs fixtures
+node scripts/ci/catalog-conformance.mjs listing
+# Third-party tier, only when the starter asked for third-party probes: one
+# unpaid request per row, from a row source the block names.
+node scripts/ci/catalog-conformance.mjs probe --rows "$SCRATCH/catalog-rows-<scan>.json"
+```
+
+**Positive control (offline, every run).** Half A: a committed fixture pair, one
+catalog row and one 402 whose `extensions.bazaar.info.input` declares a
+different method and a query parameter, which the comparison must report; a
+matching pair, which it must not; and a third pair whose 402 carries no input,
+which must be reported as `no declared input`. A known match alone would only
+show that both sides parse. Half B: a fixture challenge with an echo of 5 KB or
+more. In the third-party tier the Anchor token-price row (POST, declared,
+matches) is the live control.
+
+**False-positive classes, stated** (third-party tier): a merchant that is down;
+a merchant whose GET and POST 402s differ; a row on a chain the environment does
+not list. And for both tiers: a row the tier does not cover (Haven-operated,
+`protocol: mcp`, `source: bazaar`) is out of sample, not clean.
+
+**Baseline figures.** The fixture controls at `8486093df` (the PR's base):
+`fixtures` → the mismatch pair reported (`method: row GET, 402 POST; body: row
+none, 402 json; query parameters the catalog cannot carry: network`), the
+matching pair not reported, the no-input pair reported as `no declared input`;
+half B over the large-echo fixture → header **7,976 bytes**, names
+`PAYMENT-SIGNATURE` (1), product **7,976 bytes**, largest echoed extension
+**5,122 bytes** → lead. The default tier's listing read, taken
+2026-11-11T02:37Z: **26 entries, 24 active, 12 http/operator, 12 mcp/operator, 0
+bazaar**; the third-party tier would cover 12 rows across 7 hosts
+(`api.anchor-x402.com`, `api.linkedpanda.com`, `api.nansen.ai`, `minifetch.com`,
+`pro-api.coingecko.com`, `services.ampersend.ai`,
+`services.sandbox.ampersend.ai`). For the third-party tier, the 2026-11-09 hand
+probe recorded in #4754 and #4755 stands, labelled as taken by hand, until the
+first run whose starter asks for third-party probes supersedes it.
+
+**Reporting.** Each tier is reported on its own line: `examined`, `partial`, or
+`not examined → <reason>` (network unavailable; third-party probes not
+requested). Neither is ever a zero.
+
+**Self-test.** `scripts/ci/catalog-conformance.test.mjs` runs in the always-run
+*Repo CI config checks* job (`node --test scripts/ci/*.test.mjs`), so it needs no
+`npm ci` and no build. It proves the join can say yes and no on the committed
+fixtures, and the budget arithmetic and its thresholds on a fixture encoder; it
+does not prove the real envelope produces the bytes — that is `fixtures` mode's
+job against the built package, and the figures above are what it printed.
+
+**Not a manifest row.** Block 10 does not join
+`docs/quality/scan-baselines.json`: it needs the network (the dev listing, and
+the third-party tier on request) and an SDK build, while a manifest row must be
+cheap, offline, and carry the newest `Probed clean` entry's SHA with a `$SHA`
+command (`scripts/docs/scan-baselines.test.mjs`). Its fixture figures live here
+and in the ledger entry, not in the manifest.
+
+**Probe: residual archaeology — what merged PRs say they did not solve.** Not a
+numbered block: it is the replacement for reading `TODO`s, and it produces leads
+for candidates, never a structural finding on its own. The repository now names
+its unsolved problems in PR bodies, not in comments: `git grep -c -w -E
+'TODO|FIXME|HACK|XXX' 49747fac3 -- 'packages/*/src/*' | wc -l` → **0 files**
+(control, the same command with `import` → 2,303), and all three product
+candidates of the 2026-10-30 run cite a merged PR's own statement of a residual
+(`scan-ledger.md:2330` PR #4544, `:2338` PR #4546, `:2342` PR #4479).
+
+**Sample: PRs merged to `dev` in the scan window.** The window is bounded by
+**instants**, never dates: a date-only range grows within hours (2026-10-30..
+2026-11-09 read 112 at 2026-11-09T21:40Z and 114 later that day). Quote the
+count beside the time it was taken.
+
+```bash
+# Sample: PRs merged to dev in the window, bounded by instants.
+FROM=2026-10-30T00:00:00Z; TO=2026-11-09T21:40:00Z
+gh pr list --state merged --base dev --search "merged:$FROM..$TO" --limit 300 --json number,title,body > "$SCRATCH/prs.json"
+# Extract the inline `Residual risk:` line and every residual heading's
+# top-level bullets; print the ones that cite no issue or PR.
+node -e '
+const fs = require("node:fs")
+const prs = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+const inline = /^[-*]?\s*\**Residual risk:\**[ \t]*(\S.*)$/gim
+const heading = /^#{2,3}\s*(Residual risk|Not covered|Not in scope|Follow-?ups?|Deferred|Known limits?|Out of scope)/gim
+const none = /^(none|n\/a|no)\b/i
+let withInline = 0, saysNone = 0, withHeading = 0, bullets = 0, cited = 0
+for (const pr of prs) {
+  const body = pr.body ?? ""
+  const lines = [...body.matchAll(inline)].map((m) => m[1].trim()).filter(Boolean)
+  if (lines.length) withInline += 1
+  saysNone += lines.filter((t) => none.test(t)).length
+  const sections = [...body.matchAll(heading)]
+  if (sections.length) withHeading += 1
+  for (const m of sections) {
+    const rest = body.slice(m.index + m[0].length)
+    const stop = rest.search(/^#{1,3}\s/m)
+    const section = stop === -1 ? rest : rest.slice(0, stop)
+    for (const b of section.split("\n").filter((l) => /^[-*]\s+\S/.test(l))) {
+      bullets += 1
+      if (/#\d+/.test(b)) cited += 1
+      else console.log(`#${pr.number} ${b.trim().slice(0, 160)}`)
+    }
+  }
+  for (const l of lines) if (!none.test(l) && !/#\d+/.test(l)) console.log(`#${pr.number} Residual risk: ${l.slice(0, 160)}`)
+}
+console.log(`PRs ${prs.length}; inline Residual risk ${withInline} (${saysNone} say none); residual headings ${withHeading}; bullets ${bullets}, ${cited} citing an issue or PR`)
+' "$SCRATCH/prs.json"
+```
+
+**Report:** the residuals that cite no issue number, grouped by surface, each
+with its PR number. Each is a **lead for a candidate, not a finding** — the
+structural bar is unchanged, and a residual a PR already names is prior art the
+scan must not re-file as new.
+
+**Clean:** every residual in the window either cites an issue or PR, or is
+accepted by a recorded owner decision. **False-positive classes:** a residual
+that says `none`; a residual accepted by a recorded owner decision; a residual
+already tracked under another wording (the same defect named differently in
+another PR or issue).
+
+**The `TODO` grep stays as a one-line control, not as a step.** It is the
+existing `comment-archaeology-markers` row in `docs/quality/scan-baselines.json`
+with its `import` control row, and `REQUIRED_BLOCKS` in
+`scripts/docs/scan-baselines.test.mjs` keeps `comment-archaeology`. A zero from
+it is a control that the instrument can still say no, not a finding.
+
+**Baseline (window 2026-10-30T00:00:00Z..2026-11-09T21:40:00Z, taken
+2026-11-11T02:44Z):** 112 PRs; 55 carry an inline `Residual risk:` line, 6 of
+those say none; 15 carry a residual heading; 59 top-level bullets in those
+sections, 4 citing an issue or PR. The same figures the issue recorded at
+2026-11-09T21:40Z, reproduced by this command — the instant-bounded window is
+what makes them stable.
+
+**Not a manifest row.** The `gh` census cannot join
+`docs/quality/scan-baselines.json`: a manifest row must carry the newest
+`Probed clean` entry's SHA and a `$SHA` command
+(`scripts/docs/scan-baselines.test.mjs`), and this one reads GitHub at a wall
+clock, not a commit. The `comment-archaeology-markers` row stays the manifest's
+record of the `TODO` control.

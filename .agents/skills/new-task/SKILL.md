@@ -50,6 +50,11 @@ record a machine's observation, not an agent's judgement.
      for other issues.
    - **Surface**: checked surface labels.
    - **Money-path?**: explicit Yes or No.
+   - **Found by** for a defect issue: one body line, `Found by: <channel>`,
+     from the closed list `live purchase`, `review`, `builder`, `quality-scan`,
+     `owner`, `external`, `CI`, `unknown`. It records which channel found the
+     defect, so a quality-scan run can measure which defects escaped it
+     (#4757). A feature, an epic or a chore carries no such line.
 
    Take the template's **body shape and its sizing rule** — "keep it small and
    self-contained, one PR's worth of work"; anything larger is an epic, below.

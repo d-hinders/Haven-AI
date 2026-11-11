@@ -123,6 +123,7 @@ import * as agentsAvatarTint from './121_agents_avatar_tint.js'
 import * as agentsAvatarTintSupersededHolds from './122_agents_avatar_tint_superseded_holds.js'
 import * as purchaseCorrelationKey from './123_purchase_correlation_key.js'
 import * as userVisits from './124_user_visits.js'
+import * as anchorCalldataCallSemantics from './125_anchor_calldata_call_semantics.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -305,4 +306,5 @@ export const migrations: Migration[] = [
   agentsAvatarTintSupersededHolds,
   purchaseCorrelationKey,
   userVisits,
+  anchorCalldataCallSemantics,
 ]

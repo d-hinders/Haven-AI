@@ -15,8 +15,68 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.13.0-alpha.0",
+    "released_version": "0.14.0-alpha.0",
     "notes": [
+      {
+        "version": "0.14.0-alpha.0",
+        "date": "2026-11-11",
+        "summary": "An x402 v2 payment goes out under PAYMENT-SIGNATURE alone, on either scheme. x402PaymentHeaderNamesFor now decides by the payload's x402Version: v2 → PAYMENT-SIGNATURE only; v1 (and an unreadable header) → both PAYMENT-SIGNATURE and X-PAYMENT, as before. (+9 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "An x402 v2 payment goes out under ",
+            "code": false
+          },
+          {
+            "text": "PAYMENT-SIGNATURE",
+            "code": true
+          },
+          {
+            "text": " alone, on either scheme. ",
+            "code": false
+          },
+          {
+            "text": "x402PaymentHeaderNamesFor",
+            "code": true
+          },
+          {
+            "text": " now decides by the payload's ",
+            "code": false
+          },
+          {
+            "text": "x402Version",
+            "code": true
+          },
+          {
+            "text": ": v2 → ",
+            "code": false
+          },
+          {
+            "text": "PAYMENT-SIGNATURE",
+            "code": true
+          },
+          {
+            "text": " only; v1 (and an unreadable header) → both ",
+            "code": false
+          },
+          {
+            "text": "PAYMENT-SIGNATURE",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "X-PAYMENT",
+            "code": true
+          },
+          {
+            "text": ", as before. (+9 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.13.0-alpha.0",
         "date": "2026-10-30",
@@ -32,28 +92,36 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.12.0-alpha.0",
-        "date": "2026-10-29",
-        "summary": "haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+10 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven_list_receipts",
-            "code": true
-          },
-          {
-            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+10 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.13.0-alpha.0",
+    "released_version": "0.14.0-alpha.0",
     "notes": [
+      {
+        "version": "0.14.0-alpha.0",
+        "date": "2026-11-11",
+        "summary": "retry_headers names PAYMENT-SIGNATURE alone for an x402 v2 payload. It follows the SDK's new version rule: EIP-3009 used to return both names, and a doubled header carrying a merchant's echoed extensions was refused with HTTP 431 after funding.",
+        "summary_segments": [
+          {
+            "text": "retry_headers",
+            "code": true
+          },
+          {
+            "text": " names ",
+            "code": false
+          },
+          {
+            "text": "PAYMENT-SIGNATURE",
+            "code": true
+          },
+          {
+            "text": " alone for an x402 v2 payload. It follows the SDK's new version rule: EIP-3009 used to return both names, and a doubled header carrying a merchant's echoed extensions was refused with HTTP 431 after funding.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.13.0-alpha.0",
         "date": "2026-10-30",
@@ -61,18 +129,6 @@ export const CLIENT_RELEASE_DATA = {
         "summary_segments": [
           {
             "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.12.0-alpha.0",
-        "date": "2026-10-29",
-        "summary": "Every successful signature now names the agent's next step. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "Every successful signature now names the agent's next step. (+1 more in the changelog)",
             "code": false
           }
         ],
@@ -81,8 +137,40 @@ export const CLIENT_RELEASE_DATA = {
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.13.0-alpha.0",
+    "released_version": "0.14.0-alpha.0",
     "notes": [
+      {
+        "version": "0.14.0-alpha.0",
+        "date": "2026-11-11",
+        "summary": "haven_send and haven_sweep_delegate no longer point at a tool this package does not have. Both descriptions told the agent to use haven_check_funds, which only the hosted MCP registers. (+2 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven_send",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "haven_sweep_delegate",
+            "code": true
+          },
+          {
+            "text": " no longer point at a tool this package does not have. Both descriptions told the agent to use ",
+            "code": false
+          },
+          {
+            "text": "haven_check_funds",
+            "code": true
+          },
+          {
+            "text": ", which only the hosted MCP registers. (+2 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.13.0-alpha.0",
         "date": "2026-10-30",
@@ -90,26 +178,6 @@ export const CLIENT_RELEASE_DATA = {
         "summary_segments": [
           {
             "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.12.0-alpha.0",
-        "date": "2026-10-29",
-        "summary": "The local haven_list_receipts rows carry the delivery verdict, the settlement scheme and the budget hash. (+3 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "The local ",
-            "code": false
-          },
-          {
-            "text": "haven_list_receipts",
-            "code": true
-          },
-          {
-            "text": " rows carry the delivery verdict, the settlement scheme and the budget hash. (+3 more in the changelog)",
             "code": false
           }
         ],
@@ -118,8 +186,60 @@ export const CLIENT_RELEASE_DATA = {
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.13.0-alpha.0",
+    "released_version": "0.14.0-alpha.0",
     "notes": [
+      {
+        "version": "0.14.0-alpha.0",
+        "date": "2026-11-11",
+        "summary": "The fix for reaches installed agents through runtime-manifest.ts. The next connect release must bump sdkVersion and signerVersion to the releases that send an x402 v2 payment under PAYMENT-SIGNATURE alone; --doctor installs whatever those pin.",
+        "summary_segments": [
+          {
+            "text": "The fix for reaches installed agents through ",
+            "code": false
+          },
+          {
+            "text": "runtime-manifest.ts",
+            "code": true
+          },
+          {
+            "text": ". The next connect release must bump ",
+            "code": false
+          },
+          {
+            "text": "sdkVersion",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "signerVersion",
+            "code": true
+          },
+          {
+            "text": " to the releases that send an x402 v2 payment under ",
+            "code": false
+          },
+          {
+            "text": "PAYMENT-SIGNATURE",
+            "code": true
+          },
+          {
+            "text": " alone; ",
+            "code": false
+          },
+          {
+            "text": "--doctor",
+            "code": true
+          },
+          {
+            "text": " installs whatever those pin.",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.13.0-alpha.0",
         "date": "2026-10-30",
@@ -127,50 +247,6 @@ export const CLIENT_RELEASE_DATA = {
         "summary_segments": [
           {
             "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.12.0-alpha.0",
-        "date": "2026-10-29",
-        "summary": "The installed skill names the ended budget. needs_approval with no allowances[] rows and budgetEndedAt set means the budget ENDED on that date — waiting will not help, ask the owner to set a new one; with no rows and no budgetEndedAt, nobody approved a budget yet. (+3 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "The installed skill names the ended budget. ",
-            "code": false
-          },
-          {
-            "text": "needs_approval",
-            "code": true
-          },
-          {
-            "text": " with no ",
-            "code": false
-          },
-          {
-            "text": "allowances[]",
-            "code": true
-          },
-          {
-            "text": " rows and ",
-            "code": false
-          },
-          {
-            "text": "budgetEndedAt",
-            "code": true
-          },
-          {
-            "text": " set means the budget ENDED on that date — waiting will not help, ask the owner to set a new one; with no rows and no ",
-            "code": false
-          },
-          {
-            "text": "budgetEndedAt",
-            "code": true
-          },
-          {
-            "text": ", nobody approved a budget yet. (+3 more in the changelog)",
             "code": false
           }
         ],
@@ -179,8 +255,24 @@ export const CLIENT_RELEASE_DATA = {
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.13.0-alpha.0",
+    "released_version": "0.14.0-alpha.0",
     "notes": [
+      {
+        "version": "0.14.0-alpha.0",
+        "date": "2026-11-11",
+        "summary": "haven guide's runbook says signup is passkey-only. Its copy of the agent runbook drops \"or a wallet\" from the account step and the signup hand-off script, regenerated from the SDK runbook: signup offers a passkey, and a wallet joins an existing account's signer set later. (+2 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "haven guide",
+            "code": true
+          },
+          {
+            "text": "'s runbook says signup is passkey-only. Its copy of the agent runbook drops \"or a wallet\" from the account step and the signup hand-off script, regenerated from the SDK runbook: signup offers a passkey, and a wallet joins an existing account's signer set later. (+2 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.13.0-alpha.0",
         "date": "2026-10-30",
@@ -188,46 +280,6 @@ export const CLIENT_RELEASE_DATA = {
         "summary_segments": [
           {
             "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.12.0-alpha.0",
-        "date": "2026-10-29",
-        "summary": "haven guide's runbook gives needs_approval its three causes. No allowances[] rows with budgetEndedAt set: the budget ENDED on that date — waiting will not help, ask the owner to set a new one. (+3 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "haven guide",
-            "code": true
-          },
-          {
-            "text": "'s runbook gives ",
-            "code": false
-          },
-          {
-            "text": "needs_approval",
-            "code": true
-          },
-          {
-            "text": " its three causes. No ",
-            "code": false
-          },
-          {
-            "text": "allowances[]",
-            "code": true
-          },
-          {
-            "text": " rows with ",
-            "code": false
-          },
-          {
-            "text": "budgetEndedAt",
-            "code": true
-          },
-          {
-            "text": " set: the budget ENDED on that date — waiting will not help, ask the owner to set a new one. (+3 more in the changelog)",
             "code": false
           }
         ],

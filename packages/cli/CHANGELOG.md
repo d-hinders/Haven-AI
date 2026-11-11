@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.14.0-alpha.0 — 2026-11-11
+
 ### Changed
 
 - **`haven guide`'s runbook says signup is passkey-only (#4675).** Its copy of

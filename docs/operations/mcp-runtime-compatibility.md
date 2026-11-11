@@ -672,10 +672,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.13.0-alpha.0` |
-| `@haven_ai/mcp` | `0.13.0-alpha.0` |
-| `@haven_ai/sdk` | `0.13.0-alpha.0` |
-| `@haven_ai/signer` | `0.13.0-alpha.0` |
+| `@haven_ai/connect` | `0.14.0-alpha.0` |
+| `@haven_ai/mcp` | `0.14.0-alpha.0` |
+| `@haven_ai/sdk` | `0.14.0-alpha.0` |
+| `@haven_ai/signer` | `0.14.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 

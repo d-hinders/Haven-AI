@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.14.0-alpha.0 — 2026-11-11
+
 ### Changed
 
 - **The fix for #4754 reaches installed agents through `runtime-manifest.ts` (#4754).** The next connect release must bump `sdkVersion` and `signerVersion` to the releases that send an x402 v2 payment under `PAYMENT-SIGNATURE` alone; `--doctor` installs whatever those pin. Nothing in connect itself changes. No update needed.

@@ -153,14 +153,42 @@ const MAKE_PAYMENT_DESCRIPTION =
 // stable substring tests assert on) and then appends the SDK-specific guidance
 // for tool-calling consumers.
 
+/**
+ * #4808: `havenTools` is a third surface, and its six tools are not the MCP
+ * surface's tools. Two shared fragments name MCP tool names, and both are
+ * pinned byte-for-byte by the two MCP goldens
+ * (`packages/mcp/src/local-tool-contract.golden.json` and
+ * `packages/mcp-server/src/tools-list.snapshot.json`), so the shared text
+ * cannot change. These are the SDK-surface variants, derived from the shared
+ * fragment so there is one source of truth: the MCP-only pointer is dropped,
+ * and an MCP tool name is replaced by the SDK tool that does the same job.
+ * `sdk-tool-names.test.ts` fails if a variant stops differing from the shared
+ * text (a silent no-op) or names a tool outside the six.
+ */
+const SDK_GET_ALLOWANCES_BEHAVIOR = sharedDescriptions.getAllowances.behavior.replace(
+  "Open task budgets are not listed here: haven_get_agent's taskBudgets[] carries each one's spentAtomic/remainingAtomic and lifecycle status.",
+  'Open task budgets are not listed here.',
+)
+
+const SDK_PAY_X402_NEXT_ACTION_GUIDANCE = sharedDescriptions.payX402.nextActionGuidance.replaceAll(
+  'haven_get_payment_status',
+  'get_payment_status',
+)
+
 const GET_STATUS_DESCRIPTION =
   sharedDescriptions.getPaymentStatus.summary + ' ' +
   'Accepts payment intent IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
 
-const GET_ALLOWANCES_DESCRIPTION = composeDescription(sharedDescriptions.getAllowances)
+const GET_ALLOWANCES_DESCRIPTION = composeDescription({
+  ...sharedDescriptions.getAllowances,
+  behavior: SDK_GET_ALLOWANCES_BEHAVIOR,
+})
 
 const AUTHORIZE_X402_DESCRIPTION =
-  composeDescription(sharedDescriptions.payX402) + ' ' +
+  composeDescription({
+    ...sharedDescriptions.payX402,
+    nextActionGuidance: SDK_PAY_X402_NEXT_ACTION_GUIDANCE,
+  }) + ' ' +
   'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key; funding, when the scheme needs it, is redeemed from the agent budget delegation and is bounded by it. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +

@@ -90,6 +90,39 @@ covers:
 last-verified: "2026-11-11"
 ---
 
+> **Contract change (#4808, 2026-11-11): the local MCP's settlement-evidence
+> message.** `packages/mcp/src/tools.ts` is on this contract's cover list.
+>
+> The backend's `message` names `haven_report_settlement_evidence` in two
+> states — phase `delivered_unverified` / next action `stop_and_tell_user`, and
+> phase `payment_submitted` / next action `awaiting_settlement_evidence`. That
+> tool is hosted-only, and the local package has no settlement-evidence path at
+> all, so the instruction was unreachable for a local-MCP agent. The local
+> `haven_get_payment_status` handler now replaces `message` whole in those two
+> states, keyed on the structured fields and never on the backend's sentence,
+> and names no reporting tool: it says the merchant delivered, that Haven's
+> settlement sweep may still attribute the payment, and to tell the user if it
+> stays unverified. Every other state passes the backend message through
+> unchanged. No `phase`, `next_action`, status code or stored value changes,
+> and `agent-payment-status.ts` is not edited.
+>
+> **What an installed client sees.** The `message` field of the local
+> `haven_get_payment_status` response changes in exactly those two states;
+> nothing else in the response moves. **What does not:** no tool name,
+> argument, input schema, strict-input list, expected-context version, consent
+> hash, `tools-list.snapshot.json` entry, `local-tool-contract.golden.json`
+> entry or `next-arguments-corpus.json` row changes — both goldens are
+> byte-identical before and after, and the hosted contract fingerprint does not
+> move.
+>
+> **How it is held.** `packages/mcp/src/payment-status-message.test.ts` pins
+> the local replacement with `toBe` in both states, twice per state (the
+> backend's current sentence and an arbitrary string), and proves pass-through
+> elsewhere; `packages/mcp-server/src/payment-status-message.test.ts` proves
+> the hosted agent still reads `haven_report_settlement_evidence`, so a
+> replacement moved into the shared SDK read goes red. `last-verified` is not
+> re-stamped: this block is the scope.
+
 > **Contract change (#4790, 2026-11-11): the local MCP's typed refusal answers.**
 > `packages/mcp/src/tools.ts` is on this contract's cover list. The local
 > `normalizeError`'s `HavenApiError` branch typed none of the 20 backend

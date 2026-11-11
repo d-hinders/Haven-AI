@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- **`haven_get_payment_status` no longer names a tool this package does not have (#4808).** The backend's `message` names `haven_report_settlement_evidence` in two states — phase `delivered_unverified` / next action `stop_and_tell_user`, and phase `payment_submitted` / next action `awaiting_settlement_evidence` — and that tool is hosted-only. The local handler now replaces `message` whole in those two states, keyed on the structured fields and never on the backend's sentence, and names no reporting tool: it says the merchant delivered, that Haven's settlement sweep may still attribute the payment, and to tell the user if it stays unverified. Every other state passes the backend message through unchanged. No `phase`, `next_action`, status code or stored value changes, and the local `tools/list` golden is byte-identical. No update needed.
+
 ## 0.14.0-alpha.0 — 2026-11-11
 
 ### Fixed

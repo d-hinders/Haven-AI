@@ -1802,3 +1802,25 @@ Historical verification records for this document are kept in the [archive](../a
 > than a fourth copy of either, so the rail filter and the #3755 netting are
 > the same ones §8 already describes. The rest of this document was not re-read
 > for it, and `last-verified` is not bumped.
+
+> **#4808 (2026-11-11).** This diff touches `packages/sdk/src/client.ts` in
+> this document's coverage list. `HavenClient.executeTool` gained the missing
+> `haven_sweep_delegate` branch: `havenTools.claude()` and `havenTools.openai()`
+> both advertised the tool, but a model that called it got
+> `Unknown tool: haven_sweep_delegate`. The branch calls `this.sweepDelegate()`
+> — the method the local MCP's handler already calls — and returns its result
+> as a plain object. It reads nothing from `input`, so a model cannot choose an
+> amount, an asset or a destination: the sweep goes to
+> `getAgent().accountAddress`, the account Haven's API reports for this agent,
+> exactly as §8 describes. It needs the delegate key the embedding process
+> already holds, and nothing new is granted. **This adds one more caller that
+> can trigger the same sweep, as the local MCP already can** — the residual
+> §8 records (#3375 names it, does not close it) is unchanged, not widened:
+> an agent can trigger a sweep the user did not ask for, which returns funds to
+> the reported account, and under a compromised Haven that destination could be
+> redirected. The same diff also replaces the backend's settlement-evidence
+> `message` in two client layers (the local MCP handler and
+> `executeTool('get_payment_status')`) because it names a hosted-only tool;
+> that is prose about a state the backend already reports, and it changes no
+> phase, next action, stored value or refusal. The rest of this document was
+> not re-read for it, and `last-verified` is not bumped.

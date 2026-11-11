@@ -314,6 +314,7 @@ for (const block of response.content) {
 | `get_allowances` | Read configured and on-chain budget state, including spent and remaining budget |
 | `authorize_x402_payment` | Authorize a policy-limited x402 payment and return a payment header for an HTTP 402 resource |
 | `resume_x402_payment` | Resume an authorized x402 payment and return a merchant payment header without creating a duplicate payment |
+| `haven_sweep_delegate` | Sweep stranded USDC and ETH from the delegate wallet back to the agent's Haven account. Needs `delegateKey` and a `chainRpcs` entry for the agent's chain |
 
 Use `get_allowances` for allowance, budget, spend-limit, remaining amount, reset-period, or "what can I spend?" questions. Payment tools still require the agent-held delegate key and the on-chain budget delegation; the Haven API key identifies the agent but does not authorize spending by itself.
 

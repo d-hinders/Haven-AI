@@ -21,6 +21,7 @@ import {
   composeDescription,
   discoverMerchantMcpUrl,
   resolveTokenFromAddress,
+  replaceSettlementEvidenceMessage,
   sameUrl,
   selectErc7710PaymentOption,
   selectStandardPaymentOption,
@@ -831,7 +832,17 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       // in @haven_ai/sdk for the single home of this "settled x402 only"
       // attach logic (was duplicated verbatim in both packages) and for why
       // `funded_but_unsettled` is excluded from "settled".
-      return runTool(async () => haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id))
+      //
+      // #4808: the backend's message names haven_report_settlement_evidence in
+      // two states, and this surface has no such tool. Replace it whole, keyed
+      // on the structured fields — see the SDK's payment-status-message module
+      // for why the replacement lives in this layer and not in the shared read.
+      return runTool(async () =>
+        replaceSettlementEvidenceMessage(
+          await haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id),
+          'haven_get_payment_status',
+        ),
+      )
     },
 
     haven_get_resume_state: async (input) => {

@@ -35,6 +35,7 @@ export type {
 } from './passport.js'
 
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
+export { replaceSettlementEvidenceMessage } from './payment-status-message.js'
 export { catalogFundingLegExpected, type CatalogFundingLegHint } from './catalog-funding-leg.js'
 export type { ToolDescription, SharedToolKey, McpSurface } from './tool-descriptions.js'
 

@@ -15,6 +15,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Fixed
+
+- **The SDK's own tool definitions name only tools the SDK agent can call, and `haven_sweep_delegate` runs (#4808).** `havenTools.claude()` and `havenTools.openai()` return six tools, but three descriptions named five `haven_…` names outside that set: `get_allowances` pointed at `haven_get_agent`, `authorize_x402_payment` at `haven_get_payment_status`, and `haven_sweep_delegate` at `haven_pay_x402` / `haven_get_allowances` / `haven_check_funds`. They now name the SDK's own tools where the capability exists (`get_payment_status`, `get_allowances`, `authorize_x402_payment`) and drop the pointer where it does not. Separately, `executeTool('haven_sweep_delegate')` used to throw `Unknown tool` for a tool the SDK advertised; it now calls `sweepDelegate()` and returns its result, reading nothing from the input, so a model cannot choose an amount, an asset or a destination. `executeTool('get_payment_status')` also replaces the backend's `message` in the two states whose text names `haven_report_settlement_evidence` (a hosted-only tool), keyed on `phase` / `next_action` and naming no reporting tool. No tool name, argument or schema changes, and both MCP goldens are byte-identical. No update needed.
+
 ## 0.14.0-alpha.0 — 2026-11-11
 
 ### Fixed

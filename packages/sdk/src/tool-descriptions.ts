@@ -250,10 +250,17 @@ export const toolDescriptions = {
   sweep_delegate: {
     summary:
       'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating account.',
+    // #4808: the no-surface text is the SDK's own direct tool definitions
+    // (`havenTools`), whose six tools are `make_payment`, `get_payment_status`,
+    // `get_allowances`, `authorize_x402_payment`, `resume_x402_payment` and
+    // `haven_sweep_delegate` — no `haven_pay_x402`, no `haven_check_funds`.
+    // Nobody else composes this fragment: the local MCP passes `'local'` and
+    // the hosted MCP uses its own SWEEP_DELEGATE_DESCRIPTION, so this text can
+    // change without moving either MCP golden.
     selectionGuidance:
       'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
-      'Do NOT use for normal payments — use haven_pay_x402. ' +
-      'Do NOT use to read balances only — use haven_get_allowances, or haven_check_funds for whether the account holds funds.',
+      'Do NOT use for normal payments — use authorize_x402_payment. ' +
+      'Do NOT use to read balances only — use get_allowances; it reports the budget, and its fundsCoverRemaining: false flags an account balance that cannot back it.',
     selectionGuidanceFor: {
       // The local surface has no check of funds against an amount, and a live
       // budget is not proof that funds are held — so haven_get_allowances is

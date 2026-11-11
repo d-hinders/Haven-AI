@@ -172,6 +172,7 @@ const boundary: ClientBoundary = {
     './merchant-egress.js', // #3747
     './payment-mappers.js',
     './payment-state.js',
+    './payment-status-message.js', // #4808: the settlement-evidence message replacement executeTool applies
     './receipt.js',
     './signer.js',
     './sweep.js',
@@ -592,6 +593,7 @@ describe('HavenClient structural boundary', () => {
       'readClientUpdate', // #3303
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
+      'replaceSettlementEvidenceMessage', // #4808
       'resolveConnectorChannel',
       'resolveTokenBySymbol', // #3410
       'resolveTokenFromAddress',

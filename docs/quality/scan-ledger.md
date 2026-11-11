@@ -2951,3 +2951,84 @@ partly artifacts. Pinned to `--since=2026-09-01T00:00:00Z`: **47 of 57** at
 `49747fac3` and **48 of 58** at `51e66d281` — one landing between the two,
 and it touched both packages. The conclusion (about five in six local
 landings also change the hosted package) is unchanged.
+
+## 2026-11-11 — the two flagged rows of the weekly re-measurement (scoped; #4635)
+
+Scoped to the two rows the weekly job flagged at `039556e38` (#4625's table in
+#4635): `sizing` ("flagged — shrank (expected to grow)") and `docs boundary`
+("flagged — moved (exact)", 43 → 45). Measured at `origin/dev` @
+`8486093dfc6039dda4a892290d87e34bb871facf` (the tip at pickup; the table's own
+SHA is `039556e38`), in a linked worktree, no `npm ci` needed for either
+instrument. A scoped scan: `docs/quality/scan-baselines.json` is not updated
+(skill § Method), so the manifest keeps `43` @ `e0617aa9f`; the next whole-repo
+entry records the new count. GitHub read-only; no live Haven, MCP, dev or
+production call.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. Neither row re-surfaces one.
+
+**Structural findings:** none. The scope is two instruments, not a sweep.
+
+**Improvement candidate (one PR), filed:** the docs-boundary instrument counts
+test fixtures as ungoverned Markdown — see the row below, filed as
+[#4804](https://github.com/d-hinders/Haven-AI/issues/4804).
+
+**Probed clean** (coverage record; scoped, so only the two rows are examined):
+
+- sizing → examined → the row's command (pinned `git ls-tree`/`git show`, 13
+  packages, `.test.`/`__tests__`/`.spec.` split) → at `8486093df`: backend
+  124,177 / 167,496; frontend 83,583 / 93,776; sdk 20,628 / 23,627; core
+  26,142 / 985; qa-agent 20,292 / 18,508; mcp-server 14,330 / 26,323; signer
+  5,488 / 9,545; connect 12,436 / 15,676; cli 3,196 / 3,611; ops 3,199 / 2,266;
+  ui 2,849 / 2,402; mcp 3,010 / 5,449; demo-merchant-mcp 4,105 / 4,591. Totals
+  323,435 source / 374,255 test (323,104 / 373,222 at `039556e38`; 308,076 /
+  352,607 at `e0617aa9f`). Against the recorded baseline: +3,114 / +6,604;
+  +4,990 / +6,878; +986 / +980; +388 / 0; +5,159 / +5,225; +216 / +867;
+  −76 / +182; 0 / 0; −11 / +2; +56 / +44; +27 / +74; +193 / +411;
+  +317 / +381. Three figures shrank, each traced to the commit that did it:
+  cli source −11 = `f6fdb2620` (#4662), `args.ts` −2 and `commands.ts` −9 net;
+  signer test −1 = `ae192d597` (#4756), `x402-sign-header-transport.test.ts`
+  +2/−3; signer source −76 = `8486093df` (#4792), `credentials.ts` −57 net and
+  `file-mode.ts` −19 net, with the handling moved to a new SDK module (+187)
+  and a +183 characterization test. Verdict: real deletions and a
+  cross-package move, not instrument rot. No finding.
+- block 6 → partial → the docs-boundary half only → the row's pinned listing
+  (`git ls-tree -r --name-only $SHA | grep -E '\.md$' | grep -vE
+  '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l`) → **52** at
+  `8486093df` (43 at `e0617aa9f`, 45 at `039556e38`). Composition at the tip:
+  `.agents/skills` 24, `.claude/commands` 8, `.claude/agents` 7, `scripts` 8,
+  `.github` 3, `.claude/hooks` 1, `.agents/README.md` 1. The 43 → 45 move is
+  `586cd8e8c` (#4727, the review-issue skill: `SKILL.md` + 2 references +
+  `.claude/commands/review-issue.md`, 4 files) less `e9275701d` (#4694, the two
+  retired qa commands, 2 files) — the same class as the baseline's
+  `.agents/skills` and `.claude` files, no new class. The 45 → 52 move is
+  **7 test fixtures**: `scripts/docs/fixtures/issue-method/*.md`, added by
+  `68efd71dd` (#4797) as inputs to the issue-method checker's test
+  (`FIXTURES = join(HERE, 'fixtures', 'issue-method')`, line 38). They are not
+  documentation, and the row's `tolerance` is 0, so every fixture addition
+  flags the weekly row as `moved (exact)` — a false positive. **Finding filed:
+  #4804** (`area:docs`, `area:ci`, `pending-review`): exclude Markdown under a
+  `fixtures/` directory from the pinned listing, state the exclusion in
+  `dimensions.md` § 6, and keep the row's `43` @ `e0617aa9f` — the exclusion is
+  a no-op at that SHA (0 fixture files there), so the pin stays valid.
+- blocks 1–5, 8, 9, comment archaeology, incident clustering, workflow
+  archaeology, cross-package duplication, data-layer coverage, live exercise →
+  not examined → out of this scope (the two flagged rows).
+
+**Controls.** The sizing instrument reproduces both recorded readings exactly:
+at `e0617aa9f` it prints the 26 recorded figures (26/26) and at `039556e38` the
+26 figures of #4635's table (26/26), so the deltas above are the instrument's,
+not a reconstruction. The docs-boundary listing's arithmetic holds: 962 `.md`
+at the SHA − 906 under `docs/` or `packages/` − 4 root files = 52, and the
+listing reaches a known top-level file (`.agents/skills/quality-scan/SKILL.md`
+→ 1). The proposed exclusion's control: the same listing without it prints 52
+at `8486093df`, with it 45, and the 7-file difference is exactly the fixture
+directory.
+
+**Doc figures.** All three `docFigures` rows measured again at `8486093df` and
+unchanged: `ds-button-variant-distribution` 205 / 33 / 8 / 4,
+`ds-icon-rung-12px` 16, `frontend-settings-tabs-dark-baseline` 1. No doc
+sentence moves, so no row is refreshed (#4631).
+
+**Disposition: finding filed** (#4804, `pending-review` until its independent
+review-issue pass). The sizing row needs no decision.

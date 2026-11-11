@@ -47,6 +47,11 @@ entries predate them and stand as written):
   Blocks 8 and 9 need Postgres, the core/SDK builds and about 288 s, so a run
   that skips them writes `block 8 → not examined → needs the backend suite's
   database and builds` (and the same for block 9), never a zero.
+- **`partial` in the heading (#4757, binding for entries from 2026-11-11
+  on):** a run that leaves block 1, 8 or 9 unexamined is titled `partial` in
+  its heading and its report filename, the way the 2026-09-08 entry is
+  (`partial: dimension 1 and sizing only`). Block 10 is not in that list: a run
+  whose third-party tier was not requested is not `partial` for that reason.
 - **Machine-readable figures (#4625, binding for entries from 2026-11-03
   on):** the `Probed clean` lines here are prose. The commands and their
   latest figures live in `docs/quality/scan-baselines.json`, which

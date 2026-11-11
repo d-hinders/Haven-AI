@@ -8,34 +8,34 @@
       "kind": "grows",
       "command": "# Pairs, in order: backend frontend sdk core qa-agent mcp-server signer connect cli ops ui mcp demo-merchant-mcp.\n# Each prints source lines, then test lines (.test. / __tests__ / .spec. split), .ts|.tsx|.mjs under packages/<p>/src.\nfor p in backend frontend sdk core qa-agent mcp-server signer connect cli ops ui mcp demo-merchant-mcp; do\n  git ls-tree -r --name-only \"$SHA\" \"packages/$p/src\" | grep -E '\\.(ts|tsx|mjs)$' > \"$SCRATCH/sz-$p.txt\"\n  src=0; tst=0\n  while IFS= read -r f; do\n    n=$(git show \"$SHA:$f\" | wc -l)\n    if printf '%s' \"$f\" | grep -qE '\\.test\\.|__tests__|\\.spec\\.'; then tst=$((tst+n)); else src=$((src+n)); fi\n  done < \"$SCRATCH/sz-$p.txt\"\n  echo \"$src\"; echo \"$tst\"\ndone",
       "figures": [
-        121063,
-        160892,
-        78593,
-        86898,
-        19642,
-        22647,
-        25754,
+        124298,
+        167714,
+        83583,
+        93776,
+        20679,
+        23628,
+        26194,
         985,
-        15133,
-        13283,
-        14114,
-        25456,
-        5564,
-        9363,
+        20292,
+        18508,
+        14330,
+        26472,
+        5488,
+        9545,
         12436,
         15676,
-        3207,
-        3609,
-        3143,
-        2222,
-        2822,
-        2328,
-        2817,
-        5038,
-        3788,
-        4210
+        3196,
+        3611,
+        3199,
+        2266,
+        2849,
+        2402,
+        3010,
+        5449,
+        4105,
+        4591
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0.05,
       "requires": []
     },
@@ -50,7 +50,7 @@
         5,
         7
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -61,10 +61,10 @@
       "kind": "count",
       "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nnode scripts/docs/covers-gaps.mjs 2>&1 | sed -nE 's/.*\\(([0-9]+) baselined pair\\(s\\) across ([0-9]+) doc\\(s\\) remain\\).*/\\1\\n\\2/p'",
       "figures": [
-        124,
+        123,
         33
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0.05,
       "requires": []
     },
@@ -76,7 +76,7 @@
       "expect": "no-CONTROL-FAILED-line",
       "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nFM='FNR==1{c=0} /^---$/{c++; next} c==1 && /^contract: true([[:space:]]|$)/{print FILENAME; nextfile}'\nCTL=\"$SCRATCH/fm\"; mkdir -p \"$CTL\"\nprintf '%s\\n' '---' 'owner: \"@x\"' 'status: current' 'covers:' '  - scripts/docs/**' 'last-verified: \"2026-10-30\"' '---' '' 'contract: true' > \"$CTL/body-only.md\"\nprintf '%s\\n' '---' 'owner: \"@x\"' 'status: current' 'contract: true' 'covers:' '  - scripts/docs/**' 'last-verified: \"2026-10-30\"' '---' '' 'no key in the body' > \"$CTL/front-matter.md\"\nawk \"$FM\" \"$CTL/body-only.md\" | grep -q . && echo \"CONTROL FAILED body-only fixture selected\"\nawk \"$FM\" \"$CTL/front-matter.md\" | grep -q . || echo \"CONTROL FAILED front-matter fixture not selected\"\necho \"selector fixtures checked\"",
       "figures": [],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -87,10 +87,10 @@
       "kind": "head-sample",
       "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nR='\\b[0-9]+ of [0-9]+\\b|\\b[0-9]+/[0-9]+\\b|\\b[0-9]+%|\\*\\*[0-9]+(\\*\\*|[ ,;:)]|$)|\\b[0-9]+ (passed|failed|skipped|red|files|commits|tests|runs|rows|lines|hits|matches)\\b'\ngit ls-tree --name-only \"$SHA\" docs/regulatory/casp-changelog/ | grep -E '/2026-[^/]*\\.md$' | sort | tail -25 > \"$SCRATCH/shards.txt\"\n[ -s \"$SCRATCH/shards.txt\" ] || { echo \"no shards listed: $RG would search the whole tree\" >&2; exit 1; }\n\"$RG\" -n \"$R\" $(cat \"$SCRATCH/shards.txt\") | wc -l\n\"$RG\" -n \"$R\" $(cat \"$SCRATCH/shards.txt\") | \"$RG\" '`(rg|grep|git|node|npm|find|ls|wc) ' | wc -l",
       "figures": [
-        13,
-        2
+        7,
+        1
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": [
         "rg"
@@ -105,7 +105,7 @@
       "figures": [
         39
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": [
         "rg"
@@ -122,7 +122,7 @@
         270,
         57
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0.05,
       "requires": []
     },
@@ -135,7 +135,7 @@
       "figures": [
         0
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": [
         "rg"
@@ -148,9 +148,9 @@
       "kind": "control",
       "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\n\"$RG\" -l \"from '\" packages/backend/src | wc -l",
       "figures": [
-        1001
+        1039
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0.05,
       "requires": [
         "rg"
@@ -165,7 +165,7 @@
       "expect": "no-CONTROL-FAILED-line",
       "command": "R='\\b[0-9]+ of [0-9]+\\b|\\b[0-9]+/[0-9]+\\b|\\b[0-9]+%|\\*\\*[0-9]+(\\*\\*|[ ,;:)]|$)|\\b[0-9]+ (passed|failed|skipped|red|files|commits|tests|runs|rows|lines|hits|matches)\\b'\nfor spec in 2026-09-02-2421.md:110 2026-09-03-2423.md:26 2026-09-03-2423.md:36; do\n  git show \"$SHA:docs/regulatory/casp-changelog/${spec%%:*}\" | sed -n \"${spec##*:}p\" | \"$RG\" -q \"$R\" || echo \"CONTROL FAILED $spec\"\ndone\necho \"specimen control checked\"",
       "figures": [],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": [
         "rg"
@@ -178,11 +178,11 @@
       "kind": "count",
       "command": "# This command reads the worktree; refuse to run unless the tree is exactly $SHA.\ngit diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\nT='executeAllowanceTransfer|generateTransferHash|hasTokenAllowanceConfigured|decideCoverage|legacy-authorize|allowance-nonce|safe_approver_metadata|approval_requests|pendingApprovals|approval queue'\n\"$RG\" -l -i \"$T\" docs packages .agents scripts -g '*.md' -g '*.ts' -g '*.tsx' -g '*.mjs' -g '*.json' -g '!node_modules' -g '!**/dist/**' -g '!.agents/skills/quality-scan/references/dimensions.md' -g '!docs/quality/scan-baselines.json' | sort > \"$SCRATCH/rv-files.txt\"\nlive=0; hist=0\nwhile read f; do\n  s=$(awk '/^---$/{c++; next} c==1 && /^status:/{print $2; exit}' \"$f\" 2>/dev/null)\n  case \"$f\" in\n    docs/regulatory/casp-changelog/*|docs/quality/scan-ledger.md|docs/archive/*|docs/bug-reports/*) hist=$((hist+1));;\n    *) if [ -n \"$s\" ] && [ \"$s\" != \"current\" ]; then hist=$((hist+1)); else live=$((live+1)); fi;;\n  esac\ndone < \"$SCRATCH/rv-files.txt\"\nwc -l < \"$SCRATCH/rv-files.txt\"; echo \"$hist\"; echo \"$live\"",
       "figures": [
-        196,
-        47,
-        149
+        199,
+        48,
+        151
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0.05,
       "requires": [
         "rg"
@@ -198,7 +198,7 @@
       "figures": [
         36
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": [
         "rg"
@@ -213,7 +213,7 @@
       "figures": [
         282
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -224,10 +224,10 @@
       "kind": "grows",
       "command": "git log --first-parent \"$SHA\" --since=2026-08-10T00:00:00Z --format=%s | awk '/\\(#[0-9]+\\)$/{s++} END{print s+0; print NR}'",
       "figures": [
-        1420,
-        1705
+        1531,
+        1816
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -238,10 +238,10 @@
       "kind": "grows",
       "command": "git ls-tree -r --name-only \"$SHA\" packages/frontend/src packages/sdk/src | grep -E '\\.(ts|tsx)$' | grep -vE '\\.test\\.|__tests__|/app/|/components/|/hooks/' > \"$SCRATCH/cl.txt\"\nnode -e 'import(\"./scripts/frontend-copy-lint.mjs\").then(async (m) => { const fs = await import(\"node:fs\"); const cp = await import(\"node:child_process\"); const sha = process.argv[2]; const files = fs.readFileSync(process.argv[1], \"utf8\").trim().split(\"\\n\").filter((f) => !m.SCAN_FILES.includes(f)); let hit = 0; for (const f of files) { const n = m.findCopyIssues(cp.execFileSync(\"git\", [\"show\", sha + \":\" + f], { encoding: \"utf8\" })).length; if (n) hit++ } console.log(files.length); console.log(hit) })' \"$SCRATCH/cl.txt\" \"$SHA\"",
       "figures": [
-        111,
-        14
+        121,
+        15
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -253,10 +253,10 @@
       "expect": "nonzero",
       "command": "git ls-tree -r --name-only \"$SHA\" packages/frontend/src packages/sdk/src | grep -E '\\.(ts|tsx)$' | grep -vE '\\.test\\.|__tests__|/app/|/components/|/hooks/' > \"$SCRATCH/cl.txt\"\ngrep -E '^packages/sdk/src/[^/]+\\.ts$' \"$SCRATCH/cl.txt\" | wc -l\ngrep -E '^packages/frontend/src/[^/]+\\.(ts|tsx)$' \"$SCRATCH/cl.txt\" | wc -l",
       "figures": [
-        46,
+        48,
         1
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -270,7 +270,7 @@
         32,
         20
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0.05,
       "requires": [
         "rg"
@@ -286,7 +286,7 @@
         15,
         27
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": [
         "rg"
@@ -299,9 +299,9 @@
       "kind": "count",
       "command": "git ls-tree -r --name-only \"$SHA\" | grep -E '\\.md$' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l",
       "figures": [
-        43
+        52
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -314,7 +314,7 @@
       "figures": [
         0
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     },
@@ -326,9 +326,9 @@
       "expect": "nonzero",
       "command": "git grep -c -w import \"$SHA\" -- 'packages/*/src/*' | wc -l",
       "figures": [
-        2223
+        2326
       ],
-      "sha": "e0617aa9f",
+      "sha": "9871885a9",
       "tolerance": 0,
       "requires": []
     }

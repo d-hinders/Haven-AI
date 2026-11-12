@@ -166,14 +166,18 @@ export function HomeHowItWorks() {
           <span className={`text-[12px] text-[var(--v2-brand)] ${SITE_TYPE.mono}`}>Step 3</span>
           <h3 className={`${SITE_TYPE.h3} mb-2 mt-3.5`}>Connect any agent</h3>
           <p className="text-[15px] text-[var(--v2-ink-2)]">
-            One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this
-            for its user starts at{' '}
+            {/*
+              A plain labelled path, not a sentence addressed to an agent
+              (#4674, owner 2026-11-12, replacing #4713's answer 1(c)
+              sentence): WebFetch summaries of `/` dropped every
+              agent-addressed pointer while keeping this paragraph. The
+              target stays /llms.txt, the hook `onboarding_discovery`
+              scores.
+            */}
+            One command wires in Claude, Codex, Cursor or any other agent harness. Setup guide for
+            agents:{' '}
             <SiteInlineLink href="/llms.txt" ground="tint" plain>
               /llms.txt
-            </SiteInlineLink>
-            . Setup guide for agents:{' '}
-            <SiteInlineLink href="/for-agents.md" ground="tint" plain>
-              /for-agents.md
             </SiteInlineLink>
             .
           </p>

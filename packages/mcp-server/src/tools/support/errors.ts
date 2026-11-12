@@ -417,6 +417,29 @@ const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
   'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
 
 /**
+ * #4828: the backend's typed `error_code` on a sponsorship-budget 429 — the
+ * relayer's per-identity window cap (`hybrid_deploy` for an account deploy,
+ * `sweep` for a sweep). One value for both bodies, so the mapper never
+ * matches on English. A slot frees when the oldest counted operation ages
+ * out, so this is a stop that names the window, not a retry.
+ */
+const RELAYER_BUDGET_EXCEEDED_ERROR_CODE = 'relayer_budget_exceeded'
+const RELAYER_BUDGET_EXCEEDED_OMITTED_REASON =
+  'the relayer sponsorship budget for this operation is exhausted; a slot frees when the oldest counted operation ages out (up to 24 hours for an account deploy, up to 60 minutes for a sweep), so tell the user the window and do not re-call it now'
+
+/**
+ * #4828: a 429 is a rate limit, not a refusal as made. The limiter may be
+ * Haven (the plugin's per-route limit, the hourly x402 cap, the catalog
+ * submission queue) or the merchant (a 429 on the unpaid MCP probe, which
+ * reaches this branch as a status-only `HavenApiError`), so the reason names
+ * neither: it says the upstream call was rate-limited and tells the agent to
+ * wait, then re-call once. `retry_after_seconds` rides the result when the
+ * body carries it (the hourly x402 cap does).
+ */
+const RATE_LIMITED_OMITTED_REASON =
+  'the upstream call was rate-limited; wait (retry_after_seconds when the answer carries it), then re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user'
+
+/**
  * #3747: the structured hosted refusal for a merchant-egress policy refusal
  * that happened BEFORE anything was sent — the quote/prepare seams run the
  * policy pre-intent, so the sentence can say nothing was funded or signed
@@ -902,7 +925,12 @@ export function normalizeError(err: unknown): ToolFailure {
     // - Otherwise the status: a 5xx is usually transient — the live 500 that
     //   filed #3214 re-ran the same quote with the same arguments and
     //   succeeded — and a 4xx is the call refused as made.
+    // - #4828: a 429 is neither. It is a rate limit, so it takes the
+    //   transient step (wait, then re-call once) whatever the limiter; the
+    //   sponsorship budget is the one 429 that is a stop, and it is typed by
+    //   `error_code` rather than by English.
     const cause = err.failureCause
+    const body = err.body as { error_code?: string; retry_after_seconds?: unknown } | undefined
     const step =
       cause?.kind === 'no_answer'
         ? cause.method === 'GET'
@@ -922,25 +950,42 @@ export function normalizeError(err: unknown): ToolFailure {
               nextTool: null,
               nextToolOmittedReason: DETERMINISTIC_API_OMITTED_REASON,
             })
-          : err.statusCode !== undefined && err.statusCode < 500
+          : body?.error_code === RELAYER_BUDGET_EXCEEDED_ERROR_CODE
             ? refusalNextStep({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
                 nextTool: null,
-                nextToolOmittedReason:
-                  'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+                nextToolOmittedReason: RELAYER_BUDGET_EXCEEDED_OMITTED_REASON,
               })
-            : refusalNextStep({
-                nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-                nextTool: null,
-                nextToolOmittedReason:
-                  'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
-              })
+            : err.statusCode === 429
+              ? refusalNextStep({
+                  nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                  nextTool: null,
+                  nextToolOmittedReason: RATE_LIMITED_OMITTED_REASON,
+                })
+              : err.statusCode !== undefined && err.statusCode < 500
+                ? refusalNextStep({
+                    nextAction: AgentPaymentNextAction.StopAndTellUser,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+                  })
+                : refusalNextStep({
+                    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
+                  })
     return {
       success: false,
       code: err.code,
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      // #4828: the wait the limiter stated, when the body carries one. Additive
+      // and only present when the body has a finite number.
+      ...(typeof body?.retry_after_seconds === 'number' && Number.isFinite(body.retry_after_seconds)
+        ? { retry_after_seconds: body.retry_after_seconds }
+        : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

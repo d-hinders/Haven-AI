@@ -212,7 +212,11 @@ under #2871 and is not a contract surface here.
 every relayer-paid operation (deploys and sweeps; Safe execs and allowance
 transfers too, until #1440 deleted them) runs a per-identity window budget before the relayer signs (over-cap → 429,
 the intent/sweep left retryable, never burned) and records its submitted txs
-with receipt gas numbers (`relayer_gas_events`) for attribution. Direction of
+with receipt gas numbers (`relayer_gas_events`) for attribution. Since #4828
+that 429 body also carries a typed `error_code: 'relayer_budget_exceeded'` (one
+value for both rules), so the hosted MCP's error mapper answers the stop from
+the code instead of matching on the English message; the code is additive and
+changes no decision on this rail. Direction of
 failure is the OPPOSITE of the money-path gates and deliberate: a database
 error fails **open**, because this guard protects the shared gas sponsor's
 availability while funds stay caveat-gated on-chain regardless — failing

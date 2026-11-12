@@ -95,6 +95,16 @@ export class RelayerBudgetExceededError extends Error {
   }
 }
 
+/**
+ * #4828: the typed `error_code` every sponsorship-budget 429 body carries —
+ * one value for both rules (`hybrid_deploy` and `sweep`), so the hosted MCP's
+ * error mapper can answer the stop from the code instead of matching on the
+ * English message. The mapper's copy is
+ * `packages/mcp-server/src/tools/support/errors.ts`; the two are pinned by the
+ * mapper's fixtures.
+ */
+export const RELAYER_BUDGET_EXCEEDED_ERROR_CODE = 'relayer_budget_exceeded'
+
 function capFor(rule: BudgetRule): number {
   const raw = process.env[rule.envVar]
   if (raw !== undefined) {

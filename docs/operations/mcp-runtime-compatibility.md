@@ -2544,6 +2544,57 @@ to call next in structured fields, and those fields are typed end to end
   ratchet, and is self-tested (`lint:next-steps:test`). It is a step inside
   those required contexts, not a new required context.
 
+## A 429 is a rate limit, not a refusal as made (#4828, 2026-11-12)
+
+The hosted mapper (`packages/mcp-server/src/tools/support/errors.ts`) used to
+split an upstream `HavenApiError` on the status alone: below 500 was
+`stop_and_tell_user` with "the upstream call was refused as made (4xx);
+re-calling it the same way cannot succeed". A 429 is below 500, so a rate
+limit reached the agent as a permanent refusal and any stated wait was
+dropped. Two branches now sit ahead of that split, both keeping
+`code: 'API_ERROR'`:
+
+- **A 429 is the transient step.** `next_action: retry_with_explicit_context`
+  (the value the 5xx branch already uses — no new `next_action` value), with a
+  reason that says the upstream call was rate-limited, to wait, then re-call
+  the same tool with the same arguments (and the same `idempotency_key` where
+  the tool has one) **once** before telling the user. The reason names neither
+  Haven nor the merchant as the limiter, because both reach this branch: the
+  plugin's per-route limit, the hourly x402 cap and the catalog submission
+  queue are Haven's, while a merchant's 429 on the unpaid MCP probe arrives as
+  a status-only `HavenApiError` (the discovered-endpoint rebuild in
+  `tools/support/mcp-context.ts` drops the body). No payment exists at the
+  probe, so the re-call is safe there too.
+- **The sponsorship budget is the one 429 that stops.** The relayer's
+  per-identity window cap (`hybrid_deploy` for an account deploy, `sweep` for
+  a sweep) now carries a typed `error_code: 'relayer_budget_exceeded'` on both
+  bodies, so the mapper answers `stop_and_tell_user` from the code rather than
+  from English. Its reason names the budget and the window: a slot frees when
+  the oldest counted operation ages out, up to 24 hours for an account deploy
+  and up to 60 minutes for a sweep. The sign route's 429 carries the same code
+  as a defensive case; it is unreachable in production, because
+  `RelayerBudgetExceededError` is thrown only by `assertRelayerBudget`, whose
+  callers are the account-deploy and sweep paths.
+
+**The additive field.** A rate-limit answer carries `retry_after_seconds`
+(the number the limiter stated) when its body has one — the hourly x402 cap
+sends `retry_after_seconds: 60`. It is absent on every other answer, and no
+existing field changes meaning. The plugin states its wait only in a
+`retry-after` header, which `HavenApiError` does not carry
+(`packages/sdk/src/types.ts`), so that wait stays unread here; carrying it is
+a change to the published SDK transport, not to this mapper.
+
+**The local runtime diverges, deliberately.** The local MCP's mapper
+(`packages/mcp/src/tools.ts`) answers a 429 `stop_and_tell_user` and relays
+the whole `body`, so the wait is not dropped there — the agent reads
+`retry_after_seconds` from `body` instead of a top-level field. The
+`next_action` therefore differs between the two runtimes for a 429 (hosted:
+`retry_with_explicit_context`; local: `stop_and_tell_user`), and the local
+answer has no top-level `retry_after_seconds`. `local-hosted-refusal-parity.test.ts`
+does not compare these rows: it walks only the fixtures whose hosted answer is
+a typed code, and both 429 branches keep `API_ERROR`. Bringing the local
+mapper onto the same step is its own change.
+
 ## Troubleshooting
 
 - **A stale local `dist/` masquerading as version skew (#1188).** The symptoms

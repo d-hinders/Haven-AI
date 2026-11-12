@@ -46,6 +46,8 @@ import { AnimatedRefusalReceipt } from './AnimatedRefusalReceipt'
  *   against mockup version `1791292014-abae`). A cold agent reading this page
  *   through a summarising fetch kept these steps and lost the hero's pointer,
  *   so it never reached the runbook and told its user a setup with no funding.
+ *   Step 3's wording is a plain label since #4674 (owner, 2026-11-12,
+ *   https://github.com/d-hinders/Haven-AI/issues/4674#issuecomment-6818972051).
  * - The spending-limits band says the budget message in plain words, with no
  *   chain or mechanism vocabulary (#3676 decision 3). That decision covers
  *   this band only; How it works keeps its own security section. The band's

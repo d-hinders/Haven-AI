@@ -1135,6 +1135,33 @@ const errorResponse = {
 } as const
 
 /**
+ * #4821: the 502 an OWNER-SIGNED submit answers with (signer change, single
+ * and batch delegation revocation, the re-key's revoke).
+ *
+ * TWO shapes, told apart by `error_code`:
+ * - `submission_outcome_unknown` — the operation was SENT and its answer or
+ *   its receipt was lost, so it may have landed. `error` says so and
+ *   `user_op_hash` names the operation the bundler received (a 4337 operation
+ *   hash, NOT a transaction hash). Do not sign the same operation again:
+ *   re-read the account's state first.
+ * - `onchain_execution_failed` — a KNOWN failure (an explicit pre-send
+ *   rejection, or an operation that landed and reverted, so nothing moved).
+ *   `error` keeps the route's existing sentence and retrying is safe.
+ */
+const ownerSignedSubmitFailureResponse = {
+  ...errorResponse,
+  description:
+    'The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). ' +
+    '`submission_outcome_unknown` — the operation was SENT and its answer or its receipt ' +
+    'was lost, so it may have landed; `error` says so and `user_op_hash` names the operation ' +
+    'the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the ' +
+    'same operation again: re-read the account state first. ' +
+    '`onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an ' +
+    'operation that landed and reverted, so nothing moved); `error` keeps the route\'s ' +
+    'existing sentence and retrying is safe.',
+} as const
+
+/**
  * #3416: this deployment has no delegation-rail bundler credential for the
  * agent's chain. A configuration state, not a transient failure — retrying
  * gets the same answer until an operator provisions the chain. Nothing was
@@ -3211,7 +3238,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': errorResponse,
           '409': errorResponse,
-          '502': errorResponse,
+          '502': ownerSignedSubmitFailureResponse,
         },
       },
     },
@@ -3674,7 +3701,7 @@ export const openapiSpec = {
           '403': errorResponse,
           '404': errorResponse,
           '409': errorResponse,
-          '502': errorResponse,
+          '502': ownerSignedSubmitFailureResponse,
         },
       },
     },
@@ -3908,7 +3935,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': errorResponse,
           '409': errorResponse,
-          '502': errorResponse,
+          '502': ownerSignedSubmitFailureResponse,
         },
       },
     },
@@ -4035,7 +4062,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': errorResponse,
           '409': errorResponse,
-          '502': errorResponse,
+          '502': ownerSignedSubmitFailureResponse,
         },
       },
     },
@@ -5844,7 +5871,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '404': errorResponse,
           '409': errorResponse,
-          '502': errorResponse,
+          '502': ownerSignedSubmitFailureResponse,
         },
       },
     },

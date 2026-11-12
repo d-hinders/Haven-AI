@@ -102,6 +102,9 @@ vi.mock('../../infra/chain/delegation-budget-reader.js', async (importOriginal) 
 })
 
 const agentRekeyRoutes = (await import('../agent-rekey.js')).default
+// #4821: the real typed error — the route branches on `instanceof` and on
+// `outcome`, so a look-alike would prove nothing.
+const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
 
 const AGENT_ID = '11111111-1111-1111-1111-111111111111'
 const REKEY_ID = '22222222-2222-2222-2222-222222222222'
@@ -381,6 +384,53 @@ describe('#3343 re-key revoke submit — calldata binding', () => {
     const res = await submit({ signature, user_operation: { callData: op }, delegation_hashes: [HASH] })
     expect(res.statusCode).toBe(502)
     expect(JSON.stringify(res.json())).not.toContain('SECRET')
+    expect(mockRevokeByHashes).not.toHaveBeenCalled()
+    expect(mockMarkRevoked).not.toHaveBeenCalled()
+  })
+
+  // ── #4821: the submit's failure body tells "nothing was sent" from "we do
+  // not know" ────────────────────────────────────────────────────────────────
+  const USER_OP_HASH = ('0x' + 'dd'.repeat(32)) as `0x${string}`
+
+  it('an outcome-unknown submit answers a distinct code and the operation hash, never "Revocation failed"', async () => {
+    mockTreasury.mockResolvedValue({
+      treasuryAddress: TREASURY,
+      prepareCalls: vi.fn(),
+      submitCall: vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError(
+          `treasury UserOp ${USER_OP_HASH} was sent but its receipt could not be confirmed: timeout`,
+          USER_OP_HASH,
+          'receipt_unconfirmed',
+        ),
+      ),
+    })
+    const op = singleEnvelope(disableCall(JSON.stringify(storedDelegation('1'))))
+    const res = await submit({ signature, user_operation: { callData: op }, delegation_hashes: [HASH] })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.user_op_hash).toBe(USER_OP_HASH)
+    expect(body.error).not.toBe('Revocation failed')
+    expect(body.error).toMatch(/may have gone through/)
+    // Nothing was written and the stage stays preflight: the revoke may have
+    // landed, so the retry must re-read rather than re-sign blindly.
+    expect(mockRevokeByHashes).not.toHaveBeenCalled()
+    expect(mockMarkRevoked).not.toHaveBeenCalled()
+  })
+
+  it("an explicit pre-send rejection keeps today's status and text, plus the known-failure code", async () => {
+    mockTreasury.mockResolvedValue({
+      treasuryAddress: TREASURY,
+      prepareCalls: vi.fn(),
+      submitCall: vi.fn().mockRejectedValue(new Error('AA25 invalid account nonce')),
+    })
+    const op = singleEnvelope(disableCall(JSON.stringify(storedDelegation('1'))))
+    const res = await submit({ signature, user_operation: { callData: op }, delegation_hashes: [HASH] })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error).toBe('Revocation failed')
+    expect(body.error_code).toBe('onchain_execution_failed')
+    expect(body.user_op_hash).toBeUndefined()
     expect(mockRevokeByHashes).not.toHaveBeenCalled()
     expect(mockMarkRevoked).not.toHaveBeenCalled()
   })

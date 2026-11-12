@@ -622,6 +622,39 @@ describe('passkey owners can re-key (#1890)', () => {
    * refusal lands before `revoke/submit`, so nothing is revoked and the
    * re-key is still retryable at `preflight`.
    */
+  it('#4821: an outcome-unknown revoke shows its own state, with no control that signs it again', async () => {
+    passkeyOnlyAccount()
+    fullRunOn('webauthn_userop')
+    const base = mockApiPost.getMockImplementation()!
+    mockApiPost.mockImplementation(async (path: string, body?: unknown) => {
+      if (path.endsWith('/revoke/submit')) {
+        throw Object.assign(new Error('The revocation may have gone through'), {
+          name: 'ApiRequestError',
+          status: 502,
+          body: {
+            error: 'The revocation may have gone through',
+            error_code: 'submission_outcome_unknown',
+            user_op_hash: '0x' + 'dd'.repeat(32),
+          },
+        })
+      }
+      return base(path, body)
+    })
+    renderModal()
+    await advanceToConsequences()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /switch off the old key/i }))
+
+    await waitFor(() => expect(screen.getByText(/could not confirm the key switch/i)).toBeInTheDocument())
+    // The old key may already be off, so nothing here signs the revoke again.
+    expect(screen.queryByRole('button', { name: /switch off the old key/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull()
+    // The footer's only action is Close (the modal header carries one too).
+    expect(screen.getAllByRole('button', { name: /^close$/i }).length).toBeGreaterThan(0)
+    // And the flow did not continue past the revoke.
+    expect(mockApiPost.mock.calls.some((c: unknown[]) => String(c[0]).endsWith('/issue'))).toBe(false)
+  })
+
   it('signs what the server resolved, not what this device assumed', async () => {
     passkeyOnlyAccount()
     fullRunOn('eip712_userop') // the device would have guessed webauthn

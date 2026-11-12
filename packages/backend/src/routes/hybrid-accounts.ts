@@ -33,6 +33,7 @@ import {
   type SignerActionBody,
 } from '../rails/hybrid-signer-actions.js'
 import { prepareTransfer, submitTransfer, transferFailureBody, type TransferBody } from '../rails/hybrid-transfers.js'
+import { ownerSignedFailureBody } from '../rails/owner-signed-failure.js'
 import { recordOwnerTransfer } from '../infra/repositories/owner-transfers.js'
 
 /**
@@ -594,10 +595,9 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
 
     const result = await submitSignerChange(resolved.account, request.body ?? {})
-    if (!result.ok) {
-      const { status, error, details } = result.failure
-      return reply.code(status).send(details ? { error, details } : { error })
-    }
+    // #4821: the body carries `error_code` and `user_op_hash` when the rail
+    // classified the failure; a caller that only reads `error` is unaffected.
+    if (!result.ok) return reply.code(result.failure.status).send(ownerSignedFailureBody(result.failure))
     return { updated: true, tx_hash: result.txHash }
   })
 

@@ -8,11 +8,15 @@ vi.mock('@/components/WalletConnectAction', () => ({
   default: () => <button type="button">Connect wallet</button>,
 }))
 
-const { mockUseSigners } = vi.hoisted(() => ({ mockUseSigners: vi.fn() }))
+const { mockUseSigners, mockToast } = vi.hoisted(() => ({
+  mockUseSigners: vi.fn(),
+  // #4821: hoisted so a test can assert WHICH sentence the card shows.
+  mockToast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+}))
 
 vi.mock('@/hooks/useAccountSigners', () => ({ useAccountSigners: (...a: unknown[]) => mockUseSigners(...a) }))
 vi.mock('@/components/ui/Toast', () => ({
-  useToast: () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }),
+  useToast: () => ({ toast: mockToast }),
 }))
 
 const AccountSignersCard = (await import('../AccountSignersCard')).default
@@ -39,7 +43,13 @@ function base(overrides: Record<string, unknown> = {}) {
   }
 }
 
-beforeEach(() => mockUseSigners.mockReset())
+beforeEach(() => {
+  mockUseSigners.mockReset()
+  mockToast.mockReset()
+  mockToast.success.mockReset()
+  mockToast.error.mockReset()
+  mockToast.info.mockReset()
+})
 
 describe('AccountSignersCard (#888)', () => {
   it('warns when there is only one way to approve, and Remove is absent there (#4474)', async () => {
@@ -197,6 +207,36 @@ describe('AccountSignersCard (#888)', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull()
     await waitFor(() => expect(removePasskey).toHaveBeenCalledWith('0x' + '11'.repeat(32)))
+  })
+
+  // #4821: the submit was rejected and the change may have landed. The card
+  // says so and re-reads the signer set — it never claims nothing happened.
+  it('an unconfirmed signer change says it may have gone through and re-reads the signer set', async () => {
+    const reload = vi.fn()
+    const removePasskey = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    mockUseSigners.mockReturnValue(
+      base({
+        reload,
+        removePasskey,
+        signers: {
+          account_address: '0x' + 'aa'.repeat(20),
+          chain_id: 84532,
+          owner_address: '0x' + 'ee'.repeat(20),
+          passkeys: [
+            { key_id: '0x' + '11'.repeat(32), x: '0x1', y: '0x2', created_at: '2026-03-03T12:00:00.000Z' },
+            { key_id: '0x' + '22'.repeat(32), x: '0x3', y: '0x4', created_at: '2026-05-10T09:00:00.000Z' },
+          ],
+        },
+      }),
+    )
+    render(<AccountSignersCard {...PROPS} />)
+    const removes = screen.getAllByText('Remove') as HTMLButtonElement[]
+    fireEvent.click(removes[1])
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled())
+    expect(mockToast.error.mock.calls[0][0]).toMatch(/may have gone through/i)
+    expect(mockToast.error.mock.calls[0][0]).toMatch(/check the signers above/i)
+    expect(reload).toHaveBeenCalled()
   })
 
   it('the wallet owner can be removed when a passkey remains, behind a consequence-naming confirmation (#1087, #1153)', async () => {

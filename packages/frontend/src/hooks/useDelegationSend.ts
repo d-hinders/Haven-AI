@@ -13,7 +13,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { Address } from 'viem'
-import { api, ApiRequestError } from '@/lib/api'
+import { api } from '@/lib/api'
+import { classifySubmitOutcome } from '@/lib/submitOutcome'
 import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { signPreparedAccountOp, type PreparedAccountOp } from '@/lib/hybridAccountOps'
@@ -37,16 +38,6 @@ export interface SendInput {
   amountAtomic: string
 }
 
-/** The transfer submit route's two codes (#4820). */
-const OUTCOME_UNKNOWN_CODE = 'submission_outcome_unknown'
-const KNOWN_FAILURE_CODE = 'onchain_execution_failed'
-
-function readStringField(body: unknown, field: string): string | null {
-  if (!body || typeof body !== 'object') return null
-  const value = (body as Record<string, unknown>)[field]
-  return typeof value === 'string' && value !== '' ? value : null
-}
-
 /**
  * #4820: what a rejected SUBMIT request is evidence of.
  *
@@ -65,27 +56,12 @@ function readStringField(body: unknown, field: string): string | null {
  * code (`onchain_execution_failed` — an explicit pre-send rejection, or an
  * operation that landed and reverted), is the route saying nothing moved:
  * `failed`, and retrying is safe.
+ *
+ * #4821: the classification itself lives in `lib/submitOutcome.ts` — the
+ * signer-change, revocation and re-key submits answer the same two codes.
  */
 function classifySubmitFailure(err: unknown): SendResult {
-  if (!(err instanceof ApiRequestError)) {
-    return { ok: false, reason: 'unconfirmed', message: err instanceof Error ? err.message : undefined }
-  }
-  const code = readStringField(err.body, 'error_code')
-  if (code === OUTCOME_UNKNOWN_CODE) {
-    return {
-      ok: false,
-      reason: 'unconfirmed',
-      message: err.message,
-      userOpHash: readStringField(err.body, 'user_op_hash') ?? undefined,
-    }
-  }
-  if (err.status >= 400 && err.status < 500) {
-    return { ok: false, reason: 'failed', message: err.message }
-  }
-  if (code === KNOWN_FAILURE_CODE) {
-    return { ok: false, reason: 'failed', message: err.message }
-  }
-  return { ok: false, reason: 'unconfirmed', message: err.message }
+  return { ok: false, ...classifySubmitOutcome(err) }
 }
 
 export function useDelegationSend(accountAddress: string, chainId: number) {

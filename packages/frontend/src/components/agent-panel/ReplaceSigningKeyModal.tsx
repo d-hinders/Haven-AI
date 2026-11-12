@@ -81,7 +81,7 @@ import type { PaymentActivityItem } from '@/hooks/useAgentActivity'
 /** Why the owner is replacing the key. Same mechanics, different urgency. */
 type Reason = 'lost' | 'compromised'
 
-type Step = 'reason' | 'address' | 'consequences' | 'signing' | 'stalled' | 'done'
+type Step = 'reason' | 'address' | 'consequences' | 'signing' | 'stalled' | 'unconfirmed' | 'done'
 
 const STEP_ORDER: Step[] = ['reason', 'address', 'consequences', 'signing']
 
@@ -122,6 +122,11 @@ function failureCopy(failure: RekeyFailure): string {
       return 'One of the replacement budget rules was not approved, so nothing was changed. Try again and approve every prompt.'
     case 'completion_failed':
       return 'The replacement could not be finished, and nothing was changed by this attempt. You can try again.'
+    case 'unconfirmed':
+      // #4821: the revoke may have landed. The modal shows this on its own
+      // step (no control signs the same operation again); this sentence is the
+      // fallback for any caller that renders the failure inline.
+      return 'We could not confirm the key switch. The old key may already be switched off — reopen the replacement to check before trying again.'
     default:
       return failure.message
   }
@@ -279,9 +284,16 @@ export function ReplaceSigningKeyModal({
       setSigningLabel('Waiting for your approval to switch off the old key…')
       const revoked = await rekey.revoke()
       if (!revoked.ok) {
+        setSigningLabel(null)
+        // #4821: the revoke was sent and its answer was lost, so it may have
+        // landed. No control here signs it again — the owner closes and
+        // reopens, and preflight re-reads the re-key's stage.
+        if (revoked.failure.kind === 'unconfirmed') {
+          setStep('unconfirmed')
+          return
+        }
         // Nothing landed: the re-key is still at `preflight` and the old key
         // still works, so this is safely retryable from the gate.
-        setSigningLabel(null)
         setError(failureCopy(revoked.failure))
         setStep('consequences')
         return
@@ -428,6 +440,7 @@ export function ReplaceSigningKeyModal({
       {step === 'consequences' ? renderConsequences() : null}
       {step === 'signing' ? renderSigning() : null}
       {step === 'stalled' ? renderStalled() : null}
+      {step === 'unconfirmed' ? renderUnconfirmed() : null}
       {step === 'done' ? renderDone() : null}
     </Modal>
   )
@@ -745,6 +758,29 @@ export function ReplaceSigningKeyModal({
     )
   }
 
+  /**
+   * #4821: the revoke was sent and its answer was lost, so it may have landed.
+   * The footer offers only Close: reopening the flow runs preflight, which
+   * re-reads the re-key's stage, so the owner is never asked to switch the old
+   * key off a second time on a guess.
+   */
+  function renderUnconfirmed() {
+    return (
+      <div className="space-y-4">
+        <ApprovalRequiredBanner title="We could not confirm the key switch" tone="danger">
+          <p className="text-sm leading-relaxed">
+            The approval was sent and its answer was lost. {agentName}’s old key may already be
+            switched off, and its replacement budget may not be in place yet.
+          </p>
+        </ApprovalRequiredBanner>
+        <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
+          Close this and reopen the replacement. Haven reads the re-key’s stage first, so it will
+          not ask you to switch the old key off a second time.
+        </p>
+      </div>
+    )
+  }
+
   function renderDone() {
     if (!result) return null
     return (
@@ -838,6 +874,15 @@ export function ReplaceSigningKeyModal({
     }
     if (step === 'signing') {
       return <Button disabled>Working…</Button>
+    }
+    if (step === 'unconfirmed') {
+      // #4821: nothing here signs the revoke again — reopening re-reads the
+      // stage first.
+      return (
+        <Button variant="ghost" onClick={handleClose} disabled={rekey.busy}>
+          Close
+        </Button>
+      )
     }
     if (step === 'stalled') {
       return (

@@ -628,6 +628,42 @@ describe('EditBudgetModal — replace without a silent leftover (#3933)', () => 
     expect(screen.getByRole('button', { name: 'Stop old budget' })).toBeInTheDocument()
   })
 
+  // #4821: the Stop was sent and its answer was lost, so it may have landed.
+  // That is NOT the plain failure — the copy says so, and the button re-reads
+  // the chain at prepare before it can send anything.
+  it('revoke_unfinished: an outcome-unknown Stop says it may already be stopped, never "could not be stopped"', async () => {
+    await toRevokeUnfinished()
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop old budget' }))
+    await waitFor(() =>
+      expect(screen.getByText(/we could not confirm the stop/i)).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/may already be stopped/i)).toBeInTheDocument()
+    expect(screen.queryByText('The previous budget could not be stopped. Try again.')).toBeNull()
+  })
+
+  it('revoke_unconfirmed: the new budget is live, the old stop is unknown, and only Close is offered', async () => {
+    const { onBudgetChange } = renderModal()
+    mockEditBudget.mockResolvedValue({
+      ok: false,
+      reason: 'revoke_unconfirmed',
+      newDelegationHash: '0x' + 'be'.repeat(32),
+      unstoppedDelegationHashes: [OLD_HASH],
+      moved: false,
+    })
+    fireEvent.change(screen.getByLabelText('Budget amount'), { target: { value: '10' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve new budget' }))
+    await waitFor(() =>
+      expect(screen.getByText('The old budget may already be stopped')).toBeInTheDocument(),
+    )
+    expect(screen.getByText(/the previous budget was sent a stop and its answer was lost/i)).toBeInTheDocument()
+    // No control here signs the Stop again — the card's Stop re-reads first.
+    expect(screen.queryByRole('button', { name: 'Stop old budget' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(onBudgetChange).toHaveBeenCalled()
+  })
+
   it('slot_occupied (a stale `replaces`): names it, refreshes the card, and offers only Close', async () => {
     const { onBudgetChange } = renderModal()
     mockEditBudget.mockResolvedValue({ ok: false, reason: 'slot_occupied', existingDelegationHash: '0x' + 'e1'.repeat(32) })

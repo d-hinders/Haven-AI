@@ -574,6 +574,36 @@ unknown outcome — the record needs the transaction hash of a landed transfer �
 and a landed transfer still appears in Activity without it, because the record
 is attribution only.
 
+**The same rule covers every other owner-signed operation (#4821).** The two
+signer-change submits, the single and batch delegation revocations, and the
+re-key's revoke all go through the same `submitCall`, and each now answers the
+typed outcome-unknown error as `submission_outcome_unknown` with the operation
+hash instead of "… failed". The dashboard states differ per operation because
+what Haven can do next differs:
+
+- **Revocations heal at prepare.** Both revocations read the disabled hashes
+  on-chain before preparing, and `disableDelegation` reverts on an
+  already-disabled delegation, so a retry after a landed-but-unconfirmed revoke
+  converges on the revoked database state without a second on-chain operation.
+  The dashboard's Stop re-reads the chain at prepare, which is why it may stay
+  available.
+- **The signer set has no on-chain reader** (`modules/ops/onchain.ts`), so a
+  landed-but-unconfirmed signer change cannot be reconciled by Haven. Its
+  unconfirmed state offers no retry: the card re-reads the signer set and the
+  owner decides. A throw from the post-landing storage sync answers "landed but
+  Haven could not record it" with no `error_code`, which the dashboard reads as
+  unconfirmed for the same reason.
+- **The re-key's revoke has no disabled-on-chain read**, so its unconfirmed
+  state offers only Close; reopening runs preflight, which re-reads the stage.
+
+A known failure (an explicit pre-send rejection, or an operation that landed
+and reverted) keeps each route's existing sentence plus
+`error_code: onchain_execution_failed`, and retrying there is safe because
+nothing moved. No handler writes its database state before `submitCall`
+returns, so an unconfirmed operation leaves the record saying it did not
+happen — which is exactly why the dashboard must not present it as a plain
+failure.
+
 **The signer set is symmetric (#1087, #1199):** enrolling an EOA owner is not
 a one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
 the same prepare/submit path and returns the account to passkey-only. Removing

@@ -2,12 +2,13 @@
  * #4790 (epic #4788 slice 2) — the LOCAL ↔ HOSTED refusal parity test.
  *
  * The hosted MCP's `normalizeError` (`packages/mcp-server/src/tools/support/
- * errors.ts`) types 20 backend `error_code`s: the ten payment-scope codes
- * through `PAYMENT_SCOPE_REFUSAL_ANSWERS`, and ten more through hand-written
+ * errors.ts`) types 21 backend `error_code`s: the ten payment-scope codes
+ * through `PAYMENT_SCOPE_REFUSAL_ANSWERS`, and eleven more through hand-written
  * branches whose answers depend on the body (`submission_outcome_unknown`
  * names the status read only when the body carries a `payment_id`;
  * `prepare_reverted` changes its step on `revert_cause`; `delegation_expired`
- * is guarded on status 403). The local MCP's mapper
+ * is guarded on status 403; `payment_already_submitted` (#4826) requires the
+ * body's `payment_id`). The local MCP's mapper
  * (`packages/mcp/src/tools.ts`) typed none of them: every one reached the
  * agent as `API_ERROR` with no reason.
  *
@@ -100,14 +101,14 @@ const TYPED_SITES = REFUSAL_SITES.filter((site) => {
 
 describe('#4790 local ↔ hosted refusal parity on the fixture bodies', () => {
   it('compares a non-empty set of typed fixture sites', () => {
-    // 22 at this commit: the ten payment-scope codes, plus rail_unavailable,
+    // 23 at this commit: the ten payment-scope codes, plus rail_unavailable,
     // task_budget_exceeded, task_budget_exceeds_remaining,
     // delegation_budget_exceeded, delegation_expired, the two
-    // submission_outcome_unknown variants, account_validation_failed,
-    // signature_rejected, the two prepare_reverted variants and
-    // onchain_execution_failed.
+    // submission_outcome_unknown variants, payment_already_submitted (#4826),
+    // account_validation_failed, signature_rejected, the two prepare_reverted
+    // variants and onchain_execution_failed.
     expect(TYPED_SITES.length).toBeGreaterThan(0)
-    expect(TYPED_SITES.length).toBe(22)
+    expect(TYPED_SITES.length).toBe(23)
   })
 
   it('agrees on every compared field, or the difference is allowlisted', async () => {
@@ -144,9 +145,9 @@ describe('#4790 local ↔ hosted refusal parity on the fixture bodies', () => {
       hostedCodes.add((normalizeError(site.thrown) as { code: string }).code)
       localCodes.add(String((await localAnswer(site.thrown)).code))
     }
-    // 20 distinct codes at this commit — the ten payment-scope keys and the
-    // ten branch codes.
-    expect(hostedCodes.size).toBe(20)
+    // 21 distinct codes at this commit — the ten payment-scope keys and the
+    // eleven branch codes.
+    expect(hostedCodes.size).toBe(21)
     expect([...hostedCodes].filter((code) => !localCodes.has(code))).toEqual([])
     expect(localCodes.has('API_ERROR')).toBe(false)
   })

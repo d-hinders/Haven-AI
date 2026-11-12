@@ -154,6 +154,23 @@ last-verified: "2026-11-12"
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
 > `@haven_ai/core`, so a new core code cannot go unanswered locally.
 
+> **Contract change (#4826, 2026-11-12): one more typed refusal on the local
+> MCP.** `packages/mcp/src/tools.ts` is on this contract's cover list. The
+> backend's x402 authorize replay for an idempotency key whose payment is
+> already `submitted` now answers `409` with `error_code:
+> "payment_already_submitted"`, `payment_id` and `status: "submitted"`. Both
+> mappers answer it with `check_status_later` and
+> `haven_get_payment_status { payment_id }` taken from the body — never a
+> retry, never a new payment. That is the 21st typed code the local mapper
+> answers; the hosted branch requires the body's `payment_id`, and a body
+> without one falls through to the generic `API_ERROR` answer on both
+> surfaces. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash or `tools-list.snapshot.json` entry
+> changes; `next-arguments-corpus.json` gains one row for the new fixture site
+> (the same `haven_get_payment_status { payment_id }` step the two
+> `submission_outcome_unknown` rows already carry), and no hosted runtime file
+> changes. `last-verified` is not re-stamped: this block is the scope.
+
 > **Description-only change (#4796, 2026-11-10): four tool descriptions named
 > a tool their own surface does not register.** The shared description text in
 > `packages/sdk/src/tool-descriptions.ts` told a local-MCP agent to use

@@ -16,7 +16,8 @@
  * itself (the pre-check's rows are seeded directly: it creates none): a fresh
  * request under
  * an ample budget creates the real `pending_signature` row, which is then
- * replayed, moved to `failed`, or confirmed with a `tx_hash`. Every link is
+ * replayed, moved to `failed`, moved to `submitted`, or confirmed with a
+ * `tx_hash`. Every link is
  * made short before each replay, so an answer that consulted the budget
  * would show it.
  *
@@ -326,7 +327,14 @@ async function runCell(entrypoint: MatrixEntrypoint, scope: MatrixScope, state: 
   }
   // Every replay starts from a row under this key.
   if (entrypoint === 'budget-precheck') {
-    const status = state === 'settledReplay' ? 'confirmed' : state === 'pendingReplay' ? 'pending_signature' : 'failed'
+    const status =
+      state === 'settledReplay'
+        ? 'confirmed'
+        : state === 'pendingReplay'
+          ? 'pending_signature'
+          : state === 'submittedReplay'
+            ? 'submitted'
+            : 'failed'
     await seedPrecheckRow(scope, world, key, status, state === 'settledReplay' ? hash(++seq) : null)
   } else {
     setAll(AMPLE)
@@ -336,6 +344,10 @@ async function runCell(entrypoint: MatrixEntrypoint, scope: MatrixScope, state: 
     if (!id) return 'SETUP no intent row'
     if (state === 'settledReplay') {
       await db.query(`UPDATE payment_intents SET status = 'confirmed', tx_hash = $2 WHERE id = $1`, [id, hash(++seq)])
+    } else if (state === 'submittedReplay') {
+      // #4826: the agent settled and the outcome is not booked yet. No
+      // tx_hash — the reconciler's shape.
+      await db.query(`UPDATE payment_intents SET status = 'submitted' WHERE id = $1`, [id])
     } else if (state === 'terminalReplay') {
       await db.query(`UPDATE payment_intents SET status = 'failed' WHERE id = $1`, [id])
     }

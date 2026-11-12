@@ -1717,10 +1717,11 @@ function paymentScopeRefusalAnswer(errorCode: string | undefined): { code: strin
 }
 
 /**
- * #4790: the ten hand-written hosted branches, whose answers a flat table
- * cannot hold — `submission_outcome_unknown` and `prepare_reverted` change
- * their step on a body field, and `delegation_expired` is guarded on status
- * 403. The reason strings are written here rather than imported: they live in
+ * #4790: the hand-written hosted branches, whose answers a flat table cannot
+ * hold — `submission_outcome_unknown` and `prepare_reverted` change their step
+ * on a body field, `delegation_expired` is guarded on status 403, and
+ * `payment_already_submitted` (#4826) requires the body's payment_id. The
+ * reason strings are written here rather than imported: they live in
  * `packages/mcp-server/src/tools/support/errors.ts`, which this package cannot
  * depend on, and the SDK does not export them. The parity test holds every one
  * of them equal to the hosted answer.
@@ -1761,10 +1762,11 @@ interface TypedRefusalAnswer {
 }
 
 /**
- * #4790: the typed answer for one of the 20 refusal codes the hosted mapper
+ * #4790: the typed answer for one of the refusal codes the hosted mapper
  * types, or `null` for any other code — and for `delegation_expired` at a
- * status other than 403, where the hosted mapper falls back to the generic
- * answer and so does this one.
+ * status other than 403, or `payment_already_submitted` without a body
+ * payment_id, where the hosted mapper falls back to the generic answer and so
+ * does this one.
  */
 function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): TypedRefusalAnswer | null {
   if (!errorCode) return null
@@ -1817,6 +1819,24 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
         nextTool: null,
         nextToolOmittedReason: DELEGATION_EXPIRED_OMITTED_REASON,
       }
+    case 'payment_already_submitted': {
+      // #4826: an x402 authorize replay whose key belongs to a `submitted`
+      // payment. The payment is in flight, so the only follow-up is reading
+      // its status — never a retry, never a new payment. The hosted branch
+      // requires the body's payment_id (check_status_later's default tool
+      // cannot be called without one); a body without it falls through to the
+      // generic answer on both surfaces.
+      const paymentId = typeof body?.payment_id === 'string' ? body.payment_id : undefined
+      if (!paymentId) return null
+      return {
+        code: 'PAYMENT_ALREADY_SUBMITTED',
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        nextTool: 'haven_get_payment_status',
+        nextArguments: { payment_id: paymentId },
+        nextToolOmittedReason: null,
+        paymentId,
+      }
+    }
     case 'submission_outcome_unknown': {
       const paymentId = typeof body?.payment_id === 'string' ? body.payment_id : undefined
       // With a payment id the status read is truthful and is named; without

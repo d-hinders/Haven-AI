@@ -94,7 +94,8 @@ import { isPendingApproval } from './support/quote-response.js'
  * `directSignerCompatibilityNotice` (`support/signer-compat.ts`) for the
  * exact signer-side mapping this text now names separately: `fallback:
  * 'typed_data_b64'` (any code — a currently-published signer's transport
- * failure, malformed body, or a 404 on an older backend) versus
+ * failure, malformed body, a 5xx or 429 from Haven since #4829, or a 404 on an
+ * older backend) versus
  * `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` with NO `fallback`
  * field (a signer predating #3271, which has no direct-fetch fallback of its
  * own to try).
@@ -102,7 +103,7 @@ import { isPendingApproval } from './support/quote-response.js'
 const DIRECT_SIGN_REASON =
   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer fetches the ' +
   "exact bytes by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' " +
-  '(any code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
+  '(any code: a transport failure, a malformed body, a 5xx or 429 from Haven, or a 404 on an older backend), or code ' +
   "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer older " +
   'than 0.5.0-alpha.1 — nothing was signed either way: re-run this same tool with the SAME idempotency_key ' +
   '(echoed on this result as idempotency_key) plus include_signing_payload: true — repeating the ' +

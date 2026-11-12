@@ -130,7 +130,7 @@ export const HOSTED_INSTRUCTIONS = [
   '(no typed_data / typed_data_b64; idempotency_key is generated when you',
   'pass none, and echoed on the result): sign by payment_id per their',
   'response guidance. If haven_sign refuses that call — carrying fallback: \'typed_data_b64\'',
-  '(any code: a transport failure, a malformed body, or a',
+  '(any code: a transport failure, a malformed body, a 5xx or 429 from Haven, or a',
   '404 on an older backend), or code SIGN_CONTEXT_REFUSED with',
   'backend_error_code sign_context_unavailable from an older signer with no',
   'such fallback (it signed nothing either way) — re-run the same direct-payment tool with',

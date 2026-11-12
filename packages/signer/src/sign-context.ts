@@ -40,6 +40,16 @@ export interface HavenIdentity {
  * outcome, and they never reach the backend's REST/OpenAPI surface, only this
  * package's MCP tool responses. Same reasoning `SignerRefusalCode` documents
  * for the version-mismatch pair.
+ *
+ * #4829: `SIGN_CONTEXT_UNREACHABLE` is the NON-ANSWER class, not only a
+ * transport failure. Haven answered, but not usably — a body that is not a
+ * JSON object at any non-2xx status, any 5xx, and a 429 — is reported here,
+ * with `http_status` carrying the status Haven sent. `SIGN_CONTEXT_REFUSED`
+ * stays for a 4xx other than 429 whose body IS a JSON object: the only shape
+ * that carries Haven's own `error` / `error_code`, and so the only one where
+ * "Haven refused" is a true statement. A gateway's HTML 502 and the
+ * money-path rate limit's 429 used to land in `SIGN_CONTEXT_REFUSED`, telling
+ * the agent Haven had refused a payment it never looked at.
  */
 export type SignContextErrorCode =
   | 'SIGN_CONTEXT_TIMEOUT'
@@ -58,6 +68,12 @@ export type SignContextErrorCode =
  * refusal (`HavenUnsupportedSignerVersionError`) already carries `code`,
  * `fallback`, `next_action` as DATA; this mirrors that shape for the
  * sign-context fetch.
+ *
+ * #4829: "a non-ok backend response" is two classes, not one. A 4xx other
+ * than 429 whose body is a JSON object is a REFUSAL (`SIGN_CONTEXT_REFUSED`).
+ * A 5xx, a 429, or a body that is not a JSON object at any non-2xx status is
+ * a NON-ANSWER (`SIGN_CONTEXT_UNREACHABLE`, with `http_status`): Haven did not
+ * look at the payment, so the signer must not say it refused one.
  *
  * Extends `HavenSigningError` so every existing `instanceof HavenSigningError`
  * catch site keeps matching unchanged. `code` is inherited as `readonly` from
@@ -149,7 +165,12 @@ export class HavenSignContextError extends HavenSigningError {
   readonly next_arguments?: Record<string, unknown>
   readonly next_tool_omitted_reason?: string
   readonly retry_with_new_quote?: true
-  /** Present only for `SIGN_CONTEXT_REFUSED` (the backend's HTTP status). */
+  /**
+   * #4829: present whenever Haven ANSWERED the sign-context fetch with a
+   * non-2xx status — a refusal (`SIGN_CONTEXT_REFUSED`) or the non-answer
+   * class (`SIGN_CONTEXT_UNREACHABLE`: a 5xx, a 429, or a body that is not a
+   * JSON object). Absent on a transport failure, which never got a response.
+   */
   readonly http_status?: number
   /** Present only for `SIGN_CONTEXT_REFUSED`: the backend's own `error_code`. */
   readonly backend_error_code?: string
@@ -163,7 +184,12 @@ export class HavenSignContextError extends HavenSigningError {
   constructor(
     message: string,
     code: SignContextErrorCode,
-    refusal: { httpStatus: number; errorCode?: string; clientUpdate?: HavenClientUpdate } | undefined,
+    /**
+     * #4829: the fields Haven's ANSWER carried, when it answered at all — the
+     * HTTP status always, plus the backend's own `error_code` / update hint
+     * when the answer is a refusal. `undefined` on a transport failure.
+     */
+    answer: { httpStatus: number; errorCode?: string; clientUpdate?: HavenClientUpdate } | undefined,
     /** #3103: the payment the context was fetched for, so a refusal can name the status read. */
     paymentId: string,
     /**
@@ -185,16 +211,19 @@ export class HavenSignContextError extends HavenSigningError {
     super(message)
     ;(this as { code: string }).code = code
     this.name = 'HavenSignContextError'
+    // #4829: the status rides on every answer Haven gave — a refusal AND the
+    // non-answer class, which is reported as SIGN_CONTEXT_UNREACHABLE. A
+    // transport failure has no answer, so no status.
+    if (answer) this.http_status = answer.httpStatus
     let step: NextStep
     if (code === 'SIGN_CONTEXT_REFUSED') {
-      this.http_status = refusal?.httpStatus
-      this.backend_error_code = refusal?.errorCode
-      if (refusal?.errorCode === 'client_outdated') {
+      this.backend_error_code = answer?.errorCode
+      if (answer?.errorCode === 'client_outdated') {
         // #3303: this signer is below the minimum the deployment set, so it is
         // refused at sign-context — nothing is signed or submitted, and the
         // prepared payment is left unsigned (owner decision 2026-09-25, #3303).
         // No retry and no other bytes can help; only an update can.
-        this.client_update = refusal.clientUpdate
+        this.client_update = answer.clientUpdate
         this.next_action = AgentPaymentNextAction.StopAndTellUser
         step = signerRefusalStep({
           nextAction: AgentPaymentNextAction.StopAndTellUser,
@@ -203,10 +232,10 @@ export class HavenSignContextError extends HavenSigningError {
             'this signer is below the minimum version Haven accepts — tell the user to run ' +
             // #3412: the doctor diagnoses and prints the repair line; running
             // the doctor alone changes nothing, so the repair step is named.
-            `${refusal.clientUpdate?.upgrade_command ?? connectorUpgradeCommand()} and the repair line it prints, ` +
+            `${answer.clientUpdate?.upgrade_command ?? connectorUpgradeCommand()} and the repair line it prints, ` +
             'restart the agent runtime, then retry the same haven_sign / haven_sign_x402 call',
         })
-      } else if (flow === 'direct' && refusal?.httpStatus === 404) {
+      } else if (flow === 'direct' && answer?.httpStatus === 404) {
         // Either the payment is not this agent's, or the backend predates
         // #3271 and has no direct sign-context route at all (deploy skew) —
         // and, since that also means it predates #3495, its result already
@@ -219,7 +248,7 @@ export class HavenSignContextError extends HavenSigningError {
           nextTool: null,
           nextToolOmittedReason: DIRECT_404_FALLBACK,
         })
-      } else if (flow === 'direct' && refusal?.errorCode === 'expired') {
+      } else if (flow === 'direct' && answer?.errorCode === 'expired') {
         // Keyed on the backend's `expired` code, never a bare 410: the direct
         // route also answers 410 for a retired-rail row (no error_code), and a
         // re-send cannot help there, so that falls through to stop-and-tell.
@@ -230,7 +259,7 @@ export class HavenSignContextError extends HavenSigningError {
           nextToolOmittedReason:
             'call haven_send / haven_pay again with the same idempotency_key — the expired payment frees it',
         })
-      } else if (flow === 'x402' && (refusal?.httpStatus === 410 || refusal?.errorCode === 'expired')) {
+      } else if (flow === 'x402' && (answer?.httpStatus === 410 || answer?.errorCode === 'expired')) {
         this.next_action = AgentPaymentNextAction.PaymentWindowExpired
         this.retry_with_new_quote = true
         step = signerRefusalStep({
@@ -357,13 +386,116 @@ function signContextHeaders(identity: HavenIdentity, clientIdentity: string | un
   }
 }
 
-/** #3303: the refusal fields a backend answer carries, `client_update` included. */
-function refusalOf(status: number, body: Record<string, unknown>) {
+/**
+ * #3303: the fields a backend ANSWER carries, `client_update` included.
+ * #4829: used for both classes — a refusal and the non-answer class — because
+ * the HTTP status is worth carrying either way; the constructor keeps
+ * `backend_error_code` and `client_update` for refusals only.
+ */
+function answerOf(status: number, body: Record<string, unknown>) {
   return {
     httpStatus: status,
     errorCode: typeof body.error_code === 'string' ? body.error_code : undefined,
     clientUpdate: readClientUpdate(body.client_update),
   }
+}
+
+/**
+ * #4829: read a sign-context answer body. A body that is not a JSON object is
+ * NOT a refusal — it is "Haven did not answer usably" — so the caller has to
+ * know which it got. A stalled body read is still the timeout it always was
+ * (#2985 review): the same signal bounds it, and naming the timeout beats
+ * reporting a gateway's half-sent body as a malformed answer.
+ */
+async function readSignContextBody(
+  response: Response,
+  timeoutMs: number,
+  timeoutMessage: string,
+  subjectId: string,
+  flow: 'x402' | 'direct' | 'task',
+): Promise<{ body: Record<string, unknown>; jsonObject: boolean }> {
+  let parsed: unknown
+  try {
+    parsed = await response.json()
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new HavenSignContextError(timeoutMessage, 'SIGN_CONTEXT_TIMEOUT', undefined, subjectId, flow)
+    }
+    return { body: {}, jsonObject: false }
+  }
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return { body: parsed as Record<string, unknown>, jsonObject: true }
+  }
+  return { body: {}, jsonObject: false }
+}
+
+/**
+ * #4829: is this non-2xx answer a refusal by Haven, or did Haven not answer
+ * usably? A refusal is a 4xx other than 429 whose body IS a JSON object — the
+ * only shape that carries Haven's own `error` / `error_code`, and so the only
+ * one where "Haven refused" is a true statement. Everything else is the
+ * non-answer class: any 5xx, a 429 (the money-path rate limit every one of
+ * these four routes carries), and a body that is not a JSON object at any
+ * status — an HTML 502 from a gateway, an HTML 404 from a platform edge.
+ */
+function isRefusalAnswer(status: number, jsonObject: boolean): boolean {
+  return jsonObject && status >= 400 && status < 500 && status !== 429
+}
+
+/**
+ * #4829: the `Retry-After` wait, when the header is whole seconds. The
+ * HTTP-date form (and anything else) is not cited — the signer does not sleep,
+ * so the number is advice for the agent's own re-call, and a date it cannot
+ * turn into a wait would be worse than saying nothing.
+ */
+function retryAfterSeconds(response: Response): number | undefined {
+  const raw = response.headers.get('retry-after')
+  if (raw === null) return undefined
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const seconds = Number(trimmed)
+  return Number.isSafeInteger(seconds) ? seconds : undefined
+}
+
+/**
+ * #4829: the 429's extra sentence. The signer never re-fetches on its own —
+ * the agent's re-call is the retry — so the reason says exactly that, and
+ * cites the wait Haven asked for when `Retry-After` is whole seconds.
+ */
+function rateLimitText(response: Response): string {
+  const seconds = retryAfterSeconds(response)
+  const wait = seconds === undefined ? 'a short wait' : `${seconds} second${seconds === 1 ? '' : 's'}`
+  const cited = seconds === undefined ? '' : ` (Retry-After: ${seconds})`
+  return (
+    ` Haven is rate-limiting this read${cited}: re-call the same signer tool with the same ` +
+    `arguments once after ${wait}.`
+  )
+}
+
+/**
+ * #4829: the non-answer class, reported like the transport failure each flow
+ * already handles — `SIGN_CONTEXT_UNREACHABLE`, that flow's existing step, and
+ * the `typed_data_b64` relay where the flow has one — never as a refusal by
+ * Haven. `http_status` rides along so an agent can tell a gateway 502 from a
+ * rate limit. The text never says Haven refused: it did not look at the
+ * payment.
+ */
+function nonAnswerError(
+  response: Response,
+  body: Record<string, unknown>,
+  subject: { id: string; what: string; remedy: string },
+  flow: 'x402' | 'direct' | 'task',
+): HavenSignContextError {
+  const detail = typeof body.error === 'string' ? ` — ${body.error}` : ''
+  const rateLimit = response.status === 429 ? rateLimitText(response) : ''
+  return new HavenSignContextError(
+    `Haven did not answer the ${subject.what} fetch for ${subject.id} usably: ` +
+      `HTTP ${response.status}${detail}.${rateLimit} ${subject.remedy}`,
+    'SIGN_CONTEXT_UNREACHABLE',
+    answerOf(response.status, body),
+    subject.id,
+    flow,
+  )
 }
 
 export async function fetchX402SignContext(
@@ -399,22 +531,29 @@ export async function fetchX402SignContext(
   // #2985 review: the same signal bounds the BODY read. A stalled body used
   // to be swallowed by the `.catch(() => ({}))` and misdiagnosed as a
   // malformed/older backend response — name the timeout instead.
-  let body: Record<string, unknown>
-  try {
-    body = (await response.json()) as Record<string, unknown>
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new HavenSignContextError(
-        `Haven did not finish sending the signing context for ${paymentId} within ${timeoutMs} ms. ` +
-          'Retry, or pass typed_data_b64 from the quote result instead.',
-        'SIGN_CONTEXT_TIMEOUT',
-      undefined,
-      paymentId,
-    )
-    }
-    body = {}
-  }
+  // #4829: a body that is not a JSON object is not a refusal either; the
+  // helper reports which shape arrived so the branch below can tell them apart.
+  const { body, jsonObject } = await readSignContextBody(
+    response,
+    timeoutMs,
+    `Haven did not finish sending the signing context for ${paymentId} within ${timeoutMs} ms. ` +
+      'Retry, or pass typed_data_b64 from the quote result instead.',
+    paymentId,
+    'x402',
+  )
   if (!response.ok) {
+    if (!isRefusalAnswer(response.status, jsonObject)) {
+      throw nonAnswerError(
+        response,
+        body,
+        {
+          id: paymentId,
+          what: 'signing-context',
+          remedy: 'Retry, or pass typed_data_b64 from the quote result instead.',
+        },
+        'x402',
+      )
+    }
     const detail =
       typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
     throw new HavenSignContextError(
@@ -425,7 +564,7 @@ export async function fetchX402SignContext(
             ? ' Re-run the quote with the same idempotency key, then sign the fresh payment_id.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      refusalOf(response.status, body),
+      answerOf(response.status, body),
       paymentId,
     )
   }
@@ -526,24 +665,30 @@ export async function fetchDirectSignContext(
       'direct',
     )
   }
-  let body: Record<string, unknown>
-  try {
-    body = (await response.json()) as Record<string, unknown>
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new HavenSignContextError(
-        `Haven did not finish sending the direct-payment signing context for ${paymentId} within ${timeoutMs} ms. ` +
-          'Retry, or re-run haven_send / haven_pay with the same idempotency_key plus ' +
-          'include_signing_payload: true and pass typed_data_b64 from that result instead.',
-        'SIGN_CONTEXT_TIMEOUT',
-        undefined,
-        paymentId,
+  const { body, jsonObject } = await readSignContextBody(
+    response,
+    timeoutMs,
+    `Haven did not finish sending the direct-payment signing context for ${paymentId} within ${timeoutMs} ms. ` +
+      'Retry, or re-run haven_send / haven_pay with the same idempotency_key plus ' +
+      'include_signing_payload: true and pass typed_data_b64 from that result instead.',
+    paymentId,
+    'direct',
+  )
+  if (!response.ok) {
+    if (!isRefusalAnswer(response.status, jsonObject)) {
+      throw nonAnswerError(
+        response,
+        body,
+        {
+          id: paymentId,
+          what: 'direct-payment signing-context',
+          remedy:
+            'Retry, or re-run haven_send / haven_pay with the same idempotency_key plus ' +
+            'include_signing_payload: true and pass typed_data_b64 from that result instead.',
+        },
         'direct',
       )
     }
-    body = {}
-  }
-  if (!response.ok) {
     const detail =
       typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
     throw new HavenSignContextError(
@@ -558,7 +703,7 @@ export async function fetchDirectSignContext(
             ? ' The payment window has expired; call haven_send / haven_pay again with the same idempotency_key.'
             : ''),
       'SIGN_CONTEXT_REFUSED',
-      refusalOf(response.status, body),
+      answerOf(response.status, body),
       paymentId,
       'direct',
     )
@@ -722,27 +867,27 @@ export async function fetchSubBudgetSignContext(
       'task',
     )
   }
-  let body: Record<string, unknown>
-  try {
-    body = (await response.json()) as Record<string, unknown>
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new HavenSignContextError(
-        `Haven did not finish sending the sub-budget signing context for ${subBudgetId} within ${timeoutMs} ms. Retry.`,
-        'SIGN_CONTEXT_TIMEOUT',
-        undefined,
-        subBudgetId,
+  const { body, jsonObject } = await readSignContextBody(
+    response,
+    timeoutMs,
+    `Haven did not finish sending the sub-budget signing context for ${subBudgetId} within ${timeoutMs} ms. Retry.`,
+    subBudgetId,
+    'task',
+  )
+  if (!response.ok) {
+    if (!isRefusalAnswer(response.status, jsonObject)) {
+      throw nonAnswerError(
+        response,
+        body,
+        { id: subBudgetId, what: 'sub-budget signing-context', remedy: 'Retry.' },
         'task',
       )
     }
-    body = {}
-  }
-  if (!response.ok) {
     const detail = typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
     throw new HavenSignContextError(
       `Haven refused the sub-budget signing-context fetch for ${subBudgetId}: ${detail}`,
       'SIGN_CONTEXT_REFUSED',
-      refusalOf(response.status, body),
+      answerOf(response.status, body),
       subBudgetId,
       'task',
     )
@@ -867,27 +1012,27 @@ export async function fetchTaskBudgetSignContext(
       'task',
     )
   }
-  let body: Record<string, unknown>
-  try {
-    body = (await response.json()) as Record<string, unknown>
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new HavenSignContextError(
-        `Haven did not finish sending the task-budget signing context for ${taskBudgetId} within ${timeoutMs} ms. Retry.`,
-        'SIGN_CONTEXT_TIMEOUT',
-        undefined,
-        taskBudgetId,
+  const { body, jsonObject } = await readSignContextBody(
+    response,
+    timeoutMs,
+    `Haven did not finish sending the task-budget signing context for ${taskBudgetId} within ${timeoutMs} ms. Retry.`,
+    taskBudgetId,
+    'task',
+  )
+  if (!response.ok) {
+    if (!isRefusalAnswer(response.status, jsonObject)) {
+      throw nonAnswerError(
+        response,
+        body,
+        { id: taskBudgetId, what: 'task-budget signing-context', remedy: 'Retry.' },
         'task',
       )
     }
-    body = {}
-  }
-  if (!response.ok) {
     const detail = typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
     throw new HavenSignContextError(
       `Haven refused the task-budget signing-context fetch for ${taskBudgetId}: ${detail}`,
       'SIGN_CONTEXT_REFUSED',
-      refusalOf(response.status, body),
+      answerOf(response.status, body),
       taskBudgetId,
       'task',
     )

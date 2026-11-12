@@ -2255,7 +2255,12 @@ caught the PR's first pass conflating them into one wrong trigger): (1) any
 code — a currently-published `@haven_ai/signer` (0.5.0-alpha.1 through
 current) sets that field only on `SIGN_CONTEXT_TIMEOUT` /
 `SIGN_CONTEXT_UNREACHABLE` / `SIGN_CONTEXT_MALFORMED`, or
-`SIGN_CONTEXT_REFUSED` with `http_status: 404` against an older backend; (2)
+`SIGN_CONTEXT_REFUSED` with `http_status: 404` against an older backend.
+Since #4829 `SIGN_CONTEXT_UNREACHABLE` is the NON-ANSWER class as well as a
+transport failure: a body that is not a JSON object at any non-2xx status, any
+5xx, and a 429 all report it (with `http_status`), so a gateway's HTML 502 and
+the money-path rate limit's 429 route here rather than to
+`SIGN_CONTEXT_REFUSED`; (2)
 `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
 and NO `fallback` field, which only a signer predating #3271 produces (no
 direct-fetch fallback of its own to try). Guidance never suggests a

@@ -1151,6 +1151,12 @@ no calendar months. The header sentence, the Needs-attention items that say
 wire's `activityWindowStart` is its boundary). They differ in what they put
 in it, not when it ends: the header counts confirmed agent payments, the
 Transactions card also carries deposits, sweeps, failed and pending rows.
+The "Since your last visit" line (#4709) is compared against that same
+interval: it is hidden when its window `(after, through]` lies inside
+`[activityWindowStart, +7×24h)` and holds the same number of confirmed payments,
+because the 7-day sentence then says the same thing (#4839). The test anchors on
+`activityWindowStart`, which slides with every overview poll, never on the
+Since window's own `through`, which is fixed for the visit.
 
 **The dashboard's activity list is grouped and merchant-first (#3810).** The
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per

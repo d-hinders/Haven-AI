@@ -5,6 +5,7 @@ import {
   buildDashboardSummary,
   buildSinceLastVisitSummary,
   merchantDisplayName,
+  sinceLineRepeatsSevenDay,
   type DashboardSummaryInput,
   type SinceLastVisitInput,
 } from '../dashboard-summary'
@@ -454,3 +455,56 @@ describe('buildSinceLastVisitSummary (#4709) — the exact sentences', () => {
     expect(sentence).not.toMatch(/0x[0-9a-fA-F]{6,}/)
   })
 })
+
+describe('sinceLineRepeatsSevenDay (#4839)', () => {
+  // The overview's 7-day window: [start, start + 7×24 h).
+  const START = '2026-11-05T12:00:00.000Z'
+  const END_MS = Date.parse(START) + 7 * 24 * 60 * 60 * 1000
+  const inside = { after: '2026-11-11T09:00:00.000Z', through: '2026-11-12T09:00:00.000Z' }
+  const repeats = (o: Partial<Parameters<typeof sinceLineRepeatsSevenDay>[0]> & { payments?: number } = {}) =>
+    sinceLineRepeatsSevenDay({
+      since: { ...inside, payments: o.payments ?? 3 },
+      activityWindowStart: START,
+      sevenDayPayments: 3,
+      ...o,
+    })
+
+  it('window inside the 7-day window with equal counts: it repeats, so it is hidden', () => {
+    expect(repeats()).toBe(true)
+  })
+
+  it('window inside, fewer payments since: it adds something, so it shows', () => {
+    expect(repeats({ payments: 2 })).toBe(false)
+  })
+
+  it('window inside, MORE payments since than the 7-day read (the overview predates the entry): shows', () => {
+    expect(repeats({ payments: 4 })).toBe(false)
+  })
+
+  it('window starting before the 7-day window (too old, or slid on a long-open tab), equal counts: shows', () => {
+    expect(repeats({ since: { after: '2026-11-05T11:59:59.999Z', through: inside.through, payments: 3 } })).toBe(false)
+    // Exactly on the start is inside: d7 includes its start.
+    expect(repeats({ since: { after: START, through: inside.through, payments: 3 } })).toBe(true)
+  })
+
+  it('window ending at or after the 7-day window end, equal counts: shows', () => {
+    const atEnd = new Date(END_MS).toISOString()
+    expect(repeats({ since: { after: inside.after, through: atEnd, payments: 3 } })).toBe(false)
+    expect(repeats({ since: { after: inside.after, through: new Date(END_MS - 1).toISOString(), payments: 3 } })).toBe(true)
+  })
+
+  it('honours the overview window length when it is on the wire', () => {
+    const throughDay8 = new Date(END_MS + 12 * 60 * 60 * 1000).toISOString()
+    expect(repeats({ since: { after: inside.after, through: throughDay8, payments: 3 } })).toBe(false)
+    expect(repeats({ since: { after: inside.after, through: throughDay8, payments: 3 }, activityWindowDays: 8 })).toBe(true)
+  })
+
+  it('anything missing or unparseable: never hidden, the line behaves as before', () => {
+    expect(repeats({ since: null })).toBe(false)
+    expect(repeats({ activityWindowStart: undefined })).toBe(false)
+    expect(repeats({ activityWindowStart: 'not a date' })).toBe(false)
+    expect(repeats({ sevenDayPayments: undefined })).toBe(false)
+    expect(repeats({ since: { after: 'garbage', through: inside.through, payments: 3 } })).toBe(false)
+  })
+})
+

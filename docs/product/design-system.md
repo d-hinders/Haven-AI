@@ -1573,7 +1573,10 @@ The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
 registered pieces: `PageHeader` (the heading carries the templated 7-day
 summary sentence from `lib/dashboard-summary.ts` — fixed templates over the
 overview's own figures, never model-written, naming at most two agents and
-one merchant and describing budget stops neutrally), then ONE money card
+one merchant and describing budget stops neutrally; above it, #4709's "Since
+your last visit" line, which is hidden when it would only repeat the 7-day
+sentence — its window lies inside the overview's 7-day window and holds as many
+payments (#4839, owner decision 2026-11-12)), then ONE money card
 (#3897): `Card elevation="raised"` — the page's single most prominent
 surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing

@@ -589,17 +589,46 @@ export async function claimIntentForSubmission(
   return result.rows.length > 0
 }
 
+/**
+ * The ONE confirm write (#4819). Both writers — the sign route and the
+ * submission reconciler — reach it through `bookConfirmedPayment`, so a
+ * confirmed payment records the same thing whichever path confirmed it.
+ *
+ * Two conjuncts carry the compare-and-set: `status = 'submitted'` makes the
+ * second writer the no-op loser, and `tx_hash IS NULL` keeps a row that
+ * already carries a hash un-touchable. `agent_id` is the tenant scope the
+ * route has always passed; the reconciler passes the row's own agent.
+ *
+ * The `submission_outcome` CASE is what stops a reconciled row reading
+ * "unknown" after it is confirmed: the outcome-pending booking wrote that
+ * marker, and a resolved row must not keep it. It is a CASE rather than an
+ * unconditional write so a route-confirmed row — which never carried the
+ * marker — keeps its `machine_metadata` byte-identical to before this slice.
+ */
 export const CONFIRM_SUBMITTED_INTENT_SQL = `UPDATE payment_intents
          SET status = 'confirmed',
              tx_hash = $1,
              confirmed_at = NOW(),
              usd_value = $3,
              eur_value = $4,
-             sek_value = $6
-         WHERE id = $2 AND agent_id = $5 AND status = 'submitted'
+             sek_value = $6,
+             machine_metadata = CASE
+               WHEN machine_metadata ? 'submission_outcome'
+                 THEN machine_metadata || jsonb_build_object('submission_outcome', 'resolved')
+               ELSE machine_metadata
+             END
+         WHERE id = $2 AND agent_id = $5 AND status = 'submitted' AND tx_hash IS NULL
          RETURNING id`
 
-/** Confirm a claimed (`submitted`) intent after on-chain success. */
+/**
+ * Confirm a claimed (`submitted`) intent after on-chain success.
+ *
+ * #4819: callers on the money path go through `bookConfirmedPayment`
+ * (`modules/payments/confirm-booking.ts`), which prices the payment, calls
+ * this write and then runs the evidence hook, the accounting feed and the
+ * first-payment event. Calling this directly books the row WITHOUT those side
+ * effects — the thin booking this slice exists to remove.
+ */
 export async function confirmSubmittedIntent(
   input: {
     txHash: string
@@ -688,12 +717,18 @@ export async function bookSubmittedOutcomePending(
 export interface OutcomePendingIntentRow {
   id: string
   agent_id: string
+  /** The payment's owner — the booking's accounting feed is scoped to them. */
+  user_id: string
   chain_id: number
   signed_at: string
   user_op_hash: string
+  /** The intent's own token and amount, for the booking's fiat capture. */
+  token_symbol: string
+  amount_human: string
 }
 
-export const FIND_OUTCOME_PENDING_INTENTS_SQL = `SELECT id, agent_id, chain_id, signed_at,
+export const FIND_OUTCOME_PENDING_INTENTS_SQL = `SELECT id, agent_id, user_id, chain_id, signed_at,
+            token_symbol, amount_human,
             machine_metadata->>'user_op_hash' AS user_op_hash
      FROM payment_intents
      WHERE status = 'submitted'
@@ -727,26 +762,6 @@ export async function findOutcomePendingIntents(
   return result.rows
 }
 
-export const RECONCILE_OUTCOME_CONFIRMED_SQL = `UPDATE payment_intents
-         SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW()
-         WHERE id = $2 AND status = 'submitted' AND tx_hash IS NULL
-         RETURNING id`
-
-/**
- * #3564: the receipt says the op landed and SUCCEEDED — confirm the row with
- * the receipt's own transaction hash. The CAS makes a concurrent settle's
- * confirm the winner and this write the loser (and vice versa); idempotent by
- * construction (a second run finds no open row and returns false).
- */
-export async function reconcileOutcomeConfirmed(
-  intentId: string,
-  txHash: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(RECONCILE_OUTCOME_CONFIRMED_SQL, [txHash, intentId])
-  return result.rows.length > 0
-}
-
 export const RECONCILE_OUTCOME_FAILED_SQL = `UPDATE payment_intents
          SET status = 'failed',
              error_message = COALESCE(error_message, '') || ' | reconciled from chain: redemption UserOp ' || (machine_metadata->>'user_op_hash') || $1::text,
@@ -769,6 +784,37 @@ export async function reconcileOutcomeFailed(
 ): Promise<boolean> {
   const result = await db.query<{ id: string }>(RECONCILE_OUTCOME_FAILED_SQL, [cause, intentId])
   return result.rows.length > 0
+}
+
+// ── The epic's census (#4816, #4819) ─────────────────────────────────────────
+//
+// Read-only. The epic's promotion checklist runs two counts against the dev and
+// production databases BEFORE #4818 merges: `submitted` rows without a hash
+// (#4818's intake) and the population below — payments the reconciler already
+// confirmed with the thin booking. Once #4818's code runs, the reconciler
+// consumes the first population within a tick; the second is history that no
+// pass repairs (the owner decided no backfill in #4819), so it is counted, not
+// healed.
+//
+// The predicate is the marker the outcome-pending booking wrote and the
+// confirm write now resolves: a CONFIRMED row still carrying
+// `submission_outcome: 'unknown'` was confirmed by the old reconciler path.
+// No index, no migration, no writer — a census that changed the thing it
+// measures would be worthless.
+
+export const COUNT_RECONCILER_THIN_BOOKINGS_SQL = `SELECT COUNT(*)::int AS count
+     FROM payment_intents
+     WHERE status = 'confirmed'
+       AND machine_metadata->>'submission_outcome' = 'unknown'`
+
+/**
+ * #4819: how many payments the reconciler already confirmed with the thin
+ * booking (confirmed rows still carrying the outcome-pending marker). Read-only
+ * — the epic's census box, not a repair.
+ */
+export async function countReconcilerThinBookings(db: Executor = pool): Promise<number> {
+  const result = await db.query<{ count: number }>(COUNT_RECONCILER_THIN_BOOKINGS_SQL)
+  return result.rows[0]?.count ?? 0
 }
 
 // ── Machine-rail transitions (rail-scoped guards, modules/mpp/authorize.ts) ──

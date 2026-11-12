@@ -3072,46 +3072,50 @@ the agent surface; the owner dashboard), each required to run a reproduction
 with a positive control, and one measurement worker in its own clone for the
 numbered blocks. The captain ran all 15 reproduction test files and 2 scripts a
 second time at the SHA; each gave the pass / fail pattern its hunter reported.
-Blocks 8 and 9 recorded the backend suite against a disposable local Postgres
-16 database. Live calls were read-only, on dev only, as a dev agent. GitHub was
-read-only. One security hypothesis is not written in the public record and
-went to the owner directly.
+The bundler, the accounting provider and the HTTP client were stand-ins in
+every reproduction; no finding claims an on-chain outcome. Blocks 8 and 9
+recorded the backend suite against a disposable local Postgres database. Live
+calls were read-only, on dev only, as a dev agent. GitHub was read-only. One
+security hypothesis is not written in the public record and went to the owner
+directly.
+
+**A departure from the skill, named:** the owner's scope was a defect hunt, so
+the report carries a third list beside the two output levels — ten reproduced
+one-PR defects beyond the cap of five. They are prior art for the next run's
+exclusion like any candidate.
 
 **Excluded this run:** every prior finding and candidate, whatever its
 disposition. S1 sits beside #3564, #3930 and #4470, each of which fixed one
-call site of the same class and is closed; S1 is the sites they did not reach,
-none of which a prior entry measured. S2 sits beside #4470 in the same way.
+call site of the same failure mode and is closed; S1 is the sites they did not
+reach, none of which a prior entry measured.
 
-**Structural findings (pending owner decision):**
-- S1 — an operation that was sent and whose outcome is unknown is booked,
-  answered or shown as failed. The backend's rail file has two send-and-wait
-  sites; "sent, outcome unknown" is recognised only at the receipt wait of the
-  agent-payment submit. Five reproduced defects: (1) the agent sign route books
-  `failed`, and the hosted mapper says "create a new payment", when the
-  bundler's answer to the send is lost (10 s transport timeout); (2) the same
-  when the op is mined and the confirm write throws; (3) a sign request that
-  dies after the claim leaves the row `submitted` with no operation hash, and
-  the submission reconciler, the erc7710 sweep and the orphan sweep each select
-  0 rows for it; (4) a payment the submission reconciler confirms has no fiat
-  values, fires no accounting feed and is excluded by the Sync-now backfill's
-  SQL; (5) the dashboard's Send dialog shows a lost submit as a failure with
-  "Try again", and the retry signs and submits a second transfer with no
-  idempotency key. All five owner-side callers of the treasury submit (owner
-  transfer, signer change, two revocations, re-key revocation) answer any
-  throw, post-send included, with 502 "… failed". Cost on record: #3564, #3930,
-  #4470. Slices: the rail; the sign route and reconciler intake; reconciler
-  booking; the owner transfer route and dialog; the four other owner callers.
-  Not observed: a real bundler including an op whose answer was lost.
-- S2 — a non-answer is read as an answer, on four surfaces: (1) the hosted and
-  local `haven_quote_x402` skip the `expected_amount` comparison when the agent
-  read fails, answer `safe_to_continue: true` and prefill the cap at the
-  merchant's price; (2) the hosted error mapper answers a 429 (rate limit,
-  hourly x402 cap, relayer budget) "refused as made … cannot succeed" and drops
-  the wait; (3) the signer's sign-context fetch reports an HTML 502 and a 429 as
-  `SIGN_CONTEXT_REFUSED` without the relay fallback; (4) the dashboard's session
-  restore deletes a valid token on any failed `/auth/me`, and a token that
-  expires mid-session is never noticed. Cost on record: #4470, #3214, #3541.
-  Slices by package.
+**Structural finding (pending owner decision):**
+- S1 — between sending an operation and booking its outcome, one failure mode
+  is recognised as "outcome unknown". The backend's rail file has two
+  send-and-wait functions; the unknown outcome is raised at one throw site, the
+  receipt wait of the shared redemption submit, which three routes read. Five
+  reproduced defects: (1) the agent sign route books `failed`, and the hosted
+  mapper says "create a new payment", when the bundler's answer to the send is
+  lost (a transport timeout of about 10 s); (2) the same when the op is mined
+  and the confirm write throws; (3) a sign request that dies after the claim
+  leaves the row `submitted` with no operation hash, and the submission
+  reconciler, the erc7710 sweep and the orphan sweep each select 0 rows for it;
+  (4) a payment the submission reconciler confirms has no fiat values, fires no
+  accounting feed and is excluded by the Sync-now backfill's SQL; (5) the
+  dashboard's Send dialog shows a lost submit as a failure with "Try again",
+  and the retry signs and submits a second transfer with no idempotency key.
+  All five owner-side callers of the treasury submit (owner transfer, signer
+  change, two revocations, re-key revocation) answer any throw, post-send
+  included, with 502 "… failed". On record: the same failure mode fixed three
+  times, one site at a time (#3564 and #3930 from code review, #4470 from the
+  2026-10-27 refusal-census trial); no production incident. Slices: the rail
+  first; the sign route and reconciler intake; reconciler booking; the owner
+  transfer route and dialog; the four other owner callers. Not observed: a real
+  bundler including an op whose answer was lost.
+- A second structural finding ("a non-answer is read as an answer", four
+  defects in four packages) was drafted and withdrawn at review: no measured
+  census, and each remedy is one PR. Its four defects are listed beyond the cap
+  below.
 
 **Improvement candidates (one PR each), pending owner decision:**
 - C1 — the signed receipt bundle (`GET /payments/:id/receipt`,
@@ -3133,30 +3137,50 @@ none of which a prior entry measured. S2 sits beside #4470 in the same way.
 - C5 — x402 authorize with the same idempotency key after settle answers an
   untyped 409 "retry the original request" with no payment id for as long as
   the row is `submitted` (`modules/x402/replay.ts`).
-- Reproduced, outside the cap of five: Send's amount field (a decimal comma
-  silently rejected; a sub-unit amount reaching Review as "Send 0 USDC"); Send
-  above the balance answering "Could not prepare the transfer" with a retry
-  button; a contact the Contacts page accepts that Send cannot review
-  (checksum-strict check); contacts unique per raw string, so one address in two
-  casings is stored twice; one Bazaar index entry with a field of the wrong
-  type aborting the discovery run; a quote that reports the standard entry's
-  price while it compares and pays the erc7710 entry's.
-- Leads, not proposed: block 1's two survivors (dead code in the hosted
-  `auth.ts`; the task-budget recipient caveat pinned by count only); typed
-  codes on task-budget, sub-budget and resume routes that reach the generic
-  branch outside block 8's payment-route rule.
 
-**Escape analysis** (89 issues created since 2026-11-02; 11 carry a `Found by`
-line; 28 judged defects not found by a scan, by the captain's reading): dev
-tooling and CI 14 (block 6 should have seen 3 — scripts that exit 0 without
-running); agent guidance and onboarding wording 5 (no block); catalog and
-header conformance from a live purchase 2 (block 10, added since); what a
-money field claims 2 (no block); operator incident 2 (no block); dashboard,
-from walkthroughs 3 (no block). This run's own defects by class: post-send
-outcome 5, non-answer read as an answer 4, cross-surface disagreement on one
-fact 3, dashboard input validation 4, and one each of a handoff to something
-the surface lacks, replay shape, a retry that is not byte-stable, and one item
-aborting a batch. The first three classes have no block.
+**Reproduced, beyond the cap of five (pending owner decision):**
+- the hosted `haven_quote_x402` handler skips the `expected_amount` comparison
+  when its agent read fails, answers `safe_to_continue: true` and prefills the
+  cap at the merchant's price — through the hosted server this needs the
+  identity gate's read of the same endpoint to succeed and the handler's to
+  fail (the reproduction bypassed the gate); the local quote, which has no
+  gate, returns a plain quote with no comparison and no stop;
+- the hosted error mapper answers a 429 (rate limit, hourly x402 cap, relayer
+  budget) "refused as made … cannot succeed" and drops the wait;
+- the signer's sign-context fetch reports an HTML 502 and a 429 as
+  `SIGN_CONTEXT_REFUSED` without the relay fallback;
+- the dashboard's session restore deletes a valid token on any failed
+  `/auth/me`, and a token that expires mid-session is never noticed;
+- Send's amount field: a decimal comma silently rejected; a sub-unit amount
+  reaching Review as "Send 0 USDC";
+- Send above the balance answering "Could not prepare the transfer" (backend
+  half run; the dialog's retry button for this case inferred);
+- a contact the Contacts page accepts that Send cannot review (checksum-strict
+  check);
+- contacts unique per raw string, so one address in two casings is stored
+  twice;
+- one Bazaar index entry with a field of the wrong type aborting the discovery
+  run;
+- a quote that reports the standard entry's price while it compares and pays
+  the erc7710 entry's.
+
+Leads, not proposed: block 1's two survivors (dead code in the hosted
+`auth.ts`; the task-budget recipient caveat pinned by count only); typed codes
+on task-budget, sub-budget and resume routes that reach the generic branch
+outside block 8's payment-route rule.
+
+**Escape analysis** (89 issues created since 2026-11-02; 2 carry a `Found by:`
+line as the convention writes it; 28 judged defects not found by a scan, by the
+captain's reading; the other 61 read by title only and not classified one by
+one): dev tooling and CI 14 (block 6 should have seen 3 — scripts that exit 0
+without running); agent guidance and onboarding wording 5 (no block); catalog
+and header conformance from a live purchase 2 (block 10, added since); what a
+money field claims 2 (no block); operator incident 2 (no block); dashboard 3
+(no block). This run's own 20 defects by class: the seam after the send 5,
+non-answer read as an answer 4, cross-surface disagreement on one fact 3,
+dashboard input handling 3, and one each of contact casing, a handoff to
+something the surface lacks, replay shape, a retry that is not byte-stable,
+and one item aborting a batch. The first three classes have no block.
 
 **Dispositions observed (upkeep):** 2026-11-11 scoped entry → #4804 open,
 still `pending-review`. 2026-11-02 C1 → epic #4610 open for its promotion
@@ -3204,20 +3228,34 @@ checklist. The 2026-11-09 epics #4759 and #4788 are closed; #4580 is closed.
   residual line, 7 saying none; 13 with a residual heading; 45 bullets, 3
   citing an issue or PR.
 - live exercise → examined → read-only, dev only, 13 calls through the dev
-  hosted MCP; runtime identities recorded in the report; result C1 and one
-  lead.
+  hosted MCP before dev began deploying the next landing; runtime identities
+  recorded in the report; result C1 and one lead.
 - cross-package duplication → not examined; validation / contracts → partial
   (blocks 8, 9 and the hunters' route tests); data-layer coverage → partial
   (the gauge).
 - novelty → the hunters' GitHub searches, the ledger and the bug reports'
-  names; the captain read each cited issue's title and state.
+  names; the captain read each cited issue's title and state, the reviewer its
+  body.
 
-Instrument lessons: a new file under a package's `src` makes another package's
-fresh-dist guard refuse to start, so reproductions for the SDK, the signer and
-the local MCP run as scripts against `dist`; `rg` does not resolve under `bash`
-on the scan machine and was passed to the runner through `$RG`; a hunter's
-`git fetch` in a shared worktree moves `origin/dev` for every reader, so
-commands name the SHA.
+Instrument lessons: a new file under one package's `src` makes another
+package's fresh-dist guard refuse to start (a signer reproduction stopped the
+hosted MCP's tests for minutes), so a reproduction for a package others build
+against is better run as a script against `dist`, as the two local-MCP ones
+were; `rg` does not resolve under `bash` on the scan machine and was passed to
+the runner through `$RG`; a hunter's `git fetch` in a shared worktree moves
+`origin/dev` for every reader, so commands name the SHA; a hunter's timing
+figure is not the captain's — quote the run that was kept.
 
-**Disposition: pending owner decision** (S1, S2, C1–C5, and the six defects
-outside the cap).
+**Review:** `haven-reviewer` at head `42f2ccc39`, in its own clone, checked 60
+line references, every count with a command, the 21 manifest rows, the block
+figures against their raw outputs, 20 issue and PR claims against their
+bodies and each quoted reproduction output against the logs and test sources:
+changes requested — 7 blocking, 16 should-fix, 10 nits, all applied in place.
+Among them: the second structural finding withdrawn; the hosted quote defect
+narrowed to the condition above; two wrong attributions (#4470's origin,
+#3214's subject); a timing figure that was a hunter's, not the captain's; a
+false "touches none of the files cited"; three money-path verdicts that had
+been asserted and not run. The report's § 5 lists them.
+
+**Disposition: pending owner decision** (S1, C1–C5, and the ten defects beyond
+the cap).

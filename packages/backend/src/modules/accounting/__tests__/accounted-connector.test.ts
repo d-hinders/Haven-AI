@@ -330,7 +330,14 @@ describe('AccountedConnector.pushTransaction (#3018)', () => {
     expect((forbidden as ProviderError).status).toBe(403)
   })
 
-  it('409 IDEMPOTENCY_KEY_REUSE (same key, different bytes) → terminal skipped, never retried here', async () => {
+  /**
+   * #4824: the fallback shape. A payment that rendered under this build
+   * carries a pin, so a retry replays instead of reaching this branch; the
+   * 409 is what a row whose first render predates the pin still gets. The
+   * connector itself never retries — the sweep re-feeds the skipped row, and
+   * a pinned row replays on that retry.
+   */
+  it('409 IDEMPOTENCY_KEY_REUSE (same key, different bytes) → skipped with the reason; the connector itself never retries', async () => {
     connectedMock()
     underlagMock()
     const { connector, state } = withRouter()

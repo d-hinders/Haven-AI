@@ -621,9 +621,10 @@ none can disagree with the others on an identical accepts[]/agent pair.
 Another deliberate local/hosted skew, same shape as the one above: this is
 response shaping specific to the hosted capability modules
 (`buildMcpToolQuoteResponse`, and the hosted `haven_quote_x402` handler
-directly), so the local stdio `haven_quote_x402` passthrough gains none of
-these fields — it has no server-side agent read to predict from, and a local
-caller already holds its own key/rail state.
+directly), so the local stdio `haven_quote_x402` gains none of these fields —
+it predicts no settlement scheme, and a local caller already holds its own
+key/rail state. (It does read the agent since #3967, but only to compare a
+stated `expected_amount`; see the #4830 note below.)
 
 As of #3839, `haven_discover_tools` on BOTH the hosted and the local stdio
 surface returns two additive fields per entry: `asset_transfer_methods` (the
@@ -635,11 +636,12 @@ exactly, so after a release). The description gains one guidance sentence;
 `description-size.test.ts` was re-derived for it (round 26).
 
 One **deliberate local/hosted skew**, recorded because this table exists to
-catch exactly that: the **local stdio** `haven_quote_x402` is a bare
-passthrough of the SDK's `X402Quote`, so it now also QUOTES an erc7710-only
-merchant (it used to throw) — but it returns the SDK's own `acceptedScheme`
-(camelCase) and no `erc7710_only` convenience field, since none of the hosted
-response shaping runs there. The local **pay** paths are unchanged in behavior
+catch exactly that: the **local stdio** `haven_quote_x402` returns the SDK's
+own `X402Quote` plus only the fields its own `expected_amount` comparison adds,
+so it now also QUOTES an erc7710-only merchant (it used to throw) — but it
+returns the SDK's own `acceptedScheme` (camelCase) and no `erc7710_only`
+convenience field, since none of the hosted response shaping runs there. The
+local **pay** paths are unchanged in behavior
 (`HavenClient.fetch` / `authorizeX402` / `payX402Quote` still re-select through
 `selectStandardPaymentOption` and refuse an erc7710-only merchant — a
 key-holding EIP-3009 path cannot settle it); what changed is only the refusal
@@ -653,6 +655,23 @@ the same queue-only submission tool (same `resource_url` + honeypot `website`
 input, same id/verify_token/status output). It writes a submission row only —
 no outbound request, no token reuse, no authority — and domain-ownership proof
 plus the read-only quote probe still gate any listing on the backend.
+
+> **Additive response fields (#4830, 2026-11-12):** a stated `expected_amount`
+> is no longer skipped silently on either surface. When the comparison cannot
+> be made, `haven_quote_x402` (hosted and local) returns
+> `price_comparison_made: false` with `price_comparison_not_made_cause`
+> (`agent_read_failed` | `agent_read_refused` | `no_option_selected` |
+> `unknown_decimals`), `safe_to_continue: false`, no prefilled cap and no pay
+> step; `price_differs_from_expected` is absent because nobody compared the
+> price. The next step follows the cause — `retry_with_explicit_context` for a
+> transient agent-read failure, `stop_and_tell_user` for a refused read, an
+> unselectable option or unknown decimals — and no new `next_action` value is
+> introduced. The comparison is now decided WITHOUT the agent read wherever the
+> rail cannot change the answer (one option, equal authorization amounts, or a
+> stated price equal to neither), and a stated price finer than the token's
+> scale is a decided mismatch on both surfaces (the local surface used to skip
+> it). No input, existing field, or signer surface changed. The local half
+> ships with the next `@haven_ai/mcp` release.
 
 > **Additive response field (#3476, 2026-09-29):** the hosted
 > `haven_pay_x402_quote` gains an optional `allowance` block on its

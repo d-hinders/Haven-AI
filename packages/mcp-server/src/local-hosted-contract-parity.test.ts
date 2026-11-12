@@ -170,10 +170,10 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
-      local: 'c491068545c5',
-      hosted: '86e3f8304d5d',
+      local: '4bdcbaf93f4d',
+      hosted: '86b932e45565',
       reason:
-        'Each text names its own follow-up: the local quote is the input to haven_pay_x402_quote, the hosted one returns a next step restating the request with a cap.',
+        'Each text names its own follow-up: the local quote is the input to haven_pay_x402_quote, the hosted one returns a next step restating the request with a cap. Both now say Haven is read for the agent (and, hosted, its budget) rather than "not contacted" (#4830).',
     },
   },
   'haven_pay_x402_quote↔haven_pay_x402_quote': {

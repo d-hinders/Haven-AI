@@ -488,7 +488,7 @@
       }
     },
     "haven_quote_x402": {
-      "description": "Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction. Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the quote and a next step naming haven_pay_x402_quote with this same request. Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.",
+      "description": "Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction. Probes the merchant from the hosted server, parses the 402. Haven is read for the agent and budget. Returns the quote and a next step naming haven_pay_x402_quote with this request. Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.",
       "inputSchema": {
         "type": "object",
         "properties": {

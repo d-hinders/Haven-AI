@@ -418,8 +418,10 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   remaining budget at quote time, and it can check a price you state
   (\`expected_amount\`). On the local runtime (\`@haven_ai/mcp\`) the quote
   checks only a price you state; the budget is checked when you pay.
-  When it returns \`safe_to_continue: false\` — the amount exceeds the budget, or
-  the price does not match what you expected — it prefills no cap and names no
+  When it returns \`safe_to_continue: false\` — the amount exceeds the budget, the
+  price does not match what you expected, or the price could not be compared at
+  all (\`price_comparison_made: false\`; follow its \`next_action\` — re-quote once
+  when the agent read failed, otherwise stop) — it prefills no cap and names no
   next tool: stop and tell the user. If the x402 challenge itself is wrong (a
   price wildly off the invoice) and NOTHING has been paid via x402, the
   invoice's own deposit address MAY be an alternative, but only with the

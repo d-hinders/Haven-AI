@@ -1318,7 +1318,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
 const QUOTE_X402_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteX402,
   behavior:
-    'Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the quote and a next step naming haven_pay_x402_quote with this same request.',
+    'Probes the merchant from the hosted server, parses the 402. Haven is read for the agent and budget. Returns the quote and a next step naming haven_pay_x402_quote with this request.',
   nextActionGuidance:
     'Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.',
 })

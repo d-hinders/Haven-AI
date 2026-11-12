@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { api, ApiRequestError } from '@/lib/api'
+import { api, ApiRequestError, setSessionExpiredHandler } from '@/lib/api'
 
 describe('ApiClient', () => {
   beforeEach(() => {
@@ -13,6 +13,7 @@ describe('ApiClient', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs()
+    setSessionExpiredHandler(null)
   })
 
   function mockFetchOk(data: unknown) {
@@ -296,6 +297,127 @@ describe('ApiClient', () => {
       await api.get('/users')
 
       expect(fetch).toHaveBeenCalledWith('/api/users', { headers: {} })
+    })
+  })
+
+  /**
+   * #4827: a 401 from a session-authenticated call ends the session, and the
+   * reaction lives HERE — at both throw sites — so every authenticated call is
+   * covered, not just the hooks that happen to check a status.
+   */
+  describe('session-ending 401 (#4827)', () => {
+    it('fires the handler on a 401 from an authenticated call', async () => {
+      const onExpired = vi.fn()
+      setSessionExpiredHandler(onExpired)
+      localStorage.setItem('haven_token', 'token-a')
+      mockFetchError(401, { error: 'Unauthorized' })
+
+      await expect(api.get('/dashboard/overview')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        status: 401,
+      })
+
+      expect(onExpired).toHaveBeenCalledTimes(1)
+    })
+
+    it('fires the handler at the getText throw site too', async () => {
+      const onExpired = vi.fn()
+      setSessionExpiredHandler(onExpired)
+      localStorage.setItem('haven_token', 'token-a')
+      mockFetchError(401, { error: 'Unauthorized' })
+
+      await expect(api.getText('/accounting/export')).rejects.toMatchObject({
+        name: 'ApiRequestError',
+        status: 401,
+      })
+
+      expect(onExpired).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not fire when the request carried no token', async () => {
+      const onExpired = vi.fn()
+      setSessionExpiredHandler(onExpired)
+      mockFetchError(401, { error: 'Unauthorized' })
+
+      await expect(api.get('/dashboard/overview')).rejects.toThrow(ApiRequestError)
+
+      expect(onExpired).not.toHaveBeenCalled()
+    })
+
+    it('does not fire on a non-401 failure', async () => {
+      const onExpired = vi.fn()
+      setSessionExpiredHandler(onExpired)
+      localStorage.setItem('haven_token', 'token-a')
+      mockFetchError(500, { error: 'Internal error' })
+
+      await expect(api.get('/dashboard/overview')).rejects.toThrow(ApiRequestError)
+
+      expect(onExpired).not.toHaveBeenCalled()
+    })
+
+    /**
+     * The three routes whose 401 is about the request, not the session: a wrong
+     * password and a bad agent setup code. The dashboard meets them WITH a
+     * session token stored, so the exemption has to hold in exactly that state.
+     */
+    it.each([
+      ['/auth/login', () => api.post('/auth/login', { email: 'a@b.c', password: 'x' })],
+      ['/agent-connection-setups/resolve', () => api.post('/agent-connection-setups/resolve', { code: 'x' })],
+      ['/agent-connection-setups/register', () => api.post('/agent-connection-setups/register', { code: 'x' })],
+    ])('does not fire for %s even with a session token stored', async (_path: string, call: () => Promise<unknown>) => {
+      const onExpired = vi.fn()
+      setSessionExpiredHandler(onExpired)
+      localStorage.setItem('haven_token', 'token-a')
+      mockFetchError(401, { error: 'Invalid email or password' })
+
+      await expect(call()).rejects.toMatchObject({ name: 'ApiRequestError', status: 401 })
+
+      expect(onExpired).not.toHaveBeenCalled()
+      expect(localStorage.getItem('haven_token')).toBe('token-a')
+    })
+
+    /**
+     * The answer belongs to the session that sent it. A request sent with token
+     * A that answers 401 after `login()` stored token B says nothing about the
+     * session that is live now.
+     */
+    it('does not fire when the stored token changed while the request was in flight', async () => {
+      const onExpired = vi.fn()
+      setSessionExpiredHandler(onExpired)
+      localStorage.setItem('haven_token', 'token-a')
+
+      let resolveFetch!: (value: unknown) => void
+      ;(fetch as ReturnType<typeof vi.fn>).mockReturnValue(
+        new Promise((resolve) => { resolveFetch = resolve }),
+      )
+
+      const pending = api.get('/dashboard/overview')
+      localStorage.setItem('haven_token', 'token-b')
+      resolveFetch({ ok: false, status: 401, json: () => Promise.resolve({ error: 'Unauthorized' }) })
+
+      await expect(pending).rejects.toMatchObject({ status: 401 })
+      expect(onExpired).not.toHaveBeenCalled()
+      expect(localStorage.getItem('haven_token')).toBe('token-b')
+    })
+
+    /**
+     * Two in-flight 401s are one ended session. The handler removes the token
+     * (as `AuthContext.endSession` does), so the second answer finds a token
+     * that is no longer the one it carried and stays silent.
+     */
+    it('fires once for two in-flight 401s when the handler removes the token', async () => {
+      const onExpired = vi.fn(() => localStorage.removeItem('haven_token'))
+      setSessionExpiredHandler(onExpired)
+      localStorage.setItem('haven_token', 'token-a')
+      mockFetchError(401, { error: 'Unauthorized' })
+
+      const results = await Promise.allSettled([
+        api.get('/dashboard/overview'),
+        api.get('/agents'),
+      ])
+
+      expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected'])
+      expect(onExpired).toHaveBeenCalledTimes(1)
     })
   })
 })

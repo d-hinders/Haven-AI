@@ -3921,6 +3921,32 @@ export const SCENARIOS = {
     },
   },
 
+  /**
+   * #4827: the load-error page a failed `GET /auth/me` now shows instead of
+   * signing the owner out. Route capture cannot reach it — the shared fixture
+   * answers `/auth/me` with 200 — so the scenario seeds a 500 on that one route
+   * and photographs the two routes that render the state.
+   */
+  'session-load-error': {
+    description:
+      'The load-error page a failed GET /auth/me shows on /dashboard and /onboarding (#4827) — one Try again action, no redirect to /login',
+    api(apiPath, method) {
+      if (apiPath !== '/auth/me' || method !== 'GET') return undefined
+      return httpError(500, { error: 'Internal error' })
+    },
+    async run({ page, shoot }) {
+      for (const [route, name] of [
+        ['/dashboard', 'dashboard'],
+        ['/onboarding', 'onboarding'],
+      ]) {
+        await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await page.getByText('Your account could not load').waitFor({ timeout: 20_000 })
+        await page.getByRole('button', { name: 'Try again' }).waitFor({ timeout: 20_000 })
+        await shoot(page, name)
+      }
+    },
+  },
+
   'settings-accounting': {
     description:
       'Settings → Accounting card in each of the five connection states, plus the inline feed settings and the backfill choice on a first connect (#2868), the Accounted paste modal (#3017), and the self-hosted OFF state (#2869) — the hosted flag-off capture is retired with #4359, where the card renders nothing',

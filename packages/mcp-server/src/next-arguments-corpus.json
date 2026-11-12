@@ -9,6 +9,13 @@
       }
     },
     {
+      "site": "errors.ts normalizeError: payment already submitted (typed 409, #4826)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
       "site": "errors.ts normalizeError: submission outcome unknown (typed 502, payment_id known)",
       "tool": "haven_get_payment_status",
       "arguments": {

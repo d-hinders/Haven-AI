@@ -21,6 +21,9 @@
  * - `pendingReplay`: the same key as an unexpired `pending_signature` row the
  *   entrypoint itself created (seeded directly for the pre-check, which
  *   creates none), replayed after every link went short.
+ * - `submittedReplay`: the same key as a `submitted` row — the agent settled
+ *   and the outcome is not booked yet (#4826) — replayed after every link
+ *   went short.
  * - `terminalReplay`: the same key as a row that is neither pending nor
  *   confirmed (`failed`), replayed after every link went short.
  *
@@ -35,7 +38,7 @@ export type MatrixEntrypoint = (typeof MATRIX_ENTRYPOINTS)[number]
 export const MATRIX_SCOPES = [...BUDGET_SCOPE_KINDS, 'merchantPin'] as const
 export type MatrixScope = (typeof MATRIX_SCOPES)[number]
 
-export const MATRIX_STATES = ['fresh', 'settledReplay', 'pendingReplay', 'terminalReplay'] as const
+export const MATRIX_STATES = ['fresh', 'settledReplay', 'pendingReplay', 'submittedReplay', 'terminalReplay'] as const
 export type MatrixState = (typeof MATRIX_STATES)[number]
 
 /**
@@ -75,7 +78,7 @@ const terminalFreesKey = (why: string): MatrixCell => ({ outcome: REFUSED, why }
 /** The three rows that create their own intents share their replay answers. */
 function authorizeRow(
   freshCells: Record<MatrixScope, MatrixCell>,
-  replay: { settled: string; pending: string; terminal: string },
+  replay: { settled: string; pending: string; submitted: MatrixCell; terminal: string },
 ): Record<string, Record<MatrixState, MatrixEntry>> {
   const row: Record<string, Record<MatrixState, MatrixEntry>> = {}
   for (const scope of ['none', 'taskBudget', 'subBudget', 'merchantPin'] as const) {
@@ -83,6 +86,7 @@ function authorizeRow(
       fresh: freshCells[scope],
       settledReplay: settled(replay.settled),
       pendingReplay: pending(replay.pending),
+      submittedReplay: replay.submitted,
       terminalReplay: terminalFreesKey(replay.terminal),
     }
   }
@@ -96,6 +100,13 @@ const X402_REPLAY = {
   pending:
     'delegationReplay rebuilds the stored sign context for an unexpired pending row, before any budget read: the ' +
     'enforcer in the redeemed chain stays the gate (#961)',
+  submitted: {
+    outcome: '409 payment_already_submitted',
+    why:
+      'delegationReplay answers a submitted row from the stored row with its id, status and the typed ' +
+      'payment_already_submitted code, before any budget read (#4826): the payment is in flight, so the agent reads ' +
+      'its status instead of authorizing again',
+  },
   terminal:
     'a failed row is not replayed (delegationReplay returns null), so the request takes the fresh path and the ' +
     'pre-check refuses it',
@@ -123,6 +134,12 @@ export const ENTRYPOINT_MATRIX: Partial<
       pending:
         'findPaymentReplay re-serves the stored sign data for an unexpired pending row, before scope resolution (#961, ' +
         '#3271)',
+      submitted: {
+        outcome: '409',
+        why:
+          'findPaymentReplay answers a submitted row through statusReplay, before scope resolution: the stored status ' +
+          'is in progress, so the answer is a 409 carrying the row\'s id and status (#4826 parity)',
+      },
       terminal:
         'the send-key lookup skips failed and expired rows (FIND_SEND_INTENT_BY_KEY_SQL), so the key is free, the ' +
         'request takes the fresh path and the pre-check refuses it',
@@ -163,6 +180,12 @@ export const ENTRYPOINT_MATRIX: Partial<
         outcome: REFUSED,
         why: 'only a SETTLED row bypasses the compare; a pending child is still refused (#3527, #3619 parity table)',
       },
+      submittedReplay: {
+        outcome: REFUSED,
+        why:
+          'a submitted row is not settled (only `confirmed` with a hash is), so the compare runs and refuses ' +
+          '(#4826, #3619 parity table)',
+      },
       terminalReplay: {
         outcome: REFUSED,
         why: 'a failed row is not settled, so the compare runs and refuses (#3619 parity table)',
@@ -181,6 +204,7 @@ export const ENTRYPOINT_MATRIX: Partial<
           '#3619 parity table): the compare runs and refuses',
       },
       pendingReplay: { outcome: REFUSED, why: 'not settled and scoped: the compare runs and refuses (#3619)' },
+      submittedReplay: { outcome: REFUSED, why: 'not settled and scoped: the compare runs and refuses (#4826, #3619)' },
       terminalReplay: { outcome: REFUSED, why: 'not settled and scoped: the compare runs and refuses (#3619)' },
     },
     subBudget: {
@@ -194,6 +218,7 @@ export const ENTRYPOINT_MATRIX: Partial<
         why: 'a sub-budget-scoped row is never a settled replay for the pre-check (#3619 parity table): the compare runs',
       },
       pendingReplay: { outcome: REFUSED, why: 'not settled and scoped: the compare runs and refuses (#3619)' },
+      submittedReplay: { outcome: REFUSED, why: 'not settled and scoped: the compare runs and refuses (#4826, #3619)' },
       terminalReplay: { outcome: REFUSED, why: 'not settled and scoped: the compare runs and refuses (#3619)' },
     },
     merchantPin: {
@@ -203,6 +228,7 @@ export const ENTRYPOINT_MATRIX: Partial<
         why: 'a settled, unscoped keyed row is sufficient by construction (#3492 / #3527)',
       },
       pendingReplay: { outcome: REFUSED, why: 'only a SETTLED row bypasses the compare (#3527)' },
+      submittedReplay: { outcome: REFUSED, why: 'a submitted row is not settled, so the compare runs (#4826)' },
       terminalReplay: { outcome: REFUSED, why: 'a failed row is not settled, so the compare runs (#3619)' },
     },
   },

@@ -20827,7 +20827,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The idempotency key already belongs to a payment. A `submitted` row (#4826) answers `error_code: "payment_already_submitted"` with `payment_id` and `status: "submitted"` — read that payment's status and do not authorize again; the answer is produced at the first replay lookup, before the hourly cap, scope resolution, the remaining-budget read and the funding prepare / deploy check. A replay naming a different resource, payee, amount, asset, network, facilitator set, task budget or sub-budget answers the key-collision 409 (`error` names the field, with `payment_id` and `status`). A conflict whose winner cannot be replayed answers the untyped "Idempotent replay in progress" 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21316,7 +21316,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Same as POST /x402/authorize: a `submitted` row answers the typed `payment_already_submitted` 409 with `payment_id` and `status`, and a key collision answers the mismatch 409. */
             409: {
                 headers: {
                     [name: string]: unknown;

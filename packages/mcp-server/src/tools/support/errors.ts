@@ -336,6 +336,16 @@ const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
 const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
   'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
 
+/**
+ * #4826: the backend's `error_code` for an x402 authorize replay whose
+ * idempotency key already belongs to a `submitted` payment — the agent
+ * settled and the outcome is not booked yet. The row is in flight, so the
+ * answer is a status READ, never a retry and never a second authorize. The
+ * body always carries `payment_id`; the branch below requires it, because
+ * `check_status_later`'s default tool cannot be called without one.
+ */
+const PAYMENT_ALREADY_SUBMITTED_ERROR_CODE = 'payment_already_submitted'
+
 /** #3504: the backend's `error_code` for a payment the delegation's period budget cannot cover. */
 const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
@@ -806,6 +816,33 @@ export function normalizeError(err: unknown): ToolFailure {
     return {
       success: false,
       code: 'SUBMISSION_OUTCOME_UNKNOWN',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId ?? body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #4826: an x402 authorize replay whose key belongs to a `submitted`
+  // payment. The payment is in flight — the agent settled and the outcome is
+  // not booked yet — so the ONLY follow-up is reading its status. Never a
+  // retry (a second authorize cannot succeed: the key is taken) and never a
+  // new payment. The body always carries `payment_id`; a body without one
+  // falls through to the generic 4xx branch below, which also never retries.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === PAYMENT_ALREADY_SUBMITTED_ERROR_CODE &&
+    typeof (err.body as { payment_id?: unknown }).payment_id === 'string'
+  ) {
+    const body = err.body as { error_code?: string; payment_id: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_get_payment_status',
+      nextArguments: { payment_id: body.payment_id },
+    })
+    return {
+      success: false,
+      code: 'PAYMENT_ALREADY_SUBMITTED',
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId ?? body.payment_id,

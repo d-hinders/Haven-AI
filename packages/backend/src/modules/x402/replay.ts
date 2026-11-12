@@ -45,14 +45,26 @@ export async function delegationReplay(
   },
 ): Promise<X402HandlerResult | null> {
   // #3392: the task budget a payment was charged to is part of the replay
-  // pin, so its comparison runs on `pending_signature` (unexpired) AND
-  // `confirmed` rows — BEFORE the confirmed 200 branch that used to answer
-  // any request body. Lower-cased both sides; "absent" is a value. Expired
-  // rows are never compared: a lazily expired row frees the key exactly as
-  // before. Deliberately a BUDGET-ONLY check here — enforcing the other
-  // fields on confirmed rows is out of scope (a separate decision), so the
-  // full `existingX402IntentMismatch` below stays pending-only.
-  if (existing.status !== 'pending_signature' && existing.status !== 'confirmed') return null
+  // pin, so its comparison runs on `pending_signature` (unexpired),
+  // `confirmed` AND `submitted` rows — BEFORE the confirmed 200 branch that
+  // used to answer any request body. Lower-cased both sides; "absent" is a
+  // value. Expired rows are never compared: a lazily expired row frees the
+  // key exactly as before. Deliberately a BUDGET-ONLY check here — enforcing
+  // the other fields on confirmed rows is out of scope (a separate decision),
+  // so the full `existingX402IntentMismatch` below stays pending/submitted-only.
+  //
+  // #4826: `submitted` joins the statuses this function answers. The agent
+  // settled and the outcome is not booked yet, so the row is a payment in
+  // flight. Answering it HERE — at the first replay call, before the hourly
+  // cap, scope resolution, the remaining-budget read and the funding
+  // prepare/deploy check — is what stops a replay from being refused 429/403
+  // for a payment that already exists. It answers a typed 409 (below), never
+  // a fresh intent.
+  if (
+    existing.status !== 'pending_signature' &&
+    existing.status !== 'confirmed' &&
+    existing.status !== 'submitted'
+  ) return null
   if (existing.status === 'pending_signature' && new Date(existing.expires_at as string) < new Date()) {
     // Lazy-expire: nothing else on the authorize path flips a stale
     // pending row, and until its status changes the partial unique
@@ -111,7 +123,10 @@ export async function delegationReplay(
   // Confirmed rows that do not match the 200 branch (no tx_hash) fall through
   // to null exactly as before #3392 — the caller's insert conflicts and the
   // request dead-ends on the bare replay-in-progress 409, unchanged.
-  if (existing.status !== 'pending_signature') return null
+  if (existing.status !== 'pending_signature' && existing.status !== 'submitted') return null
+  // #4826: a `submitted` row gets the SAME full pin a pending row gets — a
+  // replay naming a different resource, payee, amount, asset, network or
+  // facilitator set is a key collision, not a replay of this payment.
   const mismatch = existingX402IntentMismatch(existing, {
     resourceUrl: request.url,
     fundingTo: request.payTo,
@@ -128,6 +143,25 @@ export async function delegationReplay(
         payment_id: existing.id,
         status: existing.status,
         error: `idempotencyKey already belongs to a different x402 ${mismatch}`,
+      },
+    }
+  }
+  // #4826: the payment is already in flight. Answer from the row with its id
+  // and status and a typed code that says to READ the status, never to
+  // authorize again — the same situation `POST /payments` answers with the
+  // row's real status (`modules/payments/create-payment.ts`). No sign context
+  // is issued here: the settlement was already submitted, so there is nothing
+  // left to sign.
+  if (existing.status === 'submitted') {
+    return {
+      code: 409,
+      body: {
+        error:
+          'This idempotency key already authorized a payment that is submitted — read its ' +
+          'status with haven_get_payment_status and do not authorize again.',
+        error_code: 'payment_already_submitted',
+        payment_id: existing.id,
+        status: 'submitted',
       },
     }
   }

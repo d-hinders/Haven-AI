@@ -268,15 +268,18 @@ export function clientCompatDeps(table: CompatTable = CLIENT_COMPAT): ClientComp
         if (row.status !== 'pending_signature') return true
         return new Date(row.expires_at).getTime() >= now
       }
-      // Mirrors `delegationReplay` (modules/x402/replay.ts): only a confirmed
-      // row with a tx hash, or an in-window pending_signature row carrying its
-      // prepared UserOp, is served without minting. Every other status, an
-      // expired row, and a time-expired pending row all fall through to a
-      // fresh intent there, so none of them is a replay here. Anything this
-      // rule is unsure of is refused — the refusal writes nothing.
+      // Mirrors `delegationReplay` (modules/x402/replay.ts): a confirmed row
+      // with a tx hash, an in-window pending_signature row carrying its
+      // prepared UserOp, or a `submitted` row (#4826 — answered from the row
+      // with a typed 409, never minted) is served without minting. Every other
+      // status, an expired row, and a time-expired pending row all fall
+      // through to a fresh intent there, so none of them is a replay here.
+      // Anything this rule is unsure of is refused — the refusal writes
+      // nothing.
       const row = await findX402IntentByIdempotencyKey(agentId, key)
       if (!row) return false
       if (row.status === 'confirmed' && row.tx_hash) return true
+      if (row.status === 'submitted') return true
       return (
         row.status === 'pending_signature' &&
         row.prepared_user_op != null &&

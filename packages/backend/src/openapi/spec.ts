@@ -8079,7 +8079,18 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '403': { ...errorResponse, description: 'Spend authority the agent does not have. Either it holds no active budget delegation for this token/merchant, or (#2082, #2706) the amount exceeds that delegation\'s live remaining period budget — on BOTH settlement schemes now: the erc7710 direct-settlement branch and, since #2706, the EIP-3009 funding leg too. The over-budget refusal is PRE-FUNDING and PRE-PREPARE — no funding redemption is prepared, no settlement child is built, no intent row is written, no delegate account is deployed — and carries error_code "delegation_budget_exceeded", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", plus remaining/remaining_atomic, amount/amount_atomic and shortfall/shortfall_atomic. On the funding leg merchant_address names merchantPayTo (the real merchant), while payTo was the funding target. It is a fail-fast convenience, not the gate: the budget delegation\'s ERC20PeriodTransferEnforcer still refuses an over-budget redemption on-chain, and a degraded budget read fails OPEN (the payment proceeds to prepare, where the enforcer rules). #3500: with taskBudgetId, a payment the task budget\'s own cap cannot cover is the same 403 with error_code "task_budget_exceeded" (task_budget_id, remaining_atomic, max_atomic, amount_atomic), decided from its ERC20TransferAmountEnforcer before anything is built (or, on the funding leg, after a transfer-cap revert the same read confirms). #4458: when the only budget row for the token has ENDED, BOTH legs answer this same 403 with the typed expired body — error_code "delegation_expired", phase "insufficient_funds", next_action "fund_account_or_raise_allowance", budget_ended_at (ISO 8601), remaining/remaining_atomic "0", amount/amount_atomic and shortfall/shortfall_atomic, plus rail "x402", network, resource_url and merchant_address (merchantPayTo on the funding leg, payTo on erc7710) — the same body the hosted pre-check answers, recorded in payment_refusals as reason "delegation_expired" with budget_ended_at in its detail. The two no-delegation 403s beside it stay prose-only.' },
-          '409': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'The idempotency key already belongs to a payment. A `submitted` row (#4826) answers ' +
+              '`error_code: "payment_already_submitted"` with `payment_id` and `status: "submitted"` — ' +
+              'read that payment\'s status and do not authorize again; the answer is produced at the ' +
+              'first replay lookup, before the hourly cap, scope resolution, the remaining-budget read ' +
+              'and the funding prepare / deploy check. A replay naming a different resource, payee, ' +
+              'amount, asset, network, facilitator set, task budget or sub-budget answers the ' +
+              'key-collision 409 (`error` names the field, with `payment_id` and `status`). A conflict ' +
+              'whose winner cannot be replayed answers the untyped "Idempotent replay in progress" 409.',
+          },
           '410': { ...errorResponse, description: 'A retired rail: the Safe / AllowanceModule rail (#1986) or the session rail (#834). Fail-closed — nothing is written and no chain read is made. The message names POST /accounts/hybrid.' },
           '429': errorResponse,
           '502': {
@@ -8274,7 +8285,13 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '403': errorResponse,
-          '409': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'Same as POST /x402/authorize: a `submitted` row answers the typed ' +
+              '`payment_already_submitted` 409 with `payment_id` and `status`, and a key collision ' +
+              'answers the mismatch 409.',
+          },
           '410': {
             ...errorResponse,
             description:

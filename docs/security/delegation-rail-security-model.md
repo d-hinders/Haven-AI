@@ -233,6 +233,17 @@ monitoring only — no budget counts it, no reader of `relayer_gas_events`
 and a recording failure is swallowed: metrics can never gate a payment. See
 `docs/operations/sponsored-gas.md`.
 
+**Reconciled confirms (#4819) — the same booking, no authority move:** a
+delegation-rail submit whose answer was lost is booked outcome-pending
+(`submitted`, the operation hash recorded) and resolved later by the submission
+reconciler from the bundler's receipt index. A reconciler confirm now runs the
+same booking the sign route runs — the fiat capture in the confirm write, the
+machine-payment evidence, the accounting underlag and the first-payment event —
+through one compare-and-set, so exactly one writer books a payment and the
+loser runs no side effect. Nothing here signs, broadcasts or widens a
+delegation: the reconciler only reads a receipt for a hash the route already
+recorded, and the change is what Haven records after the signer has signed.
+
 ## 3. Delegation custody semantics (#828's contract)
 
 **Where the signed delegation lives:** Haven stores it server-side for

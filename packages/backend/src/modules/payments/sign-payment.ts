@@ -45,13 +45,11 @@ import {
   AgentPaymentPhase,
   AgentPaymentRail,
 } from '../../domain/agent-payment-taxonomy.js'
-import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
 import { RelayerBudgetExceededError, RELAYER_BUDGET_EXCEEDED_ERROR_CODE } from '../../infra/relayer-spend-guard.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import {
   bookSubmittedOutcomePending,
   claimIntentForSubmission,
-  confirmSubmittedIntent,
   expireOverdueIntent,
   expirePendingIntent,
   failSubmittedIntent,
@@ -61,7 +59,6 @@ import {
 } from '../../infra/repositories/payment-intents.js'
 import { findForAgent as findTaskBudgetForAgent } from '../../infra/repositories/task-budgets.js'
 import { selectActiveDelegationByHash } from '../../infra/repositories/delegation-budgets.js'
-import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import {
   deserializeUserOp,
   isSettlementChainState,
@@ -73,9 +70,9 @@ import {
 } from '../../rails/execution-rail.js'
 import { SubmittedUserOpFailedError } from '../../rails/delegation-rail.js'
 import { submitDelegationPayment } from '../../rails/delegation-authorization.js'
-import { feedSettledPaymentBestEffort } from '../accounting/index.js'
 import { checkTaskBudgetCap, taskBudgetExceededBody } from '../task-budgets/index.js'
 import { boundFailureMessage } from './agent-payment-status.js'
+import { bookConfirmedPayment } from './confirm-booking.js'
 import { resolveToken } from './create-payment.js'
 import { refuse, type DecidedResponse } from './refuse.js'
 import {
@@ -284,8 +281,9 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
     }
     // #3837: record the sponsored UserOp's gas cost — best-effort,
     // awaited-and-swallowed (a recording failure never fails a
-    // payment), and OUTSIDE the confirmSubmittedIntent booking flow
-    // (this sits on the submit seam, before any booking runs).
+    // payment), and OUTSIDE the confirm booking flow (#4819's
+    // `bookConfirmedPayment`; this sits on the submit seam, before any
+    // booking runs).
     const submission = await submitDelegationPayment(
       { chain_id: intent.chain_id, delegate_address: intent.delegate_address },
       deserializeUserOp(intent.prepared_user_op),
@@ -305,37 +303,29 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
     })
     const { txHash } = submission
 
-    const fiatValues = await getFiatValuesForTokenAmount(
-      intent.token_symbol,
-      intent.amount_human,
-    )
-
-    // 5. Success
-    const confirmed = await confirmSubmittedIntent({
-      txHash,
+    // 5. Success — the ONE booking (#4819): the fiat triple in the confirm
+    // write, the machine-payment evidence, the accounting underlag and the
+    // first-payment event. The submission reconciler calls the same function
+    // when it confirms a payment whose receipt the route never saw, so a
+    // confirmed payment records the same thing whichever path confirmed it.
+    const booked = await bookConfirmedPayment({
       intentId: id,
-      usdValue: fiatValues.usd,
-      eurValue: fiatValues.eur,
+      txHash,
       agentId: agent.id,
-      sekValue: fiatValues.sek,
+      userId: agent.user_id,
+      tokenSymbol: intent.token_symbol,
+      amountHuman: intent.amount_human,
+      log,
+      recordEvidence: recordMachinePaymentEvidence,
     })
 
-    if (!confirmed) {
+    if (!booked) {
       return decided(409, {
         payment_id: id,
         status: 'submitted',
         error: 'Payment intent changed after on-chain execution',
       })
     }
-
-    await recordMachinePaymentEvidence(id, agent.id, log)
-    // #4533: the evidence hook above is a no-op for a direct payment (the
-    // rail gate refuses it), so the underlag is fed from here instead. The
-    // entry is built from `payment_intents` itself; the outside-address
-    // filter lives in that SQL, so an internal transfer is simply not fed.
-    // Fire-and-forget: settlement never waits on an accounting push.
-    feedSettledPaymentBestEffort(agent.user_id, id)
-    emitFirstPaymentSettled(id)
 
     return decided(200, {
       payment_id: id,

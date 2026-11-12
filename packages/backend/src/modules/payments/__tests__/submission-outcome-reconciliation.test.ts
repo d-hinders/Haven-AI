@@ -26,7 +26,7 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import {
   bookSubmittedOutcomePending,
-  reconcileOutcomeConfirmed,
+  confirmSubmittedIntent,
   reconcileOutcomeFailed,
   findOutcomePendingIntents,
 } from '../../../infra/repositories/payment-intents.js'
@@ -153,19 +153,29 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
     expect(status?.submission_outcome_pending).toBe(true)
   })
 
-  it('MUTATION — a landed-and-succeeded receipt confirms the row with its tx_hash', async () => {
+  it('MUTATION — a landed-and-succeeded receipt confirms the row with its tx_hash and resolves the outcome marker', async () => {
     const owner = await seedOwner()
     const id = await seedIntent(owner)
     await bookSubmittedOutcomePending({ userOpHash: `0x${'ab'.repeat(32)}`, intentId: id, agentId: owner.agentId })
     const txHash = `0x${'ef'.repeat(32)}`
 
-    const confirmed = await reconcileOutcomeConfirmed(id, txHash)
+    // #4819: the reconciler's confirm is the SAME write the sign route uses.
+    const confirmed = await confirmSubmittedIntent({
+      txHash,
+      intentId: id,
+      usdValue: null,
+      eurValue: null,
+      sekValue: null,
+      agentId: owner.agentId,
+    })
     expect(confirmed).toBe(true)
 
     const row = await readRow(id)
     expect(row.status).toBe('confirmed')
     expect(row.tx_hash).toBe(txHash)
     expect(row.confirmed_at).not.toBeNull()
+    // A confirmed row must not keep reading "unknown" (#4819).
+    expect((row.machine_metadata as Record<string, unknown>).submission_outcome).toBe('resolved')
   })
 
   it('the confirm is idempotent and concurrency-safe: the second write and a post-confirm write both lose the CAS', async () => {
@@ -173,10 +183,19 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
     const id = await seedIntent(owner)
     await bookSubmittedOutcomePending({ userOpHash: `0x${'ab'.repeat(32)}`, intentId: id, agentId: owner.agentId })
     const txHash = `0x${'ef'.repeat(32)}`
+    const confirm = () =>
+      confirmSubmittedIntent({
+        txHash,
+        intentId: id,
+        usdValue: null,
+        eurValue: null,
+        sekValue: null,
+        agentId: owner.agentId,
+      })
 
-    expect(await reconcileOutcomeConfirmed(id, txHash)).toBe(true)
+    expect(await confirm()).toBe(true)
     // A second reconciler (or a replayed tick) finds no open row:
-    expect(await reconcileOutcomeConfirmed(id, txHash)).toBe(false)
+    expect(await confirm()).toBe(false)
     // A revert arm racing a confirm cannot un-confirm it:
     expect(await reconcileOutcomeFailed(id, ' was included but reverted')).toBe(false)
     const row = await readRow(id)

@@ -353,7 +353,14 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
       // booking.
       run: async () => {
         const { runSubmissionReconcileTick } = await import('./modules/payments/index.js')
-        const tick = await runSubmissionReconcileTick(log)
+        // #4819: a reconciled confirm runs the SAME booking the sign route
+        // runs, and that booking calls the machine-payment evidence hook. The
+        // hook lives in the mpp module, whose barrel imports the payments
+        // barrel, so it is handed in here rather than imported by the tick.
+        const { tryRecordMachinePaymentEvidenceBaseById } = await import('./modules/mpp/index.js')
+        const tick = await runSubmissionReconcileTick(log, {
+          recordEvidence: tryRecordMachinePaymentEvidenceBaseById,
+        })
         if (tick.confirmed || tick.failedReverted || tick.failedWindowElapsed) {
           log.info(tick, 'Submission reconcile tick acted')
         }

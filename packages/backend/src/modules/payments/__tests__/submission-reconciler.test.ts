@@ -14,6 +14,7 @@ import {
   RECONCILE_MAX_AGE_SECONDS,
   RECONCILE_MIN_AGE_SECONDS,
   runSubmissionReconcileTick,
+  type ConfirmBooking,
   type ReconcileLogger,
 } from '../submission-reconciler.js'
 import { readUserOperationReceipt } from '../../../rails/delegation-rail.js'
@@ -24,13 +25,16 @@ type ReceiptAnswer =
   | { state: 'included'; success: boolean; txHash: string }
   | { state: 'not_found_yet' }
 
-function row(overrides: Partial<{ id: string; agent_id: string; chain_id: number; signed_at: string; user_op_hash: string }> = {}) {
+function row(overrides: Partial<{ id: string; agent_id: string; user_id: string; chain_id: number; signed_at: string; user_op_hash: string; token_symbol: string; amount_human: string }> = {}) {
   return {
     id: '11111111-1111-1111-1111-111111111111',
     agent_id: '22222222-2222-2222-2222-222222222222',
+    user_id: '44444444-4444-4444-4444-444444444444',
     chain_id: 84532,
     signed_at: new Date(Date.now() - 10 * 60_000).toISOString(),
     user_op_hash: `0x${'ab'.repeat(32)}`,
+    token_symbol: 'USDC',
+    amount_human: '0.10',
     ...overrides,
   }
 }
@@ -42,44 +46,63 @@ function tickDeps(rows: unknown[], readReceipt: (chainId: number, hash: string) 
     // The tick's terminal writes are injected like its reads, so no db.js
     // mock is needed here (the shrink-only db-mock ratchet, #1227); what
     // those writes DO to the row is proven on the real harness in
-    // submission-outcome-reconciliation.test.ts.
-    confirmOutcome: vi.fn(async () => true) as unknown as typeof import('../../../infra/repositories/payment-intents.js').reconcileOutcomeConfirmed,
+    // submission-outcome-reconciliation.test.ts and confirm-booking.db.test.ts.
+    bookConfirmed: vi.fn(async () => true) as unknown as ConfirmBooking,
     failOutcome: vi.fn(async () => true) as unknown as typeof import('../../../infra/repositories/payment-intents.js').reconcileOutcomeFailed,
-    // #4354: the funnel write is injected too, so no test here reaches db.js.
-    emitFirstPayment: vi.fn(),
+    // #4819: the booking's evidence hook is a caller-supplied dependency.
+    recordEvidence: vi.fn(async () => undefined),
   }
 }
 
-describe('#4354 — a reconciled confirm writes the funnel\'s last step', () => {
+describe('#4819 — a reconciled confirm runs the ONE booking the route runs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('a landed-and-succeeded receipt emits first_payment_settled for that payment, once', async () => {
-    const deps = tickDeps([row()], async () => ({ state: 'included', success: true, txHash: `0x${'ef'.repeat(32)}` }))
-    await runSubmissionReconcileTick(log, deps)
-    expect(deps.emitFirstPayment).toHaveBeenCalledTimes(1)
-    expect(deps.emitFirstPayment).toHaveBeenCalledWith(row().id)
+  it('a landed-and-succeeded receipt books once, with the row\'s own ids and the injected evidence hook', async () => {
+    const candidate = row()
+    const txHash = `0x${'ef'.repeat(32)}`
+    const deps = tickDeps([candidate], async () => ({ state: 'included', success: true, txHash }))
+    const result = await runSubmissionReconcileTick(log, deps)
+
+    expect(result).toMatchObject({ candidates: 1, confirmed: 1, unresolved: 0 })
+    expect(deps.bookConfirmed).toHaveBeenCalledTimes(1)
+    expect(deps.bookConfirmed).toHaveBeenCalledWith({
+      intentId: candidate.id,
+      txHash,
+      agentId: candidate.agent_id,
+      userId: candidate.user_id,
+      tokenSymbol: candidate.token_symbol,
+      amountHuman: candidate.amount_human,
+      log,
+      recordEvidence: deps.recordEvidence,
+    })
   })
 
-  it('a confirm that lost its CAS emits nothing — the other writer owns the row', async () => {
+  it('a booking that lost its CAS books nothing and counts unresolved — the other writer owns the row', async () => {
     const deps = tickDeps([row()], async () => ({ state: 'included', success: true, txHash: `0x${'ef'.repeat(32)}` }))
-    deps.confirmOutcome = vi.fn(async () => false) as unknown as typeof deps.confirmOutcome
-    await runSubmissionReconcileTick(log, deps)
-    expect(deps.emitFirstPayment).not.toHaveBeenCalled()
+    deps.bookConfirmed = vi.fn(async () => false) as unknown as ConfirmBooking
+    const result = await runSubmissionReconcileTick(log, deps)
+
+    expect(result).toMatchObject({ candidates: 1, confirmed: 0, unresolved: 1 })
+    expect(deps.bookConfirmed).toHaveBeenCalledTimes(1)
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_id: row().id }),
+      'Submission outcome still unresolved',
+    )
   })
 
-  it('a reverted receipt and an elapsed window emit nothing', async () => {
+  it('a reverted receipt and an elapsed window never book', async () => {
     const reverted = tickDeps([row()], async () => ({ state: 'included', success: false, txHash: `0x${'ef'.repeat(32)}` }))
     await runSubmissionReconcileTick(log, reverted)
-    expect(reverted.emitFirstPayment).not.toHaveBeenCalled()
+    expect(reverted.bookConfirmed).not.toHaveBeenCalled()
 
     const elapsed = tickDeps(
       [row({ signed_at: new Date(Date.now() - (RECONCILE_MAX_AGE_SECONDS + 600) * 1000).toISOString() })],
       async () => ({ state: 'not_found_yet' }),
     )
     await runSubmissionReconcileTick(log, elapsed)
-    expect(elapsed.emitFirstPayment).not.toHaveBeenCalled()
+    expect(elapsed.bookConfirmed).not.toHaveBeenCalled()
   })
 })
 

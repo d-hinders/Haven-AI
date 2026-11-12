@@ -26,7 +26,7 @@
 import { encodeFunctionData } from 'viem'
 import type { Address, Hex } from 'viem'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
+import { createTreasuryOps, delegationRailBundlerUrl, SubmittedUserOpFailedError } from './delegation-rail.js'
 import {
   resolveSignatureScheme,
   validateSignedSubmission,
@@ -147,6 +147,23 @@ export async function prepareTransfer(
   }
 }
 
+/**
+ * #4820: the transfer submit's failure body.
+ *
+ * `error` is the sentence every caller already shows. `error_code` and
+ * `user_op_hash` are additive and present only when the rail classified the
+ * failure — the dashboard branches on them to tell "nothing was sent, retrying
+ * is safe" (`onchain_execution_failed`) from "we do not know, do not send
+ * again" (`submission_outcome_unknown`).
+ */
+export function transferFailureBody(failure: SignerChangeFailure): Record<string, unknown> {
+  const body: Record<string, unknown> = { error: failure.error }
+  if (failure.details) body.details = failure.details
+  if (failure.error_code) body.error_code = failure.error_code
+  if (failure.user_op_hash) body.user_op_hash = failure.user_op_hash
+  return body
+}
+
 export async function submitTransfer(
   account: SignerActionAccount,
   body: TransferBody & { signature?: string; user_operation?: unknown },
@@ -202,6 +219,35 @@ export async function submitTransfer(
       transfer: { token: encoded.token, to: encoded.to, amount: encoded.amount },
     }
   } catch (err) {
-    return { ok: false, failure: { status: 502, error: 'Transfer failed', details: safeDetails(err) } }
+    // #4820: the outcome-unknown variant is NOT a failure. The operation was
+    // SENT and its answer (or its receipt) was lost, so it may have moved the
+    // funds — the owner must not be offered a second send. The hash the
+    // bundler received rides the answer so support can look the operation up;
+    // it is NOT a transaction hash, so nothing links it to an explorer.
+    if (err instanceof SubmittedUserOpFailedError && err.outcome === 'receipt_unconfirmed') {
+      return {
+        ok: false,
+        failure: {
+          status: 502,
+          error: 'The transfer may have gone through',
+          error_code: 'submission_outcome_unknown',
+          user_op_hash: err.userOpHash,
+          details: safeDetails(err),
+        },
+      }
+    }
+    // Every KNOWN failure keeps today's status and text: an explicit pre-send
+    // rejection (the bundler answered, or the request never left) and an
+    // operation that landed and reverted (nothing moved). The code is what
+    // tells a caller retrying is safe.
+    return {
+      ok: false,
+      failure: {
+        status: 502,
+        error: 'Transfer failed',
+        error_code: 'onchain_execution_failed',
+        details: safeDetails(err),
+      },
+    }
   }
 }

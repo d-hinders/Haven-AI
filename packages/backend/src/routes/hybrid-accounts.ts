@@ -32,7 +32,7 @@ import {
   type SignerActionAccount,
   type SignerActionBody,
 } from '../rails/hybrid-signer-actions.js'
-import { prepareTransfer, submitTransfer, type TransferBody } from '../rails/hybrid-transfers.js'
+import { prepareTransfer, submitTransfer, transferFailureBody, type TransferBody } from '../rails/hybrid-transfers.js'
 import { recordOwnerTransfer } from '../infra/repositories/owner-transfers.js'
 
 /**
@@ -634,10 +634,9 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     if (!resolved.ok) return reply.code(resolved.status).send({ error: resolved.error })
 
     const result = await submitTransfer(resolved.account, request.body ?? {})
-    if (!result.ok) {
-      const { status, error, details } = result.failure
-      return reply.code(status).send(details ? { error, details } : { error })
-    }
+    // #4820: the body carries `error_code` and `user_op_hash` when the rail
+    // classified the failure; a caller that only reads `error` is unaffected.
+    if (!result.ok) return reply.code(result.failure.status).send(transferFailureBody(result.failure))
     // #4099: record that the OWNER sent this, so the feed reads it as "You"
     // rather than an unattributed transfer. Written after the receipt — the
     // transfer already executed — and fail-soft: a failed or slow write is

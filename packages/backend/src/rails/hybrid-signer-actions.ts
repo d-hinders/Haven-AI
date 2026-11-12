@@ -188,7 +188,34 @@ export function encodeSignerAction(
 // mirrors an invariant the account itself enforces on-chain, and dropping to
 // no signers bricks the account rather than merely making it unrecoverable.
 
-export type SignerChangeFailure = { status: 409 | 400 | 502; error: string; details?: string }
+/**
+ * A refusal from a prepare/submit on the owner's hybrid account.
+ *
+ * #4820 widened it with the two fields a caller must BRANCH on rather than
+ * read. `error` stays the human sentence every caller already shows; the
+ * optional fields are additive, so a caller that only reads `error` is
+ * unaffected.
+ *
+ * - `error_code: 'submission_outcome_unknown'` — the operation was SENT and
+ *   its answer (or its receipt) was lost. It may have moved funds. `error`
+ *   says so, and `user_op_hash` names the operation the bundler received.
+ * - `error_code: 'onchain_execution_failed'` — a KNOWN failure: an explicit
+ *   pre-send rejection, or an operation that landed and reverted (nothing
+ *   moved). Retrying is safe.
+ *
+ * The vocabulary matches the agent payment route's
+ * (`modules/payments/sign-payment.ts`), so one cause reads the same on both
+ * rails.
+ */
+export type SignerChangeFailure = {
+  status: 409 | 400 | 502
+  error: string
+  details?: string
+  /** #4820: present on the failures a caller must branch on. */
+  error_code?: 'submission_outcome_unknown' | 'onchain_execution_failed'
+  /** #4820: the 4337 UserOperation hash — present on `submission_outcome_unknown`. */
+  user_op_hash?: string
+}
 
 /**
  * Shape-check the signed envelope a submit must carry.

@@ -27,6 +27,9 @@ vi.mock('../../rails/delegation-rail.js', async (importOriginal) => {
 })
 
 const routes = (await import('../hybrid-accounts.js')).default
+// #4820: the real class, not a stand-in — the route branches on `instanceof`
+// and on `outcome`, so a look-alike would prove nothing.
+const { SubmittedUserOpFailedError } = await import('../../rails/delegation-rail.js')
 const ACCOUNT = '0x' + 'ab'.repeat(20)
 
 describe('GET /accounts/hybrid/:address/signers (#1079)', () => {
@@ -684,5 +687,76 @@ describe('owner-initiated send (#1083)', () => {
     const res = await app.inject({ method: 'POST', url: prepareUrl, payload: BODY })
     expect(res.statusCode).toBe(404)
     expect(mockTreasury).not.toHaveBeenCalled()
+  })
+
+  // ── #4820: the submit's failure body tells "nothing was sent" from "we do
+  // not know" ────────────────────────────────────────────────────────────────
+  // The rail's typed error (#4817) is the only evidence that separates them.
+  // Before this slice both answered the same 502 `Transfer failed`, so the
+  // dashboard could not tell a safe retry from a second send.
+  const USER_OP_HASH = ('0x' + 'dd'.repeat(32)) as `0x${string}`
+
+  it('an outcome-unknown submit answers a distinct code and the operation hash, never "Transfer failed"', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared(
+      vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError(
+          `treasury UserOp ${USER_OP_HASH} was sent but its receipt could not be confirmed: timeout`,
+          USER_OP_HASH,
+          'receipt_unconfirmed',
+        ),
+      ),
+    )
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.user_op_hash).toBe(USER_OP_HASH)
+    expect(body.error).not.toBe('Transfer failed')
+    expect(body.error).toMatch(/may have gone through/)
+    // Nothing landed, so there is no transaction hash to attribute.
+    expect(mockQuery.mock.calls.filter(isRecordInsert)).toHaveLength(0)
+  })
+
+  it('an included-and-reverted submit keeps today\'s status and text, plus the known-failure code', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared(
+      vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError(
+          `treasury UserOp ${USER_OP_HASH} included but reverted`,
+          USER_OP_HASH,
+          'included_reverted',
+          21_000n,
+        ),
+      ),
+    )
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error).toBe('Transfer failed')
+    expect(body.error_code).toBe('onchain_execution_failed')
+    // The hash is not offered as something to look up: the outcome is known.
+    expect(body.user_op_hash).toBeUndefined()
+    expect(mockQuery.mock.calls.filter(isRecordInsert)).toHaveLength(0)
+  })
+
+  it('an explicit pre-send rejection keeps today\'s status and text, plus the known-failure code', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockPrepared(vi.fn().mockRejectedValue(new Error('AA25 invalid account nonce')))
+    const res = await app.inject({
+      method: 'POST', url: submitUrl,
+      payload: { ...BODY, signature: '0x' + 'ab'.repeat(80), user_operation: { sender: ACCOUNT, callData: await transferCallData() } },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error).toBe('Transfer failed')
+    expect(body.error_code).toBe('onchain_execution_failed')
+    expect(body.user_op_hash).toBeUndefined()
   })
 })

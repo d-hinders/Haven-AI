@@ -400,8 +400,26 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
 4. **Cancelled or failed.** Both land back on Review with their message:
    "Approval was cancelled." for a dismissed approval, the server's message (or
    "Haven could not send this payment. Try again.") for a failure, with the Send
-   button reading `Try again`.
-5. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
+   button reading `Try again`. Both mean nothing was sent, so retrying is safe.
+5. **Unconfirmed (#4820).** The submit was rejected and nothing proves the
+   transfer did not go through: the route answered its outcome-unknown code, the
+   request got no answer at all, or a 5xx arrived without the route's code. The
+   Review screen keeps its amount and detail list, drops the "you approve it on
+   the next step" note (the approval already happened), and shows an
+   `InlineAlert`: "We could not confirm this transfer. It may have gone through.
+   Activity shows it if it landed, which can take a few minutes. Check Activity
+   again before sending again." The copy never says an empty Activity proves
+   nothing was sent: the route answers outcome-unknown both for a dispatched
+   send whose answer was lost (the operation may sit in the bundler's mempool)
+   and for a receipt wait that timed out (the operation was accepted and may be
+   included later), so the transfer can land after the owner looks. Activity is
+   built from landed chain transactions, so an empty Activity means "nothing has
+   landed yet", not "nothing was sent". The footer is one action, `Close` — no
+   `Back`, no `Try again`, because the submit carries no idempotency key and a
+   retry would be a second operation with the same recipient and amount. The
+   route's `user_op_hash` is not a transaction hash, so the dialog does not link
+   it to an explorer; Activity is where the owner checks.
+6. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
    address> on <chain>", and **View transaction** linking to the chain explorer
    when the send returned a transaction hash. After a send to a **new address**
    the screen offers "Save this address as a contact?" — a name field and Save,
@@ -412,8 +430,10 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    `/transactions`, the account tab and the dashboard.
    While the save is in flight, Save reads "Saving…" and Done and every close
    path are blocked. Done closes.
-6. Every screen puts its actions in the dialog's footer through the shared
-   action pair — the equal-halves shape, stacking primary-first below `sm`.
+7. Every screen puts its actions in the dialog's footer through the shared
+   action pair — the equal-halves shape, stacking primary-first below `sm`. A
+   screen with one action (Sent, Unconfirmed) renders a full-width button
+   instead.
 
 Money and risk clarity:
 - Show the selected Haven wallet before money moves.

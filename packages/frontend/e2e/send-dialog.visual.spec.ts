@@ -25,6 +25,10 @@
  *     cannot drive. The specimen renders the dialog's own markup —
  *     `DialogResult` plus the "Save as contact" row — so the clip still pins
  *     what ships, and the card is documented as a specimen on the page.
+ *   - `send-dialog-unconfirmed-*` (#4820) is the same shape for the same
+ *     reason: the outcome-unknown state is only reachable after a submit whose
+ *     answer was lost, which needs the ceremony first. The specimen renders the
+ *     Review screen with its `InlineAlert` and its single-action footer.
  *
  * ── Scoping ─────────────────────────────────────────────────────────────────
  *
@@ -321,6 +325,38 @@ test.describe('send dialog visual regression (#4641)', () => {
       await page.evaluate(() => document.fonts.ready)
       await expect(dialog).toHaveScreenshot(
         `send-dialog-review-own-account-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    test(`send-dialog-unconfirmed renders pixel-stable (${vp!.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp!.name !== 'desktop', 'no mobile dark baseline for the send-dialog visual spec')
+
+      await page.clock.setFixedTime(FROZEN_NOW)
+      await page.setViewportSize({ width: vp!.width, height: vp!.height })
+      await page.goto('/design-system')
+      await dismissMobileSidebar(page)
+
+      const card = page.getByTestId('ds-send-unconfirmed')
+      await expect(card).toHaveCount(1)
+      await card.scrollIntoViewIfNeeded()
+
+      // #4820: the outcome-unknown state — the Review screen with its alert and
+      // ONE action. No Back, no Try again: the submit carries no idempotency
+      // key, so a retry would be a second operation.
+      await expect(card.getByText("You're sending")).toHaveCount(1)
+      await expect(card.getByText('125.00 USDC', { exact: true })).toHaveCount(1)
+      await expect(card.getByText(/We could not confirm this transfer/)).toHaveCount(1)
+      await expect(card.getByText(/Activity shows it if it landed/)).toHaveCount(1)
+      await expect(card.getByRole('button', { name: 'Close', exact: true })).toHaveCount(1)
+      await expect(card.getByRole('button', { name: 'Back', exact: true })).toHaveCount(0)
+      await expect(card.getByRole('button', { name: 'Try again', exact: true })).toHaveCount(0)
+      await expect(card.getByText(/You approve it on the next step/)).toHaveCount(0)
+
+      await page.evaluate(() => document.fonts.ready)
+      await expect(card).toHaveScreenshot(
+        `send-dialog-unconfirmed-${vp!.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
       )
     })

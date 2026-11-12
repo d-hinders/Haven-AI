@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-11-08"
+last-verified: "2026-11-12"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -544,6 +544,20 @@ transfer calldata, scheme chosen by the device (#1086), and no Haven-held key
 anywhere (invariants 5/7/12/13 unchanged). Sponsorship pays gas only; the
 transfer itself is bounded by nothing but the owner's signature, which is the
 point — it is the owner's own money.
+
+**An unknown outcome is never booked as a failure (#4820).** The submit route
+answers the rail's typed outcome-unknown error with `error_code:
+submission_outcome_unknown` and the operation hash, and the dashboard's Send
+dialog then offers one action, Close — no retry. That is a spend-path
+restriction, not a new authority: the submit body carries no idempotency key,
+so a retry after a lost answer would be a SECOND operation with the same
+recipient and amount. A known failure (an explicit pre-send rejection, or an
+operation that landed and reverted) keeps `Transfer failed` plus
+`error_code: onchain_execution_failed`, and retrying there is safe because
+nothing moved. The route writes no owner-transfer attribution record for an
+unknown outcome — the record needs the transaction hash of a landed transfer —
+and a landed transfer still appears in Activity without it, because the record
+is attribution only.
 
 **The signer set is symmetric (#1087, #1199):** enrolling an EOA owner is not
 a one-way door — `remove_owner` encodes `transferOwnership(address(0))` through

@@ -407,12 +407,18 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    Review screen keeps its amount and detail list, drops the "you approve it on
    the next step" note (the approval already happened), and shows an
    `InlineAlert`: "We could not confirm this transfer. It may have gone through.
-   Activity shows it if it landed. If nothing appears there, nothing was sent
-   and you can send again." The footer is one action, `Close` — no `Back`, no
-   `Try again`, because the submit carries no idempotency key and a retry would
-   be a second operation with the same recipient and amount. The route's
-   `user_op_hash` is not a transaction hash, so the dialog does not link it to
-   an explorer; Activity is where the owner checks.
+   Activity shows it if it landed, which can take a few minutes. Check Activity
+   again before sending again." The copy never says an empty Activity proves
+   nothing was sent: the route answers outcome-unknown both for a dispatched
+   send whose answer was lost (the operation may sit in the bundler's mempool)
+   and for a receipt wait that timed out (the operation was accepted and may be
+   included later), so the transfer can land after the owner looks. Activity is
+   built from landed chain transactions, so an empty Activity means "nothing has
+   landed yet", not "nothing was sent". The footer is one action, `Close` — no
+   `Back`, no `Try again`, because the submit carries no idempotency key and a
+   retry would be a second operation with the same recipient and amount. The
+   route's `user_op_hash` is not a transaction hash, so the dialog does not link
+   it to an explorer; Activity is where the owner checks.
 6. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
    address> on <chain>", and **View transaction** linking to the chain explorer
    when the send returned a transaction hash. After a send to a **new address**

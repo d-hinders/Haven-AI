@@ -80,12 +80,23 @@ type ReviewMessage = { tone: 'neutral' | 'danger' | 'unconfirmed'; message: stri
 /**
  * #4820: the outcome-unknown copy. The submit was rejected and nothing proves
  * the transfer did not go through, so the dialog says so, points at the one
- * place that can answer it (Activity), and says what to do if nothing appears.
- * It never offers a second send: the submit carries no idempotency key, so a
- * retry would be a second operation with the same recipient and amount.
+ * place that can answer it (Activity), and tells the owner to check there
+ * again before sending again.
+ *
+ * It never infers "nothing was sent" from an empty Activity. The route answers
+ * outcome-unknown both when `eth_sendUserOperation` was dispatched and its
+ * answer was lost (the op may sit in the bundler's mempool) and when the
+ * receipt wait timed out (the op was accepted and may be included later). In
+ * both cases the transfer can land AFTER the owner looks, and Activity is
+ * built from landed chain transactions — there is no row for a dispatched but
+ * unlanded operation. So an empty Activity proves "nothing has landed yet",
+ * not "nothing was sent", and the copy must not invite a second send in that
+ * window. It also never offers a second send itself: the submit carries no
+ * idempotency key, so a retry would be a second operation with the same
+ * recipient and amount.
  */
 const UNCONFIRMED_MESSAGE =
-  'We could not confirm this transfer. It may have gone through. Activity shows it if it landed. If nothing appears there, nothing was sent and you can send again.'
+  'We could not confirm this transfer. It may have gone through. Activity shows it if it landed, which can take a few minutes. Check Activity again before sending again.'
 
 export default function DelegationSendModal({
   open,

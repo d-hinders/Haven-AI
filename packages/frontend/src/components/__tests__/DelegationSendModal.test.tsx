@@ -786,7 +786,9 @@ describe('DelegationSendModal — working, cancelled and failed (#4641)', () => 
   // #4820: the submit was rejected and nothing proves the transfer did not go
   // through. The dialog must not offer a second send — the submit carries no
   // idempotency key, so a retry is a second operation with the same recipient
-  // and amount.
+  // and amount. It must also not infer "nothing was sent" from an empty
+  // Activity: the operation can still land after the owner looks, so the copy
+  // tells them to check Activity again before sending again.
   it('an unconfirmed send says the transfer may have gone through and offers only Close', async () => {
     const send = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
     mockUseSend.mockReturnValue(base({ send }))
@@ -797,10 +799,12 @@ describe('DelegationSendModal — working, cancelled and failed (#4641)', () => 
     await waitFor(() =>
       expect(
         screen.getByText(
-          'We could not confirm this transfer. It may have gone through. Activity shows it if it landed. If nothing appears there, nothing was sent and you can send again.',
+          'We could not confirm this transfer. It may have gone through. Activity shows it if it landed, which can take a few minutes. Check Activity again before sending again.',
         ),
       ).toBeTruthy(),
     )
+    // The copy never claims an empty Activity proves nothing was sent.
+    expect(screen.queryByText(/nothing was sent/)).toBeNull()
     // Still on Review, but with one action and no way back into the form.
     expect(screen.getByText("You're sending")).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()

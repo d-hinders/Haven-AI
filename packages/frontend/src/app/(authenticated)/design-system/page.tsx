@@ -3818,7 +3818,7 @@ export default function DesignSystemPage() {
                 />
                 <InlineAlert>
                   We could not confirm this transfer. It may have gone through. Activity shows it if it
-                  landed. If nothing appears there, nothing was sent and you can send again.
+                  landed, which can take a few minutes. Check Activity again before sending again.
                 </InlineAlert>
                 <Button variant="ghost" className="w-full">
                   Close

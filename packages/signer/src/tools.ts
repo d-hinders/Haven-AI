@@ -646,7 +646,12 @@ export interface ToolFailure {
    * #1309: precise recovery guidance as DATA, not just prose inside `message`
    * — the same text the hosted quote's advisory `signer_compatibility.fallback`
    * carries when the refusal is an out-of-date signer. #3001 reuses this same
-   * field for every sign-context refusal (`'typed_data_b64'`).
+   * field for every sign-context failure where signing OTHER bytes is a
+   * remedy (`'typed_data_b64'`): a transport failure, a malformed body, the
+   * direct fetch's older-backend 404, and — since #4829 — the non-answer class
+   * (a 5xx, a 429, or a body that is not a JSON object) on the x402 and direct
+   * fetches. The task-budget and sub-budget fetches have no relay to offer, so
+   * they never set it.
    */
   fallback?: string
   /**
@@ -658,9 +663,12 @@ export interface ToolFailure {
   /** #3419: present on `UNSUPPORTED_ARGUMENT` — this signer's own package version. */
   signer_version?: string
   /**
-   * #3001: present on `SIGN_CONTEXT_REFUSED` — the HTTP status the backend
-   * answered the sign-context fetch with (404, 410, …) — the x402 fetch, or
-   * the direct `/payments/:id/sign-context` fetch since #3271.
+   * #3001: present whenever Haven ANSWERED the sign-context fetch with a
+   * non-2xx status — a refusal (`SIGN_CONTEXT_REFUSED`: 404, 410, …) or, since
+   * #4829, the non-answer class (`SIGN_CONTEXT_UNREACHABLE`: a 5xx, a 429, or
+   * a body that is not a JSON object). Absent on a transport failure, which
+   * never got a response. The x402 fetch, or the direct
+   * `/payments/:id/sign-context` fetch since #3271.
    */
   http_status?: number
   /** #3001: the backend's own `error_code` on `SIGN_CONTEXT_REFUSED` (`expired`, `already_executed`, `not_signable`, `sign_context_unavailable`, and since #3303 `client_outdated`). */

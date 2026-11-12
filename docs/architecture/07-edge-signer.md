@@ -346,7 +346,11 @@ unchanged to `haven_sign` — its OWN reason says so directly, rather than
 looping the agent back through `payment_id` again. The route covers two
 DISTINCT refusal shapes: (1) any refusal carrying `fallback: 'typed_data_b64'`,
 whatever its code — a currently-published `@haven_ai/signer` sets that field
-only on a transport failure, a malformed body, or a 404 on an older backend;
+only on a transport failure, a malformed body, or a 404 on an older backend.
+Since #4829 the transport-failure code `SIGN_CONTEXT_UNREACHABLE` also covers
+Haven's NON-ANSWER class — a body that is not a JSON object at any non-2xx
+status, any 5xx, and a 429 — so a gateway's HTML 502 and the money-path rate
+limit's 429 route here too, with `http_status` carried;
 (2) `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
 and NO `fallback` field, which only a signer predating #3271 produces (it has
 no direct-fetch fallback of its own to try). On either path a current signer now runs the UserOp binding check before signing

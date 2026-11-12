@@ -3266,3 +3266,53 @@ pass. The report's § 5 lists both passes.
 
 **Disposition: pending owner decision** (S1, C1–C5, and the ten defects beyond
 the cap).
+
+**Disposition (owner, 2026-11-12): file as proposed.** The owner's words in the
+captain's session were "Fila enligt ditt förslag" ("file as you proposed"), the
+proposal being: S1 as an epic with the rail slice first, C1–C5 as standalone
+issues, and four of the ten defects beyond the cap (the dashboard session
+read, the 429 mapping, the signer's gateway errors, the skipped price
+comparison). The other six beyond-cap defects stay unfiled. The security
+hypothesis kept out of this record is not part of this disposition. Every
+issue went through new-task with one independent spec review; none was ready
+as first filed, and the ten reviews required 136 body corrections in all.
+
+- S1 → epic [#4816](https://github.com/d-hinders/Haven-AI/issues/4816)
+  (`epic`, `area:backend`, `area:frontend`, `money-path`), slices #4817
+  (rail), #4819 (reconciler booking), #4818 (sign route and reconciler
+  intake), #4820 (owner Send), #4821 (other owner operations), in that build
+  order. Verdict `blocked on owner decision`, 31 corrections; the review
+  reordered the slices, excluded erc7710 rows from the new intake, and re-cut
+  #4821. `pending-review` lifted on #4817, #4820, #4821.
+- C1 → [#4822](https://github.com/d-hinders/Haven-AI/issues/4822), 13
+  corrections, one owner question.
+- C2 → [#4823](https://github.com/d-hinders/Haven-AI/issues/4823), 7
+  corrections, one owner question (a third option added by the review).
+- C3 → [#4824](https://github.com/d-hinders/Haven-AI/issues/4824), 10
+  corrections, one owner question; the review found five sources of byte
+  drift, not one.
+- C4 → [#4825](https://github.com/d-hinders/Haven-AI/issues/4825), 12
+  corrections, one owner question; now `money-path` by its cross-package pins.
+- C5 → [#4826](https://github.com/d-hinders/Haven-AI/issues/4826), 14
+  corrections, `ready`, `pending-review` lifted.
+- Dashboard session → [#4827](https://github.com/d-hinders/Haven-AI/issues/4827),
+  13 corrections, two owner questions.
+- 429 mapping → [#4828](https://github.com/d-hinders/Haven-AI/issues/4828),
+  12 corrections, `ready`, `pending-review` lifted; the sign route's 429 named
+  in the report is unreachable in production.
+- Signer gateway errors → [#4829](https://github.com/d-hinders/Haven-AI/issues/4829),
+  11 corrections, one owner question; all four signing-context fetches share
+  the defect.
+- Skipped price comparison → [#4830](https://github.com/d-hinders/Haven-AI/issues/4830),
+  13 corrections, `ready`, `pending-review` lifted; two further local skips
+  found by the review.
+- Unfiled, beyond the cap: Send's amount field, Send above the balance, the
+  contact checksum mismatch, contact casing, the Bazaar poison entry, and the
+  quote's two prices.
+
+**Owner decisions on the filed issues (2026-11-12, same day):** the owner
+answered every open question with "Kör på dina förslag" ("go with your
+proposals"), the recommendation written in each issue. Each decision is
+recorded under `## Owner decisions` in its issue, and `pending-review` is
+lifted on all fifteen. The security hypothesis is still not part of this
+disposition.

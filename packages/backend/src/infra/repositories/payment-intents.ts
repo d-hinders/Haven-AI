@@ -946,12 +946,30 @@ export async function findIntentStatusRow(
 // #2960: `delegate_account_address` is `pi.machine_metadata->>'delegate_account_address'`,
 // written at authorize on both delegation-rail legs — null on rows
 // authorized before #2960 and on the legacy rail.
+//
+// #4822: `merchant_address` is the repository's counterparty expression
+// (`COALESCE(merchant_address, x402_merchant_address, to_address)`, the same
+// one `dashboard.ts` uses). On the EIP-3009 bridge the intent row is the
+// FUNDING leg — its `to_address` is the agent's own delegate — while the
+// merchant named at authorize sits in `merchant_address` /
+// `x402_merchant_address`. The receipt bundle must name the merchant, so the
+// coalesce is resolved here rather than in the mapper: a retired-rail row
+// with neither merchant column still falls back to `to_address`, which is
+// what the bundle named before this change.
+//
+// `merchant_settlement_tx_hash` is `machine_metadata.merchant_settlement_tx_hash`
+// — the merchant-leg transaction Haven verified on-chain (#4530), the same
+// key the status read names. It is null until recorded; the merchant's own
+// unverified echo (`protocol_receipt_payload.transaction`, surfaced as
+// `settlement_tx_hash` on the receipt list) is deliberately NOT selected.
 export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
             pi.execution_rail,
+            COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address) AS merchant_address,
             pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
+            pi.machine_metadata->>'merchant_settlement_tx_hash' AS merchant_settlement_tx_hash,
             mpe.resource_url AS resource_url,
             mpe.amount_sek AS amount_sek,
             dq.quality AS delivery_quality,
@@ -981,6 +999,19 @@ export interface PaymentReceiptRow extends BuyerJoinColumns {
   amount_sek: string | null
   /** #2960: from `machine_metadata`; null on rows authorized before #2960. */
   delegate_account_address: string | null
+  /**
+   * #4822: the merchant named at authorize —
+   * `COALESCE(merchant_address, x402_merchant_address, to_address)`. On the
+   * EIP-3009 bridge `to_address` is the agent's own delegate (the funding
+   * leg), so this is the only column that names the merchant.
+   */
+  merchant_address: string | null
+  /**
+   * #4822: `machine_metadata.merchant_settlement_tx_hash` — the merchant-leg
+   * transaction verified on-chain (#4530). Null until recorded; the
+   * merchant's unverified echo is never read here.
+   */
+  merchant_settlement_tx_hash: string | null
   /**
    * #3418: the rail the intent ran on — `delegation` (erc7710 or the eip3009
    * funding leg), `direct`, or null (legacy AllowanceModule / rows read by

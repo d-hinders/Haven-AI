@@ -1,0 +1,38 @@
+{
+  "_base": "65b1d7cb7",
+  "_note": "pins the corrected #4822 values (merchant party + settlementTxHash); recorded at the PR head, not the base",
+  "body": {
+    "version": "haven-receipt-1",
+    "paymentId": "pi-6",
+    "payment": {
+      "token": "USDC",
+      "tokenAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "0.01",
+      "amountSek": "0.11",
+      "recipient": "0xcb9a000000000000000000000000000000005ba8",
+      "safe": "0x2222222222222222222222222222222222222222",
+      "account": "0x2222222222222222222222222222222222222222",
+      "chainId": 8453,
+      "settledAt": "2026-09-01T00:05:00.000Z",
+      "resourceUrl": "https://api.example.com/data",
+      "deliveryQuality": null,
+      "parties": {
+        "treasury_account": "0x2222222222222222222222222222222222222222",
+        "delegate": "0xcb9a000000000000000000000000000000005ba8",
+        "delegate_account": null,
+        "merchant": "0x041500000000000000000000000000000000b195"
+      }
+    },
+    "authorization": {
+      "delegate": "0xcb9a000000000000000000000000000000005ba8",
+      "signHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "signature": "0x2222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+      "signatureScheme": "eip712_userop"
+    },
+    "onChain": {
+      "txHash": "0xdededededededededededededededededededededededededededededededede",
+      "chainId": 8453
+    },
+    "settlementTxHash": "0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e"
+  }
+}

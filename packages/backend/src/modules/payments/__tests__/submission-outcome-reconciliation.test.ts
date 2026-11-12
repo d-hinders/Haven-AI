@@ -26,10 +26,13 @@ import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import {
   bookSubmittedOutcomePending,
+  censusSubmittedWithoutHash,
+  claimIntentForSubmission,
   confirmSubmittedIntent,
   reconcileOutcomeFailed,
   findOutcomePendingIntents,
 } from '../../../infra/repositories/payment-intents.js'
+import { runSubmissionReconcileTick } from '../submission-reconciler.js'
 // Static, not `await import()` inside the status-surface test (#4126): this
 // module's graph (fee, transactions, x402, openapi, ethers) costs ~3.5 s to
 // cold-load, which a dynamic import charged to that one test's 5 s timeout —
@@ -288,6 +291,136 @@ describeDb('#3564 — outcome-pending booking and chain reconciliation', () => {
           expect.objectContaining({ id: newer }),
         ]),
       )
+    })
+  })
+
+  // ── #4818: the claim's marker, and the intake's honesty ──────────────────
+
+  describe('#4818 — a claimed row is always reconcilable, and only a claimed row', () => {
+    /** Age a row past the intake gate without waiting for it. */
+    async function ageRow(id: string, days = 30): Promise<void> {
+      await db.query(
+        `UPDATE payment_intents SET signed_at = NOW() - ($2 * interval '1 day') WHERE id = $1`,
+        [id, days],
+      )
+    }
+
+    async function signHashOf(id: string): Promise<string> {
+      const result = await db.query<{ sign_hash: string }>(
+        `SELECT sign_hash FROM payment_intents WHERE id = $1`,
+        [id],
+      )
+      return result.rows[0].sign_hash
+    }
+
+    it('a row claimed by claimIntentForSubmission is a candidate past the age gate, carrying the operation hash', async () => {
+      const owner = await seedOwner()
+      const id = await seedIntent(owner, { status: 'pending_signature', signedAtOffset: 0 })
+      const signHash = await signHashOf(id)
+
+      expect(await claimIntentForSubmission(`0x${'ab'.repeat(97)}`, id, owner.agentId)).toBe(true)
+
+      // The claim recorded the prepared operation hash and the marker beside it.
+      const claimed = await readRow(id)
+      expect(claimed.status).toBe('submitted')
+      expect(claimed.tx_hash).toBeNull()
+      const metadata = claimed.machine_metadata as Record<string, unknown>
+      expect(metadata.user_op_hash).toBe(signHash)
+      expect(metadata.submission_claimed).toBe(true)
+
+      // Before the intake age: not selected (a live sign request's row).
+      expect(await findOutcomePendingIntents(3600, 100)).toEqual([])
+
+      // Past it: selected, with the operation hash the reconciler looks up.
+      await ageRow(id)
+      const rows = await findOutcomePendingIntents(0, 100)
+      expect(rows).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id, user_op_hash: signHash })]),
+      )
+    })
+
+    it('a row claimed by the OLD code (submitted, no hash, no marker) is never a candidate, however old — and the census lists it', async () => {
+      const owner = await seedOwner()
+      const oldCode = await seedIntent(owner, { signedAtOffset: -30 * 24 * 60 * 60 })
+      const reconcilable = await seedIntent(owner, { status: 'pending_signature', signedAtOffset: 0 })
+      await claimIntentForSubmission(`0x${'ab'.repeat(97)}`, reconcilable, owner.agentId)
+      await ageRow(reconcilable, 1)
+
+      const rows = await findOutcomePendingIntents(0, 100)
+      expect(rows.map((r) => r.id)).not.toContain(oldCode)
+      expect(rows.map((r) => r.id)).toContain(reconcilable)
+
+      // Owner decision 2026-11-12 (b): the pre-#4818 row is kept OUT of the
+      // intake and listed by the census for manual resolution. The census is
+      // the PR body's artifact — on this seeded database it returns exactly
+      // these two rows, one per class.
+      const census = await censusSubmittedWithoutHash()
+      expect(census.map((r) => ({ id: r.id, intake: r.intake }))).toEqual([
+        { id: oldCode, intake: 'stranded' },
+        { id: reconcilable, intake: 'reconcilable' },
+      ])
+    })
+
+    it('an aged erc7710 submitted row is never a candidate, and the tick leaves it untouched', async () => {
+      const owner = await seedOwner()
+      const erc7710 = await seedIntent(owner, {
+        metadata: { settlement_scheme: 'erc7710' },
+        signedAtOffset: -30 * 24 * 60 * 60,
+      })
+      const stranded = await seedIntent(owner, { status: 'pending_signature', signedAtOffset: 0 })
+      await claimIntentForSubmission(`0x${'ab'.repeat(97)}`, stranded, owner.agentId)
+      const strandedHash = await signHashOf(stranded)
+      await ageRow(stranded)
+
+      const rows = await findOutcomePendingIntents(0, 100)
+      expect(rows.map((r) => r.id)).not.toContain(erc7710)
+      expect(rows.map((r) => r.id)).toContain(stranded)
+
+      // The tick resolves the stranded candidate through the window arm — a
+      // row whose operation was never sent ends `failed`, never `submitted` —
+      // and never touches the erc7710 row.
+      const result = await runSubmissionReconcileTick(
+        { info: () => {}, warn: () => {} },
+        {
+          findCandidates: findOutcomePendingIntents,
+          readReceipt: async () => ({ state: 'not_found_yet' }),
+          recordEvidence: async () => undefined,
+        },
+      )
+      expect(result.candidates).toBe(1)
+      expect(result.failedWindowElapsed).toBe(1)
+
+      const failed = await readRow(stranded)
+      expect(failed.status).toBe('failed')
+      expect(String(failed.error_message)).toContain(
+        'was never seen on chain after the bounded reconciliation window',
+      )
+      expect(String(failed.error_message)).toContain(strandedHash)
+
+      const untouched = await readRow(erc7710)
+      expect(untouched.status).toBe('submitted')
+      expect(untouched.machine_metadata).toEqual({ settlement_scheme: 'erc7710' })
+    })
+
+    it('reconcileOutcomeFailed stores the cause even when machine_metadata was NULL', async () => {
+      const owner = await seedOwner()
+      const id = await seedIntent(owner)
+      // A real SQL NULL, not a JSON `null` scalar.
+      await db.query(`UPDATE payment_intents SET machine_metadata = NULL WHERE id = $1`, [id])
+
+      expect(
+        await reconcileOutcomeFailed(
+          id,
+          ' was never seen on chain after the bounded reconciliation window',
+        ),
+      ).toBe(true)
+
+      const row = await readRow(id)
+      expect(row.status).toBe('failed')
+      expect(String(row.error_message)).toContain(
+        'was never seen on chain after the bounded reconciliation window',
+      )
+      expect((row.machine_metadata as Record<string, unknown>).submission_outcome).toBe('resolved')
     })
   })
 })

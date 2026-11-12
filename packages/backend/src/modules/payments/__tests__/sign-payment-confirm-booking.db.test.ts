@@ -22,11 +22,15 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { listUnpushedPaymentIds } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { serializeUserOp } from '../../../rails/execution-rail.js'
 
-const { mockSubmit, mockFeed, mockFunnel, mockPrice } = vi.hoisted(() => ({
+const { mockSubmit, mockFeed, mockFunnel, mockPrice, mockFiat, realFiat } = vi.hoisted(() => ({
   mockSubmit: vi.fn(),
   mockFeed: vi.fn(),
   mockFunnel: vi.fn(),
   mockPrice: vi.fn(),
+  mockFiat: vi.fn(),
+  realFiat: {
+    current: null as null | ((tokenSymbol: string, amountHuman: string) => Promise<unknown>),
+  },
 }))
 
 // The submit is the one network seam: the rail's bundler call is not part of
@@ -52,6 +56,14 @@ vi.mock('../../../infra/repositories/onboarding-funnel.js', async (importOrigina
 vi.mock('../../../infra/prices.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../infra/prices.js')>()
   return { ...actual, getTokenPrice: (...a: unknown[]) => mockPrice(...a) }
+})
+// #4818: the fiat helper itself is wrapped so ONE test can make it THROW — the
+// robustness case the issue names. Every other test delegates to the real
+// helper, which runs on the mocked price source above.
+vi.mock('../../../infra/fiat-values.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../infra/fiat-values.js')>()
+  realFiat.current = actual.getFiatValuesForTokenAmount as never
+  return { ...actual, getFiatValuesForTokenAmount: (...a: unknown[]) => mockFiat(...a) }
 })
 
 const { signPayment } = await import('../sign-payment.js')
@@ -157,6 +169,11 @@ describeDb('#4819 — the route confirm booking (characterization)', () => {
     mockFunnel.mockReset()
     mockPrice.mockReset()
     mockPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 10.76 })
+    // Default: the real helper, on the mocked price source.
+    mockFiat.mockReset()
+    mockFiat.mockImplementation((...a: unknown[]) =>
+      realFiat.current!(a[0] as string, a[1] as string),
+    )
   })
 
   it('a route-confirmed payment books the fiat triple, the evidence hook, the feed and the funnel — once each', async () => {
@@ -236,5 +253,42 @@ describeDb('#4819 — the route confirm booking (characterization)', () => {
     // And with no fiat value the underlag list does not see it — the same
     // shape the reconciler's thin booking produced before this slice.
     expect(await listUnpushedPaymentIds(owner.userId, 'memory', 200, null)).toEqual([])
+  })
+
+  it('#4818 — a THROWING fiat helper never fails a mined payment: the payment ends confirmed', async () => {
+    const owner = await seedOwner()
+    const paymentId = await seedPendingIntent(owner)
+    mockSubmit.mockResolvedValue({
+      txHash: TX_HASH,
+      userOpHash: `0x${'ef'.repeat(32)}`,
+      actualGasUsed: 100_000n,
+      actualGasCost: 1_000n,
+    })
+    // The helper itself throws — not the price source it wraps. Before #4818
+    // this throw landed in the route's catch and booked the mined payment
+    // `failed` with `tx_hash` null.
+    mockFiat.mockRejectedValue(new Error('fiat helper exploded'))
+    const recordMachinePaymentEvidence = vi.fn(async () => undefined)
+
+    const decided = await signPayment({
+      agent: agentOf(owner),
+      paymentId,
+      signature: SIGNATURE,
+      log: { warn: () => {} },
+      mppDemoRetired: () => ({ statusCode: 410, body: { error: 'retired' } }),
+      recordMachinePaymentEvidence,
+    })
+
+    expect(decided.code).toBe(200)
+    const row = await readRow(paymentId)
+    expect(row.status).toBe('confirmed')
+    expect(row.tx_hash).toBe(TX_HASH)
+    expect(row.usd_value).toBeNull()
+    expect(row.eur_value).toBeNull()
+    expect(row.sek_value).toBeNull()
+    // The booking still runs its side effects; only the fiat capture is empty.
+    expect(recordMachinePaymentEvidence).toHaveBeenCalledTimes(1)
+    expect(mockFeed).toHaveBeenCalledTimes(1)
+    expect(mockFunnel).toHaveBeenCalledTimes(1)
   })
 })

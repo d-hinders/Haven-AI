@@ -156,6 +156,15 @@ describe('#3564 — the submission reconciler tick', () => {
     expect(typeof RECONCILE_MIN_AGE_SECONDS).toBe('number')
     expect(RECONCILE_MAX_AGE_SECONDS).toBeGreaterThan(RECONCILE_MIN_AGE_SECONDS)
   })
+
+  it('#4818 — the intake age sits above the route\'s longest wait (10 s send + 120 s receipt wait)', () => {
+    // A claimed row can belong to a sign request that is still running: the
+    // route claims, sends (10 s timeout) and waits for a receipt (120 s
+    // timeout) before it books anything. Selecting a row inside that window
+    // would read the bundler mid-flight and could book `failed` under a live
+    // request.
+    expect(RECONCILE_MIN_AGE_SECONDS).toBeGreaterThan(10 + 120)
+  })
 })
 
 describe('#3564 — readUserOperationReceipt maps every unknown to not_found_yet', () => {

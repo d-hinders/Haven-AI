@@ -106,11 +106,11 @@ let writes: string[] = []
 function primeDb(...routes: DbRoute[]) {
   mockQuery.mockImplementation(async (sql: unknown, params: unknown[]) => {
     const text = String(sql)
+    // Record EVERY write the state machine issues, whether or not a route
+    // below claims it — an unmatched write is still a write.
+    if (/^UPDATE payment_intents/.test(text.trim())) writes.push(labelOf(text))
     for (const [re, handler] of routes) {
-      if (re.test(text)) {
-        if (/^UPDATE payment_intents/.test(text.trim())) writes.push(labelOf(text))
-        return handler(text, params)
-      }
+      if (re.test(text)) return handler(text, params)
     }
     return { rows: [] }
   })
@@ -120,6 +120,9 @@ function labelOf(sql: string): string {
   if (/SET signature[\s\S]*status = 'submitted'/.test(sql)) return 'claim'
   if (/SET status = 'confirmed'/.test(sql)) return 'confirm'
   if (/SET status = 'failed'/.test(sql)) return 'fail'
+  // #4818: the dispatched-hash upgrade — machine_metadata gains user_op_hash
+  // but NOT the outcome-pending marker.
+  if (/SET machine_metadata[\s\S]*user_op_hash/.test(sql) && !/submission_outcome/.test(sql)) return 'record-hash'
   if (/user_op_hash/.test(sql)) return 'outcome-pending'
   if (/SET status = 'pending_signature'/.test(sql)) return 'release'
   if (/SET status = 'expired'/.test(sql)) return 'expire'
@@ -223,8 +226,9 @@ describe('signPayment — the POST /payments/:id/sign submit state machine (#476
     expect(body.amount).toBe('0.10')
 
     // The money-path invariant: the claim lands BEFORE the submit, and the
-    // terminal write AFTER it.
-    expect(writes).toEqual(['claim', 'submit', 'confirm'])
+    // terminal write AFTER it. #4818 adds the dispatched-hash upgrade between
+    // the submit and the confirm.
+    expect(writes).toEqual(['claim', 'submit', 'record-hash', 'confirm'])
 
     // The sponsored-gas recording rides the submit seam, on the success path.
     expect(mockRecordGas).toHaveBeenCalledTimes(1)
@@ -288,6 +292,102 @@ describe('signPayment — the POST /payments/:id/sign submit state machine (#476
     // The op WAS sent, so the sponsored gas is recorded with the unknown cost.
     expect(mockRecordGas).toHaveBeenCalledTimes(1)
     expect((mockRecordGas.mock.calls[0][0] as { outcome: string }).outcome).toBe('receipt_unconfirmed')
+  })
+
+  // ── #4818: nothing after the submit books `failed` ──────────────────────
+
+  it('#4818 — a throw from the confirm write AFTER the submit returned books outcome-pending, never failed', async () => {
+    const TX = `0x${'cd'.repeat(32)}`
+    const OP = `0x${'ef'.repeat(32)}`
+    primeDb(
+      INTENT,
+      CLAIM_OK,
+      [/SET status = 'confirmed'/, () => {
+        throw new Error('confirm write exploded')
+      }],
+      BOOK_PENDING,
+      FAIL_WRITE,
+    )
+    mockSubmit.mockImplementation(async () => {
+      writes.push('submit')
+      return { txHash: TX, userOpHash: OP, actualGasUsed: 100_000n, actualGasCost: 1_000n }
+    })
+    mockFiat.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 1.05 })
+
+    const decided = await call()
+
+    // The existing outcome-pending body — the one the hosted mapper and the
+    // SDK already handle — not a `failed` verdict for a mined payment.
+    expect(decided.code).toBe(502)
+    const body = decided.body as Record<string, unknown>
+    expect(body.status).toBe('submitted')
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.user_op_hash).toBe(OP)
+    expect(body.message).toMatch(/do not create a new payment/i)
+
+    // The confirm write was ATTEMPTED and threw; the outcome-pending booking
+    // followed it. `failSubmittedIntent` was never reached.
+    expect(writes).toEqual(['claim', 'submit', 'record-hash', 'confirm', 'outcome-pending'])
+    expect(writes).not.toContain('fail')
+  })
+
+  it('#4818 — a throwing fiat helper never fails a mined payment: the confirm still books', async () => {
+    primeDb(INTENT, CLAIM_OK, CONFIRM_OK)
+    mockSubmit.mockImplementation(async () => {
+      writes.push('submit')
+      return {
+        txHash: `0x${'cd'.repeat(32)}`,
+        userOpHash: `0x${'ef'.repeat(32)}`,
+        actualGasUsed: 100_000n,
+        actualGasCost: 1_000n,
+      }
+    })
+    mockFiat.mockRejectedValue(new Error('price source exploded'))
+
+    const decided = await call()
+
+    expect(decided.code).toBe(200)
+    expect((decided.body as Record<string, unknown>).status).toBe('confirmed')
+    expect(writes).toEqual(['claim', 'submit', 'record-hash', 'confirm'])
+    expect(writes).not.toContain('fail')
+    expect(writes).not.toContain('outcome-pending')
+  })
+
+  it('#4818 — a confirm CAS lost to the reconciler answers 200 confirmed with the ROW hash, and runs no side effects', async () => {
+    const ROW_TX = `0x${'77'.repeat(32)}`
+    let reads = 0
+    primeDb(
+      [/FROM payment_intents\s+WHERE id/, () => {
+        reads += 1
+        return {
+          rows: [reads === 1 ? intentRow() : intentRow({ status: 'confirmed', tx_hash: ROW_TX })],
+        }
+      }],
+      CLAIM_OK,
+      // The reconciler confirmed first: the route's CAS matches zero rows.
+      [/SET status = 'confirmed'/, () => ({ rows: [] })],
+    )
+    mockSubmit.mockImplementation(async () => {
+      writes.push('submit')
+      return {
+        txHash: `0x${'cd'.repeat(32)}`,
+        userOpHash: `0x${'ef'.repeat(32)}`,
+        actualGasUsed: 100_000n,
+        actualGasCost: 1_000n,
+      }
+    })
+    mockFiat.mockResolvedValue({ usd: 0.1, eur: 0.09, sek: 1.05 })
+
+    const decided = await call()
+
+    expect(decided.code).toBe(200)
+    const body = decided.body as Record<string, unknown>
+    expect(body.status).toBe('confirmed')
+    expect(body.tx_hash).toBe(ROW_TX)
+    // The winner already ran the evidence hook, the feed and the funnel event.
+    expect(recordMachinePaymentEvidence).not.toHaveBeenCalled()
+    expect(mockFeed).not.toHaveBeenCalled()
+    expect(mockFunnel).not.toHaveBeenCalled()
   })
 
   it('a pre-claim refusal is a decided response too — 404, nothing claimed, nothing submitted', async () => {

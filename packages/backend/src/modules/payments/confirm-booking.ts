@@ -49,7 +49,7 @@
  * `no-circular` refuses. The sign route already hands the hook in for exactly
  * this reason (#4761); the reconciler's caller does the same.
  */
-import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
+import { getFiatValuesForTokenAmount, type FiatValues } from '../../infra/fiat-values.js'
 import { confirmSubmittedIntent } from '../../infra/repositories/payment-intents.js'
 import { emitFirstPaymentSettled } from '../../infra/repositories/onboarding-funnel.js'
 import { feedSettledPaymentBestEffort } from '../accounting/index.js'
@@ -97,8 +97,23 @@ export interface ConfirmBookingInput<L> {
  * side effects, `false` when another writer had already confirmed the row —
  * in which case nothing was written and nothing was emitted.
  */
-export async function bookConfirmedPayment<L>(input: ConfirmBookingInput<L>): Promise<boolean> {
-  const fiatValues = await getFiatValuesForTokenAmount(input.tokenSymbol, input.amountHuman)
+export async function bookConfirmedPayment<L extends ConfirmBookingLogger>(
+  input: ConfirmBookingInput<L>,
+): Promise<boolean> {
+  // #4818: a price-source failure never fails a mined payment. The helper
+  // already maps a failed quote to nulls; this catches the case where the
+  // helper itself throws (a mock, or a future regression), so the confirm
+  // write still runs and the payment is booked. The funds already moved —
+  // nothing about the fiat capture may decide the payment's fate.
+  let fiatValues: FiatValues = { usd: null, eur: null, sek: null }
+  try {
+    fiatValues = await getFiatValuesForTokenAmount(input.tokenSymbol, input.amountHuman)
+  } catch (err) {
+    input.log.warn(
+      { err, payment_id: input.intentId },
+      'fiat capture threw; booking the confirm with null fiat values',
+    )
+  }
 
   const confirmed = await confirmSubmittedIntent({
     txHash: input.txHash,

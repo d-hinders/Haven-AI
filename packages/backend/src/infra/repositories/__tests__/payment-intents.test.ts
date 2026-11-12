@@ -33,6 +33,7 @@ import {
   insertSendIntent,
   inTransaction,
   listIntentsForAgent,
+  recordSubmittedUserOpHash,
   releaseSubmittedClaim,
 } from '../payment-intents.js'
 import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
@@ -184,6 +185,54 @@ describeDb('payment-intents repository (#1223)', () => {
   })
 
   // ── Claim → confirm → release lifecycle ────────────────────────────────
+
+  it('#4818: the claim records the prepared operation hash and the intake marker', async () => {
+    const { agentId, userId } = await seedAgent()
+    const input = delegationInput(agentId, userId)
+    const intent = await insertDelegationIntent(input)
+
+    expect(await claimIntentForSubmission('0xsig', intent.id, agentId)).toBe(true)
+
+    const row = await findIntentForAgent(intent.id, agentId)
+    const metadata = row!.machine_metadata as Record<string, unknown>
+    // The prepared hash the row already carried, copied where the reconciler
+    // looks for it, plus the marker that keeps pre-#4818 rows out of the intake.
+    expect(metadata.user_op_hash).toBe(input.signHash)
+    expect(metadata.submission_claimed).toBe(true)
+    // The claim is still the same CAS: no tx_hash, no outcome marker yet.
+    expect(row!.tx_hash).toBeNull()
+    expect(metadata.submission_outcome).toBeUndefined()
+  })
+
+  it('#4818: recordSubmittedUserOpHash upgrades the hash on an open submit only', async () => {
+    const { agentId, userId } = await seedAgent()
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
+    const dispatched = `0x${'9'.repeat(64)}`
+
+    // Before the claim the row is not an open submit — the CAS misses.
+    expect(await recordSubmittedUserOpHash({ userOpHash: dispatched, intentId: intent.id, agentId })).toBe(false)
+
+    await claimIntentForSubmission('0xsig', intent.id, agentId)
+    expect(await recordSubmittedUserOpHash({ userOpHash: dispatched, intentId: intent.id, agentId })).toBe(true)
+    expect((await findIntentForAgent(intent.id, agentId))!.machine_metadata).toMatchObject({
+      user_op_hash: dispatched,
+      submission_claimed: true,
+    })
+
+    // A confirmed row is never touched again.
+    await confirmSubmittedIntent({
+      txHash: `0x${'1'.repeat(64)}`,
+      intentId: intent.id,
+      usdValue: null,
+      eurValue: null,
+      sekValue: null,
+      agentId,
+    })
+    expect(await recordSubmittedUserOpHash({ userOpHash: `0x${'8'.repeat(64)}`, intentId: intent.id, agentId })).toBe(false)
+    expect((await findIntentForAgent(intent.id, agentId))!.machine_metadata).toMatchObject({
+      user_op_hash: dispatched,
+    })
+  })
 
   it('confirm requires a CLAIMED row, and a second confirm is refused', async () => {
     const { agentId, userId } = await seedAgent()

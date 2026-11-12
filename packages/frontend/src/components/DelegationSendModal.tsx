@@ -75,7 +75,17 @@ type Step = 'details' | 'review' | 'done'
 type SaveState = 'idle' | 'saving' | 'saved' | 'already' | 'error'
 
 /** A message on Review: a cancelled approval is neutral, a failure is not. */
-type ReviewMessage = { tone: 'neutral' | 'danger'; message: string }
+type ReviewMessage = { tone: 'neutral' | 'danger' | 'unconfirmed'; message: string }
+
+/**
+ * #4820: the outcome-unknown copy. The submit was rejected and nothing proves
+ * the transfer did not go through, so the dialog says so, points at the one
+ * place that can answer it (Activity), and says what to do if nothing appears.
+ * It never offers a second send: the submit carries no idempotency key, so a
+ * retry would be a second operation with the same recipient and amount.
+ */
+const UNCONFIRMED_MESSAGE =
+  'We could not confirm this transfer. It may have gone through. Activity shows it if it landed. If nothing appears there, nothing was sent and you can send again.'
 
 export default function DelegationSendModal({
   open,
@@ -251,6 +261,11 @@ export default function DelegationSendModal({
         onSent?.()
       } else if (result.reason === 'cancelled') {
         setMessage({ tone: 'neutral', message: 'Approval was cancelled.' })
+      } else if (result.reason === 'unconfirmed') {
+        // #4820: the submit was rejected and the transfer may have gone
+        // through. The dialog stops offering a second send; Activity is where
+        // the owner finds out.
+        setMessage({ tone: 'unconfirmed', message: UNCONFIRMED_MESSAGE })
       } else {
         setMessage({
           tone: 'danger',
@@ -309,22 +324,30 @@ export default function DelegationSendModal({
         </Button>
       </DialogActions>
     ) : step === 'review' ? (
-      <DialogActions className="w-full">
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setMessage(null)
-            setStep('details')
-          }}
-          className="flex-1"
-          disabled={working}
-        >
-          Back
+      message?.tone === 'unconfirmed' ? (
+        // #4820: the transfer may have gone through, so there is nothing safe
+        // to retry and nothing to go back to. One action, Close.
+        <Button variant="ghost" onClick={onClose} className="w-full">
+          Close
         </Button>
-        <Button onClick={() => void handleSend()} disabled={!canSend} className="flex-1">
-          {working ? 'Sending…' : message ? 'Try again' : `Send ${amountDisplay} ${token?.symbol ?? ''}`.trim()}
-        </Button>
-      </DialogActions>
+      ) : (
+        <DialogActions className="w-full">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setMessage(null)
+              setStep('details')
+            }}
+            className="flex-1"
+            disabled={working}
+          >
+            Back
+          </Button>
+          <Button onClick={() => void handleSend()} disabled={!canSend} className="flex-1">
+            {working ? 'Sending…' : message ? 'Try again' : `Send ${amountDisplay} ${token?.symbol ?? ''}`.trim()}
+          </Button>
+        </DialogActions>
+      )
     ) : (
       <Button variant="ghost" onClick={onClose} className="w-full" disabled={saving}>
         Done
@@ -457,13 +480,17 @@ export default function DelegationSendModal({
             ]}
           />
 
-          <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
-            A sent payment can&apos;t be reversed. You approve it on the next step.
-          </p>
+          {/* #4820: the approval already happened, so the "you approve it on
+              the next step" note would be false in the unconfirmed state. */}
+          {message?.tone === 'unconfirmed' ? null : (
+            <p className="text-xs leading-relaxed text-[var(--v2-ink-2)]">
+              A sent payment can&apos;t be reversed. You approve it on the next step.
+            </p>
+          )}
 
           {message ? (
             <div ref={messageRef} className="scroll-mb-3">
-              {message.tone === 'danger' ? (
+              {message.tone === 'danger' || message.tone === 'unconfirmed' ? (
                 <InlineAlert>{message.message}</InlineAlert>
               ) : (
                 <p className="text-xs text-[var(--v2-ink-2)]">{message.message}</p>

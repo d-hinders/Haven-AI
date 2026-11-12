@@ -5959,7 +5959,18 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': errorResponse,
           '429': { ...errorResponse, description: 'Money-path rate limit.' },
-          '502': errorResponse,
+          '502': {
+            ...errorResponse,
+            description:
+              'The submit did not confirm. TWO shapes, told apart by `error_code` (#4820). ' +
+              '`submission_outcome_unknown` — the operation was SENT and its answer or its receipt ' +
+              'was lost, so it may have moved the funds; `error` says so and `user_op_hash` names the ' +
+              'operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not ' +
+              'submit the transfer again: check Activity for the transfer. ' +
+              '`onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an ' +
+              'operation that landed and reverted, so nothing moved); `error` is "Transfer failed" and ' +
+              'retrying is safe.',
+          },
         },
       },
     },

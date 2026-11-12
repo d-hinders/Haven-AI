@@ -3777,6 +3777,57 @@ export default function DesignSystemPage() {
           </Card>
 
           {/*
+            #4820: the unconfirmed state is a specimen for the same reason the
+            sent screen is — reaching it in a browser needs a completed passkey
+            ceremony, and the visual gate cannot drive WebAuthn. The markup is
+            the dialog's own Review screen with its InlineAlert and its
+            single-action footer, so the clip still pins what ships.
+          */}
+          <div data-testid="ds-send-unconfirmed" className="xl:col-span-2">
+            <Card hover={false} className="p-5">
+              <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Unconfirmed</h3>
+              <div className="mt-4 space-y-5">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-[var(--v2-ink-3)]">You&apos;re sending</p>
+                  <p className="v2-tabular text-2xl font-semibold text-[var(--v2-ink)]">125.00 USDC</p>
+                </div>
+                <DetailList
+                  items={[
+                    {
+                      label: 'To',
+                      value: (
+                        <span className="flex items-start gap-2">
+                          <Monogram name="Acme Services" size="xs" decorative />
+                          <span className="min-w-0">
+                            <span className="block">Acme Services</span>
+                            <span className="mt-0.5 block text-xs font-normal text-[var(--v2-ink-3)]">
+                              <Address value={DS_ACME} grouped />
+                            </span>
+                          </span>
+                        </span>
+                      ),
+                    },
+                    ...(
+                      [
+                        ['From', 'Operating wallet'],
+                        ['Network', 'Base'],
+                        ['Network fee', 'None. Haven covers it.'],
+                      ] as Array<[string, string]>
+                    ).map(([label, value]) => ({ label, value })),
+                  ]}
+                />
+                <InlineAlert>
+                  We could not confirm this transfer. It may have gone through. Activity shows it if it
+                  landed. If nothing appears there, nothing was sent and you can send again.
+                </InlineAlert>
+                <Button variant="ghost" className="w-full">
+                  Close
+                </Button>
+              </div>
+            </Card>
+          </div>
+
+          {/*
             The sent screen is a specimen rather than a live capture: reaching
             it in a browser needs a completed passkey ceremony, which the visual
             gate cannot drive. The markup is the dialog's own — `DialogResult`

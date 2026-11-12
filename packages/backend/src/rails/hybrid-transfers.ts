@@ -26,7 +26,7 @@
 import { encodeFunctionData } from 'viem'
 import type { Address, Hex } from 'viem'
 import { isAddress as isValidAddress } from '@haven_ai/core'
-import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
+import { createTreasuryOps, delegationRailBundlerUrl, SubmittedUserOpFailedError } from './delegation-rail.js'
 import {
   resolveSignatureScheme,
   validateSignedSubmission,
@@ -202,6 +202,35 @@ export async function submitTransfer(
       transfer: { token: encoded.token, to: encoded.to, amount: encoded.amount },
     }
   } catch (err) {
-    return { ok: false, failure: { status: 502, error: 'Transfer failed', details: safeDetails(err) } }
+    // #4820: the outcome-unknown variant is NOT a failure. The operation was
+    // SENT and its answer (or its receipt) was lost, so it may have moved the
+    // funds — the owner must not be offered a second send. The hash the
+    // bundler received rides the answer so support can look the operation up;
+    // it is NOT a transaction hash, so nothing links it to an explorer.
+    if (err instanceof SubmittedUserOpFailedError && err.outcome === 'receipt_unconfirmed') {
+      return {
+        ok: false,
+        failure: {
+          status: 502,
+          error: 'The transfer may have gone through',
+          error_code: 'submission_outcome_unknown',
+          user_op_hash: err.userOpHash,
+          details: safeDetails(err),
+        },
+      }
+    }
+    // Every KNOWN failure keeps today's status and text: an explicit pre-send
+    // rejection (the bundler answered, or the request never left) and an
+    // operation that landed and reverted (nothing moved). The code is what
+    // tells a caller retrying is safe.
+    return {
+      ok: false,
+      failure: {
+        status: 502,
+        error: 'Transfer failed',
+        error_code: 'onchain_execution_failed',
+        details: safeDetails(err),
+      },
+    }
   }
 }

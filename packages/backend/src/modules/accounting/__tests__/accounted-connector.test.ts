@@ -21,7 +21,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 const { flowMocks, underlagMocks, repoMocks, entryMocks } = vi.hoisted(() => ({
   flowMocks: { readApiKeyConnection: vi.fn() },
-  underlagMocks: { loadReceiptUnderlag: vi.fn() },
+  underlagMocks: { loadReceiptUnderlag: vi.fn(), pinUnderlagInputs: vi.fn() },
   repoMocks: { getSyncState: vi.fn(), getConnection: vi.fn() },
   entryMocks: { buildAccountingEntryForPayment: vi.fn() },
 }))
@@ -29,6 +29,7 @@ vi.mock('../api-key-flow.js', () => ({ readApiKeyConnection: flowMocks.readApiKe
 vi.mock('../receipt-underlag.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../receipt-underlag.js')>()),
   loadReceiptUnderlag: underlagMocks.loadReceiptUnderlag,
+  pinUnderlagInputs: underlagMocks.pinUnderlagInputs,
 }))
 vi.mock('../entry.js', () => ({ buildAccountingEntryForPayment: entryMocks.buildAccountingEntryForPayment }))
 vi.mock('../../../infra/repositories/accounting-feed-syncs.js', () => ({
@@ -402,6 +403,42 @@ describe('AccountedConnector.pushTransaction (#3018)', () => {
     const r2 = await c2.pushTransaction(USER, tx())
     expect(r2.status).toBe('skipped')
     expect(s2.requests).toHaveLength(0)
+  })
+
+  /**
+   * #4824: the render inputs are pinned BEFORE the first upload request, and
+   * only when one is actually sent. A connector that fails earlier (no
+   * connection, no company id, a render failure, an oversize underlag) writes
+   * no pin, so its retry renders whatever the sources hold by then.
+   */
+  it('pins the render inputs before the upload, and never when no upload request is sent', async () => {
+    underlagMocks.pinUnderlagInputs.mockReset().mockResolvedValue(true)
+    connectedMock()
+    underlagMock()
+    const { connector } = withRouter()
+    const t = tx()
+    await connector.pushTransaction(USER, t)
+    expect(underlagMocks.pinUnderlagInputs).toHaveBeenCalledTimes(1)
+    expect(underlagMocks.pinUnderlagInputs).toHaveBeenCalledWith(t)
+
+    // A render failure: the throw happens before the pin.
+    underlagMocks.pinUnderlagInputs.mockClear()
+    underlagMocks.loadReceiptUnderlag.mockRejectedValueOnce(new Error('db down'))
+    await expect(connector.pushTransaction(USER, tx())).rejects.toThrow(/could not render/)
+    expect(underlagMocks.pinUnderlagInputs).not.toHaveBeenCalled()
+
+    // No company id: the connector returns before the render.
+    underlagMocks.pinUnderlagInputs.mockClear()
+    connectedMock(null)
+    await connector.pushTransaction(USER, tx())
+    expect(underlagMocks.pinUnderlagInputs).not.toHaveBeenCalled()
+
+    // Oversize underlag: gated locally, no request, no pin.
+    underlagMocks.pinUnderlagInputs.mockClear()
+    connectedMock()
+    underlagMock(10 * 1024 * 1024 + 1)
+    await connector.pushTransaction(USER, tx())
+    expect(underlagMocks.pinUnderlagInputs).not.toHaveBeenCalled()
   })
 
   it('the upload request itself never carries the key anywhere but the Authorization header', async () => {

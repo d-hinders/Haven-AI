@@ -85,9 +85,18 @@ export default function AccountSignersCard({ accountAddress, chainId, userEmail 
       // #1085: neutral, not error — the user changed their mind.
     else if (r.reason === 'cancelled') toast.info('Approval was cancelled.')
       else if (r.reason === 'blocked') toast.error(r.message ?? 'That change is not allowed.')
+      // #4821: the submit was rejected and the change may have landed. Re-read
+      // the signer set before the owner tries again — the card above is the
+      // only place that can answer it.
+      else if (r.reason === 'unconfirmed') {
+        toast.error(
+          'We could not confirm the signer change. It may have gone through — check the signers above before trying again.',
+        )
+        void reload()
+      }
       else toast.error('Something went wrong. Try again.')
     },
-    [toast],
+    [reload, toast],
   )
 
   if (signers === null && !loadError) return null

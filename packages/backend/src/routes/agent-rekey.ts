@@ -122,6 +122,7 @@ import {
 import { reanchorPassportBestEffort } from '../modules/passport/index.js'
 import type { Executor } from '../infra/transaction.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
+import { revocationFailureBody } from '../rails/owner-signed-failure.js'
 
 // #3609: redacted AND bounded — the shared rule for every response `details`.
 function safeDetails(err: unknown): string {
@@ -782,11 +783,10 @@ export default async function agentRekeyRoutes(app: FastifyInstance): Promise<vo
       )
       txHash = result.txHash
     } catch (err) {
-      // Fail-closed and fail-BEFORE: nothing was written, the re-key stays in
-      // `preflight`, and the old key is still live. Retrying is safe.
-      return reply.code(502).send({ error: 'Revocation failed', details: safeDetails(err) })
+      // A pre-send rejection wrote nothing (retrying is safe); an outcome-unknown
+      // throw may have landed, so the answer says so and a retry must re-read.
+      return reply.code(502).send(revocationFailureBody(err, 'Revocation failed'))
     }
-
     await revokeDelegationsByHashes(request.params.id, delegation_hashes_server)
     const advanced = await markRevoked(rekey.id, request.params.id, txHash)
     if (!advanced) {

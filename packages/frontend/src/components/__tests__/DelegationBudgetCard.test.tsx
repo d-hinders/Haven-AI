@@ -493,6 +493,22 @@ describe('DelegationBudgetCard (#833)', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Stop this budget?' })).toBeNull())
   })
 
+  // #4821: the stop was sent and its answer was lost, so it may have landed.
+  // The toast says so and the card re-reads — never "could not stop".
+  it('an outcome-unknown stop says it may already be stopped and re-reads the list', async () => {
+    mockGet.mockReturnValue([budget()])
+    mockRevoke.mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    const onBudgetChange = vi.fn()
+    render(<DelegationBudgetCard {...PROPS} onBudgetChange={onBudgetChange} />)
+    await openStopViaMenu('5 USDC per day')
+    fireEvent.click(screen.getByRole('button', { name: 'Stop budget' }))
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled())
+    expect(mockToast.error.mock.calls[0][0]).toMatch(/could not confirm the stop/i)
+    expect(mockToast.error.mock.calls[0][0]).toMatch(/may already be stopped/i)
+    expect(mockToast.error).not.toHaveBeenCalledWith('Could not stop the budget. Try again.')
+    expect(onBudgetChange).toHaveBeenCalled()
+  })
+
   it('notifies onBudgetChange after a successful revoke — the page summary reads a different source (#1090)', async () => {
     mockGet.mockReturnValue([budget()])
     mockRevoke.mockResolvedValue({ ok: true })

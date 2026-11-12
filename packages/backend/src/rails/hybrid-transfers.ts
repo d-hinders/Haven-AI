@@ -27,6 +27,7 @@ import { encodeFunctionData } from 'viem'
 import type { Address, Hex } from 'viem'
 import { isAddress as isValidAddress } from '@haven_ai/core'
 import { createTreasuryOps, delegationRailBundlerUrl, SubmittedUserOpFailedError } from './delegation-rail.js'
+import { ownerSignedFailureBody } from './owner-signed-failure.js'
 import {
   resolveSignatureScheme,
   validateSignedSubmission,
@@ -157,11 +158,7 @@ export async function prepareTransfer(
  * again" (`submission_outcome_unknown`).
  */
 export function transferFailureBody(failure: SignerChangeFailure): Record<string, unknown> {
-  const body: Record<string, unknown> = { error: failure.error }
-  if (failure.details) body.details = failure.details
-  if (failure.error_code) body.error_code = failure.error_code
-  if (failure.user_op_hash) body.user_op_hash = failure.user_op_hash
-  return body
+  return ownerSignedFailureBody(failure)
 }
 
 export async function submitTransfer(

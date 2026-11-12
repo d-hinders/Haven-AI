@@ -86,9 +86,9 @@ import {
   validateSignedSubmission,
   type SignerActionBody,
 } from '../rails/hybrid-signer-actions.js'
+import { classifySubmitThrow, ownerSignedFailureBody, revocationFailureBody } from '../rails/owner-signed-failure.js'
 
-/** Vendor errors echo the bundler URL (which embeds the API key) — #764. */
-// #3609: redacted AND bounded — the shared rule for every response `details`.
+// Vendor errors echo the bundler URL (which embeds the API key) — #764; #3609: redacted AND bounded.
 function safeDetails(err: unknown): string {
   return boundedErrorDetails(err) ?? ''
 }
@@ -495,10 +495,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
         },
         request.body ?? {},
       )
-      if (!result.ok) {
-        const { status, error, details } = result.failure
-        return reply.code(status).send(details ? { error, details } : { error })
-      }
+      // #4821: relay the rail's classification (`error_code`, `user_op_hash`).
+      if (!result.ok) return reply.code(result.failure.status).send(ownerSignedFailureBody(result.failure))
       return { updated: true, tx_hash: result.txHash }
     },
   )
@@ -1204,7 +1202,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       const revoked = await revokeDelegationsByHashes(request.params.id, delegation_hashes_server)
       return { revoked: true, tx_hash: result.txHash, delegation_hashes: revoked }
     } catch (err) {
-      return reply.code(502).send({ error: 'Batch revocation failed', details: safeDetails(err) })
+      // #4821: an outcome-unknown submit may have landed — never "failed".
+      return reply.code(502).send(revocationFailureBody(err, 'Batch revocation failed'))
     }
   })
 
@@ -1383,7 +1382,8 @@ export default async function agentDelegationRoutes(app: FastifyInstance): Promi
       )
       return { revoked: true, tx_hash: result.txHash }
     } catch (err) {
-      return reply.code(502).send({ error: 'Revocation failed', details: safeDetails(err) })
+      // #4821: same split as the batch — it may have disabled this delegation.
+      return reply.code(502).send(revocationFailureBody(err, 'Revocation failed'))
     }
   })
 }

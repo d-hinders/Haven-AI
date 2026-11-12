@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toHex, type Address } from 'viem'
 import { api } from '@/lib/api'
+import { classifySubmitOutcome } from '@/lib/submitOutcome'
 import { useActiveSigner, rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { signPreparedAccountOp } from '@/lib/hybridAccountOps'
@@ -26,7 +27,15 @@ import { createPasskey, base64UrlDecode } from '@/lib/passkey'
 import type { AccountSigners } from '@/lib/delegationPasskeySigner'
 import { pickSigningPath, passkeyLikelyElsewhere } from './useDelegationBudget'
 
-export type SignerResult = { ok: true } | { ok: false; reason: 'cancelled' | 'blocked' | 'failed'; message?: string }
+export type SignerResult =
+  | { ok: true }
+  | { ok: false; reason: 'cancelled' | 'blocked' | 'failed'; message?: string }
+  /**
+   * #4821: the submit request was rejected and nothing proves the signer
+   * change did not land. `userOpHash` is the operation the bundler received
+   * when the route knew it — NOT a chain transaction identifier.
+   */
+  | { ok: false; reason: 'unconfirmed'; message?: string; userOpHash?: string }
 
 interface PrepareResponse {
   signature_scheme: 'eip712_userop' | 'webauthn_userop'
@@ -88,33 +97,45 @@ export function useAccountSigners(accountAddress: string, chainId: number, userE
     async (body: Record<string, unknown>): Promise<SignerResult> => {
       setBusy(true)
       try {
-        // Tell the backend which signer this device will use — gas estimation
-        // is shaped by the signature kind, and only the device knows what is
-        // available.
-        const prep = await api.post<PrepareResponse>(
-          `/accounts/hybrid/${accountAddress}/signers/prepare?chain_id=${chainId}`,
-          {
+        // Everything up to the signature changes nothing: a refusal here is a
+        // plain failure, and retrying is safe.
+        let prep: PrepareResponse
+        let signature: string
+        try {
+          // Tell the backend which signer this device will use — gas estimation
+          // is shaped by the signature kind, and only the device knows what is
+          // available.
+          prep = await api.post<PrepareResponse>(
+            `/accounts/hybrid/${accountAddress}/signers/prepare?chain_id=${chainId}`,
+            {
+              ...body,
+              signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
+            },
+          )
+          signature = await signPrepared(prep)
+        } catch (err) {
+          // Shared predicate (#1079): the WebAuthn path throws ox's
+          // SignFailedError, never our PasskeyCancelledError — an instanceof
+          // check here classified every dismissed sheet as a failure.
+          if (isPasskeyCancellation(err)) return { ok: false, reason: 'cancelled' }
+          const status = (err as { status?: number }).status
+          const message = err instanceof Error ? err.message : undefined
+          if (status === 409) return { ok: false, reason: 'blocked', message }
+          return { ok: false, reason: 'failed', message }
+        }
+        // #4821: the submit is the only call that can change the signer set, so
+        // its rejection is classified rather than folded into `failed`.
+        try {
+          await api.post(`/accounts/hybrid/${accountAddress}/signers/submit?chain_id=${chainId}`, {
             ...body,
-            signature_scheme: signingPath === 'passkey' ? 'webauthn_userop' : 'eip712_userop',
-          },
-        )
-        const signature = await signPrepared(prep)
-        await api.post(`/accounts/hybrid/${accountAddress}/signers/submit?chain_id=${chainId}`, {
-          ...body,
-          signature,
-          user_operation: prep.user_operation,
-        })
+            signature,
+            user_operation: prep.user_operation,
+          })
+        } catch (err) {
+          return { ok: false, ...classifySubmitOutcome(err) }
+        }
         await reload()
         return { ok: true }
-      } catch (err) {
-        // Shared predicate (#1079): the WebAuthn path throws ox's
-        // SignFailedError, never our PasskeyCancelledError — an instanceof
-        // check here classified every dismissed sheet as a failure.
-        if (isPasskeyCancellation(err)) return { ok: false, reason: 'cancelled' }
-        const status = (err as { status?: number }).status
-        const message = err instanceof Error ? err.message : undefined
-        if (status === 409) return { ok: false, reason: 'blocked', message }
-        return { ok: false, reason: 'failed', message }
       } finally {
         setBusy(false)
       }

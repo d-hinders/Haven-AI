@@ -10577,7 +10577,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -11518,7 +11518,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12094,7 +12094,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12435,7 +12435,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -16315,7 +16315,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;

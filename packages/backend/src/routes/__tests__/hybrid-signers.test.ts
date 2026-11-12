@@ -318,6 +318,80 @@ describe('account-scoped signer management (#1081)', () => {
     expect(res.json().error).toMatch(/signature is required/)
     expect(mockLoadOwner).not.toHaveBeenCalled()
   })
+
+  // ── #4821: the submit's failure body tells "nothing was sent" from "we do
+  // not know" ────────────────────────────────────────────────────────────────
+  // The rail's typed error (#4817) is the only evidence that separates them.
+  // Before this slice both answered the same 502 `Signer change failed`, so the
+  // dashboard could not tell a safe retry from a second signature for a change
+  // that may already have landed.
+  const USER_OP_HASH = ('0x' + 'dd'.repeat(32)) as `0x${string}`
+
+  /** The addKey calldata the route re-derives, so the pinning check passes. */
+  async function addPasskeyCallData(): Promise<string> {
+    const { encodeFunctionData } = await import('viem')
+    const { HYBRID_SIGNER_ABI } = await import('../../rails/hybrid-signer-actions.js')
+    return encodeFunctionData({
+      abi: HYBRID_SIGNER_ABI,
+      functionName: 'addKey',
+      args: [NEW_PK.key_id, BigInt(NEW_PK.x), BigInt(NEW_PK.y)],
+    })
+  }
+
+  function mockSubmitRejects(err: unknown) {
+    mockTreasury.mockResolvedValue({
+      treasuryAddress: ACCOUNT,
+      prepareCall: vi.fn(),
+      submitCall: vi.fn().mockRejectedValue(err),
+    })
+  }
+
+  it('an outcome-unknown submit answers a distinct code and the operation hash, never "Signer change failed"', async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockSubmitRejects(
+      new SubmittedUserOpFailedError(
+        `treasury UserOp ${USER_OP_HASH} was sent but its receipt could not be confirmed: timeout`,
+        USER_OP_HASH,
+        'receipt_unconfirmed',
+      ),
+    )
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'add_passkey', passkey: NEW_PK,
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData: await addPasskeyCallData() },
+      },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.user_op_hash).toBe(USER_OP_HASH)
+    expect(body.error).not.toBe('Signer change failed')
+    expect(body.error).toMatch(/may have gone through/)
+    // The DB sync runs only after a landed op, so nothing was recorded.
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO hybrid_account_passkeys/.test(String(sql)))).toBe(false)
+  })
+
+  it("an explicit pre-send rejection keeps today's status and text, plus the known-failure code", async () => {
+    ownedAccount({ passkeys: [PK1] })
+    mockSubmitRejects(new Error('AA25 invalid account nonce'))
+    const res = await app.inject({
+      method: 'POST', url: `/accounts/hybrid/${ACCOUNT}/signers/submit?chain_id=84532`,
+      payload: {
+        action: 'add_passkey', passkey: NEW_PK,
+        signature: '0x' + 'ab'.repeat(80),
+        user_operation: { sender: ACCOUNT, callData: await addPasskeyCallData() },
+      },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error).toBe('Signer change failed')
+    expect(body.error_code).toBe('onchain_execution_failed')
+    // The hash is not offered as something to look up: the outcome is known.
+    expect(body.user_op_hash).toBeUndefined()
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO hybrid_account_passkeys/.test(String(sql)))).toBe(false)
+  })
 })
 
 describe('remove_owner — enrolling a wallet is not a one-way door (#1087)', () => {

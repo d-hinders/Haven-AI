@@ -214,15 +214,25 @@ describe('Haven MCP tool descriptions', () => {
     it(`${tool} composes every fragment from the shared ${key} description`, () => {
       const shared = sharedDescriptions[key]
       const desc = toolDescriptions[tool]
+      // #4825: the local surface composes the per-surface form where the shared
+      // fragment has one (`selectionGuidanceFor` / `behaviorFor`), exactly as
+      // `composeDescription(d, 'local')` does.
+      const fragments = shared as {
+        selectionGuidance?: string
+        selectionGuidanceFor?: Partial<Record<'local' | 'hosted', string>>
+        behavior?: string
+        behaviorFor?: Partial<Record<'local' | 'hosted', string>>
+        nextActionGuidance?: string
+      }
       // Every entry must have a non-empty summary so the substring check
       // below has a real anchor rather than the vacuously-true `''`.
       expect(shared.summary.length).toBeGreaterThan(10)
       expect(desc).toContain(shared.summary)
-      if ('selectionGuidance' in shared && shared.selectionGuidance) {
-        expect(desc).toContain(shared.selectionGuidance)
-      }
-      if (shared.behavior) expect(desc).toContain(shared.behavior)
-      if (shared.nextActionGuidance) expect(desc).toContain(shared.nextActionGuidance)
+      const selection = fragments.selectionGuidanceFor?.local ?? fragments.selectionGuidance
+      if (selection) expect(desc).toContain(selection)
+      const behavior = fragments.behaviorFor?.local ?? fragments.behavior
+      if (behavior) expect(desc).toContain(behavior)
+      if (fragments.nextActionGuidance) expect(desc).toContain(fragments.nextActionGuidance)
     })
   }
 

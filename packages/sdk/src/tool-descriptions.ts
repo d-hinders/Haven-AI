@@ -37,6 +37,16 @@ export interface ToolDescription {
   /** Concrete behaviour the tool performs end-to-end, including which
    * non-custodial guarantee applies. */
   behavior: string
+  /**
+   * #4825: the same behaviour text for ONE MCP surface, where the shared
+   * sentence names a step that surface cannot take. The local MCP has no
+   * signer tool, so the shared `haven_get_agent` sentence about a signer step
+   * is false there. `composeDescription(d, surface)` uses this in place of
+   * `behavior` when the surface has an entry; with no surface (the SDK's own
+   * direct tool definitions, and the hosted MCP) the shared text is used
+   * unchanged.
+   */
+  behaviorFor?: Partial<Record<McpSurface, string>>
   /** What the agent should do next on error / declined states.
    * Empty string if not applicable. */
   nextActionGuidance: string
@@ -54,7 +64,8 @@ export type McpSurface = 'local' | 'hosted'
  */
 export function composeDescription(d: ToolDescription, surface?: McpSurface): string {
   const selection = (surface && d.selectionGuidanceFor?.[surface]) ?? d.selectionGuidance
-  return [d.summary, selection, d.behavior, d.nextActionGuidance].filter(Boolean).join(' ')
+  const behavior = (surface && d.behaviorFor?.[surface]) ?? d.behavior
+  return [d.summary, selection, behavior, d.nextActionGuidance].filter(Boolean).join(' ')
 }
 
 /**
@@ -66,6 +77,34 @@ export function composeDescription(d: ToolDescription, surface?: McpSurface): st
 export const FUNDING_LEG_DISCOVERY_GUIDANCE =
   'funding_leg_expected is a catalog hint: among equivalent entries prefer false (erc7710, no funding leg); "unknown" is no preference; never hide true entries. ' +
   'A recipient-pinned budget can pay erc7710 merchants only. The quote\'s expected_funding_leg is authoritative.'
+
+/**
+ * #4825: the one sentence in the shared `haven_get_agent` behavior that names a
+ * signer step. The hosted surface hands signing to the signer; the local MCP
+ * (`@haven_ai/mcp`) has no signer tool at all — the connector's `--local` mode
+ * removes the signer server on every runtime that supports local mode — so it
+ * says what is true there instead. Composed through `behaviorFor` below, so the
+ * hosted text is unchanged.
+ */
+const GET_AGENT_SUB_BUDGET_SENTENCE: Record<McpSurface, string> = {
+  hosted: 'pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature, with the haven_sign step.',
+  local:
+    'pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature; this runtime has no signer ' +
+    'tool, so it cannot sign one — the owner signs it from a hosted-plus-signer install.',
+}
+
+/**
+ * #4825: the shared `haven_get_agent` behavior, composed per surface. The one
+ * sentence that names a signer step is per-surface (`GET_AGENT_SUB_BUDGET_SENTENCE`):
+ * the hosted surface hands signing to the signer, the local MCP has no signer
+ * tool at all. Everything else is shared, so the hosted text is unchanged.
+ */
+const GET_AGENT_BEHAVIOR_HEAD =
+  'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. needs_approval with no allowances[] rows and budgetEndedAt set: the budget ENDED on that date — ask the owner to set a new one, waiting will not help; with no rows and no budgetEndedAt: nothing approved yet; with rows: spent for this period, refilling at budgetRefillsAt (null: it ends first). Readiness is AUTHORITY — a budget is live, not that funds are held. Each allowances[] row carries fundsCoverRemaining: false when the account\'s balance cannot back that row\'s whole remaining budget — a heads-up to mention, not a refusal (budgets above the balance are normal; an owner may top up weekly) — and null when the coverage read failed or the remaining was not read live; the key is absent at remaining 0, and rows for one token are compared alone. Covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify it with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay, nextRefillAt per token. taskBudgets[] rows carry maxAtomic/maxDisplay plus spentAtomic/remainingAtomic/remainingDisplay — what the chain still allows that budget — and remainingIsFromChain: false marks a failed read (figures null, never the cap); only live rows are listed, each with its status (pending | open | closing) and isExpired. '
+const GET_AGENT_BEHAVIOR_TAIL =
+  ' Identity fields: id, name, status, accountAddress, delegateAddress, chainId.'
+const getAgentBehavior = (surface: McpSurface): string =>
+  GET_AGENT_BEHAVIOR_HEAD + GET_AGENT_SUB_BUDGET_SENTENCE[surface] + GET_AGENT_BEHAVIOR_TAIL
 
 export const toolDescriptions = {
   quoteX402: {
@@ -135,8 +174,8 @@ export const toolDescriptions = {
       'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, per-token remaining allowance (atomic + human-readable). The recommended first call in a new session.',
     selectionGuidance:
       'Use this as the session bootstrap, or to confirm identity together with whether the agent has spend authority right now. For per-token detail (configured vs spent vs reset window) use haven_get_allowances.',
-    behavior:
-      'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. needs_approval with no allowances[] rows and budgetEndedAt set: the budget ENDED on that date — ask the owner to set a new one, waiting will not help; with no rows and no budgetEndedAt: nothing approved yet; with rows: spent for this period, refilling at budgetRefillsAt (null: it ends first). Readiness is AUTHORITY — a budget is live, not that funds are held. Each allowances[] row carries fundsCoverRemaining: false when the account\'s balance cannot back that row\'s whole remaining budget — a heads-up to mention, not a refusal (budgets above the balance are normal; an owner may top up weekly) — and null when the coverage read failed or the remaining was not read live; the key is absent at remaining 0, and rows for one token are compared alone. Covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify it with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay, nextRefillAt per token. taskBudgets[] rows carry maxAtomic/maxDisplay plus spentAtomic/remainingAtomic/remainingDisplay — what the chain still allows that budget — and remainingIsFromChain: false marks a failed read (figures null, never the cap); only live rows are listed, each with its status (pending | open | closing) and isExpired. pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature, with the haven_sign step. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
+    behavior: getAgentBehavior('hosted'),
+    behaviorFor: { local: getAgentBehavior('local') },
     nextActionGuidance: '',
   },
   getAllowances: {

@@ -588,9 +588,14 @@ goes to `POST /x402/:id/settle` and the response carries the Haven-assembled
 Haven-submitted transaction on that scheme. Omitting the field, or sending
 `eip3009`, relays the funding signature exactly as before, so **every existing
 caller is unchanged and there is nothing to upgrade**. The local stdio MCP's
-`haven_submit` (added by #3329) relays task-budget and sub-budget signatures
-(`task_budget_id` / `sub_budget_id`) and refuses a `payment_id`, so it takes no
-`settlement_scheme` and nothing here is skew.
+`haven_submit` (added by #3329) relays a signature the
+agent already holds (`task_budget_id` / `sub_budget_id`) and refuses a
+`payment_id`, so it takes no `settlement_scheme` and nothing here is skew.
+Since #4825 that runtime has no signer tool, so it cannot produce a
+task-budget or sub-budget signature at all: the task-budget tools refuse with
+`TASK_BUDGET_SIGNING_UNAVAILABLE` and a pending sub-budget row names no next
+tool (see *Task budgets and sub-budget signing are hosted-plus-signer
+features* below).
 
 An **erc7710-ONLY merchant** — no untagged `accepts[]` entry — is reachable
 through `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` since #2054:
@@ -1624,6 +1629,30 @@ and `haven_submit` (the local relay step task budgets need; its `payment_id`
 branch refuses, because the local runtime signs and submits a payment inline);
 the hosted MCP gains `haven_open_task_budget` and `haven_close_task_budget`,
 and its existing `haven_submit` takes `task_budget_id` XOR `payment_id`.
+
+**#4825 (2026-11-12) corrects where the signature comes from on the local
+runtime.** Task budgets and sub-budget signing are **hosted-plus-signer
+features**: opening a task budget, closing one that is open, and signing a
+sub-budget row all need a signature from the Haven signer, and a `--local`
+install has no signer tool — the connector's local mode removes the signer
+server on every runtime that supports local mode
+(`packages/connect/src/runtime-install.ts`,
+`packages/connect/src/config-writers.ts`). The local tool NAMES do not change,
+so the local consent hash does not move; the behaviour does. `haven_open_task_budget`
+refuses with the typed code `TASK_BUDGET_SIGNING_UNAVAILABLE` before contacting
+anything (no `POST /task-budgets`, so no pending row is created);
+`haven_close_task_budget` still answers `status: "closed"` for a pending or
+expired budget, and refuses with the same code — without calling
+`POST /task-budgets/:id/close`, so the budget is not left `closing` — for one
+that is open or closing; a `pendingSubBudgetSignatures[]` row of
+`haven_get_agent` and both `haven_submit { sub_budget_id }` results carry no
+`next_tool` and a `next_tool_omitted_reason` saying this runtime cannot sign a
+sub-budget and that the owner signs it from a hosted-plus-signer install. No
+local tool description names a signer tool or a signer step any more, and the
+`signer_compatibility` notice is gone from the local handoffs (they no longer
+hand off). Spending through an open sub-budget (`sub_budget_id` on the pay
+tools) needs no signer and is unchanged.
+
 `task_budget_id` is an optional argument on `haven_send`, `haven_pay`,
 `haven_pay_x402_quote` and `haven_pay_x402` where each exists. (#3378
 re-verification: until then the local `haven_pay_x402_quote` and the hosted
@@ -2330,10 +2359,14 @@ The notice says instead: close the pending budget with
 the deployment's upgrade command (`npx -y @haven_ai/connect@<channel>
 --doctor`, #3412) and then the repair line it prints, then open the budget
 again. The handoff `reason` points at the notice rather than restating the
-steps. The local `@haven_ai/mcp` handoffs carry the same notice from the same
+steps. The local `@haven_ai/mcp` handoffs carried the same notice from the same
 builder shape (local `mcp` has no dependency on the hosted package, so the
-fields are built from the same SDK constant; the cross-package pins in
-`hosted-signer-integration.test.ts` hold them together). The historic refusal
+fields were built from the same SDK constant; the cross-package pins in
+`hosted-signer-integration.test.ts` held them together). **Since #4825 the
+local handoffs are gone** — that runtime has no signer tool, so it refuses
+instead of handing off (see *Task budgets and sub-budget signing are
+hosted-plus-signer features* below), and the local builder was deleted with
+them. The historic refusal
 strings the trigger matches on are pinned verbatim in that test, with their
 release-commit provenance (`9c548158`, `f6bd8a63`), so rewording either
 historic message fails the build instead of silently disarming the recovery.

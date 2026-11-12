@@ -162,9 +162,9 @@ refuses, with a settled basis, because the payment already completed.
 - `haven_verify_receipt`
 - `haven_get_receipt` (#3723 — the signed bundle: `{ receipt }` from one of this agent's own settled payments, which `haven_verify_receipt` reads unchanged)
 - `haven_get_task_budget` (#3518)
-- `haven_open_task_budget` (#3329)
-- `haven_close_task_budget` (#3329)
-- `haven_submit` (#3329 — relays a local signer signature by `task_budget_id`, or (#3506) by `sub_budget_id` for a sub-budget this agent delegates (listed in `haven_get_agent`'s `pendingSubBudgetSignatures[]`); a `payment_id` is refused on this runtime, which signs and submits payments inline)
+- `haven_open_task_budget` (#3329 — **refuses on this runtime since #4825**: opening a task budget needs a signature from the Haven signer, and a `--local` install has no signer tool, so the call answers `TASK_BUDGET_SIGNING_UNAVAILABLE` and nothing is reserved)
+- `haven_close_task_budget` (#3329 — a pending or expired budget still closes with `status: "closed"`; one that is open or closing needs a signature and refuses with `TASK_BUDGET_SIGNING_UNAVAILABLE` since #4825, leaving the budget unchanged)
+- `haven_submit` (#3329 — relays a signature you already hold, by `task_budget_id`, or (#3506) by `sub_budget_id` for a sub-budget this agent delegates (listed in `haven_get_agent`'s `pendingSubBudgetSignatures[]`); a `payment_id` is refused on this runtime, which signs and submits payments inline. Since #4825 this runtime has no signer tool, so it cannot produce a task-budget or sub-budget signature: a pending row names no next tool and says the owner signs it from a hosted-plus-signer install)
 
 ### `idempotencyKey` is removed — send `idempotency_key`
 

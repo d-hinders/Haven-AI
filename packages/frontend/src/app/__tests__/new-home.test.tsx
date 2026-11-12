@@ -89,7 +89,7 @@ describe('the new home page (#3574)', () => {
     )
     expect(step3, 'the step 3 paragraph').toBeDefined()
     expect(flat(step3!)).toBe(
-      'One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this for its user starts at /llms.txt.',
+      'One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this for its user starts at /llms.txt. Setup guide for agents: /for-agents.md.',
     )
     const link = step3!.querySelector('a[href="/llms.txt"]')
     expect(link, 'the step 3 /llms.txt link').not.toBeNull()
@@ -98,6 +98,14 @@ describe('the new home page (#3574)', () => {
     expect(link!.closest('[aria-hidden="true"]')).toBeNull()
     // How it works is the tint ground, so the focus ring is offset on it.
     expect(link!.className).toContain('focus-visible:ring-offset-[var(--v2-surface)]')
+    // #4674: the runbook as a plain, non-instructional link. WebFetch
+    // summaries of `/` dropped every agent-addressed pointer while keeping
+    // Step 3's text (runs 43045310759 and 43179789112), so a labelled path
+    // is the variant under test.
+    const guide = step3!.querySelector('a[href="/for-agents.md"]')
+    expect(guide, 'the step 3 /for-agents.md link').not.toBeNull()
+    expect(guide!.textContent).toBe('/for-agents.md')
+    expect(guide!.closest('[aria-hidden="true"]')).toBeNull()
   })
 
   it('has no placeholder href and no founders CTA (decisions 8 and “no dead links”)', () => {

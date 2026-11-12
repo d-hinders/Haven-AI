@@ -171,6 +171,10 @@ export function HomeHowItWorks() {
             <SiteInlineLink href="/llms.txt" ground="tint" plain>
               /llms.txt
             </SiteInlineLink>
+            . Setup guide for agents:{' '}
+            <SiteInlineLink href="/for-agents.md" ground="tint" plain>
+              /for-agents.md
+            </SiteInlineLink>
             .
           </p>
           <div className="mt-2 flex min-w-0 flex-1 flex-col">

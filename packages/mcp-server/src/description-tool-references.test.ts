@@ -14,7 +14,11 @@
  * every `haven_…` tool name, and fails unless the name is one of:
  *   (a) a tool that surface registers;
  *   (b) a signer tool — taken from `@haven_ai/signer`'s own registry, not
- *       restated, because both surfaces hand signing to it;
+ *       restated — on the HOSTED surface only. The hosted server is keyless and
+ *       hands signing to the signer; the local MCP (`@haven_ai/mcp`) registers
+ *       no signing tool and the connector's `--local` mode removes the signer
+ *       server, so a local description that names one names a tool the agent
+ *       reading it cannot call (#4825);
  *   (c) an entry in `ALLOWED_REFERENCES`, keyed by surface, describing tool
  *       AND referenced name, with a reason.
  *
@@ -65,7 +69,10 @@ function unresolved(surface: Surface): string[] {
   const out: string[] = []
   for (const tool of registered) {
     for (const name of referencesIn(descriptions[tool])) {
-      if (registered.includes(name) || SIGNER_TOOLS.includes(name)) continue
+      if (registered.includes(name)) continue
+      // #4825: only the hosted surface hands signing to the signer. The local
+      // MCP registers no signing tool, so a signer name there is unresolved.
+      if (surface === 'hosted' && SIGNER_TOOLS.includes(name)) continue
       out.push(`${surface}|${tool}|${name}`)
     }
   }
@@ -95,6 +102,14 @@ describe('#4796 — a tool description names only tools its own surface can call
     // And real descriptions do name other tools — the scan is not reading empty text.
     expect(referencesIn(SURFACES.hosted.descriptions.haven_send)).toContain('haven_get_allowances')
     expect(referencesIn(SURFACES.local.descriptions.haven_send)).toContain('haven_get_allowances')
+    // #4825: the signer exemption is the hosted surface's alone. No local
+    // description names a signer tool — the local MCP registers none, and the
+    // connector's --local mode removes the signer server.
+    for (const tool of SURFACES.local.registered) {
+      for (const name of referencesIn(SURFACES.local.descriptions[tool])) {
+        expect(SIGNER_TOOLS, `local ${tool} → ${name}`).not.toContain(name)
+      }
+    }
   })
 
   for (const surface of ['local', 'hosted'] as const) {

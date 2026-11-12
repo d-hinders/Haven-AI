@@ -80,24 +80,25 @@ describe('haven_submit — sub_budget_id branch (#3506)', () => {
     expect(result.data).toMatchObject({ sub_budget: { id: GRANT }, status: 'open' })
   })
 
-  it('opened while the tree\'s OTHER row is pending: names haven_sign { sub_budget_id } for it', async () => {
+  it('opened while the tree\'s OTHER row is pending: names no next tool and says this runtime cannot sign it (#4825)', async () => {
     const { haven, listPendingSubBudgetSignatures } = stubHaven({ pending: async () => [row(GRANT)] })
     const result = await createToolHandlers(haven).haven_submit({ sub_budget_id: PARENT_CHILD, signature: SIG })
     if (!result.success) throw new Error('expected success')
     expect(listPendingSubBudgetSignatures).toHaveBeenCalledTimes(1)
-    expect(result.data).toMatchObject({
-      status: 'open',
-      next_action: 'sign',
-      next_tool: 'mcp__haven-signer__haven_sign',
-      next_arguments: { sub_budget_id: GRANT },
-    })
+    const data = result.data as Record<string, unknown>
+    expect(data).toMatchObject({ status: 'open', next_action: 'stop_and_tell_user' })
+    expect(data.next_tool).toBeUndefined()
+    expect(data.next_tool_omitted_reason).toMatch(new RegExp(GRANT))
+    expect(data.next_tool_omitted_reason).toMatch(/cannot sign|no signer tool/)
   })
 
-  it('opening the grant while the parent-child row is pending points at the parent-child row', async () => {
+  it('opening the grant while the parent-child row is pending names the parent-child row in the reason', async () => {
     const { haven } = stubHaven({ pending: async () => [row(PARENT_CHILD)] })
     const result = await createToolHandlers(haven).haven_submit({ sub_budget_id: GRANT, signature: SIG })
     if (!result.success) throw new Error('expected success')
-    expect(result.data).toMatchObject({ next_arguments: { sub_budget_id: PARENT_CHILD } })
+    const data = result.data as Record<string, unknown>
+    expect(data.next_tool).toBeUndefined()
+    expect(data.next_tool_omitted_reason).toMatch(new RegExp(PARENT_CHILD))
   })
 
   it('ignores pending rows of OTHER trees and rows owing a close signature', async () => {
@@ -175,8 +176,8 @@ describe('haven_submit — sub_budget_id branch (#3506)', () => {
   })
 })
 
-describe('haven_get_agent — pending sub-budget signatures (#3506)', () => {
-  it('names haven_sign { sub_budget_id } on each pending row', async () => {
+describe('haven_get_agent — pending sub-budget signatures (#3506, #4825)', () => {
+  it('names no next tool on each pending row, and says this runtime cannot sign one', async () => {
     const { haven } = stubHaven({
       summary: async () => ({
         id: 'agt_1',
@@ -190,11 +191,14 @@ describe('haven_get_agent — pending sub-budget signatures (#3506)', () => {
     expect(rows[0]).toMatchObject({
       subBudgetId: PARENT_CHILD,
       what: 'parent-child',
-      next_action: 'sign',
-      next_tool: 'mcp__haven-signer__haven_sign',
-      next_arguments: { sub_budget_id: PARENT_CHILD },
+      next_action: 'stop_and_tell_user',
     })
-    expect(rows[1]).toMatchObject({ subBudgetId: GRANT, purpose: 'close', next_arguments: { sub_budget_id: GRANT } })
+    expect(rows[0].next_tool).toBeUndefined()
+    expect(rows[0].next_tool_omitted_reason).toMatch(/no signer tool/)
+    expect(rows[0].next_tool_omitted_reason).toMatch(/hosted MCP install/)
+    expect(rows[1]).toMatchObject({ subBudgetId: GRANT, purpose: 'close', next_action: 'stop_and_tell_user' })
+    expect(rows[1].next_tool).toBeUndefined()
+    expect(rows[1].next_tool_omitted_reason).toMatch(new RegExp(GRANT))
   })
 
   it('leaves an empty list empty and adds no next step to the summary itself', async () => {
@@ -224,7 +228,7 @@ describe('haven_submit — a stale or unconfirmed close recovers without a close
     return { haven, closeSubBudget }
   }
 
-  it('close_needs_reprepare: re-prepares via closeSubBudget and names haven_sign { sub_budget_id } for the fresh op', async () => {
+  it('close_needs_reprepare: re-prepares via closeSubBudget and names no next tool (#4825)', async () => {
     const { haven, closeSubBudget } = stubClose({
       submit: async () => {
         throw apiError(409, 'close_needs_reprepare')
@@ -236,10 +240,12 @@ describe('haven_submit — a stale or unconfirmed close recovers without a close
       success: false,
       code: 'CLOSE_NEEDS_REPREPARE',
       statusCode: 409,
-      next_action: 'sign',
-      next_tool: 'mcp__haven-signer__haven_sign',
-      next_arguments: { sub_budget_id: GRANT },
+      next_action: 'stop_and_tell_user',
     })
+    const failure = result as { next_tool?: string; next_tool_omitted_reason?: string; message: string }
+    expect(failure.next_tool).toBeUndefined()
+    expect(failure.next_tool_omitted_reason).toMatch(/no signer tool/)
+    expect(failure.message).not.toMatch(/haven_sign/)
   })
 
   it('close_needs_reprepare where the chain already shows the disable: reports closed, no refusal', async () => {

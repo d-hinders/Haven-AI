@@ -14,7 +14,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { HavenClient } from '@haven_ai/sdk'
 import { createToolHandlers, toolSchemas } from './tools.js'
-import { taskSignerCompatibilityNotice } from './signer-compat.js'
 
 const ALLOWANCES = {
   agentId: 'agt_1',
@@ -98,61 +97,47 @@ function stubHaven(overrides: Partial<Record<string, unknown>> = {}) {
   return { haven, calls }
 }
 
-describe('haven_open_task_budget (#3329)', () => {
+describe('haven_open_task_budget (#3329, #4825)', () => {
   it('is declared in the tool schema and description surfaces', () => {
     expect(toolSchemas.haven_open_task_budget).toBeDefined()
   })
 
-  it('resolves the default token (USDC) from allowances, converts the human amount, and hands off to the signer', async () => {
-    const { haven, calls } = stubHaven()
+  it('refuses with TASK_BUDGET_SIGNING_UNAVAILABLE and never calls POST /task-budgets (#4825)', async () => {
+    // The stub client fails the test if `openTaskBudget` is reached: a pending
+    // row must not be created on a runtime that cannot sign it.
+    const { haven, calls } = stubHaven({
+      openTaskBudget: vi.fn(async () => {
+        throw new Error('the local haven_open_task_budget reached openTaskBudget')
+      }),
+    })
     const result = await createToolHandlers(haven).haven_open_task_budget({
       max_amount_human: '5',
       ttl_minutes: 60,
     })
-    expect(result.success).toBe(true)
-    if (!result.success) throw new Error('expected success')
-    expect(calls.openTaskBudget[0]).toMatchObject({
-      tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-      maxAmountAtomic: '5000000',
-      ttlSeconds: 3600,
+    expect(result).toMatchObject({
+      success: false,
+      code: 'TASK_BUDGET_SIGNING_UNAVAILABLE',
+      next_action: 'stop_and_tell_user',
     })
-    expect(result.data).toMatchObject({
-      task_budget: { id: 'tb_1' },
-      next_action: 'sign',
-      next_tool: 'mcp__haven-signer__haven_sign',
-      next_arguments: { task_budget_id: 'tb_1' },
-    })
-    // #3419: the local handoff carries the same recovery notice the hosted
-    // handoffs carry — same fields, same trigger sentence, same route.
-    expect(result.data).toMatchObject({
-      signer_compatibility: taskSignerCompatibilityNotice(),
-    })
-    const notice = (result.data as { signer_compatibility: ReturnType<typeof taskSignerCompatibilityNotice> })
-      .signer_compatibility
-    expect(notice.check).toContain('Pass payment_id (preferred for delegation-rail x402')
-    expect(notice.fallback).toContain('Pass payment_id (preferred for delegation-rail x402')
-    expect(notice.fallback).toContain('haven_close_task_budget')
-    expect(notice.fallback).toContain('no relay fallback')
-  })
-
-  it('refuses a token this agent holds no allowance for, before any reservation', async () => {
-    const { haven, calls } = stubHaven()
-    const result = await createToolHandlers(haven).haven_open_task_budget({
-      max_amount_human: '5',
-      ttl_minutes: 60,
-      token: 'DAI',
-    })
-    expect(result.success).toBe(false)
     expect(calls.openTaskBudget).toBeUndefined()
+    // Nothing else is contacted either — not even the allowance read.
+    expect(calls.getAllowances).toBeUndefined()
+    const failure = result as { message: string; next_tool?: string; next_tool_omitted_reason?: string }
+    expect(failure.next_tool).toBeUndefined()
+    expect(failure.message).toMatch(/hosted-plus-signer/)
+    expect(failure.next_tool_omitted_reason).toMatch(/cannot sign a task budget/)
   })
 
-  it('refuses a human amount with more decimal places than the token supports', async () => {
+  it('refuses the same way whatever the arguments are — no argument makes this runtime able to sign', async () => {
     const { haven, calls } = stubHaven()
-    const result = await createToolHandlers(haven).haven_open_task_budget({
-      max_amount_human: '5.1234567',
-      ttl_minutes: 60,
-    })
-    expect(result.success).toBe(false)
+    for (const args of [
+      { max_amount_human: '5', ttl_minutes: 60 },
+      { max_amount_human: '5', ttl_minutes: 60, token: 'DAI' },
+      { max_amount_human: '5.1234567', ttl_minutes: 60 },
+    ]) {
+      const result = await createToolHandlers(haven).haven_open_task_budget(args)
+      expect(result).toMatchObject({ success: false, code: 'TASK_BUDGET_SIGNING_UNAVAILABLE' })
+    }
     expect(calls.openTaskBudget).toBeUndefined()
   })
 
@@ -164,42 +149,119 @@ describe('haven_open_task_budget (#3329)', () => {
   })
 })
 
-describe('haven_close_task_budget (#3329)', () => {
-  it('returns status closed directly when the backend already closed it', async () => {
-    const { haven } = stubHaven()
+describe('haven_close_task_budget (#3329, #4825)', () => {
+  /** A stub whose `getTaskBudget` answers `budget` and whose close answers `close`. */
+  function stubClose(budget: Record<string, unknown>, close?: () => Promise<unknown>) {
+    const closeTaskBudget = vi.fn(
+      close ??
+        (async () => ({
+          taskBudget: { id: 'tb_1', status: 'closed' },
+          status: 'closed',
+        })),
+    )
+    const getTaskBudget = vi.fn(async () => budget)
+    const haven = {
+      getTaskBudget,
+      closeTaskBudget,
+      withRequestContext: async (_ctx: unknown, run: () => Promise<unknown>) => run(),
+      clientUpdate: () => undefined,
+    } as unknown as HavenClient
+    return { haven, getTaskBudget, closeTaskBudget }
+  }
+
+  it('still answers status closed for a PENDING budget, without a signature', async () => {
+    const { haven, closeTaskBudget } = stubClose({
+      id: 'tb_1',
+      status: 'pending',
+      isExpired: false,
+      isLive: true,
+      openedAt: null,
+      closedAt: null,
+    })
     const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
     expect(result.success).toBe(true)
     if (!result.success) throw new Error('expected success')
     expect(result.data).toMatchObject({ task_budget: { id: 'tb_1' }, status: 'closed' })
+    expect(closeTaskBudget).toHaveBeenCalledWith('tb_1')
   })
 
-  it('hands off to the signer when a close UserOp needs a signature', async () => {
-    const { haven } = stubHaven({
-      closeTaskBudget: vi.fn(async () => ({
-        taskBudget: { id: 'tb_1', status: 'closing' },
-        status: 'closing',
-        signData: { signatureScheme: 'eip712_userop', typedData: {} },
-      })),
+  it('still answers status closed for an EXPIRED budget, without a signature', async () => {
+    const { haven, closeTaskBudget } = stubClose({
+      id: 'tb_1',
+      status: 'open',
+      isExpired: true,
+      isLive: false,
+      openedAt: '2026-11-01T00:00:00Z',
+      closedAt: null,
     })
-    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
-    expect(result.success).toBe(true)
-    if (!result.success) throw new Error('expected success')
-    expect(result.data).toMatchObject({
-      next_action: 'sign',
-      next_tool: 'mcp__haven-signer__haven_sign',
-      next_arguments: { task_budget_id: 'tb_1' },
-      // #3419: the CLOSING handoff carries the same notice from the same builder.
-      signer_compatibility: taskSignerCompatibilityNotice(),
-    })
-  })
-
-  it('a CLOSED close result carries no signer_compatibility (#3419 negative)', async () => {
-    const { haven } = stubHaven()
     const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
     expect(result.success).toBe(true)
     if (!result.success) throw new Error('expected success')
     expect(result.data).toMatchObject({ status: 'closed' })
-    expect(result.data).not.toHaveProperty('signer_compatibility')
+    expect(closeTaskBudget).toHaveBeenCalledWith('tb_1')
+  })
+
+  it('answers status closed for an already-CLOSED budget without calling the close route', async () => {
+    const { haven, closeTaskBudget } = stubClose({
+      id: 'tb_1',
+      status: 'closed',
+      isExpired: false,
+      isLive: false,
+      openedAt: '2026-11-01T00:00:00Z',
+      closedAt: '2026-11-02T00:00:00Z',
+    })
+    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
+    expect(result.success).toBe(true)
+    if (!result.success) throw new Error('expected success')
+    expect(result.data).toMatchObject({ status: 'closed' })
+    expect(closeTaskBudget).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an open', { id: 'tb_1', status: 'open', isExpired: false, isLive: true, openedAt: '2026-11-01T00:00:00Z', closedAt: null }],
+    ['a closing', { id: 'tb_1', status: 'closing', isExpired: false, isLive: true, openedAt: '2026-11-01T00:00:00Z', closedAt: null }],
+  ])('refuses %s budget with TASK_BUDGET_SIGNING_UNAVAILABLE and never calls POST /task-budgets/:id/close (#4825)', async (_label, budget) => {
+    // The stub fails the test if the close route is reached: a refused close
+    // must not leave the budget `closing`.
+    const { haven, closeTaskBudget } = stubClose(budget, async () => {
+      throw new Error('the local haven_close_task_budget reached closeTaskBudget')
+    })
+    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
+    expect(result).toMatchObject({
+      success: false,
+      code: 'TASK_BUDGET_SIGNING_UNAVAILABLE',
+      next_action: 'stop_and_tell_user',
+    })
+    expect(closeTaskBudget).not.toHaveBeenCalled()
+    const failure = result as { message: string; next_tool?: string; next_tool_omitted_reason?: string }
+    expect(failure.next_tool).toBeUndefined()
+    expect(failure.message).toMatch(/hosted-plus-signer/)
+    expect(failure.next_tool_omitted_reason).toMatch(/cannot sign a task budget/)
+  })
+
+  it('refuses an open budget on a backend that predates is_live, using isExpired instead', async () => {
+    const { haven, closeTaskBudget } = stubClose({
+      id: 'tb_1',
+      status: 'open',
+      isExpired: false,
+      openedAt: '2026-11-01T00:00:00Z',
+      closedAt: null,
+    })
+    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
+    expect(result).toMatchObject({ success: false, code: 'TASK_BUDGET_SIGNING_UNAVAILABLE' })
+    expect(closeTaskBudget).not.toHaveBeenCalled()
+  })
+
+  it('passes a failed budget read through as the typed refusal it is', async () => {
+    const haven = {
+      getTaskBudget: vi.fn(async () => {
+        throw new Error('network down')
+      }),
+      withRequestContext: async (_ctx: unknown, run: () => Promise<unknown>) => run(),
+      clientUpdate: () => undefined,
+    } as unknown as HavenClient
+    const result = await createToolHandlers(haven).haven_close_task_budget({ task_budget_id: 'tb_1' })
+    expect(result.success).toBe(false)
   })
 })
 

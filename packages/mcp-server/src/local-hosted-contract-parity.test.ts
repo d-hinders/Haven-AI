@@ -144,10 +144,10 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
         'Hosted haven_submit relays either a funding signature or an erc7710 settlement child and is told which; the local one takes no scheme.',
     },
     description: {
-      local: '8d6a9dedf88c',
+      local: 'ec647b165fab',
       hosted: 'e86bdff11c81',
       reason:
-        'The local text opens with the three ids a signature can belong to; the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up.',
+        'The local text opens with the three ids a signature can belong to and says this runtime has no signer tool, so it cannot produce one (#4825); the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up.',
     },
   },
   'haven_pay_mcp_tool↔haven_pay_mcp_tool': {
@@ -222,18 +222,26 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
   },
   'haven_open_task_budget↔haven_open_task_budget': {
     description: {
-      local: 'de104b0f1fa7',
+      local: '6e500db757a7',
       hosted: 'c0d794452742',
       reason:
-        'Same inputs; the local text returns next_tool and next_arguments for the signature, the hosted text returns sign_data and names the haven_submit relay.',
+        'Same inputs; the local text says the call refuses with TASK_BUDGET_SIGNING_UNAVAILABLE because a --local install has no signer tool (#4825), the hosted text returns sign_data and names the haven_submit relay.',
     },
   },
   'haven_close_task_budget↔haven_close_task_budget': {
     description: {
-      local: '4820ffb90a95',
+      local: '086dfcaa0805',
       hosted: '9f4f5a7c917f',
       reason:
-        'Same inputs; the local text returns next_tool and next_arguments for the signature, the hosted text returns sign_data and names signer_compatibility.',
+        'Same inputs; the local text says a pending or expired budget still closes but an open or closing one refuses with TASK_BUDGET_SIGNING_UNAVAILABLE (#4825), the hosted text returns sign_data and names signer_compatibility.',
+    },
+  },
+  'haven_get_agent↔haven_get_agent': {
+    description: {
+      local: '1fb042fa1f05',
+      hosted: '40752113f31c',
+      reason:
+        '#4825: the shared behavior fragment is composed per surface — the local text says pendingSubBudgetSignatures[] rows cannot be signed on this runtime (no signer tool) and the owner signs them from a hosted-plus-signer install, where the hosted text names the haven_sign step.',
     },
   },
   'haven_get_task_budget↔haven_get_task_budget': {

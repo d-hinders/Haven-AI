@@ -20,7 +20,6 @@ import {
   catalogFundingLegExpected,
   composeDescription,
   discoverMerchantMcpUrl,
-  resolveTokenFromAddress,
   replaceSettlementEvidenceMessage,
   sameUrl,
   selectErc7710PaymentOption,
@@ -35,7 +34,6 @@ import {
   type X402Quote,
   type X402ResumeState,
 } from '@haven_ai/sdk'
-import { taskSignerCompatibilityNotice } from './signer-compat.js'
 import { z } from 'zod/v3'
 
 const headersSchema = z.record(z.string(), z.string()).optional()
@@ -459,15 +457,19 @@ export const toolSchemas = {
 // #3101: keys survive on the type (see the hosted server's contracts.ts).
 } as const satisfies Record<HavenMcpToolName, z.ZodRawShape>
 
-// #3329: outcome language only — never "delegation", "caveat" or "UserOp".
+// #3329 / #4825: outcome language only — never "delegation", "caveat" or
+// "UserOp". The tool stays registered and refuses: opening a task budget needs
+// a signature from the Haven signer, and a --local install has no signer tool.
 const OPEN_TASK_BUDGET_DESCRIPTION = [
   'Open a budget for one task that ends by itself: a spending cap, good for at most ttl_minutes,',
   'reserved out of the agent\'s own budget and separate from its period reset.',
   'Pass max_amount_human (whole tokens, e.g. "5" for 5 USDC), ttl_minutes (1-1440), and optionally',
   'recipient (pins every payment against this task budget to one address), label, and token',
-  '(defaults to USDC). Returns { task_budget, next_action: "sign", next_tool, next_arguments } —',
-  'call next_tool with next_arguments EXACTLY as given to get a signature, then relay it with',
-  'haven_submit. Spending anything above the reserved amount, past the deadline, or to a',
+  '(defaults to USDC). This runtime cannot open a task budget: opening one needs a signature from the',
+  'Haven signer, and a --local install has no signer tool, so the call refuses with',
+  'TASK_BUDGET_SIGNING_UNAVAILABLE and nothing is reserved. Task budgets are a hosted-plus-signer',
+  'feature — use a hosted MCP install with the Haven signer connected, or ask the owner to open the',
+  'budget there. Spending anything above the reserved amount, past the deadline, or to a',
   'different recipient than the one pinned here is declined on the spot — nothing is queued.',
   'A recipient pin is checked against where each payment first goes: haven_pay_x402 and',
   'haven_pay_x402_quote first move funds into the agent\'s own wallet, so a budget pinned to a',
@@ -476,12 +478,13 @@ const OPEN_TASK_BUDGET_DESCRIPTION = [
 
 const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'End a task budget early, before its deadline, releasing whatever of its cap was unspent back',
-  'to the agent\'s own budget. Pass task_budget_id. If the budget was never signed (still pending),',
-  'this ends it immediately with { task_budget, status: "closed" } and nothing was ever reserved',
-  'on-chain. Otherwise it returns a signature request: { task_budget, next_action: "sign",',
-  'next_tool, next_arguments } — call next_tool with next_arguments EXACTLY as given, then relay',
-  'the signature with haven_submit. A task budget past its own deadline closes immediately, the',
-  'same as the pending case.',
+  'to the agent\'s own budget. Pass task_budget_id. A budget that was never signed (still pending)',
+  'or is past its own deadline ends immediately with { task_budget, status: "closed" } and nothing',
+  'was ever reserved on-chain. A budget that is open or closing needs a signature from the Haven',
+  'signer, and a --local install has no signer tool: the call refuses with',
+  'TASK_BUDGET_SIGNING_UNAVAILABLE, nothing is closed and the budget is left unchanged. Task',
+  'budgets are a hosted-plus-signer feature — use a hosted MCP install with the Haven signer',
+  'connected, or ask the owner to close it there.',
 ].join(' ')
 
 // #3518: the status check a close refusal's "re-check the budget's status"
@@ -495,13 +498,18 @@ const GET_TASK_BUDGET_DESCRIPTION = [
   'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
 ].join(' ')
 
+// #3329 / #3506 / #4825: the relay step. The local runtime has no signer tool,
+// so it cannot produce a task-budget or sub-budget signature — the description
+// says so instead of naming a signer step.
 const SUBMIT_DESCRIPTION = [
-  'Relay a signature from the local signer. Pass exactly one of task_budget_id (from',
+  'Relay a signature you already hold. Pass exactly one of task_budget_id (from',
   'haven_open_task_budget or haven_close_task_budget), sub_budget_id (from haven_get_agent',
   'pendingSubBudgetSignatures[]) or payment_id — never two, never none — plus signature.',
   'For a task budget this opens or closes it on-chain and returns { task_budget,',
   'status }; a close in progress may return { task_budget, status: "closed", close_tx_hash }.',
-  'A sub_budget_id returns { sub_budget, status } with the next signer step, if one is owed.',
+  'A sub_budget_id returns { sub_budget, status }. This runtime has no signer tool, so it cannot',
+  'produce a signature for a task budget or a sub-budget: a pendingSubBudgetSignatures[] row names',
+  'no next tool and says the owner signs it from a hosted-plus-signer install.',
 ].join(' ')
 
 /**
@@ -519,7 +527,7 @@ export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_resume_x402_payment: composeDescription(sharedDescriptions.resumeX402),
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
-  haven_get_agent: composeDescription(sharedDescriptions.getAgent),
+  haven_get_agent: composeDescription(sharedDescriptions.getAgent, 'local'),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate, 'local'),
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
@@ -601,17 +609,64 @@ export interface ToolFailure {
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 
 /**
- * #3506: the next step for a sub-budget row that still needs THIS agent's
- * signature — the signer's `haven_sign` with `sub_budget_id` (it fetches the
- * signing context itself), then `haven_submit` with the same id. Same shape as
- * the task-budget handoffs above (`next_action: 'sign'`, the signer tool, its
- * arguments).
+ * #4825: the typed refusal the local runtime answers a task-budget open or a
+ * close that needs a signature with. Task budgets are a hosted-plus-signer
+ * feature: opening one, and closing one that is open, both need a signature
+ * from the Haven signer, and a `--local` install has no signer tool — the
+ * connector's local mode removes the signer server on every runtime that
+ * supports it (`packages/connect/src/runtime-install.ts`,
+ * `packages/connect/src/config-writers.ts`). The tools stay registered (the
+ * local consent hash covers the tool list, not behaviour); they refuse.
+ */
+const TASK_BUDGET_SIGNING_UNAVAILABLE = 'TASK_BUDGET_SIGNING_UNAVAILABLE'
+
+/** The one sentence both task-budget refusals share: what the owner can do instead. */
+const TASK_BUDGET_HOSTED_PLUS_SIGNER =
+  'Task budgets are a hosted-plus-signer feature: use a hosted MCP install with the Haven signer ' +
+  'connected, or ask the owner to do it there.'
+
+/**
+ * #4825: the refusal for `haven_open_task_budget` and for a
+ * `haven_close_task_budget` whose budget needs a signature. Nothing is
+ * contacted: no `POST /task-budgets`, no `POST /task-budgets/:id/close`, so no
+ * pending row is created and no budget is left `closing`.
+ */
+function taskBudgetSigningUnavailable(action: 'open' | 'close'): ToolFailure {
+  return {
+    success: false,
+    code: TASK_BUDGET_SIGNING_UNAVAILABLE,
+    message:
+      action === 'open'
+        ? 'Opening a task budget needs a signature from the Haven signer, and this --local install has no ' +
+          'signer tool. Nothing was opened and nothing was reserved. ' +
+          TASK_BUDGET_HOSTED_PLUS_SIGNER
+        : 'Closing this task budget needs a signature from the Haven signer, and this --local install has no ' +
+          'signer tool. Nothing was closed and the budget is unchanged. ' +
+          TASK_BUDGET_HOSTED_PLUS_SIGNER,
+    next_action: 'stop_and_tell_user',
+    next_tool_omitted_reason:
+      'this runtime cannot sign a task budget — no tool on this surface produces the signature, so no tool ' +
+      'follows; the owner can do it from a hosted MCP install with the Haven signer connected',
+  }
+}
+
+/**
+ * #3506 / #4825: a sub-budget row that still needs THIS agent's signature.
+ *
+ * The local surface has no sub-budget tool of its own and no signer tool: the
+ * connector's `--local` mode removes the signer server, so nothing here can
+ * produce the signature. The row therefore names no next tool and says why,
+ * plus what the owner can do instead. Spending through a sub-budget
+ * (`sub_budget_id` on the pay tools) needs no signer once the row is open.
  */
 function subBudgetSignStep(subBudgetId: string) {
   return {
-    next_action: 'sign',
-    next_tool: 'mcp__haven-signer__haven_sign',
-    next_arguments: { sub_budget_id: subBudgetId },
+    next_action: 'stop_and_tell_user',
+    next_tool_omitted_reason:
+      `sub-budget ${subBudgetId} still needs your signature, and this --local install has no signer tool: ` +
+      'the connector removes the Haven signer on a --local setup, so nothing on this surface can produce it. ' +
+      'Ask the owner to sign it from a hosted MCP install with the Haven signer connected; spending through ' +
+      'the sub-budget needs no signature once it is open.',
   }
 }
 
@@ -659,7 +714,8 @@ async function submitSubBudgetTool(haven: HavenClient, subBudgetId: string, sign
         code: 'CLOSE_NEEDS_REPREPARE',
         message:
           'The stored close operation for this sub-budget was stale, so nothing was relayed. Haven prepared a ' +
-          'fresh one: sign it with haven_sign, then call haven_submit again with the new signature.',
+          'fresh one, but this --local install has no signer tool to sign it: ask the owner to sign and submit ' +
+          'it from a hosted MCP install with the Haven signer connected.',
         statusCode: 409,
         ...subBudgetSignStep(subBudgetId),
       }
@@ -709,7 +765,8 @@ async function submitSubBudgetTool(haven: HavenClient, subBudgetId: string, sign
         next_arguments: {},
         reason:
           'This sub-budget row is open, but Haven could not say whether its tree has another row ' +
-          'awaiting your signature. Call haven_get_agent and sign any pendingSubBudgetSignatures row.',
+          'awaiting your signature. Call haven_get_agent to see; this runtime cannot sign one, so the ' +
+          'owner signs it from a hosted MCP install with the Haven signer connected.',
       }
     }
     const tree = result.subBudget.parentSubBudgetId ?? result.subBudget.id
@@ -1167,55 +1224,58 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       }),
 
     haven_open_task_budget: async (input) => {
-      const args = objectInput('haven_open_task_budget', input)
-      return runTool(async () => {
-        const token = await resolveTaskBudgetToken(haven, typeof args.token === 'string' ? args.token : undefined)
-        const maxAmountAtomic = humanToAtomicOrNull(args.max_amount_human as string, token.decimals)
-        if (maxAmountAtomic === null) {
-          throw new HavenApiError(
-            `max_amount_human ("${args.max_amount_human}") is not a valid decimal amount for ` +
-              `${token.symbol} (${token.decimals} decimal places). Nothing was reserved.`,
-            400,
-          )
-        }
-        const result = await haven.openTaskBudget({
-          tokenAddress: token.address,
-          maxAmountAtomic,
-          ttlSeconds: Number(args.ttl_minutes) * 60,
-          recipientAddress: typeof args.recipient === 'string' ? args.recipient : undefined,
-          label: typeof args.label === 'string' ? args.label : undefined,
-        })
-        // #3419: the same recovery notice the hosted task-budget handoffs
-        // carry (same builder, the SDK's TASK_SIGN_CONTEXT_VERSION) — an old
-        // signer strips the unknown task_budget_id key exactly the same way
-        // on the local surface.
-        return {
-          task_budget: result.taskBudget,
-          next_action: 'sign',
-          next_tool: 'mcp__haven-signer__haven_sign',
-          next_arguments: { task_budget_id: result.taskBudget.id },
-          signer_compatibility: taskSignerCompatibilityNotice(),
-        }
-      })
+      objectInput('haven_open_task_budget', input)
+      // #4825: opening a task budget needs a signature from the Haven signer,
+      // and a --local install has no signer tool (the connector's local mode
+      // removes the signer server). Refuse BEFORE anything is contacted: no
+      // `POST /task-budgets`, so no pending row is created and nothing is
+      // reserved. The arguments are not inspected — no argument makes this
+      // runtime able to sign.
+      return taskBudgetSigningUnavailable('open')
     },
 
     haven_close_task_budget: async (input) => {
       const args = objectInput('haven_close_task_budget', input)
-      return runTool(async () => {
-        const result = await haven.closeTaskBudget(args.task_budget_id as string)
-        if (result.status === 'closed') {
-          return { task_budget: result.taskBudget, status: 'closed' as const }
-        }
-        // #3419: same notice as the open handoff above — this result also
-        // hands the agent to haven_sign { task_budget_id }.
-        return {
-          task_budget: result.taskBudget,
-          next_action: 'sign',
-          next_tool: 'mcp__haven-signer__haven_sign',
-          next_arguments: { task_budget_id: args.task_budget_id },
-          signer_compatibility: taskSignerCompatibilityNotice(),
-        }
-      })
+      const taskBudgetId = args.task_budget_id as string
+      // #4825: read the budget FIRST. A budget that was never signed (still
+      // pending) or is past its own deadline closes without a signature, so
+      // that case still answers `status: closed`. One that was signed and is
+      // still live (open or closing) needs a signature this runtime cannot
+      // produce, and calling `POST /task-budgets/:id/close` would leave it
+      // `closing` — so it is refused without the call.
+      //
+      // The question is asked of the wire fields the backend already publishes
+      // (`closed_at`, `is_live`, `opened_at`) rather than by restating a status
+      // comparison: #3924's census counts inline budget-liveness predicates and
+      // is shrink-only. `opened_at` is set exactly when the open was signed
+      // (`SET status = 'open', … opened_at = NOW()`), so "signed and still
+      // live" is the real question, not a proxy for it.
+      let budget: Awaited<ReturnType<HavenClient['getTaskBudget']>>
+      try {
+        budget = await haven.getTaskBudget(taskBudgetId)
+      } catch (err) {
+        return normalizeError(err)
+      }
+      if (budget.closedAt !== null) {
+        return { success: true, data: { task_budget: budget, status: 'closed' as const } }
+      }
+      const live = budget.isLive ?? !budget.isExpired
+      if (live && budget.openedAt !== null) {
+        return taskBudgetSigningUnavailable('close')
+      }
+      let result: Awaited<ReturnType<HavenClient['closeTaskBudget']>>
+      try {
+        result = await haven.closeTaskBudget(taskBudgetId)
+      } catch (err) {
+        return normalizeError(err)
+      }
+      if (result.status === 'closed') {
+        return { success: true, data: { task_budget: result.taskBudget, status: 'closed' as const } }
+      }
+      // Defensive: the backend answered a signature request for a row this
+      // handler read as unsigned or expired. Refuse rather than hand off to a
+      // signer this runtime does not have.
+      return taskBudgetSigningUnavailable('close')
     },
 
     // #3518: read ONE task budget by id, any status — the status check a
@@ -1442,46 +1502,6 @@ async function responsePayload(response: Response): Promise<Record<string, unkno
     headers: Object.fromEntries(response.headers.entries()),
     body: parseMaybeJson(text),
   }
-}
-
-/**
- * #3329: `haven_open_task_budget` takes a symbol-or-address plus a HUMAN
- * amount, but the SDK's `openTaskBudget` takes atomic units against a
- * resolved token address — the same split `haven_check_funds` bridges on the
- * hosted surface. This agent's own allowances are the source of truth for
- * which tokens it may spend at all, so a symbol resolves against THOSE (never
- * a guess), and decimals come from the SDK's own chain registry.
- */
-async function resolveTaskBudgetToken(
-  haven: HavenClient,
-  symbolOrAddress: string | undefined,
-): Promise<{ address: string; symbol: string; decimals: number }> {
-  const wanted = (symbolOrAddress ?? 'USDC').toLowerCase()
-  const { allowances } = await haven.getAllowances()
-  const isAddress = /^0x[0-9a-fA-F]{40}$/.test(wanted)
-  const match = isAddress
-    ? allowances.find((a) => a.tokenAddress.toLowerCase() === wanted)
-    : allowances.find((a) => (a.tokenSymbol ?? '').toLowerCase() === wanted)
-  if (!match) {
-    const known = allowances.map((a) => `${a.tokenSymbol} (${a.tokenAddress})`)
-    throw new HavenApiError(
-      `token "${symbolOrAddress ?? 'USDC'}" is not the symbol or address of any allowance this ` +
-        `agent holds${known.length > 0 ? ` (it holds: ${known.join(', ')})` : ' (it holds none)'}. ` +
-        'Nothing was reserved.',
-      400,
-    )
-  }
-  const resolved = resolveTokenFromAddress(match.tokenAddress)
-  return { address: match.tokenAddress, symbol: match.tokenSymbol, decimals: resolved?.decimals ?? 6 }
-}
-
-/** A plain decimal string ("5", "0.25") to atomic units, or null if it does not fit `decimals`. */
-function humanToAtomicOrNull(human: string, decimals: number): string | null {
-  if (!/^[0-9]+(\.[0-9]+)?$/.test(human)) return null
-  const [whole, frac = ''] = human.split('.')
-  if (frac.length > decimals) return null
-  const atomic = BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, '0') || '0')
-  return atomic.toString()
 }
 
 function parseMaybeJson(text: string): unknown {

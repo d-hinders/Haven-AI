@@ -657,6 +657,8 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
 
     const withLedger = await injectSign()
     expect(withLedger.statusCode).toBe(429)
+    // #4828: the typed code the hosted mapper answers the stop from.
+    expect(withLedger.json().error_code).toBe('relayer_budget_exceeded')
     const asks = ledgerAsks()
     expect(asks).toHaveLength(1)
     expect(asks[0]).toMatchObject({

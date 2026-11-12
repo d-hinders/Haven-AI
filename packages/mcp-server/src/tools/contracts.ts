@@ -1623,6 +1623,13 @@ export interface ToolFailure {
   next_tool_server_role?: 'hosted' | 'signer'
   next_arguments?: Record<string, unknown>
   next_tool_omitted_reason?: string
+  /**
+   * #4828: the wait a rate limiter stated, in seconds, when its 429 body
+   * carried one (the hourly x402 cap sends `retry_after_seconds: 60`). Present
+   * only on that answer; the step's text says to wait for it before the one
+   * re-call. Additive — no existing field changes meaning.
+   */
+  retry_after_seconds?: number
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure

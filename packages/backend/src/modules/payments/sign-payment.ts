@@ -46,7 +46,7 @@ import {
   AgentPaymentRail,
 } from '../../domain/agent-payment-taxonomy.js'
 import { getFiatValuesForTokenAmount } from '../../infra/fiat-values.js'
-import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+import { RelayerBudgetExceededError, RELAYER_BUDGET_EXCEEDED_ERROR_CODE } from '../../infra/relayer-spend-guard.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import {
   bookSubmittedOutcomePending,
@@ -358,7 +358,7 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
       // #3053: through the shared choke point. The claim release stays
       // BEFORE the return — refuse() records, it does not release claims.
       const refused = refuse(
-        decided(429, { payment_id: intent.id, status: 'pending_signature', error: err.message }),
+        decided(429, { payment_id: intent.id, status: 'pending_signature', error: err.message, error_code: RELAYER_BUDGET_EXCEEDED_ERROR_CODE }),
         {
           userId: agent.user_id,
           agentId: agent.id,

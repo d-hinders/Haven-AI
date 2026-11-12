@@ -12,9 +12,14 @@
  * The route books such a row outcome-PENDING (`submitted`,
  * `machine_metadata.user_op_hash` recorded, `submission_outcome: 'unknown'`)
  * instead of `failed`, and this tick is what eventually gives the row its
- * true terminal state. Without it the row would sit unresolved forever,
- * because nothing else writes a `submitted` row without a tx_hash on this
- * seam.
+ * true terminal state.
+ *
+ * #4818 closes the other half of that gap: a sign request that dies between
+ * the claim and the route's booking (a deploy, a crash, an abandoned request)
+ * used to leave a `submitted` row with no hash that no job selected. The claim
+ * now records the operation hash and a `submission_claimed` marker, so such a
+ * row is a candidate here too — and the age gate sits above the route's
+ * longest wait, so a live request's row is never selected mid-flight.
  *
  * ## Attribution — one path, and it refuses to guess
  *
@@ -94,14 +99,22 @@ export interface ReconcileLogger {
 }
 
 /**
- * Grace before an outcome-pending payment becomes a reconciler candidate.
- * Shorter than the settlement sweep's 90 s on purpose: the receipt-unconfirmed
- * row has NO live waiter (the route already gave up), so every tick here is
- * the only thing standing between the agent and a truthful status — but still
- * past the point where the bundler's receipt index has simply not indexed a
- * just-mined op yet.
+ * Grace before a `submitted` row becomes a reconciler candidate.
+ *
+ * #4818: the claim now records the operation hash, so a candidate can be a row
+ * whose sign request is STILL RUNNING — the route claims, sends, and waits for
+ * a receipt before it books anything. The route's longest wait is the 10 s send
+ * timeout plus the 120 s receipt-wait timeout (130 s), plus the booking that
+ * follows it. The gate must sit above that whole window: a row selected
+ * mid-flight would be read from the bundler while the route is still waiting,
+ * and the window arm could book it `failed` under a live request.
+ *
+ * 300 s leaves ~170 s of margin over the route's 130 s worst case. The cost is
+ * that a route-booked outcome-pending row (which is already ≥130 s old when it
+ * is booked) waits ~170 s more before its first tick — the row is non-terminal
+ * and the agent is told to poll, so that delay changes nothing it can observe.
  */
-export const RECONCILE_MIN_AGE_SECONDS = 60
+export const RECONCILE_MIN_AGE_SECONDS = 300
 
 /**
  * How long an op may stay "not found yet" before the row is resolved `failed`.

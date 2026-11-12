@@ -36,6 +36,24 @@
  * and no waiver can silence. A deep import into the mpp module would need a
  * waiver this slice may not add. So the route keeps importing those two
  * functions and hands them in; this file imports nothing from the mpp module.
+ *
+ * ## #4818: nothing after the submit books `failed`
+ *
+ * The submit, the fiat lookup and the confirm write used to share one `try`,
+ * so a throw from the confirm write landed in the catch that books `failed` —
+ * for a payment whose transaction hash had already come back, i.e. one that
+ * may have moved the funds. The `submitted` marker now splits the two worlds:
+ * before it, the catch classifies and books `failed` exactly as before; after
+ * it, the catch books outcome-PENDING with the dispatched hash and answers the
+ * existing outcome-pending body, and the submission reconciler resolves the
+ * row from the bundler's receipt.
+ *
+ * The route also records the DISPATCHED hash on the row the moment the submit
+ * returns (`recordSubmittedUserOpHash`), because the claim can only record the
+ * PREPARED one and #4817 established they can differ. And when the confirm
+ * compare-and-set is lost to the reconciler, the route answers `200 confirmed`
+ * with the row's hash instead of the old 409 — the payment is confirmed, and
+ * the winner already ran the evidence hook, the feed and the funnel event.
  */
 import { formatTokenAmount } from '@haven_ai/core'
 import type { AgentContext } from '../../middleware/agentAuth.js'
@@ -55,7 +73,9 @@ import {
   failSubmittedIntent,
   findIntentForAgent,
   getIntentStatus,
+  recordSubmittedUserOpHash,
   releaseSubmittedClaim,
+  type PaymentIntentRow,
 } from '../../infra/repositories/payment-intents.js'
 import { findForAgent as findTaskBudgetForAgent } from '../../infra/repositories/task-budgets.js'
 import { selectActiveDelegationByHash } from '../../infra/repositories/delegation-budgets.js'
@@ -124,6 +144,54 @@ export interface SignPaymentInput extends SignPaymentMppCollaborators {
  */
 function decided(code: number, body: unknown): DecidedResponse {
   return { code, body }
+}
+
+/**
+ * The confirmed body — the same shape whichever writer confirmed the row.
+ *
+ * #4818: the route can lose the confirm compare-and-set to the submission
+ * reconciler (or a concurrent settle) and still hold a transaction hash from
+ * its own submit. The payment IS confirmed in that case, so the answer is this
+ * body with the ROW's hash, never a 409.
+ */
+function confirmedBody(intent: PaymentIntentRow, txHash: string): Record<string, unknown> {
+  return {
+    payment_id: intent.id,
+    status: 'confirmed',
+    tx_hash: txHash,
+    chain_id: intent.chain_id,
+    explorer_url: getExplorerUrl(intent.chain_id, 'tx', txHash),
+    token: intent.token_symbol,
+    amount: intent.amount_human,
+    to: intent.to_address,
+  }
+}
+
+/**
+ * The outcome-pending body (#3564) — the answer for a submit whose on-chain
+ * outcome is not known yet. #4818 reuses it verbatim for a throw AFTER the
+ * submit returned: the operation is mined, the row keeps its hash, and the
+ * agent's instruction is the same poll-don't-recreate one the hosted mapper
+ * and the SDK already handle.
+ */
+function outcomePendingBody(input: {
+  paymentId: string
+  userOpHash: string
+  details: string | null
+}): Record<string, unknown> {
+  return {
+    payment_id: input.paymentId,
+    status: 'submitted',
+    error: 'On-chain submission outcome unknown',
+    error_code: 'submission_outcome_unknown',
+    message:
+      `The payment was submitted (UserOperation ${input.userOpHash}) but its on-chain outcome ` +
+      'is not known yet — it may have moved the funds. Do not create a new payment for this ' +
+      'payment_id: poll haven_get_payment_status for it — Haven reconciles this payment from ' +
+      'the chain, and this status becomes the real outcome.',
+    user_op_hash: input.userOpHash,
+    details: input.details,
+  }
 }
 
 // ── The state machine ─────────────────────────────────────────────
@@ -272,6 +340,12 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
   }
 
   // 4. Execute on-chain — on the rail the intent was authorized for.
+  //
+  // #4818: `submitted` is the line between "nothing was broadcast" and "the
+  // operation is MINED". Once the submit has returned a transaction hash the
+  // funds may have moved, so nothing after that point may book `failed` — the
+  // catch below reads this marker and books outcome-pending instead.
+  let submitted: { txHash: string; userOpHash: string } | null = null
   try {
     // Replay the exact prepared redemption whose hash the agent signed;
     // only the signature is stamped in. The caveat enforcers authorize it
@@ -289,6 +363,7 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
       deserializeUserOp(intent.prepared_user_op),
       signature as `0x${string}`,
     )
+    submitted = { txHash: submission.txHash, userOpHash: submission.userOpHash }
     await recordSponsoredUserOpGas({
       paymentIntentId: id,
       agentId: agent.id,
@@ -302,6 +377,17 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
       actualGasCost: submission.actualGasCost,
     })
     const { txHash } = submission
+
+    // #4818: the hash the bundler indexes is the DISPATCHED one (#4817), not
+    // the prepared one the claim recorded. Write it now — before the booking —
+    // so a throw anywhere below leaves a row the reconciler can find by the
+    // right hash. A throw HERE is post-submit too, and the catch books
+    // outcome-pending with the same hash.
+    await recordSubmittedUserOpHash({
+      intentId: id,
+      agentId: agent.id,
+      userOpHash: submission.userOpHash,
+    })
 
     // 5. Success — the ONE booking (#4819): the fiat triple in the confirm
     // write, the machine-payment evidence, the accounting underlag and the
@@ -320,6 +406,16 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
     })
 
     if (!booked) {
+      // #4818: the compare-and-set can be lost to the submission reconciler
+      // (or a concurrent settle) confirming first. The submit returned a hash,
+      // so the payment IS confirmed — answer with the ROW's hash instead of
+      // the old 409 "changed after on-chain execution". The winner already ran
+      // the evidence hook, the feed and the funnel event, so this arm runs
+      // none of them.
+      const current = await findIntentForAgent(id, agent.id)
+      if (current?.status === 'confirmed' && current.tx_hash) {
+        return decided(200, confirmedBody(current, current.tx_hash))
+      }
       return decided(409, {
         payment_id: id,
         status: 'submitted',
@@ -327,17 +423,52 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
       })
     }
 
-    return decided(200, {
-      payment_id: id,
-      status: 'confirmed',
-      tx_hash: txHash,
-      chain_id: intent.chain_id,
-      explorer_url: getExplorerUrl(intent.chain_id, 'tx', txHash),
-      token: intent.token_symbol,
-      amount: intent.amount_human,
-      to: intent.to_address,
-    })
+    return decided(200, confirmedBody(intent, txHash))
   } catch (err) {
+    // #4818: POST-SUBMIT. The submit returned a transaction hash, so the
+    // operation is MINED and the funds may have moved. Whatever threw below —
+    // the hash write, the fiat capture, the confirm write, the evidence hook,
+    // the feed — must never book `failed`. Book outcome-pending with the
+    // dispatched hash (and the observed transaction hash, as evidence) and
+    // answer the existing outcome-pending body; the submission reconciler
+    // resolves the row from the bundler's receipt.
+    //
+    // This arm is FIRST on purpose: every classification below describes a
+    // pre-send or included-and-reverted failure, and none of them can be true
+    // once a hash came back.
+    if (submitted) {
+      const postSubmitMessage = boundFailureMessage(
+        redactVendorSecrets(err instanceof Error ? err.message : String(err)),
+      )
+      // The booking is best-effort HERE: the claim already recorded the
+      // operation hash and the marker, so the reconciler finds the row even if
+      // this write fails. A throw out of the catch would answer 500 for a
+      // mined payment — the one answer this slice exists to prevent.
+      try {
+        await bookSubmittedOutcomePending({
+          userOpHash: submitted.userOpHash,
+          intentId: id,
+          agentId: agent.id,
+          txHash: submitted.txHash,
+        })
+      } catch (bookErr) {
+        log.warn(
+          { err: bookErr, payment_id: id },
+          'post-submit outcome-pending booking failed; the claim marker still makes the row reconcilable',
+        )
+      }
+      return refuse(
+        decided(
+          502,
+          outcomePendingBody({
+            paymentId: id,
+            userOpHash: submitted.userOpHash,
+            details: postSubmitMessage,
+          }),
+        ),
+        null,
+      )
+    }
     // #717: over-budget = refused before ANY broadcast. This route claims
     // the intent to 'submitted' before executing (step 3), so release the
     // claim or the row is stuck unretryable forever — the one place a 429
@@ -417,19 +548,10 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
     if (err instanceof SubmittedUserOpFailedError && err.outcome === 'receipt_unconfirmed') {
       await bookSubmittedOutcomePending({ userOpHash: err.userOpHash, intentId: id, agentId: agent.id })
       return refuse(
-        decided(502, {
-          payment_id: id,
-          status: 'submitted',
-          error: 'On-chain submission outcome unknown',
-          error_code: 'submission_outcome_unknown',
-          message:
-            `The payment was submitted (UserOperation ${err.userOpHash}) but its on-chain outcome ` +
-            'is not known yet — it may have moved the funds. Do not create a new payment for this ' +
-            'payment_id: poll haven_get_payment_status for it — Haven reconciles this payment from ' +
-            'the chain, and this status becomes the real outcome.',
-          user_op_hash: err.userOpHash,
-          details: boundedMessage,
-        }),
+        decided(
+          502,
+          outcomePendingBody({ paymentId: id, userOpHash: err.userOpHash, details: boundedMessage }),
+        ),
         null,
       )
     }

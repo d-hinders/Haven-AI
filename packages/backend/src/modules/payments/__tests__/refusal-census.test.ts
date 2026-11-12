@@ -188,13 +188,19 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // `bookConfirmedPayment` call (the booking moved to
     // `modules/payments/confirm-booking.ts`), removing ten lines above
     // these sites. No refusal was added, removed or reordered.
-    { line: 350, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 419, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
-    { line: 471, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 497, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 546, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 585, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 639, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+    // #4818 added ONE no-writer site — the post-submit arm, which answers the
+    // existing outcome-pending body for a throw after the submit returned —
+    // and shifted the rest down again (the dispatched-hash write, the
+    // lost-confirm re-read, and the outcome-pending body moved into a helper).
+    // No refusal was removed or reordered.
+    { line: 460, code: 502, ledger: 'skipped' }, // #4818 post-submit throw — outcome-pending booking, allowlisted
+    { line: 481, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
+    { line: 550, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
+    { line: 593, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 619, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 668, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 707, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 761, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
   'src/modules/payments/create-payment.ts': [
     // #4760: the create flow, moved verbatim out of routes/payments.ts. Six
@@ -258,27 +264,31 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/modules/payments/sign-payment.ts': [
     {
-      line: 419,
+      line: 460,
+      reason: '#4818 a throw AFTER the submit returned — the row is booked outcome-pending (never failed) with the dispatched hash and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
+    },
+    {
+      line: 550,
       reason: '#3564 the receipt-unconfirmed submit — the row is booked outcome-pending (never failed) and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
     },
     {
-      line: 471,
+      line: 593,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 497,
+      line: 619,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 546,
+      line: 668,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 585,
+      line: 707,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 639,
+      line: 761,
       reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],
@@ -488,11 +498,12 @@ describe('refusal census — every policy refusal in the enumerated files goes t
     }
     // 15 ledger writers (8 in delegation-authorize + 6 in create-payment.ts
     // + 1 in sign-payment.ts; #3500 added three, #3503 two, #4352 the two
-    // expired-only-budget rows) plus 14 no-writer sites (6 + 2 + 6: #3416,
-    // the #3494/#3564 sign-failure answers and #3609's two prepare_failed
-    // branches among them) = 29 refuse( call sites total. #4761 moved the
-    // route's one writer and six no-writer sites into sign-payment.ts; the
-    // totals are unchanged by the move.
+    // expired-only-budget rows) plus 15 no-writer sites (6 + 2 + 7: #3416,
+    // the #3494/#3564/#4818 sign-failure answers and #3609's two prepare_failed
+    // branches among them) = 30 refuse( call sites total. #4761 moved the
+    // route's one writer and six no-writer sites into sign-payment.ts; #4818
+    // added the post-submit no-writer site there. The writer total is
+    // unchanged by either move.
     expect(rows).toBe(15)
   })
 })

@@ -1824,3 +1824,20 @@ Historical verification records for this document are kept in the [archive](../a
 > that is prose about a state the backend already reports, and it changes no
 > phase, next action, stored value or refusal. The rest of this document was
 > not re-read for it, and `last-verified` is not bumped.
+
+> **#4830 (2026-11-12).** This diff touches
+> `packages/mcp-server/src/tools/support/quote-response.ts` in this document's
+> coverage list. The change is the quote-time `expected_amount` comparison:
+> when the stated price cannot be compared (the agent read failed or was
+> refused, no option this agent can pay was selected, or the token's decimals
+> are unknown) the quote now says so — `price_comparison_made: false`,
+> `safe_to_continue: false`, no prefilled cap and no pay step — instead of
+> answering as if no expectation had been stated. It is ADVISORY guidance on a
+> read-only quote: it creates no payment, signature, funding intent or
+> delegation, and it can only ever add a STOP where the surface previously
+> said "safe to continue". The on-chain budget and the delegation policy
+> remain the actual gate, and the quote-time budget pre-check's own perimeter
+> (§8's fail-open degrade) is unchanged — the check is simply skipped on a
+> quote that is already stopping, as it already was on a decided mismatch. No
+> authority, custody, signer or settlement fact changes. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.

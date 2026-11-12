@@ -22,6 +22,7 @@ import {
   HavenApiError,
   HavenClient,
   selectErc7710PaymentOption,
+  selectStandardPaymentOption,
   selectX402SettlementScheme,
   x402AuthorizationAmount,
   type AgentPaymentWarning,
@@ -33,6 +34,7 @@ import {
   type X402ResumeState,
 } from '@haven_ai/sdk'
 import type { ToolFailure } from '../contracts.js'
+import { humanToAtomic } from './cap-price.js'
 import { serializeMcpTransport } from './mcp-context.js'
 
 /**
@@ -112,6 +114,215 @@ export function selectedSettlement(
 ): { scheme: 'erc7710' | 'eip3009'; option: X402PaymentOption } | null {
   const prediction = predictSettlementScheme(accepts, agent)
   return prediction ? { scheme: prediction.scheme, option: prediction.option } : null
+}
+
+/**
+ * #4830 — why a stated `expected_amount` could NOT be compared with the price
+ * the agent would actually pay. Each cause maps to its own next step, the way
+ * `normalizeError` decides a step from the cause first and the status second
+ * (`support/errors.ts`):
+ *
+ * - `agent_read_failed` — the agent read got a 5xx, no answer, or any other
+ *   transient failure. Re-quoting once with the same arguments can succeed.
+ * - `agent_read_refused` — the read was refused 401/403. Re-calling it the
+ *   same way cannot succeed.
+ * - `no_option_selected` — the read succeeded but no option this agent can pay
+ *   was selected (an erc7710-only merchant and an account off the delegation
+ *   rail). Deterministic: re-quoting changes nothing.
+ * - `unknown_decimals` — the quote's asset is not a token Haven recognises, so
+ *   the stated human price cannot be converted to the token's atomic scale.
+ *   Deterministic.
+ */
+export type ExpectedAmountNotComparedCause =
+  | 'agent_read_failed'
+  | 'agent_read_refused'
+  | 'no_option_selected'
+  | 'unknown_decimals'
+
+/**
+ * #4830 — the outcome of the `expected_amount` comparison. `compared` carries
+ * the decision; `not_compared` says the comparison was NOT made, which is a
+ * different answer from "the price matches" and must never read as one.
+ */
+export type ExpectedAmountComparison =
+  | { kind: 'compared'; differs: boolean }
+  | { kind: 'not_compared'; cause: ExpectedAmountNotComparedCause }
+
+/** The AUTHORIZATION amount of one option, or null when it is unpayable data. */
+function authorizationAmountOf(option: X402PaymentOption): bigint | null {
+  try {
+    return BigInt(x402AuthorizationAmount(option))
+  } catch {
+    return null
+  }
+}
+
+/** #4830: the cause of a failed agent read, decided the way `normalizeError` does. */
+function notComparedCauseForReadError(error: unknown): ExpectedAmountNotComparedCause {
+  if (error instanceof HavenApiError) {
+    const status = error.statusCode
+    if (status === 401 || status === 403) return 'agent_read_refused'
+  }
+  return 'agent_read_failed'
+}
+
+/**
+ * #4830 — compare a stated `expected_amount` with the price the agent would
+ * actually pay, and say so when that comparison cannot be made.
+ *
+ * The agent read only ever chooses BETWEEN the merchant's erc7710 and standard
+ * options (`selectX402SettlementScheme`). So when that choice cannot change
+ * the answer — only one option exists, both carry the same authorization
+ * amount, or the stated price equals neither — the comparison is decided
+ * WITHOUT the agent read. Only the remaining case (two options at different
+ * amounts, the stated price equal to exactly one) needs the read, and when the
+ * read failed the result says the comparison was not made rather than
+ * answering as if no expectation had been stated.
+ *
+ * A stated price finer than the token's own scale cannot equal any option
+ * amount, so it is a decided mismatch — the same decision the hosted surface
+ * already made before #4830, now shared with the local one.
+ */
+export function compareExpectedAmount(input: {
+  accepts: X402PaymentOption[]
+  decimals: number | null
+  expectedAmount: string
+  agent: HavenAgent | undefined
+  /** The agent read's error, kept instead of mapped to `undefined` (#4830). */
+  agentError: unknown
+}): ExpectedAmountComparison {
+  const { accepts, decimals, expectedAmount, agent, agentError } = input
+  // An asset Haven cannot identify has no scale to convert the stated price
+  // through — guessing one would compare against a number nobody stated.
+  if (decimals === null) return { kind: 'not_compared', cause: 'unknown_decimals' }
+  const expectedAtomic = humanToAtomic(expectedAmount, decimals)
+  // Finer than the token's scale: it cannot equal any option amount.
+  if (expectedAtomic === null) return { kind: 'compared', differs: true }
+
+  if (agent) {
+    const selected = selectedSettlement(accepts, agent)
+    if (!selected) return { kind: 'not_compared', cause: 'no_option_selected' }
+    const amount = authorizationAmountOf(selected.option)
+    // Unreachable today (every selected option passed the SDK's positive-amount
+    // check) — reported as not compared rather than guessed at.
+    if (amount === null) return { kind: 'not_compared', cause: 'no_option_selected' }
+    return { kind: 'compared', differs: amount !== expectedAtomic }
+  }
+
+  // The agent read failed. Decide from the merchant's own two candidate
+  // options wherever the rail cannot change the answer.
+  const candidates: X402PaymentOption[] = []
+  const erc7710 = selectErc7710PaymentOption(accepts)
+  if (erc7710) candidates.push(erc7710)
+  const standard = selectStandardPaymentOption(accepts)
+  if (standard && standard !== erc7710) candidates.push(standard)
+  if (candidates.length === 0) return { kind: 'not_compared', cause: 'no_option_selected' }
+  const amounts = candidates.map(authorizationAmountOf)
+  if (amounts.some((amount) => amount === null)) {
+    return { kind: 'not_compared', cause: notComparedCauseForReadError(agentError) }
+  }
+  const decided = amounts as bigint[]
+  if (decided.length === 1) return { kind: 'compared', differs: decided[0] !== expectedAtomic }
+  if (decided[0] === decided[1]) return { kind: 'compared', differs: decided[0] !== expectedAtomic }
+  if (expectedAtomic !== decided[0] && expectedAtomic !== decided[1]) {
+    return { kind: 'compared', differs: true }
+  }
+  // Two options at different amounts and the stated price equals exactly one:
+  // which one this agent pays depends on the rail nobody could read.
+  return { kind: 'not_compared', cause: notComparedCauseForReadError(agentError) }
+}
+
+/**
+ * #4830 — the next step a not-compared quote carries, decided by the CAUSE
+ * (never a new `next_action` value): a transient read failure is worth one
+ * re-quote with the same arguments; a refused read, an unselectable option and
+ * unknown decimals are deterministic and stop the agent.
+ */
+export function expectedAmountNotComparedNextAction(
+  cause: ExpectedAmountNotComparedCause,
+): AgentPaymentNextAction {
+  return cause === 'agent_read_failed'
+    ? AgentPaymentNextAction.RetryWithExplicitContext
+    : AgentPaymentNextAction.StopAndTellUser
+}
+
+/** #4830: why no tool follows a not-compared quote. */
+export function expectedAmountNotComparedOmittedReason(
+  cause: ExpectedAmountNotComparedCause,
+): string {
+  switch (cause) {
+    case 'agent_read_failed':
+      return (
+        'no Haven tool follows yet: the price could not be compared because the agent read ' +
+        'failed — re-quote once with the same arguments before telling the user'
+      )
+    case 'agent_read_refused':
+      return (
+        'no Haven tool follows: the agent read was refused, so the price could not be ' +
+        'compared — tell the user what failed'
+      )
+    case 'no_option_selected':
+      return (
+        'no Haven tool follows: no payment option this agent can pay was selected, so the ' +
+        'price could not be compared — tell the user'
+      )
+    case 'unknown_decimals':
+      return (
+        "no Haven tool follows: the quote's token is not one Haven recognises, so the price " +
+        'could not be compared — tell the user'
+      )
+  }
+}
+
+/**
+ * #4830 — the prose for a not-compared quote. It says the comparison was NOT
+ * made and why, and it deliberately does NOT say the price differs (nobody
+ * compared it) and does NOT name the deposit-address fallback (that remedy
+ * belongs to a challenge found WRONG, which this is not).
+ */
+export function expectedAmountNotComparedReason(
+  expectedAmount: string,
+  cause: ExpectedAmountNotComparedCause,
+): string {
+  const opening =
+    `The merchant's quoted price was NOT compared with the expected price (${expectedAmount}) ` +
+    'stated with this quote: '
+  const closing = ' No comparison was made — this says nothing about whether the price matches.'
+  switch (cause) {
+    case 'agent_read_failed':
+      return (
+        opening +
+        "the agent's account could not be read from Haven, and the merchant's payment options " +
+        'carry different amounts, so which one this agent would pay is unknown.' +
+        closing +
+        ' Re-quote once with the same arguments; if the read still fails, stop and tell the ' +
+        'user before any payment.'
+      )
+    case 'agent_read_refused':
+      return (
+        opening +
+        "the agent's account read was refused by Haven, and the merchant's payment options " +
+        'carry different amounts, so which one this agent would pay is unknown.' +
+        closing +
+        ' Stop and tell the user before any payment; re-quoting the same way cannot succeed.'
+      )
+    case 'no_option_selected':
+      return (
+        opening +
+        "no payment option this agent can pay was selected from the merchant's offer, so the " +
+        'amount this agent would authorize is unknown.' +
+        closing +
+        ' Stop and tell the user before any payment.'
+      )
+    case 'unknown_decimals':
+      return (
+        opening +
+        "the quote's token is not one Haven recognises, so its decimals are unknown and the " +
+        "stated price cannot be converted to the token's atomic amount." +
+        closing +
+        ' Stop and tell the user before any payment.'
+      )
+  }
 }
 
 /**

@@ -72,7 +72,7 @@ export const toolDescriptions = {
     summary:
       'Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction.',
     behavior:
-      'Probes the merchant directly and parses the 402 response. Pure read-only client behavior — Haven is not contacted.',
+      'Probes the merchant directly and parses the 402 response. Pure read-only client behavior — Haven is read only for the agent when expected_amount is stated.',
     nextActionGuidance:
       'On success the returned quote is the input to haven_pay_x402_quote. Do not call the merchant again — Haven re-uses the captured request when paying.',
   },

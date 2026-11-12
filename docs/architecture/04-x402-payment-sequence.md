@@ -253,6 +253,22 @@ itself is still returned, an unavailable pre-check fails OPEN with a warning
 (the on-chain policy remains the actual gate), and nothing about the payment
 path's own checks changes.
 
+Since #4830 a stated `expected_amount` is never silently skipped. The agent
+read only chooses BETWEEN the merchant's erc7710 and standard options, so the
+comparison is decided without it whenever that choice cannot change the answer
+(one option, equal authorization amounts, or a stated price equal to neither);
+a stated price finer than the token's scale is a decided mismatch on both
+surfaces. When the comparison genuinely cannot be made — two options at
+different amounts with the stated price equal to exactly one and the agent read
+failed, a read refused 401/403, no option this agent can pay, or an asset whose
+decimals are unknown — the result says so: `price_comparison_made: false` with
+`price_comparison_not_made_cause`, `safe_to_continue: false`, no prefilled cap
+and no pay step. The next step follows the cause, as `normalizeError` decides
+one: a transient read failure is worth one re-quote with the same arguments
+(`retry_with_explicit_context`); a refused read, an unselectable option and
+unknown decimals stop the agent (`stop_and_tell_user`). No new `next_action`
+value, no input change, and no signer surface change.
+
 Every merchant-facing SDK fetch (probes, MCP handshakes, paid retries,
 resume retries) is bounded since #1300: `config.merchantTimeout` (default
 **300 s**, calibrated to the protocol contract — the merchant's own

@@ -147,6 +147,23 @@ export async function prepareTransfer(
   }
 }
 
+/**
+ * #4820: the transfer submit's failure body.
+ *
+ * `error` is the sentence every caller already shows. `error_code` and
+ * `user_op_hash` are additive and present only when the rail classified the
+ * failure — the dashboard branches on them to tell "nothing was sent, retrying
+ * is safe" (`onchain_execution_failed`) from "we do not know, do not send
+ * again" (`submission_outcome_unknown`).
+ */
+export function transferFailureBody(failure: SignerChangeFailure): Record<string, unknown> {
+  const body: Record<string, unknown> = { error: failure.error }
+  if (failure.details) body.details = failure.details
+  if (failure.error_code) body.error_code = failure.error_code
+  if (failure.user_op_hash) body.user_op_hash = failure.user_op_hash
+  return body
+}
+
 export async function submitTransfer(
   account: SignerActionAccount,
   body: TransferBody & { signature?: string; user_operation?: unknown },

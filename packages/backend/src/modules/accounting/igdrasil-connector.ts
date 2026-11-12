@@ -18,7 +18,7 @@ import { igdrasilConfigured, igdrasilCredentials, igdrasilOAuth2Config } from '.
 import type { AccountingConnector, ProviderSecrets, PushResult, VerifyOutcome } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
 import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
-import { loadReceiptUnderlag, merchantReceiptDocument } from './receipt-underlag.js'
+import { loadReceiptUnderlag, merchantReceiptDocument, pinUnderlagInputs } from './receipt-underlag.js'
 import { MultiCompanyGrantError, ProviderError, type ProviderCompanyInfo } from './provider.js'
 import { getValidOAuth2AccessToken, revokeToken } from './oauth-flow.js'
 import { ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
@@ -33,8 +33,11 @@ import { markPushed } from './feed-sync.js'
  * non-asserting shape with no account, VAT or lines anywhere in the request.
  * Delivery is PROVEN by the upload echoing the SHA-256 of the bytes sent.
  * Igdrasil keys a document on its bytes, so a retry of the same payment's
- * deterministic underlag names the same document (200) instead of filing a
- * second one; there is no idempotency key to send.
+ * underlag names the same document (200) instead of filing a second one;
+ * there is no idempotency key to send. The bytes are stable because the
+ * render inputs are pinned at the payment's first render (#4824) — without
+ * the pin a merchant receipt or delivery reference written between two
+ * attempts would file a SECOND underlag.
  *
  * Semantics, and why:
  *  - `baseCurrency` is **null** (`PublicCompany` has no currency field); the
@@ -105,9 +108,10 @@ export class IgdrasilConnector implements AccountingConnector {
    *  1. A live access token (the generic flow refreshes under the row lock)
    *     and the company id the connect stored. No token → `not_connected`; no
    *     company → skipped, recoverable by reconnecting.
-   *  2. `loadReceiptUnderlag` → the deterministic PDF. A lookup failure
-   *     THROWS (never a false "no receipt exists"); absent evidence is a
-   *     pre-push skip.
+   *  2. `loadReceiptUnderlag` → the underlag PDF (deterministic for fixed
+   *     input, and the inputs are pinned at the payment's first render —
+   *     #4824). A lookup failure THROWS (never a false "no receipt exists");
+   *     absent evidence is a pre-push skip.
    *  3. Local size gate (25 MiB) before any request.
    *  4. Upload; the client proves delivery by the echoed SHA-256.
    *  5. The merchant's own invoice, when captured, is a second upload —
@@ -135,6 +139,12 @@ export class IgdrasilConnector implements AccountingConnector {
     if (underlag.pdf.byteLength > IGDRASIL_UPLOAD_MAX_BYTES) {
       return { externalRef: null, status: 'skipped', reason: 'The receipt document is larger than Igdrasil accepts (over 25 MiB).' }
     }
+
+    // #4824: freeze the render inputs BEFORE the first upload request, so a
+    // retry renders the first attempt's bytes and Igdrasil names the existing
+    // document instead of filing a second one. Thrown, not swallowed: an
+    // upload without a pin is a document a retry cannot reproduce.
+    await pinUnderlagInputs(tx)
 
     let upload: IgdrasilUpload
     try {

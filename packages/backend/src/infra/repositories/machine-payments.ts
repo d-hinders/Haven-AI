@@ -1228,14 +1228,19 @@ export async function getMerchantReceiptRow(
 // supplies the settlement facts — without this branch the Accounted connector
 // would skip the payment with "receipt evidence not found" and no document
 // would ever be uploaded.
+// #4824: the render inputs pinned at the payment's first render ride the same
+// read — one query returns the source row AND the pin, so the renderer never
+// pays a second round trip to learn what it must reproduce.
 export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
-            pi.sign_hash, pi.signature, pi.delegate_address
+            pi.sign_hash, pi.signature, pi.delegate_address,
+            pi.machine_metadata->'accounting_underlag_inputs' AS pinned_underlag_inputs
      FROM machine_payment_evidence mpe
      LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
      WHERE mpe.id = $1 AND mpe.user_id = $2
      UNION ALL
      SELECT pi.tx_hash, pi.chain_id, pi.to_address AS merchant_address,
-            pi.sign_hash, pi.signature, pi.delegate_address
+            pi.sign_hash, pi.signature, pi.delegate_address,
+            pi.machine_metadata->'accounting_underlag_inputs' AS pinned_underlag_inputs
      FROM payment_intents pi
      WHERE pi.id = $1 AND pi.user_id = $2
        AND ${DIRECT_PAYMENT_RAIL_SQL}
@@ -1247,6 +1252,14 @@ export interface UnderlagSourceRow {
   sign_hash: string | null
   signature: string | null
   delegate_address: string | null
+  /**
+   * #4824: the underlag render inputs pinned at the payment's first render
+   * (`payment_intents.machine_metadata->'accounting_underlag_inputs'`), or
+   * null when the payment has never rendered. Typed `unknown` because the
+   * renderer validates it — a JSONB column written by an older or newer build
+   * must never be trusted into a document.
+   */
+  pinned_underlag_inputs?: unknown
 }
 
 /**
@@ -1275,6 +1288,12 @@ export async function loadReceiptUnderlagSource(
 // is what keeps Accounted's idempotency key (which derives from the
 // paymentId) from going terminal on a re-file with different bytes.
 //
+// The hash is only ONE of the render inputs that can move between attempts;
+// #4824 pins the rest (the merchant receipt, the delivery reference, the
+// purchase group and the catalog country) at the payment's first render, in
+// the same JSONB, so a retry reproduces the first attempt's bytes whichever
+// of them was written in between. See the underlag-input pin below.
+//
 // Storage is `payment_intents.machine_metadata` JSONB — deliberately no
 // migration and no `accounting_feed_syncs` column (the latter would put the
 // change under CODEOWNERS for a fact that lives with the payment, not with
@@ -1301,5 +1320,74 @@ export async function pinAccountingBookedTx(
   db: Executor = pool,
 ): Promise<boolean> {
   const result = await db.query(PIN_ACCOUNTING_BOOKED_TX_SQL, [paymentIntentId, txHash, kind])
+  return result.rows.length > 0
+}
+
+// ── Underlag-input pin (#4824) ────────────────────────────────────────────────
+//
+// The underlag is rendered from live reads on every attempt. Four of those
+// reads can be written AFTER a payment's first render — the merchant receipt
+// (the seller block AND the transaction kind), the delivery reference, the
+// purchase group / parent receipt, and the catalog country. Accounted's
+// idempotency key derives from the paymentId alone, so a retry that renders
+// different bytes is refused as `IDEMPOTENCY_KEY_REUSE` and the row ends
+// `skipped` although the document is already in the customer's store.
+//
+// The remedy (owner decision 2026-11-12) pins the INPUTS — not the bytes — at
+// the payment's first render, stored the #3767 way in
+// `payment_intents.machine_metadata`, and renders every retry from the pin.
+// Template drift stays the accepted risk it already is.
+//
+// Storage is `machine_metadata` for the same reason as the booked-hash pin:
+// no migration, and the fact lives with the payment rather than with one
+// destination's ledger row.
+
+/**
+ * The render inputs frozen at a payment's first render. Deliberately the
+ * MUTABLE ones only: the FX capture, `Settled at`, the booked hash (#3767),
+ * the authorization block and the ledger currency are already stable between
+ * attempts, so pinning them would be pinning the bytes.
+ */
+export interface AccountingUnderlagPin {
+  /** The merchant's own receipt as captured at the first render (#956). */
+  merchantReceipt: { url: string | null; inlineJson: unknown | null } | null
+  /** The derived kind and its description line at the first render (#4532). */
+  transactionKind: string
+  description: string
+  /** The purchase correlation key at the first render (#4534). */
+  purchaseGroupId: string | null
+  parentReceiptRef: string | null
+  /** The catalog country at the first render (#3918). */
+  merchantCountry: string | null
+}
+
+export const PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL = `UPDATE payment_intents
+     SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object(
+           'accounting_underlag_inputs', $2::jsonb)
+     WHERE id = $1
+       AND machine_metadata->'accounting_underlag_inputs' IS NULL
+     RETURNING id`
+
+/** A payment reference that is not a UUID cannot be a `payment_intents.id`. */
+const PAYMENT_INTENT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Pin the underlag render inputs, on the payment's FIRST render only.
+ * First-writer-wins: a pin that already exists is never replaced, which is
+ * exactly the guarantee the stable-bytes acceptance rests on. True when this
+ * call wrote the pin.
+ *
+ * A reference that is not a UUID (a legacy approval-request id, a test
+ * fixture) is not a `payment_intents.id` and is answered `false` without a
+ * query — the pin is a fact about an intent, and there is no intent to hold
+ * it.
+ */
+export async function pinAccountingUnderlagInputs(
+  paymentIntentId: string,
+  pin: AccountingUnderlagPin,
+  db: Executor = pool,
+): Promise<boolean> {
+  if (!PAYMENT_INTENT_UUID_RE.test(paymentIntentId)) return false
+  const result = await db.query(PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL, [paymentIntentId, JSON.stringify(pin)])
   return result.rows.length > 0
 }

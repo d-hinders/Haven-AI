@@ -237,6 +237,18 @@ hash already is the settlement: they are never deferred and `txHashIsFunding`
 is always false. Retired rails carry `txHash: null` and render exactly as they
 did before this contract existed.
 
+The hash is only one of the render inputs that can move between attempts.
+#4824 pins the rest — the merchant receipt (the seller block AND the
+transaction kind), the delivery reference, the purchase group / parent receipt
+and the catalog country — at the payment's FIRST render
+(`pinUnderlagInputs`, stored beside the booked-hash pin in
+`payment_intents.machine_metadata`), and `loadReceiptUnderlag` renders every
+retry from that pin. A connector that fails before any upload request (no
+connection, no company id, a render failure) writes no pin, so its retry
+renders whatever the sources hold by then — nothing exists at the provider to
+collide with. Template drift across a deploy stays the accepted risk it
+already is.
+
 ## What kind of transaction it is (#4532)
 
 `FeedTransaction.transactionKind` is a closed enum — `purchase` | `api_fee` |

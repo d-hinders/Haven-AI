@@ -1,7 +1,11 @@
-import { loadReceiptUnderlagSource } from '../../infra/repositories/machine-payments.js'
+import {
+  loadReceiptUnderlagSource,
+  pinAccountingUnderlagInputs,
+  type AccountingUnderlagPin,
+} from '../../infra/repositories/machine-payments.js'
 import { safeGetBinary, type SafeFetchOptions, type SsrfRefusal } from '../../infra/http/ssrf-guard.js'
 import type { FeedTransaction } from './feed-transaction.js'
-import type { TransactionKind } from './transaction-kind.js'
+import { TRANSACTION_KINDS, type TransactionKind } from './transaction-kind.js'
 
 /**
  * Receipt underlag for the reporting feed (epic #491, P2 #498).
@@ -401,6 +405,79 @@ export function sellerFromMerchantReceipt(inlineJson: unknown): {
 }
 
 /**
+ * #4824: the render inputs a first attempt froze, read back off
+ * `payment_intents.machine_metadata`. Validated field by field — a JSONB
+ * column written by an older or newer build must never be trusted into a
+ * document. A pin that cannot be read (missing kind, missing description)
+ * returns null, and the render falls back to the live values exactly as it
+ * did before this feature; that is the pre-deploy shape, not a new failure.
+ */
+export interface PinnedUnderlagInputs extends Omit<AccountingUnderlagPin, 'transactionKind'> {
+  /** Narrowed to the closed enum by the validator — never a free string. */
+  transactionKind: TransactionKind
+}
+
+export function pinnedUnderlagInputs(raw: unknown): PinnedUnderlagInputs | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const p = raw as Record<string, unknown>
+  const kind =
+    typeof p.transactionKind === 'string' && (TRANSACTION_KINDS as readonly string[]).includes(p.transactionKind)
+      ? (p.transactionKind as TransactionKind)
+      : null
+  if (kind == null || typeof p.description !== 'string') return null
+  const receiptRaw = p.merchantReceipt
+  let merchantReceipt: { url: string | null; inlineJson: unknown | null } | null = null
+  if (receiptRaw != null && typeof receiptRaw === 'object' && !Array.isArray(receiptRaw)) {
+    const r = receiptRaw as Record<string, unknown>
+    merchantReceipt = {
+      url: typeof r.url === 'string' ? r.url : null,
+      inlineJson: r.inlineJson ?? null,
+    }
+  }
+  return {
+    merchantReceipt,
+    transactionKind: kind,
+    description: p.description,
+    purchaseGroupId: typeof p.purchaseGroupId === 'string' ? p.purchaseGroupId : null,
+    parentReceiptRef: typeof p.parentReceiptRef === 'string' ? p.parentReceiptRef : null,
+    merchantCountry: typeof p.merchantCountry === 'string' ? p.merchantCountry : null,
+  }
+}
+
+/**
+ * #4824: the inputs a render of `tx` would use, in the shape the pin stores.
+ * The four mutable sources and nothing else — the FX capture, `Settled at`,
+ * the booked hash (#3767), the authorization block and the ledger currency
+ * are already stable between attempts.
+ */
+export function underlagPinFromTransaction(tx: FeedTransaction): AccountingUnderlagPin {
+  return {
+    merchantReceipt: tx.merchantReceipt ?? null,
+    transactionKind: tx.transactionKind,
+    description: tx.description,
+    purchaseGroupId: tx.purchaseGroupId,
+    parentReceiptRef: tx.parentReceiptRef,
+    merchantCountry: tx.counterparty.country,
+  }
+}
+
+/**
+ * #4824: freeze the render inputs at the payment's FIRST render, before the
+ * first upload request is sent. First-writer-wins, so a retry never replaces
+ * the pin the first attempt rendered from.
+ *
+ * Called by the connectors that key a document on the payment (Accounted) or
+ * on its bytes (Igdrasil) — the two shapes a changed render breaks. A
+ * connector that fails BEFORE any upload request (no connection, no company
+ * id, a render failure) never reaches this call, so its retry renders
+ * whatever the sources hold by then: nothing exists at the provider to
+ * collide with.
+ */
+export async function pinUnderlagInputs(tx: FeedTransaction): Promise<boolean> {
+  return pinAccountingUnderlagInputs(tx.paymentId, underlagPinFromTransaction(tx))
+}
+
+/**
  * Load + render the underlag for a feed transaction. `receiptRef` is the
  * `machine_payment_evidence` row id (see `AccountingEntry.receiptRef`);
  * authorization details join in from the payment intent when there is one.
@@ -408,6 +485,12 @@ export function sellerFromMerchantReceipt(inlineJson: unknown): {
  * failure THROWS — the caller must degrade with a "lookup failed" note, not a
  * false "no receipt exists" diagnosis (the attachment is unrecoverable once
  * the invoice is posted, so the audit trail must state the real reason).
+ *
+ * #4824: when the payment carries a pin, the four mutable inputs are read
+ * from it instead of from `tx`, so every retry renders the first attempt's
+ * bytes whichever of them was written in between. The pin is written by
+ * `pinUnderlagInputs` at the first render; a payment that never rendered has
+ * none and renders live, exactly as before.
  */
 export async function loadReceiptUnderlag(
   userId: string,
@@ -416,11 +499,13 @@ export async function loadReceiptUnderlag(
   // SQL lives in infra/repositories/machine-payments.ts (#999).
   const row = await loadReceiptUnderlagSource(tx.receiptRef, userId)
   if (!row) return null
+  const pin = pinnedUnderlagInputs(row.pinned_underlag_inputs)
   // #3918: the seller identity comes from the merchant's OWN invoice when the
   // agent captured one (the demo merchant names Haven Demo AB + org/VAT nos);
   // the catalog country is the counterparty's — the feed's VAT-treatment
-  // source, unchanged.
-  const seller = sellerFromMerchantReceipt(tx.merchantReceipt?.inlineJson ?? null)
+  // source, unchanged. #4824: both read the pin when one exists.
+  const merchantReceipt = pin ? pin.merchantReceipt : (tx.merchantReceipt ?? null)
+  const seller = sellerFromMerchantReceipt(merchantReceipt?.inlineJson ?? null)
   return underlagFromData({
     paymentId: tx.paymentId,
     settledAt: tx.settledAt,
@@ -436,20 +521,22 @@ export async function loadReceiptUnderlag(
     fxRateLedger: tx.fxRateLedger,
     merchantName: seller.name ?? tx.counterparty.name,
     merchantAddress: tx.counterparty.address ?? row.merchant_address,
-    merchantCountry: tx.counterparty.country,
+    merchantCountry: pin ? pin.merchantCountry : tx.counterparty.country,
     merchantVatNo: seller.vatNo,
     merchantOrgNo: seller.orgNo,
     resourceUrl: tx.resourceUrl,
     // #4532: the kind and its line, decided once in `toAccountingEntry` — the
-    // same two values the feed payload carries.
-    transactionKind: tx.transactionKind,
-    description: tx.description,
+    // same two values the feed payload carries. #4824: pinned at the first
+    // render, because the merchant receipt and the delivery reference can
+    // change the rung that decides them.
+    transactionKind: pin ? pin.transactionKind : tx.transactionKind,
+    description: pin ? pin.description : tx.description,
     // #4534: the purchase correlation key — the same two values the feed
     // payload carries, so the document and the payload agree.
     // #4577: `parentReceiptRef` is the parent purchase's `receiptRef`;
     // `receiptRef` is this document's own evidence id.
-    purchaseGroupId: tx.purchaseGroupId,
-    parentReceiptRef: tx.parentReceiptRef,
+    purchaseGroupId: pin ? pin.purchaseGroupId : tx.purchaseGroupId,
+    parentReceiptRef: pin ? pin.parentReceiptRef : tx.parentReceiptRef,
     receiptRef: tx.receiptRef,
     chainId: row.chain_id,
     // #3767: the BOOKED hash — the settlement when available/pinned, the

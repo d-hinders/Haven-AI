@@ -576,7 +576,7 @@ pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
 | `failed` | the push failed; `error` is the provider message verbatim | nothing at first — the sweep retries with backoff (1 min doubling to 1 h, 8 attempts). Persisting: fix the named cause; **Sync now** retries immediately |
 | `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
-| `skipped` | a connector skip with the reason preserved (`not_connected`, `no_ledger_amount` — `no_sek_amount` on rows recorded before #2877, `not_outbound`), `connection needs_reauthorisation: …`, or `scope refused before the invoice was created: …` | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
+| `skipped` | a connector skip with the reason preserved (`not_connected`, `no_ledger_amount` — `no_sek_amount` on rows recorded before #2877, `not_outbound`), `connection needs_reauthorisation: …`, `scope refused before the invoice was created: …`, or `IDEMPOTENCY_KEY_REUSE — …` (a row whose first render predates the #4824 pin: the document is at the provider, Haven cannot name it, and every retry renders live bytes and is refused again) | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
 | *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, the payment never produced an evidence row (settlement-side, above), or (#3767) an eip3009 payment is inside the merchant-report grace with no verified settlement recorded — the pre-claim deferral writes no row and burns no attempt | read `GET /accounting/feed/status`; the #3767 deferral self-recovers — the sweep's second selection feeds it once the window passes or the settlement is recorded; for the other causes, **Sync now** or the backfill feeds it once the cause is gone |
 
 **On-call read, per user:**
@@ -707,6 +707,24 @@ replaced, so a settlement recorded between two attempts cannot change the
 bytes a destination already saw — the retry re-pushes the identical
 transaction rather than an `IDEMPOTENCY_KEY_REUSE` refusal. A pin failure
 fails the push without attempting it, so the retry re-runs the whole claim.
+
+**The underlag-input pin (#4824).** The booked hash is only one of the render
+inputs that can move between attempts. The merchant receipt (the seller block
+**and** the transaction kind), the delivery reference, the purchase group /
+parent receipt and the catalog country are all live reads too, and any of them
+written after a payment's first render changed the bytes a retry uploaded —
+which Accounted refused as `IDEMPOTENCY_KEY_REUSE`, leaving the row `skipped`
+although the document was already in the customer's store. The connector now
+writes those four inputs to
+`payment_intents.machine_metadata.accounting_underlag_inputs`
+(`PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL`, first-writer-wins) immediately before
+the first upload request, and `loadReceiptUnderlag` renders every retry from
+the pin. A first attempt that failed before any upload request (no connection,
+no company id, a render failure) writes no pin, so its retry renders whatever
+the sources hold by then — nothing exists at the provider to collide with.
+Rows already `skipped` with `IDEMPOTENCY_KEY_REUSE` at deploy carry no pin and
+are left as they are: the provider's 409 names no document id, so Haven cannot
+recover a ref it never received.
 
 **A re-claim of a row with no pin keeps the funding hash.** A `failed` (or
 `skipped`) sync row that predates this feature re-claims with `fresh: false`
@@ -1023,7 +1041,8 @@ Accounted keys are revoked in their dashboard, so a disconnect clears the local
 secrets only.
 
 **The document push (#3018, slice 2).** `pushTransaction` renders the verifiable
-receipt underlag (`receipt-underlag.ts`, deterministic bytes; the
+receipt underlag (`receipt-underlag.ts`; the render inputs are pinned at the
+payment's first render, #4824, so the bytes are stable across attempts; the
 suggested-account hint is excluded by owner decision — the upload takes exactly
 `file` + `upload_source=api`) and uploads it with
 `POST /api/v1/companies/{companyId}/documents`,
@@ -1033,12 +1052,33 @@ of the sent bytes — anything else is `skipped` and no ref is stored. Error
 map: 403 `INSUFFICIENT_SCOPE` → `skipped` + `scope_missing` with
 `missingScopes` from the envelope `details` when present; plain `FORBIDDEN`
 → thrown (retryable, NOT a scope verdict); 409 `IDEMPOTENCY_KEY_REUSE` →
-terminal `skipped` (same key, different bytes — never retried); 400
+`skipped` (same key, different bytes — the fallback for a row whose first
+render predates the #4824 pin; a row that rendered under this build replays
+instead); 400
 `DOC_UPLOAD_TOO_LARGE` / `DOC_UPLOAD_UNSUPPORTED_TYPE` → permanent
 `skipped`; 500 `DOC_UPLOAD_STORAGE_FAILED` → thrown for the sweep; 429 →
 `ProviderError` with `retryAfterMs` from `Retry-After` (seconds → ms; the
 sweep reads the field, `retry-sweep.ts`). Oversize underlag (> 10 MB) is
 gated locally BEFORE any request.
+
+**The render inputs are pinned at the first render (#4824).** The underlag is
+rendered from live reads, and four of them can be written after a payment's
+first render: the merchant receipt (the seller block **and** the transaction
+kind), the delivery reference, the purchase group / parent receipt, and the
+catalog country. Accounted's idempotency key derives from the payment id
+alone, so a retry that rendered different bytes was refused as
+`IDEMPOTENCY_KEY_REUSE` and the row ended `skipped` although the document was
+already in the customer's store. `pinUnderlagInputs` now freezes those four
+inputs in `payment_intents.machine_metadata->'accounting_underlag_inputs'`
+before the first upload request (first-writer-wins, the #3767 storage shape),
+and `loadReceiptUnderlag` renders every retry from the pin. A first attempt
+that failed before any upload request (no connection, no company id, a render
+failure) writes no pin, so its retry renders whatever the sources hold by
+then. Rows already `skipped` with `IDEMPOTENCY_KEY_REUSE` at deploy carry no
+pin: a *Sync now* re-claims them, renders live bytes and is refused again —
+they are left as they are, because the provider's 409 names no document id
+and Haven cannot recover a ref it never received. Template drift across a
+deploy stays the accepted risk recorded above.
 
 **The merchant's own invoice, as a second document (#3918).** #3016 scoped
 "one upload is one file, one ref per sync row"; #3918 revisits the ROW, not
@@ -1331,7 +1371,8 @@ suggested-account hint therefore has no effect for Igdrasil: the upload
 carries no account, VAT or lines. There is no idempotency key: **Igdrasil
 keys a document on its bytes** — the same file answers 200 naming the
 existing document, a new one 201. That is why a re-push of a payment files
-nothing new: the underlag renders byte-identical for the same payment
+nothing new: the render inputs are pinned at the payment's first render
+(#4824), so the underlag renders byte-identical for the same payment
 (`igdrasil-feed.db.test.ts` proves it on the real renderer), and two payments
 render different bytes. Delivery proof: a 2xx whose `sha256` equals the local
 SHA-256 of the bytes sent; anything else is `skipped` with no ref. The ref is

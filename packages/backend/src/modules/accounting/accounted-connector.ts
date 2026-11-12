@@ -19,7 +19,7 @@ import {
 import type { AccountingConnector, ProviderSecrets, PushResult, VerifyOutcome } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
 import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
-import { loadReceiptUnderlag, merchantReceiptDocument } from './receipt-underlag.js'
+import { loadReceiptUnderlag, merchantReceiptDocument, pinUnderlagInputs } from './receipt-underlag.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 import { readApiKeyConnection } from './api-key-flow.js'
 import { ledgerCurrencyOrDefault } from '../../domain/ledger-currency.js'
@@ -138,19 +138,26 @@ export class AccountedConnector implements AccountingConnector {
    *  1. Secrets + company id off the generic connection row (the company id
    *     is WHERE the document goes; a row without one cannot upload —
    *     skipped, recoverable by reconnecting).
-   *  2. `loadReceiptUnderlag` → the deterministic PDF (`receiptPdf` is
-   *     deterministic for fixed input). A query failure THROWS (the caller
+   *  2. `loadReceiptUnderlag` → the underlag PDF (`receiptPdf` is
+   *     deterministic for fixed input, and the inputs are pinned at the
+   *     payment's first render — #4824). A query failure THROWS (the caller
    *     must not record a false "no receipt exists"); a genuinely absent
    *     evidence row is a pre-push `skipped` — there is nothing to deliver,
    *     and a `pushed` row with no document at the provider would be a lie.
    *  3. Local oversize gate: the underlag alone over 10 MB is skipped
    *     BEFORE any request; the reason is what `AccountingBadge` shows on
    *     hover, so it reads as a sentence.
-   *  4. `accountedUploadDocument` with `Idempotency-Key =
-   *     uuid5(paymentId)`: the bytes are deterministic and the merchant
-   *     receipt is excluded, so a retry of the same payment replays the
-   *     provider's cached answer.
-   *  5. Delivery proof: a 2xx (the spec declares `200`, not `201` — keying
+   *  4. `pinUnderlagInputs` (#4824): the render inputs are frozen at this
+   *     payment's FIRST render, before the first upload request. The bytes
+   *     are deterministic for a fixed input, but four of the inputs are live
+   *     reads that can be written between two attempts (the merchant receipt,
+   *     the delivery reference, the purchase group / parent receipt, the
+   *     catalog country) — the pin makes every retry render the first
+   *     attempt's bytes, so the provider replays instead of refusing.
+   *  5. `accountedUploadDocument` with `Idempotency-Key =
+   *     uuid5(paymentId)`: with the pinned inputs a retry of the same payment
+   *     replays the provider's cached answer.
+   *  6. Delivery proof: a 2xx (the spec declares `200`, not `201` — keying
    *     on `201` would turn every real success into `skipped`) whose
    *     `data.sha256_hash` equals the local SHA-256. Anything else is not a
    *     delivery: skipped, and no ref is stored for bytes Haven cannot
@@ -208,6 +215,12 @@ export class AccountedConnector implements AccountingConnector {
       }
     }
 
+    // #4824: freeze the render inputs BEFORE the first upload request. A
+    // failure here is thrown, not swallowed: uploading without a pin would
+    // leave a document at the provider that a retry cannot reproduce, which
+    // is the exact `IDEMPOTENCY_KEY_REUSE` this pin exists to prevent.
+    await pinUnderlagInputs(tx)
+
     let document: AccountedDocument
     try {
       ;({ document } = await accountedUploadDocument({
@@ -241,11 +254,15 @@ export class AccountedConnector implements AccountingConnector {
         }
       }
       if (err instanceof ProviderError && err.status === 409 && code === 'IDEMPOTENCY_KEY_REUSE') {
-        // TERMINAL: the key derives from the paymentId, so this is the same
-        // payment's slot filed with DIFFERENT bytes — the underlag changed
-        // under a document already in the WORM store. Never retried (the
-        // sweep re-feeds skipped rows, but this skip is permanent), counted,
-        // and named so the badge tooltip says what happened.
+        // The key derives from the paymentId, so this is the same payment's
+        // slot filed with DIFFERENT bytes. Since #4824 the render inputs are
+        // pinned at the payment's first render, so a retry of a payment that
+        // rendered under this build replays instead of reaching here. This
+        // branch is the fallback for a row whose first render predates the
+        // pin (a pre-deploy `skipped` row): the document is in the WORM
+        // store, Haven cannot name it, and the row stays `skipped` —
+        // re-claimable, but every retry renders live bytes and is refused
+        // again. Named so the badge tooltip says what happened.
         return {
           externalRef: null,
           status: 'skipped',
@@ -271,7 +288,9 @@ export class AccountedConnector implements AccountingConnector {
 
     // #3918: the merchant's own invoice, second document of the same sync.
     // Deterministic key (paymentId + ':merchant-invoice') → a retry replays
-    // the provider's cached answer exactly like the underlag does.
+    // the provider's cached answer. #4824 pins the underlag's render inputs,
+    // not this file's: the invoice is the merchant's own document, uploaded
+    // as captured, and its key is separate from the underlag's.
     let merchantInvoiceRef: string | undefined
     const notes: string[] = []
     if (tx.merchantReceipt) {
@@ -299,8 +318,9 @@ export class AccountedConnector implements AccountingConnector {
               )
             } else if (err instanceof ProviderError && err.status === 409 && providerErrorCode(err) === 'IDEMPOTENCY_KEY_REUSE') {
               // Same slot, different bytes: the invoice changed under a
-              // document already filed. Same terminal honesty as the
-              // underlag's 409 — named, never retried, never faked.
+              // document already filed. Named on the pushed row, never
+              // faked — the underlag's delivery stands on its own and the
+              // row is never re-fed, so this note is the record.
               notes.push("the merchant's own invoice was not attached: IDEMPOTENCY_KEY_REUSE — different bytes under the filed document")
             } else {
               throw err

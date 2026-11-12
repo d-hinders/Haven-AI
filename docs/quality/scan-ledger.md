@@ -3309,3 +3309,10 @@ as first filed, and the ten reviews required 136 body corrections in all.
 - Unfiled, beyond the cap: Send's amount field, Send above the balance, the
   contact checksum mismatch, contact casing, the Bazaar poison entry, and the
   quote's two prices.
+
+**Owner decisions on the filed issues (2026-11-12, same day):** the owner
+answered every open question with "Kör på dina förslag" ("go with your
+proposals"), the recommendation written in each issue. Each decision is
+recorded under `## Owner decisions` in its issue, and `pending-review` is
+lifted on all fifteen. The security hypothesis is still not part of this
+disposition.

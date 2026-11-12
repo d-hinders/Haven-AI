@@ -6,9 +6,15 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from 'react'
-import { api, type ListPasskeysResponse } from '@/lib/api'
+import {
+  api,
+  ApiRequestError,
+  setSessionExpiredHandler,
+  type ListPasskeysResponse,
+} from '@/lib/api'
 import { LEGACY_ACTIVE_ACCOUNT_STORAGE_KEY, AUTH_TOKEN_STORAGE_KEY } from '@/lib/auth-storage'
 import { clearEntryLatches } from '@/lib/entry-latch'
 import {
@@ -82,6 +88,17 @@ interface AuthState {
   user: User | null
   token: string | null
   loading: boolean
+  /**
+   * #4827: the load-time `GET /auth/me` failed in a way that does NOT end the
+   * session — a rejected `fetch`, a 5xx, a 429, a 2xx whose body is not JSON.
+   * The token is still stored and the session is still valid; the READ just did
+   * not happen. `ProtectedRoute` and `OnboardingClient` render a load-error page
+   * with one Try again action instead of redirecting to `/login`, because
+   * "signed out" and "read failed" are no longer the same state.
+   */
+  loadError: boolean
+  /** Repeat the load-time `GET /auth/me` after a `loadError`. */
+  retryLoad: () => void
   passkeys: ListPasskeysResponse['passkeys']
   signup: (name: string, email: string, password: string, via?: string | null) => Promise<User>
   login: (email: string, password: string) => Promise<User>
@@ -98,13 +115,58 @@ interface AuthState {
   reloadUser: () => Promise<boolean>
 }
 
+/**
+ * #4827: which failures of the load-time `GET /auth/me` end the session.
+ *
+ * Owner decision 2026-11-12: a 401 (the token is not accepted) and a 404
+ * `User not found` (the token is accepted but the account behind it is gone).
+ * Everything else is a failed READ, not an ended session, and keeps the token —
+ * a network failure, a 502 from a deploy and a 500 all used to sign the owner
+ * out and throw away a valid session.
+ */
+function isSessionEndingError(err: unknown): boolean {
+  if (!(err instanceof ApiRequestError)) return false
+  if (err.status === 401) return true
+  return err.status === 404 && err.message === 'User not found'
+}
+
 const AuthContext = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [passkeys, setPasskeys] = useState<ListPasskeysResponse['passkeys']>([])
+
+  // #4827: guards a superseded load (a retry, or Strict Mode's double mount)
+  // from writing state after a newer read has started.
+  const loadGenerationRef = useRef(0)
+
+  /**
+   * #4827: one sign-out per ended session.
+   *
+   * The stored token is the latch: the first caller removes it, and every later
+   * 401 for the same session finds it gone and does nothing. That is what keeps
+   * two in-flight 401s — and the load-time read's own catch — to exactly one
+   * `clearEntryLatches()` and one redirect.
+   *
+   * The effects are the load-time expiry's (`AuthContext.tsx:200-204`) plus
+   * `setUser(null)`: the session is over, so the user goes with it. Stored
+   * passkey signer pointers stay — they are device state, not session state.
+   */
+  const endSession = useCallback(() => {
+    if (localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) === null) return
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+    // #4704: an expired session is a sign-out too — the next sign-in is an entrance.
+    clearEntryLatches()
+    setToken(null)
+    setUser(null)
+    // The session is over, so there is no failed read left to offer Try again
+    // for: the route must redirect to `/login`, not sit on the load-error page.
+    setLoadError(false)
+    setPasskeys([])
+  }, [])
 
   // Takes the freshly-fetched user rather than reading state: it runs inside
   // refreshUser/login/signup BEFORE React commits setUser, so `user` state
@@ -172,12 +234,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await reloadUser()
   }, [reloadUser])
 
-  // On mount, check for existing token.
-  // A cancelled ref guards against the effect re-running (e.g. in Strict Mode)
-  // while an in-flight request is still pending — without it two overlapping
-  // /auth/me calls could both call setUser in an undefined order.
-  useEffect(() => {
-    let cancelled = false
+  /**
+   * #4827: the load-time session read, repeatable by `retryLoad`.
+   *
+   * A failure is told apart from an ended session here: a 401 (and a 404
+   * `User not found`) ends the session; anything else is a failed READ and
+   * leaves the token, the entry latches and the session alone, surfacing
+   * `loadError` so the route can offer Try again instead of a redirect.
+   */
+  const loadSession = useCallback(async () => {
+    const generation = ++loadGenerationRef.current
 
     const stored = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
     if (!stored) {
@@ -187,28 +253,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setToken(stored)
 
-    api
-      .get<User>('/auth/me')
-      .then(async (u) => {
-        if (cancelled) return
-        setUser(u)
-        await hydratePasskeys(u)
-      })
-      .catch(() => {
-        if (cancelled) return
-        // Token invalid or expired
-        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
-        // #4704: an expired session is a sign-out too — the next sign-in is an entrance.
-        clearEntryLatches()
-        setToken(null)
-        setPasskeys([])
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+    try {
+      const u = await api.get<User>('/auth/me')
+      if (loadGenerationRef.current !== generation) return
+      setUser(u)
+      await hydratePasskeys(u)
+    } catch (err) {
+      if (loadGenerationRef.current !== generation) return
+      if (isSessionEndingError(err)) {
+        // A 401 has already fired `endSession` from the API client; this call
+        // is the no-op half of that pair, and the whole of the 404 half.
+        endSession()
+        return
+      }
+      setLoadError(true)
+    } finally {
+      if (loadGenerationRef.current === generation) setLoading(false)
+    }
+  }, [hydratePasskeys, endSession])
 
-    return () => { cancelled = true }
-  }, [hydratePasskeys])
+  // #4827: the API client's 401 reaction. Registered BEFORE the load effect so
+  // the load-time `GET /auth/me` 401 lands on the same one sign-out path as
+  // every other authenticated call.
+  useEffect(() => {
+    setSessionExpiredHandler(endSession)
+    return () => setSessionExpiredHandler(null)
+  }, [endSession])
+
+  // On mount, check for existing token.
+  // The generation guard replaces the old `cancelled` flag: it covers the
+  // effect re-running (e.g. in Strict Mode) AND a retry superseding an
+  // in-flight read, so two overlapping /auth/me calls cannot both setUser in
+  // an undefined order.
+  useEffect(() => {
+    void loadSession()
+    return () => {
+      loadGenerationRef.current += 1
+    }
+  }, [loadSession])
+
+  const retryLoad = useCallback(() => {
+    setLoadError(false)
+    setLoading(true)
+    void loadSession()
+  }, [loadSession])
 
   const signup = useCallback(
     // `via` is the #2522 agent hand-off marker. Optional and omitted when
@@ -225,6 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
+      setLoadError(false)
       await hydratePasskeys(res.user)
       return res.user
     },
@@ -240,6 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, res.token)
       setToken(res.token)
       setUser(res.user)
+      setLoadError(false)
       await hydratePasskeys(res.user)
       return res.user
     },
@@ -262,6 +352,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearEntryLatches()
     setToken(null)
     setUser(null)
+    setLoadError(false)
     setPasskeys([])
   }, [user?.accounts])
 
@@ -275,6 +366,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         loading,
+        loadError,
+        retryLoad,
         passkeys,
         signup,
         login,

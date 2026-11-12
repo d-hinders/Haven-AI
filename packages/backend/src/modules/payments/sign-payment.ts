@@ -380,8 +380,10 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
     // before the booking split, covering BOTH variants:
     // `included_reverted` carries the receipt's `actualGasCost` on the
     // widened error; `receipt_unconfirmed` has no known cost (recorded
-    // cost-NULL). Pre-send bundler rejections are NOT recorded — the op
-    // never entered the mempool, so nothing was sponsored. Same
+    // cost-NULL). #4817: "post-send" now includes a send whose ANSWER was
+    // lost — the request was dispatched, so the bundler may have accepted
+    // it. Pre-send bundler rejections are NOT recorded — the op never
+    // entered the mempool, so nothing was sponsored. Same
     // awaited-and-swallowed rule as the success path.
     if (err instanceof SubmittedUserOpFailedError) {
       await recordSponsoredUserOpGas({
@@ -409,10 +411,11 @@ export async function signPayment(input: SignPaymentInput): Promise<DecidedRespo
     const boundedMessage = boundFailureMessage(errorMsg)
     // #3564: the receipt-unconfirmed variant of SubmittedUserOpFailedError
     // means the UserOp was SENT and MAY have landed (the funds may have
-    // moved). Booking that `failed` would record a funds-moved payment as
-    // failed forever, so the row is left `submitted` — status reads
-    // "outcome pending" (phase payment_submitted, next_action
-    // check_status_later) — and the userOpHash is stored for the
+    // moved) — #4817 widened "sent" to include a send whose ANSWER was lost,
+    // not just a receipt wait that errored. Booking that `failed` would
+    // record a funds-moved payment as failed forever, so the row is left
+    // `submitted` — status reads "outcome pending" (phase payment_submitted,
+    // next_action check_status_later) — and the userOpHash is stored for the
     // submission reconciler (modules/payments/submission-reconciler.ts),
     // which resolves the row from the bundler's receipt: landed+succeeded
     // → confirmed with its tx_hash; landed+reverted or never seen within

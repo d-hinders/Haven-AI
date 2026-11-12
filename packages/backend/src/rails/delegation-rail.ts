@@ -25,7 +25,17 @@
  * docs/operations/delegation-rail-vendor-ops.md.
  */
 
-import { http, createPublicClient, zeroAddress, type Address, type Hex, type LocalAccount } from 'viem'
+import {
+  http,
+  createPublicClient,
+  zeroAddress,
+  HttpRequestError,
+  RpcRequestError,
+  TimeoutError,
+  type Address,
+  type Hex,
+  type LocalAccount,
+} from 'viem'
 import { toAccount } from 'viem/accounts'
 import { entryPoint07Address, toPackedUserOperation, toWebAuthnAccount } from 'viem/account-abstraction'
 import { getUserOperationHash } from 'viem/account-abstraction'
@@ -220,39 +230,51 @@ export interface RedemptionSubmitResult {
 }
 
 /**
- * #3329 review finding N2: `submitRedemption` can fail in two phases, and a
- * caller must never treat them alike. A failure BEFORE `sendUserOperation`
- * resolves (bundler rejected it — bad nonce, stale signature) means the op
+ * #3329 review finding N2: a submit can fail in two phases, and a caller must
+ * never treat them alike. A failure BEFORE the operation was sent (the
+ * bundler ANSWERED with a rejection — bad nonce, stale signature, a revoked
+ * or rate-limited key — or the client's prepare step failed) means the op
  * never entered the mempool: nothing changed on-chain, safe to say "stale,
- * re-prepare". A failure AFTER it resolves (the receipt wait errored or
- * timed out, or the op landed but reverted) means the op MAY have been
- * included — for a `disableDelegation` call that is NOT reversible by
- * re-preparing: the child may already be disabled on-chain, and a caller
- * that assumes otherwise will loop 502 forever (a fresh prepare reverts
- * `AlreadyDisabled`). Thrown only for the post-send phase; `userOpHash` is
- * always known at that point, so callers can check `disabledDelegations`
- * (or transaction status) before deciding what to tell the agent.
+ * re-prepare". A failure AFTER it was sent (the send's answer was lost, the
+ * receipt wait errored or timed out, or the op landed but reverted) means the
+ * op MAY have been included — for a `disableDelegation` call that is NOT
+ * reversible by re-preparing: the child may already be disabled on-chain, and
+ * a caller that assumes otherwise will loop 502 forever (a fresh prepare
+ * reverts `AlreadyDisabled`). Thrown only for the post-send phase;
+ * `userOpHash` is always known at that point, so callers can check
+ * `disabledDelegations` (or transaction status) before deciding what to tell
+ * the agent.
+ *
+ * #4817: "sent" is decided by whether the `eth_sendUserOperation` request was
+ * DISPATCHED, not by whether `sendUserOperation` resolved. A dispatched
+ * request whose answer never arrived (a transport timeout, a reset
+ * connection, a body that is not a JSON-RPC answer, an HTTP 5xx) may have
+ * been accepted by the bundler, so it throws this error with the
+ * outcome-unknown variant and the hash of the operation the bundler received.
+ * An explicit rejection — a JSON-RPC error the bundler answered with, an HTTP
+ * 4xx, or a failure in the client's prepare step before the request left —
+ * stays an ordinary pre-send error.
  *
  * #3494 review round 2 (N3): `reverted` further splits the post-send phase a
  * caller must not conflate. `reverted: true` means the receipt arrived and
  * says the op executed and reverted — that is a KNOWN, confirmed outcome
  * (the execution call reverts, so no token transfer and no delegation spend; only the EntryPoint nonce and the paymaster's sponsored gas are consumed) and a
  * caller may safely answer "this failed, try again". `reverted: false`
- * (the default) means the receipt wait itself errored or timed out — Haven
- * never learned whether the op landed, so a caller must NOT say "this
+ * (the default) means the send's answer or the receipt wait itself was lost —
+ * Haven never learned whether the op landed, so a caller must NOT say "this
  * failed, try again": the right answer is "unknown, check before paying
  * again".
  */
 export class SubmittedUserOpFailedError extends Error {
   readonly userOpHash: Hex
   /**
-   * #3564: which post-send variant threw. `receipt_unconfirmed` — the wait
-   * errored or timed out, the op MAY have landed, its outcome is genuinely
-   * unknown and a caller must NOT book terminal failure. `included_reverted`
-   * — the op landed and reverted, nothing moved, terminal failure is the
-   * honest booking. Everything downstream of this class (the sign route's
-   * booking split, the hosted mapping) keys on this field, so a new variant
-   * must be added here before any caller can see it.
+   * #3564: which post-send variant threw. `receipt_unconfirmed` — the send's
+   * answer or the receipt wait was lost, the op MAY have landed, its outcome
+   * is genuinely unknown and a caller must NOT book terminal failure.
+   * `included_reverted` — the op landed and reverted, nothing moved, terminal
+   * failure is the honest booking. Everything downstream of this class (the
+   * sign route's booking split, the hosted mapping) keys on this field, so a
+   * new variant must be added here before any caller can see it.
    */
   readonly outcome: 'receipt_unconfirmed' | 'included_reverted'
   /**
@@ -279,6 +301,144 @@ export class SubmittedUserOpFailedError extends Error {
    * op landed and reverted (nothing moved) vs the outcome-unknown variant. */
   get reverted(): boolean {
     return this.outcome === 'included_reverted'
+  }
+}
+
+/**
+ * #4817: what a throw from `client.sendUserOperation` is evidence OF.
+ *
+ * `pre_send` — the operation never reached the bundler's mempool: the bundler
+ * ANSWERED with a JSON-RPC error (an `AA25` nonce rejection), or answered
+ * HTTP 4xx (a revoked or rate-limited bundler key), or the throw happened
+ * before the `eth_sendUserOperation` request was dispatched at all (the
+ * client's prepare step: nonce, factory args, paymaster stub/data). Nothing
+ * changed on-chain; the caller may re-prepare.
+ *
+ * `outcome_unknown` — the `eth_sendUserOperation` request WAS dispatched and
+ * no answer came back: a transport timeout, a connection reset, a body that
+ * is not a JSON-RPC answer, or an HTTP 5xx. The bundler may have accepted the
+ * operation, so the caller must NOT book terminal failure.
+ */
+type SendFailureReading = 'pre_send' | 'outcome_unknown'
+
+/**
+ * #4817: read the transport-level failure out of a viem error chain.
+ *
+ * viem wraps the transport error twice on this path —
+ * `UserOperationExecutionError` → a bundler error (`UnknownBundlerError`,
+ * `InvalidAccountNonceError`, …) → the transport error — so the
+ * classification walks `cause` instead of testing the outer class.
+ *
+ * Returns null when the chain carries no transport error at all: an
+ * unrecognised throw is not evidence that the operation was sent.
+ */
+function readTransportFailure(err: unknown): SendFailureReading | null {
+  const seen = new Set<unknown>()
+  let current: unknown = err
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current)
+    // The bundler ANSWERED with a JSON-RPC error — an explicit rejection.
+    if (current instanceof RpcRequestError) return 'pre_send'
+    if (current instanceof HttpRequestError) {
+      // A 4xx is the bundler refusing the request (a revoked or rate-limited
+      // key); a 5xx, or no status at all (a reset connection, a body that is
+      // not a JSON-RPC answer), is a request that may have been accepted.
+      const status = current.status
+      return typeof status === 'number' && status >= 400 && status < 500 ? 'pre_send' : 'outcome_unknown'
+    }
+    // No answer at all.
+    if (current instanceof TimeoutError) return 'outcome_unknown'
+    current = (current as { cause?: unknown }).cause
+  }
+  return null
+}
+
+/**
+ * #4817: the `eth_sendUserOperation` request this rail actually dispatched.
+ *
+ * The rule is "a failure before the request is dispatched stays pre-send", and
+ * no error class can answer that: the client's prepare step raises the same
+ * transport errors the send does. So the bundler transport records the
+ * formatted operation of every `eth_sendUserOperation` request it hands to
+ * `fetch`, and a submit compares the record before and after its own send.
+ *
+ * One rail serves one operation: every caller builds a fresh rail per
+ * prepare/submit pair (`getDelegationRailFor`, `submitDelegationPayment`, the
+ * budget services), so the record holds at most one in-flight send. viem
+ * passes `retryCount: 0` for `eth_sendUserOperation` (2.54.1), so one dispatch
+ * is one attempt — a retry cannot overwrite the record with a second body.
+ */
+interface SendDispatchRecord {
+  /** The formatted `params[0]` of the last `eth_sendUserOperation` dispatched. */
+  sent: Record<string, unknown> | null
+}
+
+function createSendDispatchRecord(): SendDispatchRecord {
+  return { sent: null }
+}
+
+/** The `onFetchRequest` hook that fills a {@link SendDispatchRecord}. */
+function recordSendDispatch(record: SendDispatchRecord) {
+  return (_request: Request, init: { body?: unknown }): void => {
+    const body = parseJsonRpcBody(init?.body)
+    if (!body) return
+    for (const entry of Array.isArray(body) ? body : [body]) {
+      if (!entry || typeof entry !== 'object') continue
+      const { method, params } = entry as { method?: unknown; params?: unknown }
+      if (method !== 'eth_sendUserOperation' || !Array.isArray(params)) continue
+      const operation = params[0]
+      if (operation && typeof operation === 'object') record.sent = operation as Record<string, unknown>
+    }
+  }
+}
+
+function parseJsonRpcBody(body: unknown): unknown {
+  if (typeof body !== 'string') return null
+  try {
+    return JSON.parse(body)
+  } catch {
+    return null
+  }
+}
+
+/** The UserOperation fields `formatUserOperationRequest` hex-encodes. */
+const HEX_USER_OPERATION_FIELDS = [
+  'nonce',
+  'callGasLimit',
+  'verificationGasLimit',
+  'preVerificationGas',
+  'maxFeePerGas',
+  'maxPriorityFeePerGas',
+  'paymasterVerificationGasLimit',
+  'paymasterPostOpGasLimit',
+] as const
+
+/**
+ * #4817: the 4337 hash of the operation the bundler RECEIVED.
+ *
+ * The prepared object's `userOpHash` is a placeholder (`'0x'`) on every caller
+ * of both submit functions, and the client re-runs its prepare step inside
+ * `sendUserOperation` (paymaster data is re-fetched), so the operation that
+ * went out is not necessarily the one that was prepared. The hash a caller
+ * records must be the one the bundler indexes, so it is computed from the
+ * dispatched request body. Null when that body cannot be read back — the
+ * caller then falls back to the prepared hash rather than inventing one.
+ */
+function sentUserOperationHash(sent: Record<string, unknown>, chainId: number): Hex | null {
+  try {
+    const userOperation: Record<string, unknown> = { ...sent }
+    for (const field of HEX_USER_OPERATION_FIELDS) {
+      const value = userOperation[field]
+      if (typeof value === 'string' && value.startsWith('0x')) userOperation[field] = BigInt(value)
+    }
+    return getUserOperationHash({
+      chainId,
+      entryPointAddress: entryPoint07Address,
+      entryPointVersion: '0.7',
+      userOperation: userOperation as never,
+    })
+  } catch {
+    return null
   }
 }
 
@@ -479,10 +639,14 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     transport: http(cfg.bundlerUrl),
     entryPoint: { address: entryPoint07Address, version: '0.7' },
   })
+  // #4817: the send-dispatch record rides the bundler transport, so a submit
+  // can tell "the bundler answered with a rejection" from "the request left
+  // and no answer came back".
+  const sendDispatch = createSendDispatchRecord()
   const client = createSmartAccountClient({
     account,
     chain,
-    bundlerTransport: http(cfg.bundlerUrl),
+    bundlerTransport: http(cfg.bundlerUrl, { onFetchRequest: recordSendDispatch(sendDispatch) }),
     paymaster: pimlico,
     ...(cfg.sponsorshipPolicyId
       ? { paymasterContext: { sponsorshipPolicyId: cfg.sponsorshipPolicyId } }
@@ -539,12 +703,30 @@ export async function createDelegationRail(cfg: DelegationRailConfig): Promise<D
     prepared: PreparedRedemption,
     signature: Hex,
   ): Promise<RedemptionSubmitResult> {
-    // #3329 review finding N2: a throw HERE (bundler rejected the op) means
-    // it never entered the mempool — nothing on-chain changed.
-    const userOpHash = await client.sendUserOperation({
-      ...prepared.userOperation,
-      signature,
-    })
+    // #4817: a throw HERE is only "it never entered the mempool" when the
+    // bundler ANSWERED (a JSON-RPC error, an HTTP 4xx) or the request never
+    // left (the client's prepare step). A dispatched `eth_sendUserOperation`
+    // whose answer was lost — a timeout, a reset connection, a body that is
+    // not a JSON-RPC answer, an HTTP 5xx — may have been accepted, so it is
+    // the outcome-unknown variant, carrying the hash of the operation the
+    // bundler received.
+    const dispatchedBefore = sendDispatch.sent
+    let userOpHash: Hex
+    try {
+      userOpHash = await client.sendUserOperation({
+        ...prepared.userOperation,
+        signature,
+      })
+    } catch (err) {
+      const sent = sendDispatch.sent
+      if (!sent || sent === dispatchedBefore || readTransportFailure(err) !== 'outcome_unknown') throw err
+      const hash = sentUserOperationHash(sent, cfg.chainId) ?? prepared.userOpHash
+      throw new SubmittedUserOpFailedError(
+        `redemption UserOp ${hash} was sent but the bundler's answer was lost: ${err instanceof Error ? err.message : String(err)}`,
+        hash,
+        'receipt_unconfirmed',
+      )
+    }
     // Everything past this point is POST-SEND: a throw here means the op MAY
     // have landed, and `SubmittedUserOpFailedError` says so explicitly.
     let receipt: Awaited<ReturnType<typeof pimlico.waitForUserOperationReceipt>>
@@ -740,10 +922,13 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
     transport: http(cfg.bundlerUrl),
     entryPoint: { address: entryPoint07Address, version: '0.7' },
   })
+  // #4817: same send-dispatch record as the delegation rail — see
+  // `createSendDispatchRecord`.
+  const sendDispatch = createSendDispatchRecord()
   const client = createSmartAccountClient({
     account,
     chain,
-    bundlerTransport: http(cfg.bundlerUrl),
+    bundlerTransport: http(cfg.bundlerUrl, { onFetchRequest: recordSendDispatch(sendDispatch) }),
     paymaster: pimlico,
     ...(cfg.sponsorshipPolicyId
       ? { paymasterContext: { sponsorshipPolicyId: cfg.sponsorshipPolicyId } }
@@ -784,12 +969,49 @@ export async function createTreasuryOps(cfg: TreasuryOpsConfig): Promise<Treasur
     prepared: PreparedTreasuryOp,
     signature: Hex,
   ): Promise<RedemptionSubmitResult> {
-    const userOpHash = await client.sendUserOperation({
-      ...prepared.userOperation,
-      signature,
-    })
-    const receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
-    if (!receipt.success) throw new Error('treasury UserOp included but reverted')
+    // #4817: the same send classification as `submitRedemption` — a dispatched
+    // `eth_sendUserOperation` whose answer was lost may have been accepted, so
+    // it is the outcome-unknown variant with the hash the bundler received.
+    const dispatchedBefore = sendDispatch.sent
+    let userOpHash: Hex
+    try {
+      userOpHash = await client.sendUserOperation({
+        ...prepared.userOperation,
+        signature,
+      })
+    } catch (err) {
+      const sent = sendDispatch.sent
+      if (!sent || sent === dispatchedBefore || readTransportFailure(err) !== 'outcome_unknown') throw err
+      const hash = sentUserOperationHash(sent, cfg.chainId) ?? prepared.userOpHash
+      throw new SubmittedUserOpFailedError(
+        `treasury UserOp ${hash} was sent but the bundler's answer was lost: ${err instanceof Error ? err.message : String(err)}`,
+        hash,
+        'receipt_unconfirmed',
+      )
+    }
+    // #4817: the receipt wait is post-send too — the op MAY have landed, so a
+    // throw here is the outcome-unknown variant, never a plain error.
+    let receipt: Awaited<ReturnType<typeof pimlico.waitForUserOperationReceipt>>
+    try {
+      receipt = await pimlico.waitForUserOperationReceipt({ hash: userOpHash })
+    } catch (err) {
+      throw new SubmittedUserOpFailedError(
+        `treasury UserOp ${userOpHash} was sent but its receipt could not be confirmed: ${err instanceof Error ? err.message : String(err)}`,
+        userOpHash,
+        'receipt_unconfirmed',
+      )
+    }
+    if (!receipt.success) {
+      // #4817: the op LANDED and reverted — a KNOWN outcome, distinct from the
+      // variant above. The receipt's `actualGasCost` rides the error so a
+      // caller can record the sponsored gas the failed op still burned.
+      throw new SubmittedUserOpFailedError(
+        `treasury UserOp ${userOpHash} included but reverted`,
+        userOpHash,
+        'included_reverted',
+        receipt.actualGasCost ?? null,
+      )
+    }
     return {
       txHash: receipt.receipt.transactionHash,
       userOpHash,

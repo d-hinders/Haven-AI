@@ -5,10 +5,11 @@
  * ## The gap
  *
  * `POST /payments/:id/sign` submits the sponsored redemption UserOp and waits
- * for its receipt. When the wait throws — a timeout, a bundler hiccup — the
- * rail raises `SubmittedUserOpFailedError` with outcome
- * `receipt_unconfirmed` (#3564): the op MAY have landed, and the funds MAY
- * have moved. The route books such a row outcome-PENDING (`submitted`,
+ * for its receipt. When the send's answer is lost, or the wait throws — a
+ * timeout, a bundler hiccup — the rail raises `SubmittedUserOpFailedError`
+ * with outcome `receipt_unconfirmed` (#3564, widened by #4817 to cover the
+ * lost send answer): the op MAY have landed, and the funds MAY have moved.
+ * The route books such a row outcome-PENDING (`submitted`,
  * `machine_metadata.user_op_hash` recorded, `submission_outcome: 'unknown'`)
  * instead of `failed`, and this tick is what eventually gives the row its
  * true terminal state. Without it the row would sit unresolved forever,

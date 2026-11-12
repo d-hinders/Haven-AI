@@ -3093,7 +3093,8 @@ reach, none of which a prior entry measured.
 - S1 — between sending an operation and booking its outcome, one failure mode
   is recognised as "outcome unknown". The backend's rail file has two
   send-and-wait functions; the unknown outcome is raised at one throw site, the
-  receipt wait of the shared redemption submit, which three routes read. Five
+  receipt wait of the shared redemption submit, which three callers read (the
+  sign module and the two budget routes). Five
   reproduced defects: (1) the agent sign route books `failed`, and the hosted
   mapper says "create a new payment", when the bundler's answer to the send is
   lost (a transport timeout of about 10 s); (2) the same when the op is mined
@@ -3180,7 +3181,9 @@ money field claims 2 (no block); operator incident 2 (no block); dashboard 3
 non-answer read as an answer 4, cross-surface disagreement on one fact 3,
 dashboard input handling 3, and one each of contact casing, a handoff to
 something the surface lacks, replay shape, a retry that is not byte-stable,
-and one item aborting a batch. The first three classes have no block.
+and one item aborting a batch. The first and third classes have no block;
+block 8 states the second as its clean criterion, but its instrument did not
+reach these four.
 
 **Dispositions observed (upkeep):** 2026-11-11 scoped entry → #4804 open,
 still `pending-review`. 2026-11-02 C1 → epic #4610 open for its promotion
@@ -3246,16 +3249,20 @@ the runner through `$RG`; a hunter's `git fetch` in a shared worktree moves
 `origin/dev` for every reader, so commands name the SHA; a hunter's timing
 figure is not the captain's — quote the run that was kept.
 
-**Review:** `haven-reviewer` at head `42f2ccc39`, in its own clone, checked 60
-line references, every count with a command, the 21 manifest rows, the block
-figures against their raw outputs, 20 issue and PR claims against their
-bodies and each quoted reproduction output against the logs and test sources:
-changes requested — 7 blocking, 16 should-fix, 10 nits, all applied in place.
+**Review:** `haven-reviewer` at head `42f2ccc39`, in its own clone, checked
+(by its own count) 60 line references, every count with a command, the 21
+manifest rows, the block figures against their raw outputs, 20 issue and PR
+claims against their bodies and each quoted reproduction output against the
+logs and test sources: changes requested — 7 blocking, 16 should-fix, 10 nits,
+all applied.
 Among them: the second structural finding withdrawn; the hosted quote defect
 narrowed to the condition above; two wrong attributions (#4470's origin,
 #3214's subject); a timing figure that was a hunter's, not the captain's; a
 false "touches none of the files cited"; three money-path verdicts that had
-been asserted and not run. The report's § 5 lists them.
+been asserted and not run. A second pass at `94eb159bd` found all seven
+blockers resolved and no blocking item, and asked for four should-fix and
+three nit text corrections, which the captain applied directly without a third
+pass. The report's § 5 lists both passes.
 
 **Disposition: pending owner decision** (S1, C1–C5, and the ten defects beyond
 the cap).

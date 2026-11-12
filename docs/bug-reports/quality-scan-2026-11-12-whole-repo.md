@@ -100,11 +100,12 @@ git grep -n -E "\.submitCall\(" 9871885a9 -- packages/backend/src ':!**/*.test.t
 #   → 5: hybrid-signer-actions.ts:320, hybrid-transfers.ts:191, agent-delegations.ts:1195 and :1375, agent-rekey.ts:774
 ```
 
-- The one throw site is `delegation-rail.ts:552-563`. Three routes read it as
-  outcome-unknown: `sign-payment.ts:424`, `routes/task-budgets.ts:368` and
-  `routes/sub-budgets.ts:195` (the two budget routes answer
-  `close_outcome_unconfirmed`; their close flows were not exercised in this
-  run).
+- The one throw site is `delegation-rail.ts:552-563`. Three callers treat the
+  typed error as "may have landed": the sign module (`sign-payment.ts:424`,
+  for the receipt-unconfirmed variant) and the two budget routes
+  (`routes/task-budgets.ts:368`, `routes/sub-budgets.ts:195`, which test for
+  the error class and so see both of its variants; their close flows were not
+  exercised in this run).
 - `submitCall` (`delegation-rail.ts:783-799`) has no post-send distinction. All
   five of its callers answer any throw with `502` and a "… failed" body:
   `hybrid-transfers.ts:205` `Transfer failed`; `hybrid-signer-actions.ts:340`
@@ -129,7 +130,9 @@ git grep -n -E "\.submitCall\(" 9871885a9 -- packages/backend/src ':!**/*.test.t
    candidates. The hosted mapper's text for that code
    (`packages/mcp-server/src/tools/support/errors.ts:391-392`) tells the agent
    to "create a new payment if they still want to pay". The idempotency lookup
-   and its partial index both exclude `failed` rows, so the key is free again.
+   (`payment-intents.ts:422`) and its partial index
+   (`020_send_idempotency_key.ts:29-30`) both exclude `failed` rows, so the key
+   is free again.
 2. *Agent payment: the op is mined, a later step throws.* The fiat lookup and
    the confirm write sit in the same `try` as the submit
    (`sign-payment.ts:289-321`). With the submit returning a transaction hash and
@@ -209,9 +212,14 @@ repository file.
   whose revocation landed but answered "failed" would stay at its stage until
   the owner retries; the code's own comment there says retrying is safe.
 
-Routing and money-path for the files named (the skill's two one-liners; control
-`sweep.ts` → `money-path`): `code frontend backend packages`; every backend
-file `money-path`; the two dashboard files `off`.
+Routing and money-path for the ten files the slices change
+(`delegation-rail.ts`, `sign-payment.ts`, `submission-reconciler.ts`,
+`payment-intents.ts`, `hybrid-transfers.ts`, `hybrid-signer-actions.ts`,
+`agent-delegations.ts`, `agent-rekey.ts`, `useDelegationSend.ts`,
+`DelegationSendModal.tsx`; the skill's two one-liners, control `sweep.ts` →
+`money-path`): `code frontend backend packages`; the eight backend files
+`money-path`; the two dashboard files `off`. Cited as evidence only:
+`index.ts` (`off`) and the hosted `errors.ts` (`money-path`).
 
 ### Withdrawn at review: a second structural finding
 
@@ -271,7 +279,8 @@ two one-liners for the files named; the control `sweep.ts` printed
   agent back to `haven_discover_tools`. Routing → `code backend mcp_server
   packages`; money-path → `routes/catalog.ts off`,
   `tools/catalog-purchase.ts money-path`. Whether dev or production holds a
-  `verified_payable` submission was not checked.
+  `verified_payable` submission was not checked. Mutation recipe *unrun*: the
+  branch it would mutate does not exist yet.
 - **Verification still needed.** The same two tests green; a guided quote of
   an ingestion row end to end, which nothing in the suite does today.
 
@@ -292,7 +301,8 @@ two one-liners for the files named; the control `sweep.ts` printed
   answer lost; a receipt captured; attempt 2 → `skipped`,
   `IDEMPOTENCY_KEY_REUSE`, `external_ref` null, one document at the provider.
   Control without the receipt: the retry replays and the row is `pushed`.
-  Routing → `code backend packages`; money-path → both files `off`.
+  Routing → `code backend packages`; money-path → both files `off`. Mutation
+  recipe *unrun*: the pin it would mutate does not exist yet.
 - **Verification still needed.** The same test green; the behaviour of the
   live Accounted API on a same-key, different-bytes upload (the provider side
   here is the simulator).
@@ -315,7 +325,8 @@ two one-liners for the files named; the control `sweep.ts` printed
   above. The hunter also ran the connector's own local-mode tests unmodified
   (they assert the removal); the captain did not run those. Routing → `code
   connect mcp mcp_server packages`; money-path → `packages/mcp/src/tools.ts
-  off`. A pending task budget reserves nothing (read).
+  off`. A pending task budget reserves nothing (read). Mutation recipe
+  *unrun*: neither remedy's branch exists yet.
 - **Verification still needed.** A task budget opened and closed through the
   local MCP alone, on dev.
 
@@ -336,7 +347,8 @@ two one-liners for the files named; the control `sweep.ts` printed
   immediately after settle and with the row aged 30 days, after one
   remaining-budget read and one deploy check. Control: the same key while
   pending replays as 201 with the id. Routing → `code backend packages`;
-  money-path → both files `money-path`.
+  money-path → both files `money-path`. Mutation recipe *unrun*: the branch it
+  would mutate does not exist yet.
 - **Verification still needed.** The same test green; the hosted tool's answer
   for the new body.
 
@@ -350,8 +362,9 @@ Run by a hunter and again by the captain. ‡ marks the four withdrawn from S2.
   directly with that read answering 500, a merchant quoting 1.5 USDC and
   `expected_amount: "0.10"`: `safe_to_continue: true`, `max_amount_human:
   "1.5"` prefilled, no `price_differs_from_expected` key; `next_arguments`
-  then prepares a payment at 1,500,000 atomic. Control: with the read
-  answering 200 the quote stops. **Condition:** the hosted server runs an
+  then prepares a payment at 1,500,000 atomic (the test prints these fields;
+  it asserts only that the quote succeeded). Control: with the read answering
+  200 the quote stops. **Condition:** the hosted server runs an
   identity gate before every non-exempt handler
   (`packages/mcp-server/src/server.ts:311-314`), and that gate reads the same
   endpoint, so through the server the defect needs the gate's read to succeed
@@ -464,7 +477,10 @@ cross-surface disagreement on one fact (3: the receipt merchant, the
 listed-then-404 row, the quote's two prices), input handling in the dashboard
 (3), and one each of contact casing in the backend, a handoff to something the
 surface lacks, replay shape, a retry that is not byte-stable, and one item
-aborting a batch. None of the first three classes has a block.
+aborting a batch. The first and third classes have no block. Block 8 states
+the second as its clean criterion ("no non-answer … reads as a refusal"), but
+its instrument did not reach these four: a 429, the signer's own fetch, the
+quote's skipped comparison and the dashboard's session read.
 
 **Residual archaeology** (PRs merged to `dev` 2026-11-02T00:00:00Z ..
 2026-11-12T00:00:00Z, taken 2026-11-11T23:10Z): 115 PRs; 61 carry an inline
@@ -521,7 +537,7 @@ picker with no selectable row).
   one unauthenticated read of the dev listing at 2026-11-11T23:17:50Z → 26
   entries, 24 active, 12 http / 12 mcp, 0 bazaar; third-party tier not
   examined → not requested. Dev was deploying `cbb1798b9` at that instant
-  (the deployment began 23:14:54Z); #4814 changes nothing under
+  (the deployment record was created 23:14:52Z); #4814 changes nothing under
   `packages/backend`.
 - incident clustering → partial → the escape analysis above; no count over
   time.
@@ -583,12 +599,13 @@ picker with no selectable row).
 
 ## 5. Independent review
 
-`haven-reviewer`, in its own clone, at head `42f2ccc39`: **changes requested**.
-It checked 60 line references (57 held), every count with a command, all 21
-manifest rows against the runner's output, the block figures against their raw
-outputs, 20 issue and PR claims against their bodies, and each quoted
-reproduction output against the captain's logs and the test sources. Seven
-blocking corrections, sixteen should-fix and ten nits; all applied in place:
+**First pass**, `haven-reviewer` in its own clone, at head `42f2ccc39`:
+changes requested. By the reviewer's own count it checked 60 line references
+(57 held), every count with a command, all 21 manifest rows against the
+runner's output, the block figures against their raw outputs, 20 issue and PR
+claims against their bodies, and each quoted reproduction output against the
+captain's logs and the test sources. Seven blocking corrections, sixteen
+should-fix and ten nits; all applied:
 
 - **A structural finding withdrawn.** S2 did not meet the skill's bars; its
   four defects moved to *beyond the cap*.
@@ -606,7 +623,7 @@ blocking corrections, sixteen should-fix and ten nits; all applied in place:
   function, and the `signPayment` test does not time its call.
 - **A false universal.** "#4814 touches none of the files cited" — it touches
   one. "Recognised at exactly one point … the agent-payment submit" — one
-  throw site, in the shared redemption submit, read by three routes.
+  throw site, in the shared redemption submit, read by three callers.
 - **Money-path verdicts** that were asserted, not run: C4 is `off`, C2's
   route file is `off` and its hint file `money-path`. All verdicts above are
   now the one-liners' output.
@@ -615,4 +632,13 @@ blocking corrections, sixteen should-fix and ten nits; all applied in place:
   process-handler grep, the 429 bodies, the amount string, the instant of the
   live calls), and the "beyond the cap" list named as a departure.
 
-The corrected head is recorded on the PR.
+**Second pass** (the delta), at head `94eb159bd`: all seven blockers resolved
+and no blocking item; changes requested on four should-fix and three nits, all
+one-line text corrections that change no finding — the mutation-recipe line
+missing from C2–C5; S1's routing sentence covering files it did not name; "the
+first three classes have no block", when block 8 states the second as its
+clean criterion; the first pass's tallies quoted without saying whose count
+they were; a deployment instant two seconds off; "three routes" for a module
+and two routes; a missing reference for the idempotency exclusion. The captain
+applied them directly, without a third pass, under the owner's standing rule
+for text corrections. The corrected head is recorded on the PR.

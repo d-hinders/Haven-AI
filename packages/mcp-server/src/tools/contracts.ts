@@ -156,6 +156,12 @@ const mcpTransportArg = z
  */
 export type DiscoveryHint =
   | { suggested_tool: 'haven_quote_catalog_purchase'; suggested_arguments: { catalog_id: string } }
+  // #4823: a self-submitted (`source: 'ingestion'`) MCP row is listed to
+  // agents but the agent detail read answers it 404, so the catalog-id hint
+  // was a dead end on the hosted runtime. It gets the same by-URL hint the
+  // local runtime already emits — haven_quote_mcp_tool takes merchant_url and
+  // tool_name, both of which the row carries.
+  | { suggested_tool: 'haven_quote_mcp_tool'; suggested_arguments: { merchant_url: string; tool_name: string } }
   // #3769: a plain-HTTP row that declares a method/body carries them in the
   // hint — the arguments must remain VERBATIM-acceptable by
   // haven_quote_x402's schema (url, method, headers, body), which already

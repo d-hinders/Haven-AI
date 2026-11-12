@@ -904,16 +904,21 @@ never authorize payment, and any catalog price remains indicative until the
 live quote below.
 Since #3100 each entry carries `suggested_tool` **and** `suggested_arguments`,
 spelled in that tool's own vocabulary and accepted by it verbatim — on the
-hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`
-`{ catalog_id }` (prepare requires a cap the server must never invent) and an
-HTTP entry at `haven_quote_x402 { url }` — with `method` and `body` added to
-the hint when the row declares them (#3769: a GET-only suggestion for a
-POST-declared resource described a call the merchant cannot answer usefully;
-`body` is the JSON string of the row's `body_example`); the local runtime
-points at its pay tools with `{ merchant_url, tool_name, arguments }`
-(`arguments` only when the row carries them) / `{ url }`. A row the suggested
-tool would refuse — no `tool_name` on either surface, degraded on the hosted
-one — gets `suggested_tool_omitted_reason` instead of a hint. A hosted strict
+hosted surface an operator MCP entry points at the cap-free
+`haven_quote_catalog_purchase` `{ catalog_id }` (prepare requires a cap the
+server must never invent) and an HTTP entry at `haven_quote_x402 { url }` — with
+`method` and `body` added to the hint when the row declares them (#3769: a
+GET-only suggestion for a POST-declared resource described a call the merchant
+cannot answer usefully; `body` is the JSON string of the row's `body_example`);
+the local runtime points at its pay tools with `{ merchant_url, tool_name,
+arguments }` (`arguments` only when the row carries them) / `{ url }`. A
+self-submitted (`source: 'ingestion'`) MCP row is the exception on the hosted
+surface (#4823): it is listed to agents but the agent detail read answers it
+404, so it points at `haven_quote_mcp_tool { merchant_url, tool_name }` — the
+same by-URL path the local runtime names — instead of the catalog-id dead end.
+A row the suggested tool would refuse — no `tool_name` on either surface,
+degraded on the hosted one — gets `suggested_tool_omitted_reason` instead of a
+hint. A hosted strict
 refusal names the declared keys and the declared alias of a rejected key
 (`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
 quote tool the hosted hint names carries no structured next step of its own:

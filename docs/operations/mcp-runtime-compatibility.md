@@ -87,7 +87,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-11"
+last-verified: "2026-11-12"
 ---
 
 > **Contract change (#4808, 2026-11-11): the local MCP's settlement-evidence
@@ -2471,7 +2471,12 @@ to call next in structured fields, and those fields are typed end to end
   `next_tool` is absent — never null — and `next_tool_omitted_reason` says why.
   A refusal carries the same fields a success does. Discovery entries carry
   `suggested_tool` + `suggested_arguments` under the same rule, or
-  `suggested_tool_omitted_reason`.
+  `suggested_tool_omitted_reason`. Provenance decides which tool an MCP row
+  names on the hosted surface (#4823): an operator row points at
+  `haven_quote_catalog_purchase { catalog_id }`, while a self-submitted
+  (`source: 'ingestion'`) row — listed to agents but answered 404 by the agent
+  detail read — points at `haven_quote_mcp_tool { merchant_url, tool_name }`,
+  the same by-URL path the local runtime names.
 - **Where it is built.** The SDK's `createNextStepBuilder`
   (`packages/sdk/src/next-step.ts`) over a target map; the hosted server, the
   signer and the local runtime each declare the shapes they hand off to, and a

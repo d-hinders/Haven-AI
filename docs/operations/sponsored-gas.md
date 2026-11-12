@@ -37,10 +37,11 @@ Three rules worth knowing:
   widened `SubmittedUserOpFailedError` (`actualGasCost`) and is recorded. Only
   the token transfer rolled back; the paymaster's gas did not.
 - **A `receipt_unconfirmed` op has no known cost** — it is recorded with a
-  cost-NULL row so the attempt still counts. The submission reconciler's later
-  resolution does NOT backfill the cost (the reconciler reads a receipt shape
-  that carries only inclusion/txHash; widening that is a deliberate
-  non-goal for #3837).
+  cost-NULL row so the attempt still counts. That outcome covers both a send
+  whose answer was lost and a receipt wait that errored (#4817): in neither
+  case was a receipt seen. The submission reconciler's later resolution does
+  NOT backfill the cost (the reconciler reads a receipt shape that carries only
+  inclusion/txHash; widening that is a deliberate non-goal for #3837).
 - **A pre-send bundler rejection records NOTHING** — the op never entered the
   mempool, so nothing was sponsored.
 

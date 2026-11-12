@@ -184,12 +184,12 @@ const EXPECTED_REFUSE_CALLS: Record<(typeof TARGET_FILES)[number], { line: numbe
     // ledger writer and six allowlisted no-writer sites, in the order the
     // state machine decides them.
     { line: 360, code: 429, ledger: 'row' }, // relayer budget refused before broadcast (#717/#2945)
-    { line: 426, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
-    { line: 478, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
-    { line: 504, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
-    { line: 553, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
-    { line: 592, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
-    { line: 646, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
+    { line: 429, code: 502, ledger: 'skipped' }, // #3564 receipt-unconfirmed submit — outcome-pending booking, allowlisted
+    { line: 481, code: 502, ledger: 'skipped' }, // #3494 AA24 signature rejection confirmed at submit — allowlisted
+    { line: 507, code: 502, ledger: 'skipped' }, // #3494 other AA2x account-validation failure confirmed at submit — allowlisted
+    { line: 556, code: 502, ledger: 'skipped' }, // #3494 task-budget transfer-cap revert confirmed at submit — allowlisted
+    { line: 595, code: 502, ledger: 'skipped' }, // #3494 period-budget revert confirmed at submit — allowlisted
+    { line: 649, code: 502, ledger: 'skipped' }, // on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — allowlisted
   ],
   'src/modules/payments/create-payment.ts': [
     // #4760: the create flow, moved verbatim out of routes/payments.ts. Six
@@ -253,27 +253,27 @@ const WRAPPED_NO_WRITER: Record<(typeof TARGET_FILES)[number], { line: number; r
   ],
   'src/modules/payments/sign-payment.ts': [
     {
-      line: 426,
+      line: 429,
       reason: '#3564 the receipt-unconfirmed submit — the row is booked outcome-pending (never failed) and the submission reconciler resolves it from the chain, so the 502 is a poll instruction, not a policy refusal',
     },
     {
-      line: 478,
+      line: 481,
       reason: '#3494 AA24 signature rejection — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 504,
+      line: 507,
       reason: '#3494 other AA2x account-validation failure — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 553,
+      line: 556,
       reason: '#3494 task-budget transfer-cap revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 592,
+      line: 595,
       reason: '#3494 period-budget revert confirmed at submit — deliberately not booked: the failed intent row is the record',
     },
     {
-      line: 646,
+      line: 649,
       reason: 'on-chain execution failed after claim (including a reverted-but-landed SubmittedUserOpFailedError, review round 2) — deliberately not booked: the failed intent row is the record',
     },
   ],

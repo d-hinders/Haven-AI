@@ -652,10 +652,11 @@ export async function failSubmittedIntent(
 // ── Outcome-pending booking + chain reconciliation (#3564) ────────────────────
 //
 // A `SubmittedUserOpFailedError` whose outcome is `receipt_unconfirmed` means
-// the UserOp was SENT and MAY have landed: booking that row `failed` records a
-// funds-moved payment as failed forever. The booking below instead leaves the
-// row `submitted` (non-terminal) and records the userOpHash in
-// `machine_metadata` as the reconciler's lookup key. The `tx_hash IS NULL`
+// the UserOp was SENT and MAY have landed — the send's answer was lost, or the
+// receipt wait errored (#4817 widened the first case in): booking that row
+// `failed` records a funds-moved payment as failed forever. The booking below
+// instead leaves the row `submitted` (non-terminal) and records the userOpHash
+// in `machine_metadata` as the reconciler's lookup key. The `tx_hash IS NULL`
 // conjunct keeps a confirmed row un-touchable; the `status = 'submitted'`
 // conjunct makes the write a CAS — a concurrent settle still wins cleanly.
 

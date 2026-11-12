@@ -15,7 +15,7 @@ import type { AgentContext } from '../../middleware/agentAuth.js'
 import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../../rails/delegation-rail.js'
 import { prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureDelegateHybridDeployed } from '../../rails/hybrid-provisioning.js'
-import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+import { RelayerBudgetExceededError, RELAYER_BUDGET_EXCEEDED_ERROR_CODE } from '../../infra/relayer-spend-guard.js'
 import {
   buildSettlementDelegation,
   selectStoredAccepted,
@@ -1014,7 +1014,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     if (err instanceof RelayerBudgetExceededError) {
       // #3053: choke point; allowlisted without a ledger row — the relayer
       // sponsorship budget is exhausted (capacity, not spend policy).
-      return refuse({ code: 429, body: { error: err.message } }, null)
+      return refuse({ code: 429, body: { error: err.message, error_code: RELAYER_BUDGET_EXCEEDED_ERROR_CODE } }, null)
     }
     // #3053: choke point; allowlisted without a ledger row — delegate-account
     // deploy infrastructure, not policy (named in the census guard's header).

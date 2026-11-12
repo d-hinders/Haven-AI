@@ -46,7 +46,10 @@ function hostedSource(): string {
   return parts.join('\n')
 }
 
-const NEXT_KEYS = ['next_action', 'suggested_tool', 'next_tool', 'next_tool_server', 'next_tool_name', 'next_tool_server_role', 'next_arguments', 'next_tool_omitted_reason'] as const
+// #4828: `retry_after_seconds` joins the pinned wire fields — a rate-limit
+// answer carries the limiter's stated wait, and a reworded or dropped field
+// reddens the fixture that pins it.
+const NEXT_KEYS = ['next_action', 'suggested_tool', 'next_tool', 'next_tool_server', 'next_tool_name', 'next_tool_server_role', 'next_arguments', 'next_tool_omitted_reason', 'retry_after_seconds'] as const
 
 describe('hosted refusal next-step emissions — characterization (#3102)', () => {
   it(`census: ${REFUSAL_STEP_CALLS} refusal steps are built in the hosted source (refusalNextStep calls; a bare nextAction on HostedToolError no longer compiles)`, () => {

@@ -317,6 +317,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(429)
       expect(res.json().error).toMatch(/Relayer budget exceeded/)
+      // #4828: the typed code the hosted mapper answers the stop from.
+      expect(res.json().error_code).toBe('relayer_budget_exceeded')
       expect(mockCreateIntent).not.toHaveBeenCalled()
     })
 

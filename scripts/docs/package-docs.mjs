@@ -626,7 +626,20 @@ export const GOVERNED_PACKAGE_DOCS = [
     // session 404 and 30-minute TTL, the readiness gate's 503 body and 15 s
     // cache, the #3170 revert split and its 120/500-character caps, the
     // DelegationManager pin, the skip-settle guard and migration 102.
-    'last-verified': '2026-10-24',
+    // #4853: new § "Stripe recording" verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/products.ts
+    // (`stripeRecording`, `productReceivingAddress`) and src/http.ts (the
+    // /healthz `stripe` block, the fire-and-forget recording), plus
+    // stripe.test.ts / stripe-recording.test.ts / stripe-reconcile.test.ts.
+    // EDITED: the settlement-paths table's "Receives the USDC" row, the
+    // "no product's does today" sentence (one does now), the /healthz endpoint
+    // description, and a "What It Demonstrates" bullet. The Stripe parameters
+    // and the two API versions were re-read from
+    // docs.stripe.com/payments/machine/x402 on 2026-11-16. The optional
+    // STRIPE_PREVIOUS_DEPOSIT_ADDRESS and its operator note were verified
+    // against src/stripe.ts and src/x402.ts. Nothing else re-verified in this
+    // pass.
+    'last-verified': '2026-11-16',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

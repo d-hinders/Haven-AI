@@ -160,6 +160,14 @@ export interface Product {
    * Read it through `productSettlementKind`.
    */
   settlement?: SettlementKind
+  /**
+   * #4853: this product's payments are recorded in Stripe as PaymentIntents,
+   * and its receiving address is the Stripe deposit address when one is
+   * configured. Read the address through `productReceivingAddress`, never off
+   * this field. Only the CDP-settled joke sets it: Stripe records what CDP
+   * settled, and no other product is settled by CDP.
+   */
+  stripeRecording?: boolean
 }
 
 /**
@@ -175,8 +183,21 @@ export const SETTLEMENT_KINDS = ['self', 'cdp'] as const
 export type SettlementKind = (typeof SETTLEMENT_KINDS)[number]
 export const DEFAULT_SETTLEMENT_KIND: SettlementKind = 'self'
 
-/** #4850: the address a payment for `product` must be made out to. */
-export function productReceivingAddress(product: Product, merchantDefault: Address): Address {
+/**
+ * #4850: the address a payment for `product` must be made out to.
+ *
+ * #4853: a product whose payments Stripe records (`stripeRecording`) is paid
+ * to the Stripe deposit address when one is configured — the deposit address
+ * IS that product's receiving address, and no other product can name it. The
+ * caller passes the deposit address only when Stripe is on; absent, the
+ * product keeps `MERCHANT_ADDRESS` exactly as before.
+ */
+export function productReceivingAddress(
+  product: Product,
+  merchantDefault: Address,
+  opts?: { stripeDepositAddress?: Address },
+): Address {
+  if (product.stripeRecording && opts?.stripeDepositAddress) return opts.stripeDepositAddress
   return product.receivingAddress ?? merchantDefault
 }
 
@@ -302,6 +323,10 @@ export const PRODUCTS: Record<ProductId, Product> = {
    *
    * 10,000 atomic USDC = 0.01 USDC: a whole number of US cents, which Stripe's
    * machine-payments recording needs in M2 (#4853).
+   *
+   * #4853: the one product Stripe records. With `STRIPE_DEPOSIT_ADDRESS` and
+   * `STRIPE_SECRET_KEY` both set, its receiving address is the Stripe deposit
+   * address and each settled payment becomes a PaymentIntent.
    */
   joke: {
     id: 'joke',
@@ -313,6 +338,7 @@ export const PRODUCTS: Record<ProductId, Product> = {
     category: 'joke',
     billing: 'one_time',
     settlement: 'cdp',
+    stripeRecording: true,
     x402: { settlementMethods: ['eip3009'], defaultSettlementMethod: 'eip3009' },
   },
 }

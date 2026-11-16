@@ -59,6 +59,13 @@ export interface MerchantConfig {
    * server is exactly what it was before the product existed.
    */
   cdpConfigured?: boolean
+  /**
+   * #4853: the Stripe deposit address, when Stripe recording is on. It is the
+   * receiving address of the product Stripe records (the joke), so the in-band
+   * quote names the same address the HTTP 402 does. Absent, that product keeps
+   * `merchantAddress`.
+   */
+  stripeDepositAddress?: Address
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -559,7 +566,10 @@ async function completePurchase(
   const t = STRINGS[locale]
   const product = PRODUCTS[productId]
   // #4850: the address THIS product is paid to; the merchant-wide one is its default.
-  const receivingAddress = productReceivingAddress(product, config.merchantAddress)
+  // #4853: the Stripe-recorded product is paid to the deposit address when on.
+  const receivingAddress = productReceivingAddress(product, config.merchantAddress, {
+    stripeDepositAddress: config.stripeDepositAddress,
+  })
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()
 

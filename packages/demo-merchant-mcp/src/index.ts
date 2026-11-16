@@ -26,6 +26,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { type Address } from 'viem'
+import { createStripeRecording, resolveStripeConfig } from './stripe.js'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
@@ -208,12 +209,34 @@ const settlementClient = createViemSettlementClient({
   settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
 })
 
-const paymentProcessor = createX402PaymentProcessor(
-  settlementClient,
-  ERC7710_CONFIG
-    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG, cdp: CDP_CONFIG }
-    : { settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG, cdp: CDP_CONFIG },
-)
+// #4853: Stripe recording for the joke product. Off unless BOTH variables are
+// set, CDP is configured, and the joke's price is a whole number of cents; a
+// half-set or unusable configuration warns and stays off (never a refusal to
+// start). The secret goes to the Stripe client and nowhere else, and nothing
+// here logs it.
+const STRIPE_CONFIG = resolveStripeConfig({
+  depositAddressRaw: process.env.STRIPE_DEPOSIT_ADDRESS,
+  secretKeyRaw: process.env.STRIPE_SECRET_KEY,
+  previousDepositAddressRaw: process.env.STRIPE_PREVIOUS_DEPOSIT_ADDRESS,
+  cdpConfigured: Boolean(CDP_CONFIG),
+  priceAtomic: PRODUCTS.joke.price_usdc,
+})
+const STRIPE_RECORDING = STRIPE_CONFIG ? createStripeRecording(STRIPE_CONFIG) : undefined
+
+// #4853: a deposit address this merchant quoted before the current one, and
+// still honours for a payment that already settled to it. Operator-supplied —
+// the payment's own `payTo` is attacker-chosen and cannot be the test.
+const PREVIOUS_RECEIVING_ADDRESSES = STRIPE_CONFIG?.previousDepositAddress
+  ? [STRIPE_CONFIG.previousDepositAddress]
+  : undefined
+
+const paymentProcessor = createX402PaymentProcessor(settlementClient, {
+  ...(ERC7710_CONFIG ? { erc7710: ERC7710_CONFIG } : {}),
+  settlementMethods: SETTLEMENT_METHODS,
+  passport: PASSPORT_CONFIG,
+  cdp: CDP_CONFIG,
+  ...(PREVIOUS_RECEIVING_ADDRESSES ? { previousReceivingAddresses: PREVIOUS_RECEIVING_ADDRESSES } : {}),
+})
 
 const server = createDemoMerchantServer({
   merchantAddress: MERCHANT_ADDRESS,
@@ -223,6 +246,7 @@ const server = createDemoMerchantServer({
   settlementClient,
   passport: PASSPORT_CONFIG,
   cdpConfigured: Boolean(CDP_CONFIG),
+  stripe: STRIPE_RECORDING,
 })
 
 server.listen(PORT, () => {
@@ -248,6 +272,16 @@ server.listen(PORT, () => {
     CDP_CONFIG
       ? `  CDP:       configured — ${cdpProducts} verified and settled by Coinbase's facilitator`
       : '  CDP:       not configured (CDP_API_KEY_ID / CDP_API_KEY_SECRET unset) — joke product not offered',
+  )
+  // #4853: names the deposit address (public) and the API version, never the key.
+  console.log(
+    STRIPE_RECORDING
+      ? `  Stripe:    recording the joke to deposit address ${STRIPE_RECORDING.depositAddress} ` +
+          `(${STRIPE_RECORDING.network}, ${STRIPE_RECORDING.apiVersion})` +
+          (STRIPE_RECORDING.previousDepositAddress
+            ? `; still honouring settled payments to ${STRIPE_RECORDING.previousDepositAddress}`
+            : '')
+      : '  Stripe:    not configured — the joke is paid to MERCHANT_ADDRESS',
   )
   console.log()
   console.log(

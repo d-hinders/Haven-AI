@@ -36,6 +36,7 @@ import {
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
 import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from './tax-declaration.js'
+import { recordStripePayment, type StripeRecording } from './stripe.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
@@ -58,6 +59,14 @@ export interface DemoMerchantServerOptions {
    * payment gate, and `/healthz` has no `cdp` block.
    */
   cdpConfigured?: boolean
+  /**
+   * #4853: Stripe recording, present only when both Stripe variables are set
+   * and the recorded product's price is a whole number of cents. Its
+   * `depositAddress` is the recorded product's receiving address, and every
+   * settled payment for that product is recorded as a PaymentIntent. Absent,
+   * the product keeps `MERCHANT_ADDRESS` and `/healthz` has no `stripe` block.
+   */
+  stripe?: StripeRecording
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -257,6 +266,23 @@ async function handle(
             },
           }
         : {}),
+      // #4853: present only when Stripe recording is on, so a merchant without
+      // it keeps its /healthz byte-identical. `record_failures` is the counter
+      // the issue asks for; it is process-local (the merchant sleeps after
+      // ~10 minutes), so the durable signal is the `[stripe] record_failed
+      // tx=<hash>` log line the reconciliation runbook greps for.
+      ...(options.stripe
+        ? {
+            stripe: {
+              configured: true,
+              deposit_address: options.stripe.depositAddress,
+              api_version: options.stripe.apiVersion,
+              network: options.stripe.network,
+              recorded: options.stripe.stats().recorded,
+              record_failures: options.stripe.stats().failed,
+            },
+          }
+        : {}),
     })
     return
   }
@@ -320,6 +346,13 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
+    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
+    // has already moved, so a Stripe refusal, timeout or network error must
+    // never delay or refuse the goods. A failure is logged as
+    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
+    // /healthz. A payment served through recovery without a transaction hash
+    // (#4851) records nothing here — the reconciliation script picks it up.
+    recordStripePayment(options.stripe, paymentToolInfo.product, settled)
     // #4855: the buyer's signed tax declaration, if this paid request carried
     // one. Verified against the payer the merchant just settled from — the
     // same key that signed the payment — and treated as absent on ANY failure,
@@ -335,7 +368,9 @@ async function handle(
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
     const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
-      receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress),
+      receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
+        stripeDepositAddress: options.stripe?.depositAddress,
+      }),
       taxDeclaration,
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
@@ -361,8 +396,11 @@ async function handlePaymentGate(
 ): Promise<SettledPayment | null> {
   const { productId, product, description, settlementMethod } = paymentToolInfo
   // #4850: the PRODUCT names the address its payment is made out to; the
-  // merchant-wide address is only its default.
-  const receivingAddress = productReceivingAddress(product, options.merchantAddress)
+  // merchant-wide address is only its default. #4853: the Stripe-recorded
+  // product's address is the deposit address when Stripe is on.
+  const receivingAddress = productReceivingAddress(product, options.merchantAddress, {
+    stripeDepositAddress: options.stripe?.depositAddress,
+  })
 
   // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
   // the unpaid one that would receive the 402 challenge AND the agent's
@@ -542,6 +580,9 @@ async function getSession(
     settlementMethods: options.settlementMethods,
     passport: options.passport,
     cdpConfigured: options.cdpConfigured,
+    // #4853: the in-band quote must name the same receiving address the HTTP
+    // 402 does, so the deposit address travels with the session's config.
+    stripeDepositAddress: options.stripe?.depositAddress,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,

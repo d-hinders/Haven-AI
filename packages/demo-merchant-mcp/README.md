@@ -19,8 +19,11 @@ merchant-of-record product. Funds do not flow through Haven.
   `PAYMENT-RESPONSE`.
 - Haven compatibility: `X-PAYMENT` is accepted as an alias for
   `PAYMENT-SIGNATURE` while Haven SDK clients transition.
-- Merchant self-settlement with EIP-3009 `transferWithAuthorization`; the
-  submitter key only pays gas and does not need to be the receiving wallet.
+- Two settlement paths (see [Settlement paths](#settlement-paths-4852)):
+  merchant self-settlement with EIP-3009 `transferWithAuthorization` for every
+  product but the joke — the submitter key only pays gas and does not need to
+  be the receiving wallet — and, for the joke only, verification and settlement
+  by Coinbase's hosted facilitator (CDP).
 - ERC-7710 settlement by simulating and submitting `redeemDelegations` against
   an operator-configured trusted DelegationManager. The submitter key is the
   redeemer; it is not a Haven key and cannot spend without a buyer-signed
@@ -112,6 +115,42 @@ EIP-3009 by default. Haven's clients read `extra.assetTransferMethod`: under
 the #1450 preference rule, whose selector came with #1453, they prefer the option tagged `assetTransferMethod: "erc7710"` when the
 account is on the delegation rail and fall back to EIP-3009 otherwise
 (`selectX402SettlementScheme` in `packages/sdk/src/x402.ts`).
+
+## Settlement paths (#4852)
+
+Each product carries a settlement kind (`settlement` in `src/products.ts`, read
+through `productSettlementKind`; #4850). There are two:
+
+| | Own key (`self`) | Coinbase facilitator (`cdp`) |
+|---|---|---|
+| Products | the seven VPN and storage products, `vpn_legacy` included | the joke (`buy_joke`, 0.01 USDC) |
+| Offered | always | only with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` both set |
+| Methods | EIP-3009, plus ERC-7710 when enabled (`vpn_legacy`: EIP-3009 only) | EIP-3009 only |
+| Verifies | this merchant: signature, amount, recipient, window, or a simulated `redeemDelegations` | this merchant's own checks first, then CDP's `verify` (including its sanctions and risk screening) |
+| Submits and pays gas | `SETTLEMENT_PRIVATE_KEY` | CDP |
+| Receives the USDC | `MERCHANT_ADDRESS` | `MERCHANT_ADDRESS` |
+| Readiness gate on the merchant's gas wallet | applies | exempt |
+| After a failure | EIP-3009: the pre-submit `authorizationState` read (#1519); ERC-7710: the pinned enforcer's `spentMap` check (#1515) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
+
+In both, the merchant is paid in one transfer from the payer straight to
+`MERCHANT_ADDRESS`; Haven is not a party to it. (For a Haven agent paying with
+EIP-3009, the payer is its delegate wallet, which Haven's bridge funded from the
+agent's budget just before — that funding leg is Haven's, not the merchant's.) A product's receiving address can
+differ from `MERCHANT_ADDRESS` (#4850), but no product's does today.
+
+**Why the joke is not in Haven's catalog.** The demo store's funding target —
+which merchant-locked budgets are pinned to — is computed over all of its
+active, verified catalog rows
+(`MERCHANT_FUNDING_AGGREGATES_SQL` in
+`packages/backend/src/infra/repositories/merchants.ts`): the rows must all
+offer ERC-7710 and must agree on one `payTo`. One EIP-3009-only row would make
+merchant-locked budgets for the demo store refuse with 409, failing the QA
+`merchant-locked-budget` scenario, and a second receiving address (Stripe's
+deposit address, epic #4849 M2) would make the target conflicting. Like
+`vpn_legacy`, which has no catalog row either (and would hit the same refusal if
+it had one), the joke is paid at
+this merchant's MCP endpoint directly: quote, then pay, as for any MCP merchant
+outside the catalog. Listing it would need a change to that aggregate.
 
 ## Extensions echo (x402 v2, enforced)
 
@@ -355,8 +394,9 @@ It is the default receiving address: a product may name its own
 invoice's recipient address all follow the product being bought. Today no
 product names one, so every payment goes to `MERCHANT_ADDRESS`.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
-`transferWithAuthorization`; it does not need to be the receiving wallet and
-should not hold user or agent funds.
+`transferWithAuthorization` (and `redeemDelegations`) for every own-key product;
+it does not settle the joke, which CDP settles. It does not need to be the
+receiving wallet and should not hold user or agent funds.
 
 `MERCHANT_X402_SETTLEMENT_METHODS` defaults to EIP-3009 only unless the trusted
 DelegationManager is configured. If `erc7710` is requested but the manager is
@@ -535,7 +575,8 @@ the merchant **verifies by simulating**
 [executionCallData])` (the calldata encodes `USDC.transfer(merchant, amount)`),
 then settles by submitting that same call from `SETTLEMENT_PRIVATE_KEY`.
 
-Because the merchant self-settles, the settlement key is the **redeemer** — a
+Because the merchant self-settles every ERC-7710 payment (CDP settles no
+ERC-7710, and the joke offers none), the settlement key is the **redeemer** — a
 delegation with a redeemer caveat must name the settlement account. Each
 delegation settles at most one product here (in-process dedupe keyed on the
 `permissionContext` hash); scoping of token, amount, recipient, and expiry is

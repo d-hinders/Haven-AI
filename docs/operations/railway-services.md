@@ -67,7 +67,10 @@ merchant that consumes it.
 packages/demo-merchant-mcp` after the build: it spawns the built
 `dist/index.js` with a throwaway config and waits for the startup banner, which
 is printed inside `server.listen`'s callback. A green `tsup` alone would not
-prove the emitted entrypoint can resolve its workspace dependency.
+prove the emitted entrypoint can resolve its workspace dependency. Since #4851
+the throwaway config includes a fake CDP key pair: the smoke then asks the
+local `/healthz` and fails if CDP is not reported or if the key secret appears
+in the startup output or `/healthz`.
 
 **Operator step — the passport env flip.** The demo merchant advertises
 `haven-passport` only when BOTH of these are set on the service:
@@ -82,11 +85,45 @@ both **together, on a service that is not mid-quote**: the merchant's echo rule
 refuses a payment whose extensions do not contain every advertised key, so a
 402 quoted before the flip and paid after it is refused — and on the EIP-3009
 bridge that happens after funding, so the funds strand until a sweep. The
-window is one quote lifetime (`maxTimeoutSeconds`, 300 s).
+window is about 10 minutes: the 300 s quote (`maxTimeoutSeconds`) plus the
+300 s forward margin Haven's SDK adds when it signs
+(`X402_SETTLEMENT_FORWARD_MARGIN_SECONDS`).
 
 Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks this pin: the merchant will
 answer `not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER`
 is updated. See [secret-rotation.md](secret-rotation.md).
+
+**Operator step — the CDP key (#4851, epic #4849).** The demo merchant offers
+its CDP-settled joke product only when BOTH of these are set on the service:
+
+| Variable | Value |
+|---|---|
+| `CDP_API_KEY_ID` | the API key ID of a Coinbase Developer Platform project used only for the demo merchant |
+| `CDP_API_KEY_SECRET` | that key's secret |
+
+Paste the values straight into the service variables, never into chat, an
+issue, a file or a log, then redeploy: the pair is read once, at startup. With
+neither set the merchant is exactly as before to buyers and on `/healthz` (the
+startup banner gains a `CDP: not configured` line). With one set, or with both
+set but the Coinbase client failing to build, it logs a warning (naming the
+variables, or the error class only) and does not offer the joke; every other
+product is unaffected.
+
+**Setting** the pair needs no coordination with in-flight quotes: no joke quote
+can exist before it, and every other product's 402 is rebuilt from the product
+on each request, so it is unchanged. **Removing** it does: a joke quoted before
+the removal and paid after it gets "unknown tool" — nothing settles, so the
+merchant is not paid — but on Haven's EIP-3009 bridge, the joke's only path,
+the refusal comes after the funding leg, so 0.01 USDC strands on the agent's
+delegate until it is swept. Remove the pair on a service that is not mid-quote;
+the window is the same 10 minutes as for the passport flip above. Either redeploy
+also drops every in-memory MCP session, which buyers recover from by
+re-initialising, as after any redeploy.
+
+Check the result with `GET /healthz`, which carries a `cdp` block
+(`configured: true`, no credential) only when CDP is on — it also catches the
+client-build failure above. See [secret-rotation.md](secret-rotation.md) for
+the key's inventory row.
 
 ### Sleep
 

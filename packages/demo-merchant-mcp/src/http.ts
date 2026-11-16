@@ -35,6 +35,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
+import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from './tax-declaration.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
@@ -319,11 +320,23 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
+    // #4855: the buyer's signed tax declaration, if this paid request carried
+    // one. Verified against the payer the merchant just settled from — the
+    // same key that signed the payment — and treated as absent on ANY failure,
+    // so a malformed declaration can never turn a settled purchase into an
+    // error. Display only: it changes the buyer block and the VAT treatment,
+    // never the price.
+    const taxDeclaration = acceptTaxDeclaration({
+      header: firstHeader(req.headers[X_TAX_DECLARATION_HEADER.toLowerCase()]),
+      payer: settled.from,
+      chainId: CHAIN_ID,
+    })
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
     const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
       receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress),
+      taxDeclaration,
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
   }
@@ -773,6 +786,8 @@ function applyCorsHeaders(res: ServerResponse): void {
       'MCP-Protocol-Version',
       PAYMENT_SIGNATURE_HEADER,
       LEGACY_PAYMENT_SIGNATURE_HEADER,
+      // #4855: the buyer's signed tax declaration travels on the paid retry.
+      X_TAX_DECLARATION_HEADER,
     ].join(', '),
   )
   res.setHeader('Access-Control-Expose-Headers', `${PAYMENT_REQUIRED_HEADER}, ${PAYMENT_RESPONSE_HEADER}, mcp-session-id`)

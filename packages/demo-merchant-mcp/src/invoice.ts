@@ -1,6 +1,7 @@
 import type { MerchantLocale, ProductId } from './products.js'
 import { CHAIN_ID, PRODUCTS, formatUsdc, networkDisplayName, productBillingPeriod } from './products.js'
 import type { SettledPayment, SettlementState } from './x402.js'
+import { vatTreatmentFor, type AcceptedTaxDeclaration, type VatTreatment } from './tax-declaration.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
 // Swedish bookkeeping artifact by design — it feeds the `x-receipt-json`
@@ -108,6 +109,12 @@ export interface InvoiceParams {
   payerRole: 'agent_delegate' | 'agent_delegate_account'
   /** #4850: the purchased product's receiving address (`productReceivingAddress`). */
   receivingAddress: string
+  /**
+   * #4855: the buyer's accepted tax declaration, or absent/null when the
+   * request carried none (or carried one the merchant refused). Display only —
+   * it changes the buyer block and the VAT treatment, never the price.
+   */
+  taxDeclaration?: AcceptedTaxDeclaration | null
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
   /** The wire hash — rendered only when `settlement === 'settled_onchain'`
@@ -140,12 +147,26 @@ export interface InvoiceJson {
      * uses it to avoid calling a delegate address "the buyer".
      */
     roll: 'agent_delegate' | 'agent_delegate_account'
+    /**
+     * #4855: present ONLY when the merchant accepted a signed declaration.
+     * Absent otherwise, so a receipt without one is unchanged apart from
+     * `momsbehandling`. The declaration carries no company name and no
+     * organisation number, so this block shows only what it does carry.
+     */
+    deklaration?: BuyerDeclaration
   }
   rader: InvoiceRow[]
   belopp_exkl_moms: string
   moms_procent: number
   moms_belopp: string
   totalt_inkl_moms: string
+  /**
+   * #4855: the display treatment the amounts above follow. `SE_25` is the
+   * unchanged Swedish 25% VAT taken out of the price; `REVERSE_CHARGE` shows
+   * the full price as net with 0% VAT and a zero VAT amount. Display only —
+   * the merchant applies the rule, it does not compute or file tax.
+   */
+  momsbehandling: VatTreatment
   valuta: 'USDC'
   /** `Kryptovaluta (USDC på <network>)`; mainnet is exactly `... på Base)` (#1550, #3834). */
   betalningssatt: `Kryptovaluta (USDC på ${string})`
@@ -160,6 +181,22 @@ export interface InvoiceJson {
    * settled earlier, no reference' is distinct from 'delivered, unconfirmed'.
    */
   status: 'Betald' | 'Betald i tidigare transaktion — referens saknas' | 'Levererad — ej bekräftad på kedjan'
+}
+
+/**
+ * #4855: the buyer block's declaration fields. Swedish keys, like the rest of
+ * the bookkeeping document (#1550). `giltig_till` is the ISO date of the
+ * declaration's `validUntil`.
+ */
+export interface BuyerDeclaration {
+  /** Declared country, ISO 3166-1 alpha-2. */
+  land: string
+  /** The buyer's VAT number. */
+  moms_nr: string
+  /** The declared taxable status, e.g. `TAXABLE_PERSON`. */
+  status: string
+  /** ISO date the declaration is valid until. */
+  giltig_till: string
 }
 
 interface InvoiceRow {
@@ -183,11 +220,19 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const dueDate = new Date(today)
   dueDate.setDate(dueDate.getDate() + 30)
 
+  // #4855: the treatment is display-only and never changes the price. Under
+  // `SE_25` the price is VAT-inclusive and 25% is taken out of it, exactly as
+  // before. Under `REVERSE_CHARGE` the full price is the net amount, the VAT
+  // rate is 0 and the VAT amount is zero (owner decision, 2026-11-16).
+  const declaration = params.taxDeclaration ?? null
+  const treatment = vatTreatmentFor(declaration)
+  const reverseCharge = treatment === 'REVERSE_CHARGE'
+
   const totalInclMoms = product.price_usdc
-  // VAT is 25%; price_usdc is VAT-inclusive for simplicity
   // exkl. moms = inkl. moms / 1.25
-  const exklMoms = (totalInclMoms * 100n) / 125n
-  const momsBelopp = totalInclMoms - exklMoms
+  const exklMoms = reverseCharge ? totalInclMoms : (totalInclMoms * 100n) / 125n
+  const momsBelopp = reverseCharge ? 0n : totalInclMoms - exklMoms
+  const momsProcent = reverseCharge ? 0 : 25
 
   // #2969: only a REAL on-chain settlement gets a reference. Both non-settled
   // states get `null` — never the zero hash, and never a fallback nonce
@@ -204,7 +249,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     beskrivning: `${product.name} — ${product.description_sv} (${productBillingPeriod(product) === 'monthly' ? '1 månad' : 'engångsköp'})`,
     antal: 1,
     apris_exkl_moms: formatUsdc(exklMoms),
-    moms_procent: 25,
+    moms_procent: momsProcent,
     moms_belopp: formatUsdc(momsBelopp),
     totalt_inkl_moms: formatUsdc(totalInclMoms),
   }
@@ -219,12 +264,16 @@ export function generateInvoice(params: InvoiceParams): Invoice {
       identifierare: params.buyerAddress,
       typ: 'blockkedjeadress',
       roll: params.payerRole,
+      // #4855: absent when there is no accepted declaration, so a receipt
+      // without one keeps its exact previous shape.
+      ...(declaration ? { deklaration: buyerDeclarationBlock(declaration) } : {}),
     },
     rader: [row],
     belopp_exkl_moms: formatUsdc(exklMoms),
-    moms_procent: 25,
+    moms_procent: momsProcent,
     moms_belopp: formatUsdc(momsBelopp),
     totalt_inkl_moms: formatUsdc(totalInclMoms),
+    momsbehandling: treatment,
     valuta: 'USDC',
     betalningssatt: `Kryptovaluta (USDC på ${networkDisplayName(params.chainId ?? CHAIN_ID, 'sv')})`,
     blockkedje_referens: blockRef,
@@ -234,6 +283,16 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const text = buildInvoiceText(json, product.name)
 
   return { json, text }
+}
+
+/** #4855: the four declaration fields the buyer block shows. */
+function buyerDeclarationBlock(declaration: AcceptedTaxDeclaration): BuyerDeclaration {
+  return {
+    land: declaration.jurisdiction,
+    moms_nr: declaration.taxId,
+    status: declaration.taxableStatus,
+    giltig_till: isoDate(new Date(declaration.validUntil)),
+  }
 }
 
 /**
@@ -264,7 +323,7 @@ SÄLJARE
 
 KÖPARE
   Blockkedjeadress: ${inv.kopare.identifierare}
-
+${buyerDeclarationLinesSv(inv)}
 ────────────────────────────────────────────────────────────
   Fakturanummer:   ${inv.fakturanummer}
   Fakturadatum:    ${inv.fakturadatum}
@@ -281,7 +340,7 @@ TJÄNSTER
   Belopp exkl. moms:   ${inv.belopp_exkl_moms} USDC
   Moms ${inv.moms_procent}%:              ${inv.moms_belopp} USDC
   TOTALT inkl. moms:   ${inv.totalt_inkl_moms} USDC
-────────────────────────────────────────────────────────────
+${reverseChargeLinesSv(inv)}────────────────────────────────────────────────────────────
 
   Valuta:           ${inv.valuta}
   Betalningssätt:   ${inv.betalningssatt}
@@ -294,6 +353,37 @@ ${blockchainReferenceSection(inv, 'BLOCKKEDJEREFERENS')}  Status: ${inv.status}
   Frågor: support@haven.xyz
 ════════════════════════════════════════════════════════════
 `.trimStart()
+}
+
+/**
+ * #4855: the buyer block's declaration lines, Swedish render. Empty when the
+ * merchant accepted no declaration, so a receipt without one is byte-for-byte
+ * what it was before (#1550).
+ */
+function buyerDeclarationLinesSv(inv: InvoiceJson): string {
+  const d = inv.kopare.deklaration
+  if (!d) return ''
+  return (
+    `  Land:             ${d.land}\n` +
+    `  Momsreg.nr:       ${d.moms_nr}\n` +
+    `  Status:           ${d.status}\n` +
+    `  Deklaration giltig till: ${d.giltig_till}\n`
+  )
+}
+
+/**
+ * #4855: the reverse-charge note, Swedish render. Empty under `SE_25`, so the
+ * Swedish invoice is unchanged for every purchase without an EU declaration.
+ * Names BOTH VAT numbers, as the treatment requires.
+ */
+function reverseChargeLinesSv(inv: InvoiceJson): string {
+  const d = inv.kopare.deklaration
+  if (inv.momsbehandling !== 'REVERSE_CHARGE' || !d) return ''
+  return (
+    `  Omvänd betalningsskyldighet (reverse charge) — köparen redovisar momsen.\n` +
+    `  Säljarens momsreg.nr: ${inv.saljare.moms_nr}\n` +
+    `  Köparens momsreg.nr: ${d.moms_nr}\n`
+  )
 }
 
 /**
@@ -333,7 +423,7 @@ SELLER
 PAYER
   Blockchain address: ${inv.kopare.identifierare}
   Role: ${inv.kopare.roll === 'agent_delegate_account' ? 'agent delegate account (erc7710 delegator) — paid on behalf of an owner treasury account not visible to this merchant' : 'agent delegate address (eip3009)'}
-
+${buyerDeclarationLinesEn(inv)}
 ────────────────────────────────────────────────────────────
   Invoice number:  ${inv.fakturanummer}
   Invoice date:    ${inv.fakturadatum}
@@ -350,7 +440,7 @@ SERVICES
   Amount excl. VAT:    ${inv.belopp_exkl_moms} USDC
   VAT ${inv.moms_procent}%:             ${inv.moms_belopp} USDC
   TOTAL incl. VAT:     ${inv.totalt_inkl_moms} USDC
-────────────────────────────────────────────────────────────
+${reverseChargeLinesEn(inv)}────────────────────────────────────────────────────────────
 
   Currency:          ${inv.valuta}
   Payment method:    Cryptocurrency (USDC on ${networkDisplayName(chainId, 'en')})
@@ -363,6 +453,36 @@ ${blockchainReferenceSection(inv, 'BLOCKCHAIN REFERENCE')}  Status: ${STATUS_EN[
   Questions: support@haven.xyz
 ════════════════════════════════════════════════════════════
 `.trimStart()
+}
+
+/**
+ * #4855: the buyer block's declaration lines, English render. Empty when the
+ * merchant accepted no declaration, so the English render is unchanged for
+ * every purchase without one.
+ */
+function buyerDeclarationLinesEn(inv: InvoiceJson): string {
+  const d = inv.kopare.deklaration
+  if (!d) return ''
+  return (
+    `  Country: ${d.land}\n` +
+    `  VAT reg. no: ${d.moms_nr}\n` +
+    `  Status: ${d.status}\n` +
+    `  Declaration valid until: ${d.giltig_till}\n`
+  )
+}
+
+/**
+ * #4855: the reverse-charge note, English render. Empty under `SE_25`. Names
+ * BOTH VAT numbers, as the treatment requires.
+ */
+function reverseChargeLinesEn(inv: InvoiceJson): string {
+  const d = inv.kopare.deklaration
+  if (inv.momsbehandling !== 'REVERSE_CHARGE' || !d) return ''
+  return (
+    `  Reverse charge — the buyer accounts for the VAT.\n` +
+    `  Seller VAT reg. no: ${inv.saljare.moms_nr}\n` +
+    `  Buyer VAT reg. no: ${d.moms_nr}\n`
+  )
 }
 
 export { nextInvoiceNumber }
@@ -383,7 +503,7 @@ const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
 export function invoiceForPayment(
   payment: SettledPayment,
   productId: ProductId,
-  opts: { receivingAddress: string; chainId?: number },
+  opts: { receivingAddress: string; chainId?: number; taxDeclaration?: AcceptedTaxDeclaration | null },
 ): Invoice {
   const cached = invoicesByPayment.get(payment)
   if (cached) return cached
@@ -392,6 +512,9 @@ export function invoiceForPayment(
     productId,
     chainId: opts.chainId,
     receivingAddress: opts.receivingAddress,
+    // #4855: the declaration the paid request carried, already verified
+    // against this payment's payer. Display only.
+    taxDeclaration: opts.taxDeclaration ?? null,
     buyerAddress: payment.from,
     // #2960: `payment.from` is the delegate EOA on `eip3009` and the
     // delegate SMART account (`delegator`) on `erc7710` — see

@@ -91,7 +91,8 @@ the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled
 payment (never re-derived from the quoted catalog price).
 
-Purchase tools accept an optional `settlement_method` argument. It decides
+Purchase tools (all but `buy_joke`, which offers one method) accept an optional
+`settlement_method` argument. It decides
 which option comes FIRST in the 402's `accepts`; every other method the product
 and the merchant support is still offered after it:
 
@@ -312,7 +313,9 @@ wallet that drains between the two is caught before anything is settled.
   unchanged — same "never block on an unknown" rule as `/healthz`.
 - **Exempt**: free (unpaid) tools, and the `MERCHANT_SKIP_SETTLE_PRODUCT`
   QA fixture below — neither one settles anything on-chain, so a drained
-  wallet cannot block a settlement that never runs.
+  wallet cannot block a settlement that never runs. Also exempt: a
+  CDP-settled product (the joke, #4851) — Coinbase's facilitator pays that
+  gas, not this wallet.
 
 The existing merchant-fault 402 body (the #1517 fault-class message) also now
 carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
@@ -326,7 +329,9 @@ already-settled decision, served) and otherwise refuses it as a payer-side
 DECISION — a 402 whose `error` names the revert, then the next action (nothing
 settled; re-quote, pay with a fresh authorization), then the likely causes (the
 child's transfer-amount caveat exhausted, the delegator short of the price, the
-child redeemed elsewhere). No `reason_code` rides a decision. Only a PROVEN
+child redeemed elsewhere). No `reason_code` rides that decision; only the CDP
+path's decisions carry one (`facilitator_refused` / `facilitator_retryable`,
+see [Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)). Only a PROVEN
 revert takes that branch — viem's `ContractFunctionRevertedError` carrying
 decoded data, an error signature or an "execution reverted" reason, the
 node's `ExecutionRevertedError` (minus geth's "gas required exceeds
@@ -393,14 +398,20 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   retryable refusal; the same header retried runs the check again and settles
   at most once. A retry after `validBefore` is served when the chain says the
   money moved, and refused as expired when it did not.
-- **Settled or cancelled.** `authorizationState` reads "used" for both, so the
-  merchant tells them apart by USDC's events: `AuthorizationCanceled`, or an
-  `AuthorizationUsed` whose transaction did not pay this merchant the price, is
-  a final refusal.
+- **Settled or cancelled.** `authorizationState` reads "used" for a payment,
+  a cancelled authorization and a nonce spent by another authorization alike.
+  The merchant searches USDC's `AuthorizationUsed` event for this payer and
+  nonce inside the authorization's own validity window — the only time a
+  payment for it can land. Found, and its transaction paid this merchant the
+  price: served, with that hash. Found paying anything else, or the whole
+  window empty: a final refusal. When the search fails, or the window is too
+  long to search in full, the buyer is served with the reference marked
+  unavailable — never refused.
 - **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
   (final: CDP refused at verification, including its sanctions and risk
-  screening, or the authorization was cancelled) or
-  `"facilitator_retryable"` (nothing moved; retry the same header). Haven's
+  screening, or the authorization was consumed by something other than this
+  payment) or `"facilitator_retryable"` (nothing has moved yet; retry the SAME
+  header, never a newly signed one). Haven's
   clients read `reason_code` only inside a 503 `merchant_not_ready` body, so
   these degrade to the ordinary refusal there.
 - **Not in Haven's catalog.** Like `vpn_legacy`, the joke is paid at this

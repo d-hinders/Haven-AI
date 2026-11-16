@@ -961,7 +961,8 @@ export function createX402PaymentProcessor(
    * of every failure. No facilitator error string is matched: whatever went
    * wrong — a refusal, a timeout, a network error — the merchant reads USDC's
    * `authorizationState` itself.
-   *  - used → the money moved (or the payer cancelled; `recoverUsedAuthorization`
+   *  - used → the money moved, or the nonce was consumed some other way;
+   *    `recoverUsedAuthorization`
    *    tells the two apart). The buyer is served.
    *  - not used → nothing moved. The buyer is told to retry the same header,
    *    which runs this check again.
@@ -988,14 +989,16 @@ export function createX402PaymentProcessor(
     try {
       verification = await withCdpTimeout('verify', timeoutMs, () => p.cdp.facilitator.verify(p.payload, p.requirements))
     } catch (err) {
-      if (err instanceof VerifyError) throw cdpVerificationRefused(err.invalidReason, err.invalidMessage)
+      if (err instanceof VerifyError) return refuseVerificationUnlessPaid(p, err.invalidReason, err.invalidMessage)
       console.error('[x402] CDP verify did not answer — nothing settled', { payer, nonce, error: describeError(err) })
       throw new PaymentError(
         "Coinbase's facilitator did not answer the verification. Nothing settled — retry the same payment header.",
         'facilitator_retryable',
       )
     }
-    if (!verification.isValid) throw cdpVerificationRefused(verification.invalidReason, verification.invalidMessage)
+    if (!verification.isValid) {
+      return refuseVerificationUnlessPaid(p, verification.invalidReason, verification.invalidMessage)
+    }
 
     let failure: string
     try {
@@ -1020,12 +1023,40 @@ export function createX402PaymentProcessor(
       )
     }
     if (used) return recoverUsedAuthorization(p)
-    console.error('[x402] CDP settle failed; authorization unused — nothing moved', { payer, nonce, failure })
+    console.error('[x402] CDP settle failed; authorization unused so far', { payer, nonce, failure })
     throw new PaymentError(
-      "Coinbase's facilitator did not settle the payment, and the chain shows the authorization unused: nothing " +
-        'moved. Retry the same payment header.',
+      "Coinbase's facilitator did not confirm the settlement, and the chain shows the authorization unused: " +
+        'nothing has moved yet. Retry the SAME payment header — it is checked against the chain again — and do ' +
+        'not sign a new one.',
       'facilitator_retryable',
     )
+  }
+
+  /**
+   * Review of #4851: a verification refusal is final only if the money has
+   * not moved. An earlier settle that timed out may still land, and the
+   * facilitator then refuses the same authorization as already used. One more
+   * chain read keeps "do not retry" from reaching a buyer who paid.
+   */
+  async function refuseVerificationUnlessPaid(
+    p: { cdp: CdpSettlementConfig; authorization: Eip3009Authorization },
+    invalidReason: string | undefined,
+    invalidMessage: string | undefined,
+  ): Promise<never> {
+    const payer = getAddress(p.authorization.from)
+    const nonce = p.authorization.nonce as Hex
+    let used = false
+    try {
+      used = await p.cdp.chain.authorizationUsed(payer, nonce)
+    } catch (err) {
+      console.error('[x402] CDP refused at verification; the chain could not be re-read', {
+        payer,
+        nonce,
+        error: describeError(err),
+      })
+    }
+    if (used) return recoverUsedAuthorization(p)
+    throw cdpVerificationRefused(invalidReason, invalidMessage)
   }
 
   async function readAuthorizationUsed(cdp: CdpSettlementConfig, payer: Address, nonce: Hex): Promise<boolean> {
@@ -1042,13 +1073,16 @@ export function createX402PaymentProcessor(
 
   /**
    * The authorization is used on-chain. `authorizationState` says the same for
-   * a payment and for a CANCELLED authorization, so USDC's events decide:
-   * `AuthorizationUsed` whose transaction paid this merchant the price →
-   * served with that transaction as the reference; `AuthorizationCanceled`, or
-   * a nonce spent on some other transfer → refused, nothing was paid here.
-   * When the events cannot be found (an RPC that will not search the range),
-   * the buyer is served with no reference: a buyer whose money moved is never
-   * refused, and this is the same answer the own-key path gives (#1519).
+   * a payment, a CANCELLED authorization and a nonce spent by another
+   * authorization, so USDC's `AuthorizationUsed` event inside this
+   * authorization's own validity window decides (`findAuthorizationOutcome`):
+   * - found, and its transaction paid this merchant the price → served, with
+   *   that transaction as the reference;
+   * - found, paying anything else, or the whole window empty → refused: this
+   *   payment cannot have landed outside its window, so nothing was paid here;
+   * - the search failed, or the window was too long to search in full → served
+   *   with no reference. A buyer whose money may have moved is never refused,
+   *   and this is the answer the own-key path gives to any used nonce (#1519).
    */
   async function recoverUsedAuthorization(p: {
     cdp: CdpSettlementConfig
@@ -1073,9 +1107,11 @@ export function createX402PaymentProcessor(
         error: describeError(err),
       })
     }
-    if (outcome?.kind === 'canceled') {
+    if (outcome?.kind === 'not_in_window') {
       throw new PaymentError(
-        `The payer cancelled authorization ${nonce} on-chain. Nothing was paid; nothing is delivered.`,
+        `Authorization ${nonce} is marked used on-chain, but no transfer for it happened inside its validity ` +
+          'window: it was cancelled, or its nonce was spent by another authorization. Nothing was paid here; ' +
+          'nothing is delivered.',
         'facilitator_refused',
       )
     }
@@ -1947,7 +1983,8 @@ function sameAddress(a: string, b: string): boolean {
  * carries none, exactly as before.
  * - `facilitator_refused`: final. Coinbase's facilitator refused the payment
  *   at verification (including its sanctions and risk screening), or the
- *   chain shows the authorization cancelled or spent elsewhere. Nothing is
+ *   chain shows the authorization consumed by something other than this
+ *   payment (cancelled, or its nonce spent elsewhere). Nothing is
  *   delivered; retrying the same header will not help.
  * - `facilitator_retryable`: nothing moved, as far as the merchant can tell.
  *   Retry the SAME header; it is checked against the chain again, so it

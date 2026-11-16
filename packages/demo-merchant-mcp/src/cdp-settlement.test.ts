@@ -317,6 +317,29 @@ describe('settlement through CDP (#4851)', () => {
     expect(fakes.authorizationUsed).toHaveBeenCalledTimes(2)
   })
 
+  it('a settle answer of success:false is a failure even when it carries a hash: the chain decides', async () => {
+    // Review of #4851 (R5): a well-formed hash must not stand in for success.
+    const { url, fakes } = await startServer()
+    fakes.settle.mockResolvedValue({ success: false, errorReason: 'transaction_failed', transaction: CDP_TX, network: 'eip155:8453' })
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(402)
+    expect(refusal(raw).reason_code).toBe('facilitator_retryable')
+    expect(fakes.waitForReceipt).not.toHaveBeenCalled()
+  })
+
+  it('verify refused but the chain says the authorization was already used: served, not told to stop', async () => {
+    // Review of #4851 (nit 6): an earlier settle that timed out lands, then
+    // the facilitator refuses the same authorization as already used.
+    const { url, fakes } = await startServer()
+    fakes.verify.mockResolvedValue({ isValid: false, invalidReason: 'invalid_exact_evm_payload_authorization_nonce' })
+    fakes.authorizationUsed.mockResolvedValueOnce(false).mockResolvedValue(true)
+    fakes.findAuthorizationOutcome.mockResolvedValue({ kind: 'settled', txHash: CDP_TX })
+    const { response } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    expect(receiptOf(response).blockkedje_referens).toBe(`Tx: ${CDP_TX}`)
+    expect(fakes.settle).not.toHaveBeenCalled()
+  })
+
   it('settle error but the authorization used: served, with the transaction recovered from the chain', async () => {
     const { url, fakes } = await startServer()
     fakes.settle.mockRejectedValue(new Error('upstream 502'))
@@ -343,7 +366,7 @@ describe('settlement through CDP (#4851)', () => {
   })
 
   it.each<[string, AuthorizationOutcome]>([
-    ['cancelled by the payer', { kind: 'canceled' }],
+    ['not used inside its window (cancelled, or the nonce spent elsewhere)', { kind: 'not_in_window' }],
     ['spent on another transfer', { kind: 'used_elsewhere', txHash: `0x${'aa'.repeat(32)}` }],
   ])('used but %s: refused as final, nothing delivered', async (_label, outcome) => {
     const { url, fakes } = await startServer()
@@ -447,6 +470,22 @@ describe("the merchant's own checks run before CDP is called (#4851)", () => {
     ['not valid yet', { validAfter: now() + 600, validBefore: now() + 700 }, 'not valid yet'],
     ['signature', { signWith: `0x${'02'.repeat(32)}` }, 'signature'],
     ['amount signed', { value: '9999' }, 'amount'],
+    [
+      'recipient signed',
+      {
+        payload: (p) => ({
+          ...p,
+          payload: {
+            ...p.payload,
+            authorization: {
+              ...(p.payload.authorization as Eip3009Authorization),
+              to: '0x2222222222222222222222222222222222222222',
+            },
+          },
+        }),
+      },
+      'not addressed to this merchant',
+    ],
   ])('%s', async (_label, edit, expected) => {
     const { url, fakes } = await startServer()
     const { response, raw } = await pay(url, await signedHeader(await challenge(url), edit))
@@ -454,6 +493,37 @@ describe("the merchant's own checks run before CDP is called (#4851)", () => {
     expect(refusal(raw).error?.toLowerCase()).toContain(expected.toLowerCase())
     expect(fakes.verify).not.toHaveBeenCalled()
     expect(fakes.settle).not.toHaveBeenCalled()
+  })
+})
+
+describe('the in-band (stdio) refusal for the joke (#4851)', () => {
+  it('names one EIP-3009 option, as the HTTP 402 does, even with erc7710 enabled on the merchant', async () => {
+    // Review of #4851 (R6): the in-band requirements follow the product.
+    const { buildMerchantMcpServer } = await import('./server.js')
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+    const processor = createX402PaymentProcessor(
+      { submit: vi.fn(), waitForReceipt: vi.fn() },
+      { erc7710: { delegationManager: TRUSTED_DELEGATION_MANAGER }, settlementMethods: ['eip3009', 'erc7710'] },
+    )
+    const server = buildMerchantMcpServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      buildPaymentRequired: processor.buildPaymentRequired,
+      settlementMethods: ['eip3009', 'erc7710'],
+      cdpConfigured: true,
+    })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    const result = await client.callTool({ name: 'buy_joke', arguments: {} })
+    await client.close()
+    await server.close()
+    const text = (result.content as Array<{ text: string }>)[0].text
+    const requirements = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as PaymentRequired
+    expect(requirements.accepts).toHaveLength(1)
+    expect(requirements.accepts[0]).toMatchObject({ amount: '10000', payTo: MERCHANT })
+    expect(requirements.accepts[0].extra?.assetTransferMethod).toBeUndefined()
   })
 })
 

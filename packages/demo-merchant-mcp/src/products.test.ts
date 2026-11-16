@@ -130,7 +130,7 @@ describe('buildProductMetadata (#1274) — machine-readable product contract', (
   })
 })
 
-describe('vpn_legacy is the EIP-3009-only product (#1441)', () => {
+describe('vpn_legacy is the self-settled EIP-3009-only product (#1441)', () => {
   /**
    * `x402-hosted-mcp-signer` covers the funding-leg topology from the
    * `haven_pay_mcp_tool` entry point, and that topology only exists on

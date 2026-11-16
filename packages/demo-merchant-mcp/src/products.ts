@@ -216,7 +216,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   /**
-   * The ONLY EIP-3009-only product (#1441). Everything else advertises both
+   * The ONLY self-settled EIP-3009-only product (#1441; the CDP-settled joke,
+   * #4851, is EIP-3009-only too). Everything else advertises both
    * methods, and the #1450 preference rule then picks erc7710 — which has no
    * funding leg, so it makes the funding-leg topology unreachable from the
    * `haven_pay_mcp_tool` entry point that `x402-hosted-mcp-signer` exists to
@@ -378,8 +379,8 @@ export function productToolArgs(product: Product): ProductToolArgs {
 export function productArgumentsSchema(product: Product): Record<string, unknown> {
   const { argumentName, argumentValue, argumentEnum, toolName } = productToolArgs(product)
   if (!argumentName || !argumentEnum) {
-    // #4851: a one-product tool takes no selector, and a product with one
-    // settlement method takes no override — the schema says so exactly.
+    // #4851: a one-product tool (`buy_joke`) takes no selector, and its one
+    // settlement method needs no override — the schema says so exactly.
     return { type: 'object', properties: {}, required: [], additionalProperties: false }
   }
   return {

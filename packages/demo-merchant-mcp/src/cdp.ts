@@ -17,6 +17,7 @@ import {
   parseAbiItem,
   type Address,
   type Hex,
+  type PublicClient,
 } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
 import type { PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse } from '@x402/core/types'
@@ -30,28 +31,35 @@ export interface CdpFacilitator {
 }
 
 /**
- * What the chain says happened to one EIP-3009 authorization, read from USDC's
- * own events. `authorizationState` answers only "used or not", and a payer who
- * CANCELLED the authorization (`cancelAuthorization`) reads as "used" too —
- * these events tell the two apart.
- * - `settled`: `AuthorizationUsed` was emitted, and the same transaction moved
- *   exactly `value` from the payer to the merchant's address.
- * - `canceled`: `AuthorizationCanceled` was emitted — nothing was paid.
- * - `used_elsewhere`: `AuthorizationUsed` was emitted but its transaction did
- *   not pay the merchant this amount (the nonce was spent on another transfer).
+ * What the chain says consumed one EIP-3009 authorization whose nonce
+ * `authorizationState` reports used. That flag is also set by a CANCELLED
+ * authorization (`cancelAuthorization`), and by any other authorization that
+ * spent the same nonce, so USDC's `AuthorizationUsed` event decides.
+ *
+ * The search covers the authorization's OWN validity window: USDC executes a
+ * `transferWithAuthorization` only while `validAfter < now < validBefore`, so
+ * if this payment moved, its event is in that window.
+ * - `settled`: an `AuthorizationUsed` for (payer, nonce) in the window, and its
+ *   transaction moved exactly `value` from the payer to the merchant.
+ * - `used_elsewhere`: an `AuthorizationUsed` in the window whose transaction did
+ *   not pay the merchant this amount.
+ * - `not_in_window`: the whole window was searched and holds no
+ *   `AuthorizationUsed`. The nonce was consumed by something that is not this
+ *   payment — a cancellation, or another authorization with the same nonce.
  */
 export type AuthorizationOutcome =
   | { kind: 'settled'; txHash: Hex }
-  | { kind: 'canceled' }
   | { kind: 'used_elsewhere'; txHash: Hex }
+  | { kind: 'not_in_window' }
 
 export interface CdpChainReader {
   /** USDC `authorizationState(authorizer, nonce)`: true once used OR cancelled. */
   authorizationUsed(authorizer: Address, nonce: Hex): Promise<boolean>
   /**
-   * Find what consumed the authorization. `null` when no event is found in the
-   * searched range — the caller treats the authorization as used with no
-   * reference rather than refusing a buyer whose money may have moved.
+   * Find what consumed the authorization. `null` when the window could not be
+   * searched in full (it is longer than `MAX_SEARCH_BLOCKS`); a read that fails
+   * throws. In both cases the caller serves the buyer with no reference rather
+   * than refuse one whose money may have moved.
    */
   findAuthorizationOutcome(params: {
     authorizer: Address
@@ -129,9 +137,6 @@ export async function createCdpFacilitator(credentials: {
 const AUTHORIZATION_USED_EVENT = parseAbiItem(
   'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
 )
-const AUTHORIZATION_CANCELED_EVENT = parseAbiItem(
-  'event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce)',
-)
 const AUTHORIZATION_STATE_ABI = [
   {
     type: 'function',
@@ -156,31 +161,12 @@ const LOG_CHUNK_BLOCKS = 500n
 /** Never search more than this many blocks, whatever the window says (about 12 h). */
 const MAX_SEARCH_BLOCKS = 21_600n
 
-/** The read-only slice of a viem public client the reader uses — injectable for tests. */
-export interface ChainReadClient {
-  readContract(args: {
-    address: Address
-    abi: typeof AUTHORIZATION_STATE_ABI
-    functionName: 'authorizationState'
-    args: readonly [Address, Hex]
-  }): Promise<boolean>
-  getBlock(args: { blockTag: 'latest' }): Promise<{ number: bigint; timestamp: bigint }>
-  getLogs(args: {
-    address: Address
-    events: readonly [typeof AUTHORIZATION_USED_EVENT, typeof AUTHORIZATION_CANCELED_EVENT]
-    args: { authorizer: Address; nonce: Hex }
-    fromBlock: bigint
-    toBlock: bigint
-  }): Promise<Array<{ eventName?: string; transactionHash: Hex | null }>>
-  getTransactionReceipt(args: { hash: Hex }): Promise<{
-    status: 'success' | 'reverted'
-    logs: Array<{ address: Address; topics: readonly Hex[]; data: Hex }>
-  }>
-}
+/** The viem public client the reader uses. Tests pass a real one over a stub transport. */
+export type ChainReadClient = PublicClient
 
 export function createViemChainReadClient(rpcUrl: string): ChainReadClient {
   const chain = CHAIN_ID === 84532 ? baseSepolia : base
-  return createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as ChainReadClient
+  return createPublicClient({ chain, transport: http(rpcUrl) }) as ChainReadClient
 }
 
 export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
@@ -190,34 +176,48 @@ export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
         address: USDC_ADDRESS,
         abi: AUTHORIZATION_STATE_ABI,
         functionName: 'authorizationState',
-        args: [getAddress(authorizer), nonce],
+        args: [getAddress(authorizer), nonce.toLowerCase() as Hex],
       })
     },
 
     async findAuthorizationOutcome(params) {
+      // Review of #4851: the nonce is normalised before it becomes a topic. The
+      // merchant accepts any hex case, and a topic match is exact; an uppercase
+      // nonce would otherwise never match its own event.
+      const nonce = params.nonce.toLowerCase() as Hex
       const latest = await client.getBlock({ blockTag: 'latest' })
       const blockAt = (unixSeconds: bigint): bigint => {
         const behind = (latest.timestamp - unixSeconds) / BASE_BLOCK_TIME_SECONDS
         const estimate = latest.number - (behind > 0n ? behind : 0n)
         return estimate > 0n ? estimate : 0n
       }
+      // The authorization's own validity window, plus a margin for the
+      // estimate. A window longer than MAX_SEARCH_BLOCKS is searched from its
+      // END only, and then an empty result proves nothing (`complete: false`).
       let toBlock = blockAt(params.validBefore) + BLOCK_MARGIN
       if (toBlock > latest.number) toBlock = latest.number
-      let fromBlock = blockAt(params.validAfter) - BLOCK_MARGIN
-      if (fromBlock < 0n) fromBlock = 0n
-      if (toBlock - fromBlock > MAX_SEARCH_BLOCKS) fromBlock = toBlock - MAX_SEARCH_BLOCKS
+      const windowStart = blockAt(params.validAfter)
+      let fromBlock = windowStart > BLOCK_MARGIN ? windowStart - BLOCK_MARGIN : 0n
+      let complete = true
+      if (toBlock - fromBlock > MAX_SEARCH_BLOCKS) {
+        fromBlock = toBlock - MAX_SEARCH_BLOCKS
+        complete = false
+      }
 
       for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK_BLOCKS) {
         const end = start + LOG_CHUNK_BLOCKS - 1n < toBlock ? start + LOG_CHUNK_BLOCKS - 1n : toBlock
+        // Review of #4851: ONE event per query. Given `events: [...]`, viem
+        // drops `args` from the topics and filters client-side, so the RPC
+        // would return every such event in the range. With `event:` the
+        // authorizer and nonce are encoded as topics and the node filters.
         const logs = await client.getLogs({
           address: USDC_ADDRESS,
-          events: [AUTHORIZATION_USED_EVENT, AUTHORIZATION_CANCELED_EVENT],
-          args: { authorizer: getAddress(params.authorizer), nonce: params.nonce },
+          event: AUTHORIZATION_USED_EVENT,
+          args: { authorizer: getAddress(params.authorizer), nonce },
           fromBlock: start,
           toBlock: end,
         })
-        if (logs.some((log) => log.eventName === 'AuthorizationCanceled')) return { kind: 'canceled' }
-        const used = logs.find((log) => log.eventName === 'AuthorizationUsed' && log.transactionHash)
+        const used = logs.find((log) => log.transactionHash)
         if (used?.transactionHash) {
           const receipt = await client.getTransactionReceipt({ hash: used.transactionHash })
           return paidMerchant(receipt, params)
@@ -225,6 +225,7 @@ export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
             : { kind: 'used_elsewhere', txHash: used.transactionHash }
         }
       }
+      if (complete) return { kind: 'not_in_window' }
       return null
     },
   }

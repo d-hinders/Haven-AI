@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createInvoiceNumberer, generateInvoice, renderInvoiceText } from './invoice.js'
+import { PRODUCTS, formatUsdc } from './products.js'
 
 const BASE_PARAMS = {
   invoiceNumber: 'FAK-2026-00099',
@@ -184,5 +185,142 @@ describe('OCR check digit (#3422)', () => {
       expect(ocr_nummer.startsWith(invoiceNumber.replace(/\D/g, ''))).toBe(true)
       expect(passesLuhn(ocr_nummer), `${invoiceNumber} → ${ocr_nummer}`).toBe(true)
     }
+  })
+})
+
+// ── #4855: buyer declaration and VAT treatment ───────────────────────────────
+// `storage_50gb` costs 500 atomic USDC. Under SE_25 that is 400 net + 100 VAT;
+// under REVERSE_CHARGE the full 500 is net and the VAT amount is zero.
+const SE_DECLARATION = {
+  jurisdiction: 'SE',
+  taxId: 'SE559412345601',
+  taxableStatus: 'TAXABLE_PERSON',
+  validUntil: Date.parse('2027-06-30T00:00:00.000Z'),
+}
+const DE_DECLARATION = {
+  jurisdiction: 'DE',
+  taxId: 'DE123456789',
+  taxableStatus: 'TAXABLE_PERSON',
+  validUntil: Date.parse('2027-06-30T00:00:00.000Z'),
+}
+
+describe('generateInvoice — buyer declaration and VAT treatment (#4855)', () => {
+  it('an accepted Swedish declaration puts the buyer block on the receipt and keeps SE_25', () => {
+    const invoice = generateInvoice({
+      ...BASE_PARAMS,
+      payerRole: 'agent_delegate',
+      taxDeclaration: SE_DECLARATION,
+    })
+
+    expect(invoice.json.momsbehandling).toBe('SE_25')
+    expect(invoice.json.kopare.deklaration).toEqual({
+      land: 'SE',
+      moms_nr: 'SE559412345601',
+      status: 'TAXABLE_PERSON',
+      giltig_till: '2027-06-30',
+    })
+    // The VAT lines are unchanged from today under SE_25.
+    expect(invoice.json.belopp_exkl_moms).toBe('0.0004')
+    expect(invoice.json.moms_procent).toBe(25)
+    expect(invoice.json.moms_belopp).toBe('0.0001')
+    expect(invoice.json.totalt_inkl_moms).toBe('0.0005')
+    expect(invoice.json.rader[0].moms_procent).toBe(25)
+
+    const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
+    expect(sv).toContain('Land:             SE')
+    expect(sv).toContain('Momsreg.nr:       SE559412345601')
+    expect(sv).toContain('Status:           TAXABLE_PERSON')
+    expect(sv).toContain('Deklaration giltig till: 2027-06-30')
+    // SE_25 carries no reverse-charge note.
+    expect(sv).not.toContain('Omvänd betalningsskyldighet')
+
+    const en = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'en')
+    expect(en).toContain('Country: SE')
+    expect(en).toContain('VAT reg. no: SE559412345601')
+    expect(en).toContain('Declaration valid until: 2027-06-30')
+    expect(en).not.toContain('Reverse charge')
+  })
+
+  it('an accepted declaration from another EU country is REVERSE_CHARGE: net = total = price, 0% VAT, zero VAT amount', () => {
+    const invoice = generateInvoice({
+      ...BASE_PARAMS,
+      payerRole: 'agent_delegate',
+      taxDeclaration: DE_DECLARATION,
+    })
+
+    expect(invoice.json.momsbehandling).toBe('REVERSE_CHARGE')
+    expect(invoice.json.belopp_exkl_moms).toBe('0.0005')
+    expect(invoice.json.totalt_inkl_moms).toBe('0.0005')
+    expect(invoice.json.moms_procent).toBe(0)
+    expect(invoice.json.moms_belopp).toBe('0')
+    expect(invoice.json.rader[0]).toMatchObject({
+      apris_exkl_moms: '0.0005',
+      moms_procent: 0,
+      moms_belopp: '0',
+      totalt_inkl_moms: '0.0005',
+    })
+    // The price itself does not change with the treatment.
+    expect(invoice.json.totalt_inkl_moms).toBe(formatUsdc(PRODUCTS.storage_50gb.price_usdc))
+
+    const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
+    expect(sv).toContain('Omvänd betalningsskyldighet')
+    expect(sv).toContain('Säljarens momsreg.nr: SE559412345601')
+    expect(sv).toContain('Köparens momsreg.nr: DE123456789')
+
+    const en = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'en')
+    expect(en).toContain('Reverse charge')
+    expect(en).toContain('Seller VAT reg. no: SE559412345601')
+    expect(en).toContain('Buyer VAT reg. no: DE123456789')
+  })
+
+  it('a purchase without a declaration has no buyer block and is unchanged apart from the treatment field', () => {
+    const invoice = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate' })
+
+    expect(invoice.json.momsbehandling).toBe('SE_25')
+    // No `deklaration` key at all — the buyer block keeps its exact shape.
+    expect(Object.keys(invoice.json.kopare)).toEqual(['identifierare', 'typ', 'roll'])
+    expect(invoice.json.kopare.deklaration).toBeUndefined()
+    expect(invoice.json.belopp_exkl_moms).toBe('0.0004')
+    expect(invoice.json.moms_procent).toBe(25)
+    expect(invoice.json.moms_belopp).toBe('0.0001')
+    expect(invoice.json.totalt_inkl_moms).toBe('0.0005')
+
+    const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
+    expect(sv).not.toContain('Land:')
+    expect(sv).not.toContain('Deklaration giltig till')
+    expect(sv).not.toContain('Omvänd betalningsskyldighet')
+    const en = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'en')
+    expect(en).not.toContain('Country:')
+    expect(en).not.toContain('Reverse charge')
+  })
+
+  it('keeps the seller keys Haven accounting reads (name, org_nr, moms_nr) in every treatment', () => {
+    for (const taxDeclaration of [null, SE_DECLARATION, DE_DECLARATION]) {
+      const { json } = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate', taxDeclaration })
+      expect(json.saljare.name).toBe('Haven Demo AB')
+      expect(json.saljare.org_nr).toBe('559412-3456')
+      expect(json.saljare.moms_nr).toBe('SE559412345601')
+    }
+  })
+
+  it('leaves the rendered buyer block and VAT block byte-for-byte unchanged when there is no declaration', () => {
+    const invoice = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate' })
+    const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
+    // The two regions this change touches: the buyer block keeps its single
+    // blank line, and the totals block keeps its exact SE_25 lines.
+    expect(sv).toContain(`KÖPARE\n  Blockkedjeadress: ${BASE_PARAMS.buyerAddress}\n\n────`)
+    expect(sv).toContain(
+      '  Belopp exkl. moms:   0.0004 USDC\n' +
+        '  Moms 25%:              0.0001 USDC\n' +
+        '  TOTALT inkl. moms:   0.0005 USDC\n────',
+    )
+
+    const en = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'en')
+    expect(en).toContain(`PAYER\n  Blockchain address: ${BASE_PARAMS.buyerAddress}\n  Role: agent delegate address (eip3009)\n\n────`)
+    expect(en).toContain(
+      '  Amount excl. VAT:    0.0004 USDC\n' +
+        '  VAT 25%:             0.0001 USDC\n' +
+        '  TOTAL incl. VAT:     0.0005 USDC\n────',
+    )
   })
 })

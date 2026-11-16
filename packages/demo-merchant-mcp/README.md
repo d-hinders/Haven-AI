@@ -410,6 +410,69 @@ Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks the pin: the merchant answers
 `not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER` is
 updated.
 
+## Buyer tax declaration and VAT treatment (#4855)
+
+A paid request may carry a signed `X-Tax-Declaration` header: base64url(JSON) of
+the SDK's seven-field declaration (`version`, `jurisdiction`, `taxableStatus`,
+`taxId`, `validUntil`, `principalId`, `principalAttributionHash`) plus its
+EIP-712 `signature`. The buyer's own payment key signs it — the same key that
+signs the EIP-3009 authorization — and it travels only to the seller, never to
+Haven or a facilitator. It is sent on EIP-3009 payments made through the SDK or
+the local MCP server; the hosted, keyless path does not send one.
+
+The merchant **accepts** a declaration only when all of these hold, and treats
+it as absent otherwise:
+
+- the signature verifies and recovers to the payment's payer
+  (`authorization.from`);
+- `principalId` is that payer on the payment's network
+  (`did:pkh:eip155:<chainId>:<payer>`);
+- `principalAttributionHash` recomputes from `principalId`;
+- `validUntil` is in the future.
+
+A refused declaration never refuses the purchase: the payment settles and the
+receipt is the same as if no header had been sent. The check runs after
+settlement, like the passport check.
+
+**What the receipt shows.** The declaration carries no company name and no
+organisation number, so the buyer block shows only what is there — the declared
+country, the VAT number, the status, and the date the declaration is valid
+until:
+
+```json
+"kopare": {
+  "identifierare": "0x…",
+  "typ": "blockkedjeadress",
+  "roll": "agent_delegate",
+  "deklaration": {
+    "land": "DE",
+    "moms_nr": "DE123456789",
+    "status": "TAXABLE_PERSON",
+    "giltig_till": "2027-06-30"
+  }
+}
+```
+
+`deklaration` is absent when no declaration was accepted, so a receipt without
+one keeps its previous shape apart from the new `momsbehandling` field.
+
+**VAT treatment, display only.** For a Swedish seller of an electronic service:
+
+| `momsbehandling` | When | Amounts |
+|---|---|---|
+| `SE_25` | the declared country is Sweden, or there is no accepted declaration | unchanged: 25% VAT taken out of the price |
+| `REVERSE_CHARGE` | the declared country is another EU country | net = total = the product price, VAT rate 0, VAT amount 0 |
+
+Under `REVERSE_CHARGE` the rendered invoice names both VAT numbers and says
+"reverse charge" (English) / "omvänd betalningsskyldighet" (Swedish). The price
+does not change with the treatment.
+
+**Limits.** The merchant applies a display rule; it does not compute, assert or
+file tax, and it does not verify the VAT number against VIES. A non-EU
+treatment is not built — a Haven buyer only ever sends a declaration for an EU
+VAT number, and a non-EU jurisdiction falls back to `SE_25`. The declaration is
+not persisted: it lives on the receipt for the payment that carried it.
+
 ## QA hook: verify-without-settle (testnet-only)
 
 `MERCHANT_SKIP_SETTLE_PRODUCT=<product_id,...>` (#603) verifies listed

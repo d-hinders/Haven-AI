@@ -25,6 +25,7 @@ import {
   formatUsdc,
   isSettlementMethod,
   merchantEnvironmentForChain,
+  productReceivingAddress,
   settlementMethodsForProduct,
   type ProductId,
   type SettlementMethod,
@@ -297,7 +298,9 @@ async function handle(
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
-    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId)
+    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
+      receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress),
+    })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
   }
 
@@ -320,6 +323,9 @@ async function handlePaymentGate(
   paymentToolInfo: PaymentToolInfo,
 ): Promise<SettledPayment | null> {
   const { productId, product, description, settlementMethod } = paymentToolInfo
+  // #4850: the PRODUCT names the address its payment is made out to; the
+  // merchant-wide address is only its default.
+  const receivingAddress = productReceivingAddress(product, options.merchantAddress)
 
   // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
   // the unpaid one that would receive the 402 challenge AND the agent's
@@ -333,7 +339,7 @@ async function handlePaymentGate(
   }
 
   const paymentRequired = options.paymentProcessor.buildPaymentRequired({
-    merchantAddress: options.merchantAddress,
+    merchantAddress: receivingAddress,
     amountUsdc: product.price_usdc,
     resource: `${options.baseUrl}${options.path}`,
     description,
@@ -359,7 +365,7 @@ async function handlePaymentGate(
     return await options.paymentProcessor.verifyAndSettle({
       productId,
       paymentHeader,
-      merchantAddress: options.merchantAddress,
+      merchantAddress: receivingAddress,
       expectedAmount: product.price_usdc,
       paymentRequired,
     })

@@ -642,6 +642,12 @@ export interface X402PaymentProcessorOptions {
 
 export interface X402PaymentProcessor {
   buildPaymentRequired(params: {
+    /**
+     * #4850: the receiving address of the PRODUCT being bought
+     * (`productReceivingAddress`), not a merchant-wide global — the 402's
+     * `payTo`. Callers resolve it per product; the name is kept because every
+     * verification step compares the payment against it as "this merchant".
+     */
     merchantAddress: Address
     amountUsdc: bigint
     resource: string
@@ -661,6 +667,9 @@ export interface X402PaymentProcessor {
   verifyAndSettle(params: {
     productId: ProductId
     paymentHeader: string
+    /** #4850: the purchased product's receiving address — the same value the
+     *  challenge it is checked against was built with. The EIP-3009 `to`, the
+     *  quoted option's `payTo` and the ERC-7710 transfer target must all equal it. */
     merchantAddress: Address
     expectedAmount: bigint
     paymentRequired: PaymentRequired

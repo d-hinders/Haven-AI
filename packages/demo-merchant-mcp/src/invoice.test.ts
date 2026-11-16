@@ -5,6 +5,7 @@ const BASE_PARAMS = {
   invoiceNumber: 'FAK-2026-00099',
   productId: 'storage_50gb' as const,
   buyerAddress: '0x2222222222222222222222222222222222222222',
+  receivingAddress: '0x1111111111111111111111111111111111111111',
   authorizationNonce: `0x${'ab'.repeat(32)}`,
   txHash: `0x${'cd'.repeat(32)}` as const,
   settlement: 'settled_onchain' as const,

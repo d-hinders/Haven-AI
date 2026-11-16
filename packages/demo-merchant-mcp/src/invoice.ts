@@ -10,15 +10,28 @@ import type { SettledPayment, SettlementState } from './x402.js'
 // render gains an English variant, via `renderInvoiceText`.
 
 // ── Merchant identity ────────────────────────────────────────────────────────
-const MERCHANT = {
+const MERCHANT_IDENTITY = {
   name: 'Haven Demo AB',
   address: 'Birger Jarlsgatan 57, 113 56 Stockholm',
   org_nr: '559412-3456',
   moms_nr: 'SE559412345601',
   iban: 'SE35 5000 0000 0549 1000 0003',
   bic: 'ESSESESS',
-  /** USDC on the merchant's network (see `networkDisplayName`) — our merchant wallet */
-  crypto_address: process.env.MERCHANT_ADDRESS ?? '0x0000000000000000000000000000000000000000',
+}
+
+/**
+ * The seller block. Its keys are a contract: Haven's accounting reads
+ * `name`, `org_nr` and `moms_nr` off the receipt
+ * (`packages/backend/src/modules/accounting/receipt-underlag.ts`).
+ */
+export type InvoiceSeller = typeof MERCHANT_IDENTITY & {
+  /**
+   * USDC on the merchant's network (see `networkDisplayName`): the address
+   * THIS payment was made out to. #4850: the purchased product's receiving
+   * address, passed in per invoice — no longer read from `MERCHANT_ADDRESS`
+   * at import, which named one address for every product.
+   */
+  crypto_address: string
 }
 
 /**
@@ -93,6 +106,8 @@ export interface InvoiceParams {
    * "buyer".
    */
   payerRole: 'agent_delegate' | 'agent_delegate_account'
+  /** #4850: the purchased product's receiving address (`productReceivingAddress`). */
+  receivingAddress: string
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
   /** The wire hash — rendered only when `settlement === 'settled_onchain'`
@@ -114,7 +129,7 @@ export interface InvoiceJson {
   fakturadatum: string
   forfallodatum: string
   ocr_nummer: string
-  saljare: typeof MERCHANT
+  saljare: InvoiceSeller
   kopare: {
     identifierare: string
     typ: 'blockkedjeadress'
@@ -198,7 +213,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     fakturadatum: isoDate(today),
     forfallodatum: isoDate(dueDate),
     ocr_nummer: ocr,
-    saljare: MERCHANT,
+    saljare: { ...MERCHANT_IDENTITY, crypto_address: params.receivingAddress },
     kopare: {
       identifierare: params.buyerAddress,
       typ: 'blockkedjeadress',
@@ -358,15 +373,24 @@ export { nextInvoiceNumber }
 // (so a paying agent can capture the merchant's own receipt), and the MCP tool
 // handler renders it in the confirmation text. One generation per payment
 // keeps the two identical — and repeat tool calls replay the same invoice.
+//
+// #4850: keyed by payment alone, so every caller must pass the SAME
+// `receivingAddress` for a payment — the purchased product's
+// (`productReceivingAddress`). Whichever caller runs first fixes the invoice.
 const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
 
-export function invoiceForPayment(payment: SettledPayment, productId: ProductId, chainId?: number): Invoice {
+export function invoiceForPayment(
+  payment: SettledPayment,
+  productId: ProductId,
+  opts: { receivingAddress: string; chainId?: number },
+): Invoice {
   const cached = invoicesByPayment.get(payment)
   if (cached) return cached
   const invoice = generateInvoice({
     invoiceNumber: nextInvoiceNumber(),
     productId,
-    chainId,
+    chainId: opts.chainId,
+    receivingAddress: opts.receivingAddress,
     buyerAddress: payment.from,
     // #2960: `payment.from` is the delegate EOA on `eip3009` and the
     // delegate SMART account (`delegator`) on `erc7710` — see

@@ -14,6 +14,7 @@ import {
   merchantEnvironmentForChain,
   networkDisplayName,
   productDescription,
+  productReceivingAddress,
   type MerchantLocale,
   type ProductId,
   type SettlementMethod,
@@ -480,6 +481,8 @@ async function completePurchase(
   const { description, settlementMethod, locale, detail } = options
   const t = STRINGS[locale]
   const product = PRODUCTS[productId]
+  // #4850: the address THIS product is paid to; the merchant-wide one is its default.
+  const receivingAddress = productReceivingAddress(product, config.merchantAddress)
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()
 
@@ -488,7 +491,7 @@ async function completePurchase(
     // only after receiving a settle-less receipt. Same suffix the discovery
     // document and list_products carry, so all three read as one fact.
     const requirements = config.buildPaymentRequired({
-      merchantAddress: config.merchantAddress,
+      merchantAddress: receivingAddress,
       amountUsdc: product.price_usdc,
       resource,
       description: isSkipSettleProduct(productId) ? `${description}${QA_FIXTURE_DESCRIPTION_SUFFIX}` : description,
@@ -502,7 +505,7 @@ async function completePurchase(
           text:
             `${t.paymentRequired(product.name)}\n\n` +
             `${t.priceLine(formatUsdc(product.price_usdc))}\n` +
-            `${t.paymentAddress}: ${config.merchantAddress}\n` +
+            `${t.paymentAddress}: ${receivingAddress}\n` +
             `${t.network}: eip155:${CHAIN_ID}\n\n` +
             `${t.paymentRequirementsHeading}\n${JSON.stringify(requirements, null, 2)}\n\n` +
             t.resendHint,
@@ -516,7 +519,7 @@ async function completePurchase(
   // every call is cheap and deterministic (invoiceForPayment memoizes per
   // payment), so the summary below can never disagree between a fresh
   // purchase and a retried/duplicate one.
-  const invoice = invoiceForPayment(payment, productId, config.chainId)
+  const invoice = invoiceForPayment(payment, productId, { receivingAddress, chainId: config.chainId })
   // #4723: advisory, AFTER settlement, cached per payment. Never a condition
   // of the purchase — the goods are already owed by the time this runs.
   const passport = await passportSummaryFor(payment, {

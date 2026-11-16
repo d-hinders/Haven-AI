@@ -341,6 +341,11 @@ hosted server relays the first 500 characters of this body
 (`packages/mcp-server/src/tools/paid-mcp-completion.ts`).
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
+It is the default receiving address: a product may name its own
+(`receivingAddress` in `src/products.ts`, read through
+`productReceivingAddress`), and the 402's `payTo`, the verification and the
+invoice's recipient address all follow the product being bought. Today no
+product names one, so every payment goes to `MERCHANT_ADDRESS`.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
 `transferWithAuthorization`; it does not need to be the receiving wallet and
 should not hold user or agent funds.

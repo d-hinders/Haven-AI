@@ -39,11 +39,23 @@ function config(overrides: Partial<Parameters<typeof resolveStripeConfig>[0]> = 
   })
 }
 
-/** An in-memory Stripe: search by metadata, create with an idempotency key. */
+/** Stripe's idempotency-key retention: about 24 hours, then the key is pruned. */
+const IDEMPOTENCY_KEY_RETENTION_MS = 24 * 60 * 60 * 1000
+
+/**
+ * An in-memory Stripe: search by metadata, create with an idempotency key.
+ *
+ * The key store models Stripe's ~24h retention (review S5): a repeated key
+ * inside the window returns the SAME PaymentIntent, and after it the key is
+ * forgotten, so the same key would create a new one. `advanceClock` moves the
+ * fake's clock, as a day passing would.
+ */
 function fakeStripe(opts: { failCreate?: boolean; failSearch?: boolean; hang?: boolean } = {}) {
   const intents = new Map<string, { id: string; form: Record<string, string> }>()
   const byTx = new Map<string, string>()
   const requests: StripeHttpRequest[] = []
+  const idempotencyKeys = new Map<string, { id: string; at: number }>()
+  let now = Date.now()
   let nextId = 1
   const client: StripeHttpClient = {
     async request(request) {
@@ -61,13 +73,33 @@ function fakeStripe(opts: { failCreate?: boolean; failSearch?: boolean; hang?: b
       }
       const tx = request.form?.['metadata[transaction_hash]']
       if (!tx) return { status: 400, body: { error: { type: 'invalid_request_error' } } }
+      const key = request.idempotencyKey
+      if (key) {
+        const held = idempotencyKeys.get(key)
+        if (held && now - held.at < IDEMPOTENCY_KEY_RETENTION_MS) {
+          return { status: 200, body: { id: held.id } }
+        }
+        // Stripe prunes the key after ~24h: it no longer answers for the create.
+        if (held) idempotencyKeys.delete(key)
+      }
       const id = `pi_test_${nextId++}`
       intents.set(id, { id, form: request.form ?? {} })
       byTx.set(tx, id)
+      if (key) idempotencyKeys.set(key, { id, at: now })
       return { status: 200, body: { id } }
     },
   }
-  return { client, intents, byTx, requests }
+  return {
+    client,
+    intents,
+    byTx,
+    requests,
+    idempotencyKeys,
+    /** Move the fake's clock forward, as a day passing would. */
+    advanceClock(ms: number) {
+      now += ms
+    },
+  }
 }
 
 describe('stripeAmountCents (#4853)', () => {
@@ -212,6 +244,36 @@ describe('encodeStripeForm (#4853)', () => {
   })
 })
 
+describe('the Stripe fake models idempotency-key retention (#4853, review S5)', () => {
+  const create = (stripe: ReturnType<typeof fakeStripe>, key: string) =>
+    stripe.client.request({
+      method: 'POST',
+      path: '/v1/payment_intents',
+      apiVersion: STRIPE_API_VERSION_SANDBOX,
+      secretKey: FAKE_KEY,
+      form: { 'metadata[transaction_hash]': TX },
+      idempotencyKey: key,
+    })
+
+  it('returns the same PaymentIntent for a repeated key inside 24 hours', async () => {
+    const stripe = fakeStripe()
+    const first = await create(stripe, TX)
+    stripe.advanceClock(23 * 60 * 60 * 1000)
+    const second = await create(stripe, TX)
+    expect(second.body).toEqual(first.body)
+    expect(stripe.intents.size).toBe(1)
+  })
+
+  it('forgets the key after 24 hours: the same key creates a new PaymentIntent', async () => {
+    const stripe = fakeStripe()
+    const first = await create(stripe, TX)
+    stripe.advanceClock(25 * 60 * 60 * 1000)
+    const second = await create(stripe, TX)
+    expect(second.body).not.toEqual(first.body)
+    expect(stripe.intents.size).toBe(2)
+  })
+})
+
 describe('createStripeRecording (#4853)', () => {
   it('creates one PaymentIntent with the amount in cents and the transaction hash as idempotency key', async () => {
     const stripe = fakeStripe()
@@ -246,6 +308,25 @@ describe('createStripeRecording (#4853)', () => {
     const second = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })
 
     expect(second).toEqual({ status: 'already_recorded', paymentIntentId: 'pi_test_1' })
+    expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(1)
+    expect(recording.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, failed: 0 })
+  })
+
+  it('records nothing a day later, when Stripe has forgotten the idempotency key (#4853, review S5)', async () => {
+    const stripe = fakeStripe()
+    const recording = createStripeRecording(config()!, { http: stripe.client, log: () => {} })
+
+    const first = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })
+    expect(first).toEqual({ status: 'recorded', paymentIntentId: 'pi_test_1' })
+
+    // Stripe prunes idempotency keys after about 24 hours. A key-only
+    // implementation would create a second PaymentIntent here; the metadata
+    // search — not the key — is what prevents the duplicate.
+    stripe.advanceClock(25 * 60 * 60 * 1000)
+
+    const second = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })
+    expect(second).toEqual({ status: 'already_recorded', paymentIntentId: 'pi_test_1' })
+    expect(stripe.intents.size).toBe(1)
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(1)
     expect(recording.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, failed: 0 })
   })
@@ -345,10 +426,13 @@ describe('the deposit address is the recorded product’s receiving address (#48
   })
 })
 
-describe('each off condition warns and leaves the joke on MERCHANT_ADDRESS (#4853)', () => {
+describe('each off condition that leaves the joke offered warns and keeps MERCHANT_ADDRESS (#4853)', () => {
+  // Review S4: with CDP not configured the joke is ABSENT, not on
+  // MERCHANT_ADDRESS — that case is covered by the HTTP test in
+  // stripe-recording.test.ts. Only the conditions that leave the product
+  // offered belong in this table.
   const cases: Array<{ name: string; input: Partial<Parameters<typeof resolveStripeConfig>[0]> }> = [
     { name: 'only one Stripe variable set', input: { secretKeyRaw: undefined } },
-    { name: 'CDP not configured', input: { cdpConfigured: false } },
     { name: 'price below one cent', input: { priceAtomic: 500n } },
     { name: 'price not a whole number of cents', input: { priceAtomic: 15_000n } },
   ]

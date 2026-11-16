@@ -26,6 +26,7 @@ import { reconcileStripe } from './stripe-reconcile.js'
 import {
   STRIPE_API_VERSION_SANDBOX,
   createStripeRecording,
+  resolveStripeConfig,
   type StripeHttpClient,
   type StripeHttpRequest,
   type StripeRecording,
@@ -72,11 +73,23 @@ function makeFakes(): Fakes {
   }
 }
 
-/** An in-memory Stripe: search by metadata, create with an idempotency key. */
+/** Stripe's idempotency-key retention: about 24 hours, then the key is pruned. */
+const IDEMPOTENCY_KEY_RETENTION_MS = 24 * 60 * 60 * 1000
+
+/**
+ * An in-memory Stripe: search by metadata, create with an idempotency key.
+ *
+ * The key store models Stripe's ~24h retention (review S5): a repeated key
+ * inside the window returns the SAME PaymentIntent, and after it the key is
+ * forgotten, so the same key would create a new one. `advanceClock` moves the
+ * fake's clock, as a day passing would.
+ */
 function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
   const intents = new Map<string, { id: string; form: Record<string, string> }>()
   const byTx = new Map<string, string>()
   const requests: StripeHttpRequest[] = []
+  const idempotencyKeys = new Map<string, { id: string; at: number }>()
+  let now = Date.now()
   let nextId = 1
   const client: StripeHttpClient = {
     async request(request) {
@@ -93,13 +106,33 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
       }
       const tx = request.form?.['metadata[transaction_hash]']
       if (!tx) return { status: 400, body: { error: { type: 'invalid_request_error' } } }
+      const key = request.idempotencyKey
+      if (key) {
+        const held = idempotencyKeys.get(key)
+        if (held && now - held.at < IDEMPOTENCY_KEY_RETENTION_MS) {
+          return { status: 200, body: { id: held.id } }
+        }
+        // Stripe prunes the key after ~24h: it no longer answers for the create.
+        if (held) idempotencyKeys.delete(key)
+      }
       const id = `pi_test_${nextId++}`
       intents.set(id, { id, form: request.form ?? {} })
       byTx.set(tx, id)
+      if (key) idempotencyKeys.set(key, { id, at: now })
       return { status: 200, body: { id } }
     },
   }
-  return { client, intents, byTx, requests }
+  return {
+    client,
+    intents,
+    byTx,
+    requests,
+    idempotencyKeys,
+    /** Move the fake's clock forward, as a day passing would. */
+    advanceClock(ms: number) {
+      now += ms
+    },
+  }
 }
 
 async function startServer(
@@ -108,11 +141,13 @@ async function startServer(
     stripe?: boolean
     stripeFail?: boolean
     stripeHang?: boolean
+    cdp?: boolean
     fakes?: Fakes
     previousReceivingAddresses?: readonly `0x${string}`[]
   } = {},
 ) {
   const fakes = opts.fakes ?? makeFakes()
+  const cdp = opts.cdp ?? true
   const settlementClient: SettlementClient = {
     submit: fakes.submit,
     waitForReceipt: fakes.waitForReceipt,
@@ -138,16 +173,20 @@ async function startServer(
     paymentProcessor: createX402PaymentProcessor(settlementClient, {
       erc7710: { delegationManager: TRUSTED_DELEGATION_MANAGER },
       settlementMethods,
-      cdp: {
-        facilitator: { verify: fakes.verify, settle: fakes.settle },
-        chain: { authorizationUsed: fakes.authorizationUsed, findAuthorizationOutcome: fakes.findAuthorizationOutcome },
-        timeoutMs: 200,
-      },
+      ...(cdp
+        ? {
+            cdp: {
+              facilitator: { verify: fakes.verify, settle: fakes.settle },
+              chain: { authorizationUsed: fakes.authorizationUsed, findAuthorizationOutcome: fakes.findAuthorizationOutcome },
+              timeoutMs: 200,
+            },
+          }
+        : {}),
       ...(opts.previousReceivingAddresses ? { previousReceivingAddresses: opts.previousReceivingAddresses } : {}),
     }),
     settlementClient,
     readinessCacheMs: 0,
-    cdpConfigured: true,
+    cdpConfigured: cdp,
     stripe: recording,
   })
   servers.push(server)
@@ -277,6 +316,36 @@ describe('the deposit address in the 402 (#4853)', () => {
     const { origin } = await startServer({ stripe: false })
     const health = (await (await fetch(`${origin}/healthz`)).json()) as Record<string, unknown>
     expect(health.stripe).toBeUndefined()
+  })
+})
+
+describe('Stripe configured with CDP not configured (#4853, review S4)', () => {
+  it('warns naming CDP and does not offer the joke, even with a recording in hand', async () => {
+    // The startup path: both Stripe variables set, CDP not. Stripe stays off
+    // with a warning naming CDP — the joke is not offered at all (#4851).
+    const warn = vi.fn()
+    const resolved = resolveStripeConfig({
+      depositAddressRaw: DEPOSIT,
+      secretKeyRaw: FAKE_KEY,
+      cdpConfigured: false,
+      priceAtomic: 10_000n,
+      warn,
+    })
+    expect(resolved).toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]![0]).toContain('CDP')
+
+    // And the server itself: a recording is present, CDP is not, and the joke
+    // is absent from every surface — not merely paid to MERCHANT_ADDRESS.
+    const { url, origin, stripe } = await startServer({ cdp: false })
+    const list = await (await postMcp(url, callTool('list_products', {}, 1))).text()
+    expect(list).not.toContain('joke')
+    const tools = await (await postMcp(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).text()
+    expect(tools).not.toContain('buy_joke')
+    expect(JSON.stringify(await (await fetch(`${origin}/`)).json())).not.toContain('joke')
+    const call = await postMcp(url, buyJoke())
+    expect(call.status).not.toBe(402)
+    expect(stripe.requests).toHaveLength(0)
   })
 })
 

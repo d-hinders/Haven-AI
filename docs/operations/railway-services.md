@@ -114,9 +114,13 @@ it does not need:
   static outbound IPs are enabled on it.
 - **Permissions** (*Advanced settings*): leave *Trade*, *Transfer* and
   *Receive* (Coinbase App & Advanced Trade) and *Export* and *Manage*
-  (Non-custodial) unticked. The facilitator's verify and settle calls need
-  none of them, and *Transfer* would let a leaked key move the account's funds.
-  Leave *View* unticked too if the form allows it.
+  (Non-custodial) unticked: #4852's dev run settled with a key set up this
+  way, and with them a leaked key could move the Coinbase account's funds
+  (*Transfer*) or export or re-permission its CDP wallets (*Export*, *Manage*).
+  *View* is ticked by default and unticking it has not been tried — the dev
+  key that settled may have had it ticked — so if verify or settle is refused
+  without it, tick *View*. A key with *View* can read the account's CDP
+  wallets, so keep wallets out of this account or accept that.
 - **Signature algorithm:** the default, Ed25519.
 - One key per environment, so dev and production can be revoked apart.
 

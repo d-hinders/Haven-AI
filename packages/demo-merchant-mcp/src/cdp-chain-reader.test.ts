@@ -42,10 +42,17 @@ interface ChainState {
   /** The receipt returned for any transaction. */
   receipt?: { status: '0x1' | '0x0'; transfers: Array<{ from: Address; to: Address; value: bigint; token?: Address }> }
   authorizationState?: boolean
+  /**
+   * #4866: the widest `eth_getLogs` range the node serves, inclusive. Wider is
+   * refused the way the public Base Sepolia RPC refuses it (-32614).
+   */
+  maxRange?: bigint
 }
 
 interface Recorded {
   getLogs: Array<{ address: string; topics: Array<string | string[] | null>; fromBlock: bigint; toBlock: bigint }>
+  /** #4866: `eth_getLogs` calls the node refused for their range. */
+  refused: Array<{ fromBlock: bigint; toBlock: bigint }>
   ethCalls: Hex[]
 }
 
@@ -70,7 +77,7 @@ function rawLog(fields: { address: Address; topics: Hex[]; data: Hex; block: big
 /** A real viem client over a stub node. The stub filters `eth_getLogs` by its
  *  topics exactly as a node does: a topic slot that is absent matches anything. */
 function chain(state: ChainState): { client: ChainReadClient; recorded: Recorded } {
-  const recorded: Recorded = { getLogs: [], ethCalls: [] }
+  const recorded: Recorded = { getLogs: [], refused: [], ethCalls: [] }
   const transport = custom({
     async request({ method, params }: { method: string; params?: unknown }) {
       const p = (params ?? []) as unknown[]
@@ -92,6 +99,10 @@ function chain(state: ChainState): { client: ChainReadClient; recorded: Recorded
           const filter = p[0] as { address: string; topics: Array<string | string[] | null>; fromBlock: Hex; toBlock: Hex }
           const fromBlock = BigInt(filter.fromBlock)
           const toBlock = BigInt(filter.toBlock)
+          if (state.maxRange !== undefined && toBlock - fromBlock + 1n > state.maxRange) {
+            recorded.refused.push({ fromBlock, toBlock })
+            throw { code: -32614, message: `eth_getLogs is limited to a ${state.maxRange} range` }
+          }
           recorded.getLogs.push({ address: filter.address, topics: filter.topics, fromBlock, toBlock })
           const matches = (slot: string | string[] | null | undefined, value: Hex) =>
             slot == null || (Array.isArray(slot) ? slot.includes(value) : slot === value)
@@ -137,7 +148,7 @@ function chain(state: ChainState): { client: ChainReadClient; recorded: Recorded
           throw new Error(`stub node: unexpected ${method}`)
       }
     },
-  })
+  }, { retryCount: 0 })
   return { client: createPublicClient({ chain: base, transport }) as ChainReadClient, recorded }
 }
 
@@ -273,5 +284,34 @@ describe('withCdpTimeout (#4851)', () => {
 
   it('returns the answer when it comes in time', async () => {
     await expect(withCdpTimeout('verify', 1_000, async () => 'ok')).resolves.toBe('ok')
+  })
+})
+
+describe('the recovery search fits the RPC provider\'s block-range limit (#4866)', () => {
+  it('a node that serves at most 200 blocks: learns the limit, searches the whole window, and proves not_in_window', async () => {
+    const { client, recorded } = chain({ maxRange: 200n })
+    // Before #4866 the first 500-block chunk was refused and the search threw,
+    // so a closed window could never be proven empty on such a node.
+    expect(await createCdpChainReader(client).findAuthorizationOutcome(CLOSED)).toEqual({ kind: 'not_in_window' })
+    expect(recorded.refused).toHaveLength(1)
+    for (const call of recorded.getLogs) expect(call.toBlock - call.fromBlock + 1n).toBeLessThanOrEqual(200n)
+    for (let i = 1; i < recorded.getLogs.length; i++) {
+      expect(recorded.getLogs[i].fromBlock).toBe(recorded.getLogs[i - 1].toBlock + 1n)
+    }
+    // The refused call's start is covered from the first successful window on.
+    expect(recorded.getLogs[0].fromBlock).toBe(recorded.refused[0].fromBlock)
+  })
+
+  it('finds the event on such a node, too', async () => {
+    const { client } = chain({ maxRange: 200n, used: [{ authorizer: PAYER, nonce: NONCE, block: LATEST - 400n, tx: TX }] })
+    expect(await createCdpChainReader(client).findAuthorizationOutcome(WIDE)).toEqual({ kind: 'settled', txHash: TX })
+  })
+
+  it('keeps a learned limit for the next search on the same reader: no second refusal', async () => {
+    const { client, recorded } = chain({ maxRange: 200n })
+    const reader = createCdpChainReader(client)
+    await reader.findAuthorizationOutcome(CLOSED)
+    await reader.findAuthorizationOutcome(CLOSED)
+    expect(recorded.refused).toHaveLength(1)
   })
 })

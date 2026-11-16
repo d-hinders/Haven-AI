@@ -98,8 +98,31 @@ its CDP-settled joke product only when BOTH of these are set on the service:
 
 | Variable | Value |
 |---|---|
-| `CDP_API_KEY_ID` | the API key ID of a Coinbase Developer Platform project used only for the demo merchant |
+| `CDP_API_KEY_ID` | the key ID of a Coinbase Developer Platform secret API key used only by the demo merchant |
 | `CDP_API_KEY_SECRET` | that key's secret |
+
+**Creating the key.** The Coinbase Developer Platform portal has no projects:
+a secret API key belongs to the whole account, which has a **Live** and a
+**Sandbox** mode. So the key cannot be isolated in a project of its own;
+isolate it by giving the demo merchant its own key, with nothing ticked that
+it does not need:
+
+- **Mode:** Live. A Live key settled the joke on Base Sepolia in #4852's dev
+  run; a Sandbox key has not been tried.
+- **IP allowlist:** tick *Allow requests from any IP address*. An allowlist
+  works only with fixed outbound IPs, which a Railway service has only when
+  static outbound IPs are enabled on it.
+- **Permissions** (*Advanced settings*): leave *Trade*, *Transfer* and
+  *Receive* (Coinbase App & Advanced Trade) and *Export* and *Manage*
+  (Non-custodial) unticked: #4852's dev run settled with a key set up this
+  way, and with them a leaked key could move the Coinbase account's funds
+  (*Transfer*) or export or re-permission its CDP wallets (*Export*, *Manage*).
+  *View* is ticked by default and unticking it has not been tried — the dev
+  key that settled may have had it ticked — so if verify or settle is refused
+  without it, tick *View*. A key with *View* can read the account's CDP
+  wallets, so keep wallets out of this account or accept that.
+- **Signature algorithm:** the default, Ed25519.
+- One key per environment, so dev and production can be revoked apart.
 
 Paste the values straight into the service variables, never into chat, an
 issue, a file or a log, then redeploy: the pair is read once, at startup. With

@@ -19,7 +19,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
-import { buildMerchantMcpServer } from './server.js'
+import { buildMerchantMcpServer, runWithSettledPayment } from './server.js'
 import {
   PRODUCTS,
   productReceivingAddress,
@@ -33,6 +33,7 @@ import {
   USDC_ADDRESS,
   createX402PaymentProcessor,
   type Eip3009Authorization,
+  type SettledPayment,
   type SettlementClient,
 } from './x402.js'
 
@@ -268,6 +269,49 @@ describe('a product carries its own receiving address and settlement kind (#4850
     expect(wrong.status).toBe(402)
     expect(((await wrong.json()) as { error?: string }).error).toContain('not addressed to this merchant')
     expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('the tool handler renders its own invoice against the product address (no HTTP layer first)', async () => {
+    // Over HTTP the gate generates and memoizes the invoice before the tool
+    // runs, so the handler's own `invoiceForPayment` call is only reached when
+    // the handler sees the payment first. Drive it that way.
+    overrideProduct('vpn_ultra', { receivingAddress: OTHER_RECIPIENT })
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+    const processor = createX402PaymentProcessor({
+      submit: vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH),
+      waitForReceipt: vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined),
+    })
+    const server = buildMerchantMcpServer({
+      merchantAddress: MERCHANT,
+      baseUrl: 'http://127.0.0.1:0',
+      buildPaymentRequired: processor.buildPaymentRequired,
+    })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'test', version: '0' })
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+    const payment: SettledPayment = {
+      productId: 'vpn_ultra',
+      settlementMethod: 'eip3009',
+      from: privateKeyToAccount(PAYER_KEY).address,
+      to: OTHER_RECIPIENT,
+      value: PRODUCTS.vpn_ultra.price_usdc,
+      nonce: `0x${'12'.repeat(32)}`,
+      txHash: TX_HASH,
+      paymentResponse: { success: true, transaction: TX_HASH, network: 'eip155:8453' },
+      paymentResponseHeader: 'unused',
+      settlement: 'settled_onchain',
+      passportReference: null,
+    }
+    const result = await runWithSettledPayment(payment, () =>
+      client.callTool({ name: 'buy_vpn', arguments: { plan: 'ultra' } }),
+    )
+    await client.close()
+    await server.close()
+    const text = (result.content as Array<{ text: string }>)[0].text
+    expect(text).toContain('Purchase confirmed')
+    expect(text).toContain(`Recipient address: ${OTHER_RECIPIENT}`)
+    expect(text).not.toContain(MERCHANT)
   })
 
   it('names the product address in the in-band refusal', async () => {

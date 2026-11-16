@@ -17,6 +17,7 @@
     "smoke:start": "node scripts/start-smoke.mjs"
   },
   "dependencies": {
+    "@coinbase/x402": "^2.1.0",
     "@haven_ai/sdk": "*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@x402/core": "^2.29.0",

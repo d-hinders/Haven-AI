@@ -421,7 +421,8 @@ describe('hosted tool refusals are reported as such', () => {
 })
 
 describe('an erc7710 quote is now a REGRESSION, not an out-of-scope skip (#1441)', () => {
-  // The leg buys `vpn_legacy`, the one product advertising eip3009 ALONE, so
+  // The leg buys `vpn_legacy`, the one self-settled product advertising eip3009
+  // ALONE (#4851's joke is CDP-settled and not bought here), so
   // the funding-leg topology is reachable. #1450's preference rule has no
   // erc7710 option to prefer here — if a quote comes back erc7710 anyway,
   // scheme selection ignored the merchant's advertised methods, or the dev

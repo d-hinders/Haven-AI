@@ -45,10 +45,13 @@ merchant-of-record product. Funds do not flow through Haven.
 | CloudNest 50 GB | `buy_cloud_storage` | 0.0005 USDC |
 | CloudNest 200 GB | `buy_cloud_storage` | 0.0015 USDC |
 | CloudNest 1 TB | `buy_cloud_storage` | 0.004 USDC |
+| Haven Joke (only with CDP configured) | `buy_joke` | 0.01 USDC, EIP-3009 only, one-time |
 
-`vpn_legacy` (`plan: "legacy"`) is the one EIP-3009-only product (#1441): the QA
-harness's hosted funding-leg scenario needs a merchant offer the erc7710
-preference cannot pick. Every other product supports both methods.
+`vpn_legacy` (`plan: "legacy"`) is the one self-settled EIP-3009-only product
+(#1441): the QA harness's hosted funding-leg scenario needs a merchant offer the
+erc7710 preference cannot pick. The joke is EIP-3009-only too, but Coinbase's
+facilitator settles it (see [Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)).
+Every other product supports both methods.
 
 Every product's x402 capability shows in `list_products`, in its text line and
 in its `structuredContent.products` record:
@@ -88,7 +91,8 @@ the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled
 payment (never re-derived from the quoted catalog price).
 
-Purchase tools accept an optional `settlement_method` argument. It decides
+Purchase tools (all but `buy_joke`, which offers one method) accept an optional
+`settlement_method` argument. It decides
 which option comes FIRST in the 402's `accepts`; every other method the product
 and the merchant support is still offered after it:
 
@@ -309,7 +313,9 @@ wallet that drains between the two is caught before anything is settled.
   unchanged — same "never block on an unknown" rule as `/healthz`.
 - **Exempt**: free (unpaid) tools, and the `MERCHANT_SKIP_SETTLE_PRODUCT`
   QA fixture below — neither one settles anything on-chain, so a drained
-  wallet cannot block a settlement that never runs.
+  wallet cannot block a settlement that never runs. Also exempt: a
+  CDP-settled product (the joke, #4851) — Coinbase's facilitator pays that
+  gas, not this wallet.
 
 The existing merchant-fault 402 body (the #1517 fault-class message) also now
 carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
@@ -323,7 +329,9 @@ already-settled decision, served) and otherwise refuses it as a payer-side
 DECISION — a 402 whose `error` names the revert, then the next action (nothing
 settled; re-quote, pay with a fresh authorization), then the likely causes (the
 child's transfer-amount caveat exhausted, the delegator short of the price, the
-child redeemed elsewhere). No `reason_code` rides a decision. Only a PROVEN
+child redeemed elsewhere). No `reason_code` rides that decision; only the CDP
+path's decisions carry one (`facilitator_refused` / `facilitator_retryable`,
+see [Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)). Only a PROVEN
 revert takes that branch — viem's `ContractFunctionRevertedError` carrying
 decoded data, an error signature or an "execution reverted" reason, the
 node's `ExecutionRevertedError` (minus geth's "gas required exceeds
@@ -365,6 +373,53 @@ by the QA harness (#575). On Base Sepolia the merchant uses Circle's testnet USD
 domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at the
 matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
 and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
+
+## Coinbase facilitator (CDP): joke product (#4851)
+
+`buy_joke` sells one joke for 0.01 USDC. It is the only product verified and
+settled by Coinbase's hosted x402 facilitator (CDP) instead of this merchant's
+own `SETTLEMENT_PRIVATE_KEY`; CDP pays the gas. It is offered only when both
+`CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set. With neither, the merchant
+behaves exactly as it does without the product. With only one, it logs a
+warning and does not offer the product; it still starts. `/healthz` carries a
+`cdp` block only when CDP is configured, and never a credential.
+
+- **EIP-3009 only.** Haven agents prefer ERC-7710 whenever it is offered, and
+  CDP does not settle it, so the joke offers EIP-3009 alone. An agent whose
+  budget is pinned to one recipient cannot pay it: EIP-3009 needs an open budget.
+- **The merchant checks its own quote first.** The extensions echo, x402
+  version, quoted option, resource, recipient, amount, signature and validity
+  window are checked before CDP is called at all. A signed window
+  (`validBefore - validAfter`) longer than 42,600 s (just under 12 h) is
+  refused too: the recovery search below could not cover it in full.
+- **The chain decides every failure.** After any settle failure or timeout
+  (30 s per call), the merchant reads USDC's `authorizationState` itself and
+  matches no facilitator error string. Used: USDC's events decide whether it
+  was this payment (next bullet). Unused: a
+  retryable refusal; the same header retried runs the check again and settles
+  at most once. A retry after `validBefore` is served when the chain says the
+  money moved, and refused as expired when it did not.
+- **Settled or cancelled.** `authorizationState` reads "used" for a payment,
+  a cancelled authorization and a nonce spent by another authorization alike.
+  The merchant searches USDC's `AuthorizationUsed` event for this payer and
+  nonce inside the authorization's own validity window — the only time a
+  payment for it can land. Found, and its transaction paid this merchant the
+  price: served, with that hash. Found paying anything else, or the whole
+  window empty: a final refusal. "Whole" means `validBefore` is at least
+  300 blocks (about 10 minutes) behind the RPC's head, so a node lagging a few
+  blocks cannot hide a payment that just landed. When the search fails, the
+  window is too long to search in full, or it closed too recently, the buyer is
+  served with the reference marked unavailable — never refused.
+- **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
+  (final: CDP refused at verification — including its sanctions and risk
+  screening — and the chain shows the authorization unused, or the
+  authorization was consumed by something other than this
+  payment) or `"facilitator_retryable"` (nothing has moved yet; retry the SAME
+  header, never a newly signed one). Haven's
+  clients read `reason_code` only inside a 503 `merchant_not_ready` body, so
+  these degrade to the ordinary refusal there.
+- **Not in Haven's catalog.** Like `vpn_legacy`, the joke is paid at this
+  endpoint directly; a catalog row would change the demo store's funding target.
 
 ## Agent Passport check (advisory, #4723)
 

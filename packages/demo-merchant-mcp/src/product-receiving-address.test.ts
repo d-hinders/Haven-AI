@@ -37,6 +37,7 @@ import { createDemoMerchantServer } from './http.js'
 import { buildMerchantMcpServer, runWithSettledPayment } from './server.js'
 import {
   PRODUCTS,
+  offeredProducts,
   productReceivingAddress,
   productSettlementKind,
   productToolArgs,
@@ -56,7 +57,9 @@ const MERCHANT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a' as const
 const OTHER_RECIPIENT = '0x2222222222222222222222222222222222222222' as const
 const PAYER_KEY = `0x${'01'.repeat(32)}` as const
 const TX_HASH = `0x${'ef'.repeat(32)}` as const
-const PRODUCT_IDS = Object.keys(PRODUCTS) as ProductId[]
+// #4851: the products a merchant WITHOUT CDP credentials offers — the set the
+// characterization snapshot was recorded over, and which must stay byte-identical.
+const PRODUCT_IDS = offeredProducts({ cdpConfigured: false }).map((product) => product.id)
 
 let servers: Server[] = []
 const restoreProducts: Array<() => void> = []
@@ -109,7 +112,7 @@ function buyCall(id: ProductId, rpcId = 3) {
     jsonrpc: '2.0',
     id: rpcId,
     method: 'tools/call',
-    params: { name: toolName, arguments: { [argumentName]: argumentValue } },
+    params: { name: toolName, arguments: argumentName ? { [argumentName]: argumentValue } : {} },
   }
 }
 
@@ -180,7 +183,10 @@ async function inBandRefusal(id: ProductId): Promise<string> {
   const client = new Client({ name: 'test', version: '0' })
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
   const { toolName, argumentName, argumentValue } = productToolArgs(PRODUCTS[id])
-  const result = await client.callTool({ name: toolName, arguments: { [argumentName]: argumentValue } })
+  const result = await client.callTool({
+    name: toolName,
+    arguments: argumentName ? { [argumentName]: argumentValue } : {},
+  })
   await client.close()
   await server.close()
   return (result.content as Array<{ text: string }>)[0].text
@@ -221,7 +227,9 @@ describe('characterization: merchant-wide surfaces are unchanged by #4850', () =
 })
 
 describe('a product carries its own receiving address and settlement kind (#4850)', () => {
-  it('every product today defaults to MERCHANT_ADDRESS and self-settlement', () => {
+  // #4851: scoped on purpose to the products offered without CDP — the joke is
+  // `cdp`-settled (pinned in products.test.ts) and also defaults its address.
+  it('every product offered without CDP defaults to MERCHANT_ADDRESS and self-settlement', () => {
     for (const id of PRODUCT_IDS) {
       expect(PRODUCTS[id].receivingAddress).toBeUndefined()
       expect(productReceivingAddress(PRODUCTS[id], MERCHANT)).toBe(MERCHANT)

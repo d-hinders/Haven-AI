@@ -2,9 +2,18 @@ import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
 import type { PassportVerifierConfig } from './x402.js'
 import {
+  createCdpChainReader,
+  createCdpFacilitator,
+  createViemChainReadClient,
+  resolveCdpCredentials,
+  type CdpSettlementConfig,
+} from './cdp.js'
+import {
   DEFAULT_SETTLEMENT_METHOD,
   PRODUCTS,
   SUPPORTED_SETTLEMENT_METHODS,
+  offeredProducts,
+  productSettlementKind,
   formatUsdc,
   CHAIN_ID,
   networkLogLabel,
@@ -171,6 +180,26 @@ if (!SETTLEMENT_PRIVATE_KEY) {
   process.exit(1)
 }
 
+// #4851: Coinbase's hosted facilitator, for the joke product only. Off unless
+// BOTH variables are set; a half-set pair warns and stays off (never a refusal
+// to start). The secret goes to the Coinbase client constructor and nowhere else.
+const CDP_CREDENTIALS = resolveCdpCredentials(process.env.CDP_API_KEY_ID, process.env.CDP_API_KEY_SECRET)
+let CDP_CONFIG: CdpSettlementConfig | undefined
+if (CDP_CREDENTIALS) {
+  try {
+    CDP_CONFIG = {
+      facilitator: await createCdpFacilitator(CDP_CREDENTIALS),
+      chain: createCdpChainReader(createViemChainReadClient(BASE_RPC_URL)),
+    }
+  } catch (err) {
+    // The class only: an SDK error message is not ours to print next to a key.
+    console.warn(
+      `Coinbase facilitator (CDP) client could not be built (${err instanceof Error ? err.name : 'UnknownError'}). ` +
+        'The CDP-settled joke product is not offered; every other product is unaffected.',
+    )
+  }
+}
+
 // #1530: held in a local so `/healthz` can ask the same client that settles.
 // Checking a DIFFERENT client's balance would report on a wallet that is not
 // the one paying, which is the class of near-miss this whole issue is about.
@@ -182,8 +211,8 @@ const settlementClient = createViemSettlementClient({
 const paymentProcessor = createX402PaymentProcessor(
   settlementClient,
   ERC7710_CONFIG
-    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG }
-    : { settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG },
+    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG, cdp: CDP_CONFIG }
+    : { settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG, cdp: CDP_CONFIG },
 )
 
 const server = createDemoMerchantServer({
@@ -193,6 +222,7 @@ const server = createDemoMerchantServer({
   settlementMethods: SETTLEMENT_METHODS,
   settlementClient,
   passport: PASSPORT_CONFIG,
+  cdpConfigured: Boolean(CDP_CONFIG),
 })
 
 server.listen(PORT, () => {
@@ -208,6 +238,16 @@ server.listen(PORT, () => {
     PASSPORT_CONFIG
       ? `  Passport:  standing checked against ${PASSPORT_CONFIG.baseUrl} (issuer ${PASSPORT_CONFIG.issuer})`
       : '  Passport:  not advertised (MERCHANT_HAVEN_BASE_URL / MERCHANT_PASSPORT_ISSUER unset)',
+  )
+  // #4851: names the product and the fact, never a credential.
+  const cdpProducts = offeredProducts({ cdpConfigured: true })
+    .filter((product) => productSettlementKind(product) === 'cdp')
+    .map((product) => `${product.id} $${formatUsdc(product.price_usdc)}`)
+    .join(', ')
+  console.log(
+    CDP_CONFIG
+      ? `  CDP:       configured — ${cdpProducts} verified and settled by Coinbase's facilitator`
+      : '  CDP:       not configured (CDP_API_KEY_ID / CDP_API_KEY_SECRET unset) — joke product not offered',
   )
   console.log()
   console.log(

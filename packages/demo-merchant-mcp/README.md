@@ -405,8 +405,8 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   nonce inside the authorization's own validity window — the only time a
   payment for it can land. Found, and its transaction paid this merchant the
   price: served, with that hash. Found paying anything else, or the whole
-  window empty: a final refusal. "Whole" means the window closed at least
-  150 blocks (about 5 minutes) before the RPC's head, so a node lagging a few
+  window empty: a final refusal. "Whole" means `validBefore` is at least
+  300 blocks (about 10 minutes) behind the RPC's head, so a node lagging a few
   blocks cannot hide a payment that just landed. When the search fails, the
   window is too long to search in full, or it closed too recently, the buyer is
   served with the reference marked unavailable — never refused.

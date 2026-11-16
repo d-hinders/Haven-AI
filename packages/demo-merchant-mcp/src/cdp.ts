@@ -213,8 +213,9 @@ export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
       // Review of #4851: an empty result REFUSES the buyer, so it must be
       // proof. A load-balanced RPC can answer the log read from a node a few
       // blocks behind the one that said "used"; a payment that just landed
-      // would then be missing. Only a window that closed at least
-      // BLOCK_MARGIN blocks before this node's head counts as fully searched;
+      // would then be missing. Only a window whose `validBefore` is at least
+      // 2 × BLOCK_MARGIN blocks (300, about 10 minutes) behind this node's head
+      // counts as fully searched;
       // a recent one returns `null`, and the buyer is served without a reference.
       let complete = windowEnd + BLOCK_MARGIN <= latest.number
       if (toBlock - fromBlock > MAX_SEARCH_BLOCKS) {

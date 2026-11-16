@@ -152,6 +152,8 @@ const PARAMS = {
 }
 /** Wide enough to need two 500-block chunks: 600 blocks back to 150 back. */
 const WIDE = { ...PARAMS, validAfter: NOW - 1_200n }
+/** A window that closed long ago: 900 blocks back to 600 back. */
+const CLOSED = { ...PARAMS, validAfter: NOW - 1_800n, validBefore: NOW - 1_200n }
 
 describe('findAuthorizationOutcome (#4851)', () => {
   it('asks the node for THIS authorization only: one event, authorizer and nonce as topics', async () => {
@@ -188,16 +190,31 @@ describe('findAuthorizationOutcome (#4851)', () => {
     expect(await createCdpChainReader(client).findAuthorizationOutcome(PARAMS)).toEqual({ kind: 'used_elsewhere', txHash: TX })
   })
 
-  it('the whole window searched and empty (cancelled, or the nonce spent outside it): not_in_window', async () => {
+  it('a window that closed long ago, searched whole and empty (cancelled, or the nonce spent outside it): not_in_window', async () => {
     // An event for the same nonce long before the window, as a cancellation or
     // an early reuse would leave, and one for another payer inside it.
     const { client } = chain({
       used: [
         { authorizer: PAYER, nonce: NONCE, block: LATEST - 5_000n, tx: TX },
-        { authorizer: OTHER, nonce: NONCE, block: LATEST - 200n, tx: TX },
+        { authorizer: OTHER, nonce: NONCE, block: LATEST - 700n, tx: TX },
       ],
     })
-    expect(await createCdpChainReader(client).findAuthorizationOutcome(PARAMS)).toEqual({ kind: 'not_in_window' })
+    expect(await createCdpChainReader(client).findAuthorizationOutcome(CLOSED)).toEqual({ kind: 'not_in_window' })
+  })
+
+  it('head lags the block that mined the payment, window still open: null (served), never not_in_window', async () => {
+    // Review of #4851 (round 2, blocking): the eth_call that said "used" was
+    // answered by a node one block ahead of the one answering getBlock/getLogs.
+    const { client } = chain({ used: [{ authorizer: PAYER, nonce: NONCE, block: LATEST + 1n, tx: TX }] })
+    const now = { ...PARAMS, validAfter: NOW - 60n, validBefore: NOW + 240n }
+    expect(await createCdpChainReader(client).findAuthorizationOutcome(now)).toBeNull()
+  })
+
+  it('a window that closed too recently to rule out a lagging node: an empty result is null, not proof', async () => {
+    // Review of #4851: an empty result refuses the buyer, so it must not come
+    // from a log read that may lag the node which said "used".
+    const { client } = chain({})
+    expect(await createCdpChainReader(client).findAuthorizationOutcome(PARAMS)).toBeNull()
   })
 
   it('a window longer than the search cap: searched from its end, and an empty result is null, not proof', async () => {

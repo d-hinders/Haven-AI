@@ -389,12 +389,13 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   budget is pinned to one recipient cannot pay it: EIP-3009 needs an open budget.
 - **The merchant checks its own quote first.** The extensions echo, x402
   version, quoted option, resource, recipient, amount, signature and validity
-  window are checked before CDP is called at all.
+  window are checked before CDP is called at all. A signed window
+  (`validBefore - validAfter`) longer than 42,600 s (just under 12 h) is
+  refused too: the recovery search below could not cover it in full.
 - **The chain decides every failure.** After any settle failure or timeout
   (30 s per call), the merchant reads USDC's `authorizationState` itself and
-  matches no facilitator error string. Used: the buyer is served, with the
-  transaction recovered from USDC's `AuthorizationUsed` event when it can be
-  found, and the reference marked unavailable when it cannot. Unused: a
+  matches no facilitator error string. Used: USDC's events decide whether it
+  was this payment (next bullet). Unused: a
   retryable refusal; the same header retried runs the check again and settles
   at most once. A retry after `validBefore` is served when the chain says the
   money moved, and refused as expired when it did not.
@@ -404,12 +405,15 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   nonce inside the authorization's own validity window — the only time a
   payment for it can land. Found, and its transaction paid this merchant the
   price: served, with that hash. Found paying anything else, or the whole
-  window empty: a final refusal. When the search fails, or the window is too
-  long to search in full, the buyer is served with the reference marked
-  unavailable — never refused.
+  window empty: a final refusal. "Whole" means the window closed at least
+  150 blocks (about 5 minutes) before the RPC's head, so a node lagging a few
+  blocks cannot hide a payment that just landed. When the search fails, the
+  window is too long to search in full, or it closed too recently, the buyer is
+  served with the reference marked unavailable — never refused.
 - **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
-  (final: CDP refused at verification, including its sanctions and risk
-  screening, or the authorization was consumed by something other than this
+  (final: CDP refused at verification — including its sanctions and risk
+  screening — and the chain shows the authorization unused, or the
+  authorization was consumed by something other than this
   payment) or `"facilitator_retryable"` (nothing has moved yet; retry the SAME
   header, never a newly signed one). Haven's
   clients read `reason_code` only inside a 503 `merchant_not_ready` body, so

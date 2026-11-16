@@ -42,7 +42,12 @@ import {
   type SettlementMethod,
 } from './products.js'
 import type { ProductId } from './products.js'
-import { CDP_CALL_TIMEOUT_MS, withCdpTimeout, type CdpSettlementConfig } from './cdp.js'
+import {
+  CDP_CALL_TIMEOUT_MS,
+  CDP_MAX_AUTHORIZATION_WINDOW_SECONDS,
+  withCdpTimeout,
+  type CdpSettlementConfig,
+} from './cdp.js'
 
 export { DEFAULT_SETTLEMENT_METHOD, SUPPORTED_SETTLEMENT_METHODS, USDC_ADDRESS }
 export type { SettlementMethod }
@@ -936,6 +941,14 @@ export function createX402PaymentProcessor(
     const { expired } = await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount, {
       allowExpired: true,
     })
+    // Review of #4851: refuse, before any chain read or CDP call, a window the
+    // recovery search could not cover in full — see the constant.
+    if (BigInt(authorization.validBefore) - BigInt(authorization.validAfter) > BigInt(CDP_MAX_AUTHORIZATION_WINDOW_SECONDS)) {
+      throw new PaymentError(
+        `Payment authorization validity window is longer than ${CDP_MAX_AUTHORIZATION_WINDOW_SECONDS} s ` +
+          '(validBefore - validAfter); sign it with a validAfter close to now.',
+      )
+    }
     const payer = getAddress(authorization.from)
     const nonce = authorization.nonce as Hex
     return {
@@ -962,12 +975,14 @@ export function createX402PaymentProcessor(
    * wrong — a refusal, a timeout, a network error — the merchant reads USDC's
    * `authorizationState` itself.
    *  - used → the money moved, or the nonce was consumed some other way;
-   *    `recoverUsedAuthorization`
-   *    tells the two apart). The buyer is served.
-   *  - not used → nothing moved. The buyer is told to retry the same header,
-   *    which runs this check again.
+   *    `recoverUsedAuthorization` tells the two apart from USDC's events and
+   *    serves the buyer only in the first case (or when it cannot tell).
+   *  - not used → nothing has moved yet. The buyer is told to retry the same
+   *    header, which runs this check again.
    * A refusal AT VERIFICATION (which includes Coinbase's sanctions and risk
-   * screening) is final: nothing settled, nothing is delivered, no retry.
+   * screening) is final — nothing settled, nothing delivered, no retry —
+   * unless the chain already shows the authorization used (an earlier settle
+   * that landed); then the events decide, as above.
    */
   async function settleThroughCdp(p: {
     cdp: CdpSettlementConfig

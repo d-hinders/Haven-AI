@@ -496,6 +496,28 @@ describe("the merchant's own checks run before CDP is called (#4851)", () => {
   })
 })
 
+describe('a signed window too long to search is refused up front (#4851)', () => {
+  it('validAfter far in the past: refused before any chain read or CDP call', async () => {
+    // Review of #4851 (round 2): otherwise the recovery search is capped, an
+    // empty capped search serves the buyer, and a cancelled nonce is served.
+    const { url, fakes } = await startServer()
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url), { validAfter: 0 }))
+    expect(response.status).toBe(402)
+    expect(refusal(raw).error).toContain('validAfter close to now')
+    expect(fakes.authorizationUsed).not.toHaveBeenCalled()
+    expect(fakes.verify).not.toHaveBeenCalled()
+  })
+
+  it('a window just inside the limit is accepted', async () => {
+    const { CDP_MAX_AUTHORIZATION_WINDOW_SECONDS } = await import('./cdp.js')
+    const { url } = await startServer()
+    const now = Math.floor(Date.now() / 1000)
+    const validBefore = now + 300
+    const header = await signedHeader(await challenge(url), { validAfter: validBefore - CDP_MAX_AUTHORIZATION_WINDOW_SECONDS, validBefore })
+    expect((await pay(url, header)).response.status).toBe(200)
+  })
+})
+
 describe('the in-band (stdio) refusal for the joke (#4851)', () => {
   it('names one EIP-3009 option, as the HTTP 402 does, even with erc7710 enabled on the merchant', async () => {
     // Review of #4851 (R6): the in-band requirements follow the product.

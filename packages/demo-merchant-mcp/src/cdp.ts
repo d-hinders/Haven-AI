@@ -57,8 +57,8 @@ export interface CdpChainReader {
   authorizationUsed(authorizer: Address, nonce: Hex): Promise<boolean>
   /**
    * Find what consumed the authorization. `null` when the window could not be
-   * searched in full (it is longer than `MAX_SEARCH_BLOCKS`); a read that fails
-   * throws. In both cases the caller serves the buyer with no reference rather
+   * searched in full — longer than `MAX_SEARCH_BLOCKS`, or closed too recently
+   * to rule out a lagging RPC node; a read that fails throws. In both cases the caller serves the buyer with no reference rather
    * than refuse one whose money may have moved.
    */
   findAuthorizationOutcome(params: {
@@ -161,6 +161,18 @@ const LOG_CHUNK_BLOCKS = 500n
 /** Never search more than this many blocks, whatever the window says (about 12 h). */
 const MAX_SEARCH_BLOCKS = 21_600n
 
+/**
+ * Review of #4851: the longest signed window (`validBefore - validAfter`) the
+ * CDP path accepts — the span the event search can cover in full, less its
+ * margin on both sides. A longer window would leave the search incomplete, and
+ * an incomplete search serves the buyer (it cannot prove the payment did not
+ * land), so a payer could cancel the nonce and still be served. This
+ * merchant's own quote (300 s) never comes close.
+ */
+export const CDP_MAX_AUTHORIZATION_WINDOW_SECONDS = Number(
+  (MAX_SEARCH_BLOCKS - 2n * BLOCK_MARGIN) * BASE_BLOCK_TIME_SECONDS,
+)
+
 /** The viem public client the reader uses. Tests pass a real one over a stub transport. */
 export type ChainReadClient = PublicClient
 
@@ -194,11 +206,17 @@ export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
       // The authorization's own validity window, plus a margin for the
       // estimate. A window longer than MAX_SEARCH_BLOCKS is searched from its
       // END only, and then an empty result proves nothing (`complete: false`).
-      let toBlock = blockAt(params.validBefore) + BLOCK_MARGIN
-      if (toBlock > latest.number) toBlock = latest.number
+      const windowEnd = blockAt(params.validBefore) + BLOCK_MARGIN
+      const toBlock = windowEnd < latest.number ? windowEnd : latest.number
       const windowStart = blockAt(params.validAfter)
       let fromBlock = windowStart > BLOCK_MARGIN ? windowStart - BLOCK_MARGIN : 0n
-      let complete = true
+      // Review of #4851: an empty result REFUSES the buyer, so it must be
+      // proof. A load-balanced RPC can answer the log read from a node a few
+      // blocks behind the one that said "used"; a payment that just landed
+      // would then be missing. Only a window that closed at least
+      // BLOCK_MARGIN blocks before this node's head counts as fully searched;
+      // a recent one returns `null`, and the buyer is served without a reference.
+      let complete = windowEnd + BLOCK_MARGIN <= latest.number
       if (toBlock - fromBlock > MAX_SEARCH_BLOCKS) {
         fromBlock = toBlock - MAX_SEARCH_BLOCKS
         complete = false

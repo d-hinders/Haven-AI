@@ -20,7 +20,14 @@ import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
 import { buildMerchantMcpServer } from './server.js'
-import { PRODUCTS, productToolArgs, type Product, type ProductId } from './products.js'
+import {
+  PRODUCTS,
+  productReceivingAddress,
+  productSettlementKind,
+  productToolArgs,
+  type Product,
+  type ProductId,
+} from './products.js'
 import {
   PAYMENT_SIGNATURE_HEADER,
   USDC_ADDRESS,
@@ -194,5 +201,79 @@ describe('characterization: merchant-wide surfaces are unchanged by #4850', () =
 
   it.each(PRODUCT_IDS)('the in-band refusal for %s is byte-identical', async (id) => {
     expect(normalize(await inBandRefusal(id))).toMatchSnapshot(`in-band ${id}`)
+  })
+})
+
+describe('a product carries its own receiving address and settlement kind (#4850)', () => {
+  it('every product today defaults to MERCHANT_ADDRESS and self-settlement', () => {
+    for (const id of PRODUCT_IDS) {
+      expect(PRODUCTS[id].receivingAddress).toBeUndefined()
+      expect(productReceivingAddress(PRODUCTS[id], MERCHANT)).toBe(MERCHANT)
+      expect(productSettlementKind(PRODUCTS[id])).toBe('self')
+    }
+  })
+
+  it('quotes, verifies, settles and invoices against the product address, not MERCHANT_ADDRESS', async () => {
+    overrideProduct('vpn_pro', { receivingAddress: OTHER_RECIPIENT })
+    const { url, submit } = await startServer()
+
+    const unpaid = await postMcp(url, buyCall('vpn_pro'))
+    expect(unpaid.status).toBe(402)
+    const pr = (await unpaid.json()) as PaymentRequired
+    expect(pr.accepts.length).toBeGreaterThan(0)
+    for (const option of pr.accepts) expect(option.payTo).toBe(OTHER_RECIPIENT)
+
+    const paid = await postMcp(url, buyCall('vpn_pro', 4), { [PAYMENT_SIGNATURE_HEADER]: await signedHeader(pr) })
+    const text = await paid.text()
+    expect(paid.status).toBe(200)
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(getAddress(submit.mock.calls[0][0].to)).toBe(getAddress(OTHER_RECIPIENT))
+
+    const receipt = JSON.parse(Buffer.from(paid.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
+    expect(receipt.saljare.crypto_address).toBe(OTHER_RECIPIENT)
+    // The keys Haven's accounting reads off the seller block are unchanged.
+    expect(Object.keys(receipt.saljare)).toEqual(
+      expect.arrayContaining(['name', 'org_nr', 'moms_nr', 'crypto_address']),
+    )
+    expect(text).toContain(`Recipient address: ${OTHER_RECIPIENT}`)
+    expect(text).not.toContain(MERCHANT)
+  })
+
+  it('refuses a payment for that product made out to MERCHANT_ADDRESS', async () => {
+    overrideProduct('vpn_pro', { receivingAddress: OTHER_RECIPIENT })
+    const { url, submit } = await startServer()
+    const pr = (await (await postMcp(url, buyCall('vpn_pro'))).json()) as PaymentRequired
+
+    const wrong = await postMcp(url, buyCall('vpn_pro', 4), {
+      [PAYMENT_SIGNATURE_HEADER]: await signedHeader(pr, MERCHANT),
+    })
+    expect(wrong.status).toBe(402)
+    expect(((await wrong.json()) as { error?: string }).error).toContain('does not match')
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('refuses an authorization to MERCHANT_ADDRESS even when the echoed option names the product address', async () => {
+    // The quoted-option match passes; only the signed EIP-3009 `to` is wrong.
+    // This is the verification step itself, not the option comparison.
+    overrideProduct('vpn_pro', { receivingAddress: OTHER_RECIPIENT })
+    const { url, submit } = await startServer()
+    const pr = (await (await postMcp(url, buyCall('vpn_pro'))).json()) as PaymentRequired
+    const header = await signedHeader(pr, MERCHANT)
+    const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as PaymentPayload
+    decoded.accepted = { ...decoded.accepted, payTo: OTHER_RECIPIENT }
+
+    const wrong = await postMcp(url, buyCall('vpn_pro', 4), {
+      [PAYMENT_SIGNATURE_HEADER]: encodePaymentSignatureHeader(decoded),
+    })
+    expect(wrong.status).toBe(402)
+    expect(((await wrong.json()) as { error?: string }).error).toContain('not addressed to this merchant')
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('names the product address in the in-band refusal', async () => {
+    overrideProduct('storage_1tb', { receivingAddress: OTHER_RECIPIENT })
+    const text = await inBandRefusal('storage_1tb')
+    expect(text).toContain(`Payment address: ${OTHER_RECIPIENT}`)
+    expect(text).not.toContain(MERCHANT)
   })
 })

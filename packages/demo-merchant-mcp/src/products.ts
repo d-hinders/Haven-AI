@@ -141,6 +141,38 @@ export interface Product {
     settlementMethods: readonly SettlementMethod[]
     defaultSettlementMethod: SettlementMethod
   }
+  /**
+   * #4850: the address this product's payment is made out to — the 402's
+   * `payTo`, the EIP-3009 `to` it verifies, the ERC-7710 transfer target and
+   * the invoice's recipient address. Absent, the merchant's default receiving
+   * address (`MERCHANT_ADDRESS`): read it through `productReceivingAddress`,
+   * never off this field, so the default lives in one place.
+   */
+  receivingAddress?: Address
+  /**
+   * #4850: who verifies and settles this product's payment. Absent, `self`.
+   * Read it through `productSettlementKind`.
+   */
+  settlement?: SettlementKind
+}
+
+/**
+ * #4850: how a product's payment is verified and settled. `self` is the only
+ * kind: the merchant verifies the payment itself and settles it with its own
+ * gas-funded key (`SETTLEMENT_PRIVATE_KEY`).
+ */
+export const SETTLEMENT_KINDS = ['self'] as const
+export type SettlementKind = (typeof SETTLEMENT_KINDS)[number]
+export const DEFAULT_SETTLEMENT_KIND: SettlementKind = 'self'
+
+/** #4850: the address a payment for `product` must be made out to. */
+export function productReceivingAddress(product: Product, merchantDefault: Address): Address {
+  return product.receivingAddress ?? merchantDefault
+}
+
+/** #4850: who verifies and settles a payment for `product`. */
+export function productSettlementKind(product: Product): SettlementKind {
+  return product.settlement ?? DEFAULT_SETTLEMENT_KIND
 }
 
 export const PRODUCTS: Record<ProductId, Product> = {

@@ -24,15 +24,19 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   isSettlementMethod,
+  isProductOffered,
   merchantEnvironmentForChain,
+  offeredProducts,
   productReceivingAddress,
+  productSettlementKind,
+  productToolArgs,
   settlementMethodsForProduct,
   type ProductId,
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
-import type { SettlementClient } from './x402.js'
+import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
 export interface DemoMerchantServerOptions {
   merchantAddress: Address
@@ -46,6 +50,13 @@ export interface DemoMerchantServerOptions {
    * reports `passport: null`.
    */
   passport?: PassportVerifierConfig
+  /**
+   * #4851: true when Coinbase's facilitator is configured (both CDP variables
+   * set and its client built). Only then is a `cdp` product offered: absent,
+   * it is missing from `list_products`, discovery, the tool list and the
+   * payment gate, and `/healthz` has no `cdp` block.
+   */
+  cdpConfigured?: boolean
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -232,6 +243,19 @@ async function handle(
       network: `eip155:${CHAIN_ID}`,
       mcp_url: `${options.baseUrl}${options.path}`,
       ...(settlement ? { settlement } : {}),
+      // #4851: present only when configured, so a merchant without CDP keeps
+      // its /healthz byte-identical. Names no credential, only the fact.
+      ...(options.cdpConfigured
+        ? {
+            cdp: {
+              configured: true,
+              facilitator: 'coinbase-cdp',
+              products: offeredProducts({ cdpConfigured: true })
+                .filter((product) => productSettlementKind(product) === 'cdp')
+                .map((product) => product.id),
+            },
+          }
+        : {}),
     })
     return
   }
@@ -286,7 +310,7 @@ async function handle(
     return
   }
 
-  const paymentToolInfo = extractPaymentToolInfo(body)
+  const paymentToolInfo = extractPaymentToolInfo(body, { cdpConfigured: Boolean(options.cdpConfigured) })
   const session = await getSession(req, body, options, sessions)
 
   let settled: SettledPayment | undefined
@@ -334,7 +358,10 @@ async function handlePaymentGate(
   // caught here too (the drain test in http.test.ts). Skip the QA fixture
   // that settles nothing on-chain (`isSkipSettleProduct`) — a drained wallet
   // cannot block a settlement that never runs.
-  if (!isSkipSettleProduct(productId) && (await refuseIfNotReady(res, options))) {
+  // #4851: nor a product Coinbase's facilitator settles — CDP pays that gas,
+  // not this merchant's wallet (the same per-product exemption).
+  const settlement = productSettlementKind(product)
+  if (!isSkipSettleProduct(productId) && settlement !== 'cdp' && (await refuseIfNotReady(res, options))) {
     return null
   }
 
@@ -368,6 +395,7 @@ async function handlePaymentGate(
       merchantAddress: receivingAddress,
       expectedAmount: product.price_usdc,
       paymentRequired,
+      settlement,
     })
   } catch (err) {
     // A PaymentError is a DECISION: the merchant looked at the payment and
@@ -381,7 +409,9 @@ async function handlePaymentGate(
     // silence cost a day of QA triage on 2026-08-17: six red legs whose only
     // evidence was a generic 402.
     if (err instanceof PaymentError) {
-      writePaymentRequired(res, options, withReason(paymentRequired, err.message))
+      // #4851: a CDP-path refusal carries its own decision code; every other
+      // refusal has none, as before.
+      writePaymentRequired(res, options, withReason(paymentRequired, err.message, err.reasonCode))
       return null
     }
 
@@ -498,6 +528,7 @@ async function getSession(
     buildPaymentRequired: options.paymentProcessor.buildPaymentRequired,
     settlementMethods: options.settlementMethods,
     passport: options.passport,
+    cdpConfigured: options.cdpConfigured,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
@@ -561,8 +592,8 @@ function getPaymentHeader(req: IncomingMessage): string | undefined {
 function withReason<T extends { error?: string }>(
   paymentRequired: T,
   reason: string,
-  reasonCode?: FaultReasonCode,
-): T & { reason_code?: FaultReasonCode } {
+  reasonCode?: FaultReasonCode | DecisionReasonCode,
+): T & { reason_code?: FaultReasonCode | DecisionReasonCode } {
   const { error: _default, ...rest } = paymentRequired
   return {
     error: reason,
@@ -570,7 +601,7 @@ function withReason<T extends { error?: string }>(
     // sites, which keep their own specific message and no generic code.
     ...(reasonCode ? { reason_code: reasonCode } : {}),
     ...rest,
-  } as T & { reason_code?: FaultReasonCode }
+  } as T & { reason_code?: FaultReasonCode | DecisionReasonCode }
 }
 
 function writePaymentRequired(
@@ -617,7 +648,7 @@ function buildDiscovery(
     default_settlement_method: settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
       ? DEFAULT_SETTLEMENT_METHOD
       : settlementMethods[0],
-    products: Object.values(PRODUCTS).map((product) => ({
+    products: offeredProducts({ cdpConfigured: Boolean(options.cdpConfigured) }).map((product) => ({
       id: product.id,
       name: product.name,
       category: product.category,
@@ -626,7 +657,7 @@ function buildDiscovery(
       default_settlement_method: settlementMethods.includes(product.x402.defaultSettlementMethod)
         ? product.x402.defaultSettlementMethod
         : settlementMethods[0],
-      tools: product.category === 'vpn' ? ['buy_vpn'] : ['buy_cloud_storage'],
+      tools: [productToolArgs(product).toolName],
       // #2989: same shape list_products' structuredContent carries — see
       // `isSkipSettleProduct` in x402.ts. Absent for every other product.
       ...(isSkipSettleProduct(product.id) ? { qa_fixture: SKIP_SETTLE_QA_FIXTURE } : {}),
@@ -634,7 +665,7 @@ function buildDiscovery(
   }
 }
 
-function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
+function extractPaymentToolInfo(body: unknown, opts: { cdpConfigured: boolean }): PaymentToolInfo | null {
   if (!body || typeof body !== 'object') return null
   const rpc = body as Record<string, unknown>
   if (rpc.method !== 'tools/call') return null
@@ -663,10 +694,16 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
       productId = `storage_${tier}` as ProductId
       descriptionSuffix = '1 month of storage'
     }
+  } else if (toolName === 'buy_joke') {
+    productId = 'joke'
+    descriptionSuffix = 'one joke'
   }
 
   if (!productId) return null
   const product = PRODUCTS[productId]
+  // #4851: a product this merchant does not offer is not gated here — its
+  // tool is not registered either, so the MCP layer answers "unknown tool".
+  if (!isProductOffered(product, opts)) return null
   // #2989: the 402 `description` is what the hosted quote/prepare surfaces to
   // the agent BEFORE it signs — the fixture must be disclosed here, not only
   // in `list_products` prose the agent may never re-read at purchase time.

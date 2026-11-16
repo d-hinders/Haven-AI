@@ -1,0 +1,264 @@
+/**
+ * #4851: settlement through Coinbase's hosted x402 facilitator (CDP).
+ *
+ * This module holds what the CDP path needs from the outside world — the
+ * facilitator client, a read of the chain, a bounded wait — so the payment
+ * processor (`x402.ts`) can be tested against fakes of exactly these. The
+ * ordering decisions (the merchant's own checks first, the chain read after any
+ * failure) live in the processor, next to the own-key path they mirror.
+ *
+ * No secret passes through here except into the Coinbase client constructor,
+ * and nothing here logs a credential.
+ */
+import {
+  createPublicClient,
+  getAddress,
+  http,
+  parseAbiItem,
+  type Address,
+  type Hex,
+} from 'viem'
+import { base, baseSepolia } from 'viem/chains'
+import type { PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse } from '@x402/core/types'
+import { CHAIN_ID, USDC_ADDRESS } from './products.js'
+
+/** The two facilitator calls the merchant makes. `HTTPFacilitatorClient` from
+ *  `@x402/core/server` (which `createCdpFacilitatorClient` returns) satisfies it. */
+export interface CdpFacilitator {
+  verify(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse>
+  settle(payload: PaymentPayload, requirements: PaymentRequirements): Promise<SettleResponse>
+}
+
+/**
+ * What the chain says happened to one EIP-3009 authorization, read from USDC's
+ * own events. `authorizationState` answers only "used or not", and a payer who
+ * CANCELLED the authorization (`cancelAuthorization`) reads as "used" too —
+ * these events tell the two apart.
+ * - `settled`: `AuthorizationUsed` was emitted, and the same transaction moved
+ *   exactly `value` from the payer to the merchant's address.
+ * - `canceled`: `AuthorizationCanceled` was emitted — nothing was paid.
+ * - `used_elsewhere`: `AuthorizationUsed` was emitted but its transaction did
+ *   not pay the merchant this amount (the nonce was spent on another transfer).
+ */
+export type AuthorizationOutcome =
+  | { kind: 'settled'; txHash: Hex }
+  | { kind: 'canceled' }
+  | { kind: 'used_elsewhere'; txHash: Hex }
+
+export interface CdpChainReader {
+  /** USDC `authorizationState(authorizer, nonce)`: true once used OR cancelled. */
+  authorizationUsed(authorizer: Address, nonce: Hex): Promise<boolean>
+  /**
+   * Find what consumed the authorization. `null` when no event is found in the
+   * searched range — the caller treats the authorization as used with no
+   * reference rather than refusing a buyer whose money may have moved.
+   */
+  findAuthorizationOutcome(params: {
+    authorizer: Address
+    nonce: Hex
+    to: Address
+    value: bigint
+    validAfter: bigint
+    validBefore: bigint
+  }): Promise<AuthorizationOutcome | null>
+}
+
+export interface CdpSettlementConfig {
+  facilitator: CdpFacilitator
+  chain: CdpChainReader
+  /** Upper bound on each facilitator call, ms. Default `CDP_CALL_TIMEOUT_MS`. */
+  timeoutMs?: number
+}
+
+/**
+ * The merchant's own bound on a facilitator call. The x402 client's default is
+ * 90 s; an MCP tool call that waits that long is one most clients have already
+ * abandoned. On expiry the call is treated like any other failure: the chain is
+ * read, and the buyer is served, or told to retry the same header.
+ */
+export const CDP_CALL_TIMEOUT_MS = 30_000
+
+/** The merchant gave up waiting for the facilitator. The outcome is unknown. */
+export class CdpTimeoutError extends Error {
+  constructor(readonly operation: 'verify' | 'settle', readonly timeoutMs: number) {
+    super(`Coinbase facilitator ${operation} did not answer within ${timeoutMs} ms`)
+    this.name = 'CdpTimeoutError'
+  }
+}
+
+export async function withCdpTimeout<T>(
+  operation: 'verify' | 'settle',
+  timeoutMs: number,
+  call: () => Promise<T>,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new CdpTimeoutError(operation, timeoutMs)), timeoutMs)
+  })
+  try {
+    return await Promise.race([call(), timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/**
+ * Build the CDP facilitator client. Loaded lazily, so a merchant without CDP
+ * credentials never imports the Coinbase SDK. The credentials go straight to
+ * the SDK's constructor and nowhere else.
+ */
+export async function createCdpFacilitator(credentials: {
+  apiKeyId: string
+  apiKeySecret: string
+}): Promise<CdpFacilitator> {
+  const { createCdpFacilitatorClient } = await import('@coinbase/cdp-sdk/x402')
+  return createCdpFacilitatorClient({
+    apiKeyId: credentials.apiKeyId,
+    apiKeySecret: credentials.apiKeySecret,
+  })
+}
+
+const AUTHORIZATION_USED_EVENT = parseAbiItem(
+  'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
+)
+const AUTHORIZATION_CANCELED_EVENT = parseAbiItem(
+  'event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce)',
+)
+const AUTHORIZATION_STATE_ABI = [
+  {
+    type: 'function',
+    name: 'authorizationState',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'authorizer', type: 'address' },
+      { name: 'nonce', type: 'bytes32' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const
+/** keccak256("Transfer(address,address,uint256)"): `Transfer(address indexed from, address indexed to, uint256 value)`. */
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
+
+/** Base produces a block every 2 s; used only to turn the signed window into a block range. */
+const BASE_BLOCK_TIME_SECONDS = 2n
+/** Blocks searched either side of the estimate, for clock skew and the estimate's error. */
+const BLOCK_MARGIN = 150n
+/** Many RPC plans refuse a wider `eth_getLogs` range; search in chunks of this size. */
+const LOG_CHUNK_BLOCKS = 500n
+/** Never search more than this many blocks, whatever the window says (about 12 h). */
+const MAX_SEARCH_BLOCKS = 21_600n
+
+/** The read-only slice of a viem public client the reader uses — injectable for tests. */
+export interface ChainReadClient {
+  readContract(args: {
+    address: Address
+    abi: typeof AUTHORIZATION_STATE_ABI
+    functionName: 'authorizationState'
+    args: readonly [Address, Hex]
+  }): Promise<boolean>
+  getBlock(args: { blockTag: 'latest' }): Promise<{ number: bigint; timestamp: bigint }>
+  getLogs(args: {
+    address: Address
+    events: readonly [typeof AUTHORIZATION_USED_EVENT, typeof AUTHORIZATION_CANCELED_EVENT]
+    args: { authorizer: Address; nonce: Hex }
+    fromBlock: bigint
+    toBlock: bigint
+  }): Promise<Array<{ eventName?: string; transactionHash: Hex | null }>>
+  getTransactionReceipt(args: { hash: Hex }): Promise<{
+    status: 'success' | 'reverted'
+    logs: Array<{ address: Address; topics: readonly Hex[]; data: Hex }>
+  }>
+}
+
+export function createViemChainReadClient(rpcUrl: string): ChainReadClient {
+  const chain = CHAIN_ID === 84532 ? baseSepolia : base
+  return createPublicClient({ chain, transport: http(rpcUrl) }) as unknown as ChainReadClient
+}
+
+export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
+  return {
+    authorizationUsed(authorizer, nonce) {
+      return client.readContract({
+        address: USDC_ADDRESS,
+        abi: AUTHORIZATION_STATE_ABI,
+        functionName: 'authorizationState',
+        args: [getAddress(authorizer), nonce],
+      })
+    },
+
+    async findAuthorizationOutcome(params) {
+      const latest = await client.getBlock({ blockTag: 'latest' })
+      const blockAt = (unixSeconds: bigint): bigint => {
+        const behind = (latest.timestamp - unixSeconds) / BASE_BLOCK_TIME_SECONDS
+        const estimate = latest.number - (behind > 0n ? behind : 0n)
+        return estimate > 0n ? estimate : 0n
+      }
+      let toBlock = blockAt(params.validBefore) + BLOCK_MARGIN
+      if (toBlock > latest.number) toBlock = latest.number
+      let fromBlock = blockAt(params.validAfter) - BLOCK_MARGIN
+      if (fromBlock < 0n) fromBlock = 0n
+      if (toBlock - fromBlock > MAX_SEARCH_BLOCKS) fromBlock = toBlock - MAX_SEARCH_BLOCKS
+
+      for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK_BLOCKS) {
+        const end = start + LOG_CHUNK_BLOCKS - 1n < toBlock ? start + LOG_CHUNK_BLOCKS - 1n : toBlock
+        const logs = await client.getLogs({
+          address: USDC_ADDRESS,
+          events: [AUTHORIZATION_USED_EVENT, AUTHORIZATION_CANCELED_EVENT],
+          args: { authorizer: getAddress(params.authorizer), nonce: params.nonce },
+          fromBlock: start,
+          toBlock: end,
+        })
+        if (logs.some((log) => log.eventName === 'AuthorizationCanceled')) return { kind: 'canceled' }
+        const used = logs.find((log) => log.eventName === 'AuthorizationUsed' && log.transactionHash)
+        if (used?.transactionHash) {
+          const receipt = await client.getTransactionReceipt({ hash: used.transactionHash })
+          return paidMerchant(receipt, params)
+            ? { kind: 'settled', txHash: used.transactionHash }
+            : { kind: 'used_elsewhere', txHash: used.transactionHash }
+        }
+      }
+      return null
+    },
+  }
+}
+
+/** Did this receipt move exactly `value` USDC from the payer to `to`? */
+function paidMerchant(
+  receipt: Awaited<ReturnType<ChainReadClient['getTransactionReceipt']>>,
+  params: { authorizer: Address; to: Address; value: bigint },
+): boolean {
+  if (receipt.status !== 'success') return false
+  return receipt.logs.some((log) => {
+    if (getAddress(log.address) !== getAddress(USDC_ADDRESS)) return false
+    if (log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC || log.topics.length !== 3) return false
+    const from = getAddress(`0x${log.topics[1]!.slice(26)}`)
+    const to = getAddress(`0x${log.topics[2]!.slice(26)}`)
+    return from === getAddress(params.authorizer) && to === getAddress(params.to) && BigInt(log.data) === params.value
+  })
+}
+
+/**
+ * #4851: read the CDP credentials from the environment's two values.
+ *
+ * Both are required together. With neither, CDP is simply off and nothing is
+ * said. With only one, the merchant warns and leaves CDP off — it never refuses
+ * to start, following the passport configuration (`index.ts`), so a typo in
+ * one variable cannot take the other products, or the production canary, down.
+ * The warning names the variables, never their values.
+ */
+export function resolveCdpCredentials(
+  apiKeyIdRaw: string | undefined,
+  apiKeySecretRaw: string | undefined,
+  warn: (message: string) => void = console.warn,
+): { apiKeyId: string; apiKeySecret: string } | undefined {
+  const apiKeyId = apiKeyIdRaw?.trim()
+  const apiKeySecret = apiKeySecretRaw?.trim()
+  if (apiKeyId && apiKeySecret) return { apiKeyId, apiKeySecret }
+  if (apiKeyId || apiKeySecret) {
+    warn(
+      'Coinbase facilitator (CDP) settlement is disabled: set BOTH CDP_API_KEY_ID and CDP_API_KEY_SECRET. ' +
+        'The CDP-settled joke product is not offered until both are set; every other product is unaffected.',
+    )
+  }
+  return undefined
+}

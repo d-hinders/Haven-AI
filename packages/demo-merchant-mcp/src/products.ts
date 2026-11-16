@@ -122,6 +122,7 @@ export type ProductId =
   | 'storage_50gb'
   | 'storage_200gb'
   | 'storage_1tb'
+  | 'joke'
 
 export interface Product {
   id: ProductId
@@ -136,7 +137,12 @@ export interface Product {
   description_sv: string
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
   price_usdc: bigint
-  category: 'vpn' | 'storage'
+  category: 'vpn' | 'storage' | 'joke'
+  /**
+   * #4851: what one purchase buys. Absent, `monthly` — every subscription
+   * product. Read through `productBillingPeriod`.
+   */
+  billing?: BillingPeriod
   x402: {
     settlementMethods: readonly SettlementMethod[]
     defaultSettlementMethod: SettlementMethod
@@ -157,11 +163,15 @@ export interface Product {
 }
 
 /**
- * #4850: how a product's payment is verified and settled. `self` is the only
- * kind: the merchant verifies the payment itself and settles it with its own
- * gas-funded key (`SETTLEMENT_PRIVATE_KEY`).
+ * #4850: how a product's payment is verified and settled.
+ * - `self`: the merchant verifies the payment itself and settles it with its
+ *   own gas-funded key (`SETTLEMENT_PRIVATE_KEY`).
+ * - `cdp` (#4851): Coinbase's hosted facilitator (CDP) verifies the payment
+ *   and settles it on-chain, paying the gas. The merchant still runs its own
+ *   pre-verification checks first, and reads the chain itself after any
+ *   failure. A `cdp` product is offered only when CDP credentials are set.
  */
-export const SETTLEMENT_KINDS = ['self'] as const
+export const SETTLEMENT_KINDS = ['self', 'cdp'] as const
 export type SettlementKind = (typeof SETTLEMENT_KINDS)[number]
 export const DEFAULT_SETTLEMENT_KIND: SettlementKind = 'self'
 
@@ -173,6 +183,26 @@ export function productReceivingAddress(product: Product, merchantDefault: Addre
 /** #4850: who verifies and settles a payment for `product`. */
 export function productSettlementKind(product: Product): SettlementKind {
   return product.settlement ?? DEFAULT_SETTLEMENT_KIND
+}
+
+/** #4851: what one purchase of `product` buys. */
+export function productBillingPeriod(product: Product): BillingPeriod {
+  return product.billing ?? 'monthly'
+}
+
+/**
+ * #4851: whether this merchant offers `product`. A `cdp` product needs CDP
+ * credentials; without them it is absent from every surface — `list_products`,
+ * the discovery document, the tool list and the payment gate — so a merchant
+ * without the key is byte-identical to one built before the product existed.
+ */
+export function isProductOffered(product: Product, opts: { cdpConfigured: boolean }): boolean {
+  return productSettlementKind(product) !== 'cdp' || opts.cdpConfigured
+}
+
+/** #4851: the offered products, in catalogue order. */
+export function offeredProducts(opts: { cdpConfigured: boolean }): Product[] {
+  return Object.values(PRODUCTS).filter((product) => isProductOffered(product, opts))
 }
 
 export const PRODUCTS: Record<ProductId, Product> = {
@@ -255,6 +285,35 @@ export const PRODUCTS: Record<ProductId, Product> = {
     category: 'storage',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
+  /**
+   * #4851: the one product Coinbase's hosted facilitator (CDP) verifies and
+   * settles — the setup Haven recommends to merchants, run here first.
+   *
+   * EIP-3009 only, on purpose: Haven agents prefer ERC-7710 whenever it is
+   * advertised, and CDP does not settle ERC-7710, so offering it would route
+   * almost nothing through CDP. That also makes it unavailable to an agent
+   * whose budget is pinned to one recipient (EIP-3009 needs an open budget).
+   *
+   * Not in Haven's catalog (#4852): the demo store's funding target is
+   * computed over all its catalog rows, and one EIP-3009-only row would make
+   * merchant-locked budgets for the store refuse. Like `vpn_legacy`, it is
+   * paid at this merchant's endpoint directly.
+   *
+   * 10,000 atomic USDC = 0.01 USDC: a whole number of US cents, which Stripe's
+   * machine-payments recording needs in M2 (#4853).
+   */
+  joke: {
+    id: 'joke',
+    name: 'Haven Joke',
+    description: 'One joke, delivered at once. Verified and settled by Coinbase\'s hosted x402 facilitator (CDP).',
+    description_sv:
+      'Ett skämt, levererat direkt. Verifieras och avräknas av Coinbases x402-facilitator (CDP).',
+    price_usdc: 10_000n,
+    category: 'joke',
+    billing: 'one_time',
+    settlement: 'cdp',
+    x402: { settlementMethods: ['eip3009'], defaultSettlementMethod: 'eip3009' },
+  },
 }
 
 export function isSettlementMethod(value: unknown): value is SettlementMethod {
@@ -288,14 +347,16 @@ const VPN_PLAN_VALUES = ['basic', 'legacy', 'pro', 'ultra'] as const
 const STORAGE_TIER_VALUES = ['50gb', '200gb', '1tb'] as const
 
 interface ProductToolArgs {
-  toolName: 'buy_vpn' | 'buy_cloud_storage'
-  argumentName: 'plan' | 'tier'
-  argumentValue: string
-  argumentEnum: readonly string[]
+  toolName: 'buy_vpn' | 'buy_cloud_storage' | 'buy_joke'
+  /** #4851: absent for a tool that sells exactly one product (`buy_joke`). */
+  argumentName?: 'plan' | 'tier'
+  argumentValue?: string
+  argumentEnum?: readonly string[]
 }
 
 /** Derives the exact buy-tool call (tool name + fixed argument) for a product. */
 export function productToolArgs(product: Product): ProductToolArgs {
+  if (product.category === 'joke') return { toolName: 'buy_joke' }
   if (product.category === 'vpn') {
     return {
       toolName: 'buy_vpn',
@@ -316,6 +377,11 @@ export function productToolArgs(product: Product): ProductToolArgs {
  *  (the fixed `const` pins the value an agent must send to select it). */
 export function productArgumentsSchema(product: Product): Record<string, unknown> {
   const { argumentName, argumentValue, argumentEnum, toolName } = productToolArgs(product)
+  if (!argumentName || !argumentEnum) {
+    // #4851: a one-product tool takes no selector, and a product with one
+    // settlement method takes no override — the schema says so exactly.
+    return { type: 'object', properties: {}, required: [], additionalProperties: false }
+  }
   return {
     type: 'object',
     properties: {
@@ -352,7 +418,7 @@ export function settlementMethodsForProduct(
   return unique
 }
 
-export type BillingPeriod = 'monthly'
+export type BillingPeriod = 'monthly' | 'one_time'
 
 // ── QA fixture marker (#2989) ────────────────────────────────────────────────
 // The verify-without-settle QA hook (`MERCHANT_SKIP_SETTLE_PRODUCT`, see
@@ -424,7 +490,7 @@ export function buildProductMetadata(
     price_atomic: product.price_usdc.toString(),
     asset: 'USDC',
     network: `eip155:${chainId}`,
-    billing_period: 'monthly',
+    billing_period: productBillingPeriod(product),
     tool_name: productToolArgs(product).toolName,
     arguments_schema: productArgumentsSchema(product),
     supported_settlement_methods: supportedSettlementMethods,

@@ -1,5 +1,5 @@
 import type { MerchantLocale, ProductId } from './products.js'
-import { CHAIN_ID, PRODUCTS, formatUsdc, networkDisplayName } from './products.js'
+import { CHAIN_ID, PRODUCTS, formatUsdc, networkDisplayName, productBillingPeriod } from './products.js'
 import type { SettledPayment, SettlementState } from './x402.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
@@ -200,7 +200,8 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const row: InvoiceRow = {
     // Always the SWEDISH description — this is the bookkeeping document, not
     // the display surface (#1550, see module comment).
-    beskrivning: `${product.name} — ${product.description_sv} (1 månad)`,
+    // #4851: a one-time product is not a month of anything.
+    beskrivning: `${product.name} — ${product.description_sv} (${productBillingPeriod(product) === 'monthly' ? '1 månad' : 'engångsköp'})`,
     antal: 1,
     apris_exkl_moms: formatUsdc(exklMoms),
     moms_procent: 25,

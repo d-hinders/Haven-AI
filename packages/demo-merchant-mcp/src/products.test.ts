@@ -4,11 +4,17 @@ import {
   buildProductMetadata,
   formatUsdc,
   merchantEnvironmentForChain,
+  offeredProducts,
   productArgumentsSchema,
+  productBillingPeriod,
+  productReceivingAddress,
+  productSettlementKind,
   productToolArgs,
   settlementMethodsForProduct,
   type SettlementMethod,
 } from './products.js'
+
+const MERCHANT_DEFAULT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a' as const
 
 describe('productToolArgs (#1274)', () => {
   it('derives the buy_cloud_storage call for a storage product', () => {
@@ -150,10 +156,54 @@ describe('vpn_legacy is the EIP-3009-only product (#1441)', () => {
     ])
   })
 
-  it('is the ONLY product with that property, so the leg has one unambiguous target', () => {
-    const threeThousandNineOnly = Object.values(PRODUCTS)
+  // #4851 rewrote this on purpose. The joke is EIP-3009-only too, but Coinbase's
+  // facilitator settles it, and the QA leg exists to exercise the merchant's
+  // OWN settlement of the funding-leg topology. So the property that must stay
+  // unique is "EIP-3009-only AND self-settled", and vpn_legacy must keep it.
+  it('is the ONLY self-settled EIP-3009-only product, so the leg has one unambiguous target', () => {
+    const selfSettledThreeThousandNineOnly = Object.values(PRODUCTS)
       .filter((p) => p.x402.settlementMethods.length === 1 && p.x402.settlementMethods[0] === 'eip3009')
+      .filter((p) => productSettlementKind(p) === 'self')
       .map((p) => p.id)
-    expect(threeThousandNineOnly).toEqual(['vpn_legacy'])
+    expect(selfSettledThreeThousandNineOnly).toEqual(['vpn_legacy'])
+  })
+})
+
+describe('the CDP-settled joke product (#4851)', () => {
+  it('is 0.01 USDC, EIP-3009 only, settled by CDP, paid to the merchant default, one-time', () => {
+    const joke = PRODUCTS.joke
+    expect(joke.price_usdc).toBe(10_000n)
+    expect(joke.x402.settlementMethods).toEqual(['eip3009'])
+    expect(settlementMethodsForProduct(joke, ['eip3009', 'erc7710'])).toEqual(['eip3009'])
+    expect(productSettlementKind(joke)).toBe('cdp')
+    expect(productReceivingAddress(joke, MERCHANT_DEFAULT)).toBe(MERCHANT_DEFAULT)
+    expect(productBillingPeriod(joke)).toBe('one_time')
+  })
+
+  it('is the only CDP-settled product, and is offered only with CDP configured', () => {
+    expect(Object.values(PRODUCTS).filter((p) => productSettlementKind(p) === 'cdp').map((p) => p.id)).toEqual(['joke'])
+    expect(offeredProducts({ cdpConfigured: false }).map((p) => p.id)).not.toContain('joke')
+    expect(offeredProducts({ cdpConfigured: true }).map((p) => p.id)).toContain('joke')
+    // Every other product is offered either way, in the same order.
+    expect(offeredProducts({ cdpConfigured: false }).map((p) => p.id)).toEqual(
+      offeredProducts({ cdpConfigured: true }).map((p) => p.id).filter((id) => id !== 'joke'),
+    )
+  })
+
+  it('has a buy_joke tool with no arguments, and one-time metadata', () => {
+    expect(productToolArgs(PRODUCTS.joke)).toEqual({ toolName: 'buy_joke' })
+    const metadata = buildProductMetadata(PRODUCTS.joke, {
+      enabledSettlementMethods: ['eip3009', 'erc7710'],
+      mcpUrl: 'http://127.0.0.1/mcp',
+    })
+    expect(metadata).toMatchObject({
+      product_id: 'joke',
+      price_atomic: '10000',
+      billing_period: 'one_time',
+      tool_name: 'buy_joke',
+      supported_settlement_methods: ['eip3009'],
+      default_settlement_method: 'eip3009',
+      arguments_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    })
   })
 })

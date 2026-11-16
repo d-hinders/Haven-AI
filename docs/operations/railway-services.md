@@ -85,7 +85,9 @@ both **together, on a service that is not mid-quote**: the merchant's echo rule
 refuses a payment whose extensions do not contain every advertised key, so a
 402 quoted before the flip and paid after it is refused — and on the EIP-3009
 bridge that happens after funding, so the funds strand until a sweep. The
-window is one quote lifetime (`maxTimeoutSeconds`, 300 s).
+window is about 10 minutes: the 300 s quote (`maxTimeoutSeconds`) plus the
+300 s forward margin Haven's SDK adds when it signs
+(`X402_SETTLEMENT_FORWARD_MARGIN_SECONDS`).
 
 Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks this pin: the merchant will
 answer `not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER`
@@ -111,10 +113,10 @@ product is unaffected.
 can exist before it, and every other product's 402 is rebuilt from the product
 on each request, so it is unchanged. **Removing** it does: a joke quoted before
 the removal and paid after it gets "unknown tool" — nothing settles, so the
-buyer is not charged — but on Haven's EIP-3009 bridge, the joke's only path,
+merchant is not paid — but on Haven's EIP-3009 bridge, the joke's only path,
 the refusal comes after the funding leg, so 0.01 USDC strands on the agent's
 delegate until it is swept. Remove the pair on a service that is not mid-quote;
-the window is one quote lifetime (`maxTimeoutSeconds`, 300 s). Either redeploy
+the window is the same 10 minutes as for the passport flip above. Either redeploy
 also drops every in-memory MCP session, which buyers recover from by
 re-initialising, as after any redeploy.
 

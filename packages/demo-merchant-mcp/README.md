@@ -36,6 +36,11 @@ merchant-of-record product. Funds do not flow through Haven.
 - An invoice after a settled purchase: Swedish bookkeeping JSON (also sent as
   the `x-receipt-json` header) and a rendered text, English by default and
   Swedish with `locale: 'sv'` (#1550).
+- Stripe machine payments (#4853): with a deposit address and a restricted key
+  configured, the joke is paid to the Stripe deposit address and each settled
+  payment is recorded as a PaymentIntent in `transaction_verification` mode,
+  keyed on the transaction hash. A reconciliation script records the ones the
+  request path missed.
 
 ## Products
 
@@ -128,7 +133,7 @@ through `productSettlementKind`; #4850). There are two:
 | Methods | EIP-3009, plus ERC-7710 when enabled (`vpn_legacy`: EIP-3009 only) | EIP-3009 only |
 | Verifies | this merchant: signature, amount, recipient, window, or a simulated `redeemDelegations` | this merchant's own checks first, then CDP's `verify` (including its sanctions and risk screening) |
 | Submits and pays gas | `SETTLEMENT_PRIVATE_KEY` | CDP |
-| Receives the USDC | `MERCHANT_ADDRESS` | `MERCHANT_ADDRESS` |
+| Receives the USDC | `MERCHANT_ADDRESS` | the Stripe deposit address when Stripe is on (#4853), else `MERCHANT_ADDRESS` |
 | Readiness gate on the merchant's gas wallet | applies | exempt |
 | After a failure | EIP-3009: the pre-submit `authorizationState` read (#1519); ERC-7710: the pinned enforcer's `spentMap` check (#1515) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
 
@@ -136,7 +141,8 @@ In both, the merchant is paid in one transfer from the payer straight to
 `MERCHANT_ADDRESS`; Haven is not a party to it. (For a Haven agent paying with
 EIP-3009, the payer is its delegate wallet, which Haven's bridge funded from the
 agent's budget just before — that funding leg is Haven's, not the merchant's.) A product's receiving address can
-differ from `MERCHANT_ADDRESS` (#4850), but no product's does today.
+differ from `MERCHANT_ADDRESS` (#4850), and one does: the joke is paid to the
+Stripe deposit address when Stripe recording is on (#4853, below).
 
 **Why the joke is not in Haven's catalog.** The demo store's funding target —
 which merchant-locked budgets are pinned to — is computed over all of its
@@ -284,7 +290,10 @@ Endpoints:
   `settlements_remaining`, the band `status` (`usable` | `warn` | `fail`) and
   both floors (`warn_floor` 25 / `fail_floor` 12) beside the legacy `ok`
   boolean (`ok` is true unless `status` is `fail`). A read failure reports
-  `ok: null` + `error` instead of taking health down.
+  `ok: null` + `error` instead of taking health down. A `cdp` block appears
+  only when CDP is configured (#4851), and a `stripe` block only when Stripe
+  recording is on (#4853): `deposit_address`, `api_version`, `network`,
+  `recorded` and `record_failures`. Neither block ever carries a credential.
 
 ### Sessions: unknown-session 404, idle TTL, and what a redeploy does (#1578, #3171)
 
@@ -460,6 +469,141 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   these degrade to the ordinary refusal there.
 - **Not in Haven's catalog.** Like `vpn_legacy`, the joke is paid at this
   endpoint directly; a catalog row would change the demo store's funding target.
+
+## Stripe recording (#4853)
+
+With `STRIPE_DEPOSIT_ADDRESS` and `STRIPE_SECRET_KEY` both set, the joke's
+receiving address is the Stripe deposit address, and every settled joke payment
+is recorded in Stripe as a PaymentIntent in `transaction_verification` mode,
+keyed on the transaction hash. No other product can name the deposit address:
+the address belongs to the recorded product (`stripeRecording` in
+`src/products.ts`), resolved through `productReceivingAddress`.
+
+Stripe is **off**, with a logged warning, and the joke keeps `MERCHANT_ADDRESS`,
+when:
+
+| Condition | What happens |
+|---|---|
+| only one of the two variables is set | warning; the joke keeps `MERCHANT_ADDRESS` |
+| CDP is not configured | warning; the joke is not offered at all (#4851) |
+| the joke's price is below one cent or not a whole number of cents | warning; the joke keeps `MERCHANT_ADDRESS` |
+| `STRIPE_DEPOSIT_ADDRESS` is not a 20-byte hex address | warning; the joke keeps `MERCHANT_ADDRESS` |
+
+The merchant never refuses to start over any of them. With neither variable set
+it says nothing, exactly as before.
+
+A third, optional variable — `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` — names the
+deposit address this one replaces, so a payment that already settled to it is
+still served. See [the operator note](#operator-note-changing-the-stripe-variables-changes-the-quoted-address).
+
+**The PaymentIntent.** `amount` in US cents (the joke is 10,000 atomic USDC =
+one cent), `currency=usd`, `confirm=true`, `payment_method_data[type]=crypto`,
+`allowed_payment_method_types=[crypto]`, and
+`payment_method_options[crypto][mode]=transaction_verification` with
+`network=base` and the transaction hash. The transaction hash is also the
+idempotency key, and it is stored in `metadata.transaction_hash`. The API
+version follows the chain: `2026-07-29.preview` on Base Sepolia (the dev
+merchant), `2026-05-27.preview` on Base. The network name is `base` on both — a
+sandbox deposit address is a Base Sepolia address, but the parameter does not
+change.
+
+**"Already recorded" is a read, not the idempotency key.** Stripe prunes
+idempotency keys after about 24 hours, so a key cannot answer "did this
+transaction get recorded?" a day later. The recorder first searches
+PaymentIntents for `metadata.transaction_hash`, and only creates when the search
+finds nothing. The idempotency key is still sent: it closes the window between
+the search and the create. **The restricted key therefore needs read access to
+PaymentIntents as well as create** — "create PaymentIntents; read balance
+transactions" is not enough.
+
+**Recording never blocks delivery.** The payment has settled before Stripe is
+called, so the call is fire-and-forget: a refusal, a timeout (10 s per call) or
+a network error is logged and counted, and the goods are delivered regardless.
+The durable signal is the log line
+
+```
+[stripe] record_failed tx=<hash> reason=<stripe type/code | StripeTimeoutError>
+```
+
+and `/healthz` carries a `stripe` block with `recorded` and `record_failures`.
+Those counters are process-local — the merchant sleeps after about 10 minutes —
+so the log line is what an operator greps for. No Stripe secret is ever logged:
+a failure names the hash and Stripe's own error `type`/`code`, never the
+response body or the request.
+
+**A payment served through recovery without a transaction hash** (#4851) creates
+no PaymentIntent at request time: there is nothing to key one on. The
+reconciliation script picks it up from the chain.
+
+### Reconciliation
+
+```sh
+npm run build -w packages/demo-merchant-mcp
+npm run reconcile:stripe -w packages/demo-merchant-mcp -- \
+  --from-block 12345678 --to-block 12349999
+```
+
+It lists the settled payments to the deposit address that have no
+PaymentIntent, and records them. There is no database to remember a block range,
+so the range is an argument.
+
+- Only an **EIP-3009 transfer of the joke's exact price** is recorded. An
+  EIP-3009 transfer is the on-chain shape CDP's settlement leaves: USDC's
+  `AuthorizationUsed` for the payer in the same transaction as the `Transfer`.
+- Any other transfer to the address — a plain `transfer`, a Permit2 pull, an
+  ERC-7710 redemption — is listed as `not_recorded` with reason `not_eip3009`
+  and left alone. Recording a transfer CDP did not settle needs Stripe's
+  confirmation first (epic #4849, Out of scope). A transfer of another amount is
+  listed as `amount_mismatch` and left alone too.
+- It is idempotent: "already recorded" is the same Stripe read, so a second run
+  over the same range creates nothing.
+
+The report is JSON: `recorded`, `already_recorded`, `not_recorded` and `failed`
+arrays of transaction hashes and PaymentIntent IDs. Exit code 0 means recorded
+or nothing to do, 1 a usage or configuration error, 2 a payment Stripe refused.
+
+**Where it runs.** Inside the merchant service's environment, as a one-off
+command using that service's variables. The key is never exported to a local
+shell or written to a file, and the report recorded on #4854/#4858 carries
+hashes and PaymentIntent IDs only. The logic lives in `src/stripe-reconcile.ts`
+and `src/reconcile-cli.ts` — under the money-path list, because it creates live
+PaymentIntents — and `scripts/reconcile-stripe.mjs` is the thin wrapper.
+
+**Who runs it.** The merchant's operator, after each live batch (#4858) and at
+each promotion. The merchant itself cannot: it has no database and sleeps.
+
+### Operator note: changing the Stripe variables changes the quoted address
+
+`STRIPE_DEPOSIT_ADDRESS` is the joke's `payTo`, so changing it (or turning
+Stripe on or off) changes the address a new quote names. A payment quoted before
+the change and paid after it is refused **only while its authorization is
+unsettled**: the quote no longer matches and nothing has moved, so the buyer
+re-quotes and pays the new address.
+
+A retry of an authorization that **already settled** to the previous receiving
+address is served, not refused — but only when the merchant is told which
+address that was. Set `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` to the address you are
+replacing, for one deploy:
+
+```sh
+STRIPE_DEPOSIT_ADDRESS=0xNEW
+STRIPE_PREVIOUS_DEPOSIT_ADDRESS=0xOLD
+```
+
+The chain is then checked first (#4851's rule), and a buyer whose authorization
+settled to `0xOLD` is served with that transaction's hash. Remove the variable
+once no quote from the old address can still be paid.
+
+**Why it is a variable and not inferred.** The payment's own `payTo` is
+attacker-chosen: a buyer can sign an authorization to any address, pay it, and
+send the header here. Serving a used authorization addressed to whatever the
+payment names would hand goods to anyone who paid an address of their own. Only
+an address this merchant actually quoted before can be honoured, and the
+merchant has no database to remember one — so the operator names it.
+
+Without the variable, a settled retry after a change is refused. The
+reconciliation script still records the payment from the chain if you run it
+over the range with the old deposit address, so the money is accounted for.
 
 ## Agent Passport check (advisory, #4723)
 

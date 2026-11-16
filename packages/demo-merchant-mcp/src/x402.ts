@@ -647,6 +647,18 @@ export interface X402PaymentProcessorOptions {
    */
   cdp?: CdpSettlementConfig
   /**
+   * #4853: receiving addresses this merchant quoted BEFORE the current one and
+   * still honours for a payment that already settled to them — a redeploy that
+   * moves the Stripe deposit address.
+   *
+   * Operator-supplied, never read from the payment. That is the whole point:
+   * the payment's own `payTo` is attacker-chosen, so serving a used
+   * authorization addressed to it would hand goods to anyone who paid an
+   * address of their own. Only an address this merchant actually quoted before
+   * can be honoured.
+   */
+  previousReceivingAddresses?: readonly Address[]
+  /**
    * #4723: when set, every challenge advertises `haven-passport` and a payment
    * that carries a reference is checked against this Haven verifier. Advisory
    * only — the settle path never consults it.
@@ -966,6 +978,76 @@ export function createX402PaymentProcessor(
           authorization,
           expired,
         }),
+    }
+  }
+
+  /**
+   * Review of #4853 (S7): recover a CDP payment whose quote no longer matches
+   * this merchant's current receiving address.
+   *
+   * A redeploy with new Stripe variables moves the joke's deposit address. A
+   * buyer that was quoted the old address, paid it, and lost the answer then
+   * retries the same header — and the quote checks refuse it before any chain
+   * read. The epic's invariant is that a buyer whose money moved is never
+   * refused, so the chain decides here: if the authorization is used and its
+   * transaction paid the address the payment was quoted for, this amount, the
+   * buyer is served with that hash.
+   *
+   * Only a payment addressed to an address this merchant quoted BEFORE the
+   * current one is considered (`previousReceivingAddresses`, operator-supplied).
+   * Every other refusal is the original one, unchanged. A chain read that fails
+   * leaves the original refusal standing rather than serving on a guess.
+   */
+  async function recoverCdpPaymentAfterQuoteChange(params: {
+    payload: PaymentPayload
+    expectedAmount: bigint
+    passportReference: PassportReference | null
+  }): Promise<VerifiedPayment | undefined> {
+    const cdp = options.cdp
+    if (!cdp) return undefined
+    let authorization: Eip3009Authorization
+    try {
+      authorization = parseExactEvmPayload(params.payload.payload).authorization
+    } catch {
+      return undefined
+    }
+    if (!isAddress(authorization.from) || !isAddress(authorization.to)) return undefined
+    if (!NONCE_RE.test(authorization.nonce)) return undefined
+    // The payment must have been quoted for an address this merchant used to
+    // quote. The payment's own `payTo` is attacker-chosen, so it cannot be the
+    // test: serving on it would hand goods to anyone who paid an address of
+    // their own choosing.
+    const previous = options.previousReceivingAddresses ?? []
+    if (!previous.some((address) => sameAddress(address, authorization.to))) return undefined
+    // And for this product's price: a transfer of another amount is not this
+    // purchase, whatever the chain says.
+    let value: bigint
+    try {
+      value = BigInt(authorization.value)
+    } catch {
+      return undefined
+    }
+    if (value !== params.expectedAmount) return undefined
+    const payer = getAddress(authorization.from)
+    const nonce = authorization.nonce as Hex
+    let used: boolean
+    try {
+      used = await cdp.chain.authorizationUsed(payer, nonce)
+    } catch {
+      return undefined
+    }
+    if (!used) return undefined
+    return {
+      paymentKey: `${payer.toLowerCase()}:${nonce.toLowerCase()}`,
+      payer,
+      payTo: getAddress(authorization.to),
+      nonce,
+      settlementMethod: 'eip3009',
+      passportReference: params.passportReference,
+      // The chain is the truth: `recoverUsedAuthorization` searches USDC's
+      // events for this authorization and serves only when its transaction
+      // paid the quoted address this amount.
+      submit: () => recoverUsedAuthorization({ cdp, authorization }),
     }
   }
 
@@ -1367,7 +1449,24 @@ export function createX402PaymentProcessor(
         if (method !== 'eip3009') {
           throw new PaymentError(`This product is paid with EIP-3009 only, not ${method}`)
         }
-        verified = await verifyCdpPayment({ ...params, payload, passportReference })
+        try {
+          verified = await verifyCdpPayment({ ...params, payload, passportReference })
+        } catch (err) {
+          // Review of #4853 (S7): the merchant's receiving address can change
+          // between a quote and its retry (a redeploy with new Stripe
+          // variables). The quote checks would then refuse the retried header
+          // before any chain read — refusing a buyer whose money already moved
+          // to the address they were quoted. The epic's invariant is that a
+          // buyer whose money moved is never refused, so the chain gets the
+          // last word before the refusal stands.
+          const recovered = await recoverCdpPaymentAfterQuoteChange({
+            payload,
+            expectedAmount: params.expectedAmount,
+            passportReference,
+          })
+          if (!recovered) throw err
+          verified = recovered
+        }
       } else if (method === ERC7710_TRANSFER_METHOD) {
         verified = await verifyErc7710Payment({ ...params, payload, passportReference })
       } else if (method === 'eip3009') {

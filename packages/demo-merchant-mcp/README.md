@@ -676,8 +676,8 @@ the same shape as the declined probe. Tracked in #4866.
 
 **The SEK amount and the rate.** The balance transaction for the one-cent
 payment: `amount` 10 (öre), `currency` `sek`, `exchange_rate` 10.0742, `fee` 0,
-`net` 10, `reporting_category` `charge`, `status` `pending`. It exists in the
-balance transaction was created at 14:06:08 UTC, a second before the payment
+`net` 10, `reporting_category` `charge`, `status` `pending`. The balance
+transaction was created at 14:06:08 UTC, a second before the payment
 succeeded, so the SEK amount and rate are known at once;
 the funds become available seven days later (`available_on` 2026-11-23 00:00
 UTC for a payment on 2026-11-16). The Dashboard says the charge "was received in

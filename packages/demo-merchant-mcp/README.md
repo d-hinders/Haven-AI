@@ -667,8 +667,9 @@ PaymentIntent found for a hash, a declined one included, as
 `already_recorded`. A declined recording is therefore silent: the Stripe
 Dashboard shows it, but nothing in the merchant (its log, `/healthz` or the
 reconciliation report) does. A decline can happen in normal operation: a
-payment that settled to `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` (or to
-`MERCHANT_ADDRESS`, when Stripe was just turned on) is served through
+payment that settled to the address named in `STRIPE_PREVIOUS_DEPOSIT_ADDRESS`
+(`MERCHANT_ADDRESS`, when the operator names it there on turning Stripe on) is
+served through
 `recoverCdpPaymentAfterQuoteChange` as `settled_onchain`, and
 `recordStripePayment` records it without checking which address it paid —
 the same shape as the declined probe. Tracked in #4866.

@@ -613,8 +613,9 @@ One run on 2026-11-16: the dev merchant (Base Sepolia) with a Stripe sandbox,
 API version `2026-07-29.preview`. A Haven dev agent bought the joke —
 transaction `0x6c210cfc73766647b5081f89b27c96369b74de7d87263ba3ac838cbfb90ed31b`,
 recorded as `pi_3UcQXqJ1wRWdOmCA1hKg75Zh`, shown as Succeeded in the sandbox
-Dashboard. Four more PaymentIntents were created by hand from inside the
-service, with the merchant's own key, to answer what Stripe's page does not say.
+Dashboard. Four more create calls were made by hand from inside the service,
+with the merchant's own key, to answer what Stripe's page does not say: one
+created a PaymentIntent, and Stripe refused the other three.
 Each answer below is what the sandbox did, not what Stripe documents.
 
 **Deposit address.** `POST /v1/crypto/deposit_addresses` with `network=base` in
@@ -638,8 +639,9 @@ reading balance transactions.
 | `receipt_email` | Accepted at create and returned on the object. |
 | `customer` | The parameter is recognised: an unknown ID is refused with `resource_missing` on `customer`, not `parameter_unknown`. Not tested with a real Customer — the key has no Customers permission and this merchant keeps no customers. |
 
-**How Stripe matches the hash.** Create answers 200 with status `processing`
-for any hash; Stripe checks the transaction afterwards.
+**How Stripe matches the hash.** For both new hashes tried, create answered 200
+with status `processing`, and Stripe checked the transaction afterwards. A hash
+of a transaction that does not exist or reverted was not tried.
 
 - The joke's transaction: `processing` → `succeeded` in about 3 seconds.
 - The hash of a USDC transfer to another address (the buyer's funding leg):
@@ -651,7 +653,7 @@ for any hash; Stripe checks the transaction afterwards.
   account.
 
 **One PaymentIntent per transaction, permanently.** A second create for the
-same hash, with a new idempotency key, is refused with 400
+same hash, with a new idempotency key (as after the old one is pruned), is refused with 400
 `resource_already_exists` on `payment_method_options[crypto][transaction_verification_options]`,
 naming the PaymentIntent already tracking the transaction. This held for the
 succeeded PaymentIntent and for the declined one. So Stripe itself keeps a
@@ -662,14 +664,20 @@ and a hash whose PaymentIntent was declined cannot be recorded again.
 create call returns, while the PaymentIntent is still `processing`; it never
 reads the final status. The reconciliation script likewise treats any
 PaymentIntent found for a hash, a declined one included, as
-`already_recorded`. A declined recording is therefore silent. The joke is only
-recorded after it settled to the deposit address, so a decline is not expected —
-but nothing would show one. Tracked in #4866.
+`already_recorded`. A declined recording is therefore silent: the Stripe
+Dashboard shows it, but nothing in the merchant (its log, `/healthz` or the
+reconciliation report) does. A decline can happen in normal operation: a
+payment that settled to `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` (or to
+`MERCHANT_ADDRESS`, when Stripe was just turned on) is served through
+`recoverCdpPaymentAfterQuoteChange` as `settled_onchain`, and
+`recordStripePayment` records it without checking which address it paid —
+the same shape as the declined probe. Tracked in #4866.
 
 **The SEK amount and the rate.** The balance transaction for the one-cent
 payment: `amount` 10 (öre), `currency` `sek`, `exchange_rate` 10.0742, `fee` 0,
 `net` 10, `reporting_category` `charge`, `status` `pending`. It exists in the
-same second the payment succeeds, so the SEK amount and rate are known at once;
+balance transaction was created at 14:06:08 UTC, a second before the payment
+succeeded, so the SEK amount and rate are known at once;
 the funds become available seven days later (`available_on` 2026-11-23 00:00
 UTC for a payment on 2026-11-16). The Dashboard says the charge "was received in
 USD, but the funds will be transferred to you in SEK". The payment object is a
@@ -685,12 +693,12 @@ transaction of −10 SEK at the original payment's rate, 10.0742, with the same
 The refund object (`pyr_1UcQgFJ1wRWdOmCAXbr6Pro6`, created 14:14:47 UTC) reads
 `status: succeeded` with `destination_details.crypto.reference: null`, but
 **nothing moved on chain**: one hour later there was no USDC transfer out of the
-deposit address and none into the payer's address. In a sandbox, then, a crypto
-refund is bookkeeping only, and this run cannot say where a live refund is sent.
+deposit address and none into the payer's address. In this run the refund was
+bookkeeping only, and the run cannot say where a live refund is sent.
 The Dashboard names no destination, and the only address Stripe shows for the
 payment is the sender — for a Haven agent its delegate address, not the owner's
 account. If a live refund goes there, it lands on the delegate and has to be
-swept back. Test that with the first live refund (#4858) before relying on it.
+swept back. Check that with the first live refund (#4858) before relying on it.
 
 **The reconciliation run.** Inside the dev service (`railway ssh`), over the
 200 blocks around the purchase:
@@ -719,8 +727,8 @@ node scripts/reconcile-stripe.mjs --from-block 59580400 --to-block 59580599
 The public Base Sepolia RPC (`https://sepolia.base.org`) answers `eth_getLogs`
 for at most 200 blocks, and the script asks for the whole range in one call: a
 1,001-block range failed with RPC error -32614 ("eth_getLogs is limited to a 200
-range") and a stack trace. On that RPC, run ranges of at most 200 blocks. #4866 makes the script read
-in windows, and covers the same limit in the CDP recovery search.
+range") and a stack trace. On that RPC, run ranges of at most 200 blocks. #4866 tracks reading in
+windows, and the same limit in the CDP recovery search.
 
 ## Agent Passport check (advisory, #4723)
 

@@ -639,6 +639,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     // STRIPE_PREVIOUS_DEPOSIT_ADDRESS and its operator note were verified
     // against src/stripe.ts and src/x402.ts. Nothing else re-verified in this
     // pass.
+    // #4854: ADDED § "What we learned from Stripe sandbox (#4854)" and one
+    // sentence in § "Reconciliation". Stripe and RPC behaviour there is what a
+    // sandbox run on 2026-11-16 observed, not a repository measurement; its
+    // code claims (the recorder, `findRecorded`, the single `getLogs`, the
+    // previous-address recovery path) were verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/x402.ts and src/http.ts at c7a779d59.
     'last-verified': '2026-11-16',
   },
   {

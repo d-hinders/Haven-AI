@@ -45,10 +45,13 @@ merchant-of-record product. Funds do not flow through Haven.
 | CloudNest 50 GB | `buy_cloud_storage` | 0.0005 USDC |
 | CloudNest 200 GB | `buy_cloud_storage` | 0.0015 USDC |
 | CloudNest 1 TB | `buy_cloud_storage` | 0.004 USDC |
+| Haven Joke (only with CDP configured) | `buy_joke` | 0.01 USDC, EIP-3009 only, one-time |
 
-`vpn_legacy` (`plan: "legacy"`) is the one EIP-3009-only product (#1441): the QA
-harness's hosted funding-leg scenario needs a merchant offer the erc7710
-preference cannot pick. Every other product supports both methods.
+`vpn_legacy` (`plan: "legacy"`) is the one self-settled EIP-3009-only product
+(#1441): the QA harness's hosted funding-leg scenario needs a merchant offer the
+erc7710 preference cannot pick. The joke is EIP-3009-only too, but Coinbase's
+facilitator settles it (see [Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)).
+Every other product supports both methods.
 
 Every product's x402 capability shows in `list_products`, in its text line and
 in its `structuredContent.products` record:
@@ -365,6 +368,43 @@ by the QA harness (#575). On Base Sepolia the merchant uses Circle's testnet USD
 domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at the
 matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
 and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
+
+## Coinbase facilitator (CDP): joke product (#4851)
+
+`buy_joke` sells one joke for 0.01 USDC. It is the only product verified and
+settled by Coinbase's hosted x402 facilitator (CDP) instead of this merchant's
+own `SETTLEMENT_PRIVATE_KEY`; CDP pays the gas. It is offered only when both
+`CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set. With neither, the merchant
+behaves exactly as it does without the product. With only one, it logs a
+warning and does not offer the product; it still starts. `/healthz` carries a
+`cdp` block only when CDP is configured, and never a credential.
+
+- **EIP-3009 only.** Haven agents prefer ERC-7710 whenever it is offered, and
+  CDP does not settle it, so the joke offers EIP-3009 alone. An agent whose
+  budget is pinned to one recipient cannot pay it: EIP-3009 needs an open budget.
+- **The merchant checks its own quote first.** The extensions echo, x402
+  version, quoted option, resource, recipient, amount, signature and validity
+  window are checked before CDP is called at all.
+- **The chain decides every failure.** After any settle failure or timeout
+  (30 s per call), the merchant reads USDC's `authorizationState` itself and
+  matches no facilitator error string. Used: the buyer is served, with the
+  transaction recovered from USDC's `AuthorizationUsed` event when it can be
+  found, and the reference marked unavailable when it cannot. Unused: a
+  retryable refusal; the same header retried runs the check again and settles
+  at most once. A retry after `validBefore` is served when the chain says the
+  money moved, and refused as expired when it did not.
+- **Settled or cancelled.** `authorizationState` reads "used" for both, so the
+  merchant tells them apart by USDC's events: `AuthorizationCanceled`, or an
+  `AuthorizationUsed` whose transaction did not pay this merchant the price, is
+  a final refusal.
+- **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
+  (final: CDP refused at verification, including its sanctions and risk
+  screening, or the authorization was cancelled) or
+  `"facilitator_retryable"` (nothing moved; retry the same header). Haven's
+  clients read `reason_code` only inside a 503 `merchant_not_ready` body, so
+  these degrade to the ordinary refusal there.
+- **Not in Haven's catalog.** Like `vpn_legacy`, the joke is paid at this
+  endpoint directly; a catalog row would change the demo store's funding target.
 
 ## Agent Passport check (advisory, #4723)
 

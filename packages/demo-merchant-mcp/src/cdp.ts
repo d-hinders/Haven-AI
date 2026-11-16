@@ -103,19 +103,27 @@ export async function withCdpTimeout<T>(
 }
 
 /**
- * Build the CDP facilitator client. Loaded lazily, so a merchant without CDP
- * credentials never imports the Coinbase SDK. The credentials go straight to
- * the SDK's constructor and nowhere else.
+ * Build the CDP facilitator client: `createFacilitatorConfig` from
+ * `@coinbase/x402` (CDP's endpoint and per-request JWT auth) inside
+ * `HTTPFacilitatorClient` from `@x402/core/server` — the pairing Stripe's
+ * machine-payments sample uses. Not `@coinbase/cdp-sdk/x402`'s
+ * `createCdpFacilitatorClient`: that entry point imports every x402 scheme
+ * package (`@x402/evm`, `@x402/svm`, `@x402/extensions`) at load, which this
+ * merchant would have to install only to settle EIP-3009 on Base.
+ *
+ * Loaded lazily, so a merchant without CDP credentials never imports either.
+ * The credentials go to the config constructor and nowhere else; the client
+ * signs a fresh JWT per request, so nothing reaches Coinbase until a payment.
  */
 export async function createCdpFacilitator(credentials: {
   apiKeyId: string
   apiKeySecret: string
 }): Promise<CdpFacilitator> {
-  const { createCdpFacilitatorClient } = await import('@coinbase/cdp-sdk/x402')
-  return createCdpFacilitatorClient({
-    apiKeyId: credentials.apiKeyId,
-    apiKeySecret: credentials.apiKeySecret,
-  })
+  const [{ createFacilitatorConfig }, { HTTPFacilitatorClient }] = await Promise.all([
+    import('@coinbase/x402'),
+    import('@x402/core/server'),
+  ])
+  return new HTTPFacilitatorClient(createFacilitatorConfig(credentials.apiKeyId, credentials.apiKeySecret))
 }
 
 const AUTHORIZATION_USED_EVENT = parseAbiItem(

@@ -373,6 +373,10 @@ export { nextInvoiceNumber }
 // (so a paying agent can capture the merchant's own receipt), and the MCP tool
 // handler renders it in the confirmation text. One generation per payment
 // keeps the two identical — and repeat tool calls replay the same invoice.
+//
+// #4850: keyed by payment alone, so every caller must pass the SAME
+// `receivingAddress` for a payment — the purchased product's
+// (`productReceivingAddress`). Whichever caller runs first fixes the invoice.
 const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
 
 export function invoiceForPayment(

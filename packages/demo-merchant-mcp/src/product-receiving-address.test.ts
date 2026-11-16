@@ -13,11 +13,26 @@
  */
 import { randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { getAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
+
+// Review of #4850: the deployed merchant always has MERCHANT_ADDRESS set
+// (index.ts refuses to start without it). Set it here BEFORE the merchant
+// modules are imported, so a read of it — at import or per call — would put
+// MERCHANT on a product whose own address differs, and the tests below go red.
+const priorMerchantAddressEnv = vi.hoisted(() => {
+  const prior = process.env.MERCHANT_ADDRESS
+  process.env.MERCHANT_ADDRESS = '0x15179876c595922999C2d5DC7c23Cc7711fE799a'
+  return prior
+})
+afterAll(() => {
+  if (priorMerchantAddressEnv === undefined) delete process.env.MERCHANT_ADDRESS
+  else process.env.MERCHANT_ADDRESS = priorMerchantAddressEnv
+})
+
 import { createDemoMerchantServer } from './http.js'
 import { buildMerchantMcpServer, runWithSettledPayment } from './server.js'
 import {

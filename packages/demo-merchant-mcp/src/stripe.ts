@@ -403,7 +403,9 @@ async function withTimeout<T>(timeoutMs: number, call: () => Promise<T>): Promis
 }
 
 /**
- * #4866: how long a recording waits for Stripe's verdict after a create. The
+ * #4866: how long a recording waits (sleep time, not counting the reads) for
+ * Stripe's verdict after a create. Each read is itself bounded by
+ * `STRIPE_CALL_TIMEOUT_MS`, so the worst case is about 20 × (3 s + 10 s). The
  * #4854 sandbox decided within about 3 s (succeeded) and 30 s (declined); the
  * merchant sleeps after about 10 minutes, so the bound sits well under that.
  */

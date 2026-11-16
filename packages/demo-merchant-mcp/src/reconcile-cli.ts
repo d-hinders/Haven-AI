@@ -41,10 +41,16 @@ Environment (the merchant service's own variables):
                                serves (otherwise learned from its refusal)
 
 Exit codes: 0 nothing declined or failed (pending is listed, not an error),
-1 usage or configuration, 2 Stripe refused or declined a payment, 3 an RPC or
-Stripe error stopped the run.`
+1 usage or configuration, 2 a payment is listed under failed or declined (a
+Stripe refusal, decline, timeout or API error on that payment), 3 an RPC error
+stopped the run. Every step is idempotent: after exit 3, run the same range
+again.`
 
-/** #4866: exit code for an RPC or Stripe error that stopped the run. */
+/**
+ * #4866: exit code for an error that stopped the run. In practice an RPC
+ * error: the recorder turns every Stripe error on a payment into a `failed`
+ * entry (exit 2), so Stripe never stops the run.
+ */
 export const EXIT_RUN_ERROR = 3
 
 /** Test seams. Production passes none. */
@@ -142,7 +148,13 @@ export async function main(
   } catch (error) {
     // #4866: one line, the class only — never the message, which can carry
     // the RPC URL and the request.
-    err(`Reconciliation stopped: ${describeRunError(error)}. Nothing after this point was read or recorded.`)
+    // Payments before the error may already be recorded (their `[stripe]`
+    // lines are on stderr); every step is idempotent, so a rerun of the same
+    // range is safe and reports them as already_recorded.
+    err(
+      `Reconciliation stopped: ${describeRunError(error)}. Payments before this point may already be recorded; ` +
+        'run the same range again — it is idempotent.',
+    )
     return EXIT_RUN_ERROR
   }
 

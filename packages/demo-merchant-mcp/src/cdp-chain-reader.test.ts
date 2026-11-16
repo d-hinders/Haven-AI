@@ -307,6 +307,14 @@ describe('the recovery search fits the RPC provider\'s block-range limit (#4866)
     expect(await createCdpChainReader(client).findAuthorizationOutcome(WIDE)).toEqual({ kind: 'settled', txHash: TX })
   })
 
+  it('stops at the window that holds the event: no window after it is asked', async () => {
+    const { client, recorded } = chain({ maxRange: 200n, used: [{ authorizer: PAYER, nonce: NONCE, block: LATEST - 700n, tx: TX }] })
+    expect(await createCdpChainReader(client).findAuthorizationOutcome(WIDE)).toEqual({ kind: 'settled', txHash: TX })
+    const last = recorded.getLogs.at(-1)!
+    expect(last.fromBlock <= LATEST - 700n && LATEST - 700n <= last.toBlock).toBe(true)
+    expect(last.toBlock).toBeLessThan(LATEST)
+  })
+
   it('keeps a learned limit for the next search on the same reader: no second refusal', async () => {
     const { client, recorded } = chain({ maxRange: 200n })
     const reader = createCdpChainReader(client)

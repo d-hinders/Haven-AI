@@ -546,8 +546,9 @@ after about 10 minutes — so the log lines are what an operator greps for.
 `processing`, and Stripe later moves it to `succeeded` or declines it
 (`requires_payment_method` with `last_payment_error.code`; `canceled` counts as
 declined too). The recorder logs `[stripe] submitted …` on create, then reads
-the PaymentIntent every 3 s for up to 60 s — well under the merchant's sleep —
-and only a `succeeded` one is `recorded`. One still undecided at the bound is
+the PaymentIntent every 3 s, for up to 60 s of waiting plus the reads (each
+read is bounded at 10 s) — well under the merchant's sleep — and only a
+`succeeded` one is `recorded`. A failed read ends the wait as `pending`. One still undecided at the bound is
 `record_pending`, and the reconciliation script reads it again later. A decline
 is permanent: Stripe allows one PaymentIntent per transaction, so the
 transaction cannot be recorded again — say so to Stripe, not to this script.
@@ -606,8 +607,8 @@ The report is JSON on stdout (the recorder's log lines go to stderr):
 |---|---|
 | 0 | nothing declined or failed — `pending` entries are listed, not an error; run again later |
 | 1 | usage or configuration |
-| 2 | Stripe refused or declined a payment (`failed` or `declined` is not empty) |
-| 3 | an RPC or Stripe error stopped the run, printed as one line naming the error class — never a stack trace, never the message (a viem error message carries the RPC URL, which can hold an API key) |
+| 2 | a payment is listed under `failed` or `declined` — a Stripe refusal, decline, timeout or API error on that payment (Stripe errors never stop the run) |
+| 3 | an RPC error stopped the run, printed as one line naming the error class — never a stack trace, never the message (a viem error message carries the RPC URL, which can hold an API key). Payments before the error may already be recorded; run the same range again, it is idempotent |
 
 **Where it runs.** Inside the merchant service's environment, as a one-off
 command using that service's variables. The key is never exported to a local

@@ -574,6 +574,33 @@ describe('the recorder reports Stripe’s verdict, not the create call’s (#486
     expect(recording.stats()).toMatchObject({ recorded: 0, pending: 1 })
   })
 
+  it('a failed status read ends the wait: pending, never recorded, and the recording does not reject', async () => {
+    const requests: StripeHttpRequest[] = []
+    const client: StripeHttpClient = {
+      async request(request) {
+        requests.push(request)
+        if (request.path.startsWith('/v1/payment_intents/search')) return { status: 200, body: { data: [] } }
+        if (request.method === 'GET') return { status: 500, body: { error: { type: 'api_error' } } }
+        return { status: 200, body: { id: 'pi_3ReadFails0001', status: 'processing' } }
+      },
+    }
+    const recording = createStripeRecording(config()!, {
+      http: client,
+      log: () => {},
+      sleep: async () => {},
+      verdictPollMs: 1_000,
+      verdictTimeoutMs: 5_000,
+    })
+    expect(await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })).toEqual({
+      status: 'pending',
+      paymentIntentId: 'pi_3ReadFails0001',
+      created: true,
+    })
+    // One failed read, then it stops asking.
+    expect(requests.filter((request) => request.path === '/v1/payment_intents/pi_3ReadFails0001')).toHaveLength(1)
+    expect(recording.stats()).toMatchObject({ recorded: 0, pending: 1, failed: 0 })
+  })
+
   it('a declined PaymentIntent the search finds is reported declined, and nothing is created', async () => {
     const stripe = verdictStripe({ searchHit: { id: 'pi_old_declined', status: 'requires_payment_method' } })
     const recording = verdictRecording(stripe)

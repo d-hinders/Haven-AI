@@ -133,7 +133,7 @@ describe('reconcile-stripe main() (#4866)', () => {
     expect(code).toBe(EXIT_RUN_ERROR)
     expect(out).toEqual([])
     expect(err).toHaveLength(1)
-    expect(err[0]).toMatch(/^Reconciliation stopped: \w+\. Nothing after this point was read or recorded\.$/)
+    expect(err[0]).toMatch(/^Reconciliation stopped: \w+\. Payments before this point may already be recorded; run the same range again — it is idempotent\.$/)
     for (const line of [...out, ...err]) {
       expect(line).not.toContain(RPC_SECRET)
       expect(line).not.toContain('rpc.example')

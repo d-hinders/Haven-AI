@@ -141,6 +141,8 @@ async function startServer(
     stripe?: boolean
     stripeFail?: boolean
     stripeHang?: boolean
+    /** #4866: a recording built by the test, used instead of the default one. */
+    recording?: StripeRecording
     cdp?: boolean
     fakes?: Fakes
     previousReceivingAddresses?: readonly `0x${string}`[]
@@ -154,8 +156,8 @@ async function startServer(
   }
   const settlementMethods = ['eip3009', 'erc7710'] as const
   const stripe = fakeStripe({ failCreate: opts.stripeFail, hang: opts.stripeHang })
-  const recording: StripeRecording | undefined =
-    opts.stripe === false
+  const recording: StripeRecording | undefined = opts.recording ??
+    (opts.stripe === false
       ? undefined
       : createStripeRecording(
           {
@@ -165,7 +167,7 @@ async function startServer(
             network: 'base',
           },
           { http: stripe.client, log: (line) => logs.push(line), timeoutMs: 50 },
-        )
+        ))
   const server = createDemoMerchantServer({
     merchantAddress: MERCHANT,
     baseUrl: 'http://127.0.0.1:0',
@@ -312,6 +314,48 @@ describe('the deposit address in the 402 (#4853)', () => {
       record_failures: 0,
     })
     expect(JSON.stringify(health)).not.toContain(FAKE_KEY)
+  })
+
+  it('#4866: /healthz counts recorded, pending, declined and failures apart', async () => {
+    // One PaymentIntent Stripe declines after create, two it never decides —
+    // different counts, so swapping the two keys cannot pass.
+    const statusFor = new Map([
+      ['pi_3Declined0001', 'requires_payment_method'],
+      ['pi_3Pending00001', 'processing'],
+      ['pi_3Pending00002', 'processing'],
+    ])
+    let next = 0
+    const ids = ['pi_3Declined0001', 'pi_3Pending00001', 'pi_3Pending00002']
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.path.startsWith('/v1/payment_intents/search')) return { status: 200, body: { data: [] } }
+        if (request.method === 'GET') {
+          const id = request.path.split('/').pop()!
+          return { status: 200, body: { id, status: statusFor.get(id) } }
+        }
+        return { status: 200, body: { id: ids[next++], status: 'processing' } }
+      },
+    }
+    const recording = createStripeRecording(
+      { depositAddress: DEPOSIT, secretKey: FAKE_KEY, apiVersion: STRIPE_API_VERSION_SANDBOX, network: 'base' },
+      { http, log: () => {}, sleep: async () => {}, verdictPollMs: 1_000, verdictTimeoutMs: 2_000 },
+    )
+    await recording.record({ txHash: `0x${'d1'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+    await recording.record({ txHash: `0x${'d2'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+    await recording.record({ txHash: `0x${'d3'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+
+    const { origin } = await startServer({ recording })
+    const health = (await (await fetch(`${origin}/healthz`)).json()) as Record<string, unknown>
+    expect(health.stripe).toEqual({
+      configured: true,
+      deposit_address: DEPOSIT,
+      api_version: STRIPE_API_VERSION_SANDBOX,
+      network: 'base',
+      recorded: 0,
+      pending: 2,
+      declined: 1,
+      record_failures: 0,
+    })
   })
 
   it('/healthz has no stripe block when Stripe is off', async () => {

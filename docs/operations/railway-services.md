@@ -100,13 +100,28 @@ its CDP-settled joke product only when BOTH of these are set on the service:
 | `CDP_API_KEY_SECRET` | that key's secret |
 
 Paste the values straight into the service variables, never into chat, an
-issue, a file or a log. With neither set the merchant is exactly as before;
-with one set it logs a warning and does not offer the joke, and every other
-product is unaffected. Setting or removing the pair needs no coordination with
-in-flight quotes: it adds or removes one product and leaves every other
-product's 402 unchanged. Check the result with `GET /healthz`, which carries a
-`cdp` block (`configured: true`, no credential) only when CDP is on. See
-[secret-rotation.md](secret-rotation.md) for the key's inventory row.
+issue, a file or a log, then redeploy: the pair is read once, at startup. With
+neither set the merchant is exactly as before to buyers and on `/healthz` (the
+startup banner gains a `CDP: not configured` line). With one set, or with both
+set but the Coinbase client failing to build, it logs a warning (naming the
+variables, or the error class only) and does not offer the joke; every other
+product is unaffected.
+
+**Setting** the pair needs no coordination with in-flight quotes: no joke quote
+can exist before it, and every other product's 402 is rebuilt from the product
+on each request, so it is unchanged. **Removing** it does: a joke quoted before
+the removal and paid after it gets "unknown tool" — nothing settles, so the
+buyer is not charged — but on Haven's EIP-3009 bridge, the joke's only path,
+the refusal comes after the funding leg, so 0.01 USDC strands on the agent's
+delegate until it is swept. Remove the pair on a service that is not mid-quote;
+the window is one quote lifetime (`maxTimeoutSeconds`, 300 s). Either redeploy
+also drops every in-memory MCP session, which buyers recover from by
+re-initialising, as after any redeploy.
+
+Check the result with `GET /healthz`, which carries a `cdp` block
+(`configured: true`, no credential) only when CDP is on — it also catches the
+client-build failure above. See [secret-rotation.md](secret-rotation.md) for
+the key's inventory row.
 
 ### Sleep
 

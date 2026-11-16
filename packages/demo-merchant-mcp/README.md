@@ -130,10 +130,12 @@ through `productSettlementKind`; #4850). There are two:
 | Submits and pays gas | `SETTLEMENT_PRIVATE_KEY` | CDP |
 | Receives the USDC | `MERCHANT_ADDRESS` | `MERCHANT_ADDRESS` |
 | Readiness gate on the merchant's gas wallet | applies | exempt |
-| After a failure | the pre-submit `authorizationState` read (#1519) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
+| After a failure | EIP-3009: the pre-submit `authorizationState` read (#1519); ERC-7710: the pinned enforcer's `spentMap` check (#1515) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
 
-In both, the buyer's USDC goes straight from the payer to `MERCHANT_ADDRESS`
-in one transfer; Haven is not a party to it. A product's receiving address can
+In both, the merchant is paid in one transfer from the payer straight to
+`MERCHANT_ADDRESS`; Haven is not a party to it. (For a Haven agent paying with
+EIP-3009, the payer is its delegate wallet, which Haven's bridge funded from the
+agent's budget just before — that funding leg is Haven's, not the merchant's.) A product's receiving address can
 differ from `MERCHANT_ADDRESS` (#4850), but no product's does today.
 
 **Why the joke is not in Haven's catalog.** The demo store's funding target —
@@ -145,7 +147,8 @@ offer ERC-7710 and must agree on one `payTo`. One EIP-3009-only row would make
 merchant-locked budgets for the demo store refuse with 409, failing the QA
 `merchant-locked-budget` scenario, and a second receiving address (Stripe's
 deposit address, epic #4849 M2) would make the target conflicting. Like
-`vpn_legacy`, which has no catalog row for the same reason, the joke is paid at
+`vpn_legacy`, which has no catalog row either (and would hit the same refusal if
+it had one), the joke is paid at
 this merchant's MCP endpoint directly: quote, then pay, as for any MCP merchant
 outside the catalog. Listing it would need a change to that aggregate.
 

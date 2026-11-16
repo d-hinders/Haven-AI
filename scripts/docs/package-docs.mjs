@@ -645,6 +645,14 @@ export const GOVERNED_PACKAGE_DOCS = [
     // code claims (the recorder, `findRecorded`, the single `getLogs`, the
     // previous-address recovery path) were verified against src/stripe.ts,
     // src/stripe-reconcile.ts, src/x402.ts and src/http.ts at c7a779d59.
+    // #4866: EDITED § "Stripe recording" (the verdict, the new log lines and
+    // /healthz counters, the current-address rule), § "Reconciliation" (the
+    // windows, the report arrays, the exit-code table), the /healthz paragraph,
+    // a § "Coinbase facilitator" bullet (the recovery search's windows), and
+    // the #4854 section's "Not yet handled" paragraph and 200-block note,
+    // rewritten to say what #4866 changed. Verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/log-range.ts,
+    // src/cdp.ts and src/http.ts. Nothing else re-verified in this pass.
     'last-verified': '2026-11-16',
   },
   {

@@ -18,6 +18,9 @@ covers:
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/demo-merchant-mcp/src/tax-declaration.ts
   - packages/backend/src/modules/accounting/receipt-statement.ts
+  - packages/backend/src/modules/accounting/receipt-underlag.ts
+  - packages/backend/src/modules/mpp/merchant-receipt.ts
+  - packages/sdk/src/x402.ts
 last-verified: "2026-11-17"
 ---
 
@@ -57,8 +60,8 @@ dependency of the proxy, and the demo merchant uses the same core.
 ## 2. The two new packages
 
 Both are workspace-private packages in this repository. Neither is published
-for the pilot (owner decision, 2026-11-16: licence and distribution are decided
-after the first pilot).
+for the pilot (owner decision of 2026-11-16, recorded under *Owner decisions*
+on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and distribution are decided after the first pilot).
 
 | Package | Directory | What it holds |
 |---|---|---|
@@ -94,9 +97,11 @@ Publishing the two new packages would mean, at minimum:
 - deciding whether `packages/connect/src/runtime-manifest.ts` needs to name
   them (it pins `sdkVersion` and `signerVersion`; connect does not depend on
   either new package, so it would not);
-- a licence. The repository is public and has no licence today, so a published
-  package would need one, plus a `repository` block and a distribution
-  decision.
+- a licence decision for the kit. The repository is public with no root
+  `LICENSE` file (the five published packages declare `MIT` in their own
+  `package.json`), so the kit packages would need a licence, a `repository`
+  block and a distribution decision, which epic #4884 defers to after the
+  pilot.
 
 None of that is in scope for the pilot. The document records it so the
 decision is not rediscovered later.
@@ -131,13 +136,13 @@ when the file is missing, is not valid JSON, or fails validation.
 |---|---|---|
 | `version` | Yes | The products-file schema version. `1` is the only version. An unknown version refuses startup. |
 | `products[].id` | Yes | Stable, unique, lower-case identifier. It is the `product_id` in the sale record and the key the discovery document lists. |
-| `products[].name` | No | Human name. When present it is the sale record's `product_name`; when absent the proxy sends the `id`. |
+| `products[].name` | No | Human name. When present it is the sale record's `product_name`; when absent the proxy sends the `id`. Part of the receipt line (section 11), so it is under the same character rule as `description`. |
 | `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after the proxy's base path. A product is selected by its route. |
 | `products[].model` | No | When present, the request body's `model` must equal it, or the request is refused before settlement. This is how an inference product is pinned to one model. |
 | `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. Never a float and never a dollar string: a JSON number is refused, because a float cannot represent every atomic amount exactly. |
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product; absent for a product that is not token-priced. |
-| `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. At most 300 characters, with no character Haven's receipt reader refuses: it is the receipt line's text (section 11), and Haven's reader reads at most 300. That is inside the 500 Coinbase's facilitator allows at verify and settle (section 4). The proxy refuses a longer description at startup. |
-| `products[].input_example` | No | An example request body for this product. Carried into the challenge's directory block (section 4). Strongly recommended: without it a directory can list the product but an agent cannot build a valid call from the listing. |
+| `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. The receipt line is composed from it and the name (section 11), and **the composed line is at most 300 characters** with no character Haven's receipt reader refuses: the reader reads at most 300 and refuses the whole receipt otherwise. The description alone is therefore well inside the 500 Coinbase's facilitator allows at verify and settle (section 4). The proxy refuses a products file that breaks either rule at startup, naming the product. |
+| `products[].input_example` | No | An example request body for this product, carried into the challenge's directory block when listing is on (section 4). It must pass the proxy's own checks (the route, `model`, a settable cap), because a directory probes the route with it. Without it a directory can list the product but an agent cannot build a valid call from the listing. |
 | `products[].input_schema` | No | A JSON Schema the request body validates against, for the same block. |
 | `products[].output_example` | No | An example response body, for the same block. |
 
@@ -160,8 +165,9 @@ ambiguous.
 The proxy serves the discovery document at `/.well-known/x402`, the x402
 well-known path (RFC 8615), and nowhere else. It does not serve it at
 `/.well-known/haven-demo-merchant` and it does not carry an `mcp_url` field.
-The SDK probes exactly those two paths and acts on `mcp_url` for MCP merchants
-(`packages/sdk/src/merchant-discovery.ts`); a kit document at the demo path, or
+The SDK probes exactly `/.well-known/haven-demo-merchant` and `/`
+(`MERCHANT_DISCOVERY_PATHS` in `packages/sdk/src/merchant-discovery.ts`) and
+acts on `mcp_url` for MCP merchants; a kit document at the demo path, or
 one carrying `mcp_url`, would be read as an MCP merchant and the SDK would try
 to open an MCP session against a plain HTTP proxy. The kit's document is for
 agents, directories and Haven to read the products; it carries no MCP endpoint.
@@ -213,17 +219,22 @@ route, or refused when it is not a product route.
 | `asset` | Yes | The USDC contract address on that network. |
 | `pay_to` | Yes | The receiving address. One setting of the deployment; every product is paid to it. |
 | `settlement.scheme` | Yes | `exact`. The kit does not offer `upto` or `batch-settlement`. |
-| `settlement.facilitator` | Yes | `coinbase-cdp` or `x402-org`. |
+| `settlement.facilitator` | Yes | `coinbase-cdp`, the only value for the pilot: the #4890 core is Coinbase's client. |
 | `settlement.methods` | Yes | `["eip3009"]`. The kit advertises EIP-3009 only; ERC-7710 is later work (#4887). |
 | `products[]` | Yes | The same product objects as the products file: `id`, `name`, `route`, `model`, `price`, `output_token_cap`, `description`. |
 | `updated` | No | RFC 3339 timestamp of the last change, for caches. |
 
-The document is a superset of the product list the demo merchant serves today
-(`packages/demo-merchant-mcp/src/http.ts` builds it from
-`packages/demo-merchant-mcp/src/products.ts`). It drops the demo's MCP fields
-(`mcp_url`, `current_base_url`, `hosted_urls`, `routing`) and adds `version`,
-`operator`, `asset`, `pay_to` and `settlement`. The demo merchant keeps serving
-its own document unchanged; the kit's document is the proxy's.
+The document starts from the one the demo merchant serves today
+(`packages/demo-merchant-mcp/src/http.ts`, built from
+`packages/demo-merchant-mcp/src/products.ts`) but is a different shape, not a
+superset. It drops the demo's MCP and environment fields (`mcp_url`,
+`current_base_url`, `hosted_urls`, `routing`, `environment`, `chain_id`,
+`settlement_methods`, `default_settlement_method`, and per product `category`,
+`tools`, `settlement_methods`, `default_settlement_method`). It replaces the
+demo's human-decimal `price_usdc` with atomic `price`, and adds `version`,
+`operator`, `network`, `asset`, `pay_to`, `settlement` and per product `route`
+and `description`. The demo merchant keeps serving its own document,
+unchanged, at its own paths; the kit's document is the proxy's.
 
 ### Fields for Coinbase's directory
 
@@ -244,8 +255,18 @@ What those pages say decides where the directory fields go:
   request carries `paymentPayload.extensions.bazaar` and
   `paymentPayload.resource`. There is no registration form or separate API
   call. Indexing can take up to 15 minutes after the settled call.
-- **So the proxy puts the fields in its challenge**, built from the products
-  file, and this document mirrors them so every reader sees the same metadata:
+- **So the fields go in the challenge, and only when listing is on.** A
+  settle that carries `extensions.bazaar` is what indexes a route, and Haven's
+  SDK copies the merchant's whole `extensions` object from the challenge into
+  the payment payload (`packages/sdk/src/x402.ts`, #2361), which the core
+  forwards to Coinbase's settle call. A challenge that always carried the
+  block would list every deployment on its first settled call. The deployment
+  setting `DIRECTORY_LISTING` is therefore `off` by default; with it `off` the
+  challenge carries no `extensions.bazaar`. Haven's demo (#4892) leaves it off:
+  the owner decision of 2026-11-17 on [#4884](https://github.com/d-hinders/Haven-AI/issues/4884) keeps the demo unlisted and parks
+  listing in #4887.
+- With `DIRECTORY_LISTING=on` the proxy builds the block from the products
+  file, and this document mirrors the same metadata so every reader sees it:
 
 | Directory field | Where it lives | Kit source |
 |---|---|---|
@@ -262,11 +283,17 @@ at the top level an optional `icon_url`. They are optional in version 1, so
 the version does not change.
 
 The seller guide does not give the full JSON schema of `extensions.bazaar` or
-a required-or-optional table. The proxy (#4893) builds the block from the keys
-above, and #4893's acceptance includes Coinbase's validator answering for a
-deployed route: `POST https://api.cdp.coinbase.com/platform/v2/x402/validate`
-with `{"resource": ..., "method": ...}`, which needs no API key and checks
-reachability, the 402 answer and the `extensions.bazaar` block.
+a required-or-optional table. Building the block, and checking it with
+Coinbase's validator (`POST https://api.cdp.coinbase.com/platform/v2/x402/validate`
+with `{"resource": ..., "method": ...}`, no API key; it checks reachability,
+the 402 answer and the block), belongs with listing in #4887. The pilot builds
+`DIRECTORY_LISTING=off` only.
+
+One side effect to know when listing is turned on: Haven's SDK reads an
+`extensions.bazaar` block as a sign of an MCP merchant
+(`packages/sdk/src/mcp-merchant-transport.ts`) and tries an MCP `initialize`
+POST first. The proxy answers it 400 and the SDK falls back cleanly, at the
+cost of one extra unpaid request against the per-IP limit.
 
 Conditions the deployment inherits, from the same pages:
 
@@ -286,14 +313,13 @@ exist so a merchant that wants to be listed has nothing to retrofit.
 
 ### How an older kit is treated
 
-A reader that finds no `version` treats the document as version 1. The demo
-merchant's document today has no version field, and its product list is a
-subset of version 1, so this is the compatible reading.
-
-A reader that finds a higher version than it knows reads the fields it knows
-and ignores unknown fields; it does not refuse the document. A reader that
-finds a lower version reads the fields present and applies the documented
-default for a missing optional field. The discovery document is a catalogue,
+A document with no `version` is not a kit document: the demo merchant's
+document has none, and it lacks fields version 1 requires, so a reader does
+not read it as version 1. A reader that finds a higher version than it knows
+reads the fields it knows and ignores unknown fields; it does not refuse the
+document. A missing optional field means what the field tables say its
+absence means (an absent `output_token_cap` is an uncapped product, an absent
+`operator.contact` is no contact, and so on). The discovery document is a catalogue,
 not an authority: a reader that cannot understand a product simply does not
 offer it.
 
@@ -320,7 +346,7 @@ URL and the key.
   "amount": "10000",
   "payer": "0x7a3f9c2e1b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a",
   "merchant_reference": "sale_01JB8Z3K4M5N6P7Q8R9S0T1V2W",
-  "receipt_number": "FAK-4823517601029384",
+  "receipt_number": "FAK-5552735618149454",
   "vat_treatment": "SE_25"
 }
 ```
@@ -334,7 +360,7 @@ URL and the key.
 | `product_name` | No | The product's `name` when the products file has one; otherwise the proxy sends the `id`. |
 | `amount` | Yes | The settled amount in whole atomic USDC units, as a decimal string. It must equal the product's `price`. |
 | `payer` | Yes | The address that paid. For an EIP-3009 payment from a Haven agent this is the agent's delegate address, not the Haven account (see below). |
-| `merchant_reference` | Yes | The merchant's own reference for the sale. The proxy generates a ULID once per settled call (`sale_<ulid>`), sends it, and logs it. Haven stores it and does not interpret it. |
+| `merchant_reference` | Yes | The merchant's own reference for the sale. The proxy generates a ULID once per payment (`sale_<ulid>`) when it reserves the payment, keeps it in the consumed-payment store (section 6), sends it, and logs it. A payment has one reference however often its call is retried. Haven stores it and does not interpret it. |
 | `receipt_number` | When a receipt was sent | The number on the receipt the proxy returned for this call (section 11), derived from `tx_hash`. It lets the merchant find the sale on Haven from the receipt and the other way round. Absent when the deployment has no VAT rule and so sends no receipt. |
 | `vat_treatment` | When a receipt was sent | The VAT treatment the receipt applied, `SE_25` or `REVERSE_CHARGE` (section 11). Absent with `receipt_number`. |
 
@@ -361,8 +387,8 @@ USDC transfer into the merchant key's account (#4897). The split is:
 |---|---|---|
 | `tx_hash` | Yes: it is the lookup key, and the transaction must exist on `chain`. | |
 | `chain` | Yes: the transaction must be on that chain. | |
-| `amount` | Yes: it must equal the transfer into the account. Haven stores the chain's amount, not the record's. | |
-| `payer` | Yes: it must equal the transfer's sender. Haven stores the chain's sender. | |
+| `amount` | Haven stores what the chain read gives (#4897 defines how several transfers in one transaction are summed); the record's value is not used. | |
+| `payer` | Haven stores the sender or senders the chain read gives (#4897 defines several payers); the record's value is not used. | |
 | asset and time | Yes: the transfer must be USDC, and its time comes from the chain. | |
 | `product_id` | | Yes. Nothing on-chain names a product. |
 | `product_name` | | Yes. Display only. |
@@ -377,15 +403,24 @@ paid another account (#4897).
 
 ### Delivery
 
-The proxy sends the record after the upstream call completes, whether it
-delivered or failed, because the payment settled either way. Delivery is
-at-least-once: the proxy retries a 5xx or a timeout three times with
-exponential backoff (1 s, 4 s, 16 s), and on a final failure appends the record
-to a bounded on-disk outbox (`SALES_OUTBOX`, JSON Lines, 10,000 records) that a
-background task replays every 60 s. A 4xx is not retried: the record was
-refused, and the proxy logs `sales_report_refused` with the answer. Haven's
-ingest is idempotent on chain, transaction hash and account, so a duplicate is
-harmless.
+The proxy sends **one record per payment**, once, after settlement, whatever
+happens to the upstream call: the payment settled either way.
+`saleReported` in the consumed-payment store records that it was sent, so a
+retried call never sends a second, different record (#4897 refuses a second
+record for the same transaction that differs from the first).
+
+Delivery is at-least-once. The proxy retries a 5xx, a timeout, and the answer
+#4897 defines for "the transaction is not visible on the chain yet, retry"
+(Haven accepts a record only after a stated number of confirmations, so a
+record sent straight after settlement usually gets that answer first), with
+exponential backoff (1 s, 4 s, 16 s), and then moves the record to a bounded
+on-disk outbox (`SALES_OUTBOX`, JSON Lines, 10,000 records) that a background
+task replays every 60 s. Any other 4xx is not retried: the record was refused,
+and the proxy logs `sales_report_refused` with the answer. When the outbox is
+full the proxy keeps the records it has, logs `sales_outbox_full` for each
+record it cannot add, and the merchant must clear the cause (section 12).
+Haven's ingest is idempotent on chain, transaction hash and account, so a
+resent identical record is harmless.
 
 ## 6. The consumed-payment store
 
@@ -399,51 +434,80 @@ policy.
 ### The interface
 
 ```ts
-export type ConsumedPaymentState = 'settled' | 'forwarding' | 'delivered' | 'failed'
+export type ConsumedPaymentState =
+  | 'settling'
+  | 'settlement_unknown'
+  | 'settled'
+  | 'forwarding'
+  | 'delivered'
+  | 'failed'
+  | 'exhausted'
 
 export interface ConsumedPaymentRecord {
   key: string
   state: ConsumedPaymentState
   productId: string
-  txHash: string
   chain: string
   payer: string
   amount: string
-  settledAt: string
+  /** The authorization's `validBefore`, in seconds. */
+  validBefore: number
+  /** Generated once, at reservation; the sale record's `merchant_reference`. */
+  merchantReference: string
+  txHash?: string
+  settledAt?: string
   forwardingStartedAt?: string
+  forwardCount: number
   deliveredAt?: string
   failedAt?: string
   failureReason?: string
   upstreamStatus?: number
+  saleReported: boolean
 }
 
 export interface ConsumedPaymentStore {
-  /** Record a settlement. Returns the existing record when the key is known. */
-  claim(input: {
+  /**
+   * Reserve the key BEFORE verify and settle. Returns `reserved` for a new
+   * key, or the existing record when the key is known.
+   */
+  reserve(input: {
     key: string
     productId: string
-    txHash: string
     chain: string
     payer: string
     amount: string
-    settledAt: string
-  }): Promise<ConsumedPaymentRecord>
+    validBefore: number
+    merchantReference: string
+    now: string
+  }): Promise<{ reserved: true } | { reserved: false; record: ConsumedPaymentRecord }>
+
+  /** settling or settlement_unknown → settled, with the transaction hash. */
+  markSettled(key: string, input: { txHash: string; settledAt: string }): Promise<void>
+
+  /** settling → settlement_unknown: the settle outcome was not learned. */
+  markSettlementUnknown(key: string, now: string): Promise<void>
+
+  /** settling → removed: settle failed and the authorization is unused. */
+  release(key: string): Promise<void>
 
   /** Atomically move a settled or failed record to forwarding. */
-  beginForwarding(key: string, now: string): Promise<'forward' | 'in_flight' | 'delivered'>
+  beginForwarding(key: string, now: string): Promise<'forward' | 'in_flight' | 'delivered' | 'exhausted'>
 
   markDelivered(key: string, input: { upstreamStatus: number; deliveredAt: string }): Promise<void>
 
   markFailed(key: string, input: { reason: string; failedAt: string }): Promise<void>
 
+  markSaleReported(key: string): Promise<void>
+
   get(key: string): Promise<ConsumedPaymentRecord | null>
 }
 ```
 
-The core calls `claim` after settlement and before it returns the settled
-payment. The consumer calls `beginForwarding`, `markDelivered` and `markFailed`
-around its own work. The core keeps no map of its own: the store is the one
-place a settled payment is recorded.
+The core calls `reserve` before it sends a payment for verification, and
+`markSettled`, `markSettlementUnknown` or `release` around its settle call.
+The consumer calls `beginForwarding`, `markDelivered` and `markFailed` around
+its own work. The core keeps no map of its own: the store is the one place a
+payment is recorded.
 
 ### The key
 
@@ -458,76 +522,114 @@ derivable from the payment header alone, which is what makes the one-call rule
 survive a restart: the buyer presents the same header, the proxy derives the
 same key, and the store answers.
 
+**A known key is answered from the store first,** before any check section 8
+makes before settlement. A payment already reserved is never answered with a
+pre-settlement refusal (a 4xx or a 503), because it may already have paid.
+
 ### The states
 
 | State | Meaning | Next states |
 |---|---|---|
+| `settling` | Reserved; verify and settle are in progress. | `settled`, `settlement_unknown`, removed |
+| `settlement_unknown` | The settle call's outcome was not learned (a timeout, a lost answer) and chain recovery has not yet found a transaction. | `settled`, removed |
 | `settled` | Settlement is confirmed and the transaction hash is recorded. The call has not been forwarded. | `forwarding` |
 | `forwarding` | The upstream call is in flight. `forwardingStartedAt` bounds it. | `delivered`, `failed` |
-| `delivered` | The upstream answered and the buyer received the response. | none |
-| `failed` | The upstream call failed. The payment may be served again. | `forwarding` |
+| `delivered` | The upstream gave a complete answer the proxy can pass on (below) and the proxy wrote it to the buyer. | none |
+| `failed` | The upstream call failed. The payment may be served again. | `forwarding`, `exhausted` |
+| `exhausted` | The payment was forwarded `MAX_FORWARDS_PER_PAYMENT` times (3) and failed each time. | none |
 
 `beginForwarding` is the atomic transition. It returns `forward` when the
-record was `settled` or `failed`, or when it was `forwarding` and
-`now - forwardingStartedAt` is at least the upstream timeout (it first marks
-that record `failed`). It returns `in_flight` when the record is `forwarding`
-and younger than the timeout. It returns `delivered` when the record is
-`delivered`. The implementation does this with one conditional update and
-checks the affected row count, so two concurrent requests cannot both get
-`forward`.
+record was `settled`, or `failed` with `forwardCount` below the cap, or
+`forwarding` and older than the **takeover threshold** (it first marks that
+record `failed`); it increments `forwardCount`. The takeover threshold is
+`UPSTREAM_TIMEOUT_MS` plus 30 s, strictly longer than any call can run, so a
+call that is still running is never taken over. It returns `in_flight` for a
+younger `forwarding` record, `delivered` for a delivered one, and `exhausted`
+when the cap is reached (it marks the record `exhausted`). The implementation
+does this with one conditional update and checks the affected row count, so
+two concurrent requests cannot both get `forward`.
+
+A `settling` or `settlement_unknown` record is resolved by the core, not by
+`beginForwarding`: it reads the chain for a transfer under the authorization's
+nonce. Found, the record becomes `settled`. Not found while the
+authorization's `validBefore` is still in the future, the record stays where it
+is and the buyer is told to retry. Not found after `validBefore`, the
+authorization can no longer be executed, so nothing was paid: the record is
+released and the payment is refused as unsettled (section 8).
 
 ### Policy per consumer
 
-- **Demo merchant.** An in-memory `Map` behind the interface. `claim` returns
-  the existing record; the merchant serves the cached result again, which is
-  its current behaviour. `beginForwarding` returns `delivered` for a delivered
-  record, and the merchant serves the cached result. Nothing is persisted, so a
-  restart forgets settled payments, exactly as today.
+- **Demo merchant.** An in-memory `Map` behind the interface. A known key
+  returns the existing record; the merchant serves the cached result again,
+  which is its current behaviour. `beginForwarding` returns `delivered` for a
+  delivered record, and the merchant serves the cached result. Nothing is
+  persisted, so a restart forgets settled payments, exactly as today.
 - **Proxy.** A SQLite file at `PAYMENTS_DB`, using the built-in `node:sqlite`
   module (the repository runs Node 24, so no new dependency). One table keyed
-  on `key`, with the state and the timestamps above. A payment buys one call:
-  a `delivered` record is never forwarded again, and a `failed` record is
-  forwarded again on the same payment.
+  on `key`, with the fields above. A payment buys one call: a `delivered`
+  record is never forwarded again, a `failed` record is forwarded again on the
+  same payment, and no payment is forwarded more than three times in all.
 
 ### Restart and crash answers
 
 | Situation | Answer |
 |---|---|
-| Unknown key after a restart or a crash between settlement and delivery | The core verifies the payment, then settles. If the facilitator says the authorization was already used, the core's chain recovery finds the transaction, the store records `settled`, and the proxy forwards. If the chain shows no transaction, the payment is refused as unsettled and nothing was paid. An unknown key is never served without a settlement. |
+| Unknown key | Reserve, verify, settle. An unknown key is never served without a settlement. |
+| `settling` or `settlement_unknown` after a restart | Resolve from the chain as above: forward when the transfer is found; answer `settlement_pending` (200) while the authorization is still valid and no transfer is found; refuse as unsettled only after `validBefore`. |
 | `settled` after a restart | Forward. The settlement is recorded and the call was never made. |
-| `forwarding` after a restart, older than the upstream timeout | Mark `failed`, then forward. The process that was forwarding is gone and the upstream call cannot still be running past its timeout. |
-| `forwarding` after a restart, younger than the upstream timeout | Refuse as in flight with `Retry-After` set to the remaining time. The upstream call may still be running. |
-| `delivered` after a restart | Refuse: the payment already bought its one call. |
-| `failed` after a restart | Forward. |
+| `forwarding` after a restart, older than the takeover threshold | Mark `failed`, then forward (within the cap). The process that was forwarding is gone and no call runs past its deadline. |
+| `forwarding` after a restart, younger than the takeover threshold | Answer `payment_in_flight` (200) with `retry_after_seconds` set to the remaining time. |
+| `delivered` after a restart | Answer `payment_already_delivered` (200): the payment already bought its one call. |
+| `failed` after a restart | Forward, within the cap. |
+| `exhausted` | Answer `payment_exhausted` (200). |
 
-### The same payment twice while a call is in flight
+**The at-least-once window.** A call that completed upstream just before a
+crash, before `markDelivered` ran, is recorded `forwarding` and is forwarded
+again after the takeover threshold. The merchant may pay its upstream twice for
+that payment. This is accepted: the alternative, never retrying a call whose
+outcome was lost, would leave a buyer who paid with nothing.
 
-The second request gets HTTP 200 with `error: "payment_in_flight"` and
-`retry_after_seconds` set to the remaining time (section 8 explains why a
-post-settlement answer is 2xx). No second upstream call is made and no second
-settle call is sent. The first call's outcome decides the record.
+### The same payment twice while it is in progress
+
+The second request gets HTTP 200 with `error: "payment_in_flight"` (or
+`settlement_pending` while the first is still settling) and
+`retry_after_seconds` (section 8 explains why every answer to a known key is
+2xx). No second verify, settle or upstream call is made. The first request's
+outcome decides the record.
 
 ### What "the upstream call failed" means
 
-A call **failed** when any of these is true:
+`UPSTREAM_TIMEOUT_MS` (300 s) is **one total deadline for the whole call**,
+headers and body together, the same deadline Haven's hosted path applies to a
+delivery. A call **failed** when any of these is true:
 
-- no response headers arrived within `UPSTREAM_TIMEOUT_MS` (300 s);
-- the connection was refused, reset, or the DNS lookup failed before headers;
+- the deadline passed before the response was complete;
+- the connection was refused, reset, or the DNS lookup failed;
 - the upstream answered 5xx, 408 or 429;
+- the upstream answered 401, 402, 403 or 407: the merchant's own key or
+  account was refused, which is not the buyer's fault (logged as
+  `upstream_auth_refused`; the merchant must fix its key);
 - the response body was truncated: fewer bytes than `Content-Length`, or an
   SSE stream that ended without the upstream's terminal event (`data: [DONE]`
   for an OpenAI-compatible stream);
-- the buyer disconnected before the upstream response completed.
+- the response was larger than the 5 MiB cap (section 7);
+- the buyer disconnected before the response was written. The proxy then
+  **aborts the upstream call**, so a disconnect does not keep spending.
 
-A call **delivered** when the upstream answered with a complete body, whatever
-the status: 2xx, 3xx or 4xx. A 4xx is the upstream's answer to the buyer's
-request, and the call was served; retrying the same request would get the same
-4xx, so serving it again would waste the merchant's money. A 3xx is forwarded
-as-is; the proxy does not follow upstream redirects.
+A call **delivered** when the upstream answered with a complete body and any
+other status: 2xx, 3xx, or a 4xx other than those above. Such a 4xx is the
+upstream's answer to the buyer's own request (a malformed prompt, say);
+retrying it would get the same answer and spend the merchant's money again. A
+3xx is not followed. Every delivered answer reaches the buyer as a 2xx
+(section 8): a 2xx is passed through, and a 3xx or 4xx is wrapped.
 
 A partial response counts as failed only when the upstream's own framing says
 it is incomplete. A complete body that is shorter than the buyer hoped is
 delivered.
+
+Each failed forward counts against the cap of three. The merchant may have
+paid its upstream for a failed call too; the cap bounds what one payment can
+cost.
 
 ## 7. The proxy's request handling
 
@@ -539,18 +641,20 @@ The proxy removes these request headers and never forwards them:
 `Authorization`, `Cookie`, `Proxy-Authorization`, `Host`, `Content-Length`,
 `Transfer-Encoding`, `Connection`, `Keep-Alive`, `TE`, `Trailer`, `Upgrade`,
 `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `Forwarded`,
-`X-Real-IP`.
+`X-Real-IP`, `x402-wallet`, `mcp-session-id`.
 
 `PAYMENT-SIGNATURE` and `X-PAYMENT` are the buyer's payment; the upstream has no
 use for them and must not see them. `X-Tax-Declaration` and `SIGN-IN-WITH-X` are
-Haven buyer metadata. `Authorization` is always removed, even when the upstream
+Haven buyer metadata, and `x402-wallet` (set by Haven's hosted path) names the
+payer's delegate address. `mcp-session-id` belongs to an MCP session the
+upstream is not part of. `Authorization` is always removed, even when the upstream
 key is sent as `Authorization`: the buyer's value is replaced, never forwarded.
 The proxy sets `Host` to the upstream host and recomputes `Content-Length`. It
 does not add `X-Forwarded-For` or any other forwarding header, so the upstream
 sees the proxy's address and not the buyer's.
 
-On the response side the proxy removes any upstream `PAYMENT-REQUIRED` and
-`PAYMENT-RESPONSE` header and sets its own `PAYMENT-RESPONSE` with the
+On the response side the proxy removes any upstream `PAYMENT-REQUIRED`,
+`PAYMENT-RESPONSE`, `x-receipt-json` and `x-receipt-url` header and sets its own `PAYMENT-RESPONSE` with the
 settlement. It forwards the upstream's other headers, including
 `Content-Type` and `X-Opper-Cost`.
 
@@ -572,9 +676,11 @@ it.
   (`packages/sdk/src/merchant-egress.ts`). The proxy buffers the upstream
   response up to the cap. A response over the cap is a failed call: the buyer
   gets the post-settlement failure body with `reason: "response_too_large"` and
-  the same payment can be retried with a smaller cap.
-- Upstream timeout: 300 s, the same deadline Haven's hosted path applies to a
-  delivery. A call that exceeds it is failed.
+  the same payment can be retried, within the cap of three forwards, with a
+  smaller output cap.
+- Upstream deadline: 300 s for the whole call, headers and body together
+  (`UPSTREAM_TIMEOUT_MS`, section 6), the same deadline Haven's hosted path
+  applies to a delivery. A call that exceeds it is failed.
 
 ### Limiting unpaid requests
 
@@ -623,51 +729,70 @@ would corrupt the goods). The proxy logs `overage_tokens` from
 `usage.completion_tokens` when the upstream reports it, and the merchant's
 recourse is to lower the cap or raise the price.
 
-## 8. Refusals before settlement, and the post-settlement answer
+## 8. Refusals before settlement, and every answer after it
 
-Haven classifies a paid retry by its HTTP status: 2xx is accepted, non-2xx is
-`MERCHANT_REJECTED_AFTER_FUNDING` (`packages/sdk/src/merchant-completion.ts`,
-`packages/sdk/src/merchant-answer.ts`). A Haven agent paying by EIP-3009 has
-already moved USDC to its delegate address before the proxy sees the request,
-so a non-2xx refusal after funding is recorded as a rejection and the buyer
-must sweep the delegate (`haven_sweep_delegate`).
+Haven's SDK classifies the answer to a paid retry
+(`decidePostFundingMerchantAnswer` in `packages/sdk/src/merchant-answer.ts`,
+used by `packages/sdk/src/merchant-completion.ts`): it is **accepted** when the
+HTTP status is 2xx and the body carries no in-band refusal, which is a
+payment-required challenge, `_meta` with `success: false`, or an `isError`
+result with no settlement hash. Anything else is
+`MERCHANT_REJECTED_AFTER_FUNDING`. A Haven agent paying by EIP-3009 has already
+moved USDC to its delegate address before the proxy sees the request, so a
+rejection after funding leaves money on the delegate. The buyer's recourse is
+the shipped verify-then-sweep rule (#4062,
+`docs/architecture/04-x402-payment-sequence.md`): check
+`haven_get_payment_status` first, because the merchant may still redeem the
+authorization within its window, and only then `haven_sweep_delegate`.
 
 The proxy therefore follows one rule: **before settlement, refuse with the
-narrowest 4xx and no verify or settle call; after settlement, answer 2xx with a
-machine-readable body.** A payment that reached the merchant is never reported
-as rejected.
+narrowest 4xx or 503 and make no verify or settle call; for any payment the
+store already knows, and after settlement, answer 2xx with a machine-readable
+body.** The proxy's 2xx bodies carry an `error` field, never `isError`, a
+challenge or `success: false`, so Haven reads them as accepted: a payment that
+reached the merchant is never reported as rejected.
 
-### Before settlement
+The order of checks on a paid request is: derive the key and look it up in the
+store (a known key goes straight to the after-settlement table); then the
+checks below; then reserve, verify and settle.
+
+### Before settlement (unknown key)
 
 | Condition | Status | Body `error` | Challenge? | Haven classification | Buyer recourse |
 |---|---|---|---|---|---|
 | No payment header, route is a product | 402 | the x402 challenge | Yes, in `PAYMENT-REQUIRED` | No payment yet | Pay the challenge |
-| Payment header does not match the challenge (network, asset, `pay_to`, amount, product) | 402 | `payment_mismatch` | Yes | Rejected after funding if the agent had funded | Sweep the delegate |
-| Route is not in the products file | 404 | `unknown_route` | No | Rejected after funding if paid | Sweep the delegate |
-| Body is not JSON, or `model` does not match the product | 400 | `bad_request` | No | Rejected after funding if paid | Sweep the delegate |
-| Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Sweep the delegate |
-| Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Sweep the delegate |
+| Payment header does not match the challenge (network, asset, `pay_to`, amount, product) | 402 | `payment_mismatch` | Yes | Rejected after funding if the agent had funded | Verify, then sweep the delegate |
+| The facilitator rejects the payment at verify | 402 | `payment_invalid` | Yes | Rejected after funding if funded | Verify, then sweep the delegate |
+| Settle failed and the authorization is unused (the facilitator answered a definite failure, and no transfer is found on the chain) | 402 | `settle_failed` | Yes | Rejected after funding if funded | Verify, then sweep the delegate |
+| Route is not in the products file | 404 | `unknown_route` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Body is not JSON, or `model` does not match the product | 400 | `bad_request` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Unpaid rate limit | 429 | `rate_limited` | No | No payment yet | Retry after `Retry-After` |
-| No upstream slot | 503 | `at_capacity` | No | Rejected after funding if paid | Sweep the delegate |
-| Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Sweep the delegate |
+| No upstream slot | 503 | `at_capacity` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 
 Every refusal body is JSON with `error`, a human `message`, and, where it
-applies, `retry_after_seconds`. The proxy never calls the facilitator for a
-request it will refuse, so nothing is settled for a request that will not be
-served.
+applies, `retry_after_seconds`. Except for the two rows that come out of the
+verify and settle calls themselves, the proxy never calls the facilitator for
+a request it will refuse.
 
-### After settlement
+### After settlement, and for any known key
 
-Every answer after settlement is 2xx, because the payment reached the merchant
-and Haven must not record a rejection. The body's `error` field carries the
-outcome:
+Every answer is 2xx, because the payment may have reached the merchant. The
+body's `error` field carries the outcome:
 
 | Condition | Status | Body `error` |
 |---|---|---|
+| Upstream answered 2xx (delivered) | the upstream's 2xx | none: the upstream's body, unchanged |
+| Upstream answered a 3xx or a buyer-side 4xx (delivered, section 6) | 200 | `upstream_answered`, with `upstream_status` and the upstream body under `upstream_body` |
 | Upstream call failed (section 6) | 200 | `upstream_failed_after_settlement` |
+| Settle outcome not yet known, or the same payment still settling | 200 | `settlement_pending` |
 | Same payment presented while a call is in flight | 200 | `payment_in_flight` |
 | Same payment presented after its call was delivered | 200 | `payment_already_delivered` |
+| The payment's three forwards all failed | 200 | `payment_exhausted` |
 | Payment settled for a different product | 200 | `payment_used_for_other_product` |
+| A `settlement_unknown` payment whose authorization expired with no transfer on the chain | 402 | `settle_failed`: nothing was paid, so this one is a refusal, and the buyer verifies then sweeps |
 
 ### The upstream-failure answer
 
@@ -682,7 +807,8 @@ outcome:
   "reason": "upstream_timeout",
   "retry": {
     "same_payment": true,
-    "after_seconds": 0
+    "after_seconds": 0,
+    "forwards_left": 2
   }
 }
 ```
@@ -690,8 +816,18 @@ outcome:
 The response carries the standard `PAYMENT-RESPONSE` header with the settlement
 transaction hash, so Haven can anchor the evidence. `reason` is one of
 `upstream_timeout`, `upstream_unreachable`, `upstream_status`,
-`response_too_large` or `buyer_disconnected`. The same payment presented again
-gets the call it paid for, because the store recorded `failed`.
+`upstream_auth_refused`, `response_too_large` or `buyer_disconnected`. The
+same payment presented again gets the call it paid for, within the cap,
+because the store recorded `failed`.
+
+**Who can present the payment again.** Any buyer that kept its payment header
+can. A Haven agent cannot yet: the SDK records this 2xx as accepted and has no
+retry for it, and `resumeX402Payment` (local signer path only) re-signs the
+same nonce but refuses once the delegate's funds are gone, which after
+settlement they are. A Haven-side retry path is later work, parked with #4887;
+until it exists a Haven buyer whose call failed after settlement has paid for
+nothing, and the merchant's log (`upstream_failed_after_settlement`) is where
+the merchant sees it.
 
 ## 9. The limits Haven's hosted path puts on a response
 
@@ -715,7 +851,7 @@ of English text, so it is not the binding limit. The 300 s delivery timeout is:
 at 30 to 50 output tokens a second, a hosted buyer can receive about 9,000 to
 15,000 tokens before Haven's deadline. A product whose cap is above that will
 be cut off by Haven, not by the proxy, and the buyer sees a timeout rather than
-the answer. The demo's 1,000-token cap is well inside both limits.
+the answer. The planned Opper demo's 1,000-token cap (#4892) is well inside both limits.
 
 ## 10. Settlement cost per call
 
@@ -742,7 +878,7 @@ The vendor states:
 The kit uses `exact`, so one settled call is one onchain transaction and costs
 $0.001 after the free tier.
 
-The smallest product price at which settlement cost stays under a stated share
+The smallest product price at which settlement cost is at most a stated share
 of the price:
 
 | Settlement share of the price | Smallest price | Atomic USDC |
@@ -751,8 +887,8 @@ of the price:
 | 5% | $0.02 | `"20000"` |
 | 1% | $0.10 | `"100000"` |
 
-The demo's inference product is priced at $0.01 (`"10000"`), so settlement is
-10% of the price after the free tier and zero for the first 1,000 calls each
+The planned Opper demo (#4892) prices its inference product at $0.01
+(`"10000"`), so settlement is 10% of the price after the free tier and zero for the first 1,000 calls each
 month. A $0.001 product would net nothing, which is why the demo does not use
 one.
 
@@ -801,12 +937,12 @@ contact.
 | `saljare.crypto_address` | Deployment configuration: `PAY_TO`. |
 | `betalningssatt` | Deployment configuration: the network name from `NETWORK`. |
 | `momsbehandling`, `moms_procent` | Deployment configuration (`VAT_RULE`) applied to the payment's declaration (below). |
-| `rader[].beskrivning` | Products file: `name` and `description`, with no billing period for a per-call product. |
+| `rader[].beskrivning` | Products file: `<name> — <description>` (the `id` when there is no name), with no billing period for a per-call product. The composed line is at most 300 characters (section 3). |
 | `totalt_inkl_moms` and the line's total | Products file: `price`, which is also the settled amount. |
 | `belopp_exkl_moms`, `moms_belopp`, the line's VAT figures | Computed from the price and the treatment (below). |
 | `fakturanummer` (the receipt number) | The payment: `FAK-` and the settlement transaction hash modulo 10^16 as 16 digits, the demo's `receiptNumberForTransaction`. The same transaction gives the same number after a restart. |
 | `ocr_nummer` | The payment: the receipt number's digits plus a Luhn check digit. |
-| `fakturadatum`, `forfallodatum` | The payment: the date the proxy answered, and 30 days later. |
+| `fakturadatum`, `forfallodatum` | The payment: the date of `settledAt` in the consumed-payment store, and 30 days later, so a retry on a later day gives the same receipt. |
 | `kopare.identifierare`, `kopare.roll` | The payment: the payer address, which for a Haven agent paying by EIP-3009 is its delegate address (`roll: agent_delegate`), as in section 5. |
 | `kopare.deklaration` | The payment: present only when the request carried an `X-Tax-Declaration` that verifies against the payer, on the payment's chain, and is unexpired. Display only; a declaration that fails any check is treated as absent and never refuses the purchase. |
 | `blockkedje_referens`, `status` | The payment: the settlement transaction hash, and `Betald`. |
@@ -859,14 +995,19 @@ What the merchant runs:
   merchant controls. A shared tunnel domain works but ranks lower in Coinbase's
   directory;
 - the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO`,
-  `OPERATOR_NAME`, `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
+  `OPERATOR_NAME`, `UPSTREAM_BASE_URL` (where calls are forwarded),
+  `BASE_PATH` (the path prefix the products' routes are matched under; empty by
+  default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
   `UPSTREAM_AUTH_SCHEME` when the upstream wants them), Coinbase facilitator
-  credentials, optionally `VAT_RULE` with the seller settings (section 11) and `ICON_URL` (section 4), and, for sales
+  credentials (the pilot settles through Coinbase's facilitator only,
+  because the #4890 core is Coinbase's client), optionally `VAT_RULE` with the seller settings (section 11) and `DIRECTORY_LISTING` with `ICON_URL` (section 4, off by default), and, for sales
   reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY`;
 - persistent disk for the consumed-payment store (`PAYMENTS_DB`) and the
   sales outbox (`SALES_OUTBOX`). Losing `PAYMENTS_DB` loses the one-call rule
   for payments already delivered, so it is backed up like any other
   ledger;
+- a health route, `GET /healthz`, which needs no payment and reports
+  readiness (the upstream key present, the store and outbox writable);
 - a Haven account that receives the money, with Sales turned on (#4885) when
   the sales should appear on Haven's Sales page.
 
@@ -874,8 +1015,9 @@ What the merchant monitors:
 
 - **Settlement.** Verify and settle failures and facilitator timeouts; a
   burst means buyers are paying and not being served.
-- **Upstream health.** The rate of `upstream_failed_after_settlement`
-  answers, and `payment_in_flight` answers. Every failed call is a payment
+- **Upstream health.** The rate of `upstream_failed_after_settlement`,
+  `payment_exhausted` and `payment_in_flight` answers, and any
+  `upstream_auth_refused`, which means the merchant's own key is wrong. Every failed call is a payment
   the merchant owes a retry.
 - **Overage.** `overage_tokens` in the log: a product whose answers often run
   over its cap is priced too low or capped too high (section 7).
@@ -886,8 +1028,8 @@ What the merchant monitors:
   month (section 10), and the upstream provider's spend.
 - **Money.** The receiving account's balance in Haven against the settled
   calls in the proxy's log.
-- **Listing**, when the merchant wants one: a route with no settled call for
-  30 days lapses from Coinbase's directory (section 4).
+- **Listing**, only with `DIRECTORY_LISTING=on`: a route with no settled call
+  for 30 days lapses from Coinbase's directory (section 4).
 - **Disk.** The size of `PAYMENTS_DB` and `SALES_OUTBOX`, and the outbox's
   10,000-record bound.
 
@@ -898,8 +1040,9 @@ merchant key takes effect on the next sales report.
 ## 13. What this document does not decide
 
 - The sales ingest route's path and the merchant key's format are #4897's.
-- The licence and the distribution decision are #4887's, after the pilot.
-- Listing a deployment in Coinbase's directory, and any other directory, is outside the kit epic (#4884); section 4 only names the fields.
+- The licence and the distribution decision come after the pilot (owner decision on [#4884](https://github.com/d-hinders/Haven-AI/issues/4884)).
+- Listing a deployment in Coinbase's directory, and any other directory, is outside the kit epic (#4884) and parked in #4887; section 4 names the fields and keeps them off by default.
+- A Haven buyer's retry of a payment whose call failed after settlement is later work, parked with #4887 (section 8).
 - A periodic statement that sums a buyer's per-call receipts is later work (section 11).
 - ERC-7710 support, and advertising it when a facilitator supports it, is
   #4887's. The kit advertises EIP-3009 only.

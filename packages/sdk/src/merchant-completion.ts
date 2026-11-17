@@ -20,7 +20,11 @@ import {
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
 import { x402PaymentHeaderNamesSent, x402PaymentHeaderSchemeOf } from './x402.js'
-import { decidePostFundingMerchantAnswer } from './merchant-answer.js'
+import { decidePostFundingMerchantAnswer, parseProtocolReceiptHeader } from './merchant-answer.js'
+// #4763: the two receipt parsers live in merchant-answer.ts now — the leaf both
+// sides can import — so this module's export surface is unchanged while the
+// runtime cycle between the two files is gone.
+export { parseMerchantSettlement, parseProtocolReceiptHeader } from './merchant-answer.js'
 import { buildExplorerUrl, x402PayerAddress } from './x402-protocol.js'
 import { paymentStateStatusCode } from './payment-state.js'
 import { decodeBase64Json } from './base64.js'
@@ -1173,45 +1177,6 @@ export function isZeroSettlementTxHash(hash: string | null | undefined): boolean
   return typeof hash === 'string' && /^0x0+$/i.test(hash)
 }
 
-export function parseMerchantSettlement(header: string | null): {
-  settlementTxHash?: string | null
-} {
-  if (!header) return {}
-  const parsed = parseProtocolReceiptHeader(header)
-  const tx =
-    typeof parsed?.transaction === 'string'
-      ? parsed.transaction
-      : typeof parsed?.txHash === 'string'
-        ? parsed.txHash
-        : typeof parsed?.tx_hash === 'string'
-          ? parsed.tx_hash
-          : null
-  return { settlementTxHash: tx }
-}
-
-
-/**
- * Digest of a delegation-rail signing payload, or `undefined` when there is
- * none (#1138).
- *
- * Guarded because a payload that cannot be hashed is not a recoverable
- * condition to paper over: the edge signer derives this same digest before
- * signing, so an unhashable payload can never be signed by anyone. Surfacing it
- * as a named Haven error beats letting a raw viem type error escape from the
- * middle of intent construction.
- */
-
-export function parseProtocolReceiptHeader(value: string): Record<string, unknown> | undefined {
-  try {
-    return decodeBase64Json<Record<string, unknown>>(value)
-  } catch {
-    try {
-      return JSON.parse(value) as Record<string, unknown>
-    } catch {
-      return undefined
-    }
-  }
-}
 
 /** #4257: why a paid request's redirect was not followed, worded per refusal (completes "…with a redirect"). */
 function unfollowedRedirect(err: MerchantEgressRefusedError): string {

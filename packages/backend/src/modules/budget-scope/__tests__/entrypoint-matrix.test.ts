@@ -24,8 +24,8 @@ describe('#3620 entrypoint × scope × state matrix — completeness', () => {
     expect([...MATRIX_SCOPES]).toEqual([...BUDGET_SCOPE_KINDS, 'merchantPin'])
   })
 
-  it('the cross product is 4 entrypoints × 4 scopes × 4 states = 64 cells today', () => {
-    expect(MATRIX_ENTRYPOINTS.length * MATRIX_SCOPES.length * MATRIX_STATES.length).toBe(64)
+  it('the cross product is 4 entrypoints × 4 scopes × 5 states = 80 cells today', () => {
+    expect(MATRIX_ENTRYPOINTS.length * MATRIX_SCOPES.length * MATRIX_STATES.length).toBe(80)
   })
 
   it('every cell has an entry: an expected outcome with a reason, or a not-applicable reason', () => {

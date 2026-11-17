@@ -272,8 +272,14 @@ describe('shared Haven tool descriptions', () => {
   })
 
   it('routes balance questions away from the sweep and the send, to the coverage check', () => {
+    // #4808: the no-surface text is the SDK's own direct tool definitions,
+    // which register no haven_check_funds — it names get_allowances and its
+    // fundsCoverRemaining signal instead. The local variant and the hosted
+    // description keep their own wording.
     const sweepDesc = composeDescription(toolDescriptions.sweep_delegate)
-    expect(sweepDesc).toContain('haven_check_funds')
+    expect(sweepDesc).not.toContain('haven_check_funds')
+    expect(sweepDesc).toContain('use get_allowances')
+    expect(sweepDesc).toContain('fundsCoverRemaining')
 
     const sendDesc = composeDescription(toolDescriptions.send)
     expect(sendDesc).toContain('haven_check_funds')

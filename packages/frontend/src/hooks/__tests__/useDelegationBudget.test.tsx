@@ -375,6 +375,84 @@ describe('useDelegationBudget passkey dispatch (#887)', () => {
     expect(mockSignUserOp).not.toHaveBeenCalled()
     expect(mockSignDelegation).not.toHaveBeenCalled()
   })
+
+  // ── #4821: a rejected SUBMIT is classified, not folded into `failed` ──────
+  function preparedRevoke() {
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_op_hash: '0xh', user_operation: {} })
+      }
+      return Promise.reject(
+        Object.assign(new Error('The revocation may have gone through'), {
+          name: 'ApiRequestError',
+          status: 502,
+          body: {
+            error: 'The revocation may have gone through',
+            error_code: 'submission_outcome_unknown',
+            user_op_hash: '0x' + 'dd'.repeat(32),
+          },
+        }),
+      )
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'cd'.repeat(200))
+  }
+
+  it("the route's outcome-unknown answer is `unconfirmed`, never `failed`", async () => {
+    mockApi(PASSKEY_SIGNERS)
+    preparedRevoke()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.revoke('0x' + 'ab'.repeat(32))).toEqual({
+        ok: false,
+        reason: 'unconfirmed',
+      })
+    })
+  })
+
+  it('a submit that got no HTTP answer is `unconfirmed`: the delegation may be disabled', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_op_hash: '0xh', user_operation: {} })
+      }
+      return Promise.reject(new TypeError('Failed to fetch'))
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'cd'.repeat(200))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.revoke('0x' + 'ab'.repeat(32))).toEqual({
+        ok: false,
+        reason: 'unconfirmed',
+      })
+    })
+  })
+
+  it("the route's known-failure code is `failed`: nothing moved, retrying is safe", async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_op_hash: '0xh', user_operation: {} })
+      }
+      return Promise.reject(
+        Object.assign(new Error('Revocation failed'), {
+          name: 'ApiRequestError',
+          status: 502,
+          body: { error: 'Revocation failed', error_code: 'onchain_execution_failed' },
+        }),
+      )
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'cd'.repeat(200))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      expect(await result.current.revoke('0x' + 'ab'.repeat(32))).toEqual({
+        ok: false,
+        reason: 'failed',
+      })
+    })
+  })
 })
 
 describe('multi-signer accounts (the Daniel regression)', () => {
@@ -639,6 +717,93 @@ describe('revokeAll (#1402 remove step 1)', () => {
       expect(res).toEqual({ ok: false, reason: 'failed' })
     })
   })
+
+  // ── #4821: a rejected SUBMIT is classified, not folded into `failed` ──────
+  function preparedBatch() {
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xh',
+          user_operation: {},
+          delegation_hashes: HASHES,
+        })
+      }
+      return Promise.reject(
+        Object.assign(new Error('The revocation may have gone through'), {
+          name: 'ApiRequestError',
+          status: 502,
+          body: {
+            error: 'The revocation may have gone through',
+            error_code: 'submission_outcome_unknown',
+            user_op_hash: '0x' + 'dd'.repeat(32),
+          },
+        }),
+      )
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ef'.repeat(200))
+  }
+
+  it("the route's outcome-unknown answer is `unconfirmed`, never `failed`", async () => {
+    mockApi(PASSKEY_SIGNERS)
+    preparedBatch()
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+  })
+
+  it('a submit that got no HTTP answer is `unconfirmed`: the batch may have landed', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xh',
+          user_operation: {},
+          delegation_hashes: HASHES,
+        })
+      }
+      return Promise.reject(new TypeError('Failed to fetch'))
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ef'.repeat(200))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res).toEqual({ ok: false, reason: 'unconfirmed' })
+    })
+  })
+
+  it("the route's known-failure code is `failed`: nothing moved, retrying is safe", async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/revoke-all')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xh',
+          user_operation: {},
+          delegation_hashes: HASHES,
+        })
+      }
+      return Promise.reject(
+        Object.assign(new Error('Batch revocation failed'), {
+          name: 'ApiRequestError',
+          status: 502,
+          body: { error: 'Batch revocation failed', error_code: 'onchain_execution_failed' },
+        }),
+      )
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ef'.repeat(200))
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.revokeAll()
+      expect(res).toEqual({ ok: false, reason: 'failed' })
+    })
+  })
 })
 
 describe('editBudget — REPLACE composition (#3166)', () => {
@@ -870,7 +1035,7 @@ describe('editBudget — REPLACE composition (#3166)', () => {
     expect(mockPost.mock.calls.some((c) => String(c[0]).includes('/revoke/submit'))).toBe(false)
   })
 
-  it('revoke submit fails AFTER the new grant is live: same revoke_unfinished partial state', async () => {
+  it('revoke submit gets NO HTTP answer AFTER the new grant is live: revoke_unconfirmed, never the plain failure', async () => {
     mockApi(PASSKEY_SIGNERS)
     mockPost.mockImplementation((url: string) => {
       if (url.endsWith('/build')) {
@@ -888,7 +1053,55 @@ describe('editBudget — REPLACE composition (#3166)', () => {
           user_operation: { nonce: '9n' },
         })
       }
-      if (url.endsWith('/revoke/submit')) return Promise.reject(new Error('Batch revocation failed'))
+      // #4821: a dropped connection — the Stop may have landed.
+      if (url.endsWith('/revoke/submit')) return Promise.reject(new TypeError('Failed to fetch'))
+      return Promise.reject(new Error('unexpected ' + url))
+    })
+    mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))
+    mockSignUserOp.mockResolvedValue('0x' + 'bb'.repeat(100))
+
+    const { result } = renderHook(() => useDelegationBudget(AGENT, 84532))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    await act(async () => {
+      const res = await result.current.editBudget(OLD_HASH, INPUT)
+      expect(res).toEqual({
+        ok: false,
+        reason: 'revoke_unconfirmed',
+        newDelegationHash: NEW_HASH,
+        unstoppedDelegationHashes: [OLD_HASH],
+        moved: false,
+      })
+    })
+  })
+
+  it('revoke submit is REFUSED before sending (known failure): the revoke_unfinished partial state', async () => {
+    mockApi(PASSKEY_SIGNERS)
+    mockPost.mockImplementation((url: string) => {
+      if (url.endsWith('/build')) {
+        return Promise.resolve({
+          delegation_hash: NEW_HASH,
+          version: 2,
+          signing_payload: { domain: {}, types: {}, primaryType: 'Delegation', message: DELEGATION_MESSAGE },
+        })
+      }
+      if (url.endsWith('/activate')) return Promise.resolve({ activated: true })
+      if (url.endsWith('/revoke')) {
+        return Promise.resolve({
+          signature_scheme: 'webauthn_userop',
+          user_op_hash: '0xr',
+          user_operation: { nonce: '9n' },
+        })
+      }
+      // #4821: the route's known-failure code — nothing moved, retrying is safe.
+      if (url.endsWith('/revoke/submit')) {
+        return Promise.reject(
+          Object.assign(new Error('Revocation failed'), {
+            name: 'ApiRequestError',
+            status: 502,
+            body: { error: 'Revocation failed', error_code: 'onchain_execution_failed' },
+          }),
+        )
+      }
       return Promise.reject(new Error('unexpected ' + url))
     })
     mockSignDelegation.mockResolvedValue('0x' + 'aa'.repeat(100))

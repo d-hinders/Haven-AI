@@ -301,13 +301,23 @@ gh pr create --base dev --fill
 ### Which version string
 
 The bump-type table above is a description of the script's arithmetic, not a
-recommendation. **The convention for an alpha release is an explicit
-`0.1.<N+1>-alpha.0`** — pass the version string, not `prerelease`.
+recommendation. **The practice for an alpha release is an explicit
+`0.<N+1>.0-alpha.0`** — pass the version string, not `prerelease`. It has been
+a minor bump by default since `0.2.0-alpha.0` (2026-09-14): `0.11.0-alpha.0` →
+`0.12.0-alpha.0` → `0.13.0-alpha.0`. Before that the releases
+counted in the patch position (`0.1.36-alpha.0`, `0.1.37-alpha.0`), and this
+paragraph went on saying so for fifteen releases (#4809).
 
-`prerelease` against `0.1.27-alpha.0` produces `0.1.27-alpha.1`, which is
-valid but is not what the last several releases did (`…25-alpha.0` →
-`…26-alpha.0` → `…27-alpha.0` → `…28-alpha.0`). Reserve the `-alpha.N`
-form for a second attempt at a version that failed to publish.
+Two releases since then moved the patch position instead, `0.2.1-alpha.0` and
+`0.8.1-alpha.0`. No general rule for patch versus minor is written in this file
+or in the release skill. The SDK changelog and the `0.2.0-alpha.0` shard record
+the 0.x convention that a breaking release is a minor bump, and most release
+shards state their own call.
+
+`prerelease` against `0.13.0-alpha.0` produces `0.13.0-alpha.1`, which is valid
+but is not a new release's version. Reserve the `-alpha.N` form for a second
+cut of a version that was never published, as `0.5.0-alpha.1` was: its
+`alpha.0` was cut but not promoted.
 
 ### The contract-doc gate
 

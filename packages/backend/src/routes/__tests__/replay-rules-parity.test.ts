@@ -15,7 +15,7 @@
  * | task/sub-budget pin | the request ids must EQUAL the row's (mismatch 409); pinned rows replay | row must carry NO pin; a pinned row runs the compare (can 403) | the request ids must EQUAL the row's (mismatch 409); pinned rows replay |
  * | payee/resource/token/amount | NOT compared on confirmed rows | must match the quote exactly; absent fields never match | compared as the key-collision pin (a mismatch 409s first) |
  * | confirmed, no tx_hash | falls through (null) | not settled → compare runs (can 403) | 200 status replay (no tx_hash condition) |
- * | submitted + tx_hash | null (not pending/confirmed) | not settled → compare runs (can 403) | 200 status replay (409 code for submitted) |
+ * | submitted | 409 typed replay (`payment_already_submitted`, full pin) | not settled → compare runs (can 403) | 409 status replay |
  *
  * The row-level invariants (ownership scoping, lazy expiry, the ledger row
  * the pre-check books) keep their own suites:
@@ -483,14 +483,33 @@ describeDb('#3619 — one settled-replay rule, three readings (parity table)', (
     expect(payments.body).toMatchObject({ idempotent_replay: true, status: 'confirmed' })
   })
 
-  it('CELL 10 — SUBMITTED with tx_hash: x402 null, pre-check refuses 403, /payments 409 (status replay)', async () => {
+  it('CELL 10 — SUBMITTED: x402 answers the typed 409 replay, pre-check refuses 403, /payments 409 (status replay)', async () => {
     const seeded = await seedDelegationAgent()
     const key = 'parity-key-10'
     const rowId = await seedX402Intent(seeded, key, { status: 'submitted' })
 
-    // Rule 1: neither pending_signature nor confirmed — null.
+    // Rule 1 (#4826): a submitted row is a payment in flight — answered from
+    // the row with its id, status and a typed code that says to read the
+    // status, never to authorize again. The rule does not look at tx_hash:
+    // the reconciler's shape (submitted, no hash) and a submitted row that
+    // already carries one answer the same.
     const x402 = await x402ReplayDecision(seeded, rowId)
-    expect(x402.code).toBeNull()
+    expect(x402.code).toBe(409)
+    expect(x402.body).toMatchObject({
+      error_code: 'payment_already_submitted',
+      payment_id: rowId,
+      status: 'submitted',
+    })
+    expect(typeof x402.body?.error).toBe('string')
+    const noHashKey = 'parity-key-10-no-hash'
+    const noHashId = await seedX402Intent(seeded, noHashKey, { status: 'submitted', txHash: null })
+    const noHash = await x402ReplayDecision(seeded, noHashId)
+    expect(noHash.code).toBe(409)
+    expect(noHash.body).toMatchObject({
+      error_code: 'payment_already_submitted',
+      payment_id: noHashId,
+      status: 'submitted',
+    })
 
     // Rule 2: only `confirmed` is settled — the compare refuses.
     const mpp = await precheckDecision(seeded, { idempotencyKey: key })

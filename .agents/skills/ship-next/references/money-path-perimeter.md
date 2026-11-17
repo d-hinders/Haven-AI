@@ -252,6 +252,28 @@ off by name.
 - `packages/sdk/src/merchant-completion.ts`
 - `packages/sdk/src/merchant-answer.ts`
 
+### The shared credential-file handling
+
+#4792. The local MCP and the edge signer each carried a copy of the code that
+reads the agent's credential file — the file that holds the delegate private
+key. About half of the signer's `credentials.ts` matched the local MCP's line
+for line. No defect was claimed: the two permission checks behaved identically.
+The risk was that the next hardening of key-file handling would land in one
+package and not the other, so the common part moved here: the account-address
+readers (`account_address ?? safe_address ?? safeAddress`, and the refusal of
+the retired env names) and the permission core that warns when the key file is
+readable beyond its owner.
+
+Runtime, not control, and for the same reason `packages/signer/**` is on this
+list: it is how the key is read. The move would otherwise have taken the
+permission core off the perimeter — `packages/signer/**` covered the signer's
+copy, but the local MCP's copy was on no glob at all, and the shared module
+lives in a package whose only listed files are the signing guards (the #1892
+accident-of-location rule). `packages/sdk/src/edge.ts`, the re-export file,
+stays off, as the #3283 note records.
+
+- `packages/sdk/src/credential-file.ts`
+
 ### The machine-payment domain
 
 The machine-payment domain lives here since #987; the backend

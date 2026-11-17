@@ -2,9 +2,18 @@ import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
 import type { PassportVerifierConfig } from './x402.js'
 import {
+  createCdpChainReader,
+  createCdpFacilitator,
+  createViemChainReadClient,
+  resolveCdpCredentials,
+  type CdpSettlementConfig,
+} from './cdp.js'
+import {
   DEFAULT_SETTLEMENT_METHOD,
   PRODUCTS,
   SUPPORTED_SETTLEMENT_METHODS,
+  offeredProducts,
+  productSettlementKind,
   formatUsdc,
   CHAIN_ID,
   networkLogLabel,
@@ -17,6 +26,8 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { type Address } from 'viem'
+import { LogWindows, parseMaxBlockRange } from './log-range.js'
+import { createStripeRecording, resolveStripeConfig } from './stripe.js'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
@@ -171,6 +182,31 @@ if (!SETTLEMENT_PRIVATE_KEY) {
   process.exit(1)
 }
 
+// #4851: Coinbase's hosted facilitator, for the joke product only. Off unless
+// BOTH variables are set; a half-set pair warns and stays off (never a refusal
+// to start). The secret goes to the Coinbase client constructor and nowhere else.
+const CDP_CREDENTIALS = resolveCdpCredentials(process.env.CDP_API_KEY_ID, process.env.CDP_API_KEY_SECRET)
+let CDP_CONFIG: CdpSettlementConfig | undefined
+if (CDP_CREDENTIALS) {
+  try {
+    CDP_CONFIG = {
+      facilitator: await createCdpFacilitator(CDP_CREDENTIALS),
+      // #4866: the recovery search reads in windows the RPC serves — narrowed
+      // by ETH_GETLOGS_MAX_BLOCK_RANGE and by the provider's own refusal.
+      chain: createCdpChainReader(
+        createViemChainReadClient(BASE_RPC_URL),
+        new LogWindows({ maxSpan: parseMaxBlockRange(process.env.ETH_GETLOGS_MAX_BLOCK_RANGE) }),
+      ),
+    }
+  } catch (err) {
+    // The class only: an SDK error message is not ours to print next to a key.
+    console.warn(
+      `Coinbase facilitator (CDP) client could not be built (${err instanceof Error ? err.name : 'UnknownError'}). ` +
+        'The CDP-settled joke product is not offered; every other product is unaffected.',
+    )
+  }
+}
+
 // #1530: held in a local so `/healthz` can ask the same client that settles.
 // Checking a DIFFERENT client's balance would report on a wallet that is not
 // the one paying, which is the class of near-miss this whole issue is about.
@@ -179,12 +215,34 @@ const settlementClient = createViemSettlementClient({
   settlementPrivateKey: SETTLEMENT_PRIVATE_KEY,
 })
 
-const paymentProcessor = createX402PaymentProcessor(
-  settlementClient,
-  ERC7710_CONFIG
-    ? { erc7710: ERC7710_CONFIG, settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG }
-    : { settlementMethods: SETTLEMENT_METHODS, passport: PASSPORT_CONFIG },
-)
+// #4853: Stripe recording for the joke product. Off unless BOTH variables are
+// set, CDP is configured, and the joke's price is a whole number of cents; a
+// half-set or unusable configuration warns and stays off (never a refusal to
+// start). The secret goes to the Stripe client and nowhere else, and nothing
+// here logs it.
+const STRIPE_CONFIG = resolveStripeConfig({
+  depositAddressRaw: process.env.STRIPE_DEPOSIT_ADDRESS,
+  secretKeyRaw: process.env.STRIPE_SECRET_KEY,
+  previousDepositAddressRaw: process.env.STRIPE_PREVIOUS_DEPOSIT_ADDRESS,
+  cdpConfigured: Boolean(CDP_CONFIG),
+  priceAtomic: PRODUCTS.joke.price_usdc,
+})
+const STRIPE_RECORDING = STRIPE_CONFIG ? createStripeRecording(STRIPE_CONFIG) : undefined
+
+// #4853: a deposit address this merchant quoted before the current one, and
+// still honours for a payment that already settled to it. Operator-supplied —
+// the payment's own `payTo` is attacker-chosen and cannot be the test.
+const PREVIOUS_RECEIVING_ADDRESSES = STRIPE_CONFIG?.previousDepositAddress
+  ? [STRIPE_CONFIG.previousDepositAddress]
+  : undefined
+
+const paymentProcessor = createX402PaymentProcessor(settlementClient, {
+  ...(ERC7710_CONFIG ? { erc7710: ERC7710_CONFIG } : {}),
+  settlementMethods: SETTLEMENT_METHODS,
+  passport: PASSPORT_CONFIG,
+  cdp: CDP_CONFIG,
+  ...(PREVIOUS_RECEIVING_ADDRESSES ? { previousReceivingAddresses: PREVIOUS_RECEIVING_ADDRESSES } : {}),
+})
 
 const server = createDemoMerchantServer({
   merchantAddress: MERCHANT_ADDRESS,
@@ -193,6 +251,8 @@ const server = createDemoMerchantServer({
   settlementMethods: SETTLEMENT_METHODS,
   settlementClient,
   passport: PASSPORT_CONFIG,
+  cdpConfigured: Boolean(CDP_CONFIG),
+  stripe: STRIPE_RECORDING,
 })
 
 server.listen(PORT, () => {
@@ -208,6 +268,26 @@ server.listen(PORT, () => {
     PASSPORT_CONFIG
       ? `  Passport:  standing checked against ${PASSPORT_CONFIG.baseUrl} (issuer ${PASSPORT_CONFIG.issuer})`
       : '  Passport:  not advertised (MERCHANT_HAVEN_BASE_URL / MERCHANT_PASSPORT_ISSUER unset)',
+  )
+  // #4851: names the product and the fact, never a credential.
+  const cdpProducts = offeredProducts({ cdpConfigured: true })
+    .filter((product) => productSettlementKind(product) === 'cdp')
+    .map((product) => `${product.id} $${formatUsdc(product.price_usdc)}`)
+    .join(', ')
+  console.log(
+    CDP_CONFIG
+      ? `  CDP:       configured — ${cdpProducts} verified and settled by Coinbase's facilitator`
+      : '  CDP:       not configured (CDP_API_KEY_ID / CDP_API_KEY_SECRET unset) — joke product not offered',
+  )
+  // #4853: names the deposit address (public) and the API version, never the key.
+  console.log(
+    STRIPE_RECORDING
+      ? `  Stripe:    recording the joke to deposit address ${STRIPE_RECORDING.depositAddress} ` +
+          `(${STRIPE_RECORDING.network}, ${STRIPE_RECORDING.apiVersion})` +
+          (STRIPE_RECORDING.previousDepositAddress
+            ? `; still honouring settled payments to ${STRIPE_RECORDING.previousDepositAddress}`
+            : '')
+      : '  Stripe:    not configured — the joke is paid to MERCHANT_ADDRESS',
   )
   console.log()
   console.log(

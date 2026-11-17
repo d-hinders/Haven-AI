@@ -114,6 +114,7 @@ import {
   mapPaymentResult,
   mapPaymentStatusResult,
 } from './payment-mappers.js'
+import { replaceSettlementEvidenceMessage } from './payment-status-message.js'
 import {
   paymentStateFromRaw,
   paymentStateStatusCode,
@@ -2323,6 +2324,11 @@ export class HavenClient {
     if (toolName === 'get_payment_status') {
       const { payment_id } = input as { payment_id: string }
       const result = await this.getPaymentStatus(payment_id)
+      // #4808: the backend's message names haven_report_settlement_evidence in
+      // two states, and this surface has no such tool. Replace it whole, keyed
+      // on the structured fields — see payment-status-message.ts for why the
+      // replacement lives here and not in the shared read.
+      const message = replaceSettlementEvidenceMessage(result, 'get_payment_status').message
       return {
         payment_id: result.paymentId,
         kind: result.kind,
@@ -2344,12 +2350,21 @@ export class HavenClient {
         mpp: result.mpp,
         expires_at: result.expiresAt,
         chain_id: result.chainId,
-        message: result.message,
+        message,
       }
     }
 
     if (toolName === 'get_allowances') {
       return { ...await this.getAllowances() }
+    }
+
+    // #4808: havenTools advertises this tool, so a model that calls it must
+    // reach the capability the SDK already exposes as sweepDelegate(). No
+    // argument is read from `input` and no destination is accepted — the sweep
+    // goes to getAgent().accountAddress, exactly as it does for the local MCP.
+    // Errors propagate unchanged, like the read branches above.
+    if (toolName === 'haven_sweep_delegate') {
+      return { ...await this.sweepDelegate() }
     }
 
     throw new Error(`Unknown tool: ${toolName}`)

@@ -34,7 +34,7 @@ covers:
   - packages/sdk/src/x402.ts
   - packages/sdk/src/sweep.ts
   - packages/signer/src/core.ts
-last-verified: "2026-11-02"
+last-verified: "2026-11-12"
 ---
 
 # Haven — Identity & Key/Credential Custody
@@ -232,6 +232,33 @@ flowchart TB
    sufficient only for a threshold-one Safe. Enough compromised owner
    credentials to meet the configured threshold can change owners, disable
    modules, or move funds directly. The Safe remains the root of trust.
+
+## Dashboard session lifecycle
+
+The dashboard's session is a browser JWT in `localStorage` (`haven_token`), read
+by `packages/frontend/src/lib/api.ts` and held by
+`packages/frontend/src/context/AuthContext.tsx`. Two answers end it, and only
+those two (owner decision 2026-11-12, #4827):
+
+- a **401** from a session-authenticated call, and
+- a **404 `User not found`** from `GET /auth/me` — the token is accepted but the
+  account behind it is gone.
+
+Every other failure of `GET /auth/me` — a rejected `fetch`, a 5xx, a 429, a 2xx
+whose body is not JSON — is a **failed read, not an ended session**. The token
+stays, the entry latches stay, and the route renders a load-error page with one
+Try again action instead of redirecting to `/login`. Before #4827 every rejection
+took the sign-out branch, so a network blip or a 502 during a deploy threw away a
+valid session.
+
+The 401 reaction lives in the API client, at both throw sites, not in the hooks:
+a 401 from any authenticated call ends the session wherever the call is made.
+Three guards keep it honest — no token sent means no session to end; the three
+routes whose 401 is about the request rather than the session (`POST /auth/login`,
+`POST /agent-connection-setups/resolve`, `POST /agent-connection-setups/register`)
+are exempt; and the stored token must still be the one the request carried, so a
+401 for a session that has already been replaced or ended changes nothing. That
+last guard is also what makes two in-flight 401s produce exactly one sign-out.
 
 ## Delegation rail custody (new accounts)
 

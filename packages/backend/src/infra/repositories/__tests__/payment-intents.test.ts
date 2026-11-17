@@ -33,9 +33,11 @@ import {
   insertSendIntent,
   inTransaction,
   listIntentsForAgent,
+  recordSubmittedUserOpHash,
   releaseSubmittedClaim,
 } from '../payment-intents.js'
 import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
+import { buildPaymentReceipt } from '../../../modules/payments/receipt.js'
 
 let seq = 0
 
@@ -183,6 +185,54 @@ describeDb('payment-intents repository (#1223)', () => {
   })
 
   // ── Claim → confirm → release lifecycle ────────────────────────────────
+
+  it('#4818: the claim records the prepared operation hash and the intake marker', async () => {
+    const { agentId, userId } = await seedAgent()
+    const input = delegationInput(agentId, userId)
+    const intent = await insertDelegationIntent(input)
+
+    expect(await claimIntentForSubmission('0xsig', intent.id, agentId)).toBe(true)
+
+    const row = await findIntentForAgent(intent.id, agentId)
+    const metadata = row!.machine_metadata as Record<string, unknown>
+    // The prepared hash the row already carried, copied where the reconciler
+    // looks for it, plus the marker that keeps pre-#4818 rows out of the intake.
+    expect(metadata.user_op_hash).toBe(input.signHash)
+    expect(metadata.submission_claimed).toBe(true)
+    // The claim is still the same CAS: no tx_hash, no outcome marker yet.
+    expect(row!.tx_hash).toBeNull()
+    expect(metadata.submission_outcome).toBeUndefined()
+  })
+
+  it('#4818: recordSubmittedUserOpHash upgrades the hash on an open submit only', async () => {
+    const { agentId, userId } = await seedAgent()
+    const intent = await insertDelegationIntent(delegationInput(agentId, userId))
+    const dispatched = `0x${'9'.repeat(64)}`
+
+    // Before the claim the row is not an open submit — the CAS misses.
+    expect(await recordSubmittedUserOpHash({ userOpHash: dispatched, intentId: intent.id, agentId })).toBe(false)
+
+    await claimIntentForSubmission('0xsig', intent.id, agentId)
+    expect(await recordSubmittedUserOpHash({ userOpHash: dispatched, intentId: intent.id, agentId })).toBe(true)
+    expect((await findIntentForAgent(intent.id, agentId))!.machine_metadata).toMatchObject({
+      user_op_hash: dispatched,
+      submission_claimed: true,
+    })
+
+    // A confirmed row is never touched again.
+    await confirmSubmittedIntent({
+      txHash: `0x${'1'.repeat(64)}`,
+      intentId: intent.id,
+      usdValue: null,
+      eurValue: null,
+      sekValue: null,
+      agentId,
+    })
+    expect(await recordSubmittedUserOpHash({ userOpHash: `0x${'8'.repeat(64)}`, intentId: intent.id, agentId })).toBe(false)
+    expect((await findIntentForAgent(intent.id, agentId))!.machine_metadata).toMatchObject({
+      user_op_hash: dispatched,
+    })
+  })
 
   it('confirm requires a CLAIMED row, and a second confirm is refused', async () => {
     const { agentId, userId } = await seedAgent()
@@ -550,6 +600,64 @@ describeDb('payment-intents repository (#1223)', () => {
     const bareRow = await findSettledPaymentReceiptRow(bare, agentId)
     expect(bareRow?.execution_rail).toBe('delegation')
     expect(bareRow?.settlement_scheme).toBeNull()
+  })
+
+  // ── #4822: the receipt read names the merchant, not the funding leg ─────────
+  it('#4822: findSettledPaymentReceiptRow returns the merchant named at authorize, not the funding leg\'s to_address', async () => {
+    const { agentId, userId } = await seedAgent()
+    // The EIP-3009 bridge's funding leg: `to_address` is the agent's own
+    // delegate; the merchant named at authorize is `merchant_address`.
+    const DELEGATE = '0xcb9a000000000000000000000000000000005ba8'
+    const MERCHANT = '0x041500000000000000000000000000000000b195'
+    const SETTLEMENT_TX = `0x${'5e'.repeat(32)}`
+
+    async function seedEip3009(metadata: Record<string, unknown>, signHashSeed: string): Promise<string> {
+      const r = await db.query<{ id: string }>(
+        `INSERT INTO payment_intents
+           (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+            amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+            status, expires_at, execution_rail, merchant_address, x402_merchant_address,
+            machine_metadata)
+         VALUES ($1, $2, '0x00000000000000000000000000000000000001', 'USDC',
+                 '0x00000000000000000000000000000000000002', $3,
+                 '100000', '0.10', $4, 0, $5,
+                 'confirmed', NOW() + interval '10 minutes', 'delegation', $6, $6,
+                 $7::jsonb)
+         RETURNING id`,
+        [
+          agentId,
+          userId,
+          DELEGATE,
+          DELEGATE,
+          `0x${signHashSeed.repeat(64)}`.slice(0, 66),
+          MERCHANT,
+          JSON.stringify({ settlement_scheme: 'eip3009', ...metadata }),
+        ],
+      )
+      return r.rows[0].id
+    }
+
+    // Funded but unsettled: the merchant is named, the settlement transaction
+    // is not. Mutation guard: dropping the merchant column from
+    // FIND_SETTLED_PAYMENT_RECEIPT_SQL makes `parties.merchant` the delegate
+    // and turns this red.
+    const unsettled = await seedEip3009({}, 'c')
+    const unsettledRow = await findSettledPaymentReceiptRow(unsettled, agentId)
+    expect(unsettledRow?.merchant_address?.toLowerCase()).toBe(MERCHANT.toLowerCase())
+    const unsettledReceipt = buildPaymentReceipt(unsettledRow!)
+    expect(unsettledReceipt.payment.parties?.merchant?.toLowerCase()).toBe(MERCHANT.toLowerCase())
+    // The funding leg keeps its own names.
+    expect(unsettledReceipt.payment.recipient).toBe(DELEGATE)
+    expect(unsettledReceipt.settlementTxHash).toBeNull()
+
+    // Recorded: the on-chain-verified merchant settlement transaction rides
+    // along as its own field, beside the funding leg's onChain.txHash.
+    const settled = await seedEip3009({ merchant_settlement_tx_hash: SETTLEMENT_TX }, 'd')
+    const settledRow = await findSettledPaymentReceiptRow(settled, agentId)
+    const settledReceipt = buildPaymentReceipt(settledRow!)
+    expect(settledReceipt.payment.parties?.merchant?.toLowerCase()).toBe(MERCHANT.toLowerCase())
+    expect(settledReceipt.settlementTxHash).toBe(SETTLEMENT_TX)
+    expect(settledReceipt.onChain.txHash).toBe(settledRow?.tx_hash)
   })
 
   // ── #3531: the sole input to the advisory recipient.class field ──────────

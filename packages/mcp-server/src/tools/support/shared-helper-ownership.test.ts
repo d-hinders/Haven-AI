@@ -263,6 +263,14 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   budgetEndedWarningMessage: { module: 'quote-response', slices: ['s2810', 's2811'] },
   runQuoteBudgetPrecheck: { module: 'quote-response', slices: ['s2810', 's2811'] },
   merchantDenialWarnings: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  // #4830: the expected_amount comparison and the not-compared answer, called
+  // by haven_quote_x402 (s2811) only — the two MCP quote tools take no
+  // expectation. Kept in shared support because the local surface mirrors the
+  // same decision procedure and the prose must not drift between them.
+  compareExpectedAmount: { module: 'quote-response', slices: ['s2811'] },
+  expectedAmountNotComparedNextAction: { module: 'quote-response', slices: ['s2811'] },
+  expectedAmountNotComparedOmittedReason: { module: 'quote-response', slices: ['s2811'] },
+  expectedAmountNotComparedReason: { module: 'quote-response', slices: ['s2811'] },
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
@@ -293,6 +301,29 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
+  // s2811 (#4830): the expected_amount comparison and the not-compared answer.
+  // Only haven_quote_x402 calls them (the two MCP quote tools take no
+  // expectation), but they stay in shared support DELIBERATELY: the local
+  // surface (`packages/mcp/src/tools.ts`) mirrors the same decision procedure
+  // and the same prose, and it cannot import mcp-server support — so the
+  // hosted copy is the reference the local twin is reviewed against. Moving
+  // them into plain-http-x402.ts would put the reference inside the capability
+  // that the local package cannot see, which is exactly how the two surfaces
+  // drifted apart before #4830.
+  compareExpectedAmount:
+    'DELIBERATE: the local @haven_ai/mcp quote mirrors this decision procedure and its prose; ' +
+    'the hosted copy is the reference the local twin is reviewed against, and the local package ' +
+    'cannot import mcp-server support. Moving it into plain-http-x402.ts would hide the reference ' +
+    'from the surface that must match it.',
+  expectedAmountNotComparedNextAction:
+    'DELIBERATE, same reason as compareExpectedAmount: the local quote carries the same ' +
+    'cause-following step, and the two must not drift.',
+  expectedAmountNotComparedOmittedReason:
+    'DELIBERATE, same reason as compareExpectedAmount: the local quote emits the same ' +
+    'next_tool_omitted_reason text.',
+  expectedAmountNotComparedReason:
+    'DELIBERATE, same reason as compareExpectedAmount: the local quote emits the same prose, ' +
+    'and the not-compared wording is a money-path contract both surfaces must state identically.',
   // s2810 (#2810 catalog/quote/prepare capability — LANDED; each of the four
   // was re-argued rather than moved, the way #2809 re-argued its own):
   isMerchantEndpointMiss:
@@ -539,6 +570,11 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'runQuoteBudgetPrecheck',
     'merchantDenialWarnings',
     'budgetEndedWarningMessage', // #4458
+    // #4830: the expected_amount comparison + the not-compared answer.
+    'compareExpectedAmount',
+    'expectedAmountNotComparedNextAction',
+    'expectedAmountNotComparedOmittedReason',
+    'expectedAmountNotComparedReason',
   ],
   // #3419: the task-budget twin rides s3329's two handoff sites; the min-version
   // constant is reported on those results and pinned cross-package.

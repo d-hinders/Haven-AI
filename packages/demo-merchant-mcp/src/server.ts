@@ -13,7 +13,11 @@ import {
   formatUsdc,
   merchantEnvironmentForChain,
   networkDisplayName,
+  offeredProducts,
+  productBillingPeriod,
   productDescription,
+  productReceivingAddress,
+  productSettlementKind,
   type MerchantLocale,
   type ProductId,
   type SettlementMethod,
@@ -49,6 +53,19 @@ export interface MerchantConfig {
    * advertises only `haven-demo` and reports `passport: null`.
    */
   passport?: PassportVerifierConfig
+  /**
+   * #4851: Coinbase's facilitator is configured, so the `cdp` product (the
+   * joke) is offered: listed, and its `buy_joke` tool registered. Absent, the
+   * server is exactly what it was before the product existed.
+   */
+  cdpConfigured?: boolean
+  /**
+   * #4853: the Stripe deposit address, when Stripe recording is on. It is the
+   * receiving address of the product Stripe records (the joke), so the in-band
+   * quote names the same address the HTTP 402 does. Absent, that product keeps
+   * `merchantAddress`.
+   */
+  stripeDepositAddress?: Address
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -67,6 +84,12 @@ type ResultDetail = (typeof RESULT_DETAILS)[number]
 interface MerchantStrings {
   monthSubscription: string
   monthStorage: string
+  /** #4851: what one `buy_joke` buys. */
+  oneJoke: string
+  /** #4851: appended to the list footer only when the joke is offered. */
+  jokeFooter: string
+  /** #4851: label for the delivered joke in the confirmation. */
+  jokeLabel: string
   availableProductsHeading: string
   priceLabel: string
   perMonth: string
@@ -109,6 +132,11 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
   en: {
     monthSubscription: '1 month subscription',
     monthStorage: '1 month of storage',
+    oneJoke: 'one joke',
+    jokeFooter:
+      " Use buy_joke for a joke (EIP-3009 only; verified and settled by Coinbase's hosted facilitator, so it " +
+      'needs a budget that is not pinned to one recipient).',
+    jokeLabel: 'Your joke',
     availableProductsHeading: 'Available products:',
     priceLabel: 'Price',
     perMonth: '/month',
@@ -141,6 +169,11 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
   sv: {
     monthSubscription: '1 månads abonnemang',
     monthStorage: '1 månads lagring',
+    oneJoke: 'ett skämt',
+    jokeFooter:
+      ' Använd buy_joke för ett skämt (endast EIP-3009; verifieras och avräknas av Coinbases facilitator, så ' +
+      'det kräver en budget som inte är låst till en mottagare).',
+    jokeLabel: 'Ditt skämt',
     availableProductsHeading: 'Tillgängliga produkter:',
     priceLabel: 'Pris',
     perMonth: '/månad',
@@ -373,7 +406,9 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       const t = STRINGS[locale ?? DEFAULT_MERCHANT_LOCALE]
       // #1274: one builder shared per product so metadata and its display text
       // can never drift from each other or from the erc7710 gate resolved upstream.
-      const metadata = Object.values(PRODUCTS).map((p) =>
+      // #4851: only what this merchant offers — the joke only with CDP configured.
+      const offered = offeredProducts({ cdpConfigured: Boolean(config.cdpConfigured) })
+      const metadata = offered.map((p) =>
         buildProductMetadata(p, {
           enabledSettlementMethods: settlementMethods,
           mcpUrl: `${config.baseUrl}/mcp`,
@@ -381,12 +416,12 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         }),
       )
 
-      const text = Object.values(PRODUCTS)
+      const text = offered
         .map((p, i) => {
           const m = metadata[i]
           return (
             `[${m.product_id}] ${m.display_name}\n` +
-            `  ${t.priceLabel}: ${m.display.price_formatted}${t.perMonth}\n` +
+            `  ${t.priceLabel}: ${m.display.price_formatted}${productBillingPeriod(p) === 'monthly' ? t.perMonth : ''}\n` +
             `  x402: ${m.network} USDC, settlement_methods=${m.supported_settlement_methods.join(',')}, default=${m.default_settlement_method}\n` +
             `  Merchant MCP URL: ${m.mcp_url}\n` +
             `  Hosted routing: dev=${HOSTED_DEMO_MERCHANT_URLS.dev}/mcp, prod=${HOSTED_DEMO_MERCHANT_URLS.prod}/mcp\n` +
@@ -400,7 +435,9 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         content: [
           {
             type: 'text',
-            text: `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod, config.chainId)}`,
+            text:
+              `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod, config.chainId)}` +
+              (config.cdpConfigured ? t.jokeFooter : ''),
           },
         ],
         structuredContent: {
@@ -464,7 +501,55 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
     },
   )
 
+  // ── buy_joke (#4851) ───────────────────────────────────────────────────────
+  // Registered only when Coinbase's facilitator is configured, so a merchant
+  // without it lists exactly the tools it always did.
+  if (config.cdpConfigured) {
+    server.tool(
+      'buy_joke',
+      `Buy one joke for $${formatUsdc(PRODUCTS.joke.price_usdc)} USDC on ${networkDisplayName(config.chainId, 'en')}. ` +
+        "Paid with EIP-3009 only and verified and settled by Coinbase's hosted x402 facilitator (CDP), so it needs a " +
+        'budget that is not pinned to one recipient. Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ' +
+        'On success, report the purchase from the structured `summary` object; the joke is in the text. ' +
+        "Text output is English by default (locale: 'sv' for Swedish); pass result_detail: 'summary' to omit the rendered invoice + bookkeeping JSON from the text.",
+      {
+        locale: LOCALE_PARAM,
+        result_detail: RESULT_DETAIL_PARAM,
+      },
+      async ({ locale, result_detail }) => {
+        const resolvedLocale = locale ?? DEFAULT_MERCHANT_LOCALE
+        return completePurchase(config, 'joke', {
+          description: `${PRODUCTS.joke.name} — ${STRINGS[resolvedLocale].oneJoke}`,
+          locale: resolvedLocale,
+          detail: result_detail ?? 'full',
+        })
+      },
+    )
+  }
+
   return server
+}
+
+/**
+ * #4851: the goods. Chosen from the payment's own nonce, so a retried or
+ * duplicate call for one payment always delivers the same joke.
+ */
+const JOKES: Record<MerchantLocale, readonly string[]> = {
+  en: [
+    'Why did the agent keep its budget on-chain? Because it did not trust itself with a spreadsheet.',
+    'An AI agent walks into a bar. The bartender asks for payment. It replies with HTTP 402 and a signed authorization.',
+    'How many settlement keys does it take to change a light bulb? None. The facilitator pays the gas.',
+  ],
+  sv: [
+    'Varför höll agenten sin budget på kedjan? För att den inte litade på sig själv med ett kalkylark.',
+    'En AI-agent går in på en bar. Bartendern ber om betalning. Den svarar med HTTP 402 och en signerad auktorisation.',
+    'Hur många avräkningsnycklar behövs för att byta en glödlampa? Inga. Facilitatorn betalar gasen.',
+  ],
+}
+
+export function jokeFor(payment: SettledPayment, locale: MerchantLocale): string {
+  const jokes = JOKES[locale]
+  return jokes[Number(BigInt(payment.nonce) % BigInt(jokes.length))]
 }
 
 async function completePurchase(
@@ -480,6 +565,11 @@ async function completePurchase(
   const { description, settlementMethod, locale, detail } = options
   const t = STRINGS[locale]
   const product = PRODUCTS[productId]
+  // #4850: the address THIS product is paid to; the merchant-wide one is its default.
+  // #4853: the Stripe-recorded product is paid to the deposit address when on.
+  const receivingAddress = productReceivingAddress(product, config.merchantAddress, {
+    stripeDepositAddress: config.stripeDepositAddress,
+  })
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()
 
@@ -488,11 +578,14 @@ async function completePurchase(
     // only after receiving a settle-less receipt. Same suffix the discovery
     // document and list_products carry, so all three read as one fact.
     const requirements = config.buildPaymentRequired({
-      merchantAddress: config.merchantAddress,
+      merchantAddress: receivingAddress,
       amountUsdc: product.price_usdc,
       resource,
       description: isSkipSettleProduct(productId) ? `${description}${QA_FIXTURE_DESCRIPTION_SUFFIX}` : description,
       settlementMethod,
+      // #4851: a CDP product's in-band requirements name only what it accepts
+      // (EIP-3009), as its HTTP 402 does. The other products are unchanged here.
+      ...(productSettlementKind(product) === 'cdp' ? { settlementMethods: product.x402.settlementMethods } : {}),
     })
     return {
       isError: true,
@@ -502,7 +595,7 @@ async function completePurchase(
           text:
             `${t.paymentRequired(product.name)}\n\n` +
             `${t.priceLine(formatUsdc(product.price_usdc))}\n` +
-            `${t.paymentAddress}: ${config.merchantAddress}\n` +
+            `${t.paymentAddress}: ${receivingAddress}\n` +
             `${t.network}: eip155:${CHAIN_ID}\n\n` +
             `${t.paymentRequirementsHeading}\n${JSON.stringify(requirements, null, 2)}\n\n` +
             t.resendHint,
@@ -516,7 +609,7 @@ async function completePurchase(
   // every call is cheap and deterministic (invoiceForPayment memoizes per
   // payment), so the summary below can never disagree between a fresh
   // purchase and a retried/duplicate one.
-  const invoice = invoiceForPayment(payment, productId, config.chainId)
+  const invoice = invoiceForPayment(payment, productId, { receivingAddress, chainId: config.chainId })
   // #4723: advisory, AFTER settlement, cached per payment. Never a condition
   // of the purchase — the goods are already owed by the time this runs.
   const passport = await passportSummaryFor(payment, {
@@ -563,7 +656,9 @@ async function completePurchase(
     `Nonce:    ${payment.nonce}\n` +
     // #4723: only when the payment carried a reference. "checked" is the
     // claim; "verified" is reserved for L2, which is not issuable.
-    (passportLine ? `${passportLine}\n` : '')
+    (passportLine ? `${passportLine}\n` : '') +
+    // #4851: the joke is the goods — delivered in the text, on every variant.
+    (productId === 'joke' ? `\n${t.jokeLabel}: ${jokeFor(payment, locale)}\n` : '')
 
   const text =
     detail === 'summary'

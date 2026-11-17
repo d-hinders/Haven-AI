@@ -2968,7 +2968,7 @@ export type paths = {
         };
         /**
          * Fetch a verifiable receipt for a settled payment.
-         * @description Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle.
+         * @description Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle. Which leg each field names: on an eip3009 payment the intent row is the funding leg, so payment.recipient and onChain.txHash name the agent's own delegate and the funding transaction, while payment.parties.merchant names the merchant recorded at authorize and settlementTxHash names the merchant's settlement transaction — null until Haven has verified it on-chain. On erc7710 and direct payments the one transaction settles the payment, so settlementTxHash equals onChain.txHash.
          */
         get: operations["getPaymentReceipt"];
         put?: never;
@@ -10577,7 +10577,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -11518,7 +11518,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12094,7 +12094,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12435,7 +12435,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -16315,7 +16315,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -16598,7 +16598,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4820). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have moved the funds; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not submit the transfer again: check Activity for the transfer. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` is "Transfer failed" and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -20827,7 +20827,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The idempotency key already belongs to a payment. A `submitted` row (#4826) answers `error_code: "payment_already_submitted"` with `payment_id` and `status: "submitted"` — read that payment's status and do not authorize again; the answer is produced at the first replay lookup, before the hourly cap, scope resolution, the remaining-budget read and the funding prepare / deploy check. A replay naming a different resource, payee, amount, asset, network, facilitator set, task budget or sub-budget answers the key-collision 409 (`error` names the field, with `payment_id` and `status`). A conflict whose winner cannot be replayed answers the untyped "Idempotent replay in progress" 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21316,7 +21316,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Same as POST /x402/authorize: a `submitted` row answers the typed `payment_already_submitted` 409 with `payment_id` and `status`, and a key collision answers the mismatch 409. */
             409: {
                 headers: {
                     [name: string]: unknown;

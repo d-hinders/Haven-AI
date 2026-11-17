@@ -156,6 +156,12 @@ const mcpTransportArg = z
  */
 export type DiscoveryHint =
   | { suggested_tool: 'haven_quote_catalog_purchase'; suggested_arguments: { catalog_id: string } }
+  // #4823: a self-submitted (`source: 'ingestion'`) MCP row is listed to
+  // agents but the agent detail read answers it 404, so the catalog-id hint
+  // was a dead end on the hosted runtime. It gets the same by-URL hint the
+  // local runtime already emits — haven_quote_mcp_tool takes merchant_url and
+  // tool_name, both of which the row carries.
+  | { suggested_tool: 'haven_quote_mcp_tool'; suggested_arguments: { merchant_url: string; tool_name: string } }
   // #3769: a plain-HTTP row that declares a method/body carries them in the
   // hint — the arguments must remain VERBATIM-acceptable by
   // haven_quote_x402's schema (url, method, headers, body), which already
@@ -1247,7 +1253,7 @@ const PAY_MCP_TOOL_DESCRIPTION = composeDescription({
     'Sign per the response guidance (payment_id-only), then settle with haven_settle_mcp_tool. ' +
     'Exceptional states: on expiry re-run with the SAME idempotency_key; include_signing_payload=true on a re-run returns the inline signing payload for an older signer — and a merchant that repriced in between makes the signer refuse the stale copy: re-quote fresh.',
   nextActionGuidance: 'Next: the signer tool named by the response guidance, then haven_settle_mcp_tool.',
-})
+}, 'hosted')
 
 const QUOTE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
@@ -1318,7 +1324,7 @@ const SETTLE_MCP_TOOL_DESCRIPTION = composeDescription({
 const QUOTE_X402_DESCRIPTION = composeDescription({
   ...sharedDescriptions.quoteX402,
   behavior:
-    'Probes the merchant directly from the hosted server and parses the 402. Haven is not contacted. Returns the quote and a next step naming haven_pay_x402_quote with this same request.',
+    'Probes the merchant from the hosted server, parses the 402. Haven is read for the agent and budget. Returns the quote and a next step naming haven_pay_x402_quote with this request.',
   nextActionGuidance:
     'Next: haven_pay_x402_quote with the next_arguments given (url, method, headers, body, and the cap). It fetches the challenge again itself, unpaid, so never copy payment_required across.',
 })
@@ -1526,7 +1532,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_sweep_delegate: SWEEP_DELEGATE_DESCRIPTION,
   haven_discover_tools: DISCOVER_TOOLS_DESCRIPTION,
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
-  haven_send: composeDescription(sharedDescriptions.send),
+  haven_send: composeDescription(sharedDescriptions.send, 'hosted'),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
   haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
@@ -1617,6 +1623,13 @@ export interface ToolFailure {
   next_tool_server_role?: 'hosted' | 'signer'
   next_arguments?: Record<string, unknown>
   next_tool_omitted_reason?: string
+  /**
+   * #4828: the wait a rate limiter stated, in seconds, when its 429 body
+   * carried one (the hourly x402 cap sends `retry_after_seconds: 60`). Present
+   * only on that answer; the step's text says to wait for it before the one
+   * re-call. Additive — no existing field changes meaning.
+   */
+  retry_after_seconds?: number
 }
 
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure

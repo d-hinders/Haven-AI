@@ -56,6 +56,20 @@ export interface PaymentReceiptRow extends Partial<BuyerJoinColumns> {
   delivery_quality?: string | null
   delivery_note?: string | null
   delivery_reported_at?: string | null
+  /**
+   * #4822: the merchant named at authorize —
+   * `COALESCE(merchant_address, x402_merchant_address, to_address)` from
+   * `FIND_SETTLED_PAYMENT_RECEIPT_SQL`. Optional so rows read by the
+   * pre-#4822 SQL keep typing; absent/null falls back to `to_address`, which
+   * is what the bundle named before this change.
+   */
+  merchant_address?: string | null
+  /**
+   * #4822: `machine_metadata.merchant_settlement_tx_hash` — the merchant-leg
+   * transaction Haven verified on-chain (#4530). Null/absent until recorded.
+   * The merchant's own unverified echo is never an input here.
+   */
+  merchant_settlement_tx_hash?: string | null
 }
 
 /**
@@ -101,8 +115,45 @@ function signatureSchemeFor(row: PaymentReceiptRow): 'eip712_delegation' | 'eip7
   return undefined
 }
 
-export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
+/**
+ * #4822: the bundle as this backend emits it — the published `PaymentReceipt`
+ * plus the merchant leg's settlement transaction.
+ *
+ * `settlementTxHash` is the name the OpenAPI operation description, the SDK's
+ * receipt docs and both receipt tool descriptions already use; the field did
+ * not exist on the bundle until #4822. The published `PaymentReceipt` type is
+ * NOT changed here (the SDK and both MCP runtimes pass the bundle through
+ * unchanged, so the field reaches installed clients without a publish); the
+ * backend widens the literal with a type assertion, as #2907, #2960 and #3418
+ * did.
+ *
+ * `onChain.txHash` keeps its value — the funding leg on the EIP-3009 bridge —
+ * and `settlementTxHash` names the merchant leg: the same transaction for
+ * erc7710 and direct payments, the on-chain-verified
+ * `machine_metadata.merchant_settlement_tx_hash` for EIP-3009, and null until
+ * that is recorded.
+ */
+export type PaymentReceiptBundle = PaymentReceipt & { settlementTxHash: string | null }
+
+export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceiptBundle {
   const signatureScheme = signatureSchemeFor(row)
+  // #4822: the merchant leg. `parties.merchant` is the merchant named at
+  // authorize, never the funding leg's `to_address` (the agent's own delegate
+  // on the EIP-3009 bridge). The SQL resolves the repository's counterparty
+  // expression; a row read by older SQL (or a retired-rail row with neither
+  // merchant column) falls back to `to_address`, which is what this bundle
+  // named before the change.
+  const merchantAddress = row.merchant_address ?? row.to_address
+  // #4822: the merchant's settlement transaction, as a SEPARATE field from
+  // `onChain.txHash` (which keeps naming the funding leg). erc7710 and direct
+  // payments settle in the one transaction the bundle already carries, so it
+  // equals `onChain.txHash`; the EIP-3009 bridge pays the merchant afterwards
+  // by the delegate's EIP-3009 authorization, so it is the on-chain-verified
+  // `machine_metadata.merchant_settlement_tx_hash` and null until recorded.
+  // The merchant's unverified echo is never used: whether the merchant was
+  // paid is what the settlement transaction states, not the party.
+  const settlementTxHash =
+    row.settlement_scheme === 'eip3009' ? row.merchant_settlement_tx_hash ?? null : row.tx_hash
   return {
     version: RECEIPT_VERSION,
     paymentId: row.id,
@@ -136,7 +187,7 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
         account_address: row.account_address,
         delegate_address: row.delegate_address,
         delegate_account_address: row.delegate_account_address ?? null,
-        merchant_address: row.to_address,
+        merchant_address: merchantAddress,
         // #3332: additive, flag-gated — see `buyerPartyFromJoin`'s own doc.
         buyer_details: buyerPartyFromJoin(
           {
@@ -161,14 +212,23 @@ export function buildPaymentReceipt(row: PaymentReceiptRow): PaymentReceipt {
       ...(signatureScheme === undefined ? {} : { signatureScheme }),
     } as PaymentReceipt['authorization'],
     onChain: { txHash: row.tx_hash, chainId: row.chain_id },
-  }
+    // #4822: additive — the merchant leg's settlement transaction, beside
+    // `onChain.txHash` (the funding leg). `PaymentReceipt` is a published
+    // `@haven_ai/sdk` type and is not changed here; the literal is widened
+    // with a type assertion, exactly as `payment.account` (#2907),
+    // `payment.parties` (#2960) and `authorization.signatureScheme` (#3418)
+    // already are. `verifyPaymentReceipt` reads only `authorization` (plus
+    // `onChain.chainId`), so an additive field changes nothing about what a
+    // signature covers.
+    settlementTxHash,
+  } as PaymentReceiptBundle
 }
 
 /** Load a settled payment's receipt for the owning agent. Null if not found. */
 export async function getPaymentReceipt(
   paymentId: string,
   agentId: string,
-): Promise<PaymentReceipt | null> {
+): Promise<PaymentReceiptBundle | null> {
   const row = await findSettledPaymentReceiptRow(paymentId, agentId)
   return row ? buildPaymentReceipt(row) : null
 }

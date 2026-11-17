@@ -47,6 +47,11 @@ entries predate them and stand as written):
   Blocks 8 and 9 need Postgres, the core/SDK builds and about 288 s, so a run
   that skips them writes `block 8 → not examined → needs the backend suite's
   database and builds` (and the same for block 9), never a zero.
+- **`partial` in the heading (#4757, binding for entries from 2026-11-11
+  on):** a run that leaves block 1, 8 or 9 unexamined is titled `partial` in
+  its heading and its report filename, the way the 2026-09-08 entry is
+  (`partial: dimension 1 and sizing only`). Block 10 is not in that list: a run
+  whose third-party tier was not requested is not `partial` for that reason.
 - **Machine-readable figures (#4625, binding for entries from 2026-11-03
   on):** the `Probed clean` lines here are prose. The commands and their
   latest figures live in `docs/quality/scan-baselines.json`, which
@@ -2951,3 +2956,363 @@ partly artifacts. Pinned to `--since=2026-09-01T00:00:00Z`: **47 of 57** at
 `49747fac3` and **48 of 58** at `51e66d281` — one landing between the two,
 and it touched both packages. The conclusion (about five in six local
 landings also change the hosted package) is unchanged.
+
+**Disposition upkeep (2026-11-11), both 2026-11-09 runs: every filed slice and
+standalone issue is `shipped`; run A's epic stays open (below).** Each was
+closed by a pull request merged to `dev`.
+
+- Run A (architecture): S1's slices #4760 via PR #4777 (`9b809188`), #4761
+  via PR #4780 (`36378243`) and #4762 via PR #4783 (`c9201556`); C1 → #4763 —
+  runtime cycles only, per the owner — via PR #4802 (`d314d6d7`); C2 → #4764
+  via PR #4778 (`4346e70f`); C3 → #4765 via PR #4782 (`0cbcdff6`) →
+  `shipped`. S1's epic #4759 stays open: its promotion checklist names a qa-dev observation nobody has
+  recorded on it yet.
+- Run B (the two MCPs): S1 → epic #4788, closed 2026-11-11 with its promotion
+  check linked on the issue; slices #4789 via PR #4795 (`149a3313`), #4790
+  (which is also C1) via PR #4801 (`ba1bf134`), #4791 via PR #4794
+  (`039556e3`) → `shipped`. C2 → #4792 via PR #4803 (`8486093d`) → `shipped`.
+- A fourth slice was added to epic #4788 after the 2026-11-10 run-B
+  disposition was written, found
+  by slice 1's build rather than by the scan: #4796, four tool descriptions
+  that named a tool their own surface does not register, via PR #4798
+  (`0423db37`) → `shipped`. The same defect on three other surfaces (the
+  SDK's direct tool definitions, the signer's descriptions, backend response
+  prose) is recorded on the epic and is not filed.
+
+## 2026-11-11 — the two flagged rows of the weekly re-measurement (scoped; #4635)
+
+Scoped to the two rows the weekly job flagged at `039556e38` (#4625's table in
+#4635): `sizing` ("flagged — shrank (expected to grow)") and `docs boundary`
+("flagged — moved (exact)", 43 → 45). Measured at `origin/dev` @
+`8486093dfc6039dda4a892290d87e34bb871facf` (the tip at pickup; the table's own
+SHA is `039556e38`), in a linked worktree, no `npm ci` needed for either
+instrument. A scoped scan: `docs/quality/scan-baselines.json` is not updated
+(skill § Method), so the manifest keeps `43` @ `e0617aa9f`; the next whole-repo
+entry records the new count. GitHub read-only; no live Haven, MCP, dev or
+production call.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. Neither row re-surfaces one.
+
+**Structural findings:** none. The scope is two instruments, not a sweep.
+
+**Improvement candidate (one PR), filed:** the docs-boundary instrument counts
+test fixtures as ungoverned Markdown — see the row below, filed as
+[#4804](https://github.com/d-hinders/Haven-AI/issues/4804).
+
+**Probed clean** (coverage record; scoped, so only the two rows are examined):
+
+- sizing → examined → the row's command (`sizing-source-test-lines` in
+  `docs/quality/scan-baselines.json`: pinned `git ls-tree`/`git show`, 13
+  packages, `.test.`/`__tests__`/`.spec.` split) → at `8486093df`: backend
+  124,177 / 167,496; frontend 83,583 / 93,776; sdk 20,628 / 23,627; core
+  26,142 / 985; qa-agent 20,292 / 18,508; mcp-server 14,330 / 26,323; signer
+  5,488 / 9,545; connect 12,436 / 15,676; cli 3,196 / 3,611; ops 3,199 / 2,266;
+  ui 2,849 / 2,402; mcp 3,010 / 5,449; demo-merchant-mcp 4,105 / 4,591. Totals
+  323,435 source / 374,255 test (323,104 / 373,222 at `039556e38`; 308,076 /
+  352,607 at `e0617aa9f`). Against the recorded baseline: +3,114 / +6,604;
+  +4,990 / +6,878; +986 / +980; +388 / 0; +5,159 / +5,225; +216 / +867;
+  −76 / +182; 0 / 0; −11 / +2; +56 / +44; +27 / +74; +193 / +411;
+  +317 / +381. Three figures shrank, each traced to the commit that did it:
+  cli source −11 = `f6fdb2620` (#4662), `args.ts` −2 and `commands.ts` −9 net;
+  signer test −1 = `ae192d597` (#4756), `x402-sign-header-transport.test.ts`
+  +2/−3; signer source −76 = `8486093df` (#4792), `credentials.ts` −57 net and
+  `file-mode.ts` −19 net, with the handling moved to a new SDK module (+187)
+  and a +183 characterization test. Verdict: real deletions and a
+  cross-package move, not instrument rot. No finding.
+- block 6 → partial → the docs-boundary half only → the row's pinned listing
+  (`block6-docs-boundary`: `git ls-tree -r --name-only $SHA | grep -E '\.md$' | grep -vE
+  '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l`) → **52** at
+  `8486093df` (43 at `e0617aa9f`, 45 at `039556e38`). Composition at the tip:
+  `.agents/skills` 24, `.claude/commands` 8, `.claude/agents` 7, `scripts` 8,
+  `.github` 3, `.claude/hooks` 1, `.agents/README.md` 1. The 43 → 45 move is
+  `586cd8e8c` (#4727, the review-issue skill: `SKILL.md` + 2 references +
+  `.claude/commands/review-issue.md`, 4 files) less `e9275701d` (#4694, the two
+  retired qa commands, 2 files) — the same class as the baseline's
+  `.agents/skills` and `.claude` files, no new class. The 45 → 52 move is
+  **7 test fixtures**: `scripts/docs/fixtures/issue-method/*.md`, added by
+  `68efd71dd` (#4797) as inputs to the issue-method checker's test
+  (`FIXTURES = join(HERE, 'fixtures', 'issue-method')`, line 38). They are not
+  documentation, and the row's `tolerance` is 0, so every fixture addition
+  flags the weekly row as `moved (exact)` — a false positive. **Finding filed:
+  #4804** (`area:docs`, `area:ci`, `pending-review`): exclude Markdown under a
+  `fixtures/` directory from the pinned listing, state the exclusion in
+  `dimensions.md` § 6, and keep the row's `43` @ `e0617aa9f` — the exclusion is
+  a no-op at that SHA (0 fixture files there), so the pin stays valid.
+- blocks 1–5, 8, 9, comment archaeology, incident clustering, workflow
+  archaeology, cross-package duplication, data-layer coverage, live exercise →
+  not examined → out of this scope (the two flagged rows).
+
+**Controls.** The sizing instrument reproduces both recorded readings exactly:
+at `e0617aa9f` it prints the 26 recorded figures (26/26) and at `039556e38` the
+26 figures of #4635's table (26/26), so the deltas above are the instrument's,
+not a reconstruction. The docs-boundary listing's arithmetic holds: 962 `.md`
+at the SHA − 906 under `docs/` or `packages/` − 4 root files = 52, and the
+listing reaches a known top-level file (`.agents/skills/quality-scan/SKILL.md`
+→ 1). The proposed exclusion's control: the same listing without it prints 52
+at `8486093df`, with it 45, and the 7-file difference is exactly the fixture
+directory.
+
+**Doc figures.** All three `docFigures` rows measured again at `8486093df` and
+unchanged: `ds-button-variant-distribution` 205 / 33 / 8 / 4,
+`ds-icon-rung-12px` 16, `frontend-settings-tabs-dark-baseline` 1. No doc
+sentence moves, so no row is refreshed (#4631).
+
+**Disposition: finding filed** (#4804, `pending-review` until its independent
+review-issue pass). The sizing row needs no decision.
+
+## 2026-11-12 — whole repo, hunting defects across verticals (owner request 2026-11-12, "find bugs from several verticals")
+
+Full report: `docs/bug-reports/quality-scan-2026-11-12-whole-repo.md` (it
+carries the file:line evidence and each reproduction's decisive output).
+Measured on `origin/dev` @ `9871885a9`. The window is `e0617aa9f..9871885a9` →
+**111** first-parent landings / 909 files / +76,564 −18,080. Five workers: four
+hunters, one per vertical (the backend payment path; the backend outside it;
+the agent surface; the owner dashboard), each required to run a reproduction
+with a positive control, and one measurement worker in its own clone for the
+numbered blocks. The captain ran all 15 reproduction test files and 2 scripts a
+second time at the SHA; each gave the pass / fail pattern its hunter reported.
+The bundler, the accounting provider and the HTTP client were stand-ins in
+every reproduction; no finding claims an on-chain outcome. Blocks 8 and 9
+recorded the backend suite against a disposable local Postgres database. Live
+calls were read-only, on dev only, as a dev agent. GitHub was read-only. One
+security hypothesis is not written in the public record and went to the owner
+directly.
+
+**A departure from the skill, named:** the owner's scope was a defect hunt, so
+the report carries a third list beside the two output levels — ten reproduced
+one-PR defects beyond the cap of five. They are prior art for the next run's
+exclusion like any candidate.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. S1 sits beside #3564, #3930 and #4470, each of which fixed one
+call site of the same failure mode and is closed; S1 is the sites they did not
+reach, none of which a prior entry measured.
+
+**Structural finding (pending owner decision):**
+- S1 — between sending an operation and booking its outcome, one failure mode
+  is recognised as "outcome unknown". The backend's rail file has two
+  send-and-wait functions; the unknown outcome is raised at one throw site, the
+  receipt wait of the shared redemption submit, which three callers read (the
+  sign module and the two budget routes). Five
+  reproduced defects: (1) the agent sign route books `failed`, and the hosted
+  mapper says "create a new payment", when the bundler's answer to the send is
+  lost (a transport timeout of about 10 s); (2) the same when the op is mined
+  and the confirm write throws; (3) a sign request that dies after the claim
+  leaves the row `submitted` with no operation hash, and the submission
+  reconciler, the erc7710 sweep and the orphan sweep each select 0 rows for it;
+  (4) a payment the submission reconciler confirms has no fiat values, fires no
+  accounting feed and is excluded by the Sync-now backfill's SQL; (5) the
+  dashboard's Send dialog shows a lost submit as a failure with "Try again",
+  and the retry signs and submits a second transfer with no idempotency key.
+  All five owner-side callers of the treasury submit (owner transfer, signer
+  change, two revocations, re-key revocation) answer any throw, post-send
+  included, with 502 "… failed". On record: the same failure mode fixed three
+  times, one site at a time (#3564 and #3930 from code review, #4470 from the
+  2026-10-27 refusal-census trial); no production incident. Slices: the rail
+  first; the sign route and reconciler intake; reconciler booking; the owner
+  transfer route and dialog; the four other owner callers. Not observed: a real
+  bundler including an op whose answer was lost.
+- A second structural finding ("a non-answer is read as an answer", four
+  defects in four packages) was drafted and withdrawn at review: no measured
+  census, and each remedy is one PR. Its four defects are listed beyond the cap
+  below.
+
+**Improvement candidates (one PR each), pending owner decision:**
+- C1 — the signed receipt bundle (`GET /payments/:id/receipt`,
+  `haven_get_receipt`) of an EIP-3009 payment sets `recipient` and
+  `parties.merchant` to the agent's delegate and carries no settlement hash,
+  while the receipt list and the status read name the merchant. Seen live on
+  dev and by a tree test; the party characterization fixtures do not cover the
+  bundle.
+- C2 — a verified self-submitted catalog row is listed to agents and hinted
+  `haven_quote_catalog_purchase`, and the detail route answers 404 to an agent
+  for the same id (`routes/catalog.ts`).
+- C3 — an Accounted push ends `skipped` (`IDEMPOTENCY_KEY_REUSE`) when the
+  first upload's answer is lost and the merchant receipt is captured before the
+  retry: the underlag's bytes depend on the receipt, the idempotency key on the
+  payment id alone. Provider side is the repository's simulator.
+- C4 — the local MCP hands task-budget and sub-budget signing to
+  `mcp__haven-signer__haven_sign`, a server the connector's `--local` mode
+  removes; the local surface has no signing tool.
+- C5 — x402 authorize with the same idempotency key after settle answers an
+  untyped 409 "retry the original request" with no payment id for as long as
+  the row is `submitted` (`modules/x402/replay.ts`).
+
+**Reproduced, beyond the cap of five (pending owner decision):**
+- the hosted `haven_quote_x402` handler skips the `expected_amount` comparison
+  when its agent read fails, answers `safe_to_continue: true` and prefills the
+  cap at the merchant's price — through the hosted server this needs the
+  identity gate's read of the same endpoint to succeed and the handler's to
+  fail (the reproduction bypassed the gate); the local quote, which has no
+  gate, returns a plain quote with no comparison and no stop;
+- the hosted error mapper answers a 429 (rate limit, hourly x402 cap, relayer
+  budget) "refused as made … cannot succeed" and drops the wait;
+- the signer's sign-context fetch reports an HTML 502 and a 429 as
+  `SIGN_CONTEXT_REFUSED` without the relay fallback;
+- the dashboard's session restore deletes a valid token on any failed
+  `/auth/me`, and a token that expires mid-session is never noticed;
+- Send's amount field: a decimal comma silently rejected; a sub-unit amount
+  reaching Review as "Send 0 USDC";
+- Send above the balance answering "Could not prepare the transfer" (backend
+  half run; the dialog's retry button for this case inferred);
+- a contact the Contacts page accepts that Send cannot review (checksum-strict
+  check);
+- contacts unique per raw string, so one address in two casings is stored
+  twice;
+- one Bazaar index entry with a field of the wrong type aborting the discovery
+  run;
+- a quote that reports the standard entry's price while it compares and pays
+  the erc7710 entry's.
+
+Leads, not proposed: block 1's two survivors (dead code in the hosted
+`auth.ts`; the task-budget recipient caveat pinned by count only); typed codes
+on task-budget, sub-budget and resume routes that reach the generic branch
+outside block 8's payment-route rule.
+
+**Escape analysis** (89 issues created since 2026-11-02; 2 carry a `Found by:`
+line as the convention writes it; 28 judged defects not found by a scan, by the
+captain's reading; the other 61 read by title only and not classified one by
+one): dev tooling and CI 14 (block 6 should have seen 3 — scripts that exit 0
+without running); agent guidance and onboarding wording 5 (no block); catalog
+and header conformance from a live purchase 2 (block 10, added since); what a
+money field claims 2 (no block); operator incident 2 (no block); dashboard 3
+(no block). This run's own 20 defects by class: the seam after the send 5,
+non-answer read as an answer 4, cross-surface disagreement on one fact 3,
+dashboard input handling 3, and one each of contact casing, a handoff to
+something the surface lacks, replay shape, a retry that is not byte-stable,
+and one item aborting a batch. The first and third classes have no block;
+block 8 states the second as its clean criterion, but its instrument did not
+reach these four.
+
+**Dispositions observed (upkeep):** 2026-11-11 scoped entry → #4804 open,
+still `pending-review`. 2026-11-02 C1 → epic #4610 open for its promotion
+checklist. The 2026-11-09 epics #4759 and #4788 are closed; #4580 is closed.
+
+**Probed clean** (block → examined / partial / not examined → command → number, all at `9871885a9`; parentheses are the 2026-11-02 entry at `e0617aa9f`):
+- sizing → examined → the manifest row → backend 124,298 / 167,714 (121,063 /
+  160,892); frontend 83,583 / 93,776; sdk 20,679 / 23,628; core 26,194 / 985;
+  qa-agent 20,292 / 18,508; mcp-server 14,330 / 26,472; signer 5,488 / 9,545;
+  connect 12,436 / 15,676; cli 3,196 / 3,611; ops 3,199 / 2,266; ui 2,849 /
+  2,402; mcp 3,010 / 5,449; demo-merchant-mcp 4,105 / 4,591 (signer and cli
+  source shrank, as the 2026-11-11 entry traced). Fat controllers → 50 route
+  files, 4 at or above 1,000 lines, 216 registrations, largest 1,556 (50 / 4 /
+  212 / 1,572).
+- block 1 (guard falsifiability) → examined → the census command → **253**
+  candidate files (1 by the pre-#4806 sample); runner: 5 census mutations + 2
+  probes → **5 caught, 2 survived**, 0 shadowed, 0 mutation-red (3 caught of
+  3). Files 6–253 not sampled.
+- block 2 (`covers:` completeness) → partial → the manifest rows only → 15 / 5
+  / 7 (unchanged); covers-gaps 123 / 33 (124 / 33); control passed.
+- block 3 (stale numbers) → partial → the manifest rows only → head sample 7 /
+  1 (13 / 2); `any` 39; db-mock gauge 54 / 270 / 57; zod 0; controls passed.
+- block 4 (retired vocabulary) → partial → the manifest row only → 199 / 48 /
+  151 (196 / 47 / 149); control 36.
+- block 5 (merge-method drift) → examined → 282 merge commits (282); squash /
+  total 1,531 / 1,816 (1,420 / 1,705).
+- block 6 (nets with holes) → partial → the manifest rows only → copy lint 121
+  / 15 (111 / 14); money perimeter 32 / 20; visual gate 15 / 27; docs boundary
+  52 (43; flagged, tracked by #4804).
+- block 8 (refusal census) → examined → 573 files, 572 passed, 1 skipped,
+  7,235 tests, 359 s; **2,232 rows; 1,626 error rows; 578 keys; 143 typed rows
+  reach the generic branch** (2,203 / 1,614 / 574 / 142); 3 unmarked on agent
+  payment routes, the same three; 5xx transient 37 (36); non-answers 2; SDK
+  error sites 31 (26 / 5); positive control passed.
+- block 9 (field round-trip) → examined → emitted-never-read **5**, the same
+  five; read-never-emitted **13**; positive control passed.
+- block 10 (catalog conformance) → fixtures examined; default tier examined →
+  the dev listing at 2026-11-11T23:17:50Z → 26 entries, 24 active, 12 http / 12
+  mcp, 0 bazaar; third-party tier not examined → not requested.
+- incident clustering → partial → the escape analysis; no count over time.
+- workflow archaeology → not examined.
+- comment archaeology → examined → 0 markers (control `import` → 2,326 files).
+- residual archaeology → examined → window 2026-11-02T00:00:00Z ..
+  2026-11-12T00:00:00Z, taken 2026-11-11T23:10Z → 115 PRs; 61 with an inline
+  residual line, 7 saying none; 13 with a residual heading; 45 bullets, 3
+  citing an issue or PR.
+- live exercise → examined → read-only, dev only, 13 calls through the dev
+  hosted MCP before dev began deploying the next landing; runtime identities
+  recorded in the report; result C1 and one lead.
+- cross-package duplication → not examined; validation / contracts → partial
+  (blocks 8, 9 and the hunters' route tests); data-layer coverage → partial
+  (the gauge).
+- novelty → the hunters' GitHub searches, the ledger and the bug reports'
+  names; the captain read each cited issue's title and state, the reviewer its
+  body.
+
+Instrument lessons: a new file under one package's `src` makes another
+package's fresh-dist guard refuse to start (a signer reproduction stopped the
+hosted MCP's tests for minutes), so a reproduction for a package others build
+against is better run as a script against `dist`, as the two local-MCP ones
+were; `rg` does not resolve under `bash` on the scan machine and was passed to
+the runner through `$RG`; a hunter's `git fetch` in a shared worktree moves
+`origin/dev` for every reader, so commands name the SHA; a hunter's timing
+figure is not the captain's — quote the run that was kept.
+
+**Review:** `haven-reviewer` at head `42f2ccc39`, in its own clone, checked
+(by its own count) 60 line references, every count with a command, the 21
+manifest rows, the block figures against their raw outputs, 20 issue and PR
+claims against their bodies and each quoted reproduction output against the
+logs and test sources: changes requested — 7 blocking, 16 should-fix, 10 nits,
+all applied.
+Among them: the second structural finding withdrawn; the hosted quote defect
+narrowed to the condition above; two wrong attributions (#4470's origin,
+#3214's subject); a timing figure that was a hunter's, not the captain's; a
+false "touches none of the files cited"; three money-path verdicts that had
+been asserted and not run. A second pass at `94eb159bd` found all seven
+blockers resolved and no blocking item, and asked for four should-fix and
+three nit text corrections, which the captain applied directly without a third
+pass. The report's § 5 lists both passes.
+
+**Disposition: pending owner decision** (S1, C1–C5, and the ten defects beyond
+the cap).
+
+**Disposition (owner, 2026-11-12): file as proposed.** The owner's words in the
+captain's session were "Fila enligt ditt förslag" ("file as you proposed"), the
+proposal being: S1 as an epic with the rail slice first, C1–C5 as standalone
+issues, and four of the ten defects beyond the cap (the dashboard session
+read, the 429 mapping, the signer's gateway errors, the skipped price
+comparison). The other six beyond-cap defects stay unfiled. The security
+hypothesis kept out of this record is not part of this disposition. Every
+issue went through new-task with one independent spec review; none was ready
+as first filed, and the ten reviews required 136 body corrections in all.
+
+- S1 → epic [#4816](https://github.com/d-hinders/Haven-AI/issues/4816)
+  (`epic`, `area:backend`, `area:frontend`, `money-path`), slices #4817
+  (rail), #4819 (reconciler booking), #4818 (sign route and reconciler
+  intake), #4820 (owner Send), #4821 (other owner operations), in that build
+  order. Verdict `blocked on owner decision`, 31 corrections; the review
+  reordered the slices, excluded erc7710 rows from the new intake, and re-cut
+  #4821. `pending-review` lifted on #4817, #4820, #4821.
+- C1 → [#4822](https://github.com/d-hinders/Haven-AI/issues/4822), 13
+  corrections, one owner question.
+- C2 → [#4823](https://github.com/d-hinders/Haven-AI/issues/4823), 7
+  corrections, one owner question (a third option added by the review).
+- C3 → [#4824](https://github.com/d-hinders/Haven-AI/issues/4824), 10
+  corrections, one owner question; the review found five sources of byte
+  drift, not one.
+- C4 → [#4825](https://github.com/d-hinders/Haven-AI/issues/4825), 12
+  corrections, one owner question; now `money-path` by its cross-package pins.
+- C5 → [#4826](https://github.com/d-hinders/Haven-AI/issues/4826), 14
+  corrections, `ready`, `pending-review` lifted.
+- Dashboard session → [#4827](https://github.com/d-hinders/Haven-AI/issues/4827),
+  13 corrections, two owner questions.
+- 429 mapping → [#4828](https://github.com/d-hinders/Haven-AI/issues/4828),
+  12 corrections, `ready`, `pending-review` lifted; the sign route's 429 named
+  in the report is unreachable in production.
+- Signer gateway errors → [#4829](https://github.com/d-hinders/Haven-AI/issues/4829),
+  11 corrections, one owner question; all four signing-context fetches share
+  the defect.
+- Skipped price comparison → [#4830](https://github.com/d-hinders/Haven-AI/issues/4830),
+  13 corrections, `ready`, `pending-review` lifted; two further local skips
+  found by the review.
+- Unfiled, beyond the cap: Send's amount field, Send above the balance, the
+  contact checksum mismatch, contact casing, the Bazaar poison entry, and the
+  quote's two prices.
+
+**Owner decisions on the filed issues (2026-11-12, same day):** the owner
+answered every open question with "Kör på dina förslag" ("go with your
+proposals"), the recommendation written in each issue. Each decision is
+recorded under `## Owner decisions` in its issue, and `pending-review` is
+lifted on all fifteen. The security hypothesis is still not part of this
+disposition.

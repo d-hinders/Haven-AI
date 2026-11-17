@@ -25,6 +25,11 @@ import {
 } from '../infra/repositories/hybrid-signers.js'
 import type { SaltedHybridOwnerConfig } from './hybrid-provisioning.js'
 import { createTreasuryOps, delegationRailBundlerUrl } from './delegation-rail.js'
+import {
+  ONCHAIN_EXECUTION_FAILED,
+  SUBMISSION_OUTCOME_UNKNOWN,
+  classifySubmitThrow,
+} from './owner-signed-failure.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
 
 export const HYBRID_SIGNER_ABI = [
@@ -188,7 +193,34 @@ export function encodeSignerAction(
 // mirrors an invariant the account itself enforces on-chain, and dropping to
 // no signers bricks the account rather than merely making it unrecoverable.
 
-export type SignerChangeFailure = { status: 409 | 400 | 502; error: string; details?: string }
+/**
+ * A refusal from a prepare/submit on the owner's hybrid account.
+ *
+ * #4820 widened it with the two fields a caller must BRANCH on rather than
+ * read. `error` stays the human sentence every caller already shows; the
+ * optional fields are additive, so a caller that only reads `error` is
+ * unaffected.
+ *
+ * - `error_code: 'submission_outcome_unknown'` — the operation was SENT and
+ *   its answer (or its receipt) was lost. It may have moved funds. `error`
+ *   says so, and `user_op_hash` names the operation the bundler received.
+ * - `error_code: 'onchain_execution_failed'` — a KNOWN failure: an explicit
+ *   pre-send rejection, or an operation that landed and reverted (nothing
+ *   moved). Retrying is safe.
+ *
+ * The vocabulary matches the agent payment route's
+ * (`modules/payments/sign-payment.ts`), so one cause reads the same on both
+ * rails.
+ */
+export type SignerChangeFailure = {
+  status: 409 | 400 | 502
+  error: string
+  details?: string
+  /** #4820: present on the failures a caller must branch on. */
+  error_code?: typeof SUBMISSION_OUTCOME_UNKNOWN | typeof ONCHAIN_EXECUTION_FAILED
+  /** #4820: the 4337 UserOperation hash — present on `submission_outcome_unknown`. */
+  user_op_hash?: string
+}
 
 /**
  * Shape-check the signed envelope a submit must carry.
@@ -304,6 +336,7 @@ export async function submitSignerChange(
     }
   }
 
+  let result: { txHash: string | null }
   try {
     const treasury = await createTreasuryOps({
       ownerAddress: account.config.ownerAddress,
@@ -317,11 +350,31 @@ export async function submitSignerChange(
     const revived = JSON.parse(JSON.stringify(user_operation), (_k, v) =>
       typeof v === 'string' && /^\d+n$/.test(v) ? BigInt(v.slice(0, -1)) : v,
     )
-    const result = await treasury.submitCall(
+    result = await treasury.submitCall(
       { userOperation: revived, userOpHash: '0x' as Hex, signingTypedData: null, treasuryAddress: treasury.treasuryAddress },
       signature as Hex,
     )
+  } catch (err) {
+    // #4821: the outcome-unknown variant is NOT a failure. The operation was
+    // SENT and its answer (or its receipt) was lost, so it may have changed
+    // the signer set — the owner must not be offered a second signature for
+    // the same change. The hash the bundler received rides the answer so
+    // support can look the operation up; it is NOT a transaction hash.
+    return {
+      ok: false,
+      failure: classifySubmitThrow(err, {
+        unknown: 'The signer change may have gone through',
+        known: 'Signer change failed',
+      }),
+    }
+  }
 
+  // The op LANDED. A throw from the sync below is not "nothing happened": the
+  // signer set has no on-chain reader (`modules/ops/onchain.ts`), so Haven
+  // cannot tell a landed-but-unrecorded change from a lost one. The answer
+  // carries no `error_code`, which is what makes the dashboard treat it as
+  // unconfirmed rather than as a safe retry.
+  try {
     if (body.action === 'add_passkey' && body.passkey) {
       await addAccountPasskey(account.accountId, {
         keyId: String(body.passkey.key_id),
@@ -335,8 +388,15 @@ export async function submitSignerChange(
     } else if (body.action === 'remove_owner') {
       await clearAccountOwnerAddress(account.accountId)
     }
-    return { ok: true, txHash: result.txHash }
   } catch (err) {
-    return { ok: false, failure: { status: 502, error: 'Signer change failed', details: safeDetails(err) } }
+    return {
+      ok: false,
+      failure: {
+        status: 502,
+        error: 'The signer change landed but Haven could not record it',
+        details: safeDetails(err),
+      },
+    }
   }
+  return { ok: true, txHash: result.txHash }
 }

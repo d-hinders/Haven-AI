@@ -1711,3 +1711,233 @@ describe('haven_quote_x402 #3967 — over-budget / expected_amount / denial stop
     expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
   })
 })
+
+describe('haven_quote_x402 #4830 — a stated expected_amount is never skipped silently', () => {
+  // The agent read only chooses BETWEEN the merchant's erc7710 and standard
+  // options, so the comparison is decided without it wherever that choice
+  // cannot change the answer; when it genuinely cannot be made the result says
+  // so and stops. Never `safe_to_continue: true` on a price nobody compared.
+  const FACILITATOR = '0x4444444444444444444444444444444444444444'
+  const STANDARD_ATOMIC = '1500000' // 1.5 USDC — the fixture's maxAmountRequired
+  const ERC7710_ATOMIC = '2500000' // 2.5 USDC
+  const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+
+  /** A merchant advertising a standard entry and an erc7710 one at `erc7710Atomic`. */
+  function twoEntries(erc7710Atomic: string) {
+    return {
+      ...PAYMENT_REQUIRED,
+      accepts: [
+        ...PAYMENT_REQUIRED.accepts,
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          amount: erc7710Atomic,
+          maxAmountRequired: erc7710Atomic,
+          extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: [FACILITATOR] },
+        },
+      ],
+    }
+  }
+
+  /** The cross-network USDC fixture: Base-Sepolia USDC advertised on Base mainnet. */
+  const UNKNOWN_DECIMALS_PAYMENT_REQUIRED = {
+    ...PAYMENT_REQUIRED,
+    accepts: [
+      {
+        ...PAYMENT_REQUIRED.accepts[0],
+        network: 'eip155:8453',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      },
+    ],
+  }
+
+  function stubQuote(
+    paymentRequired: unknown,
+    agentRoute: Record<string, unknown>,
+    extra: Record<string, unknown> = {},
+  ) {
+    stubFetch({
+      'GET /paid': {
+        status: 402,
+        responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(paymentRequired)) },
+      },
+      'GET /machine-payments/agent': agentRoute,
+      ...extra,
+    })
+  }
+
+  const READ_500 = { status: 500, body: {} }
+  const READ_401 = { status: 401, body: { error: 'unauthorized' } }
+  const READ_403 = { status: 403, body: { error: 'forbidden' } }
+
+  it('decides a mismatch WITHOUT the agent read: one entry at 1.5, expected 0.10, read 500', async () => {
+    stubQuote(PAYMENT_REQUIRED, READ_500)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '0.10',
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(true)
+    expect(result.data.price_comparison_made).toBeUndefined()
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.next_arguments).toBeUndefined()
+    expect(result.data.next_tool_omitted_reason).toBeDefined()
+    // The quote data itself is still returned.
+    expect(result.data.amount).toBe('1.5')
+    // No warning on a stopped quote invites the agent to proceed.
+    expect(result.data.warnings).toBeUndefined()
+    // The expectation already decided the stop — the budget call is not spent.
+    expect(recordedCalls().find((c) => c.url.includes('/machine-payments/budget-precheck'))).toBeUndefined()
+  })
+
+  it('decides a MATCH without the agent read: one entry at 1.5, expected 1.5, read 500', async () => {
+    stubQuote(PAYMENT_REQUIRED, READ_500)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '1.5',
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(false)
+    expect(result.data.price_comparison_made).toBeUndefined()
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
+  })
+
+  it('decides a mismatch when the stated price equals NEITHER of two differently priced entries', async () => {
+    stubQuote(twoEntries(ERC7710_ATOMIC), READ_500)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '0.10',
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(true)
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_arguments).toBeUndefined()
+  })
+
+  it('decides when both entries carry the SAME authorization amount, read 500', async () => {
+    stubQuote(twoEntries(STANDARD_ATOMIC), READ_500)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '1.5',
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(false)
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
+  })
+
+  it('NOT COMPARED: two entries priced differently, expected equal to exactly one, read 500', async () => {
+    stubQuote(twoEntries(ERC7710_ATOMIC), READ_500)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '1.5', // the standard entry's amount; the erc7710 one is 2.5
+      }),
+    )
+    // The result SAYS the comparison was not made — by name.
+    expect(result.data.price_comparison_made).toBe(false)
+    expect(result.data.price_comparison_not_made_cause).toBe('agent_read_failed')
+    expect(result.data.price_differs_from_expected).toBeUndefined()
+    // No `safe_to_continue: true`, no prefilled cap, no pay step.
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_tool).toBeUndefined()
+    expect(result.data.next_arguments).toBeUndefined()
+    expect(result.data.next_arguments?.max_amount_human).toBeUndefined()
+    // The step follows the cause: a transient read failure is worth one re-quote.
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+    expect(result.data.next_tool_omitted_reason).toBeDefined()
+    // The quote object itself is still returned.
+    expect(result.data.payment_required).toBeDefined()
+    expect(result.data.amount).toBe('1.5')
+    // The prose says the comparison was not made — never that the price
+    // differs, and never the deposit-address fallback.
+    expect(result.data.reason).toContain('NOT compared')
+    expect(result.data.reason).not.toContain('does not match')
+    expect(result.data.reason).not.toContain('differs')
+    expect(result.data.reason).not.toContain('deposit address')
+    // No warning on the same result tells the agent to proceed.
+    expect(result.data.warnings).toBeUndefined()
+    // The budget pre-check is not spent on a quote that is stopping.
+    expect(recordedCalls().find((c) => c.url.includes('/machine-payments/budget-precheck'))).toBeUndefined()
+  })
+
+  it('NOT COMPARED with a REFUSED read (401): the step stops instead of re-quoting', async () => {
+    stubQuote(twoEntries(ERC7710_ATOMIC), READ_401)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '1.5',
+      }),
+    )
+    expect(result.data.price_comparison_made).toBe(false)
+    expect(result.data.price_comparison_not_made_cause).toBe('agent_read_refused')
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_arguments).toBeUndefined()
+    expect(result.data.reason).toContain('refused')
+  })
+
+  it('NOT COMPARED with a REFUSED read (403): same stop', async () => {
+    stubQuote(twoEntries(ERC7710_ATOMIC), READ_403)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '1.5',
+      }),
+    )
+    expect(result.data.price_comparison_not_made_cause).toBe('agent_read_refused')
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+  })
+
+  it('NOT COMPARED on UNKNOWN DECIMALS: the cross-network USDC fixture stops', async () => {
+    stubQuote(UNKNOWN_DECIMALS_PAYMENT_REQUIRED, { status: 200, body: DELEGATION_AGENT })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '0.10',
+      }),
+    )
+    expect(result.data.price_comparison_made).toBe(false)
+    expect(result.data.price_comparison_not_made_cause).toBe('unknown_decimals')
+    expect(result.data.price_differs_from_expected).toBeUndefined()
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_arguments).toBeUndefined()
+    expect(result.data.reason).toContain('NOT compared')
+    expect(result.data.reason).not.toContain('does not match')
+    expect(result.data.reason).not.toContain('deposit address')
+  })
+
+  it('a stated price FINER than the token scale is a decided mismatch (hosted parity)', async () => {
+    stubQuote(PAYMENT_REQUIRED, { status: 200, body: DELEGATION_AGENT })
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({
+        url: 'http://merchant.test/paid',
+        expected_amount: '0.1234567', // 7 decimals against a 6-decimal token
+      }),
+    )
+    expect(result.data.price_differs_from_expected).toBe(true)
+    expect(result.data.price_comparison_made).toBeUndefined()
+    expect(result.data.safe_to_continue).toBe(false)
+    expect(result.data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(result.data.next_arguments).toBeUndefined()
+  })
+
+  it('UNCHANGED: with no expected_amount a failed read changes nothing', async () => {
+    stubQuote(PAYMENT_REQUIRED, READ_500)
+    const result = ok<Record<string, any>>(
+      await handlers().haven_quote_x402({ url: 'http://merchant.test/paid' }),
+    )
+    expect(result.data.price_differs_from_expected).toBeUndefined()
+    expect(result.data.price_comparison_made).toBeUndefined()
+    expect(result.data.safe_to_continue).toBe(true)
+    expect(result.data.next_arguments?.max_amount_human).toBe('1.5')
+  })
+})

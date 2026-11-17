@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-11-08"
+last-verified: "2026-11-12"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -212,7 +212,11 @@ under #2871 and is not a contract surface here.
 every relayer-paid operation (deploys and sweeps; Safe execs and allowance
 transfers too, until #1440 deleted them) runs a per-identity window budget before the relayer signs (over-cap → 429,
 the intent/sweep left retryable, never burned) and records its submitted txs
-with receipt gas numbers (`relayer_gas_events`) for attribution. Direction of
+with receipt gas numbers (`relayer_gas_events`) for attribution. Since #4828
+that 429 body also carries a typed `error_code: 'relayer_budget_exceeded'` (one
+value for both rules), so the hosted MCP's error mapper answers the stop from
+the code instead of matching on the English message; the code is additive and
+changes no decision on this rail. Direction of
 failure is the OPPOSITE of the money-path gates and deliberate: a database
 error fails **open**, because this guard protects the shared gas sponsor's
 availability while funds stay caveat-gated on-chain regardless — failing
@@ -228,6 +232,17 @@ monitoring only — no budget counts it, no reader of `relayer_gas_events`
 (`gas_sponsored_ops`, `relayerSpendSummary`, `assertRelayerBudget`) sees it —
 and a recording failure is swallowed: metrics can never gate a payment. See
 `docs/operations/sponsored-gas.md`.
+
+**Reconciled confirms (#4819) — the same booking, no authority move:** a
+delegation-rail submit whose answer was lost is booked outcome-pending
+(`submitted`, the operation hash recorded) and resolved later by the submission
+reconciler from the bundler's receipt index. A reconciler confirm now runs the
+same booking the sign route runs — the fiat capture in the confirm write, the
+machine-payment evidence, the accounting underlag and the first-payment event —
+through one compare-and-set, so exactly one writer books a payment and the
+loser runs no side effect. Nothing here signs, broadcasts or widens a
+delegation: the reconciler only reads a receipt for a hash the route already
+recorded, and the change is what Haven records after the signer has signed.
 
 ## 3. Delegation custody semantics (#828's contract)
 
@@ -544,6 +559,50 @@ transfer calldata, scheme chosen by the device (#1086), and no Haven-held key
 anywhere (invariants 5/7/12/13 unchanged). Sponsorship pays gas only; the
 transfer itself is bounded by nothing but the owner's signature, which is the
 point — it is the owner's own money.
+
+**An unknown outcome is never booked as a failure (#4820).** The submit route
+answers the rail's typed outcome-unknown error with `error_code:
+submission_outcome_unknown` and the operation hash, and the dashboard's Send
+dialog then offers one action, Close — no retry. That is a spend-path
+restriction, not a new authority: the submit body carries no idempotency key,
+so a retry after a lost answer would be a SECOND operation with the same
+recipient and amount. A known failure (an explicit pre-send rejection, or an
+operation that landed and reverted) keeps `Transfer failed` plus
+`error_code: onchain_execution_failed`, and retrying there is safe because
+nothing moved. The route writes no owner-transfer attribution record for an
+unknown outcome — the record needs the transaction hash of a landed transfer —
+and a landed transfer still appears in Activity without it, because the record
+is attribution only.
+
+**The same rule covers every other owner-signed operation (#4821).** The two
+signer-change submits, the single and batch delegation revocations, and the
+re-key's revoke all go through the same `submitCall`, and each now answers the
+typed outcome-unknown error as `submission_outcome_unknown` with the operation
+hash instead of "… failed". The dashboard states differ per operation because
+what Haven can do next differs:
+
+- **Revocations heal at prepare.** Both revocations read the disabled hashes
+  on-chain before preparing, and `disableDelegation` reverts on an
+  already-disabled delegation, so a retry after a landed-but-unconfirmed revoke
+  converges on the revoked database state without a second on-chain operation.
+  The dashboard's Stop re-reads the chain at prepare, which is why it may stay
+  available.
+- **The signer set has no on-chain reader** (`modules/ops/onchain.ts`), so a
+  landed-but-unconfirmed signer change cannot be reconciled by Haven. Its
+  unconfirmed state offers no retry: the card re-reads the signer set and the
+  owner decides. A throw from the post-landing storage sync answers "landed but
+  Haven could not record it" with no `error_code`, which the dashboard reads as
+  unconfirmed for the same reason.
+- **The re-key's revoke has no disabled-on-chain read**, so its unconfirmed
+  state offers only Close; reopening runs preflight, which re-reads the stage.
+
+A known failure (an explicit pre-send rejection, or an operation that landed
+and reverted) keeps each route's existing sentence plus
+`error_code: onchain_execution_failed`, and retrying there is safe because
+nothing moved. No handler writes its database state before `submitCall`
+returns, so an unconfirmed operation leaves the record saying it did not
+happen — which is exactly why the dashboard must not present it as a plain
+failure.
 
 **The signer set is symmetric (#1087, #1199):** enrolling an EOA owner is not
 a one-way door — `remove_owner` encodes `transferOwnership(address(0))` through
@@ -1802,3 +1861,42 @@ Historical verification records for this document are kept in the [archive](../a
 > than a fourth copy of either, so the rail filter and the #3755 netting are
 > the same ones §8 already describes. The rest of this document was not re-read
 > for it, and `last-verified` is not bumped.
+
+> **#4808 (2026-11-11).** This diff touches `packages/sdk/src/client.ts` in
+> this document's coverage list. `HavenClient.executeTool` gained the missing
+> `haven_sweep_delegate` branch: `havenTools.claude()` and `havenTools.openai()`
+> both advertised the tool, but a model that called it got
+> `Unknown tool: haven_sweep_delegate`. The branch calls `this.sweepDelegate()`
+> — the method the local MCP's handler already calls — and returns its result
+> as a plain object. It reads nothing from `input`, so a model cannot choose an
+> amount, an asset or a destination: the sweep goes to
+> `getAgent().accountAddress`, the account Haven's API reports for this agent,
+> exactly as §8 describes. It needs the delegate key the embedding process
+> already holds, and nothing new is granted. **This adds one more caller that
+> can trigger the same sweep, as the local MCP already can** — the residual
+> §8 records (#3375 names it, does not close it) is unchanged, not widened:
+> an agent can trigger a sweep the user did not ask for, which returns funds to
+> the reported account, and under a compromised Haven that destination could be
+> redirected. The same diff also replaces the backend's settlement-evidence
+> `message` in two client layers (the local MCP handler and
+> `executeTool('get_payment_status')`) because it names a hosted-only tool;
+> that is prose about a state the backend already reports, and it changes no
+> phase, next action, stored value or refusal. The rest of this document was
+> not re-read for it, and `last-verified` is not bumped.
+
+> **#4830 (2026-11-12).** This diff touches
+> `packages/mcp-server/src/tools/support/quote-response.ts` in this document's
+> coverage list. The change is the quote-time `expected_amount` comparison:
+> when the stated price cannot be compared (the agent read failed or was
+> refused, no option this agent can pay was selected, or the token's decimals
+> are unknown) the quote now says so — `price_comparison_made: false`,
+> `safe_to_continue: false`, no prefilled cap and no pay step — instead of
+> answering as if no expectation had been stated. It is ADVISORY guidance on a
+> read-only quote: it creates no payment, signature, funding intent or
+> delegation, and it can only ever add a STOP where the surface previously
+> said "safe to continue". The on-chain budget and the delegation policy
+> remain the actual gate, and the quote-time budget pre-check's own perimeter
+> (§8's fail-open degrade) is unchanged — the check is simply skipped on a
+> quote that is already stopping, as it already was on a decided mismatch. No
+> authority, custody, signer or settlement fact changes. The rest of this
+> document was not re-read for it, and `last-verified` is not bumped.

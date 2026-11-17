@@ -233,9 +233,23 @@ with different bytes (Accounted). A re-claim of a row with NO pin (a pre-deploy
 used — instead of letting a settlement recorded since re-book over it; a row
 that ever rendered under this build always carries its pin. `erc7710` payments
 are one transaction whose
-hash already is the settlement: they are never deferred and `txHashIsFunding`
+hash already is the settlement: they are never deferred by the #3767 grace (the
+#4876 merchant-receipt wait still holds them) and `txHashIsFunding`
 is always false. Retired rails carry `txHash: null` and render exactly as they
 did before this contract existed.
+
+The hash is only one of the render inputs that can move between attempts.
+#4824 pins the rest — the merchant receipt (the seller block, the
+transaction kind, and since #4876 the receipt lines and VAT, with a
+`receiptLines` marker so a pre-#4876 pin renders no lines), the delivery reference, the purchase group / parent receipt
+and the catalog country, and since #4877 the product sources — at the payment's FIRST render
+(`pinUnderlagInputs`, stored beside the booked-hash pin in
+`payment_intents.machine_metadata`), and `loadReceiptUnderlag` renders every
+retry from that pin. A connector that fails before any upload request (no
+connection, no company id, a render failure) writes no pin, so its retry
+renders whatever the sources hold by then — nothing exists at the provider to
+collide with. Template drift across a deploy stays the accepted risk it
+already is.
 
 ## What kind of transaction it is (#4532)
 
@@ -252,6 +266,17 @@ kind, so an agent cannot set it, and a payment with no derivable signal is
 description names the counterparty's canonical address
 (`0x1517…799a (transfer)`), because it has no merchant name and no resource
 host to name.
+
+**The product line is separate (#4877).** `FeedTransaction.productSources`
+carries what was bought when the merchant's receipt states no lines: the
+`merchant_catalog.name` for the resource URL (only when exactly one live
+`operator` row matches; never a `bazaar` row or the unverified wire
+`catalogName`), the quote description
+(`machine_metadata.description`, caller-relayed) and the agent's
+`delivery_reference`, each cleaned and bounded in `product-sources.ts`. They
+print beside `Description`, never in it, each under its own label, so
+`description` stays derived and agent-proof as above. The ladder and the
+labels are in [`accounting-feed.md`](../../../../../docs/operations/accounting-feed.md).
 
 A connector carries the two values where its API allows it — Fortnox's
 free-text `Comments` field does, with `/` folded to `-` for its character

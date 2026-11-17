@@ -411,6 +411,8 @@ describe('machine payment sweep routes', () => {
 
       expect(res.statusCode).toBe(429)
       expect(res.json().error).toMatch(/budget/i)
+      // #4828: the typed code the hosted mapper answers the stop from.
+      expect(res.json().error_code).toBe('relayer_budget_exceeded')
 
       // The claim MUST release back to 'prepared', never 'failed' — a
       // 'failed' sweep here would strand the funds path (#717).

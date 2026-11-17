@@ -24,14 +24,21 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   formatUsdc,
   isSettlementMethod,
+  isProductOffered,
   merchantEnvironmentForChain,
+  offeredProducts,
+  productReceivingAddress,
+  productSettlementKind,
+  productToolArgs,
   settlementMethodsForProduct,
   type ProductId,
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
+import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from './tax-declaration.js'
+import { recordStripePayment, type StripeRecording } from './stripe.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
-import type { SettlementClient } from './x402.js'
+import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
 export interface DemoMerchantServerOptions {
   merchantAddress: Address
@@ -45,6 +52,21 @@ export interface DemoMerchantServerOptions {
    * reports `passport: null`.
    */
   passport?: PassportVerifierConfig
+  /**
+   * #4851: true when Coinbase's facilitator is configured (both CDP variables
+   * set and its client built). Only then is a `cdp` product offered: absent,
+   * it is missing from `list_products`, discovery, the tool list and the
+   * payment gate, and `/healthz` has no `cdp` block.
+   */
+  cdpConfigured?: boolean
+  /**
+   * #4853: Stripe recording, present only when both Stripe variables are set
+   * and the recorded product's price is a whole number of cents. Its
+   * `depositAddress` is the recorded product's receiving address, and every
+   * settled payment for that product is recorded as a PaymentIntent. Absent,
+   * the product keeps `MERCHANT_ADDRESS` and `/healthz` has no `stripe` block.
+   */
+  stripe?: StripeRecording
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -231,6 +253,42 @@ async function handle(
       network: `eip155:${CHAIN_ID}`,
       mcp_url: `${options.baseUrl}${options.path}`,
       ...(settlement ? { settlement } : {}),
+      // #4851: present only when configured, so a merchant without CDP keeps
+      // its /healthz byte-identical. Names no credential, only the fact.
+      ...(options.cdpConfigured
+        ? {
+            cdp: {
+              configured: true,
+              facilitator: 'coinbase-cdp',
+              products: offeredProducts({ cdpConfigured: true })
+                .filter((product) => productSettlementKind(product) === 'cdp')
+                .map((product) => product.id),
+            },
+          }
+        : {}),
+      // #4853: present only when Stripe recording is on, so a merchant without
+      // it keeps its /healthz byte-identical. `record_failures` is the counter
+      // the issue asks for; it is process-local (the merchant sleeps after
+      // ~10 minutes), so the durable signal is the `[stripe] record_failed
+      // tx=<hash>` log line the reconciliation runbook greps for.
+      // #4866: `recorded` counts only PaymentIntents Stripe accepted
+      // (`succeeded`); `pending` and `declined` count the ones it had not
+      // decided by the bound and the ones it declined (`[stripe]
+      // record_declined`, permanent for that transaction).
+      ...(options.stripe
+        ? {
+            stripe: {
+              configured: true,
+              deposit_address: options.stripe.depositAddress,
+              api_version: options.stripe.apiVersion,
+              network: options.stripe.network,
+              recorded: options.stripe.stats().recorded,
+              pending: options.stripe.stats().pending,
+              declined: options.stripe.stats().declined,
+              record_failures: options.stripe.stats().failed,
+            },
+          }
+        : {}),
     })
     return
   }
@@ -285,7 +343,7 @@ async function handle(
     return
   }
 
-  const paymentToolInfo = extractPaymentToolInfo(body)
+  const paymentToolInfo = extractPaymentToolInfo(body, { cdpConfigured: Boolean(options.cdpConfigured) })
   const session = await getSession(req, body, options, sessions)
 
   let settled: SettledPayment | undefined
@@ -294,11 +352,39 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
+    // #4855: the buyer's signed tax declaration, if this paid request carried
+    // one. Verified against the payer the merchant just settled from — the
+    // same key that signed the payment — and treated as absent on ANY failure,
+    // so a malformed declaration can never turn a settled purchase into an
+    // error. Display only: it changes the buyer block and the VAT treatment,
+    // never the price.
+    const taxDeclaration = acceptTaxDeclaration({
+      header: firstHeader(req.headers[X_TAX_DECLARATION_HEADER.toLowerCase()]),
+      payer: settled.from,
+      chainId: CHAIN_ID,
+    })
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
-    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId)
+    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
+      receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
+        stripeDepositAddress: options.stripe?.depositAddress,
+      }),
+      taxDeclaration,
+    })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
+    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
+    // has already moved, so a Stripe refusal, timeout or network error must
+    // never delay or refuse the goods. A failure is logged as
+    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
+    // /healthz. A payment served through recovery without a transaction hash
+    // (#4851) records nothing here — the reconciliation script picks it up.
+    // #4866: and only a payment to the CURRENT deposit address — one recovered
+    // to the previous address is logged as `not_recorded`, never sent.
+    // #4880: after the receipt, so the record carries its number, VAT and
+    // buyer keys. Reading the declaration and building the receipt are
+    // synchronous, so this delays nothing.
+    recordStripePayment(options.stripe, paymentToolInfo.product, settled, receiptInvoice.json)
   }
 
   try {
@@ -320,6 +406,12 @@ async function handlePaymentGate(
   paymentToolInfo: PaymentToolInfo,
 ): Promise<SettledPayment | null> {
   const { productId, product, description, settlementMethod } = paymentToolInfo
+  // #4850: the PRODUCT names the address its payment is made out to; the
+  // merchant-wide address is only its default. #4853: the Stripe-recorded
+  // product's address is the deposit address when Stripe is on.
+  const receivingAddress = productReceivingAddress(product, options.merchantAddress, {
+    stripeDepositAddress: options.stripe?.depositAddress,
+  })
 
   // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
   // the unpaid one that would receive the 402 challenge AND the agent's
@@ -328,12 +420,15 @@ async function handlePaymentGate(
   // caught here too (the drain test in http.test.ts). Skip the QA fixture
   // that settles nothing on-chain (`isSkipSettleProduct`) — a drained wallet
   // cannot block a settlement that never runs.
-  if (!isSkipSettleProduct(productId) && (await refuseIfNotReady(res, options))) {
+  // #4851: nor a product Coinbase's facilitator settles — CDP pays that gas,
+  // not this merchant's wallet (the same per-product exemption).
+  const settlement = productSettlementKind(product)
+  if (!isSkipSettleProduct(productId) && settlement !== 'cdp' && (await refuseIfNotReady(res, options))) {
     return null
   }
 
   const paymentRequired = options.paymentProcessor.buildPaymentRequired({
-    merchantAddress: options.merchantAddress,
+    merchantAddress: receivingAddress,
     amountUsdc: product.price_usdc,
     resource: `${options.baseUrl}${options.path}`,
     description,
@@ -359,9 +454,10 @@ async function handlePaymentGate(
     return await options.paymentProcessor.verifyAndSettle({
       productId,
       paymentHeader,
-      merchantAddress: options.merchantAddress,
+      merchantAddress: receivingAddress,
       expectedAmount: product.price_usdc,
       paymentRequired,
+      settlement,
     })
   } catch (err) {
     // A PaymentError is a DECISION: the merchant looked at the payment and
@@ -375,7 +471,9 @@ async function handlePaymentGate(
     // silence cost a day of QA triage on 2026-08-17: six red legs whose only
     // evidence was a generic 402.
     if (err instanceof PaymentError) {
-      writePaymentRequired(res, options, withReason(paymentRequired, err.message))
+      // #4851: a CDP-path refusal carries its own decision code; every other
+      // refusal has none, as before.
+      writePaymentRequired(res, options, withReason(paymentRequired, err.message, err.reasonCode))
       return null
     }
 
@@ -492,6 +590,10 @@ async function getSession(
     buildPaymentRequired: options.paymentProcessor.buildPaymentRequired,
     settlementMethods: options.settlementMethods,
     passport: options.passport,
+    cdpConfigured: options.cdpConfigured,
+    // #4853: the in-band quote must name the same receiving address the HTTP
+    // 402 does, so the deposit address travels with the session's config.
+    stripeDepositAddress: options.stripe?.depositAddress,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
@@ -555,8 +657,8 @@ function getPaymentHeader(req: IncomingMessage): string | undefined {
 function withReason<T extends { error?: string }>(
   paymentRequired: T,
   reason: string,
-  reasonCode?: FaultReasonCode,
-): T & { reason_code?: FaultReasonCode } {
+  reasonCode?: FaultReasonCode | DecisionReasonCode,
+): T & { reason_code?: FaultReasonCode | DecisionReasonCode } {
   const { error: _default, ...rest } = paymentRequired
   return {
     error: reason,
@@ -564,7 +666,7 @@ function withReason<T extends { error?: string }>(
     // sites, which keep their own specific message and no generic code.
     ...(reasonCode ? { reason_code: reasonCode } : {}),
     ...rest,
-  } as T & { reason_code?: FaultReasonCode }
+  } as T & { reason_code?: FaultReasonCode | DecisionReasonCode }
 }
 
 function writePaymentRequired(
@@ -611,7 +713,7 @@ function buildDiscovery(
     default_settlement_method: settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
       ? DEFAULT_SETTLEMENT_METHOD
       : settlementMethods[0],
-    products: Object.values(PRODUCTS).map((product) => ({
+    products: offeredProducts({ cdpConfigured: Boolean(options.cdpConfigured) }).map((product) => ({
       id: product.id,
       name: product.name,
       category: product.category,
@@ -620,7 +722,7 @@ function buildDiscovery(
       default_settlement_method: settlementMethods.includes(product.x402.defaultSettlementMethod)
         ? product.x402.defaultSettlementMethod
         : settlementMethods[0],
-      tools: product.category === 'vpn' ? ['buy_vpn'] : ['buy_cloud_storage'],
+      tools: [productToolArgs(product).toolName],
       // #2989: same shape list_products' structuredContent carries — see
       // `isSkipSettleProduct` in x402.ts. Absent for every other product.
       ...(isSkipSettleProduct(product.id) ? { qa_fixture: SKIP_SETTLE_QA_FIXTURE } : {}),
@@ -628,7 +730,7 @@ function buildDiscovery(
   }
 }
 
-function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
+function extractPaymentToolInfo(body: unknown, opts: { cdpConfigured: boolean }): PaymentToolInfo | null {
   if (!body || typeof body !== 'object') return null
   const rpc = body as Record<string, unknown>
   if (rpc.method !== 'tools/call') return null
@@ -657,10 +759,16 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
       productId = `storage_${tier}` as ProductId
       descriptionSuffix = '1 month of storage'
     }
+  } else if (toolName === 'buy_joke') {
+    productId = 'joke'
+    descriptionSuffix = 'one joke'
   }
 
   if (!productId) return null
   const product = PRODUCTS[productId]
+  // #4851: a product this merchant does not offer is not gated here — its
+  // tool is not registered either, so the MCP layer answers "unknown tool".
+  if (!isProductOffered(product, opts)) return null
   // #2989: the 402 `description` is what the hosted quote/prepare surfaces to
   // the agent BEFORE it signs — the fixture must be disclosed here, not only
   // in `list_products` prose the agent may never re-read at purchase time.
@@ -730,6 +838,8 @@ function applyCorsHeaders(res: ServerResponse): void {
       'MCP-Protocol-Version',
       PAYMENT_SIGNATURE_HEADER,
       LEGACY_PAYMENT_SIGNATURE_HEADER,
+      // #4855: the buyer's signed tax declaration travels on the paid retry.
+      X_TAX_DECLARATION_HEADER,
     ].join(', '),
   )
   res.setHeader('Access-Control-Expose-Headers', `${PAYMENT_REQUIRED_HEADER}, ${PAYMENT_RESPONSE_HEADER}, mcp-session-id`)

@@ -6,7 +6,16 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
+import { receiptNumberForTransaction } from './invoice.js'
 import { formatUsdc } from './products.js'
+import {
+  TAX_DECLARATION_DOMAIN,
+  TAX_DECLARATION_PRIMARY_TYPE,
+  TAX_DECLARATION_TYPES,
+  buildSignedTaxDeclaration,
+  encodeTaxDeclarationHeader,
+  taxPrincipalId,
+} from '@haven_ai/sdk/edge'
 import {
   LEGACY_PAYMENT_SIGNATURE_HEADER,
   PAYMENT_REQUIRED_HEADER,
@@ -304,7 +313,9 @@ describe('demo merchant MCP x402 flow', () => {
 
     expect(duplicate.status).toBe(200)
     expect(duplicateText).toContain(TX_HASH)
-    expect(duplicateText.match(/FAK-2026-\d+/)?.[0]).toBe(text.match(/FAK-2026-\d+/)?.[0])
+    // #4880: either numbering; the number must exist, or the comparison proves nothing.
+    expect(text.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(duplicateText.match(/FAK-[\d-]+/)?.[0]).toBe(text.match(/FAK-[\d-]+/)?.[0])
     expect(submit).toHaveBeenCalledTimes(1)
     // #1273 + review finding on #1302: the cached-duplicate branch must carry
     // the SAME structured summary as the fresh purchase — an agent retrying a
@@ -352,7 +363,8 @@ describe('demo merchant MCP x402 flow', () => {
       settlement_tx_hash: TX_HASH,
     })
     expect(typeof summary.invoice_id).toBe('string')
-    expect(summary.invoice_id).toMatch(/^FAK-\d{4}-\d+$/)
+    // #4880: a payment settled on-chain is numbered from its transaction hash.
+    expect(summary.invoice_id).toBe(receiptNumberForTransaction(TX_HASH))
   })
 
   it('accepts the legacy X-PAYMENT retry header alias', async () => {
@@ -1075,7 +1087,8 @@ describe('display locale and result detail (#1550)', () => {
     expect(enText).toContain('Purchase confirmed')
     expect(svText).toContain('Köp bekräftat')
     // Same invoice number across variants — one document, two renders.
-    expect(svText.match(/FAK-2026-\d+/)?.[0]).toBe(enText.match(/FAK-2026-\d+/)?.[0])
+    expect(enText.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(svText.match(/FAK-[\d-]+/)?.[0]).toBe(enText.match(/FAK-[\d-]+/)?.[0])
     // The replay is byte-identical per variant (ids differ per JSON-RPC call,
     // so compare the tool text, not the envelope).
     const toolText = (raw: string) =>
@@ -1146,5 +1159,186 @@ describe('display locale and result detail (#1550)', () => {
     }
     const svBasic = svBody.result.structuredContent.products.find((p) => p.product_id === 'vpn_basic')
     expect(svBasic?.description).toContain('Essential VPN protection')
+  })
+})
+
+// ── #4855: the buyer's signed tax declaration on the receipt ─────────────────
+// The declaration travels on the paid retry as `X-Tax-Declaration`, signed by
+// the same key that signs the EIP-3009 authorization. `buy_vpn basic` costs
+// 1000 atomic USDC: SE_25 is 800 net + 200 VAT; REVERSE_CHARGE is 1000 net and
+// a zero VAT amount.
+const TAX_CONTENT = {
+  version: 'x402-tax-1',
+  jurisdiction: 'SE',
+  taxableStatus: 'TAXABLE_PERSON',
+  taxId: 'SE559412345601',
+  validUntil: Date.now() + 30 * 24 * 60 * 60 * 1000,
+}
+
+function taxDeclarationHeader(
+  overrides: Partial<typeof TAX_CONTENT> = {},
+  opts: { key?: string; network?: string } = {},
+): string {
+  return encodeTaxDeclarationHeader(
+    buildSignedTaxDeclaration({
+      content: { ...TAX_CONTENT, ...overrides },
+      network: opts.network ?? 'eip155:8453',
+      delegateKey: opts.key ?? PAYER_KEY,
+    }),
+  )
+}
+
+/** A declaration signed by the payer over a WRONG attribution hash. */
+async function wrongAttributionHeader(): Promise<string> {
+  const declaration = {
+    ...TAX_CONTENT,
+    principalId: taxPrincipalId('eip155:8453', privateKeyToAccount(PAYER_KEY).address),
+    principalAttributionHash: `sha-256:${'00'.repeat(32)}`,
+  }
+  const signature = await privateKeyToAccount(PAYER_KEY).signTypedData({
+    domain: TAX_DECLARATION_DOMAIN,
+    types: TAX_DECLARATION_TYPES,
+    primaryType: TAX_DECLARATION_PRIMARY_TYPE,
+    message: { ...declaration, validUntil: BigInt(declaration.validUntil) },
+  })
+  return Buffer.from(JSON.stringify({ ...declaration, signature }), 'utf8').toString('base64url')
+}
+
+/** A valid header with its signature replaced by garbage. */
+function badSignatureHeader(): string {
+  const parsed = JSON.parse(Buffer.from(taxDeclarationHeader(), 'base64url').toString('utf8'))
+  parsed.signature = '0xdeadbeef'
+  return Buffer.from(JSON.stringify(parsed), 'utf8').toString('base64url')
+}
+
+interface PaidPurchase {
+  status: number
+  text: string
+  receipt: Record<string, unknown> | null
+  paymentHeader: string
+}
+
+async function buyVpn(
+  url: string,
+  headers: Record<string, string> = {},
+  args: Record<string, unknown> = { plan: 'basic' },
+): Promise<PaidPurchase> {
+  const unpaid = await postMcp(url, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'buy_vpn', arguments: args },
+  })
+  const paymentRequired = await unpaid.json() as PaymentRequired
+  const paymentHeader = await signedHeader(paymentRequired)
+  const paid = await postMcp(url, {
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: { name: 'buy_vpn', arguments: args },
+  }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader, ...headers })
+  const text = await paid.text()
+  const receiptHeader = paid.headers.get('x-receipt-json')
+  return {
+    status: paid.status,
+    text,
+    receipt: receiptHeader
+      ? JSON.parse(Buffer.from(receiptHeader, 'base64').toString('utf8')) as Record<string, unknown>
+      : null,
+    paymentHeader,
+  }
+}
+
+describe('buyer tax declaration on the receipt (#4855)', () => {
+  it('an accepted Swedish declaration puts the buyer block on the receipt and keeps SE_25', async () => {
+    const { url } = await startServer()
+    const { status, text, receipt } = await buyVpn(url, { 'X-Tax-Declaration': taxDeclarationHeader() })
+
+    expect(status).toBe(200)
+    expect(receipt).not.toBeNull()
+    expect(receipt!.momsbehandling).toBe('SE_25')
+    expect(receipt!.kopare).toMatchObject({
+      deklaration: {
+        land: 'SE',
+        moms_nr: 'SE559412345601',
+        status: 'TAXABLE_PERSON',
+        giltig_till: new Date(TAX_CONTENT.validUntil).toISOString().slice(0, 10),
+      },
+    })
+    // SE_25 VAT lines are unchanged from today.
+    expect(receipt!.belopp_exkl_moms).toBe('0.0008')
+    expect(receipt!.moms_procent).toBe(25)
+    expect(receipt!.moms_belopp).toBe('0.0002')
+    expect(receipt!.totalt_inkl_moms).toBe('0.001')
+    // The rendered invoice in the purchase text carries the same buyer block.
+    expect(text).toContain('Country: SE')
+    expect(text).toContain('VAT reg. no: SE559412345601')
+  })
+
+  it('an accepted declaration from another EU country is REVERSE_CHARGE, with both VAT numbers in English and Swedish', async () => {
+    const { url } = await startServer()
+    const header = taxDeclarationHeader({ jurisdiction: 'DE', taxId: 'DE123456789' })
+    const { status, text, receipt, paymentHeader } = await buyVpn(url, { 'X-Tax-Declaration': header })
+
+    expect(status).toBe(200)
+    expect(receipt!.momsbehandling).toBe('REVERSE_CHARGE')
+    // Net = total = the product price; VAT rate 0 and VAT amount 0.
+    expect(receipt!.belopp_exkl_moms).toBe('0.001')
+    expect(receipt!.totalt_inkl_moms).toBe('0.001')
+    expect(receipt!.moms_procent).toBe(0)
+    expect(receipt!.moms_belopp).toBe('0')
+
+    expect(text).toContain('Reverse charge')
+    expect(text).toContain('SE559412345601')
+    expect(text).toContain('DE123456789')
+
+    // The same settled payment, rendered in Swedish: the note names both VAT
+    // numbers in Swedish too.
+    const sv = await postMcp(url, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'buy_vpn', arguments: { plan: 'basic', locale: 'sv' } },
+    }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader, 'X-Tax-Declaration': header })
+    const svText = await sv.text()
+    expect(sv.status).toBe(200)
+    expect(svText).toContain('Omvänd betalningsskyldighet')
+    expect(svText).toContain('SE559412345601')
+    expect(svText).toContain('DE123456789')
+  })
+
+  it('a purchase without a declaration has no buyer block and keeps SE_25', async () => {
+    const { url } = await startServer()
+    const { status, text, receipt } = await buyVpn(url)
+
+    expect(status).toBe(200)
+    expect(receipt!.momsbehandling).toBe('SE_25')
+    expect((receipt!.kopare as Record<string, unknown>).deklaration).toBeUndefined()
+    expect(receipt!.belopp_exkl_moms).toBe('0.0008')
+    expect(receipt!.moms_procent).toBe(25)
+    expect(receipt!.moms_belopp).toBe('0.0002')
+    expect(text).not.toContain('Country:')
+    expect(text).not.toContain('Reverse charge')
+  })
+
+  it('treats every refused declaration as absent and still completes the purchase', async () => {
+    const { url, submit } = await startServer()
+    const cases: Array<[string, string]> = [
+      ['bad signature', badSignatureHeader()],
+      ['signer is not the payer', taxDeclarationHeader({}, { key: `0x${'02'.repeat(32)}` })],
+      ['principalId names another chain', taxDeclarationHeader({}, { network: 'eip155:84532' })],
+      ['attribution hash does not recompute', await wrongAttributionHeader()],
+      ['expired validUntil', taxDeclarationHeader({ validUntil: Date.now() - 1_000 })],
+    ]
+
+    for (const [label, header] of cases) {
+      const { status, receipt } = await buyVpn(url, { 'X-Tax-Declaration': header })
+      expect(status, label).toBe(200)
+      expect(receipt!.momsbehandling, label).toBe('SE_25')
+      expect((receipt!.kopare as Record<string, unknown>).deklaration, label).toBeUndefined()
+      expect(receipt!.belopp_exkl_moms, label).toBe('0.0008')
+    }
+    // Every purchase settled: the declaration never gates the payment.
+    expect(submit).toHaveBeenCalledTimes(cases.length)
   })
 })

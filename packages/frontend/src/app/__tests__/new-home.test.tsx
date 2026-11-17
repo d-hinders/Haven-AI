@@ -82,14 +82,14 @@ describe('the new home page (#3574)', () => {
     )
   })
 
-  it('step 3 points an agent at /llms.txt with a real link (#4713, owner answer 1(c))', () => {
+  it('step 3 labels /llms.txt as the agents\' setup guide with a real link (#4713, #4674)', () => {
     const { container } = render(<NewSiteHome />)
     const step3 = howParagraphs(container).find((p) =>
       flat(p).startsWith('One command wires in Claude, Codex, Cursor'),
     )
     expect(step3, 'the step 3 paragraph').toBeDefined()
     expect(flat(step3!)).toBe(
-      'One command wires in Claude, Codex, Cursor or any other agent harness. An agent doing this for its user starts at /llms.txt.',
+      'One command wires in Claude, Codex, Cursor or any other agent harness. Setup guide for agents: /llms.txt.',
     )
     const link = step3!.querySelector('a[href="/llms.txt"]')
     expect(link, 'the step 3 /llms.txt link').not.toBeNull()
@@ -98,6 +98,12 @@ describe('the new home page (#3574)', () => {
     expect(link!.closest('[aria-hidden="true"]')).toBeNull()
     // How it works is the tint ground, so the focus ring is offset on it.
     expect(link!.className).toContain('focus-visible:ring-offset-[var(--v2-surface)]')
+    // #4674: a labelled path, not an instruction to an agent. WebFetch
+    // summaries of `/` dropped every agent-addressed pointer while keeping
+    // Step 3's text (runs 43045310759 and 43179789112). The link stays on
+    // /llms.txt, the cold-setup task's scored hook: a direct /for-agents.md
+    // link would score a guessed path (graders.ts onboarding_discovery).
+    expect(step3!.querySelector('a[href="/for-agents.md"]')).toBeNull()
   })
 
   it('has no placeholder href and no founders CTA (decisions 8 and “no dead links”)', () => {

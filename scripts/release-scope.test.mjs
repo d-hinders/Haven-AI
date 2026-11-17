@@ -777,3 +777,58 @@ test('MUTATION: dropping the start-script rule loses the service itself', () => 
   assert.deepEqual(report.deploySurfaces, [], 'without the rule no package is a service')
   assert.equal(report.releaseLever.answer, 'none')
 })
+
+// --- #4809: the payload reaches a pipe whole, whatever its size ---------------
+//
+// `runScope` reads the script's stdout through a pipe, as `release-records.mjs`
+// does. The 0.14.0-alpha.0 cut was the first whose `--json` payload passed the
+// 64 KiB pipe buffer (227 195 bytes: 1069 excluded files), and the script ended
+// with `process.exit()` right after `console.log`, so the reader got the first
+// 65 536 bytes and `JSON.parse` threw.
+
+/** Enough changed files outside any package that the JSON passes the pipe buffer. */
+const bulkChanges = (count = 900) =>
+  Object.fromEntries(Array.from({ length: count }, (_, i) => [`docs/bulk/a-long-enough-directory-name/file-${String(i).padStart(4, '0')}.md`, `${i}\n`]))
+
+test('a --json payload larger than the pipe buffer arrives whole, exit 0 (#4809)', () => {
+  const { status, stdout } = runScope({ changes: bulkChanges(), args: ['--json'] })
+  assert.ok(stdout.length > 65536, `the fixture payload is only ${stdout.length} bytes: it does not pass the pipe buffer`)
+  const report = JSON.parse(stdout)
+  assert.equal(report.excluded.length, 900)
+  assert.equal(status, 0)
+})
+
+test('…and with an unresolved file it still arrives whole, exit 1 (#4809)', () => {
+  const { status, stdout } = runScope({
+    changes: { ...bulkChanges(), 'packages/alpha/src/orphan.ts': 'export const o = 2\n' },
+    args: ['--json'],
+  })
+  assert.ok(stdout.length > 65536)
+  const report = JSON.parse(stdout)
+  assert.deepEqual(report.unresolved.map((u) => u.file), ['packages/alpha/src/orphan.ts'])
+  assert.equal(status, 1, 'the exit code survives the change from process.exit to process.exitCode')
+})
+
+// The mutation proof. Node documents pipe writes as asynchronous on POSIX, so
+// restoring `process.exit()` should cut the payload on Linux as on macOS — but
+// only macOS was measured (Node v24.17.0: the reader gets exactly the 65 536-byte
+// pipe buffer). The byte window asserted below is that measurement, so the
+// proof runs on darwin and is skipped by name elsewhere rather than asserting a
+// number nobody took there. The two tests above run everywhere, and with
+// `process.exit()` restored in the script itself they are the ones that go red.
+test(
+  'the fix is load-bearing: with process.exit() back, the payload is cut at the pipe buffer (#4809)',
+  { skip: process.platform === 'darwin' ? false : 'the truncation size is measured on darwin only; the two tests above guard the fix on every platform' },
+  () => {
+    const { stdout } = runScope({
+      changes: bulkChanges(),
+      args: ['--json'],
+      mutate: (source) => source.replace('process.exitCode = report.unresolved.length > 0 ? 1 : 0', 'process.exit(report.unresolved.length > 0 ? 1 : 0)'),
+    })
+    // Bytes, not characters: the payload holds multi-byte characters, and the cut
+    // can fall inside one (the decoder then yields a replacement character).
+    const bytes = Buffer.byteLength(stdout, 'utf8')
+    assert.ok(bytes >= 65534 && bytes <= 65539, `the old ending no longer truncates at the pipe buffer (got ${bytes} bytes): this proof has stopped proving`)
+    assert.throws(() => JSON.parse(stdout), SyntaxError)
+  },
+)

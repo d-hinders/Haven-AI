@@ -23,7 +23,7 @@ import {
   releaseSweepClaim,
   resolveStrandedEventsForAgent,
 } from '../../infra/repositories/machine-payments.js'
-import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+import { RelayerBudgetExceededError, RELAYER_BUDGET_EXCEEDED_ERROR_CODE } from '../../infra/relayer-spend-guard.js'
 import { getTokenBalance } from '../../infra/chain/relayer-reads.js'
 import { getExplorerUrl } from '../../domain/chains.js'
 import {
@@ -379,7 +379,7 @@ export async function submitSweep(
       // 'prepared' so the sweep can be retried after the window; 'failed'
       // would strand the funds path.
       await releaseSweepClaim(row.id)
-      return { statusCode: 429, body: { error: err.message } }
+      return { statusCode: 429, body: { error: err.message, error_code: RELAYER_BUDGET_EXCEEDED_ERROR_CODE } }
     }
     const errorMsg = err instanceof Error ? err.message : String(err)
     await markSweepFailed(errorMsg, row.id)

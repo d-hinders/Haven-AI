@@ -438,10 +438,13 @@ export function parseCandidates(text) {
 }
 
 /**
- * Pick the census sample. Pure. Candidates arrive newest landing first (the
- * census command walks `git log` from the tip); files that no longer exist at
- * HEAD are skipped, the first CENSUS_BUDGET distinct live files get one census
- * cell each (M1…M5), and up to PROBE_BUDGET probe cells follow (M6, M7).
+ * Pick the census sample. Pure. Candidates arrive in the order the census
+ * command lists them, and the runner takes them in that order whatever it is:
+ * quality-scan block 1 lists money-path guard files that carry no recorded
+ * mutation, oldest first, and falls back to the newest-landing sample when none
+ * is left. Files that no longer exist at HEAD are skipped, the first
+ * CENSUS_BUDGET distinct live files get one census cell each (M1…M5), and up to
+ * PROBE_BUDGET probe cells follow (M6, M7).
  */
 export function selectCensus(entries, cells, exists) {
   const errors = []
@@ -562,7 +565,7 @@ export function censusTable(selection, resultsById, { head, declared }) {
   }
   lines.push('')
   lines.push(
-    `Census at \`${head}\`: ${declared} candidate guard files; ${selection.rows.length} census mutations (one per file, newest landing first) + ${selection.probes.length} probes. ` +
+    `Census at \`${head}\`: ${declared} candidate guard files; ${selection.rows.length} census mutations (one per file, in the census order) + ${selection.probes.length} probes. ` +
       `${counts.caught} caught, ${counts.survived} survived, ${counts.shadowed} shadowed, ${counts['mutation-red']} mutation-red, ${counts.refused} refused, ${counts['not run']} not run.`,
   )
   if (selection.notSampled.length) lines.push(`Not sampled (budget is ${CENSUS_BUDGET}): ${selection.notSampled.map((e) => `\`${e.file}\``).join(', ')}.`)

@@ -130,6 +130,49 @@ describe('haven_discover_tools', () => {
     }
   })
 
+  it('hints a self-submitted (ingestion) MCP row at the by-URL quote tool, never the catalog-id dead end (#4823)', async () => {
+    const base = {
+      description: 'd', category: 'api', rail: 'x402', price_display: null, price_atomic: null,
+      asset: null, network: null, status: 'active', verified_at: '2026-11-12T10:00:00.000Z',
+      domain_verified: true, verified_payable: true,
+    }
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            // Self-submitted: listed to agents, but GET /catalog/:id answers an
+            // agent 404, so haven_quote_catalog_purchase { catalog_id } was a
+            // dead end for exactly this row.
+            { ...base, id: 'cat_ingested', name: 'Self-submitted', resource_url: 'https://self.example.com/mcp', protocol: 'mcp', tool_name: 'summarize', tool_arguments: null, source: 'ingestion' },
+            // Control: an operator MCP row keeps the catalog-id hint.
+            { ...base, id: 'cat_operator', name: 'Curated', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'hello' }, source: 'operator' },
+          ],
+        },
+      },
+    })
+    const result = ok<Array<{ id: string; suggested_tool?: StrictInputToolName; suggested_arguments?: Record<string, unknown> }>>(
+      await handlers().haven_discover_tools({}),
+    )
+
+    const ingested = result.data.find((e) => e.id === 'cat_ingested')!
+    expect(ingested.suggested_tool).toBe('haven_quote_mcp_tool')
+    expect(ingested.suggested_arguments).toEqual({
+      merchant_url: 'https://self.example.com/mcp',
+      tool_name: 'summarize',
+    })
+    // The hint parses under the named tool's strict schema, and it names no
+    // catalog id — the id the agent detail read answers 404.
+    expect(() => parseStrict('haven_quote_mcp_tool', ingested.suggested_arguments)).not.toThrow()
+    expect(ingested.suggested_arguments).not.toHaveProperty('catalog_id')
+
+    // Control: provenance decides, not protocol — an operator MCP row is
+    // served on the detail read and keeps its catalog-id hint.
+    const operator = result.data.find((e) => e.id === 'cat_operator')!
+    expect(operator.suggested_tool).toBe('haven_quote_catalog_purchase')
+    expect(operator.suggested_arguments).toEqual({ catalog_id: 'cat_operator' })
+  })
+
   it('marks catalog prices as indicative (not authoritative)', async () => {
     stubFetch({
       'GET /catalog': {

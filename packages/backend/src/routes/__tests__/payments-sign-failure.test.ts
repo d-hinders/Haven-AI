@@ -204,9 +204,12 @@ describe('POST /payments/:id/sign — failure catch classification (#3494)', () 
     // redacted error never rides the body wholesale.
     expect(typeof body.details).toBe('string')
     expect((body.details as string).length).toBeLessThanOrEqual(301)
-    // The booking write issued (machine_metadata gains the user_op_hash),
-    // and failSubmittedIntent was NEVER reached — no terminal booking.
-    expect(mockQuery.mock.calls.some((c) => /user_op_hash/.test(String(c[0])))).toBe(true)
+    // The booking write issued (machine_metadata gains the outcome-pending
+    // marker), and failSubmittedIntent was NEVER reached — no terminal booking.
+    // #4818: the assertion keys on `submission_outcome`, not `user_op_hash`,
+    // because the claim now records the hash too — the marker is what only the
+    // booking writes.
+    expect(mockQuery.mock.calls.some((c) => /submission_outcome/.test(String(c[0])))).toBe(true)
     expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(false)
     expect(mockQuery.mock.calls.some((c) => /INSERT INTO payment_refusals/.test(String(c[0])))).toBe(false)
   })

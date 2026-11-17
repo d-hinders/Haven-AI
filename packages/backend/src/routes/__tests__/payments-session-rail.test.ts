@@ -657,6 +657,8 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
 
     const withLedger = await injectSign()
     expect(withLedger.statusCode).toBe(429)
+    // #4828: the typed code the hosted mapper answers the stop from.
+    expect(withLedger.json().error_code).toBe('relayer_budget_exceeded')
     const asks = ledgerAsks()
     expect(asks).toHaveLength(1)
     expect(asks[0]).toMatchObject({
@@ -784,6 +786,8 @@ describe('POST /payments — the refusal ledger on the direct paths (#2945)', ()
     expect(response.json().user_op_hash).toBeUndefined()
     // The fail write runs; the outcome-pending booking never does.
     expect(mockQuery.mock.calls.some((c) => /SET status = 'failed'/.test(String(c[0])))).toBe(true)
-    expect(mockQuery.mock.calls.some((c) => /jsonb_build_object/.test(String(c[0])))).toBe(false)
+    // #4818: keyed on the booking's own marker, not `jsonb_build_object` —
+    // the claim now writes machine_metadata too.
+    expect(mockQuery.mock.calls.some((c) => /submission_outcome/.test(String(c[0])))).toBe(false)
   })
 })

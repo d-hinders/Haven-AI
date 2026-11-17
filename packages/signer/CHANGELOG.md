@@ -17,6 +17,12 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
+- **A gateway 502 or a 429 on the signing-context fetch is no longer reported as "Haven refused" (#4829).** All four fetches (`/x402/:id/sign-context`, `/payments/:id/sign-context`, `/task-budgets/:id/sign-context`, `/sub-budgets/:id/sign-context`) now treat "Haven did not answer usably" — a body that is not a JSON object at any non-2xx status, any 5xx, and a 429 — as `SIGN_CONTEXT_UNREACHABLE`, the code a transport failure already gets, with `http_status` carried. The x402 and direct flows offer the existing `typed_data_b64` relay; the task-budget and sub-budget flows keep their no-fallback step. A 429's reason says to re-call the same signer tool with the same arguments once after the wait, citing `Retry-After` when it is whole seconds — the signer never sleeps or re-fetches. `SIGN_CONTEXT_REFUSED` stays for a 4xx other than 429 whose body is a JSON object, so every existing refusal code, hint and `refusalOf` detail is unchanged. No update needed to keep paying.
+
+## 0.14.0-alpha.0 — 2026-11-11
+
+### Fixed
+
 - **`retry_headers` names `PAYMENT-SIGNATURE` alone for an x402 v2 payload (#4754).** It follows the SDK's new version rule: EIP-3009 used to return both names, and a doubled header carrying a merchant's echoed extensions was refused with HTTP 431 after funding. A v1 payload still gets both names. The `haven_x402_sign_header` description says so. It reaches installed agents through this signer release plus a `@haven_ai/connect` release that bumps `signerVersion` in `runtime-manifest.ts`. No update needed to keep paying.
 
 ## 0.13.0-alpha.0 — 2026-10-30

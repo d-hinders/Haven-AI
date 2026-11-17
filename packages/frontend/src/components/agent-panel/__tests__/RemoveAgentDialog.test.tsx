@@ -170,6 +170,27 @@ describe('RemoveAgentDialog', () => {
     )
   })
 
+  // #4821: the batch was sent and its answer was lost, so the budget may
+  // already be stopped. That is NOT the plain failure — the dialog says so and
+  // the next press re-reads the chain before signing anything.
+  it('an outcome-unknown revoke-all says the stop may have landed, never "still live"', async () => {
+    mockRevokeAll.mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    const { onRevokeCredential, onArchive, onClose } = renderDialog(agentFixture())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove agent' }))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toMatch(/could not confirm the budget stop/i),
+    )
+    expect(screen.getByRole('alert').textContent).toMatch(/may already be stopped/i)
+    // It never claims the budget is still live, and it does not file anything.
+    expect(screen.getByRole('alert').textContent).not.toMatch(/can still spend/i)
+    expect(onRevokeCredential).not.toHaveBeenCalled()
+    expect(onArchive).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    // The action stays available: pressing it re-reads the chain first.
+    expect(screen.getByRole('button', { name: 'Remove agent' })).toBeTruthy()
+  })
+
   it('archive failure AFTER a successful revoke-all reports honestly and offers to finish', async () => {
     mockRevokeAll.mockResolvedValue({ ok: true })
     const { onClose } = renderDialog(agentFixture(), {

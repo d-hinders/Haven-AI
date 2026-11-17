@@ -129,3 +129,17 @@ export {
   type SubBudgetChildTypedData,
   type SubBudgetChildExpectation,
 } from './sub-budget-guards.js'
+// #4792: the delegate-key credential file's shared handling. The local MCP and
+// the edge signer each carried a copy of this — the account-address readers and
+// the permission check that warns when the key file is readable beyond its
+// owner. One body each now, on the edge surface both published packages resolve.
+export {
+  permissiveMode,
+  readAccountAddressEnv,
+  readAccountAddressField,
+  stringField,
+  warnIfFilePermissiveWithPrefix,
+  type PermissiveFile,
+  type PermissionLog,
+  type RawAccountAddressFields,
+} from './credential-file.js'

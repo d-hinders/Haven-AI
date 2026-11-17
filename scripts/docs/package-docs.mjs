@@ -626,7 +626,41 @@ export const GOVERNED_PACKAGE_DOCS = [
     // session 404 and 30-minute TTL, the readiness gate's 503 body and 15 s
     // cache, the #3170 revert split and its 120/500-character caps, the
     // DelegationManager pin, the skip-settle guard and migration 102.
-    'last-verified': '2026-10-24',
+    // #4853: new § "Stripe recording" verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/products.ts
+    // (`stripeRecording`, `productReceivingAddress`) and src/http.ts (the
+    // /healthz `stripe` block, the fire-and-forget recording), plus
+    // stripe.test.ts / stripe-recording.test.ts / stripe-reconcile.test.ts.
+    // EDITED: the settlement-paths table's "Receives the USDC" row, the
+    // "no product's does today" sentence (one does now), the /healthz endpoint
+    // description, and a "What It Demonstrates" bullet. The Stripe parameters
+    // and the two API versions were re-read from
+    // docs.stripe.com/payments/machine/x402 on 2026-11-16. The optional
+    // STRIPE_PREVIOUS_DEPOSIT_ADDRESS and its operator note were verified
+    // against src/stripe.ts and src/x402.ts. Nothing else re-verified in this
+    // pass.
+    // #4854: ADDED § "What we learned from Stripe sandbox (#4854)" and one
+    // sentence in § "Reconciliation". Stripe and RPC behaviour there is what a
+    // sandbox run on 2026-11-16 observed, not a repository measurement; its
+    // code claims (the recorder, `findRecorded`, the single `getLogs`, the
+    // previous-address recovery path) were verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/x402.ts and src/http.ts at c7a779d59.
+    // #4866: EDITED § "Stripe recording" (the verdict, the new log lines and
+    // /healthz counters, the current-address rule), § "Reconciliation" (the
+    // windows, the report arrays, the exit-code table), the /healthz paragraph,
+    // a § "Coinbase facilitator" bullet (the recovery search's windows), and
+    // the #4854 section's "Not yet handled" paragraph and 200-block note,
+    // rewritten to say what #4866 changed. Verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/log-range.ts,
+    // src/cdp.ts and src/http.ts. Nothing else re-verified in this pass.
+    // #4880: ADDED "What the record carries" and "The receipt number is
+    // derived from the transaction" to § "Stripe recording", a
+    // § "Reconciliation" bullet, and the `description` / `receipt_url` rows in
+    // the #4854 sandbox table. The two rows are a sandbox probe on 2026-11-17,
+    // not a repository measurement; the rest was verified against
+    // src/stripe.ts, src/invoice.ts, src/stripe-reconcile.ts and src/http.ts.
+    // Nothing else re-verified in this pass.
+    'last-verified': '2026-11-17',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

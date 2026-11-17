@@ -523,7 +523,11 @@ describe('the manifest is wired into routing', () => {
     assert.equal(ROOT_GUARD_RULES.length, ROOT_GUARDS.length)
     for (const [i, guard] of ROOT_GUARDS.entries()) {
       assert.deepEqual(ROOT_GUARD_RULES[i].patterns, [guard.path])
-      assert.deepEqual(ROOT_GUARD_RULES[i].surfaces, ['code', ...guard.jobs])
+      // A manifest path under packages/ is also a package source change, so it
+      // carries `packages` too (#4763) — the rule shadows the packages/* arm,
+      // and a shadowing rule that named fewer surfaces would narrow routing.
+      const workspaceWide = guard.path.startsWith('packages/') ? ['packages'] : []
+      assert.deepEqual(ROOT_GUARD_RULES[i].surfaces, ['code', ...guard.jobs, ...workspaceWide])
     }
   })
 

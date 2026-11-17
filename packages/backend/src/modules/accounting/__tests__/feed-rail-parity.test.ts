@@ -49,6 +49,7 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { registerConnector, clearConnectors, InMemoryConnector } from '../connector.js'
 import { syncUser } from '../feed-orchestrator.js'
 import { recordMachinePaymentEvidenceBaseById } from '../../mpp/evidence.js'
+import { insertMerchantReceiptOnce } from '../../../infra/repositories/machine-payments.js'
 import { runSettlementSweepTick, resetSettlementSweepBackoff } from '../../x402/index.js'
 import { buildSettlementDelegation } from '../../x402/x402-delegation.js'
 import { buildBudgetDelegation } from '../../../rails/delegation-policy.js'
@@ -144,7 +145,23 @@ async function settledEip3009(agentId: string, userId: string) {
     RESOURCE, null, 200,
   ])
   await recordMachinePaymentEvidenceBaseById(id, agentId)
+  await merchantReceiptArrives(id)
   return id
+}
+
+/**
+ * #4876: the feed holds an x402 payment until its merchant receipt arrives
+ * (the receipt wait) — so each rail's payment arrives the way a real paid
+ * request delivers one: the receipt stored right after the settlement
+ * evidence. No zero window, no bypass, the same rule as #3767's fixture above.
+ */
+async function merchantReceiptArrives(intentId: string) {
+  const evidence = await db.query<{ id: string }>(
+    `SELECT id FROM machine_payment_evidence WHERE payment_intent_id = $1`,
+    [intentId],
+  )
+  expect(evidence.rows).toHaveLength(1)
+  await insertMerchantReceiptOnce(evidence.rows[0].id, null, JSON.stringify({ fakturanummer: `FAK-${intentId}` }))
 }
 
 /**
@@ -177,6 +194,7 @@ async function sweptErc7710(agentId: string, userId: string) {
   // Guard the guard: if the sweep silently did nothing, the parity assertion
   // below would still pass by both rails being absent.
   expect(tick.confirmed).toBe(1)
+  await merchantReceiptArrives(id)
   return id
 }
 

@@ -298,6 +298,17 @@ Resume rehydration uses `GET /payments/{id}/resume_state`, followed by the same
 local merchant-proof and retry steps. The deprecated `/x402` alias currently
 remains in use by the SDK but has the same funding semantics.
 
+An authorize replay is answered from the stored intent, never by minting a
+second one. A `submitted` row — the agent settled and the outcome is not booked
+yet — answers `409` with `error_code: "payment_already_submitted"`, the row's
+`payment_id` and `status: "submitted"`, and text that says to read the payment's
+status and not to authorize again (#4826). That answer is produced at the first
+replay lookup, before the hourly cap, scope resolution, the remaining-budget
+read and the funding prepare / deploy check, so a replay is never refused `429`
+or `403` for a payment that already exists. A replay naming a different
+resource, payee, amount, asset, network, facilitator set, task budget or
+sub-budget is a key collision and answers the existing mismatch `409`.
+
 ## Drift Check
 
 The backend test suite checks the public contract in CI, surfaced as a

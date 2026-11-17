@@ -418,7 +418,7 @@ describe('census selection', () => {
     assert.match(parseCandidates('a000007 t7.test.mjs').errors.join(), /no "candidate guard files: N" line/)
     assert.match(parseCandidates('a000007 t7.test.mjs\ncandidate guard files: 2').errors.join(), /declares 2 .* lists 1/)
   })
-  test('five census files, one cell each, newest landing first; then two probes; the rest out of budget', () => {
+  test('five census files, one cell each, in the census order; then two probes; the rest out of budget', () => {
     const { entries } = parseCandidates(CANDIDATES)
     const s = selectCensus(entries, CENSUS_CELLS, (f) => f !== 'gone.test.mjs')
     assert.deepEqual(s.errors, [])
@@ -467,7 +467,7 @@ describe('census selection', () => {
         '| M6 | `t1.test.mjs` | second copy in t1 (`src/guard.mjs`) | 2 → **1 failed**: caught |',
         '| M7 | `t2.test.mjs` | count-only pin in t2 (`src/guard.mjs`) | 2 → **2 failed**: caught |',
         '',
-        'Census at `abc123def`: 9 candidate guard files; 5 census mutations (one per file, newest landing first) + 2 probes. 3 caught, 1 survived, 1 shadowed, 1 mutation-red, 1 refused, 0 not run.',
+        'Census at `abc123def`: 9 candidate guard files; 5 census mutations (one per file, in the census order) + 2 probes. 3 caught, 1 survived, 1 shadowed, 1 mutation-red, 1 refused, 0 not run.',
         'Not sampled (budget is 5): `t2.test.mjs`, `t1.test.mjs`.',
         'Skipped, absent at HEAD: `gone.test.mjs`.',
         'Out of budget, not run: X2, P3.',

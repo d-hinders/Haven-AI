@@ -260,6 +260,29 @@ describeDb('client-version refusal on the real payment routes (#3303)', () => {
     expect(await tableCounts()).toEqual(before)
   })
 
+  it('a SUBMITTED x402 row with the same key IS a replay: the handler answers its typed 409, not 426 (#4826)', async () => {
+    const id = await seedIntent(agent, { status: 'submitted', x402_idempotency_key: 'submitted-key', payment_rail: 'x402' })
+    const before = await tableCounts()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/x402/authorize',
+      headers: { authorization: `Bearer ${agent.apiKey}`, 'x-haven-client': MCP_OLD },
+      payload: { ...X402_BODY, idempotencyKey: 'submitted-key' },
+    })
+    // The payment is in flight: the handler answers from the row with its id,
+    // status and the typed code that says to read the status — never a 426
+    // for a client that is merely replaying its own key.
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({
+      error_code: 'payment_already_submitted',
+      payment_id: id,
+      status: 'submitted',
+    })
+    // Still below a minimum, so the replay carries the required hint.
+    expect(res.json().client_update.required).toBe(true)
+    expect(await tableCounts()).toEqual(before)
+  })
+
   it.each([
     ['POST /payments', '/payments', { send_idempotency_key: 'stale-key' }, { ...PAYMENT_BODY, idempotency_key: 'stale-key' }],
     ['POST /x402/authorize', '/x402/authorize', { x402_idempotency_key: 'stale-key', payment_rail: 'x402' }, { ...X402_BODY, idempotencyKey: 'stale-key' }],

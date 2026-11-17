@@ -77,6 +77,8 @@ function authValue(overrides: Record<string, unknown> = {}) {
   return {
     user: USER,
     loading: false,
+    loadError: false,
+    retryLoad: vi.fn(),
     updateUser: vi.fn(),
     refreshUser: vi.fn().mockResolvedValue(undefined),
     logout: mockLogout,
@@ -315,5 +317,25 @@ describe('OnboardingClient (#1162)', () => {
     )
     expect(screen.queryByLabelText('Network')).toBeNull()
     expect(screen.queryByText(/Your passkey approves everything/)).toBeNull()
+  })
+
+  /**
+   * #4827: a failed READ is not a signed-out session. Onboarding is one of the
+   * two routes that used to bounce the owner to `/login` on any `/auth/me`
+   * failure; it now shows the load-error shape of EmptyState with one Try again
+   * action and stays put.
+   */
+  it('renders the load-error page instead of redirecting when the session read failed', () => {
+    const retryLoad = vi.fn()
+    mockUseAuth.mockReturnValue(authValue({ user: null, loadError: true, retryLoad }))
+
+    render(<OnboardingClient />)
+
+    expect(screen.getByText('Your account could not load')).toBeTruthy()
+    expect(screen.getByText('You are still signed in, and nothing has changed.')).toBeTruthy()
+    expect(mockReplace).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(retryLoad).toHaveBeenCalledTimes(1)
   })
 })

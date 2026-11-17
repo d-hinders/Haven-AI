@@ -561,8 +561,37 @@ export async function expireOverdueIntentsForAgent(
   await db.query(EXPIRE_OVERDUE_INTENTS_FOR_AGENT_SQL, [agentId])
 }
 
+// ── The claim, and the hash it records (#4818) ───────────────────────────────
+//
+// The claim flips the row to `submitted` BEFORE the send, so a sign request
+// that dies between the claim and the route's outcome-pending booking used to
+// leave a row no job selects: `submitted`, no `tx_hash`, and no
+// `machine_metadata.user_op_hash` — the reconciler's only lookup key.
+//
+// #4818 closes that window at the claim. The row already stores the prepared
+// operation's hash in `sign_hash` (`create-payment.ts` and
+// `x402/delegation-authorize.ts` both write `authorization.prepared.userOpHash`
+// there), so the claim copies it into `machine_metadata.user_op_hash` and
+// stamps `submission_claimed: true` beside it. The marker is what makes the
+// intake safe: `markIntentSubmittedForSettlement` (the erc7710 settle claim)
+// writes no metadata at all, and a row claimed by the OLD code carries neither
+// key, so neither can ever be selected however old it is.
+//
+// `submission_claimed` is provenance, not state: it records that this row was
+// claimed for submission and stays true after the row is confirmed or failed.
+// The candidate query gates on `status = 'submitted'`, so a resolved row is
+// never selected by it.
+//
+// The prepared hash is not necessarily the hash the bundler indexes (#4817:
+// the client re-runs its prepare step inside `sendUserOperation`, so paymaster
+// data can change). It is the best hash available at claim time; the route
+// upgrades it to the DISPATCHED hash as soon as the submit returns
+// (`recordSubmittedUserOpHash` below).
 export const CLAIM_INTENT_FOR_SUBMISSION_SQL = `UPDATE payment_intents
-         SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW()
+         SET signature = $1, signed_at = NOW(), status = 'submitted', submitted_at = NOW(),
+             machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
+               'user_op_hash', sign_hash,
+               'submission_claimed', true))
          WHERE id = $2
            AND agent_id = $3
            AND status = 'pending_signature'
@@ -589,17 +618,78 @@ export async function claimIntentForSubmission(
   return result.rows.length > 0
 }
 
+export const RECORD_SUBMITTED_USER_OP_HASH_SQL = `UPDATE payment_intents
+         SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object('user_op_hash', $1::text)
+         WHERE id = $2 AND agent_id = $3 AND status = 'submitted' AND tx_hash IS NULL
+         RETURNING id`
+
+/**
+ * #4818: upgrade the row's recorded operation hash to the one the bundler
+ * actually indexes.
+ *
+ * The claim records the PREPARED hash (`sign_hash`), which is the only hash
+ * known before the send. #4817 established that the dispatched operation can
+ * differ from the prepared one (the client re-runs its prepare step inside
+ * `sendUserOperation`), so the route calls this the moment the submit returns
+ * — before the confirm booking — and the reconciler then looks up the hash the
+ * bundler's receipt index actually holds.
+ *
+ * Same CAS as every other write on the open submit: a row that is already
+ * confirmed or failed is never touched. False when the row was no longer an
+ * open submit.
+ */
+export async function recordSubmittedUserOpHash(
+  input: { userOpHash: string; intentId: string; agentId: string },
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query<{ id: string }>(RECORD_SUBMITTED_USER_OP_HASH_SQL, [
+    input.userOpHash,
+    input.intentId,
+    input.agentId,
+  ])
+  return result.rows.length > 0
+}
+
+/**
+ * The ONE confirm write (#4819). Both writers — the sign route and the
+ * submission reconciler — reach it through `bookConfirmedPayment`, so a
+ * confirmed payment records the same thing whichever path confirmed it.
+ *
+ * Two conjuncts carry the compare-and-set: `status = 'submitted'` makes the
+ * second writer the no-op loser, and `tx_hash IS NULL` keeps a row that
+ * already carries a hash un-touchable. `agent_id` is the tenant scope the
+ * route has always passed; the reconciler passes the row's own agent.
+ *
+ * The `submission_outcome` CASE is what stops a reconciled row reading
+ * "unknown" after it is confirmed: the outcome-pending booking wrote that
+ * marker, and a resolved row must not keep it. It is a CASE rather than an
+ * unconditional write so a route-confirmed row — which never carried the
+ * marker — keeps its `machine_metadata` byte-identical to before this slice.
+ */
 export const CONFIRM_SUBMITTED_INTENT_SQL = `UPDATE payment_intents
          SET status = 'confirmed',
              tx_hash = $1,
              confirmed_at = NOW(),
              usd_value = $3,
              eur_value = $4,
-             sek_value = $6
-         WHERE id = $2 AND agent_id = $5 AND status = 'submitted'
+             sek_value = $6,
+             machine_metadata = CASE
+               WHEN machine_metadata ? 'submission_outcome'
+                 THEN machine_metadata || jsonb_build_object('submission_outcome', 'resolved')
+               ELSE machine_metadata
+             END
+         WHERE id = $2 AND agent_id = $5 AND status = 'submitted' AND tx_hash IS NULL
          RETURNING id`
 
-/** Confirm a claimed (`submitted`) intent after on-chain success. */
+/**
+ * Confirm a claimed (`submitted`) intent after on-chain success.
+ *
+ * #4819: callers on the money path go through `bookConfirmedPayment`
+ * (`modules/payments/confirm-booking.ts`), which prices the payment, calls
+ * this write and then runs the evidence hook, the accounting feed and the
+ * first-payment event. Calling this directly books the row WITHOUT those side
+ * effects — the thin booking this slice exists to remove.
+ */
 export async function confirmSubmittedIntent(
   input: {
     txHash: string
@@ -652,17 +742,19 @@ export async function failSubmittedIntent(
 // ── Outcome-pending booking + chain reconciliation (#3564) ────────────────────
 //
 // A `SubmittedUserOpFailedError` whose outcome is `receipt_unconfirmed` means
-// the UserOp was SENT and MAY have landed: booking that row `failed` records a
-// funds-moved payment as failed forever. The booking below instead leaves the
-// row `submitted` (non-terminal) and records the userOpHash in
-// `machine_metadata` as the reconciler's lookup key. The `tx_hash IS NULL`
+// the UserOp was SENT and MAY have landed — the send's answer was lost, or the
+// receipt wait errored (#4817 widened the first case in): booking that row
+// `failed` records a funds-moved payment as failed forever. The booking below
+// instead leaves the row `submitted` (non-terminal) and records the userOpHash
+// in `machine_metadata` as the reconciler's lookup key. The `tx_hash IS NULL`
 // conjunct keeps a confirmed row un-touchable; the `status = 'submitted'`
 // conjunct makes the write a CAS — a concurrent settle still wins cleanly.
 
 export const BOOK_SUBMITTED_OUTCOME_PENDING_SQL = `UPDATE payment_intents
-         SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object(
+         SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
                'user_op_hash', $1::text,
-               'submission_outcome', 'unknown')
+               'submission_outcome', 'unknown',
+               'tx_hash', $4::text))
          WHERE id = $2 AND agent_id = $3 AND status = 'submitted' AND tx_hash IS NULL
          RETURNING id`
 
@@ -671,15 +763,24 @@ export const BOOK_SUBMITTED_OUTCOME_PENDING_SQL = `UPDATE payment_intents
  * `submitted` (status reads "outcome pending", next_action check_status_later)
  * and the userOpHash is stored for the reconciler. False when the row was not
  * still an open submit (already confirmed, failed, or expired meanwhile).
+ *
+ * #4818: `txHash` is optional and records the transaction hash the route
+ * OBSERVED when the submit returned but a later step threw. It goes into
+ * `machine_metadata`, never the `tx_hash` column: the column is the confirm
+ * write's compare-and-set key (`status = 'submitted' AND tx_hash IS NULL`), so
+ * writing it here would make the row unreconcilable — the exact defect this
+ * slice removes. The metadata copy is evidence for a human; the reconciler
+ * still confirms from the bundler's receipt.
  */
 export async function bookSubmittedOutcomePending(
-  input: { userOpHash: string; intentId: string; agentId: string },
+  input: { userOpHash: string; intentId: string; agentId: string; txHash?: string | null },
   db: Executor = pool,
 ): Promise<boolean> {
   const result = await db.query<{ id: string }>(BOOK_SUBMITTED_OUTCOME_PENDING_SQL, [
     input.userOpHash,
     input.intentId,
     input.agentId,
+    input.txHash ?? null,
   ])
   return result.rows.length > 0
 }
@@ -687,32 +788,55 @@ export async function bookSubmittedOutcomePending(
 export interface OutcomePendingIntentRow {
   id: string
   agent_id: string
+  /** The payment's owner — the booking's accounting feed is scoped to them. */
+  user_id: string
   chain_id: number
   signed_at: string
   user_op_hash: string
+  /** The intent's own token and amount, for the booking's fiat capture. */
+  token_symbol: string
+  amount_human: string
 }
 
-export const FIND_OUTCOME_PENDING_INTENTS_SQL = `SELECT id, agent_id, chain_id, signed_at,
+export const FIND_OUTCOME_PENDING_INTENTS_SQL = `SELECT id, agent_id, user_id, chain_id, signed_at,
+            token_symbol, amount_human,
             machine_metadata->>'user_op_hash' AS user_op_hash
      FROM payment_intents
      WHERE status = 'submitted'
        AND tx_hash IS NULL
-       AND machine_metadata->>'submission_outcome' = 'unknown'
-       AND machine_metadata->>'user_op_hash' IS NOT NULL
        AND machine_metadata->>'user_op_hash' LIKE '0x%'
+       AND (machine_metadata->>'submission_outcome' = 'unknown'
+            OR machine_metadata->>'submission_claimed' = 'true')
+       AND machine_metadata->>'settlement_scheme' IS DISTINCT FROM 'erc7710'
        AND signed_at < NOW() - ($1 * interval '1 second')
      ORDER BY signed_at ASC
      LIMIT $2`
 
 /**
- * #3564: the reconciler's candidate set — open submits carrying the
- * outcome-pending metadata. `LIKE '0x%'` is the guard that keeps a
- * non-hash-shaped value out of a bundler call; eligibility is the metadata's
- * own presence, NOT the row's rail, because the booking seam (the sign route)
- * does not write a rail marker and the submit is definitionally
- * delegation-rail (the only rail that raises `SubmittedUserOpFailedError`).
- * No index backfill here: the population is receipts-unconfirmed submits
- * only, bounded by the tick's own LIMIT and age gate.
+ * #3564: the reconciler's candidate set — open submits carrying a recorded
+ * operation hash. `LIKE '0x%'` is the guard that keeps a non-hash-shaped value
+ * out of a bundler call.
+ *
+ * #4818 widens eligibility to the CLAIM's marker. Two populations qualify:
+ *
+ * - `submission_outcome = 'unknown'` — the route booked the row outcome-pending
+ *   after its receipt wait threw. No live waiter; the row is already past the
+ *   route's own window.
+ * - `submission_claimed = 'true'` — the claim recorded the operation hash and
+ *   the route never reached a booking (the process died, the deploy rolled, the
+ *   request was abandoned). This is the population that used to be invisible.
+ *
+ * The marker is what keeps the intake honest in both directions. A row claimed
+ * by the OLD code carries neither key, so it is never selected however old it
+ * is (owner decision 2026-11-12 (b): kept out of the intake, listed by the
+ * census for manual resolution). An erc7710 settle row is `submitted` with no
+ * `tx_hash` too, but `markIntentSubmittedForSettlement` writes no metadata, so
+ * it carries no marker — and the explicit `settlement_scheme` exclusion keeps
+ * it out even if one were ever written.
+ *
+ * The age gate is the caller's (`RECONCILE_MIN_AGE_SECONDS`), and it must sit
+ * above the route's longest wait: a claimed row can belong to a sign request
+ * that is still running.
  */
 export async function findOutcomePendingIntents(
   minAgeSeconds: number,
@@ -726,30 +850,10 @@ export async function findOutcomePendingIntents(
   return result.rows
 }
 
-export const RECONCILE_OUTCOME_CONFIRMED_SQL = `UPDATE payment_intents
-         SET status = 'confirmed', tx_hash = $1, confirmed_at = NOW()
-         WHERE id = $2 AND status = 'submitted' AND tx_hash IS NULL
-         RETURNING id`
-
-/**
- * #3564: the receipt says the op landed and SUCCEEDED — confirm the row with
- * the receipt's own transaction hash. The CAS makes a concurrent settle's
- * confirm the winner and this write the loser (and vice versa); idempotent by
- * construction (a second run finds no open row and returns false).
- */
-export async function reconcileOutcomeConfirmed(
-  intentId: string,
-  txHash: string,
-  db: Executor = pool,
-): Promise<boolean> {
-  const result = await db.query<{ id: string }>(RECONCILE_OUTCOME_CONFIRMED_SQL, [txHash, intentId])
-  return result.rows.length > 0
-}
-
 export const RECONCILE_OUTCOME_FAILED_SQL = `UPDATE payment_intents
          SET status = 'failed',
-             error_message = COALESCE(error_message, '') || ' | reconciled from chain: redemption UserOp ' || (machine_metadata->>'user_op_hash') || $1::text,
-             machine_metadata = machine_metadata || jsonb_build_object('submission_outcome', 'resolved'),
+             error_message = COALESCE(error_message, '') || ' | reconciled from chain: redemption UserOp ' || COALESCE(machine_metadata->>'user_op_hash', sign_hash, 'unknown') || $1::text,
+             machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object('submission_outcome', 'resolved'),
              failed_at = NOW()
          WHERE id = $2 AND status = 'submitted' AND tx_hash IS NULL
          RETURNING id`
@@ -760,6 +864,13 @@ export const RECONCILE_OUTCOME_FAILED_SQL = `UPDATE payment_intents
  * appended to the stored wait error. Same CAS as the confirm arm; the
  * `submission_outcome: resolved` marker keeps the row out of every later
  * candidate scan.
+ *
+ * #4818: the cause text is stored even when `machine_metadata` is NULL. The
+ * old statement concatenated `machine_metadata->>'user_op_hash'` straight into
+ * `error_message`, so a NULL column made the whole expression NULL — the row
+ * flipped `failed` with NO cause recorded, and the metadata write was a no-op
+ * too. `COALESCE` on both sides keeps the cause (falling back to the row's own
+ * `sign_hash`, then to `unknown`) and still stamps the resolved marker.
  */
 export async function reconcileOutcomeFailed(
   intentId: string,
@@ -768,6 +879,90 @@ export async function reconcileOutcomeFailed(
 ): Promise<boolean> {
   const result = await db.query<{ id: string }>(RECONCILE_OUTCOME_FAILED_SQL, [cause, intentId])
   return result.rows.length > 0
+}
+
+// ── The epic's census (#4816, #4819) ─────────────────────────────────────────
+//
+// Read-only. The epic's promotion checklist runs two counts against the dev and
+// production databases BEFORE #4818 merges: `submitted` rows without a hash
+// (#4818's intake) and the population below — payments the reconciler already
+// confirmed with the thin booking. Once #4818's code runs, the reconciler
+// consumes the first population within a tick; the second is history that no
+// pass repairs (the owner decided no backfill in #4819), so it is counted, not
+// healed.
+//
+// The predicate is the marker the outcome-pending booking wrote and the
+// confirm write now resolves: a CONFIRMED row still carrying
+// `submission_outcome: 'unknown'` was confirmed by the old reconciler path.
+// No index, no migration, no writer — a census that changed the thing it
+// measures would be worthless.
+
+export const COUNT_RECONCILER_THIN_BOOKINGS_SQL = `SELECT COUNT(*)::int AS count
+     FROM payment_intents
+     WHERE status = 'confirmed'
+       AND machine_metadata->>'submission_outcome' = 'unknown'`
+
+/**
+ * #4819: how many payments the reconciler already confirmed with the thin
+ * booking (confirmed rows still carrying the outcome-pending marker). Read-only
+ * — the epic's census box, not a repair.
+ */
+export async function countReconcilerThinBookings(db: Executor = pool): Promise<number> {
+  const result = await db.query<{ count: number }>(COUNT_RECONCILER_THIN_BOOKINGS_SQL)
+  return result.rows[0]?.count ?? 0
+}
+
+// ── The #4818 census ─────────────────────────────────────────────────────────
+//
+// Read-only, and the PR body carries it. It lists every `submitted` row with no
+// transaction hash on a non-erc7710 rail, classified by whether #4818's intake
+// will pick it up:
+//
+// - `reconcilable` — the row carries what the new claim writes (the operation
+//   hash plus `submission_claimed`) or the route's outcome-pending marker. The
+//   reconciler consumes these within a tick once they are past the age gate.
+// - `stranded` — `submitted`, no hash, no marker: claimed by the code that
+//   shipped before #4818. Owner decision 2026-11-12 (b) keeps these OUT of the
+//   intake (a row with no recorded operation hash cannot be looked up at the
+//   bundler without guessing), so they are listed here for manual resolution.
+//
+// erc7710 settle rows are excluded: they are `submitted` with no `tx_hash` by
+// design and are resolved by the settlement-observed confirm, not this intake.
+// No index, no migration, no writer — a census that changed the thing it
+// measures would be worthless.
+
+export interface SubmittedWithoutHashCensusRow {
+  id: string
+  agent_id: string
+  chain_id: number
+  signed_at: string
+  /** `reconcilable` = #4818's intake selects it; `stranded` = pre-#4818 row. */
+  intake: 'reconcilable' | 'stranded'
+}
+
+export const CENSUS_SUBMITTED_WITHOUT_HASH_SQL = `SELECT id, agent_id, chain_id, signed_at,
+            CASE
+              WHEN machine_metadata->>'submission_outcome' = 'unknown'
+                OR machine_metadata->>'submission_claimed' = 'true'
+                THEN 'reconcilable'
+              ELSE 'stranded'
+            END AS intake
+     FROM payment_intents
+     WHERE status = 'submitted'
+       AND tx_hash IS NULL
+       AND machine_metadata->>'settlement_scheme' IS DISTINCT FROM 'erc7710'
+     ORDER BY signed_at ASC`
+
+/**
+ * #4818: the epic's promotion-checklist census — every `submitted` row without
+ * a transaction hash, classified by whether this slice's intake reconciles it.
+ * Read-only.
+ */
+export async function censusSubmittedWithoutHash(
+  db: Executor = pool,
+): Promise<SubmittedWithoutHashCensusRow[]> {
+  const result = await db.query<SubmittedWithoutHashCensusRow>(CENSUS_SUBMITTED_WITHOUT_HASH_SQL)
+  return result.rows
 }
 
 // ── Machine-rail transitions (rail-scoped guards, modules/mpp/authorize.ts) ──
@@ -946,12 +1141,30 @@ export async function findIntentStatusRow(
 // #2960: `delegate_account_address` is `pi.machine_metadata->>'delegate_account_address'`,
 // written at authorize on both delegation-rail legs — null on rows
 // authorized before #2960 and on the legacy rail.
+//
+// #4822: `merchant_address` is the repository's counterparty expression
+// (`COALESCE(merchant_address, x402_merchant_address, to_address)`, the same
+// one `dashboard.ts` uses). On the EIP-3009 bridge the intent row is the
+// FUNDING leg — its `to_address` is the agent's own delegate — while the
+// merchant named at authorize sits in `merchant_address` /
+// `x402_merchant_address`. The receipt bundle must name the merchant, so the
+// coalesce is resolved here rather than in the mapper: a retired-rail row
+// with neither merchant column still falls back to `to_address`, which is
+// what the bundle named before this change.
+//
+// `merchant_settlement_tx_hash` is `machine_metadata.merchant_settlement_tx_hash`
+// — the merchant-leg transaction Haven verified on-chain (#4530), the same
+// key the status read names. It is null until recorded; the merchant's own
+// unverified echo (`protocol_receipt_payload.transaction`, surfaced as
+// `settlement_tx_hash` on the receipt list) is deliberately NOT selected.
 export const FIND_SETTLED_PAYMENT_RECEIPT_SQL = `SELECT pi.id, pi.account_address, pi.chain_id, pi.token_symbol, pi.token_address,
             pi.to_address, pi.amount_human, pi.delegate_address, pi.sign_hash,
             pi.signature, pi.tx_hash, pi.confirmed_at,
             pi.execution_rail,
+            COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address) AS merchant_address,
             pi.machine_metadata->>'settlement_scheme' AS settlement_scheme,
             pi.machine_metadata->>'delegate_account_address' AS delegate_account_address,
+            pi.machine_metadata->>'merchant_settlement_tx_hash' AS merchant_settlement_tx_hash,
             mpe.resource_url AS resource_url,
             mpe.amount_sek AS amount_sek,
             dq.quality AS delivery_quality,
@@ -981,6 +1194,19 @@ export interface PaymentReceiptRow extends BuyerJoinColumns {
   amount_sek: string | null
   /** #2960: from `machine_metadata`; null on rows authorized before #2960. */
   delegate_account_address: string | null
+  /**
+   * #4822: the merchant named at authorize —
+   * `COALESCE(merchant_address, x402_merchant_address, to_address)`. On the
+   * EIP-3009 bridge `to_address` is the agent's own delegate (the funding
+   * leg), so this is the only column that names the merchant.
+   */
+  merchant_address: string | null
+  /**
+   * #4822: `machine_metadata.merchant_settlement_tx_hash` — the merchant-leg
+   * transaction verified on-chain (#4530). Null until recorded; the
+   * merchant's unverified echo is never read here.
+   */
+  merchant_settlement_tx_hash: string | null
   /**
    * #3418: the rail the intent ran on — `delegation` (erc7710 or the eip3009
    * funding leg), `direct`, or null (legacy AllowanceModule / rows read by

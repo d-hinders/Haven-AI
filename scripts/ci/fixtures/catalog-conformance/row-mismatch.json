@@ -1,0 +1,11 @@
+{
+  "name": "Fixture — calldata decode (mismatch)",
+  "endpoint_host": "api.fixture-mismatch.test",
+  "resource_url": "https://api.fixture-mismatch.test/v1/decode/calldata",
+  "protocol": "http",
+  "source": "operator",
+  "status": "active",
+  "http_method": null,
+  "body_type": null,
+  "body_example": null
+}

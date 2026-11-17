@@ -1171,6 +1171,39 @@ describe('human-unit spending caps (#1351)', () => {
       expect(fundingCall()).toBeDefined()
     })
 
+    it('a submitted replay answers check_status_later with the payment id, never a retry (#4826)', async () => {
+      // The backend's typed 409 for an idempotency key whose payment is
+      // already submitted. The hosted mapper must name the status read with
+      // the body's payment_id — never "retry the original request".
+      stubFetch({
+        'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+        'POST /x402': {
+          status: 409,
+          body: {
+            error:
+              'This idempotency key already authorized a payment that is submitted — read its ' +
+              'status with haven_get_payment_status and do not authorize again.',
+            error_code: 'payment_already_submitted',
+            payment_id: 'pay_submitted',
+            status: 'submitted',
+          },
+        },
+      })
+
+      const payload = fail(
+        await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED }),
+      )
+
+      expect(payload.code).toBe('PAYMENT_ALREADY_SUBMITTED')
+      expect(payload.next_action).toBe(AgentPaymentNextAction.CheckStatusLater)
+      expect(payload.next_tool_name).toBe('haven_get_payment_status')
+      expect(payload.next_arguments).toEqual({ payment_id: 'pay_submitted' })
+      expect(payload.next_tool_omitted_reason).toBeUndefined()
+      expect(payload.message).toContain('do not authorize again')
+      // The authorize call was made; nothing was retried.
+      expect(fundingCall()).toBeDefined()
+    })
+
     it('refuses a human cap when the asset does not belong to the advertised network', async () => {
       // Reachable, not theoretical: the option selector checks network and
       // asset against separate sets, so Base-SEPOLIA USDC advertised on

@@ -1478,12 +1478,10 @@ describe('#3419 — the task-budget notice is pinned to the packages it describe
     expect(notice.signer_capability).toBe(SIGNER_CAPABILITY_KEY)
   })
 
-  it('the local @haven_ai/mcp builder agrees field-for-field with the hosted one', async () => {
-    const { taskSignerCompatibilityNotice: localNotice } = await import('@haven_ai/mcp')
-    const hosted = taskSignerCompatibilityNotice()
-    const local = localNotice()
-    expect(local).toEqual(hosted)
-  })
+  // #4825: the local @haven_ai/mcp builder this block used to pin field-for-field
+  // is gone. The local runtime has no signer tool — the connector's --local mode
+  // removes the signer server — so its task-budget handoffs no longer exist and
+  // there is no local notice to agree with. The hosted notice is pinned above.
 })
 
 /**

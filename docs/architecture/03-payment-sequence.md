@@ -214,6 +214,21 @@ path above:
    strand. The intent settles to `confirmed`, or reverts if it breached the
    on-chain policy.
 
+### Reconciled confirms (#4819)
+
+A delegation-rail submit whose answer is lost is booked outcome-pending
+(`submitted`, `machine_metadata.user_op_hash` recorded, `submission_outcome:
+'unknown'`) and resolved later by the submission reconciler from the bundler's
+receipt index. A reconciler confirm runs the SAME booking the sign route runs
+(`modules/payments/confirm-booking.ts`): the three fiat values in the confirm
+write, the machine-payment evidence hook, the accounting underlag feed and the
+first-payment event. The confirm write is one compare-and-set
+(`status = 'submitted' AND tx_hash IS NULL`), so exactly one writer books a
+payment and the loser runs no side effect; it also resolves the
+`submission_outcome` marker, so a confirmed row never reads "unknown". The
+sponsored-gas row is written on the submit seam and is not backfilled by the
+reconciler ([sponsored gas](../operations/sponsored-gas.md)).
+
 Agent-facing intent shape and the `/payments/:id/sign` contract are identical to
 the legacy AllowanceModule rail's; only the `sign_data` scheme (`eip712_userop`
 vs the AllowanceModule transfer hash) and the enforcement mechanism differ. Delegation

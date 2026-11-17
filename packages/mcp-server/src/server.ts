@@ -19,7 +19,7 @@ export { AGENT_IDENTITY_UNVERIFIED, IDENTITY_GATE_EXEMPT } from './tools/identit
 export { HOSTED_CONTRACT_FINGERPRINT } from './contract-fingerprint.js'
 
 export const HOSTED_SERVER_NAME = '@haven_ai/mcp-server'
-export const HOSTED_SERVER_VERSION = '0.13.0-alpha.0'
+export const HOSTED_SERVER_VERSION = '0.14.0-alpha.0'
 
 /**
  * MCP `instructions` — the critical path, surfaced to the model at
@@ -73,9 +73,10 @@ export const HOSTED_INSTRUCTIONS = [
   'Every quote now also checks the agent\'s remaining budget at quote time and',
   'carries the answer in budget_check. When a quote returns safe_to_continue',
   'false — the quoted amount exceeds the budget, the agent\'s budget for the',
-  'token has ENDED (waiting will not help; the owner must set a new one), or it',
-  'does not match an expected_amount you stated — do NOT proceed to pay: no cap',
-  'is prefilled, and the price or the budget needs the user first. (This is',
+  'token has ENDED (waiting will not help; the owner must set a new one), it',
+  'does not match an expected_amount you stated, or the price could not be',
+  'compared at all (price_comparison_made: false) — do NOT proceed to pay: no',
+  'cap is prefilled, and the price or the budget needs the user first. (This is',
   'advisory only: the on-chain policy still gates the actual payment.)',
   'Every payment tool response carries next_action,',
   'next_tool, and next_arguments — follow those fields first; description prose',
@@ -90,7 +91,9 @@ export const HOSTED_INSTRUCTIONS = [
   'When the price is stated up front (an invoice total, for example), pass it',
   'as expected_amount on the quote: if the challenge quotes anything else, the',
   'quote returns safe_to_continue false with no cap and no next tool — stop',
-  'and tell the user; paying the invoice\'s own deposit address is an option',
+  'and tell the user. If the quote says price_comparison_made: false, nobody',
+  'compared the price: follow its next_action (re-quote once when the agent',
+  'read failed, otherwise stop) and never read it as a match. Paying the invoice\'s own deposit address is an option',
   'only with the user\'s explicit go-ahead, and never once anything has been',
   'paid via x402.',
   "url is the quote's request_url, never its resource_url, which is the",
@@ -127,7 +130,7 @@ export const HOSTED_INSTRUCTIONS = [
   '(no typed_data / typed_data_b64; idempotency_key is generated when you',
   'pass none, and echoed on the result): sign by payment_id per their',
   'response guidance. If haven_sign refuses that call — carrying fallback: \'typed_data_b64\'',
-  '(any code: a transport failure, a malformed body, or a',
+  '(any code: a transport failure, a malformed body, a 5xx or 429 from Haven, or a',
   '404 on an older backend), or code SIGN_CONTEXT_REFUSED with',
   'backend_error_code sign_context_unavailable from an older signer with no',
   'such fallback (it signed nothing either way) — re-run the same direct-payment tool with',

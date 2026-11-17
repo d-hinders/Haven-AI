@@ -1,0 +1,36 @@
+{
+  "_base": "65b1d7cb7",
+  "body": {
+    "version": "haven-receipt-1",
+    "paymentId": "pi-5",
+    "payment": {
+      "token": "USDC",
+      "tokenAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "0.02",
+      "amountSek": "0.21",
+      "recipient": "0x4444444444444444444444444444444444444444",
+      "safe": "0x7777777777777777777777777777777777777777",
+      "account": "0x7777777777777777777777777777777777777777",
+      "chainId": 8453,
+      "settledAt": "2026-09-01T00:10:00.000Z",
+      "resourceUrl": "https://api.example.com/data",
+      "deliveryQuality": null,
+      "parties": {
+        "treasury_account": "0x7777777777777777777777777777777777777777",
+        "delegate": "0x6666666666666666666666666666666666666666",
+        "delegate_account": null,
+        "merchant": "0x4444444444444444444444444444444444444444"
+      }
+    },
+    "authorization": {
+      "delegate": "0x6666666666666666666666666666666666666666",
+      "signHash": "0xabababababababababababababababababababababababababababababababab",
+      "signature": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+      "signatureScheme": "eip712_delegation"
+    },
+    "onChain": {
+      "txHash": "0xfafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa",
+      "chainId": 8453
+    }
+  }
+}

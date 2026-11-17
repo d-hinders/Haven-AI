@@ -128,9 +128,11 @@ const ACCOUNTED_IDEMPOTENCY_NAMESPACE = '9f1c2a6e-0b4d-4c7a-9e2f-5d3b8a1c7e40'
 
 /**
  * The `Idempotency-Key` for one payment's document upload: `uuid5(name)`
- * under the namespace above. Bytes are deterministic, so a retry of the same
- * payment replays the provider's cached response; a DIFFERENT payment (or a
- * different document of the same payment) derives a different key.
+ * under the namespace above. A retry of the same payment replays the
+ * provider's cached response because the render inputs are pinned at the
+ * payment's first render (#4824), so the bytes are the same; a DIFFERENT
+ * payment (or a different document of the same payment) derives a different
+ * key.
  *
  * The underlag's name stays the bare `paymentId` — the value every pre-#3918
  * upload derived its key from, kept verbatim so a pre-deploy failed row
@@ -183,7 +185,8 @@ export async function accountedErrorEnvelope(res: Response): Promise<AccountedEr
  * Multipart with EXACTLY two parts: the `file` part (the underlag PDF) and
  * `upload_source=api` (`additionalProperties: false` on the spec's request
  * body — no other part may be sent). `Idempotency-Key` rides every write:
- * with deterministic bytes a replay returns the provider's cached response.
+ * with the render inputs pinned at the payment's first render (#4824) a
+ * replay returns the provider's cached response.
  *
  * A 2xx is success ONLY when the returned `data.sha256_hash` equals the
  * local SHA-256 of the sent bytes — the delivery proof is verified here, at

@@ -202,7 +202,7 @@ export default function EditBudgetModal({
   const [outcome, setOutcome] = useState<EditBudgetResult | null>(null)
   // #3933: the finish action on the `revoke_unfinished` screen — the Stop of
   // the previous budget, through the same per-hash revoke the card's Stop uses.
-  const [finishState, setFinishState] = useState<'idle' | 'stopping' | 'failed' | 'cancelled'>('idle')
+  const [finishState, setFinishState] = useState<'idle' | 'stopping' | 'failed' | 'cancelled' | 'unconfirmed'>('idle')
 
   // Prefill every time the modal opens (also re-prefills after a close/reopen
   // on a REFRESHED budget row — the card reloads between opens, so a stale
@@ -372,6 +372,7 @@ export default function EditBudgetModal({
       // whose occupant the card's list did not show yet.
       if (
         result.reason === 'revoke_unfinished' ||
+        result.reason === 'revoke_unconfirmed' ||
         result.reason === 'slot_occupied' ||
         result.reason === 'target_slot_occupied'
       ) {
@@ -395,7 +396,15 @@ export default function EditBudgetModal({
       const result = await revoke(remaining[i])
       if (!result.ok) {
         setOutcome({ ...outcome, unstoppedDelegationHashes: remaining.slice(i) })
-        setFinishState(result.reason === 'cancelled' ? 'cancelled' : 'failed')
+        // #4821: the stop may have landed — a distinct state, not the plain
+        // failure, and the copy below says the next press re-reads first.
+        setFinishState(
+          result.reason === 'cancelled'
+            ? 'cancelled'
+            : result.reason === 'unconfirmed'
+              ? 'unconfirmed'
+              : 'failed',
+        )
         if (i > 0) onBudgetChange?.()
         return
       }
@@ -497,6 +506,12 @@ export default function EditBudgetModal({
             {finishState === 'stopping' ? 'Stopping…' : 'Stop old budget'}
           </Button>
         </DialogActions>
+      ) : outcome.reason === 'revoke_unconfirmed' ? (
+        // #4821: the Stop may have landed. No control here signs it again —
+        // the budget card's Stop re-reads the chain first.
+        <Button onClick={handleClose} className="w-full">
+          Close
+        </Button>
       ) : outcome.reason === 'target_slot_occupied' ? (
         <DialogActions className="w-full">
           <Button variant="ghost" onClick={handleClose} className="flex-1">
@@ -789,7 +804,9 @@ export default function EditBudgetModal({
                   ? earlierLimits
                     ? 'Your earlier change went through'
                     : 'New budget is live — one step left'
-                  : outcome.reason === 'slot_occupied'
+                  : outcome.reason === 'revoke_unconfirmed'
+                    ? 'The old budget may already be stopped'
+                    : outcome.reason === 'slot_occupied'
                     ? 'This budget has changed'
                     : outcome.reason === 'target_slot_occupied'
                       ? 'This recipient already has a budget'
@@ -827,6 +844,11 @@ export default function EditBudgetModal({
                       open task budget or sub-budget taken from it.
                     </>
                   )
+                ) : outcome.reason === 'revoke_unconfirmed' ? (
+                  // #4821: the new limits took effect; the old budget's stop
+                  // was sent and its answer was lost. The footer offers no
+                  // Stop — the card's Stop re-reads the chain first.
+                  'The new limits took effect. The previous budget was sent a stop and its answer was lost, so it may already be stopped. Close this and check the budget card before stopping it again — the Stop there reads the chain first.'
                 ) : outcome.reason === 'slot_occupied' ? (
                   'This agent\u2019s budgets changed after you opened this, so nothing was changed. Close this and edit the current budget.'
                 ) : outcome.reason === 'target_slot_occupied' ? (
@@ -854,6 +876,14 @@ export default function EditBudgetModal({
                   {finishState === 'failed' ? (
                     <p className="text-[var(--v2-danger)]">
                       The previous budget could not be stopped. Try again.
+                    </p>
+                  ) : finishState === 'unconfirmed' ? (
+                    // #4821: the stop may have landed. The button below
+                    // re-reads the chain at prepare, so it cannot send a
+                    // second operation for an already-disabled delegation.
+                    <p className="text-[var(--v2-danger)]">
+                      We could not confirm the stop. The previous budget may already be stopped —
+                      stopping it again checks the chain first.
                     </p>
                   ) : finishState === 'cancelled' ? (
                     <p className="text-[var(--v2-ink-2)]">

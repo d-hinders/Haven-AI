@@ -111,6 +111,11 @@ function discoveryHintFor(entry: {
   status: string
   toolName: string | null
   resourceUrl: string
+  // #4823: provenance decides the MCP hint. A self-submitted (`ingestion`)
+  // row is listed to agents but the agent detail read answers it 404, so
+  // haven_quote_catalog_purchase { catalog_id } is a dead end for it; the
+  // by-URL quote tool is the path that works on both runtimes.
+  source?: string
   // #3769: the row's declared HTTP call shape, carried into a
   // haven_quote_x402 hint the tool accepts VERBATIM.
   httpMethod?: string | null
@@ -139,6 +144,17 @@ function discoveryHintFor(entry: {
       suggested_tool_omitted_reason:
         'this catalog row carries no tool_name, so haven_quote_catalog_purchase refuses it; ' +
         'read the merchant\'s tool list yourself, then haven_quote_mcp_tool { merchant_url, tool_name, arguments }',
+    }
+  }
+  // #4823: a self-submitted row is listed to agents but the agent detail read
+  // answers it 404 (`routes/catalog.ts` serves `source: 'ingestion'` rows only
+  // to non-agents), so the catalog-id hint was a dead end on the hosted
+  // runtime. Point at the by-URL quote tool instead — the same path the local
+  // runtime already names, and the one that works for this row on both.
+  if (entry.source === 'ingestion') {
+    return {
+      suggested_tool: 'haven_quote_mcp_tool',
+      suggested_arguments: { merchant_url: entry.resourceUrl, tool_name: entry.toolName },
     }
   }
   return { suggested_tool: 'haven_quote_catalog_purchase', suggested_arguments: { catalog_id: entry.id } }

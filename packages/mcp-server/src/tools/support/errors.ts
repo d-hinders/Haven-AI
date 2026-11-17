@@ -336,6 +336,16 @@ const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
 const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
   'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
 
+/**
+ * #4826: the backend's `error_code` for an x402 authorize replay whose
+ * idempotency key already belongs to a `submitted` payment — the agent
+ * settled and the outcome is not booked yet. The row is in flight, so the
+ * answer is a status READ, never a retry and never a second authorize. The
+ * body always carries `payment_id`; the branch below requires it, because
+ * `check_status_later`'s default tool cannot be called without one.
+ */
+const PAYMENT_ALREADY_SUBMITTED_ERROR_CODE = 'payment_already_submitted'
+
 /** #3504: the backend's `error_code` for a payment the delegation's period budget cannot cover. */
 const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
@@ -415,6 +425,29 @@ const PREPARE_REVERTED_OMITTED_REASON =
 const INSUFFICIENT_BALANCE_REVERT_CAUSE = 'insufficient_balance'
 const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
   'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
+
+/**
+ * #4828: the backend's typed `error_code` on a sponsorship-budget 429 — the
+ * relayer's per-identity window cap (`hybrid_deploy` for an account deploy,
+ * `sweep` for a sweep). One value for both bodies, so the mapper never
+ * matches on English. A slot frees when the oldest counted operation ages
+ * out, so this is a stop that names the window, not a retry.
+ */
+const RELAYER_BUDGET_EXCEEDED_ERROR_CODE = 'relayer_budget_exceeded'
+const RELAYER_BUDGET_EXCEEDED_OMITTED_REASON =
+  'the relayer sponsorship budget for this operation is exhausted; a slot frees when the oldest counted operation ages out (up to 24 hours for an account deploy, up to 60 minutes for a sweep), so tell the user the window and do not re-call it now'
+
+/**
+ * #4828: a 429 is a rate limit, not a refusal as made. The limiter may be
+ * Haven (the plugin's per-route limit, the hourly x402 cap, the catalog
+ * submission queue) or the merchant (a 429 on the unpaid MCP probe, which
+ * reaches this branch as a status-only `HavenApiError`), so the reason names
+ * neither: it says the upstream call was rate-limited and tells the agent to
+ * wait, then re-call once. `retry_after_seconds` rides the result when the
+ * body carries it (the hourly x402 cap does).
+ */
+const RATE_LIMITED_OMITTED_REASON =
+  'the upstream call was rate-limited; wait (retry_after_seconds when the answer carries it), then re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user'
 
 /**
  * #3747: the structured hosted refusal for a merchant-egress policy refusal
@@ -790,6 +823,33 @@ export function normalizeError(err: unknown): ToolFailure {
       ...nextStepWireFields(step),
     }
   }
+  // #4826: an x402 authorize replay whose key belongs to a `submitted`
+  // payment. The payment is in flight — the agent settled and the outcome is
+  // not booked yet — so the ONLY follow-up is reading its status. Never a
+  // retry (a second authorize cannot succeed: the key is taken) and never a
+  // new payment. The body always carries `payment_id`; a body without one
+  // falls through to the generic 4xx branch below, which also never retries.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === PAYMENT_ALREADY_SUBMITTED_ERROR_CODE &&
+    typeof (err.body as { payment_id?: unknown }).payment_id === 'string'
+  ) {
+    const body = err.body as { error_code?: string; payment_id: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_get_payment_status',
+      nextArguments: { payment_id: body.payment_id },
+    })
+    return {
+      success: false,
+      code: 'PAYMENT_ALREADY_SUBMITTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId ?? body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
   if (
     err instanceof HavenApiError &&
     (err.body as { error_code?: string } | undefined)?.error_code === ACCOUNT_VALIDATION_FAILED_ERROR_CODE
@@ -902,7 +962,12 @@ export function normalizeError(err: unknown): ToolFailure {
     // - Otherwise the status: a 5xx is usually transient — the live 500 that
     //   filed #3214 re-ran the same quote with the same arguments and
     //   succeeded — and a 4xx is the call refused as made.
+    // - #4828: a 429 is neither. It is a rate limit, so it takes the
+    //   transient step (wait, then re-call once) whatever the limiter; the
+    //   sponsorship budget is the one 429 that is a stop, and it is typed by
+    //   `error_code` rather than by English.
     const cause = err.failureCause
+    const body = err.body as { error_code?: string; retry_after_seconds?: unknown } | undefined
     const step =
       cause?.kind === 'no_answer'
         ? cause.method === 'GET'
@@ -922,25 +987,42 @@ export function normalizeError(err: unknown): ToolFailure {
               nextTool: null,
               nextToolOmittedReason: DETERMINISTIC_API_OMITTED_REASON,
             })
-          : err.statusCode !== undefined && err.statusCode < 500
+          : body?.error_code === RELAYER_BUDGET_EXCEEDED_ERROR_CODE
             ? refusalNextStep({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
                 nextTool: null,
-                nextToolOmittedReason:
-                  'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+                nextToolOmittedReason: RELAYER_BUDGET_EXCEEDED_OMITTED_REASON,
               })
-            : refusalNextStep({
-                nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-                nextTool: null,
-                nextToolOmittedReason:
-                  'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
-              })
+            : err.statusCode === 429
+              ? refusalNextStep({
+                  nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                  nextTool: null,
+                  nextToolOmittedReason: RATE_LIMITED_OMITTED_REASON,
+                })
+              : err.statusCode !== undefined && err.statusCode < 500
+                ? refusalNextStep({
+                    nextAction: AgentPaymentNextAction.StopAndTellUser,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+                  })
+                : refusalNextStep({
+                    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
+                  })
     return {
       success: false,
       code: err.code,
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      // #4828: the wait the limiter stated, when the body carries one. Additive
+      // and only present when the body has a finite number.
+      ...(typeof body?.retry_after_seconds === 'number' && Number.isFinite(body.retry_after_seconds)
+        ? { retry_after_seconds: body.retry_after_seconds }
+        : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

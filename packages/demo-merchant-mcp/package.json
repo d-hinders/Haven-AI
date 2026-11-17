@@ -14,9 +14,11 @@
     "dev": "tsup --watch & sleep 2 && node dist/index.js",
     "test": "npm --prefix ../core run build && npm --prefix ../sdk run build && vitest run",
     "typecheck": "npm --prefix ../core run build && npm --prefix ../sdk run build && tsc --noEmit",
-    "smoke:start": "node scripts/start-smoke.mjs"
+    "smoke:start": "node scripts/start-smoke.mjs",
+    "reconcile:stripe": "node scripts/reconcile-stripe.mjs"
   },
   "dependencies": {
+    "@coinbase/x402": "^2.1.0",
     "@haven_ai/sdk": "*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@x402/core": "^2.29.0",

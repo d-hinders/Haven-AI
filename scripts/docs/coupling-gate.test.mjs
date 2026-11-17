@@ -1055,6 +1055,20 @@ const VERSION_BUMPS = [
   ['packages/mcp/src/server.ts', 'MCP_VERSION'],
 ]
 
+// The fixture's own version pair. The copied files carry whatever version the
+// repository is at, so the fixture rewrites the three constants to FIXTURE_FROM
+// before its base commit and the tests bump FIXTURE_FROM -> FIXTURE_TO. The
+// tests used to bump from the literal the repository carried when they were
+// written ('0.13.0-alpha.0'), which made both red on the first release bump
+// after them (#4809): the replace found nothing in a tree at 0.14.0-alpha.0.
+const FIXTURE_FROM = '0.0.0-fixture.0'
+const FIXTURE_TO = '0.0.1-fixture.0'
+
+/** The literal `export const NAME = '...'` currently holds in `src`, or null. */
+function versionLiteralOf(src, name) {
+  return new RegExp(`^export const ${name} = '([^']+)'`, 'm').exec(src)?.[1] ?? null
+}
+
 function git4612(dir, args) {
   return exec4612('git', args, { cwd: dir, encoding: 'utf8' })
 }
@@ -1074,6 +1088,16 @@ function makeFixtureRepo(baseDir = tmpdir4612()) {
     const dest = join4612(dir, rel)
     mkdir4612(dirname4612(dest), { recursive: true })
     copyFile4612(join4612(ROOT4612, rel), dest)
+  }
+  // Pin the three version constants to the fixture's own version, read from
+  // the copied file by pattern — never from a literal written here (#4809).
+  for (const [rel, name] of VERSION_BUMPS) {
+    const p = join4612(dir, rel)
+    const src = readFile4612(p, 'utf8')
+    const current = versionLiteralOf(src, name)
+    assert4612.ok(current, `fixture: no \`export const ${name} = '...'\` in ${rel}`)
+    assert4612.notEqual(current, FIXTURE_FROM, `fixture: ${rel} already carries the fixture version`)
+    writeFile4612(p, src.replace(`export const ${name} = '${current}'`, `export const ${name} = '${FIXTURE_FROM}'`))
   }
   git4612(dir, ['init', '-q', '-b', 'main'])
   git4612(dir, ['config', 'user.email', 'fixture@example.invalid'])
@@ -1150,12 +1174,12 @@ function withFixture(fn) {
 test4612('#4612: a release bump whose diffs are version literals only implicates neither release-coupled doc', () => {
   withFixture((fx) => {
     for (const [rel, name] of VERSION_BUMPS) {
-      bumpLiteral(fx, rel, name, '0.13.0-alpha.0', '0.13.1-alpha.0')
+      bumpLiteral(fx, rel, name, FIXTURE_FROM, FIXTURE_TO)
     }
     // The bump re-pins the manifest table itself, so that doc is in the changed
     // set — exactly as a release PR looks.
-    appendLine(fx, MCP_COMPAT, '| `0.13.1-alpha.0` | re-pinned by the bump |')
-    commitFixture(fx, 'chore(release): 0.13.1-alpha.0')
+    appendLine(fx, MCP_COMPAT, `| \`${FIXTURE_TO}\` | re-pinned by the bump |`)
+    commitFixture(fx, `chore(release): ${FIXTURE_TO}`)
 
     const { status, output, comment } = runFixtureGate(fx)
     assert4612.equal(status, 0, `a version-literal-only release bump must pass --strict:\n${output}`)
@@ -1180,20 +1204,44 @@ test4612('#4612: a release bump whose diffs are version literals only implicates
 test4612('#4612 MUTATION PROOF: one behavioural line in tools.ts still implicates the security model', () => {
   withFixture((fx) => {
     for (const [rel, name] of VERSION_BUMPS) {
-      bumpLiteral(fx, rel, name, '0.13.0-alpha.0', '0.13.1-alpha.0')
+      bumpLiteral(fx, rel, name, FIXTURE_FROM, FIXTURE_TO)
     }
-    appendLine(fx, MCP_COMPAT, '| `0.13.1-alpha.0` | re-pinned by the bump |')
+    appendLine(fx, MCP_COMPAT, `| \`${FIXTURE_TO}\` | re-pinned by the bump |`)
     // The negative control for the fixture above: same changed set, one line
     // that is not a version literal. If the partition were per-PATH rather than
     // per-diff, this would pass and a real signing-surface change would hide.
     appendLine(fx, 'packages/signer/src/tools.ts', "export const SIGNER_VERSION_SOURCE = 'tools'")
-    commitFixture(fx, 'chore(release): 0.13.1-alpha.0')
+    commitFixture(fx, `chore(release): ${FIXTURE_TO}`)
 
     const { status, output } = runFixtureGate(fx)
     assert4612.equal(status, 1, 'a behavioural line in tools.ts must still block')
     assert4612.match(output, /BLOCKING/)
     assert4612.match(output, /delegation-rail-security-model/)
   })
+})
+
+test4612('#4809: the #4612 fixtures do not depend on the version the repository is at', () => {
+  // The base commit carries the fixture's version in all three constants,
+  // whatever the tree holds: this is what keeps the two tests above green
+  // across a release bump.
+  withFixture((fx) => {
+    for (const [rel, name] of VERSION_BUMPS) {
+      const src = readFile4612(join4612(fx.dir, rel), 'utf8')
+      assert4612.equal(versionLiteralOf(src, name), FIXTURE_FROM, `${rel} was not pinned to the fixture version`)
+    }
+  })
+  // And no release's version is written in this file: a from-literal that
+  // matches the tree today is the defect, and it only shows at the next bump.
+  const self = readFile4612(fileURL4612(import.meta.url), 'utf8')
+  const bumps = [...self.matchAll(/(?<!function )bumpLiteral\(fx, rel, name, ([^)]*)\)/g)].map((m) => m[1])
+  assert4612.equal(bumps.length, 2, 'the two #4612 fixtures each bump the constants once')
+  for (const args of bumps) assert4612.equal(args, 'FIXTURE_FROM, FIXTURE_TO', `a fixture bumps from a written literal: ${args}`)
+  // The tree's own version is not the fixture's, so the pin above really moved something.
+  for (const [rel, name] of VERSION_BUMPS) {
+    const real = versionLiteralOf(readFile4612(join4612(ROOT4612, rel), 'utf8'), name)
+    assert4612.match(real ?? '', /^\d+\.\d+\.\d+/, `${rel}: no version constant in the tree`)
+    assert4612.notEqual(real, FIXTURE_FROM)
+  }
 })
 
 test4612('#4612: an added casp-changelog shard does not satisfy the security model', () => {

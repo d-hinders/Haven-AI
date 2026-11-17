@@ -166,7 +166,7 @@ export function directSignerCompatibilityNotice() {
     check:
       'Call next_tool with next_arguments EXACTLY as given — the signer fetches the exact bytes ' +
       "by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' (any " +
-      'code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
+      'code: a transport failure, a malformed body, a 5xx or 429 from Haven, or a 404 on an older backend), or code ' +
       "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer " +
       'older than 0.5.0-alpha.1 — nothing was signed either way: re-run the SAME haven_send / haven_pay ' +
       'call with the SAME idempotency_key (echoed on its result) plus include_signing_payload: ' +

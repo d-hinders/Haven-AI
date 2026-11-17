@@ -15,7 +15,7 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { HavenApiError, HavenClient } from '@haven_ai/sdk'
+import { HavenApiError, HavenClient, X402UnexpectedStatusError } from '@haven_ai/sdk'
 import { normalizeError } from './tools/support/errors.js'
 import { quoteMcpToolCall, withDiscoveryGuidance } from './tools/support/mcp-context.js'
 import { requireAgentIdentity } from './tools/identity-gate.js'
@@ -469,5 +469,139 @@ describe('#4470 review — the paths round 1 left untested', () => {
     const err = await caught(quoteMcpToolCall(haven, { merchantUrl: 'https://merchant.test/base', toolName: 't', toolArguments: {} }))
     expect((err as Error).message).toContain('DISCOVERED endpoint')
     expect(normalizeError(err).next_tool_omitted_reason).toBe(DETERMINISTIC)
+  })
+})
+
+/**
+ * #4828 — a 429 is a rate limit, not a refusal as made.
+ *
+ * Every row of the issue's table is driven through the real SDK transport over
+ * a stubbed `fetch` (the sponsorship bodies are the two the issue prescribes
+ * feeding by hand, because their routes are reached only behind a relayer
+ * budget the SDK cannot stage). The reasons are pinned whole: a reworded
+ * reason reddens these.
+ */
+const RATE_LIMITED =
+  'the upstream call was rate-limited; wait (retry_after_seconds when the answer carries it), then re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user'
+const RELAYER_BUDGET_EXCEEDED =
+  'the relayer sponsorship budget for this operation is exhausted; a slot frees when the oldest counted operation ages out (up to 24 hours for an account deploy, up to 60 minutes for a sweep), so tell the user the window and do not re-call it now'
+const RELAYER_BUDGET_MESSAGE = (cap: number, operation: string, windowMinutes: number) =>
+  `Relayer budget exceeded: more than ${cap} ${operation} operations in ${windowMinutes} minutes. ` +
+  'This protects the shared gas sponsor — wait and retry, or contact Haven if this is organic volume.'
+
+describe('Part 3 — a 429 is a rate limit, not a refusal as made (#4828)', () => {
+  it('the plugin rate limit (every rate-limited route): wait, then re-call once', async () => {
+    stubBackend({
+      'GET /machine-payments/agent': {
+        status: 429,
+        json: { error: 'Rate limit exceeded, retry in 1 minute', statusCode: 429 },
+      },
+    })
+    const out = normalizeError(await caught(client().getAgent()))
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe('retry_with_explicit_context')
+    expect(out.next_tool_omitted_reason).toBe(RATE_LIMITED)
+    expect(String(out.next_tool_omitted_reason)).not.toMatch(/cannot succeed|refused as made/)
+    expect(out.retry_after_seconds).toBeUndefined()
+  })
+
+  it('the hourly x402 cap: the wait from the body rides the result as retry_after_seconds', async () => {
+    stubBackend({
+      'POST /x402': {
+        status: 429,
+        json: { error: 'Rate limit exceeded: max 60 x402 payments per hour', retry_after_seconds: 60 },
+      },
+    })
+    const err = await caught(
+      client().createX402Intent(PAYMENT_REQUIRED as never, { delegateAddress: '0x00000000000000000000000000000000000000d1' }),
+    )
+    const out = normalizeError(err)
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe('retry_with_explicit_context')
+    expect(out.next_tool_omitted_reason).toBe(RATE_LIMITED)
+    expect(out.retry_after_seconds).toBe(60)
+  })
+
+  it('the catalog submission queue full: the same rate-limit step', async () => {
+    stubBackend({
+      'POST /catalog/submit': { status: 429, json: { error: 'The submission queue is full, try again later' } },
+    })
+    const out = normalizeError(await caught(client().submitCatalogEntry('https://merchant.test/paid')))
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe('retry_with_explicit_context')
+    expect(out.next_tool_omitted_reason).toBe(RATE_LIMITED)
+  })
+
+  it('the sponsorship budget on an account deploy: a stop that names the budget and the window', async () => {
+    const message = RELAYER_BUDGET_MESSAGE(10, 'hybrid_deploy', 24 * 60)
+    stubBackend({ 'POST /x402': { status: 429, json: { error: message, error_code: 'relayer_budget_exceeded' } } })
+    const err = await caught(
+      client().createX402Intent(PAYMENT_REQUIRED as never, { delegateAddress: '0x00000000000000000000000000000000000000d1' }),
+    )
+    const out = normalizeError(err)
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool_omitted_reason).toBe(RELAYER_BUDGET_EXCEEDED)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/24 hours/)
+    expect(String(out.next_tool_omitted_reason)).toMatch(/60 minutes/)
+    expect(String(out.next_tool_omitted_reason)).not.toMatch(/refused as made|cannot succeed/)
+  })
+
+  it('the sponsorship budget on a sweep: the same typed stop, not the retry step', async () => {
+    const message = RELAYER_BUDGET_MESSAGE(30, 'sweep', 60)
+    stubBackend({
+      'POST /machine-payments/sweep/submit': { status: 429, json: { error: message, error_code: 'relayer_budget_exceeded' } },
+    })
+    const out = normalizeError(await caught(client().submitSweep({} as never, '0xsig')))
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool_omitted_reason).toBe(RELAYER_BUDGET_EXCEEDED)
+  })
+
+  it('the sign route\'s sponsorship 429 (defensive: unreachable in production) takes the same typed stop', () => {
+    // `RelayerBudgetExceededError` is thrown only by `assertRelayerBudget`,
+    // whose callers are the account-deploy and sweep paths — never the sign
+    // route's submit. The body carries the same `error_code`, so if that ever
+    // changes the mapper still answers the stop rather than a retry.
+    const message = RELAYER_BUDGET_MESSAGE(60, 'allowance_transfer', 60)
+    const out = normalizeError(
+      new HavenApiError(message, 429, { payment_id: 'pay_1', status: 'pending_signature', error: message, error_code: 'relayer_budget_exceeded' }),
+    )
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool_omitted_reason).toBe(RELAYER_BUDGET_EXCEEDED)
+  })
+
+  it('a merchant 429 on the unpaid MCP probe (status-only): the rate-limit step, and it does not name Haven', async () => {
+    stubBackend({ 'GET /.well-known/haven-demo-merchant': { status: 200, json: { mcp_url: 'https://merchant.test/mcp' } } })
+    const haven = client()
+    vi.spyOn(haven, 'quoteMcpX402')
+      .mockRejectedValueOnce(new X402UnexpectedStatusError('Expected an x402 quote response with HTTP 402, got HTTP 429.', 429))
+      .mockRejectedValueOnce(new X402UnexpectedStatusError('Expected an x402 quote response with HTTP 402, got HTTP 429.', 429))
+    const err = await caught(quoteMcpToolCall(haven, { merchantUrl: 'https://merchant.test/base', toolName: 't', toolArguments: {} }))
+    // The discovered-endpoint rebuild drops the body: the mapper sees a status only.
+    expect((err as HavenApiError).body).toBeUndefined()
+    const out = normalizeError(err)
+    expect(out.code).toBe('API_ERROR')
+    expect(out.next_action).toBe('retry_with_explicit_context')
+    expect(out.next_tool_omitted_reason).toBe(RATE_LIMITED)
+    expect(String(out.next_tool_omitted_reason)).toContain('the upstream call was rate-limited')
+    expect(String(out.next_tool_omitted_reason)).not.toMatch(/Haven/)
+  })
+
+  it('controls: another 4xx still stops, a 500 and a JSON 503 still retry once', async () => {
+    stubBackend({ 'GET /machine-payments/agent': { status: 422, json: { error: 'unprocessable' } } })
+    const fourXx = normalizeError(await caught(client().getAgent()))
+    expect(fourXx.next_action).toBe('stop_and_tell_user')
+    expect(fourXx.next_tool_omitted_reason).toBe(STOP_4XX)
+
+    stubBackend({ 'GET /machine-payments/agent': { status: 500, json: { error: 'prepare_failed' } } })
+    const fiveXx = normalizeError(await caught(client().getAgent()))
+    expect(fiveXx.next_action).toBe('retry_with_explicit_context')
+    expect(fiveXx.next_tool_omitted_reason).toBe(RETRY_5XX)
+
+    stubBackend({ 'GET /machine-payments/agent': { status: 503, json: { error: 'upstream unavailable' } } })
+    const five03 = normalizeError(await caught(client().getAgent()))
+    expect(five03.next_action).toBe('retry_with_explicit_context')
+    expect(five03.next_tool_omitted_reason).toBe(RETRY_5XX)
   })
 })

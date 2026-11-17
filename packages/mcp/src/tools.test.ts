@@ -214,15 +214,25 @@ describe('Haven MCP tool descriptions', () => {
     it(`${tool} composes every fragment from the shared ${key} description`, () => {
       const shared = sharedDescriptions[key]
       const desc = toolDescriptions[tool]
+      // #4825: the local surface composes the per-surface form where the shared
+      // fragment has one (`selectionGuidanceFor` / `behaviorFor`), exactly as
+      // `composeDescription(d, 'local')` does.
+      const fragments = shared as {
+        selectionGuidance?: string
+        selectionGuidanceFor?: Partial<Record<'local' | 'hosted', string>>
+        behavior?: string
+        behaviorFor?: Partial<Record<'local' | 'hosted', string>>
+        nextActionGuidance?: string
+      }
       // Every entry must have a non-empty summary so the substring check
       // below has a real anchor rather than the vacuously-true `''`.
       expect(shared.summary.length).toBeGreaterThan(10)
       expect(desc).toContain(shared.summary)
-      if ('selectionGuidance' in shared && shared.selectionGuidance) {
-        expect(desc).toContain(shared.selectionGuidance)
-      }
-      if (shared.behavior) expect(desc).toContain(shared.behavior)
-      if (shared.nextActionGuidance) expect(desc).toContain(shared.nextActionGuidance)
+      const selection = fragments.selectionGuidanceFor?.local ?? fragments.selectionGuidance
+      if (selection) expect(desc).toContain(selection)
+      const behavior = fragments.behaviorFor?.local ?? fragments.behavior
+      if (behavior) expect(desc).toContain(behavior)
+      if (fragments.nextActionGuidance) expect(desc).toContain(fragments.nextActionGuidance)
     })
   }
 
@@ -999,6 +1009,221 @@ describe('Haven MCP tool handlers', () => {
     // Owner decision: the reason names the deposit-address fallback's ONE
     // condition — the user's explicit go-ahead.
     expect(String(data.reason)).toContain('explicit go-ahead')
+  })
+
+  // ── #4830: a stated expected_amount is never skipped silently ──────────────
+
+  /** A merchant advertising a standard entry (0.01) and an erc7710 one (0.025). */
+  const twoEntryChallenge = {
+    ...x402PaymentRequired,
+    accepts: [
+      ...x402PaymentRequired.accepts,
+      {
+        ...x402PaymentRequired.accepts[0],
+        amount: '25000',
+        maxAmountRequired: '25000',
+        extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: ['0x4444444444444444444444444444444444444444'] },
+      },
+    ],
+  }
+
+  /** The cross-network USDC fixture: Base-Sepolia USDC advertised on Base mainnet. */
+  const unknownDecimalsChallenge = {
+    ...x402PaymentRequired,
+    accepts: [
+      {
+        ...x402PaymentRequired.accepts[0],
+        network: 'eip155:8453',
+        asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+      },
+    ],
+  }
+
+  function stubLocalQuote(
+    challenge: unknown,
+    agentResponse: () => Response,
+  ) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      if (u === x402PaymentRequired.resource.url) {
+        return new Response(null, {
+          status: 402,
+          headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(challenge)) },
+        })
+      }
+      if (u.endsWith('/machine-payments/agent')) return agentResponse()
+      return jsonResponse({})
+    })
+  }
+
+  const delegationAgent = () =>
+    jsonResponse({
+      id: 'agt_1', name: 'Test', delegate_address: delegateAddress,
+      account_address: safeAddress, chain_id: 8453, status: 'active',
+      execution_rail: 'delegation',
+    })
+
+  it('decides a mismatch WITHOUT the agent read: one entry at 0.01, expected 0.10, read 500', async () => {
+    stubLocalQuote(x402PaymentRequired, () => jsonResponse({ error: 'down' }, 500))
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.10',
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.price_differs_from_expected).toBe(true)
+    expect(data.price_comparison_made).toBeUndefined()
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(data.next_tool_omitted_reason).toBeDefined()
+  })
+
+  it('NOT COMPARED: two entries priced differently, expected equal to exactly one, read 500', async () => {
+    stubLocalQuote(twoEntryChallenge, () => jsonResponse({ error: 'down' }, 500))
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.01', // the standard entry's amount; the erc7710 one is 0.025
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    // The result SAYS the comparison was not made — by name.
+    expect(data.price_comparison_made).toBe(false)
+    expect(data.price_comparison_not_made_cause).toBe('agent_read_failed')
+    expect(data.price_differs_from_expected).toBeUndefined()
+    // No `safe_to_continue: true`, no prefilled cap, no pay step.
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_tool).toBeUndefined()
+    expect(data.next_arguments).toBeUndefined()
+    // The step follows the cause: a transient read failure is worth one re-quote.
+    expect(data.next_action).toBe(AgentPaymentNextAction.RetryWithExplicitContext)
+    expect(data.next_tool_omitted_reason).toBeDefined()
+    // The quote object itself is still returned.
+    expect(data.paymentRequired).toBeDefined()
+    // The prose says the comparison was not made — never that the price
+    // differs, and never the deposit-address fallback.
+    expect(String(data.reason)).toContain('NOT compared')
+    expect(String(data.reason)).not.toContain('does not match')
+    expect(String(data.reason)).not.toContain('differs')
+    expect(String(data.reason)).not.toContain('deposit address')
+  })
+
+  it('NOT COMPARED with a REFUSED read (401): the step stops instead of re-quoting', async () => {
+    stubLocalQuote(twoEntryChallenge, () => jsonResponse({ error: 'unauthorized' }, 401))
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.01',
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.price_comparison_made).toBe(false)
+    expect(data.price_comparison_not_made_cause).toBe('agent_read_refused')
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(data.next_arguments).toBeUndefined()
+  })
+
+  it('NOT COMPARED on UNKNOWN DECIMALS: the cross-network USDC fixture stops', async () => {
+    stubLocalQuote(unknownDecimalsChallenge, delegationAgent)
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.01',
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.decimals).toBeNull()
+    expect(data.price_comparison_made).toBe(false)
+    expect(data.price_comparison_not_made_cause).toBe('unknown_decimals')
+    expect(data.price_differs_from_expected).toBeUndefined()
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(data.next_arguments).toBeUndefined()
+    expect(String(data.reason)).toContain('NOT compared')
+    expect(String(data.reason)).not.toContain('does not match')
+    expect(String(data.reason)).not.toContain('deposit address')
+  })
+
+  it('a stated price FINER than the token scale is a decided mismatch (hosted parity)', async () => {
+    stubLocalQuote(x402PaymentRequired, delegationAgent)
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.1234567', // 7 decimals against a 6-decimal token
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.decimals).toBe(6)
+    expect(data.price_differs_from_expected).toBe(true)
+    expect(data.price_comparison_made).toBeUndefined()
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(data.next_arguments).toBeUndefined()
+  })
+
+  it('NOT COMPARED when no option is selected for this agent (erc7710-only merchant, legacy rail)', async () => {
+    const erc7710Only = {
+      ...x402PaymentRequired,
+      accepts: [
+        {
+          ...x402PaymentRequired.accepts[0],
+          extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: ['0x4444444444444444444444444444444444444444'] },
+        },
+      ],
+    }
+    stubLocalQuote(erc7710Only, () =>
+      jsonResponse({
+        id: 'agt_1', name: 'Test', delegate_address: delegateAddress,
+        account_address: safeAddress, chain_id: 8453, status: 'active',
+        execution_rail: 'legacy',
+      }),
+    )
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+      expected_amount: '0.01',
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.price_comparison_made).toBe(false)
+    expect(data.price_comparison_not_made_cause).toBe('no_option_selected')
+    expect(data.price_differs_from_expected).toBeUndefined()
+    expect(data.safe_to_continue).toBe(false)
+    expect(data.next_action).toBe(AgentPaymentNextAction.StopAndTellUser)
+    expect(data.next_arguments).toBeUndefined()
+  })
+
+  it('UNCHANGED: with no expected_amount no agent read is issued', async () => {
+    const requests: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url)
+      requests.push(u)
+      if (u === x402PaymentRequired.resource.url) {
+        return new Response(null, {
+          status: 402,
+          headers: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(x402PaymentRequired)) },
+        })
+      }
+      return jsonResponse({})
+    })
+    const haven = new HavenClient({ apiKey: 'sk_agent_test', delegateKey, baseUrl })
+    const quote = await createToolHandlers(haven).haven_quote_x402({
+      url: x402PaymentRequired.resource.url,
+    })
+    expect(quote.success).toBe(true)
+    if (!quote.success) throw new Error('quote failed')
+    const data = quote.data as Record<string, unknown>
+    expect(data.price_differs_from_expected).toBeUndefined()
+    expect(data.price_comparison_made).toBeUndefined()
+    expect(requests.some((u) => u.endsWith('/machine-payments/agent'))).toBe(false)
   })
 
   it('haven_get_agent returns the enriched bootstrap summary (identity + readiness + remaining)', async () => {

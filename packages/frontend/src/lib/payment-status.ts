@@ -101,6 +101,31 @@ export const PAYMENT_STATUS: Record<PaymentStatus, StatusPresentation> = {
   expired: { label: 'Expired', tone: 'neutral' },
 }
 
+/**
+ * The Sales family (#4908, approved on #4894 on 2026-11-16) — the states a
+ * merchant's Sales surfaces name. None of them is a `PaymentStatus`: they
+ * describe a sale, a move the Sales page leaves out of its figures, and a
+ * product the merchant's kit no longer lists, so they are their own map and
+ * their own table (`design-system.md` § StatusBadge → `#### Sales`).
+ *
+ * - `received` — the detail panel's status for a sale. Panel-only: a ledger
+ *   row carries no badge, exactly as for a confirmed payment (#3897, #4608).
+ * - `not_counted` — a move from the owner's own agent or account, shown on
+ *   Sales but left out of its totals.
+ * - `no_longer_offered` — a product the kit's products file no longer lists.
+ *
+ * This slice documents and maps the labels and wires nothing: the screens
+ * that render them (#4900, #4901) read this map. Exported for the vocabulary
+ * drift test — see `AGENT_STATUS`.
+ */
+export type SalesStatus = 'received' | 'not_counted' | 'no_longer_offered'
+
+export const SALES_STATUS: Record<SalesStatus, StatusPresentation> = {
+  received: { label: 'Received', tone: 'success' },
+  not_counted: { label: 'Not counted', tone: 'neutral' },
+  no_longer_offered: { label: 'No longer offered', tone: 'neutral' },
+}
+
 export function formatUnknownStatus(status: string): string {
   const words = status
     .split('_')

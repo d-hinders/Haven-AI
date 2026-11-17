@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Address } from 'viem'
 import { api } from '@/lib/api'
+import { classifySubmitOutcome } from '@/lib/submitOutcome'
 import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import { useActiveSigner, hasPasskeyCredentialOnDevice, credentialIdFromKeyId } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
@@ -301,6 +302,7 @@ export type EditBudgetResult =
         | 'failed'
         | 'refused'
         | 'revoke_unfinished'
+        | 'revoke_unconfirmed'
         | 'unconfirmed'
         | 'slot_occupied'
         | 'target_slot_occupied'
@@ -774,7 +776,7 @@ export function useDelegationBudget(
   // Anything else short of a submitted Stop is `unfinished` — never thrown,
   // because the new grant is already live and only the partial state is true.
   const stopOldDelegation = useCallback(
-    async (hash: string): Promise<'signed' | 'already' | 'unfinished'> => {
+    async (hash: string): Promise<'signed' | 'already' | 'unfinished' | 'unconfirmed'> => {
       let prep: RevokePrepare
       try {
         prep = await api.post<RevokePrepare>(`/agents/${agentId}/delegations/${hash}/revoke`, {
@@ -804,8 +806,11 @@ export function useDelegationBudget(
           signature,
           user_operation: prep.user_operation,
         })
-      } catch {
-        return 'unfinished'
+      } catch (err) {
+        // #4821: an outcome-unknown submit is NOT `unfinished` — the Stop may
+        // have landed, so the caller must not offer the same signature again
+        // without re-reading the chain first.
+        return classifySubmitOutcome(err).reason === 'unconfirmed' ? 'unconfirmed' : 'unfinished'
       }
       return 'signed'
     },
@@ -1044,6 +1049,19 @@ export function useDelegationBudget(
         let signedAny = false
         for (let i = 0; i < toStop.length; i++) {
           const stop = await stopOldDelegation(toStop[i])
+          if (stop === 'unconfirmed') {
+            // #4821: the Stop was sent and its answer was lost, so it may have
+            // landed. The new grant is live; the old rows' state is unknown,
+            // so the modal must not offer the same signature again without a
+            // re-read.
+            return {
+              ok: false,
+              reason: 'revoke_unconfirmed',
+              newDelegationHash: newHash,
+              unstoppedDelegationHashes: toStop.slice(i),
+              moved,
+            }
+          }
           if (stop === 'unfinished') {
             // The new grant is LIVE; only the on-chain stop of the old rows
             // is unfinished. Report the partial state honestly so the UI can
@@ -1118,10 +1136,15 @@ export function useDelegationBudget(
           if (!signer || !prep.signing_payload) return { ok: false, reason: 'failed' }
           signature = await signTyped(signer, prep.signing_payload)
         }
-        await api.post(`/agents/${agentId}/delegations/${delegationHash}/revoke/submit`, {
-          signature,
-          user_operation: prep.user_operation,
-        })
+        try {
+          await api.post(`/agents/${agentId}/delegations/${delegationHash}/revoke/submit`, {
+            signature,
+            user_operation: prep.user_operation,
+          })
+        } catch (err) {
+          // #4821: the submit may have landed — never the plain failure state.
+          return { ok: false, reason: classifySubmitOutcome(err).reason }
+        }
         await reload()
         return { ok: true }
       } catch (err) {
@@ -1170,11 +1193,16 @@ export function useDelegationBudget(
         if (!signer || !prep.signing_payload) return { ok: false, reason: 'failed' }
         signature = await signTyped(signer, prep.signing_payload)
       }
-      await api.post(`/agents/${agentId}/delegations/revoke-all/submit`, {
-        signature,
-        user_operation: prep.user_operation,
-        delegation_hashes: prep.delegation_hashes,
-      })
+      try {
+        await api.post(`/agents/${agentId}/delegations/revoke-all/submit`, {
+          signature,
+          user_operation: prep.user_operation,
+          delegation_hashes: prep.delegation_hashes,
+        })
+      } catch (err) {
+        // #4821: the batch may have landed — never the plain failure state.
+        return { ok: false, reason: classifySubmitOutcome(err).reason }
+      }
       await reload()
       return { ok: true }
     } catch (err) {

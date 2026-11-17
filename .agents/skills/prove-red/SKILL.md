@@ -220,9 +220,11 @@ there first.
 Input: the saved output of the census command in
 [`dimensions.md` § 1](../quality-scan/references/dimensions.md) (it must keep its
 `candidate guard files: N` line). The runner skips files absent at `HEAD`, takes
-the first five distinct files — newest landing first — and runs the one `census`
-cell written for each, then up to two probe cells; anything else is listed as out
-of budget and not run. It prints the block-1 table
+the first five distinct files **in the order the census lists them** — quality-scan
+block 1 lists money-path guard files that carry no recorded mutation, oldest
+first, and falls back to the newest-landing sample when none is left — and runs
+the one `census` cell written for each, then up to two probe cells; anything else
+is listed as out of budget and not run. It prints the block-1 table
 (`| # | Guard file | Mutation | Baseline → mutant |`) for the scan report and the
 ledger. A survivor's diagnosis is still the author's; the table leaves the slot.
 

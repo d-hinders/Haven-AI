@@ -149,6 +149,15 @@ describe('generic skill content', () => {
     )
   })
 
+  it('names the not-compared state among the reasons a quote stops (#4830)', () => {
+    // A stated price nobody compared must never read as a match: the skill
+    // names the field and the cause-following step beside the two decided
+    // stops, so an agent that meets it does not pay on an unchecked price.
+    expect(HAVEN_SKILL_MD).toContain('price_comparison_made: false')
+    expect(HAVEN_SKILL_MD).toContain('the price could not be compared at')
+    expect(HAVEN_SKILL_MD).toContain('re-quote once')
+  })
+
   it('signs and settles by payment_id only, never a bare merchant_url/tool_name pass', () => {
     // Signing: payment_id + payment_required only; typed_data is never relayed
     // by the agent on the preferred path.

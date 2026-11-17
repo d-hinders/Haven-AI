@@ -17,9 +17,31 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Fixed
 
+- **The SDK's own tool definitions name only tools the SDK agent can call, and `haven_sweep_delegate` runs (#4808).** `havenTools.claude()` and `havenTools.openai()` return six tools, but three descriptions named five `haven_…` names outside that set: `get_allowances` pointed at `haven_get_agent`, `authorize_x402_payment` at `haven_get_payment_status`, and `haven_sweep_delegate` at `haven_pay_x402` / `haven_get_allowances` / `haven_check_funds`. They now name the SDK's own tools where the capability exists (`get_payment_status`, `get_allowances`, `authorize_x402_payment`) and drop the pointer where it does not. Separately, `executeTool('haven_sweep_delegate')` used to throw `Unknown tool` for a tool the SDK advertised; it now calls `sweepDelegate()` and returns its result, reading nothing from the input, so a model cannot choose an amount, an asset or a destination. `executeTool('get_payment_status')` also replaces the backend's `message` in the two states whose text names `haven_report_settlement_evidence` (a hosted-only tool), keyed on `phase` / `next_action` and naming no reporting tool. No tool name, argument or schema changes, and both MCP goldens are byte-identical. No update needed.
+
+## 0.14.0-alpha.0 — 2026-11-11
+
+### Fixed
+
 - **An x402 v2 payment goes out under `PAYMENT-SIGNATURE` alone, on either scheme (#4754).** `x402PaymentHeaderNamesFor` now decides by the payload's `x402Version`: v2 → `PAYMENT-SIGNATURE` only; v1 (and an unreadable header) → both `PAYMENT-SIGNATURE` and `X-PAYMENT`, as before. EIP-3009 used to get both names, but the #2361 extensions echo had grown that header to 5–6.5 KB, and a merchant answered HTTP 431 to a doubled one after the funding leg confirmed. `haven.fetch()`, `deliverPayment`, `x402RetryHeadersFor` and `x402PaymentHeaderNamesSent` all follow the rule, and the evidence record's `paymentProofHeaderName` reads `PAYMENT-SIGNATURE` for a v2 EIP-3009 payment. An internal helper now reads the scheme from the payload; the #3427 tax declaration and the paid-delivery refusal text use it instead of counting header names. Owner decision 2026-11-09: a merchant that issues a v2 challenge but reads only `X-PAYMENT` is the accepted residual. Release lever: this SDK release, and a `@haven_ai/connect` release that bumps `runtime-manifest.ts` so `--doctor` installs it. No update needed to keep paying, but the update removes the 431 on large-extension merchants.
 
 ### Added
+
+- **Shared tool descriptions can be worded per MCP surface (#4796).** `composeDescription(description, surface?)` takes an optional `'local' | 'hosted'`, and a description may carry `selectionGuidanceFor` for a sentence that names a tool only one surface registers. The `McpSurface` type is exported. With no surface the shared text is unchanged, so `havenTools` and existing callers are unaffected. No update needed.
+- **The delegate-key credential-file handling is shared, on `@haven_ai/sdk/edge`
+  (#4792).** The local MCP and the edge signer each carried a copy of the code
+  that reads the agent's credential file — the file that holds the delegate
+  private key — and about half of the signer's copy matched the local MCP's line
+  for line. The common part is now one module, exported from the edge entry
+  only (the barrel does not re-export it): `stringField`,
+  `readAccountAddressField`, `readAccountAddressEnv`, `permissiveMode`,
+  `warnIfFilePermissiveWithPrefix`, and the types `RawAccountAddressFields`,
+  `PermissiveFile` and `PermissionLog`. Behaviour is unchanged in both packages,
+  including the exact warning text and the symlink handling: `permissiveMode`
+  still defaults to `'nofollow'`, and both credential checks pass `'follow'`
+  because a credential reached through a symlink is judged by its target. The
+  module is on the money-path perimeter — it is how the key is read — so a later
+  change to it owes a covering QA run. No update needed to keep paying.
 
 - **A merchant can verify an agent's Agent Passport (#4723).** Two new
   merchant-side functions on the main entry: `verifyPassportReceipt(body,
@@ -67,7 +89,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
   gets it with the backend deploy, and the hosted + `@haven_ai/signer`
   EIP-3009 path does not carry it yet.
 
-- **The agent can read its own Agent Passport reference (#4721).**
+- **The agent can read its own Agent Passport reference (#4721). BREAKING only for TypeScript code that builds a `HavenAgent` literal.**
   `HavenAgent.passport` (raw `passport` on `GET /machine-payments/agent`) is
   `{ attestationUid, chainId, verifyUrl? }` for an agent with an anchored
   passport, and `null` otherwise: no passport, a pending or failed one, a

@@ -54,6 +54,7 @@ import { useCallback, useMemo, useState } from 'react'
 import type { Address } from 'viem'
 import type { ApiSchema } from '@haven_ai/core'
 import { api, ApiRequestError } from '@/lib/api'
+import { classifySubmitOutcome } from '@/lib/submitOutcome'
 import { useActiveSigner } from '@/lib/signer'
 import { isPasskeyCancellation } from '@/lib/passkeyErrors'
 import { pickSigningPath } from '@/hooks/useDelegationBudget'
@@ -171,6 +172,12 @@ export type RekeyFailure =
   | { kind: 'out_of_order'; stage: RekeyStage }
   | { kind: 'missing_signature' }
   | { kind: 'completion_failed'; detail: string | null }
+  /**
+   * #4821: the revoke submit was rejected and nothing proves it did not land.
+   * `userOpHash` is the operation the bundler received when the route knew it
+   * — NOT a chain transaction identifier.
+   */
+  | { kind: 'unconfirmed'; message?: string; userOpHash?: string }
   | { kind: 'unknown'; message: string }
 
 function bodyField(err: ApiRequestError, key: string): string | null {
@@ -395,14 +402,28 @@ export function useAgentRekey(agentId: string, chainId: number) {
       } else {
         signature = await signTypedData(prep.signing_payload as unknown as TypedDataPayload)
       }
-      const res = await api.post<{ stage: RekeyStage }>(
-        `/agents/${agentId}/rekey/${rekeyId}/revoke/submit`,
-        {
-          signature,
-          user_operation: prep.user_operation,
-          delegation_hashes: prep.delegation_hashes,
-        },
-      )
+      let res: { stage: RekeyStage }
+      try {
+        res = await api.post<{ stage: RekeyStage }>(
+          `/agents/${agentId}/rekey/${rekeyId}/revoke/submit`,
+          {
+            signature,
+            user_operation: prep.user_operation,
+            delegation_hashes: prep.delegation_hashes,
+          },
+        )
+      } catch (err) {
+        // #4821: the revoke may have landed. The answer says so, and the retry
+        // must re-read the chain rather than sign the same operation again.
+        const outcome = classifySubmitOutcome(err)
+        if (outcome.reason === 'unconfirmed') {
+          return {
+            ok: false,
+            failure: { kind: 'unconfirmed', message: outcome.message, userOpHash: outcome.userOpHash },
+          }
+        }
+        return { ok: false, failure: classify(err) }
+      }
       setStage(res.stage)
       return { ok: true, value: null }
     } catch (err) {

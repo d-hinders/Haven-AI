@@ -23,22 +23,49 @@ export interface ToolDescription {
   /** Natural-language user intents that should make an agent prefer this
    * tool over adjacent tools. Empty or omitted when the summary is enough. */
   selectionGuidance?: string
+  /**
+   * #4796: the same guidance for ONE MCP surface, where the shared sentence
+   * names a tool that surface does not register. The local MCP
+   * (`@haven_ai/mcp`) and the hosted MCP do not have the same tools — local
+   * has no `haven_check_funds`, hosted has no `haven_pay_x402` — so a sentence
+   * that says "use <tool>" has to name a tool the agent reading it can call.
+   * `composeDescription(d, surface)` uses this in place of
+   * `selectionGuidance` when the surface has an entry; with no surface (the
+   * SDK's own direct tool definitions) the shared text is used unchanged.
+   */
+  selectionGuidanceFor?: Partial<Record<McpSurface, string>>
   /** Concrete behaviour the tool performs end-to-end, including which
    * non-custodial guarantee applies. */
   behavior: string
+  /**
+   * #4825: the same behaviour text for ONE MCP surface, where the shared
+   * sentence names a step that surface cannot take. The local MCP has no
+   * signer tool, so the shared `haven_get_agent` sentence about a signer step
+   * is false there. `composeDescription(d, surface)` uses this in place of
+   * `behavior` when the surface has an entry; with no surface (the SDK's own
+   * direct tool definitions, and the hosted MCP) the shared text is used
+   * unchanged.
+   */
+  behaviorFor?: Partial<Record<McpSurface, string>>
   /** What the agent should do next on error / declined states.
    * Empty string if not applicable. */
   nextActionGuidance: string
 }
 
+/** The two MCP surfaces that register `haven_*` tools (#4796). */
+export type McpSurface = 'local' | 'hosted'
+
 /**
  * Build a single description string from the three fragments. Joined with
  * spaces so consumers can split on the summary substring if they need to.
+ *
+ * Pass the MCP `surface` the description is served on, so a fragment that
+ * names a surface-specific tool resolves to that surface's wording (#4796).
  */
-export function composeDescription(d: ToolDescription): string {
-  return [d.summary, d.selectionGuidance, d.behavior, d.nextActionGuidance]
-    .filter(Boolean)
-    .join(' ')
+export function composeDescription(d: ToolDescription, surface?: McpSurface): string {
+  const selection = (surface && d.selectionGuidanceFor?.[surface]) ?? d.selectionGuidance
+  const behavior = (surface && d.behaviorFor?.[surface]) ?? d.behavior
+  return [d.summary, selection, behavior, d.nextActionGuidance].filter(Boolean).join(' ')
 }
 
 /**
@@ -51,12 +78,40 @@ export const FUNDING_LEG_DISCOVERY_GUIDANCE =
   'funding_leg_expected is a catalog hint: among equivalent entries prefer false (erc7710, no funding leg); "unknown" is no preference; never hide true entries. ' +
   'A recipient-pinned budget can pay erc7710 merchants only. The quote\'s expected_funding_leg is authoritative.'
 
+/**
+ * #4825: the one sentence in the shared `haven_get_agent` behavior that names a
+ * signer step. The hosted surface hands signing to the signer; the local MCP
+ * (`@haven_ai/mcp`) has no signer tool at all — the connector's `--local` mode
+ * removes the signer server on every runtime that supports local mode — so it
+ * says what is true there instead. Composed through `behaviorFor` below, so the
+ * hosted text is unchanged.
+ */
+const GET_AGENT_SUB_BUDGET_SENTENCE: Record<McpSurface, string> = {
+  hosted: 'pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature, with the haven_sign step.',
+  local:
+    'pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature; this runtime has no signer ' +
+    'tool, so it cannot sign one — the owner signs it from a hosted-plus-signer install.',
+}
+
+/**
+ * #4825: the shared `haven_get_agent` behavior, composed per surface. The one
+ * sentence that names a signer step is per-surface (`GET_AGENT_SUB_BUDGET_SENTENCE`):
+ * the hosted surface hands signing to the signer, the local MCP has no signer
+ * tool at all. Everything else is shared, so the hosted text is unchanged.
+ */
+const GET_AGENT_BEHAVIOR_HEAD =
+  'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. needs_approval with no allowances[] rows and budgetEndedAt set: the budget ENDED on that date — ask the owner to set a new one, waiting will not help; with no rows and no budgetEndedAt: nothing approved yet; with rows: spent for this period, refilling at budgetRefillsAt (null: it ends first). Readiness is AUTHORITY — a budget is live, not that funds are held. Each allowances[] row carries fundsCoverRemaining: false when the account\'s balance cannot back that row\'s whole remaining budget — a heads-up to mention, not a refusal (budgets above the balance are normal; an owner may top up weekly) — and null when the coverage read failed or the remaining was not read live; the key is absent at remaining 0, and rows for one token are compared alone. Covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify it with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay, nextRefillAt per token. taskBudgets[] rows carry maxAtomic/maxDisplay plus spentAtomic/remainingAtomic/remainingDisplay — what the chain still allows that budget — and remainingIsFromChain: false marks a failed read (figures null, never the cap); only live rows are listed, each with its status (pending | open | closing) and isExpired. '
+const GET_AGENT_BEHAVIOR_TAIL =
+  ' Identity fields: id, name, status, accountAddress, delegateAddress, chainId.'
+const getAgentBehavior = (surface: McpSurface): string =>
+  GET_AGENT_BEHAVIOR_HEAD + GET_AGENT_SUB_BUDGET_SENTENCE[surface] + GET_AGENT_BEHAVIOR_TAIL
+
 export const toolDescriptions = {
   quoteX402: {
     summary:
       'Inspect an HTTP 402 x402 paid resource without creating a Haven payment, signature, approval, or on-chain transaction.',
     behavior:
-      'Probes the merchant directly and parses the 402 response. Pure read-only client behavior — Haven is not contacted.',
+      'Probes the merchant directly and parses the 402 response. Pure read-only client behavior — Haven is read only for the agent when expected_amount is stated.',
     nextActionGuidance:
       'On success the returned quote is the input to haven_pay_x402_quote. Do not call the merchant again — Haven re-uses the captured request when paying.',
   },
@@ -119,8 +174,8 @@ export const toolDescriptions = {
       'Return the authenticated agent identity AND its live spend authority in one call: Haven wallet, delegate, chain, raw status, spend_authority_readiness, per-token remaining allowance (atomic + human-readable). The recommended first call in a new session.',
     selectionGuidance:
       'Use this as the session bootstrap, or to confirm identity together with whether the agent has spend authority right now. For per-token detail (configured vs spent vs reset window) use haven_get_allowances.',
-    behavior:
-      'Reads identity plus the live spend-authority snapshot — the active on-chain budget delegation. spend_authority_readiness (readiness is a deprecated alias, same value) is "ready" when at least one token has remaining spend authority, "needs_approval" when the agent is active but has none, and "revoked" when the credential is not active. needs_approval with no allowances[] rows and budgetEndedAt set: the budget ENDED on that date — ask the owner to set a new one, waiting will not help; with no rows and no budgetEndedAt: nothing approved yet; with rows: spent for this period, refilling at budgetRefillsAt (null: it ends first). Readiness is AUTHORITY — a budget is live, not that funds are held. Each allowances[] row carries fundsCoverRemaining: false when the account\'s balance cannot back that row\'s whole remaining budget — a heads-up to mention, not a refusal (budgets above the balance are normal; an owner may top up weekly) — and null when the coverage read failed or the remaining was not read live; the key is absent at remaining 0, and rows for one token are compared alone. Covers hosted identity + on-chain spend authority ONLY — the hosted server cannot see the LOCAL signer, so "ready" does not mean the signer can start; verify it with a signer tool call or connect --doctor. An over-budget payment is declined before any money moves; there is no approval queue — ask the owner to grant or raise the budget. allowances[] carries id, tokenAddress, remainingAtomic, remainingDisplay, nextRefillAt per token. taskBudgets[] rows carry maxAtomic/maxDisplay plus spentAtomic/remainingAtomic/remainingDisplay — what the chain still allows that budget — and remainingIsFromChain: false marks a failed read (figures null, never the cap); only live rows are listed, each with its status (pending | open | closing) and isExpired. pendingSubBudgetSignatures[] lists sub-budget rows awaiting YOUR signature, with the haven_sign step. Identity fields: id, name, status, accountAddress, delegateAddress, chainId.',
+    behavior: getAgentBehavior('hosted'),
+    behaviorFor: { local: getAgentBehavior('local') },
     nextActionGuidance: '',
   },
   getAllowances: {
@@ -179,6 +234,15 @@ export const toolDescriptions = {
       'Prefer this over haven_pay_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
       'Use haven_pay_x402 for arbitrary HTTP resources. ' +
       'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
+    selectionGuidanceFor: {
+      // The hosted surface has no one-shot haven_pay_x402: an arbitrary HTTP
+      // resource starts at haven_quote_x402 there.
+      hosted:
+        'Use this when the agent wants to call a specific tool on an MCP merchant (e.g. Soundside, Coinbase Bazaar) and payment is required. ' +
+        'Prefer this over haven_quote_x402 when you know the merchant_url and tool_name — it builds the JSON-RPC envelope internally. ' +
+        'Use haven_quote_x402 for arbitrary HTTP resources. ' +
+        'Do NOT use for read-only allowance or budget questions — use haven_get_allowances.',
+    },
     behavior:
       'Builds the JSON-RPC tools/call envelope, runs the MCP Streamable-HTTP initialize handshake automatically (if the endpoint is MCP-shaped), ' +
       'pays any HTTP 402 x402 challenge against the agent\'s on-chain budget delegation, and retries the request, returning the JSON-RPC result (the actual merchant output) on success. ' +
@@ -225,10 +289,26 @@ export const toolDescriptions = {
   sweep_delegate: {
     summary:
       'Sweep stranded USDC and/or ETH from the delegate wallet back to the originating account.',
+    // #4808: the no-surface text is the SDK's own direct tool definitions
+    // (`havenTools`), whose six tools are `make_payment`, `get_payment_status`,
+    // `get_allowances`, `authorize_x402_payment`, `resume_x402_payment` and
+    // `haven_sweep_delegate` — no `haven_pay_x402`, no `haven_check_funds`.
+    // Nobody else composes this fragment: the local MCP passes `'local'` and
+    // the hosted MCP uses its own SWEEP_DELEGATE_DESCRIPTION, so this text can
+    // change without moving either MCP golden.
     selectionGuidance:
       'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
-      'Do NOT use for normal payments — use haven_pay_x402. ' +
-      'Do NOT use to read balances only — use haven_get_allowances, or haven_check_funds for whether the account holds funds.',
+      'Do NOT use for normal payments — use authorize_x402_payment. ' +
+      'Do NOT use to read balances only — use get_allowances; it reports the budget, and its fundsCoverRemaining: false flags an account balance that cannot back it.',
+    selectionGuidanceFor: {
+      // The local surface has no check of funds against an amount, and a live
+      // budget is not proof that funds are held — so haven_get_allowances is
+      // named for the one signal it does carry (fundsCoverRemaining), no more.
+      local:
+        'Use this when the user instructs you to recover stranded funds on the delegate wallet, or when a payment status returns nextAction=sweep_stranded_funds. ' +
+        'Do NOT use for normal payments — use haven_pay_x402. ' +
+        'Do NOT use to read balances only: haven_get_allowances reports the budget, and its fundsCoverRemaining: false flags an account balance that cannot back it — no tool on this surface checks funds against an amount.',
+    },
     behavior:
       'Reads the delegate EOA\'s on-chain USDC and ETH balances. For each non-zero balance, signs and submits a transfer from the delegate EOA to the originating account (hardcoded destination). ' +
       'The delegate key signs locally — Haven never sees it and the backend never constructs signed transactions (CASP/MiCA Red Line #2). ' +
@@ -248,6 +328,23 @@ export const toolDescriptions = {
       'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
       'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
       'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
+    selectionGuidanceFor: {
+      // The local surface has no check of funds against an amount, and a live
+      // budget is not proof that funds are held — so haven_get_allowances is
+      // named for the one signal it does carry (fundsCoverRemaining), no more.
+      local:
+        'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+        'Do NOT use for x402 paid endpoints — use haven_pay_x402 instead. ' +
+        'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
+        'No tool on this surface checks funds against an amount before sending: a live budget is spend authority, not proof of a balance — haven_get_allowances\' fundsCoverRemaining: false flags a balance that cannot back the remaining budget.',
+      // The hosted surface has no one-shot haven_pay_x402: an x402 endpoint
+      // starts at haven_quote_x402 there.
+      hosted:
+        'Use this for plain transfers — refunding a user, paying a freelancer, topping up a co-agent\'s wallet, or moving funds between addresses. ' +
+        'Do NOT use for x402 paid endpoints — use haven_quote_x402 instead. ' +
+        'Do NOT use for read-only allowance, budget, or what-can-I-spend questions — use haven_get_allowances. ' +
+        'Do NOT use to check whether funds are held before sending — use haven_check_funds.',
+    },
     behavior:
       'Sends the amount by redeeming the agent\'s on-chain budget delegation, account to recipient with no funding leg. ' +
       'Budget, recipient and expiry are enforced on-chain while the transfer is prepared, so a request outside them is declined before any money moves or any signing — never queued for a human to approve. ' +

@@ -508,6 +508,45 @@ describe('MoneyPanel — "Since your last visit" (#4709)', () => {
     expect(lines[1]).toBe('No agent payments in the last 7 days.')
   })
 
+  // #4839: the owner's production case — every payment of the 7-day window
+  // happened since yesterday, so the Since line would repeat the 7-day one.
+  const withSevenDay = (payments: number) => {
+    const base = overview({ d30NetUsd: 0, agents: [] })
+    return {
+      ...base,
+      activityWindowStart: '2026-10-28T12:00:00.000Z',
+      spend: { ...base.spend, d7: { ...base.spend.d7, payments } },
+    }
+  }
+  const headerLines = () => {
+    const header = screen.getByRole('heading', { name: 'Dashboard' }).closest('header')!
+    return Array.from(header.querySelector('p')!.querySelectorAll('span.block')).map((span) => span.textContent)
+  }
+
+  it('#4839: hides the Since line when it would only repeat the 7-day sentence', () => {
+    render(
+      <MoneyPanel {...baseProps} overview={withSevenDay(3)} since={sinceFigures()} sincePrevious="2026-11-02T10:00:00.000Z" />,
+    )
+    const lines = headerLines()
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).not.toMatch(/^Since /)
+    expect(lines[0]).toMatch(/in the last 7 days\.$/)
+  })
+
+  it('#4839: keeps both lines when the Since window holds fewer payments than the 7 days', () => {
+    render(
+      <MoneyPanel
+        {...baseProps}
+        overview={withSevenDay(3)}
+        since={sinceFigures({ payments: 2, agents: [{ id: 'a1', name: 'Research agent', netSpend: 4.2, payments: 2 }] })}
+        sincePrevious="2026-11-02T10:00:00.000Z"
+      />,
+    )
+    const lines = headerLines()
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toBe('Since yesterday, Research agent made 2 payments for $4.20.')
+  })
+
   it('shows no line on a first ever visit (no previous marker)', () => {
     render(
       <MoneyPanel

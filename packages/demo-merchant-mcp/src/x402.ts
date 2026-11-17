@@ -25,6 +25,7 @@ import {
   encodePaymentResponseHeader,
 } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse } from '@x402/core/types'
+import { VerifyError } from '@x402/core/types'
 import {
   HAVEN_PASSPORT_EXTENSION,
   type PassportReference,
@@ -37,9 +38,16 @@ import {
   USDC_DOMAIN_NAME,
   USDC_DOMAIN_VERSION,
   isSettlementMethod,
+  type SettlementKind,
   type SettlementMethod,
 } from './products.js'
 import type { ProductId } from './products.js'
+import {
+  CDP_CALL_TIMEOUT_MS,
+  CDP_MAX_AUTHORIZATION_WINDOW_SECONDS,
+  withCdpTimeout,
+  type CdpSettlementConfig,
+} from './cdp.js'
 
 export { DEFAULT_SETTLEMENT_METHOD, SUPPORTED_SETTLEMENT_METHODS, USDC_ADDRESS }
 export type { SettlementMethod }
@@ -633,6 +641,24 @@ export interface X402PaymentProcessorOptions {
   }
   settlementMethods?: readonly SettlementMethod[]
   /**
+   * #4851: Coinbase's hosted facilitator, for products whose settlement kind is
+   * `cdp`. Absent, such a product is refused here (and is not offered at all —
+   * the HTTP layer filters it out before a challenge is ever built).
+   */
+  cdp?: CdpSettlementConfig
+  /**
+   * #4853: receiving addresses this merchant quoted BEFORE the current one and
+   * still honours for a payment that already settled to them — a redeploy that
+   * moves the Stripe deposit address.
+   *
+   * Operator-supplied, never read from the payment. That is the whole point:
+   * the payment's own `payTo` is attacker-chosen, so serving a used
+   * authorization addressed to it would hand goods to anyone who paid an
+   * address of their own. Only an address this merchant actually quoted before
+   * can be honoured.
+   */
+  previousReceivingAddresses?: readonly Address[]
+  /**
    * #4723: when set, every challenge advertises `haven-passport` and a payment
    * that carries a reference is checked against this Haven verifier. Advisory
    * only — the settle path never consults it.
@@ -642,6 +668,12 @@ export interface X402PaymentProcessorOptions {
 
 export interface X402PaymentProcessor {
   buildPaymentRequired(params: {
+    /**
+     * #4850: the receiving address of the PRODUCT being bought
+     * (`productReceivingAddress`), not a merchant-wide global — the 402's
+     * `payTo`. Callers resolve it per product; the name is kept because every
+     * verification step compares the payment against it as "this merchant".
+     */
     merchantAddress: Address
     amountUsdc: bigint
     resource: string
@@ -661,9 +693,15 @@ export interface X402PaymentProcessor {
   verifyAndSettle(params: {
     productId: ProductId
     paymentHeader: string
+    /** #4850: the purchased product's receiving address — the same value the
+     *  challenge it is checked against was built with. The EIP-3009 `to`, the
+     *  quoted option's `payTo` and the ERC-7710 transfer target must all equal it. */
     merchantAddress: Address
     expectedAmount: bigint
     paymentRequired: PaymentRequired
+    /** #4851: the purchased product's settlement kind (`productSettlementKind`).
+     *  Absent, `self` — the merchant settles with its own key. */
+    settlement?: SettlementKind
   }): Promise<SettledPayment>
 }
 
@@ -755,9 +793,13 @@ export function createX402PaymentProcessor(
           // TRUTH, and it survives the restarts they do not. Record the
           // settlement so the buyer is told what actually happened — the goods
           // are owed — rather than being charged and handed a 402.
+          // #4851: the CDP path may recover the transaction that moved it
+          // from USDC's own events; then the receipt carries that reference.
           const entry: SettledCacheEntry = {
             productId: params.productId,
-            payment: buildSettledPayment(params, ZERO_TX_HASH, 'already_settled_earlier'),
+            payment: err.txHash
+              ? buildSettledPayment(params, err.txHash, 'settled_onchain')
+              : buildSettledPayment(params, ZERO_TX_HASH, 'already_settled_earlier'),
           }
           settled.set(productKey, entry)
           return entry
@@ -876,6 +918,311 @@ export function createX402PaymentProcessor(
       passportReference: params.passportReference,
       submit: () => settlementClient.submit(authorization, signature),
     }
+  }
+
+  /**
+   * #4851: a payment for a `cdp` product. Every check this merchant makes
+   * about its OWN quote — the extensions echo and x402 version (before the
+   * dispatch, in `verifyAndSettle`), the quoted option, the resource, the
+   * recipient, the amount, the signature and the validity window — runs here,
+   * before Coinbase's facilitator is called at all.
+   *
+   * One exception to the window: an EXPIRED authorization is not refused yet.
+   * A settle that timed out may have landed after all, and a buyer retrying
+   * the same header after `validBefore` must be served if the chain says the
+   * money moved. `settleThroughCdp` reads the chain first and refuses the
+   * expired header only when it is unused.
+   */
+  async function verifyCdpPayment(params: {
+    payload: PaymentPayload
+    merchantAddress: Address
+    expectedAmount: bigint
+    paymentRequired: PaymentRequired
+    passportReference: PassportReference | null
+  }): Promise<VerifiedPayment> {
+    const cdp = options.cdp
+    if (!cdp) {
+      throw new PaymentError(
+        "This product is settled through Coinbase's facilitator, which is not configured on this merchant",
+      )
+    }
+    const { authorization, signature } = parseExactEvmPayload(params.payload.payload)
+    const quoted = selectQuotedPaymentOption(params.payload.accepted, params.paymentRequired)
+    assertPaymentOptionMatches(params.payload.accepted, quoted, params.merchantAddress, params.expectedAmount, 'eip3009')
+    assertResourceMatches(params.payload, params.paymentRequired)
+    const { expired } = await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount, {
+      allowExpired: true,
+    })
+    // Review of #4851: refuse, before any chain read or CDP call, a window the
+    // recovery search could not cover in full — see the constant.
+    if (BigInt(authorization.validBefore) - BigInt(authorization.validAfter) > BigInt(CDP_MAX_AUTHORIZATION_WINDOW_SECONDS)) {
+      throw new PaymentError(
+        `Payment authorization validity window is longer than ${CDP_MAX_AUTHORIZATION_WINDOW_SECONDS} s ` +
+          '(validBefore - validAfter); sign it with a validAfter close to now.',
+      )
+    }
+    const payer = getAddress(authorization.from)
+    const nonce = authorization.nonce as Hex
+    return {
+      paymentKey: `${payer.toLowerCase()}:${nonce.toLowerCase()}`,
+      payer,
+      payTo: getAddress(authorization.to),
+      nonce,
+      settlementMethod: 'eip3009',
+      passportReference: params.passportReference,
+      submit: () =>
+        settleThroughCdp({
+          cdp,
+          payload: params.payload,
+          requirements: quoted,
+          authorization,
+          expired,
+        }),
+    }
+  }
+
+  /**
+   * Review of #4853 (S7): recover a CDP payment whose quote no longer matches
+   * this merchant's current receiving address.
+   *
+   * A redeploy with new Stripe variables moves the joke's deposit address. A
+   * buyer that was quoted the old address, paid it, and lost the answer then
+   * retries the same header — and the quote checks refuse it before any chain
+   * read. The epic's invariant is that a buyer whose money moved is never
+   * refused, so the chain decides here: if the authorization is used and its
+   * transaction paid the address the payment was quoted for, this amount, the
+   * buyer is served with that hash.
+   *
+   * Only a payment addressed to an address this merchant quoted BEFORE the
+   * current one is considered (`previousReceivingAddresses`, operator-supplied).
+   * Every other refusal is the original one, unchanged. A chain read that fails
+   * leaves the original refusal standing rather than serving on a guess.
+   */
+  async function recoverCdpPaymentAfterQuoteChange(params: {
+    payload: PaymentPayload
+    expectedAmount: bigint
+    passportReference: PassportReference | null
+  }): Promise<VerifiedPayment | undefined> {
+    const cdp = options.cdp
+    if (!cdp) return undefined
+    let authorization: Eip3009Authorization
+    try {
+      authorization = parseExactEvmPayload(params.payload.payload).authorization
+    } catch {
+      return undefined
+    }
+    if (!isAddress(authorization.from) || !isAddress(authorization.to)) return undefined
+    if (!NONCE_RE.test(authorization.nonce)) return undefined
+    // The payment must have been quoted for an address this merchant used to
+    // quote. The payment's own `payTo` is attacker-chosen, so it cannot be the
+    // test: serving on it would hand goods to anyone who paid an address of
+    // their own choosing.
+    const previous = options.previousReceivingAddresses ?? []
+    if (!previous.some((address) => sameAddress(address, authorization.to))) return undefined
+    // And for this product's price: a transfer of another amount is not this
+    // purchase, whatever the chain says.
+    let value: bigint
+    try {
+      value = BigInt(authorization.value)
+    } catch {
+      return undefined
+    }
+    if (value !== params.expectedAmount) return undefined
+    const payer = getAddress(authorization.from)
+    const nonce = authorization.nonce as Hex
+    let used: boolean
+    try {
+      used = await cdp.chain.authorizationUsed(payer, nonce)
+    } catch {
+      return undefined
+    }
+    if (!used) return undefined
+    return {
+      paymentKey: `${payer.toLowerCase()}:${nonce.toLowerCase()}`,
+      payer,
+      payTo: getAddress(authorization.to),
+      nonce,
+      settlementMethod: 'eip3009',
+      passportReference: params.passportReference,
+      // The chain is the truth: `recoverUsedAuthorization` searches USDC's
+      // events for this authorization and serves only when its transaction
+      // paid the quoted address this amount.
+      submit: () => recoverUsedAuthorization({ cdp, authorization }),
+    }
+  }
+
+  /**
+   * #4851: settle through Coinbase's facilitator, with the chain as the judge
+   * of every failure. No facilitator error string is matched: whatever went
+   * wrong — a refusal, a timeout, a network error — the merchant reads USDC's
+   * `authorizationState` itself.
+   *  - used → the money moved, or the nonce was consumed some other way;
+   *    `recoverUsedAuthorization` tells the two apart from USDC's events and
+   *    serves the buyer only in the first case (or when it cannot tell).
+   *  - not used → nothing has moved yet. The buyer is told to retry the same
+   *    header, which runs this check again.
+   * A refusal AT VERIFICATION (which includes Coinbase's sanctions and risk
+   * screening) is final — nothing settled, nothing delivered, no retry —
+   * unless the chain already shows the authorization used (an earlier settle
+   * that landed); then the events decide, as above.
+   */
+  async function settleThroughCdp(p: {
+    cdp: CdpSettlementConfig
+    payload: PaymentPayload
+    requirements: PaymentRequirements
+    authorization: Eip3009Authorization
+    expired: boolean
+  }): Promise<Hex> {
+    const payer = getAddress(p.authorization.from)
+    const nonce = p.authorization.nonce as Hex
+    const timeoutMs = p.cdp.timeoutMs ?? CDP_CALL_TIMEOUT_MS
+
+    // Chain first: a retried header whose earlier settle landed — inside or
+    // after its validity window — is served here, without asking CDP again.
+    if (await readAuthorizationUsed(p.cdp, payer, nonce)) return recoverUsedAuthorization(p)
+    if (p.expired) throw new PaymentError('Payment authorization has expired')
+
+    let verification
+    try {
+      verification = await withCdpTimeout('verify', timeoutMs, () => p.cdp.facilitator.verify(p.payload, p.requirements))
+    } catch (err) {
+      if (err instanceof VerifyError) return refuseVerificationUnlessPaid(p, err.invalidReason, err.invalidMessage)
+      console.error('[x402] CDP verify did not answer — nothing settled', { payer, nonce, error: describeError(err) })
+      throw new PaymentError(
+        "Coinbase's facilitator did not answer the verification. Nothing settled — retry the same payment header.",
+        'facilitator_retryable',
+      )
+    }
+    if (!verification.isValid) {
+      return refuseVerificationUnlessPaid(p, verification.invalidReason, verification.invalidMessage)
+    }
+
+    let failure: string
+    try {
+      const settlement = await withCdpTimeout('settle', timeoutMs, () => p.cdp.facilitator.settle(p.payload, p.requirements))
+      if (settlement.success && TX_HASH_RE.test(settlement.transaction)) return settlement.transaction as Hex
+      failure = `settle answered success=${String(settlement.success)}${settlement.errorReason ? ` (${settlement.errorReason})` : ''}`
+    } catch (err) {
+      failure = describeError(err)
+    }
+
+    // Any settle failure: the chain decides. A timeout can land later; a
+    // refusal can follow a broadcast. Only an unused authorization is retried.
+    let used: boolean
+    try {
+      used = await p.cdp.chain.authorizationUsed(payer, nonce)
+    } catch (err) {
+      console.error('[x402] CDP settle failed and the chain could not be read', { payer, nonce, failure, error: describeError(err) })
+      throw new PaymentError(
+        "Coinbase's facilitator did not confirm the settlement and the chain could not be read. Retry the same " +
+          'payment header: it is checked against the chain again, so it settles at most once.',
+        'facilitator_retryable',
+      )
+    }
+    if (used) return recoverUsedAuthorization(p)
+    console.error('[x402] CDP settle failed; authorization unused so far', { payer, nonce, failure })
+    throw new PaymentError(
+      "Coinbase's facilitator did not confirm the settlement, and the chain shows the authorization unused: " +
+        'nothing has moved yet. Retry the SAME payment header — it is checked against the chain again — and do ' +
+        'not sign a new one.',
+      'facilitator_retryable',
+    )
+  }
+
+  /**
+   * Review of #4851: a verification refusal is final only if the money has
+   * not moved. An earlier settle that timed out may still land, and the
+   * facilitator then refuses the same authorization as already used. One more
+   * chain read keeps "do not retry" from reaching a buyer who paid.
+   */
+  async function refuseVerificationUnlessPaid(
+    p: { cdp: CdpSettlementConfig; authorization: Eip3009Authorization },
+    invalidReason: string | undefined,
+    invalidMessage: string | undefined,
+  ): Promise<never> {
+    const payer = getAddress(p.authorization.from)
+    const nonce = p.authorization.nonce as Hex
+    let used = false
+    try {
+      used = await p.cdp.chain.authorizationUsed(payer, nonce)
+    } catch (err) {
+      console.error('[x402] CDP refused at verification; the chain could not be re-read', {
+        payer,
+        nonce,
+        error: describeError(err),
+      })
+    }
+    if (used) return recoverUsedAuthorization(p)
+    throw cdpVerificationRefused(invalidReason, invalidMessage)
+  }
+
+  async function readAuthorizationUsed(cdp: CdpSettlementConfig, payer: Address, nonce: Hex): Promise<boolean> {
+    try {
+      return await cdp.chain.authorizationUsed(payer, nonce)
+    } catch (err) {
+      console.error('[x402] CDP pre-settle chain read failed', { payer, nonce, error: describeError(err) })
+      throw new PaymentError(
+        'The merchant could not read the chain before settling. Nothing settled — retry the same payment header.',
+        'facilitator_retryable',
+      )
+    }
+  }
+
+  /**
+   * The authorization is used on-chain. `authorizationState` says the same for
+   * a payment, a CANCELLED authorization and a nonce spent by another
+   * authorization, so USDC's `AuthorizationUsed` event inside this
+   * authorization's own validity window decides (`findAuthorizationOutcome`):
+   * - found, and its transaction paid this merchant the price → served, with
+   *   that transaction as the reference;
+   * - found, paying anything else, or the whole window empty → refused: this
+   *   payment cannot have landed outside its window, so nothing was paid here;
+   * - the search failed, or the window was too long to search in full → served
+   *   with no reference. A buyer whose money may have moved is never refused,
+   *   and this is the answer the own-key path gives to any used nonce (#1519).
+   */
+  async function recoverUsedAuthorization(p: {
+    cdp: CdpSettlementConfig
+    authorization: Eip3009Authorization
+  }): Promise<never> {
+    const payer = getAddress(p.authorization.from)
+    const nonce = p.authorization.nonce as Hex
+    let outcome: Awaited<ReturnType<CdpSettlementConfig['chain']['findAuthorizationOutcome']>> = null
+    try {
+      outcome = await p.cdp.chain.findAuthorizationOutcome({
+        authorizer: payer,
+        nonce,
+        to: getAddress(p.authorization.to),
+        value: BigInt(p.authorization.value),
+        validAfter: BigInt(p.authorization.validAfter),
+        validBefore: BigInt(p.authorization.validBefore),
+      })
+    } catch (err) {
+      console.warn('[x402] CDP: authorization used, but its transaction could not be found', {
+        payer,
+        nonce,
+        error: describeError(err),
+      })
+    }
+    if (outcome?.kind === 'not_in_window') {
+      throw new PaymentError(
+        `Authorization ${nonce} is marked used on-chain, but no transfer for it happened inside its validity ` +
+          'window: it was cancelled, or its nonce was spent by another authorization. Nothing was paid here; ' +
+          'nothing is delivered.',
+        'facilitator_refused',
+      )
+    }
+    if (outcome?.kind === 'used_elsewhere') {
+      throw new PaymentError(
+        `Authorization ${nonce} was spent on a different transfer (${outcome.txHash}), not on a payment to this ` +
+          'merchant. Nothing was paid here; nothing is delivered.',
+        'facilitator_refused',
+      )
+    }
+    throw new AuthorizationAlreadyUsedError(
+      `Payment authorization ${nonce} has already settled on-chain for ${payer}. Do not resubmit it.`,
+      outcome?.kind === 'settled' ? outcome.txHash : undefined,
+    )
   }
 
   async function verifyErc7710Payment(params: {
@@ -1096,7 +1443,31 @@ export function createX402PaymentProcessor(
       const passportReference = readPassportReference((payload as { extensions?: unknown }).extensions)
 
       let verified: VerifiedPayment
-      if (method === ERC7710_TRANSFER_METHOD) {
+      if (params.settlement === 'cdp') {
+        // #4851: a CDP product is quoted with EIP-3009 only, so anything else
+        // was never offered; refuse it before any other work.
+        if (method !== 'eip3009') {
+          throw new PaymentError(`This product is paid with EIP-3009 only, not ${method}`)
+        }
+        try {
+          verified = await verifyCdpPayment({ ...params, payload, passportReference })
+        } catch (err) {
+          // Review of #4853 (S7): the merchant's receiving address can change
+          // between a quote and its retry (a redeploy with new Stripe
+          // variables). The quote checks would then refuse the retried header
+          // before any chain read — refusing a buyer whose money already moved
+          // to the address they were quoted. The epic's invariant is that a
+          // buyer whose money moved is never refused, so the chain gets the
+          // last word before the refusal stands.
+          const recovered = await recoverCdpPaymentAfterQuoteChange({
+            payload,
+            expectedAmount: params.expectedAmount,
+            passportReference,
+          })
+          if (!recovered) throw err
+          verified = recovered
+        }
+      } else if (method === ERC7710_TRANSFER_METHOD) {
         verified = await verifyErc7710Payment({ ...params, payload, passportReference })
       } else if (method === 'eip3009') {
         verified = await verifyEip3009Payment({ ...params, payload, passportReference })
@@ -1592,7 +1963,10 @@ async function verifyAuthorization(
   signature: Hex,
   merchantAddress: Address,
   expectedAmount: bigint,
-): Promise<void> {
+  /** #4851: the CDP path defers an expired authorization to a chain read
+   *  instead of refusing it here; every other check still applies. */
+  opts: { allowExpired?: boolean } = {},
+): Promise<{ expired: boolean }> {
   const nowSec = BigInt(Math.floor(Date.now() / 1000))
   const validBefore = parseBigIntField(authorization.validBefore, 'validBefore')
   const validAfter = parseBigIntField(authorization.validAfter, 'validAfter')
@@ -1604,7 +1978,8 @@ async function verifyAuthorization(
   // EIP-3009 on-chain semantics: valid iff validAfter < now < validBefore.
   // validBefore = 0 therefore means NEVER valid — the old special case read
   // it as "no expiry", the exact opposite of what the chain would do (#1279).
-  if (nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
+  const expired = nowSec >= validBefore
+  if (expired && !opts.allowExpired) throw new PaymentError('Payment authorization has expired')
   if (nowSec < validAfter) throw new PaymentError('Payment authorization is not valid yet')
   // Nit companion (#1279): the signed window must not exceed what the quote
   // advertised by more than a generous slack — a years-long authorization
@@ -1643,6 +2018,7 @@ async function verifyAuthorization(
     valid = false
   }
   if (!valid) throw new PaymentError('Invalid EIP-3009 signature')
+  return { expired }
 }
 
 function parseBigIntField(value: string, field: string): bigint {
@@ -1715,11 +2091,47 @@ function sameAddress(a: string, b: string): boolean {
   return isAddress(a) && isAddress(b) && getAddress(a).toLowerCase() === getAddress(b).toLowerCase()
 }
 
+/**
+ * #4851: machine-readable codes for the CDP path's refusals, sent as
+ * `reason_code` on the 402 next to the prose. Additive: every other refusal
+ * carries none, exactly as before.
+ * - `facilitator_refused`: final. Coinbase's facilitator refused the payment
+ *   at verification (including its sanctions and risk screening), or the
+ *   chain shows the authorization consumed by something other than this
+ *   payment (cancelled, or its nonce spent elsewhere). Nothing is
+ *   delivered; retrying the same header will not help.
+ * - `facilitator_retryable`: nothing moved, as far as the merchant can tell.
+ *   Retry the SAME header; it is checked against the chain again, so it
+ *   settles at most once.
+ */
+export type DecisionReasonCode = 'facilitator_refused' | 'facilitator_retryable'
+
 export class PaymentError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** #4851: present only on the CDP path's refusals — see `DecisionReasonCode`. */
+    readonly reasonCode?: DecisionReasonCode,
+  ) {
     super(message)
     this.name = 'PaymentError'
   }
+}
+
+const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
+
+/** #4851: a CDP verification refusal, with Coinbase's reason when it gave one. */
+function cdpVerificationRefused(invalidReason: string | undefined, invalidMessage: string | undefined): PaymentError {
+  const reason = clampReason([invalidReason, invalidMessage].filter(Boolean).join(': ') || 'no reason given')
+  return new PaymentError(
+    `Coinbase's facilitator refused this payment at verification (${reason}). Nothing settled and nothing is ` +
+      'delivered. Do not retry this payment.',
+    'facilitator_refused',
+  )
+}
+
+/** Class and message only — for the server log, never for a response body. */
+function describeError(err: unknown): string {
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err)
 }
 
 /**
@@ -1745,4 +2157,16 @@ export class SettlementRevertedError extends PaymentError {}
  * describes instead of a refusal: a buyer whose money already reached the
  * merchant must not be told the payment failed.
  */
-export class AuthorizationAlreadyUsedError extends PaymentError {}
+export class AuthorizationAlreadyUsedError extends PaymentError {
+  constructor(
+    message: string,
+    /**
+     * #4851: the transaction that used the authorization, when the CDP path
+     * recovered it from USDC's events. Absent, the receipt says the reference
+     * is unavailable (`already_settled_earlier`).
+     */
+    readonly txHash?: Hex,
+  ) {
+    super(message)
+  }
+}

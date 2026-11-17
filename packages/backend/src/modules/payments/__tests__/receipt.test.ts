@@ -203,3 +203,140 @@ describe('buildPaymentReceipt #3418: authorization.signatureScheme mapping', () 
     })
   })
 })
+
+// ── #4822: the bundle names the merchant, not the agent's own delegate ───────
+//
+// On the EIP-3009 bridge the intent row is the FUNDING leg: `to_address` is
+// the agent's own delegate, and the merchant named at authorize sits in
+// `merchant_address` / `x402_merchant_address`. The bundle used to name
+// `to_address` as the merchant. These tests pin the corrected party, the new
+// `settlementTxHash` field, and that every other field keeps its value.
+
+describe('buildPaymentReceipt #4822: merchant party and settlementTxHash', () => {
+  const DELEGATE_EOA = '0xcb9a000000000000000000000000000000005ba8'
+  const MERCHANT = '0x041500000000000000000000000000000000b195'
+  const FUNDING_TX = `0x${'cd'.repeat(32)}`
+  const SETTLEMENT_TX = `0x${'5e'.repeat(32)}`
+
+  /** The row shape the receipt SQL returns for an EIP-3009 funding leg. */
+  function eip3009Row(over: Partial<PaymentReceiptRow> = {}): PaymentReceiptRow {
+    return row({
+      to_address: DELEGATE_EOA,
+      merchant_address: MERCHANT,
+      settlement_scheme: 'eip3009',
+      execution_rail: 'delegation',
+      tx_hash: FUNDING_TX,
+      ...over,
+    })
+  }
+
+  it('recorded settlement: parties.merchant is the named merchant, settlementTxHash is the verified hash', () => {
+    const r = buildPaymentReceipt(eip3009Row({ merchant_settlement_tx_hash: SETTLEMENT_TX }))
+    expect(r.payment.parties?.merchant).toBe(MERCHANT)
+    expect(r.settlementTxHash).toBe(SETTLEMENT_TX)
+    // The funding leg keeps its own names: recipient and onChain.txHash are
+    // the delegate and the funding transaction (owner decision 2026-11-12).
+    expect(r.payment.recipient).toBe(DELEGATE_EOA)
+    expect(r.onChain.txHash).toBe(FUNDING_TX)
+  })
+
+  it('not recorded: parties.merchant is still the named merchant, settlementTxHash is null', () => {
+    const r = buildPaymentReceipt(eip3009Row({ merchant_settlement_tx_hash: null }))
+    expect(r.payment.parties?.merchant).toBe(MERCHANT)
+    expect(r.settlementTxHash).toBeNull()
+    expect(r.payment.recipient).toBe(DELEGATE_EOA)
+    expect(r.onChain.txHash).toBe(FUNDING_TX)
+  })
+
+  it('echo-only: the merchant\'s unverified echo is never used — settlementTxHash stays null', () => {
+    // The echo is what the receipt LIST surfaces as `settlement_tx_hash`
+    // (`protocol_receipt_payload.transaction`). The builder has no input for
+    // it; this row carries one anyway, and the field must stay null. Mutation
+    // guard: reading `row.settlement_tx_hash` here would turn this red.
+    const echoOnly = {
+      ...eip3009Row({ merchant_settlement_tx_hash: null }),
+      settlement_tx_hash: `0x${'ee'.repeat(32)}`,
+    } as PaymentReceiptRow
+    const r = buildPaymentReceipt(echoOnly)
+    expect(r.settlementTxHash).toBeNull()
+    expect(r.payment.parties?.merchant).toBe(MERCHANT)
+  })
+
+  it('stored casing is kept on the merchant party (#3307 kept the signed bundle unchanged)', () => {
+    const mixedCase = '0x041500000000000000000000000000000000B195'
+    const r = buildPaymentReceipt(eip3009Row({ merchant_address: mixedCase }))
+    expect(r.payment.parties?.merchant).toBe(mixedCase)
+  })
+
+  it('erc7710: every field keeps its value; settlementTxHash equals onChain.txHash', () => {
+    const erc7710Row = row({
+      settlement_scheme: 'erc7710',
+      execution_rail: 'delegation',
+      merchant_address: row().to_address,
+    })
+    const r = buildPaymentReceipt(erc7710Row)
+    expect(r).toEqual({
+      version: RECEIPT_VERSION,
+      paymentId: 'pi1',
+      payment: {
+        token: 'xDAI',
+        tokenAddress: '0x0000000000000000000000000000000000000000',
+        amount: '1',
+        amountSek: '10.60',
+        recipient: row().to_address,
+        safe: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+        account: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+        chainId: 100,
+        settledAt: '2026-06-20T10:00:00.000Z',
+        resourceUrl: 'https://api.example/resource',
+        deliveryQuality: null,
+        parties: {
+          treasury_account: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+          delegate: DELEGATE.address,
+          delegate_account: null,
+          merchant: row().to_address,
+        },
+      },
+      authorization: {
+        delegate: DELEGATE.address,
+        signHash: SIGN_HASH,
+        signature: null,
+        signatureScheme: 'eip712_delegation',
+      },
+      onChain: { txHash: row().tx_hash, chainId: 100 },
+      settlementTxHash: row().tx_hash,
+    })
+  })
+
+  it('direct: every field keeps its value; settlementTxHash equals onChain.txHash', () => {
+    const r = buildPaymentReceipt(row({ execution_rail: 'direct' }))
+    expect(r.payment.parties?.merchant).toBe(row().to_address)
+    expect(r.settlementTxHash).toBe(row().tx_hash)
+    expect(r.onChain.txHash).toBe(row().tx_hash)
+    expect('signatureScheme' in r.authorization).toBe(false)
+  })
+
+  it('retired-rail row with no merchant column: merchant falls back to to_address, settlementTxHash is tx_hash', () => {
+    // A row read by the pre-#4822 SQL carries no `merchant_address` at all.
+    const legacy = row()
+    const r = buildPaymentReceipt(legacy)
+    expect(r.payment.parties?.merchant).toBe(legacy.to_address)
+    expect(r.settlementTxHash).toBe(legacy.tx_hash)
+    expect(r.payment.recipient).toBe(legacy.to_address)
+  })
+
+  it('verification is unchanged per scheme with the additive field present', () => {
+    // The #3418 end-to-end tests above already pin `verified: true` (erc7710)
+    // and `not_verifiable_offline` (eip3009) on bundles that now carry
+    // `settlementTxHash` — `buildPaymentReceipt` always emits it. This pins
+    // the narrower claim: the field itself changes nothing about the result.
+    const erc7710 = buildPaymentReceipt(
+      row({ settlement_scheme: 'erc7710', execution_rail: 'delegation', merchant_address: row().to_address }),
+    )
+    const eip3009 = buildPaymentReceipt(eip3009Row({ merchant_settlement_tx_hash: SETTLEMENT_TX }))
+    for (const bundle of [erc7710, eip3009]) {
+      const { settlementTxHash: _dropped, ...withoutField } = bundle
+      expect(verifyPaymentReceipt(bundle)).toEqual(verifyPaymentReceipt(withoutField as never))
+    }
+  })
+})

@@ -36,8 +36,17 @@ export function TransactionActivityRow({
   onOpen,
   insetDivider = false,
   live = false,
+  mutedTitle = false,
 }: {
   title: string
+  /**
+   * Muted title (#4908, approved on #4894): the title paints in ink-3 instead
+   * of ink. For a title that states an ABSENCE rather than naming a thing —
+   * the Sales ledger's "No product recorded", a sale with no sale record. The
+   * row stays the same row; only the title's ink changes. Opt-in: every
+   * existing caller omits it and renders byte-identical.
+   */
+  mutedTitle?: boolean
   description?: ReactNode
   /**
    * Token mode: a formatted, unsigned amount — sign and tone come from
@@ -226,7 +235,11 @@ export function TransactionActivityRow({
           again, exactly as before. */}
       <div className="contents sm:col-start-2 sm:row-start-1 sm:block sm:min-w-0">
         <div className="col-start-2 row-start-1 flex flex-wrap items-center gap-2">
-          <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--v2-ink)] sm:flex-initial">{title}</p>
+          <p
+            className={`min-w-0 flex-1 truncate text-sm font-medium ${mutedTitle ? 'text-[var(--v2-ink-3)]' : 'text-[var(--v2-ink)]'} sm:flex-initial`}
+          >
+            {title}
+          </p>
           {hasBadges ? (
             <div className="flex w-full flex-wrap items-center gap-2 sm:contents">
               {countLabel ? (

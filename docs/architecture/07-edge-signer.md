@@ -24,6 +24,7 @@ covers:
   - packages/connect/src/signer-runtime.ts
   - packages/connect/src/storage.ts
   - packages/sdk/src/client.ts
+  - packages/sdk/src/credential-file.ts
   - packages/sdk/src/mcp-merchant-transport.ts
   - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/signer.ts
@@ -345,7 +346,11 @@ unchanged to `haven_sign` — its OWN reason says so directly, rather than
 looping the agent back through `payment_id` again. The route covers two
 DISTINCT refusal shapes: (1) any refusal carrying `fallback: 'typed_data_b64'`,
 whatever its code — a currently-published `@haven_ai/signer` sets that field
-only on a transport failure, a malformed body, or a 404 on an older backend;
+only on a transport failure, a malformed body, or a 404 on an older backend.
+Since #4829 the transport-failure code `SIGN_CONTEXT_UNREACHABLE` also covers
+Haven's NON-ANSWER class — a body that is not a JSON object at any non-2xx
+status, any 5xx, and a 429 — so a gateway's HTML 502 and the money-path rate
+limit's 429 route here too, with `http_status` carried;
 (2) `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
 and NO `fallback` field, which only a signer predating #3271 produces (it has
 no direct-fetch fallback of its own to try). On either path a current signer now runs the UserOp binding check before signing
@@ -624,7 +629,11 @@ account is permanently out of scope.
   names `npx @haven_ai/connect --doctor` for the connector-wired case.
 - Local secret handling mirrors `@haven_ai/mcp`: key from `HAVEN_DELEGATE_KEY`
   or a credential file selected by `--credentials` / `HAVEN_CREDENTIALS`, with
-  a permissive-file warning.
+  a permissive-file warning. Since #4792 the mirror is literal — the
+  account-address readers and the permission check are one module in
+  `@haven_ai/sdk/edge` (`packages/sdk/src/credential-file.ts`), which both
+  packages import; only the log prefix (`haven-signer:` / `haven-mcp:`) and
+  each package's own loader stay local.
 - First-launch consent must match the current signer identity and tool set.
   Acknowledgement uses `HAVEN_SIGNER_ACK` or a local
   `<credentials>.signer-ack.json` sidecar. Re-acknowledgement after a tool-set

@@ -30,7 +30,7 @@
     "lines": 1163
   },
   "packages/backend/src/routes/hybrid-accounts.ts": {
-    "lines": 721
+    "lines": 720
   },
   "packages/backend/src/routes/ops.ts": {
     "lines": 435

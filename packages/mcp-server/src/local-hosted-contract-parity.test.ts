@@ -119,6 +119,12 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
   'haven_send↔haven_send': {
     hostedOnly: { include_signing_payload: KEYLESS_SIGNING_PAYLOAD },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
+    description: {
+      local: 'cdecc99b6a33',
+      hosted: 'b484fd5fde05',
+      reason:
+        '#4796: each text names only tools its own surface has — the local one says no tool there checks funds against an amount (on funds, naming haven_get_allowances only for fundsCoverRemaining) and keeps haven_pay_x402, the hosted one points at haven_quote_x402 and haven_check_funds.',
+    },
   },
   'haven_sweep_delegate↔haven_sweep_delegate': {
     hostedOnly: {
@@ -126,7 +132,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
       signature: 'The hosted sweep is keyless: the signature comes back from the edge signer and is relayed in.',
     },
     description: {
-      local: 'f0f0d594808a',
+      local: 'b702163e8c18',
       hosted: 'de1f44567c0a',
       reason:
         'The hosted text describes two keyless phases (the authorization out, the signature back in); the local text describes one call.',
@@ -138,10 +144,10 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
         'Hosted haven_submit relays either a funding signature or an erc7710 settlement child and is told which; the local one takes no scheme.',
     },
     description: {
-      local: '8d6a9dedf88c',
+      local: 'ec647b165fab',
       hosted: 'e86bdff11c81',
       reason:
-        'The local text opens with the three ids a signature can belong to; the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up.',
+        'The local text opens with the three ids a signature can belong to and says this runtime has no signer tool, so it cannot produce one (#4825); the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up.',
     },
   },
   'haven_pay_mcp_tool↔haven_pay_mcp_tool': {
@@ -153,7 +159,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
       local: 'f540347d6c34',
-      hosted: '0cc51fa14a30',
+      hosted: '7eabc12dd14c',
       reason:
         'The local text describes the whole initialize, pay and retry round trip in one call; the hosted text describes step 1 of a flow that hands a funding intent to the signer.',
     },
@@ -164,10 +170,10 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
-      local: 'c491068545c5',
-      hosted: '86e3f8304d5d',
+      local: '4bdcbaf93f4d',
+      hosted: '86b932e45565',
       reason:
-        'Each text names its own follow-up: the local quote is the input to haven_pay_x402_quote, the hosted one returns a next step restating the request with a cap.',
+        'Each text names its own follow-up: the local quote is the input to haven_pay_x402_quote, the hosted one returns a next step restating the request with a cap. Both now say Haven is read for the agent (and, hosted, its budget) rather than "not contacted" (#4830).',
     },
   },
   'haven_pay_x402_quote↔haven_pay_x402_quote': {
@@ -216,18 +222,26 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
   },
   'haven_open_task_budget↔haven_open_task_budget': {
     description: {
-      local: 'de104b0f1fa7',
+      local: '6e500db757a7',
       hosted: 'c0d794452742',
       reason:
-        'Same inputs; the local text returns next_tool and next_arguments for the signature, the hosted text returns sign_data and names the haven_submit relay.',
+        'Same inputs; the local text says the call refuses with TASK_BUDGET_SIGNING_UNAVAILABLE because a --local install has no signer tool (#4825), the hosted text returns sign_data and names the haven_submit relay.',
     },
   },
   'haven_close_task_budget↔haven_close_task_budget': {
     description: {
-      local: '4820ffb90a95',
+      local: '086dfcaa0805',
       hosted: '9f4f5a7c917f',
       reason:
-        'Same inputs; the local text returns next_tool and next_arguments for the signature, the hosted text returns sign_data and names signer_compatibility.',
+        'Same inputs; the local text says a pending or expired budget still closes but an open or closing one refuses with TASK_BUDGET_SIGNING_UNAVAILABLE (#4825), the hosted text returns sign_data and names signer_compatibility.',
+    },
+  },
+  'haven_get_agent↔haven_get_agent': {
+    description: {
+      local: '1fb042fa1f05',
+      hosted: '40752113f31c',
+      reason:
+        '#4825: the shared behavior fragment is composed per surface — the local text says pendingSubBudgetSignatures[] rows cannot be signed on this runtime (no signer tool) and the owner signs them from a hosted-plus-signer install, where the hosted text names the haven_sign step.',
     },
   },
   'haven_get_task_budget↔haven_get_task_budget': {
@@ -250,7 +264,7 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
-      local: '11ca3557a67b',
+      local: 'cdecc99b6a33',
       hosted: 'f376faf01734',
       reason:
         'Two names for the direct wallet payment: the local text describes a send, the hosted text describes constructing an unsigned payload for the signer.',

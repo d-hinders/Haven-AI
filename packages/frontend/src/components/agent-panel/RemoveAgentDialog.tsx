@@ -78,7 +78,7 @@ export function RemoveAgentDialog({
 }) {
   const { revokeAll, ready, busy, budgets, budgetsError, signersError, signersLoading, hasPasskeys, passkeyElsewhere } = useDelegationBudget(agent.id, chainId)
   const { balance, hasRecoverableUsdc } = useDelegateBalance(agent.id)
-  const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many'>('confirm')
+  const [phase, setPhase] = useState<'confirm' | 'working' | 'filing_failed' | 'too_many' | 'unconfirmed'>('confirm')
   const [error, setError] = useState<string | null>(null)
 
   const finish = mode === 'finish'
@@ -121,6 +121,15 @@ export function RemoveAgentDialog({
     if (needsSignature) {
       const result = await revokeAll()
       if (!result.ok) {
+        // #4821: the batch was sent and its answer was lost, so the budget may
+        // already be stopped. This is NOT the plain failure: the dialog says
+        // so, and the next press re-reads the chain (the prepare heals) rather
+        // than signing the same operation again.
+        if (result.reason === 'unconfirmed') {
+          setPhase('unconfirmed')
+          setError(null)
+          return
+        }
         setPhase(result.reason === 'too_many' ? 'too_many' : 'confirm')
         setError(
           result.reason === 'cancelled'
@@ -295,6 +304,16 @@ export function RemoveAgentDialog({
                 agent&apos;s budget card
               </Link>
               , then {finish ? 'finish revoking' : 'remove it'}. Nothing changed — it can still spend until you do.
+            </InlineAlert>
+          )}
+          {/* #4821: the batch was sent and its answer was lost. The budget may
+              already be stopped, so this is not the plain failure — and the
+              next press re-reads the chain before signing anything. */}
+          {phase === 'unconfirmed' && (
+            <InlineAlert>
+              We could not confirm the budget stop. It may already be stopped. Choose{' '}
+              {finish ? 'Finish revoking' : 'Remove agent'} again to check — Haven reads the
+              chain first and will not send a second operation if it is.
             </InlineAlert>
           )}
         </div>

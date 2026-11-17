@@ -1,0 +1,320 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > /healthz, the discovery document and list_products are byte-identical > discovery 1`] = `"{"name":"Haven Demo Merchant","environment":"prod","chain_id":8453,"network":"eip155:8453","mcp_url":"http://127.0.0.1:PORT/mcp","current_base_url":"http://127.0.0.1:PORT","hosted_urls":{"dev":"https://demo-merchant-dev-84e4.up.railway.app/mcp","prod":"https://enthusiastic-blessing-production-171f.up.railway.app/mcp"},"routing":{"dev":{"chain_id":84532,"network":"eip155:84532","mcp_url":"https://demo-merchant-dev-84e4.up.railway.app/mcp"},"prod":{"chain_id":8453,"network":"eip155:8453","mcp_url":"https://enthusiastic-blessing-production-171f.up.railway.app/mcp"}},"settlement_methods":["eip3009"],"default_settlement_method":"eip3009","products":[{"id":"vpn_basic","name":"NordShield VPN Basic","category":"vpn","price_usdc":"0.001","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_vpn"]},{"id":"vpn_legacy","name":"NordShield VPN Legacy","category":"vpn","price_usdc":"0.001","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_vpn"]},{"id":"vpn_pro","name":"NordShield VPN Pro","category":"vpn","price_usdc":"0.003","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_vpn"]},{"id":"vpn_ultra","name":"NordShield VPN Ultra","category":"vpn","price_usdc":"0.005","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_vpn"]},{"id":"storage_50gb","name":"CloudNest 50 GB","category":"storage","price_usdc":"0.0005","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_cloud_storage"]},{"id":"storage_200gb","name":"CloudNest 200 GB","category":"storage","price_usdc":"0.0015","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_cloud_storage"]},{"id":"storage_1tb","name":"CloudNest 1 TB","category":"storage","price_usdc":"0.004","settlement_methods":["eip3009"],"default_settlement_method":"eip3009","tools":["buy_cloud_storage"]}]}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > /healthz, the discovery document and list_products are byte-identical > healthz 1`] = `"{"status":"ok","merchant":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","environment":"prod","chain_id":8453,"network":"eip155:8453","mcp_url":"http://127.0.0.1:PORT/mcp"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > /healthz, the discovery document and list_products are byte-identical > list_products 1`] = `
+"event: message
+data: {"result":{"content":[{"type":"text","text":"Available products:\\n\\n[vpn_basic] NordShield VPN Basic\\n  Price: $0.001 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  Essential VPN protection. Up to 10 devices. Standard speeds. 50+ server locations.\\n\\n[vpn_legacy] NordShield VPN Legacy\\n  Price: $0.001 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  VPN subscription that only supports EIP-3009 payment. Intended for clients without ERC-7710 support.\\n\\n[vpn_pro] NordShield VPN Pro\\n  Price: $0.003 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  Premium VPN. Unlimited devices. High-speed servers. Double-VPN. 90+ countries.\\n\\n[vpn_ultra] NordShield VPN Ultra\\n  Price: $0.005 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  Ultimate privacy. Onion routing. Dedicated IP addresses. 24/7 priority support.\\n\\n[storage_50gb] CloudNest 50 GB\\n  Price: $0.0005 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  Secure encrypted cloud storage. 50 GB. File sharing and automatic sync included.\\n\\n[storage_200gb] CloudNest 200 GB\\n  Price: $0.0015 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  Expanded storage. 200 GB. Version history, automatic backup, and priority bandwidth.\\n\\n[storage_1tb] CloudNest 1 TB\\n  Price: $0.004 USDC/month\\n  x402: eip155:8453 USDC, settlement_methods=eip3009, default=eip3009\\n  Merchant MCP URL: http://127.0.0.1:PORT/mcp\\n  Hosted routing: dev=https://demo-merchant-dev-84e4.up.railway.app/mcp, prod=https://enthusiastic-blessing-production-171f.up.railway.app/mcp\\n  Business-grade cloud storage. 1 TB. API access, team sharing, and a 99.9% uptime SLA.\\n\\nUse buy_vpn or buy_cloud_storage to purchase. Omit settlement_method for eip3009; pass eip3009 or erc7710 to choose explicitly. Payment happens via x402 (USDC on Base) and must be signed by the buyer's wallet or agent runtime."}],"structuredContent":{"products":[{"product_id":"vpn_basic","display_name":"NordShield VPN Basic","description":"Essential VPN protection. Up to 10 devices. Standard speeds. 50+ server locations.","price_atomic":"1000","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_vpn","arguments_schema":{"type":"object","properties":{"plan":{"type":"string","enum":["basic","legacy","pro","ultra"],"const":"basic","description":"Fixed value selecting \\"NordShield VPN Basic\\" via the buy_vpn tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["plan"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.001 USDC"}},{"product_id":"vpn_legacy","display_name":"NordShield VPN Legacy","description":"VPN subscription that only supports EIP-3009 payment. Intended for clients without ERC-7710 support.","price_atomic":"1000","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_vpn","arguments_schema":{"type":"object","properties":{"plan":{"type":"string","enum":["basic","legacy","pro","ultra"],"const":"legacy","description":"Fixed value selecting \\"NordShield VPN Legacy\\" via the buy_vpn tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["plan"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.001 USDC"}},{"product_id":"vpn_pro","display_name":"NordShield VPN Pro","description":"Premium VPN. Unlimited devices. High-speed servers. Double-VPN. 90+ countries.","price_atomic":"3000","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_vpn","arguments_schema":{"type":"object","properties":{"plan":{"type":"string","enum":["basic","legacy","pro","ultra"],"const":"pro","description":"Fixed value selecting \\"NordShield VPN Pro\\" via the buy_vpn tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["plan"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.003 USDC"}},{"product_id":"vpn_ultra","display_name":"NordShield VPN Ultra","description":"Ultimate privacy. Onion routing. Dedicated IP addresses. 24/7 priority support.","price_atomic":"5000","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_vpn","arguments_schema":{"type":"object","properties":{"plan":{"type":"string","enum":["basic","legacy","pro","ultra"],"const":"ultra","description":"Fixed value selecting \\"NordShield VPN Ultra\\" via the buy_vpn tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["plan"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.005 USDC"}},{"product_id":"storage_50gb","display_name":"CloudNest 50 GB","description":"Secure encrypted cloud storage. 50 GB. File sharing and automatic sync included.","price_atomic":"500","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_cloud_storage","arguments_schema":{"type":"object","properties":{"tier":{"type":"string","enum":["50gb","200gb","1tb"],"const":"50gb","description":"Fixed value selecting \\"CloudNest 50 GB\\" via the buy_cloud_storage tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["tier"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.0005 USDC"}},{"product_id":"storage_200gb","display_name":"CloudNest 200 GB","description":"Expanded storage. 200 GB. Version history, automatic backup, and priority bandwidth.","price_atomic":"1500","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_cloud_storage","arguments_schema":{"type":"object","properties":{"tier":{"type":"string","enum":["50gb","200gb","1tb"],"const":"200gb","description":"Fixed value selecting \\"CloudNest 200 GB\\" via the buy_cloud_storage tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["tier"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.0015 USDC"}},{"product_id":"storage_1tb","display_name":"CloudNest 1 TB","description":"Business-grade cloud storage. 1 TB. API access, team sharing, and a 99.9% uptime SLA.","price_atomic":"4000","asset":"USDC","network":"eip155:8453","billing_period":"monthly","tool_name":"buy_cloud_storage","arguments_schema":{"type":"object","properties":{"tier":{"type":"string","enum":["50gb","200gb","1tb"],"const":"1tb","description":"Fixed value selecting \\"CloudNest 1 TB\\" via the buy_cloud_storage tool."},"settlement_method":{"type":"string","enum":["eip3009","erc7710"],"description":"Optional x402 settlement method override; omit to use default_settlement_method."}},"required":["tier"],"additionalProperties":false},"supported_settlement_methods":["eip3009"],"default_settlement_method":"eip3009","mcp_url":"http://127.0.0.1:PORT/mcp","environment":"prod","display":{"price_formatted":"$0.004 USDC"}}],"environment":"prod","mcp_url":"http://127.0.0.1:PORT/mcp"}},"jsonrpc":"2.0","id":1}
+
+"
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for storage_1tb is byte-identical and pays MERCHANT_ADDRESS > 402 storage_1tb 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"CloudNest 1 TB — 1 month of storage","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"4000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for storage_50gb is byte-identical and pays MERCHANT_ADDRESS > 402 storage_50gb 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"CloudNest 50 GB — 1 month of storage","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"500","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for storage_200gb is byte-identical and pays MERCHANT_ADDRESS > 402 storage_200gb 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"CloudNest 200 GB — 1 month of storage","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"1500","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_basic is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_basic 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Basic — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"1000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_legacy is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_legacy 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Legacy — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"1000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_pro is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_pro 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Pro — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"3000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_ultra is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_ultra 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Ultra — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"5000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for storage_1tb is byte-identical > in-band storage_1tb 1`] = `
+"Payment required for CloudNest 1 TB.
+
+Price: $0.004 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "CloudNest 1 TB — 1 month of storage",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "4000",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for storage_50gb is byte-identical > in-band storage_50gb 1`] = `
+"Payment required for CloudNest 50 GB.
+
+Price: $0.0005 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "CloudNest 50 GB — 1 month of storage",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "500",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for storage_200gb is byte-identical > in-band storage_200gb 1`] = `
+"Payment required for CloudNest 200 GB.
+
+Price: $0.0015 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "CloudNest 200 GB — 1 month of storage",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "1500",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for vpn_basic is byte-identical > in-band vpn_basic 1`] = `
+"Payment required for NordShield VPN Basic.
+
+Price: $0.001 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "NordShield VPN Basic — 1 month subscription",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "1000",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for vpn_legacy is byte-identical > in-band vpn_legacy 1`] = `
+"Payment required for NordShield VPN Legacy.
+
+Price: $0.001 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "NordShield VPN Legacy — 1 month subscription",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "1000",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for vpn_pro is byte-identical > in-band vpn_pro 1`] = `
+"Payment required for NordShield VPN Pro.
+
+Price: $0.003 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "NordShield VPN Pro — 1 month subscription",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "3000",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;
+
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the in-band refusal for vpn_ultra is byte-identical > in-band vpn_ultra 1`] = `
+"Payment required for NordShield VPN Ultra.
+
+Price: $0.005 USDC (incl. 25% VAT)
+Payment address: 0x15179876c595922999C2d5DC7c23Cc7711fE799a
+Network: eip155:8453
+
+x402 payment requirements:
+{
+  "x402Version": 2,
+  "resource": {
+    "url": "http://127.0.0.1:PORT/mcp",
+    "description": "NordShield VPN Ultra — 1 month subscription",
+    "mimeType": "application/json",
+    "serviceName": "Haven Demo Merchant"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "5000",
+      "payTo": "0x15179876c595922999C2d5DC7c23Cc7711fE799a",
+      "maxTimeoutSeconds": 300,
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "haven-demo": {
+      "version": "1",
+      "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    }
+  },
+  "error": "Payment required"
+}
+
+Re-send the same HTTP call with a PAYMENT-SIGNATURE or X-PAYMENT header."
+`;

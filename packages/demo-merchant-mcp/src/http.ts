@@ -271,6 +271,10 @@ async function handle(
       // the issue asks for; it is process-local (the merchant sleeps after
       // ~10 minutes), so the durable signal is the `[stripe] record_failed
       // tx=<hash>` log line the reconciliation runbook greps for.
+      // #4866: `recorded` counts only PaymentIntents Stripe accepted
+      // (`succeeded`); `pending` and `declined` count the ones it had not
+      // decided by the bound and the ones it declined (`[stripe]
+      // record_declined`, permanent for that transaction).
       ...(options.stripe
         ? {
             stripe: {
@@ -279,6 +283,8 @@ async function handle(
               api_version: options.stripe.apiVersion,
               network: options.stripe.network,
               recorded: options.stripe.stats().recorded,
+              pending: options.stripe.stats().pending,
+              declined: options.stripe.stats().declined,
               record_failures: options.stripe.stats().failed,
             },
           }
@@ -352,6 +358,8 @@ async function handle(
     // `[stripe] record_failed tx=<hash>` (never the key) and counted in
     // /healthz. A payment served through recovery without a transaction hash
     // (#4851) records nothing here — the reconciliation script picks it up.
+    // #4866: and only a payment to the CURRENT deposit address — one recovered
+    // to the previous address is logged as `not_recorded`, never sent.
     recordStripePayment(options.stripe, paymentToolInfo.product, settled)
     // #4855: the buyer's signed tax declaration, if this paid request carried
     // one. Verified against the payer the merchant just settled from — the

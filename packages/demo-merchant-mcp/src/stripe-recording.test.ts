@@ -99,7 +99,7 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
         const query = new URLSearchParams(request.path.split('?')[1] ?? '').get('query') ?? ''
         const tx = /transaction_hash'\]\s*:\s*'([^']+)'/.exec(query)?.[1]
         const id = tx ? byTx.get(tx) : undefined
-        return { status: 200, body: { data: id ? [{ id }] : [] } }
+        return { status: 200, body: { data: id ? [{ id, status: 'succeeded' }] : [] } }
       }
       if (opts.failCreate) {
         return { status: 402, body: { error: { type: 'card_error', code: 'crypto_declined' } } }
@@ -110,7 +110,7 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
       if (key) {
         const held = idempotencyKeys.get(key)
         if (held && now - held.at < IDEMPOTENCY_KEY_RETENTION_MS) {
-          return { status: 200, body: { id: held.id } }
+          return { status: 200, body: { id: held.id, status: 'succeeded' } }
         }
         // Stripe prunes the key after ~24h: it no longer answers for the create.
         if (held) idempotencyKeys.delete(key)
@@ -119,7 +119,7 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
       intents.set(id, { id, form: request.form ?? {} })
       byTx.set(tx, id)
       if (key) idempotencyKeys.set(key, { id, at: now })
-      return { status: 200, body: { id } }
+      return { status: 200, body: { id, status: 'succeeded' } }
     },
   }
   return {
@@ -141,6 +141,8 @@ async function startServer(
     stripe?: boolean
     stripeFail?: boolean
     stripeHang?: boolean
+    /** #4866: a recording built by the test, used instead of the default one. */
+    recording?: StripeRecording
     cdp?: boolean
     fakes?: Fakes
     previousReceivingAddresses?: readonly `0x${string}`[]
@@ -154,8 +156,8 @@ async function startServer(
   }
   const settlementMethods = ['eip3009', 'erc7710'] as const
   const stripe = fakeStripe({ failCreate: opts.stripeFail, hang: opts.stripeHang })
-  const recording: StripeRecording | undefined =
-    opts.stripe === false
+  const recording: StripeRecording | undefined = opts.recording ??
+    (opts.stripe === false
       ? undefined
       : createStripeRecording(
           {
@@ -165,7 +167,7 @@ async function startServer(
             network: 'base',
           },
           { http: stripe.client, log: (line) => logs.push(line), timeoutMs: 50 },
-        )
+        ))
   const server = createDemoMerchantServer({
     merchantAddress: MERCHANT,
     baseUrl: 'http://127.0.0.1:0',
@@ -307,9 +309,53 @@ describe('the deposit address in the 402 (#4853)', () => {
       api_version: STRIPE_API_VERSION_SANDBOX,
       network: 'base',
       recorded: 0,
+      pending: 0,
+      declined: 0,
       record_failures: 0,
     })
     expect(JSON.stringify(health)).not.toContain(FAKE_KEY)
+  })
+
+  it('#4866: /healthz counts recorded, pending, declined and failures apart', async () => {
+    // One PaymentIntent Stripe declines after create, two it never decides —
+    // different counts, so swapping the two keys cannot pass.
+    const statusFor = new Map([
+      ['pi_3Declined0001', 'requires_payment_method'],
+      ['pi_3Pending00001', 'processing'],
+      ['pi_3Pending00002', 'processing'],
+    ])
+    let next = 0
+    const ids = ['pi_3Declined0001', 'pi_3Pending00001', 'pi_3Pending00002']
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.path.startsWith('/v1/payment_intents/search')) return { status: 200, body: { data: [] } }
+        if (request.method === 'GET') {
+          const id = request.path.split('/').pop()!
+          return { status: 200, body: { id, status: statusFor.get(id) } }
+        }
+        return { status: 200, body: { id: ids[next++], status: 'processing' } }
+      },
+    }
+    const recording = createStripeRecording(
+      { depositAddress: DEPOSIT, secretKey: FAKE_KEY, apiVersion: STRIPE_API_VERSION_SANDBOX, network: 'base' },
+      { http, log: () => {}, sleep: async () => {}, verdictPollMs: 1_000, verdictTimeoutMs: 2_000 },
+    )
+    await recording.record({ txHash: `0x${'d1'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+    await recording.record({ txHash: `0x${'d2'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+    await recording.record({ txHash: `0x${'d3'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+
+    const { origin } = await startServer({ recording })
+    const health = (await (await fetch(`${origin}/healthz`)).json()) as Record<string, unknown>
+    expect(health.stripe).toEqual({
+      configured: true,
+      deposit_address: DEPOSIT,
+      api_version: STRIPE_API_VERSION_SANDBOX,
+      network: 'base',
+      recorded: 0,
+      pending: 2,
+      declined: 1,
+      record_failures: 0,
+    })
   })
 
   it('/healthz has no stripe block when Stripe is off', async () => {
@@ -367,7 +413,7 @@ describe('recording a settled payment (#4853)', () => {
       'payment_method_options[crypto][transaction_verification_options][network]': 'base',
       'payment_method_options[crypto][transaction_verification_options][transaction_hash]': CDP_TX,
     })
-    expect(recording!.stats()).toEqual({ attempted: 1, recorded: 1, alreadyRecorded: 0, failed: 0 })
+    expect(recording!.stats()).toEqual({ attempted: 1, recorded: 1, alreadyRecorded: 0, pending: 0, declined: 0, failed: 0 })
   })
 
   it('creates no second PaymentIntent when the same header is retried', async () => {
@@ -382,7 +428,7 @@ describe('recording a settled payment (#4853)', () => {
     await recording!.flush()
 
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(1)
-    expect(recording!.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, failed: 0 })
+    expect(recording!.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, pending: 0, declined: 0, failed: 0 })
   })
 
   it('creates no PaymentIntent at request time for a recovery without a transaction hash', async () => {
@@ -399,7 +445,7 @@ describe('recording a settled payment (#4853)', () => {
     await recording!.flush()
 
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(0)
-    expect(recording!.stats()).toEqual({ attempted: 0, recorded: 0, alreadyRecorded: 0, failed: 0 })
+    expect(recording!.stats()).toEqual({ attempted: 0, recorded: 0, alreadyRecorded: 0, pending: 0, declined: 0, failed: 0 })
 
     // ...and the reconciliation script picks it up from the chain.
     const report = await reconcileStripe({
@@ -498,6 +544,27 @@ describe('a redeploy that moves the deposit address (#4853, review S7)', () => {
     expect(response.headers.get(PAYMENT_RESPONSE_HEADER)).toBeTruthy()
     // The facilitator was never asked to settle it again.
     expect(fakes.settle).not.toHaveBeenCalled()
+  })
+
+  it('#4866: sends the recovered payment to Stripe only if it paid the CURRENT deposit address — this one paid the old one', async () => {
+    // Stripe declines a transaction that did not pay the deposit address
+    // (#4854), and the decline is permanent for that transaction. Before
+    // #4866 this recovered payment was sent to Stripe all the same.
+    const fakes = makeFakes()
+    fakes.authorizationUsed.mockResolvedValue(true)
+    fakes.findAuthorizationOutcome.mockResolvedValue({ kind: 'settled', txHash: CDP_TX } satisfies AuthorizationOutcome)
+
+    const before = await startServer({ depositAddress: OLD_DEPOSIT, fakes })
+    const header = await signedHeader(await challenge(before.url))
+    const after = await startServer({ depositAddress: DEPOSIT, fakes, previousReceivingAddresses: [OLD_DEPOSIT] })
+    logs.length = 0
+    const { response } = await pay(after.url, header)
+    await after.recording!.flush()
+
+    expect(response.status).toBe(200)
+    expect(after.stripe.requests).toHaveLength(0)
+    expect(logs).toContain(`[stripe] not_recorded tx=${CDP_TX} reason=paid_other_address`)
+    expect(after.recording!.stats().attempted).toBe(0)
   })
 
   it('refuses the same retry when the chain says the authorization is unused', async () => {

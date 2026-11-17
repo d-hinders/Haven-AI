@@ -147,9 +147,9 @@ test.describe('settings company details', () => {
       await expect(card.getByTestId('company-details-purpose')).toContainText('personal identity number')
       // #4870: the receipt email is prefilled from the SIGN-UP email, and the
       // two address blocks are present and blank.
-      await expect(card.getByLabel('Receipt email (optional)')).toHaveValue('ada@haven.test')
-      await expect(card.getByLabel('Billing street address')).toHaveValue('')
-      await expect(card.getByLabel('Shipping street address')).toHaveValue('')
+      await expect(card.getByLabel('Receipt email (optional)', { exact: true })).toHaveValue('ada@haven.test')
+      await expect(card.getByLabel('Billing street address', { exact: true })).toHaveValue('')
+      await expect(card.getByLabel('Shipping street address', { exact: true })).toHaveValue('')
       await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-company-details-empty-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -170,11 +170,11 @@ test.describe('settings company details', () => {
       await expect(card.getByText(/verified/i)).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Remove company details' })).toHaveCount(1)
       // #4870: the stored receipt email and both addresses render.
-      await expect(card.getByLabel('Receipt email (optional)')).toHaveValue('billing@acme.se')
-      await expect(card.getByLabel('Billing street address')).toHaveValue('Sveavagen 1')
-      await expect(card.getByLabel('Billing city')).toHaveValue('Stockholm')
-      await expect(card.getByLabel('Shipping street address')).toHaveValue('Storgatan 2')
-      await expect(card.getByLabel('Shipping city')).toHaveValue('Goteborg')
+      await expect(card.getByLabel('Receipt email (optional)', { exact: true })).toHaveValue('billing@acme.se')
+      await expect(card.getByLabel('Billing street address', { exact: true })).toHaveValue('Sveavagen 1')
+      await expect(card.getByLabel('Billing city', { exact: true })).toHaveValue('Stockholm')
+      await expect(card.getByLabel('Shipping street address', { exact: true })).toHaveValue('Storgatan 2')
+      await expect(card.getByLabel('Shipping city', { exact: true })).toHaveValue('Goteborg')
       await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-company-details-filled-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,

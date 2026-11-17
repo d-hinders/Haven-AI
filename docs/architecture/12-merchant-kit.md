@@ -15,6 +15,9 @@ covers:
   - scripts/release-bump.mjs
   - .github/workflows/publish.yml
   - packages/backend/src/routes/machine-payments.ts
+  - packages/demo-merchant-mcp/src/invoice.ts
+  - packages/demo-merchant-mcp/src/tax-declaration.ts
+  - packages/backend/src/modules/accounting/receipt-statement.ts
 last-verified: "2026-11-17"
 ---
 
@@ -133,7 +136,10 @@ when the file is missing, is not valid JSON, or fails validation.
 | `products[].model` | No | When present, the request body's `model` must equal it, or the request is refused before settlement. This is how an inference product is pinned to one model. |
 | `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. Never a float and never a dollar string: a JSON number is refused, because a float cannot represent every atomic amount exactly. |
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product; absent for a product that is not token-priced. |
-| `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. |
+| `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. At most 300 characters, with no character Haven's receipt reader refuses: it is the receipt line's text (section 11), and Haven's reader reads at most 300. That is inside the 500 Coinbase's facilitator allows at verify and settle (section 4). The proxy refuses a longer description at startup. |
+| `products[].input_example` | No | An example request body for this product. Carried into the challenge's directory block (section 4). Strongly recommended: without it a directory can list the product but an agent cannot build a valid call from the listing. |
+| `products[].input_schema` | No | A JSON Schema the request body validates against, for the same block. |
+| `products[].output_example` | No | An example response body, for the same block. |
 
 The network is one setting of the deployment, not a field per product. The
 proxy reads `NETWORK` as a CAIP-2 identifier (`eip155:84532` for Base Sepolia,
@@ -219,6 +225,65 @@ The document is a superset of the product list the demo merchant serves today
 `operator`, `asset`, `pay_to` and `settlement`. The demo merchant keeps serving
 its own document unchanged; the kit's document is the proxy's.
 
+### Fields for Coinbase's directory
+
+Read from Coinbase's pages on 2026-11-17 (neither page shows a last-updated
+date):
+
+- <https://docs.cdp.coinbase.com/x402/bazaar> — "Discover services (Bazaar)",
+  the buyer-side overview.
+- <https://docs.cdp.coinbase.com/x402/seller/get-discovered.md> — "Get
+  discovered (Bazaar)", the seller guide.
+
+What those pages say decides where the directory fields go:
+
+- **The directory does not read this document.** Neither page mentions
+  `/.well-known/x402` or any other file on the seller's domain. The Bazaar
+  reads the endpoint itself: a 402 challenge carrying an `extensions.bazaar`
+  block, and a settled paid call through Coinbase's facilitator whose settle
+  request carries `paymentPayload.extensions.bazaar` and
+  `paymentPayload.resource`. There is no registration form or separate API
+  call. Indexing can take up to 15 minutes after the settled call.
+- **So the proxy puts the fields in its challenge**, built from the products
+  file, and this document mirrors them so every reader sees the same metadata:
+
+| Directory field | Where it lives | Kit source |
+|---|---|---|
+| Route key, `METHOD /path` with a specific method and absolute path | the challenge's `extensions.bazaar` (`method`) and the resource URL | `products[].route` |
+| `description`, at most 500 characters | the route's challenge; verify and settle reject a longer one | `products[].description`, which the kit already caps at 300 (section 3) |
+| `info.input` (an example request body) and its schema | `extensions.bazaar` | `products[].input_example`, `products[].input_schema` |
+| `output.example` | `extensions.bazaar` | `products[].output_example` |
+| `price` | the challenge's payment requirements | `products[].price` |
+| `resource.iconUrl`, a public JPG, JPEG, PNG, WebP or GIF image (not SVG) | the challenge's `resource` object | the deployment's `ICON_URL` setting, also served here as `icon_url` |
+
+The discovery document therefore gains, per product, the optional
+`input_example`, `input_schema` and `output_example` of the products file, and
+at the top level an optional `icon_url`. They are optional in version 1, so
+the version does not change.
+
+The seller guide does not give the full JSON schema of `extensions.bazaar` or
+a required-or-optional table. The proxy (#4893) builds the block from the keys
+above, and #4893's acceptance includes Coinbase's validator answering for a
+deployed route: `POST https://api.cdp.coinbase.com/platform/v2/x402/validate`
+with `{"resource": ..., "method": ...}`, which needs no API key and checks
+reachability, the 402 answer and the `extensions.bazaar` block.
+
+Conditions the deployment inherits, from the same pages:
+
+- **A settled call through Coinbase's facilitator is what lists a route.** A
+  deployment settling through the x402.org facilitator is not in the Coinbase
+  Bazaar; x402.org keeps a separate catalog.
+- **Testnet routes surface in the discovery endpoints** once verify and settle
+  have run through Coinbase on Base Sepolia, but curation needs live mainnet
+  payments, so a Base Sepolia deployment is listed and never curated.
+- **A route with no settlement for 30 days lapses** from the listing.
+- **Metadata is content-checked.** A description that could read as an
+  instruction to an agent gets the route rejected or delisted, so a product
+  description states what the call does and nothing else.
+
+Listing a deployment is not part of the kit epic's build (#4884); the fields
+exist so a merchant that wants to be listed has nothing to retrofit.
+
 ### How an older kit is treated
 
 A reader that finds no `version` treats the document as version 1. The demo
@@ -254,7 +319,9 @@ URL and the key.
   "product_name": "Opper GPT-6 Sol, 1,000 output tokens",
   "amount": "10000",
   "payer": "0x7a3f9c2e1b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a",
-  "merchant_reference": "sale_01JB8Z3K4M5N6P7Q8R9S0T1V2W"
+  "merchant_reference": "sale_01JB8Z3K4M5N6P7Q8R9S0T1V2W",
+  "receipt_number": "FAK-4823517601029384",
+  "vat_treatment": "SE_25"
 }
 ```
 
@@ -268,6 +335,8 @@ URL and the key.
 | `amount` | Yes | The settled amount in whole atomic USDC units, as a decimal string. It must equal the product's `price`. |
 | `payer` | Yes | The address that paid. For an EIP-3009 payment from a Haven agent this is the agent's delegate address, not the Haven account (see below). |
 | `merchant_reference` | Yes | The merchant's own reference for the sale. The proxy generates a ULID once per settled call (`sale_<ulid>`), sends it, and logs it. Haven stores it and does not interpret it. |
+| `receipt_number` | When a receipt was sent | The number on the receipt the proxy returned for this call (section 11), derived from `tx_hash`. It lets the merchant find the sale on Haven from the receipt and the other way round. Absent when the deployment has no VAT rule and so sends no receipt. |
+| `vat_treatment` | When a receipt was sent | The VAT treatment the receipt applied, `SE_25` or `REVERSE_CHARGE` (section 11). Absent with `receipt_number`. |
 
 ### The payer address
 
@@ -298,6 +367,8 @@ USDC transfer into the merchant key's account (#4897). The split is:
 | `product_id` | | Yes. Nothing on-chain names a product. |
 | `product_name` | | Yes. Display only. |
 | `merchant_reference` | | Yes. Stored, not interpreted. |
+| `receipt_number` | | Yes. Haven can recompute it from `tx_hash` but stores what the merchant sent. |
+| `vat_treatment` | | Yes. The merchant decides its own tax treatment; Haven records what it states. |
 | `version` | | Shape-checked only; an unknown version is refused. |
 
 A record whose hash paid a different Haven account gets the same answer as a
@@ -685,10 +756,151 @@ The demo's inference product is priced at $0.01 (`"10000"`), so settlement is
 month. A $0.001 product would net nothing, which is why the demo does not use
 one.
 
-## 11. What this document does not decide
+## 11. The receipt
+
+The kit returns the same receipt the demo merchant returns today
+(`packages/demo-merchant-mcp/src/invoice.ts`), so Haven's buyer-side
+accounting reads a kit receipt with no change: its reader
+(`packages/backend/src/modules/accounting/receipt-statement.ts`, documented
+field by field in `docs/operations/merchant-receipt-shape.md`) is the
+contract, and the shape is not changed. The code moves into the shared core
+with #4890; the kit's use of it is built in #4913.
+
+The proxy sends the receipt as the `x-receipt-json` response header only:
+the receipt's JSON, base64-encoded so the header stays ASCII-safe, on the
+response to a successful upstream call (section 6's definition of delivered).
+The Haven SDK captures it and relays it to Haven next to the payment evidence;
+the encoded header stays well under the 64 KiB (decoded) at which the SDK
+drops it and the backend refuses it.
+
+The demo merchant also returns the receipt as rendered text, inside its MCP
+tool result. **A proxy has no carrier for that text:** the response body is
+the upstream API's goods and the proxy does not change it. The JSON is the
+receipt; the text is a render of it, and the renderer moves to the shared core
+with #4890, so any reader that wants the text renders it from the header.
+
+The proxy removes `x-receipt-json` and `x-receipt-url` from the upstream's
+response, so an upstream cannot pass off its own receipt as the kit's. A
+receipt that cannot be built never fails a settled call: the header is left
+out and the failure is logged.
+
+The keys stay the demo's Swedish bookkeeping keys (`fakturanummer`,
+`saljare`, `kopare`, `rader[]`, `belopp_exkl_moms`, `moms_procent`,
+`moms_belopp`, `totalt_inkl_moms`, `momsbehandling`, `valuta`, and the rest of
+`InvoiceJson`). Only the values change: they come from the deployment instead
+of the demo's hard-coded seller. The receipt names no Haven address or
+contact.
+
+### Where each field comes from
+
+| Receipt field | Source |
+|---|---|
+| `saljare.name`, `address`, `org_nr`, `moms_nr` | Deployment configuration: `SELLER_NAME`, `SELLER_ADDRESS`, `SELLER_ORG_NR`, `SELLER_VAT_NR`. With a VAT rule configured, name, organisation number and VAT number are required: on Base mainnet the proxy refuses to start without them; on a test network it starts with a warning and sends no receipt. Haven's accounting reads `name`, `org_nr` and `moms_nr` from this block. |
+| The support line in the rendered text | Deployment configuration: `SELLER_SUPPORT_CONTACT`, the merchant's own contact, never Haven's. |
+| `saljare.iban`, `bic` | Deployment configuration, optional (`SELLER_IBAN`, `SELLER_BIC`); empty when unset. |
+| `saljare.crypto_address` | Deployment configuration: `PAY_TO`. |
+| `betalningssatt` | Deployment configuration: the network name from `NETWORK`. |
+| `momsbehandling`, `moms_procent` | Deployment configuration (`VAT_RULE`) applied to the payment's declaration (below). |
+| `rader[].beskrivning` | Products file: `name` and `description`, with no billing period for a per-call product. |
+| `totalt_inkl_moms` and the line's total | Products file: `price`, which is also the settled amount. |
+| `belopp_exkl_moms`, `moms_belopp`, the line's VAT figures | Computed from the price and the treatment (below). |
+| `fakturanummer` (the receipt number) | The payment: `FAK-` and the settlement transaction hash modulo 10^16 as 16 digits, the demo's `receiptNumberForTransaction`. The same transaction gives the same number after a restart. |
+| `ocr_nummer` | The payment: the receipt number's digits plus a Luhn check digit. |
+| `fakturadatum`, `forfallodatum` | The payment: the date the proxy answered, and 30 days later. |
+| `kopare.identifierare`, `kopare.roll` | The payment: the payer address, which for a Haven agent paying by EIP-3009 is its delegate address (`roll: agent_delegate`), as in section 5. |
+| `kopare.deklaration` | The payment: present only when the request carried an `X-Tax-Declaration` that verifies against the payer, on the payment's chain, and is unexpired. Display only; a declaration that fails any check is treated as absent and never refuses the purchase. |
+| `blockkedje_referens`, `status` | The payment: the settlement transaction hash, and `Betald`. |
+
+### The VAT rule is a deployment setting
+
+`VAT_RULE` is set by the merchant. For the pilot it has one value:
+
+- `SE_25_WITH_EU_REVERSE_CHARGE`: the demo merchant's rule, with its two
+  treatments. Swedish VAT at 25% is taken out of the price (`SE_25`) when the
+  request carries no accepted declaration or a Swedish one. An accepted
+  declaration from another EU country moves the receipt to `REVERSE_CHARGE`:
+  the full price is the net amount, VAT is 0% and zero, and the rendered text
+  names both VAT numbers.
+
+**A seller to whom neither treatment applies configures no rule, and the kit
+then sends no receipt.** Haven's reader accepts a receipt only when it states
+VAT figures (`receipt-statement.ts`), and a receipt stating a VAT of zero
+would be read as a stated zero, which is a tax claim the kit has no basis to
+make. With no rule there is no `x-receipt-json` header, the sale record
+carries no `receipt_number` and no `vat_treatment`, and no seller details are
+required. The proxy logs `receipt: off (no VAT_RULE)` at startup.
+
+The merchant decides its own tax treatment. The kit applies the rule the
+merchant configures and makes no tax decision of its own: it neither computes
+a treatment the merchant did not choose nor files tax. The price never changes
+with the treatment: VAT is taken out of the price, never added to it. A rule
+for another jurisdiction is later work, added as a new `VAT_RULE` value.
+
+### Amounts below the smallest unit shown
+
+The receipt states USDC amounts to the atomic unit, six decimals with
+trailing zeros trimmed (the demo's `formatUsdc`), and computes VAT in atomic
+units: the net amount is the price times 100 / 125 rounded down, and the VAT
+is the remainder. The lines therefore always add up to the price, and no VAT
+amount is ever smaller than the smallest unit the receipt shows. A $0.01 call
+under `SE_25` states `0.008` net and `0.002` VAT.
+
+Where a reader shows fewer decimals than the receipt (a fiat amount in
+cents or öre), a per-call VAT can round to zero there; Haven books its own
+fiat value at settlement and does not take the merchant's. A buyer that makes
+thousands of calls gets thousands of receipts, one per call. A periodic
+statement that sums them is later work and is not designed here.
+
+## 12. Running and monitoring the kit
+
+What the merchant runs:
+
+- the proxy process (Node 24), behind HTTPS on a public host name the
+  merchant controls. A shared tunnel domain works but ranks lower in Coinbase's
+  directory;
+- the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO`,
+  `OPERATOR_NAME`, `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
+  `UPSTREAM_AUTH_SCHEME` when the upstream wants them), Coinbase facilitator
+  credentials, optionally `VAT_RULE` with the seller settings (section 11) and `ICON_URL` (section 4), and, for sales
+  reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY`;
+- persistent disk for the consumed-payment store (`PAYMENTS_DB`) and the
+  sales outbox (`SALES_OUTBOX`). Losing `PAYMENTS_DB` loses the one-call rule
+  for payments already delivered, so it is backed up like any other
+  ledger;
+- a Haven account that receives the money, with Sales turned on (#4885) when
+  the sales should appear on Haven's Sales page.
+
+What the merchant monitors:
+
+- **Settlement.** Verify and settle failures and facilitator timeouts; a
+  burst means buyers are paying and not being served.
+- **Upstream health.** The rate of `upstream_failed_after_settlement`
+  answers, and `payment_in_flight` answers. Every failed call is a payment
+  the merchant owes a retry.
+- **Overage.** `overage_tokens` in the log: a product whose answers often run
+  over its cap is priced too low or capped too high (section 7).
+- **Sales reporting.** The outbox depth and `sales_report_refused` lines. A
+  growing outbox means Haven is not receiving the sales; a refused record
+  means its shape or key is wrong.
+- **Cost.** Coinbase facilitator usage against the 1,000 free transactions a
+  month (section 10), and the upstream provider's spend.
+- **Money.** The receiving account's balance in Haven against the settled
+  calls in the proxy's log.
+- **Listing**, when the merchant wants one: a route with no settled call for
+  30 days lapses from Coinbase's directory (section 4).
+- **Disk.** The size of `PAYMENTS_DB` and `SALES_OUTBOX`, and the outbox's
+  10,000-record bound.
+
+Secrets (`UPSTREAM_API_KEY`, the Coinbase credentials, `HAVEN_MERCHANT_KEY`)
+are rotated by the merchant. The proxy never logs them, and a rotated Haven
+merchant key takes effect on the next sales report.
+
+## 13. What this document does not decide
 
 - The sales ingest route's path and the merchant key's format are #4897's.
 - The licence and the distribution decision are #4887's, after the pilot.
+- Listing a deployment in Coinbase's directory, and any other directory, is outside the kit epic (#4884); section 4 only names the fields.
+- A periodic statement that sums a buyer's per-call receipts is later work (section 11).
 - ERC-7710 support, and advertising it when a facilitator supports it, is
   #4887's. The kit advertises EIP-3009 only.
 - Opper's terms for the demo are checked in #4892 before the demo is shown

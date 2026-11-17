@@ -625,6 +625,11 @@ that finds its transaction (`recoverUsedAuthorization` and its log-window scan
 in today's core) replaces verify and settle and is bounded in total at
 `SETTLE_RESOLVE_MS` (30 s), whatever `validAfter` the buyer chose; not found in
 time, the holder answers 503 `settlement_unknown` as for a lost settle answer.
+Found and checked, the holder takes its upstream slot then (10 s, so this path
+is 10 + 30 + 10 = 50 s, never the binding case). If none is free it records the
+settlement without its token (`settled`) and answers 200
+`at_capacity_after_settlement`, as a known-key forward does: the payment has
+settled, so the answer stays 2xx, and the retry needs a proof.
 The check that a found event paid this merchant (below) runs inside the
 `SETTLE_RESOLVE_MS` bound, not after it.
 **Every chain read is bounded at 10 s in total.** Today's core sets no read
@@ -810,10 +815,10 @@ outcome decides the record.
 
 `UPSTREAM_TIMEOUT_MS` (180 s) is **one total deadline for the whole call**,
 headers and body together. It is set from the budget before the call starts,
-taken from the core's constants: up to 10 s waiting for an upstream slot
-(section 7), the 10 s chain read before verify, verify and settle at
-`CDP_CALL_TIMEOUT_MS` (30 s) each (`packages/demo-merchant-mcp/src/cdp.ts`),
-and `SETTLE_RESOLVE_MS` (30 s), which is 110 s at worst. 110 s plus 180 s is
+taken from the core's constants: the 10 s chain read before verify, verify at
+`CDP_CALL_TIMEOUT_MS` (30 s), up to 10 s waiting for an upstream slot (section
+7), settle at 30 s (`packages/demo-merchant-mcp/src/cdp.ts`), and
+`SETTLE_RESOLVE_MS` (30 s), which is 110 s at worst. 110 s plus 180 s is
 290 s, which leaves 10 s of Haven's hosted 300 s delivery wait for transit. That keeps the ordinary case
 well inside Haven's deadline; it does not make a timeout impossible. When
 every step runs to its limit Haven can still time out first, and records the
@@ -923,8 +928,12 @@ A payment that verified is its own limit.
 come from.** Concurrent verify calls are capped at 16: a request with an
 unknown key over that cap is answered 503 `at_capacity` before it is
 reserved, so concurrent junk headers cost at most 16 verify calls in flight,
-however they are timed. Requests with a payment header do not count toward the
-10 concurrent unpaid requests per IP; the verify cap bounds them instead, so
+however they are timed. A request holds its verify token from before `reserve`
+until verify returns, and gives it back on any earlier exit too: `reserve`
+finding a known record, the chain-first read finding the authorization used,
+or a chain read that times out or fails. Requests with a payment header do not
+count toward the 10 concurrent unpaid requests per IP (a header that fails
+verification still counts toward the 60 a minute and the burst of 10); the verify cap bounds them instead, so
 Haven's shared address is not limited to 10 payments in flight. Concurrent
 upstream calls are capped at 32, and **a request takes its upstream slot after
 verify and before settle**, so a header that has not verified never holds one.
@@ -941,7 +950,8 @@ not retired (the challenge carries the key's live nonce, the same one or a
 fresh one under the 60 s rule), and the answer to a settled payment stays 2xx
 (section 8). **Every request that takes a slot and does not forward gives it
 back before it answers**: a failed nonce retire, a `beginForwarding` answer of
-`in_flight`, `delivered` or `exhausted`, or a settle that fails.
+`in_flight`, `delivered` or `exhausted`, a settle that fails, or a settle
+whose outcome is not learned within `SETTLE_RESOLVE_MS`.
 
 **A residual this design does not solve: a per-IP limit cannot tell hosted
 Haven buyers apart.** Every hosted Haven buyer reaches the merchant from

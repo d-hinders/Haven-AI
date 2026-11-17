@@ -302,6 +302,42 @@ describeDb('GET /agent-activity/:id/activity/export.csv (#4327, real DB)', () =>
     expect(records[0].counterparty_address.toLowerCase()).toBe(MERCHANT)
   })
 
+  it('#4882 — the one naming order: a curated catalog merchant names the payment and the refusal, in the file and on the tab', async () => {
+    const seed = await seedUserWithAgent()
+    const sent = await seedIntent(seed, { status: 'confirmed', createdAt: '2026-10-04T10:00:00Z', toAddress: MERCHANT })
+    await seedRefusal(seed, { createdAt: '2026-10-05T10:00:00Z', reason: 'delegation_budget_exceeded' })
+    const merchant = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name) VALUES ('nordshield-4882', 'NordShield VPN') RETURNING id`,
+    )
+    await db.query(
+      `INSERT INTO merchant_catalog (name, description, category, resource_url, rail, protocol, network, status,
+         verified_at, merchant_id, pay_to, source)
+       VALUES ('NordShield VPN', 'x', 'api', 'https://nordshield.example/paid', 'x402', 'http', 'eip155:84532',
+               'active', NOW(), $1, $2, 'operator')`,
+      [merchant.rows[0].id, MERCHANT],
+    )
+
+    const payments = parseCsv((await get(seed.userId, `/agent-activity/${seed.agentId}/activity/export.csv`)).body.slice(1))
+    expect(payments.records.find((r) => r.payment_id === sent)?.counterparty_name).toBe('NordShield VPN')
+    const refusals = parseCsv(
+      (await get(seed.userId, `/agent-activity/${seed.agentId}/activity/export.csv?status=refused`)).body.slice(1),
+    )
+    // The catalog step (3) comes before the resource host (5).
+    expect(refusals.records[0].counterparty_name).toBe('NordShield VPN')
+
+    const tab = (await get(seed.userId, `/agent-activity/${seed.agentId}/activity?kind=payments`)).json() as {
+      activity: Array<Record<string, unknown>>
+    }
+    expect(tab.activity.find((a) => a.id === sent)).toMatchObject({
+      counterparty_name: 'NordShield VPN',
+      counterparty_name_source: 'catalog',
+    })
+    const refusedTab = (await get(seed.userId, `/agent-activity/${seed.agentId}/activity?kind=refusals`)).json() as {
+      activity: Array<Record<string, unknown>>
+    }
+    expect(refusedTab.activity[0]).toMatchObject({ counterparty_name: 'NordShield VPN', counterparty_name_source: 'catalog' })
+  })
+
   it('answers 404 for an agent that is not the caller’s, and writes nothing', async () => {
     const { seed } = await seedLedger()
     const stranger = await seedUserWithAgent()

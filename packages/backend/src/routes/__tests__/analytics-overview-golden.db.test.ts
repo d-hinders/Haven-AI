@@ -424,8 +424,12 @@ describeDb('GET /analytics/overview — the golden (real DB, faked clock, #4332)
     // Balance is NEVER scoped — and the response says so.
     expect((body.balance_by_day as unknown[]).length).toBe(3)
     expect(body.balance_scope).toBe('all_accounts')
-    // The naming ran for the scoped agent only: the x402 host of p1.
-    expect((body.merchants as Array<{ label: string | null }>)[0].label).toBe('api.nordshield.example')
+    // The naming ran for the scoped agent only. #4882's order puts the
+    // contact before the resource host, so p1's merchant is the contact name.
+    expect((body.merchants as Array<{ label: string | null; kind: string }>)[0]).toMatchObject({
+      label: 'NordShield GmbH',
+      kind: 'contact',
+    })
   })
 
   it('an agent with no activity answers a zeroed page that still lists the agent', async () => {
@@ -499,6 +503,29 @@ describeDb('GET /analytics/overview — the golden (real DB, faked clock, #4332)
     expect(merchants).toHaveLength(1)
     expect(merchants[0].address).toBe(`0x${'c1'.repeat(20)}`)
     expect(merchants[0].filter_address).toBe(FILTER_A)
+  })
+
+  it('#4882 — a curated catalog merchant names its receiving address before the receipt and the host', async () => {
+    const userId = await seedUser()
+    const account = await seedAccount(userId, `0x${'ab'.repeat(20)}`)
+    const agentId = await seedAgent(userId, account)
+    const merchant = `0x${'c9'.repeat(20)}`
+    await seedPayment({ agentId, userId, toAddress: merchant, merchantAddress: merchant, resourceUrl: 'https://api.nordshield.example/v1', confirmedAt: '2030-06-02T10:00:00.000Z' })
+    const m = await db.query<{ id: string }>(`INSERT INTO merchants (slug, name) VALUES ('nordshield-golden', 'NordShield VPN') RETURNING id`)
+    await db.query(
+      `INSERT INTO merchant_catalog (name, description, category, resource_url, rail, protocol, network, status,
+         verified_at, merchant_id, pay_to, source)
+       VALUES ('NordShield VPN', 'x', 'api', 'https://api.nordshield.example/v1', 'x402', 'http', 'eip155:84532',
+               'active', NOW(), $1, $2, 'operator')`,
+      [m.rows[0].id, merchant],
+    )
+
+    const { status, body } = await getOverview(userId)
+    expect(status).toBe(200)
+    expect((body.merchants as Array<{ label: string | null; kind: string }>)[0]).toMatchObject({
+      label: 'NordShield VPN',
+      kind: 'catalog',
+    })
   })
 
   it('the x402 resource URL is the MOST RECENT payment in the window, even when an older payment carried one', async () => {

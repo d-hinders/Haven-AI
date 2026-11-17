@@ -510,3 +510,86 @@ export async function listMerchantFundingTargets(
   ])
   return result.rows.map(resolveFundingTarget).filter((t): t is MerchantFundingTarget => t !== null)
 }
+
+// ── Recipient naming: the catalog step (#4882) ──────────────────────────────
+//
+// READ-ONLY reverse lookups for the recipient-naming order
+// (`modules/transactions/counterparty-name.ts`). Nothing here is payment
+// authority, and neither statement shares `MERCHANT_FUNDING_AGGREGATES_SQL`,
+// which feeds `resolveFundingTarget` (spend-authority derivation).
+
+/** One catalog merchant named at one receiving address on one chain. */
+export interface CatalogRecipientNameRow {
+  chain_id: number
+  pay_to: string
+  name: string
+}
+
+/**
+ * The catalog merchant at each `(network, pay_to)` among `$1`, when it is
+ * unambiguous and Haven's own (owner decision 1 of 2026-11-17 on #4882):
+ * every live row (status other than `delisted`, any source) at that address
+ * on that network belongs to ONE merchant, that merchant's rows there are all
+ * `operator` rows (never a seller-listed `bazaar` row), and at least one is an
+ * active, verified x402 row — the rows whose challenge recorded the
+ * `pay_to`. An address shared by two merchants names neither; a row with no
+ * recorded `pay_to` matches nothing. `pay_to` is stored lowercase (CHECK in
+ * migration 101), so the caller passes lowercased addresses.
+ */
+export const CATALOG_RECIPIENT_NAMES_SQL = `
+  SELECT substring(mc.network FROM '^eip155:([0-9]+)$')::int AS chain_id,
+         mc.pay_to,
+         min(m.name) AS name
+  FROM merchant_catalog mc
+  JOIN merchants m ON m.id = mc.merchant_id
+  WHERE mc.pay_to = ANY($1::text[])
+    AND mc.status <> 'delisted'
+    AND mc.network ~ '^eip155:[0-9]+$'
+  GROUP BY mc.network, mc.pay_to
+  HAVING COUNT(DISTINCT mc.merchant_id) = 1
+     AND bool_and(mc.source = 'operator')
+     AND bool_or(mc.rail = 'x402' AND mc.status = 'active' AND mc.verified_at IS NOT NULL)`
+
+export async function listCatalogRecipientNames(
+  addresses: string[],
+  db: Executor = pool,
+): Promise<CatalogRecipientNameRow[]> {
+  if (addresses.length === 0) return []
+  const result = await db.query<CatalogRecipientNameRow>(CATALOG_RECIPIENT_NAMES_SQL, [
+    [...new Set(addresses.map((a) => a.toLowerCase()))],
+  ])
+  return result.rows
+}
+
+/** A catalog merchant's name, normalised, and one address it is paid at (null when none is recorded). */
+export interface CatalogMerchantNameAddressRow {
+  norm_name: string
+  pay_to: string | null
+}
+
+/**
+ * For the receipt-borrowing rule (#4882): every catalog merchant (any source,
+ * any live row) whose NORMALISED name is among `$1`, with each receiving
+ * address its live rows record. A receipt seller name equal to one of these
+ * names, at an address that is not among that name's addresses, is not used.
+ * Normalised the same way the caller normalises: trimmed, whitespace runs
+ * collapsed, lower-cased.
+ */
+export const CATALOG_MERCHANT_NAME_ADDRESSES_SQL = `
+  SELECT DISTINCT lower(regexp_replace(btrim(m.name), '\\s+', ' ', 'g')) AS norm_name,
+         mc.pay_to
+  FROM merchants m
+  JOIN merchant_catalog mc ON mc.merchant_id = m.id
+  WHERE mc.status <> 'delisted'
+    AND lower(regexp_replace(btrim(m.name), '\\s+', ' ', 'g')) = ANY($1::text[])`
+
+export async function listCatalogMerchantNameAddresses(
+  normalisedNames: string[],
+  db: Executor = pool,
+): Promise<CatalogMerchantNameAddressRow[]> {
+  if (normalisedNames.length === 0) return []
+  const result = await db.query<CatalogMerchantNameAddressRow>(CATALOG_MERCHANT_NAME_ADDRESSES_SQL, [
+    [...new Set(normalisedNames)],
+  ])
+  return result.rows
+}

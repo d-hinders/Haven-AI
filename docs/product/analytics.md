@@ -203,13 +203,15 @@ the tiles and tables stay (a line through one point agrees with every trend,
 but a total over one day is still the total over that day).
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
-A merchant's label is resolved by the API in a fixed order: the host of the
-x402 resource its most recent payment in the range called, else the name of
-one of your own accounts at that address (address-only, across chains; the
-oldest account wins a shared address), else your contact's name for that
-address, else the seller name on the merchant's receipt (its `saljare.name`,
-since #4881; a receipt's flat `merchant_name` when that yields no usable
-name), else
+A merchant's label is resolved by the API in Haven's one naming order (#4882,
+[`recipient-names.md`](recipient-names.md)): one of your own accounts at that
+address (the oldest account wins a shared address), else your contact's name,
+else the Haven catalog's merchant for that receiving address (only when every
+network it appears on names the same curated merchant), else the seller name
+on the merchant's receipt (its `saljare.name`, since #4881; a receipt's flat
+`merchant_name` when that yields no usable name; never a name borrowed from a
+catalog merchant), else the host of the x402 resource its most recent payment
+in the range called, else
 nothing — the row
 shows "Unknown recipient" where the transaction history says "New
 recipient", with the naming step as a KIND line under the name: "Your

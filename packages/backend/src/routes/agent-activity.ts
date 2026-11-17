@@ -8,8 +8,6 @@ import {
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { deriveSettlementTracking } from '../domain/settlement-tracking.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
-import { listContactsForUser } from '../infra/repositories/contacts.js'
-import { listBasicAccountsForUser } from '../infra/repositories/transaction-history.js'
 import {
   EXPORT_ROW_CAP,
   refuseCsvExportOverCap,
@@ -49,6 +47,12 @@ import {
   resolveTransactionCurrency,
   serveTimeAmount,
   serveTimeAmountTriple,
+  loadRecipientNameIndex,
+  recipientNameSnakeWire,
+  resolveRecipientName,
+  type CounterpartyName,
+  type RecipientNameIndex,
+  type RecipientTarget,
 } from '../modules/transactions/index.js'
 import { MACHINE_PAYMENT_RAILS } from '@haven_ai/core'
 
@@ -121,6 +125,7 @@ function toPaymentEntry(
   p: ActivityPaymentRow,
   approxAmount: Awaited<ReturnType<typeof serveTimeAmount>>,
   currency: TransactionCurrency,
+  name?: CounterpartyName,
 ) {
   const lifecycle = machinePaymentLifecycle({
     rail: p.source,
@@ -173,6 +178,8 @@ function toPaymentEntry(
     source: p.source ?? 'direct',
     x402_resource_url: p.x402_resource_url,
     x402_merchant_address: toCanonicalAddress(p.x402_merchant_address),
+    // #4882: the recipient name in the one naming order, when the route named it.
+    ...(name ? recipientNameSnakeWire(name) : {}),
     // #3778: the non-secret delivery pointer, when one was reported —
     // the owner's "a deliverable exists" signal on the activity row.
     delivery_reference: p.delivery_reference ?? null,
@@ -224,7 +231,7 @@ function toToolCallEntry(inv: AgentToolInvocationRow) {
  * triple, by contrast, is struck HERE from the human amount, so both views of
  * one refusal come from one conversion, never two.
  */
-function toRefusalEntry(r: AgentRefusalRow): Promise<Record<string, unknown>> {
+function toRefusalEntry(r: AgentRefusalRow, name?: CounterpartyName): Promise<Record<string, unknown>> {
   return serveTimeAmountTriple(r.token_symbol, humanTokenAmount(r.chain_id, r.token_symbol, r.amount_atomic)).then(
     (approx) => ({
       type: 'refusal' as const,
@@ -237,6 +244,7 @@ function toRefusalEntry(r: AgentRefusalRow): Promise<Record<string, unknown>> {
       chain_id: r.chain_id,
       merchant_to: r.merchant_to,
       resource_url: r.resource_url,
+      ...(name ? recipientNameSnakeWire(name) : {}),
       reason: r.reason,
       attempts: r.attempts,
       // Serve-time fiat in all three currencies (#4323); `sek_value` is not
@@ -354,37 +362,26 @@ function paymentStatusWord(status: string, needsAttention: boolean): string {
   }
 }
 
-function resourceHost(url: string | null | undefined): string | null {
-  if (!url) return null
-  try {
-    return new URL(url).hostname
-  } catch {
-    return null
+/** The naming order's target for a payment row: the payee, its chain, and its resource on a machine rail. */
+function paymentTarget(p: ActivityPaymentRow): RecipientTarget {
+  return {
+    address: toCanonicalAddress(p.x402_merchant_address ?? p.to_address),
+    chainId: p.chain_id,
+    x402ResourceUrl: p.source && MACHINE_PAYMENT_RAILS.has(p.source) ? p.x402_resource_url : null,
   }
 }
 
-/**
- * The tab's merchant-first naming without its "no address" fallbacks: a
- * machine payment's resource host, else the user's own account (chain-keyed
- * first), else the contact name, else empty — the address has its own column.
- */
-interface LedgerNames {
-  contacts: Map<string, string>
-  accounts: Map<string, string>
+/** The naming order's target for a refusal row. */
+function refusalTarget(r: AgentRefusalRow): RecipientTarget {
+  return {
+    address: r.merchant_to ? toCanonicalAddress(r.merchant_to) : null,
+    chainId: r.chain_id,
+    x402ResourceUrl: r.resource_url,
+  }
 }
 
-function counterpartyName(
-  names: LedgerNames,
-  address: string | null,
-  chainId: number,
-  host: string | null,
-): string {
-  if (host) return host
-  if (!address) return ''
-  const key = address.toLowerCase()
-  const chainKey = [key, chainId].join(':')
-  return names.accounts.get(chainKey) ?? names.accounts.get(key) ?? names.contacts.get(key) ?? ''
-}
+/** One read of each name source over a page's recipients (fail-soft by source). */
+const ledgerNames = (sub: string, targets: RecipientTarget[]) => loadRecipientNameIndex(sub, targets.map((t) => t.address))
 
 function isoDate(value: string | Date): string {
   return new Date(value).toISOString()
@@ -392,7 +389,7 @@ function isoDate(value: string | Date): string {
 
 async function paymentCsvRow(
   p: ActivityPaymentRow,
-  names: LedgerNames,
+  names: RecipientNameIndex,
   currency: TransactionCurrency,
 ): Promise<AgentLedgerCsvRow> {
   const lifecycle = machinePaymentLifecycle({
@@ -401,14 +398,14 @@ async function paymentCsvRow(
     paymentProofStatus: p.payment_proof_status,
     reconciliationEventType: p.payment_reconciliation_event_type,
   })
-  const address = toCanonicalAddress(p.x402_merchant_address ?? p.to_address)
-  const host = p.source && MACHINE_PAYMENT_RAILS.has(p.source) ? resourceHost(p.x402_resource_url) : null
+  const target = paymentTarget(p)
+  const address = target.address
   const approx = await serveTimeAmount(p.token_symbol, p.amount_human, currency)
   return {
     date: isoDate(p.created_at),
     status: paymentStatusWord(p.status, lifecycle.paymentFlowStatus === 'needs_attention'),
     reason: lifecycle.paymentAttentionReason ?? '',
-    counterparty_name: counterpartyName(names, address, p.chain_id, host),
+    counterparty_name: resolveRecipientName(names, target).label ?? '',
     counterparty_address: address ?? '',
     amount: p.amount_human,
     token: p.token_symbol,
@@ -421,17 +418,18 @@ async function paymentCsvRow(
 
 async function refusalCsvRow(
   r: AgentRefusalRow,
-  names: LedgerNames,
+  names: RecipientNameIndex,
   currency: TransactionCurrency,
 ): Promise<AgentLedgerCsvRow> {
   const amount = humanTokenAmount(r.chain_id, r.token_symbol, r.amount_atomic)
   const approx = await serveTimeAmountTriple(r.token_symbol, amount)
-  const address = r.merchant_to ? toCanonicalAddress(r.merchant_to) : null
+  const target = refusalTarget(r)
+  const address = target.address
   return {
     date: isoDate(r.created_at),
     status: 'Refused',
     reason: r.reason,
-    counterparty_name: counterpartyName(names, address, r.chain_id, resourceHost(r.resource_url)),
+    counterparty_name: resolveRecipientName(names, target).label ?? '',
     counterparty_address: address ?? '',
     amount,
     token: r.token_symbol,
@@ -533,7 +531,8 @@ export default async function agentActivityRoutes(
           listAgentRefusalsFiltered(id, filter, limit, offset),
           countAgentRefusalsFiltered(id, filter),
         ])
-        const activity = await Promise.all(rows.map(toRefusalEntry))
+        const names = await ledgerNames(sub, rows.map(refusalTarget))
+        const activity = await Promise.all(rows.map((r) => toRefusalEntry(r, resolveRecipientName(names, refusalTarget(r)))))
         return { activity, total, hasMore: offset + activity.length < total }
       }
 
@@ -546,7 +545,8 @@ export default async function agentActivityRoutes(
         const approxAmounts = await Promise.all(
           rows.map((p) => serveTimeAmount(p.token_symbol, p.amount_human, currency)),
         )
-        const activity = rows.map((p, i) => toPaymentEntry(p, approxAmounts[i], currency))
+        const names = await ledgerNames(sub, rows.map(paymentTarget))
+        const activity = rows.map((p, i) => toPaymentEntry(p, approxAmounts[i], currency, resolveRecipientName(names, paymentTarget(p))))
         return { activity, total, hasMore: offset + activity.length < total }
       }
 
@@ -587,6 +587,8 @@ export default async function agentActivityRoutes(
     )
 
     // Merge and sort by created_at desc
+    // The legacy merged window keeps its row keys exactly (#4229): no
+    // recipient-name fields here; the kinded reads carry them (#4882).
     const activity = [
       ...payments.map((p, i) => toPaymentEntry(p, approxAmounts[i], currency)),
       ...invocations.map((inv) => toToolCallEntry(inv)),
@@ -627,21 +629,7 @@ export default async function agentActivityRoutes(
       return reply.code(400).send({ error: 'invalid period bound' })
     }
 
-    const [currency, contacts, accounts] = await Promise.all([
-      approxCurrencyFor(sub),
-      listContactsForUser(sub),
-      listBasicAccountsForUser(sub),
-    ])
-    const names: LedgerNames = {
-      contacts: new Map(contacts.map((c) => [c.address.toLowerCase(), c.name])),
-      accounts: new Map(
-        accounts.flatMap((a) => [
-          [[a.account_address.toLowerCase(), a.chain_id].join(':'), a.name],
-          [a.account_address.toLowerCase(), a.name],
-        ]),
-      ),
-    }
-
+    const currency = await approxCurrencyFor(sub)
     let rows: AgentLedgerCsvRow[]
     if (status === 'refused') {
       const filter: AgentRefusalActivityFilter = {
@@ -655,6 +643,7 @@ export default async function agentActivityRoutes(
         lowerBound: true,
       })
       if (overCap) return overCap
+      const names = await ledgerNames(sub, refusals.map(refusalTarget))
       rows = await Promise.all(refusals.map((r) => refusalCsvRow(r, names, currency)))
     } else {
       // `paymentId` is the list read's deep-link narrowing, not an export
@@ -668,6 +657,7 @@ export default async function agentActivityRoutes(
         lowerBound: true,
       })
       if (overCap) return overCap
+      const names = await ledgerNames(sub, payments.map(paymentTarget))
       rows = await Promise.all(payments.map((p) => paymentCsvRow(p, names, currency)))
     }
 

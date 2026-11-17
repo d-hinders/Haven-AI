@@ -63,6 +63,22 @@ const tokenSymbol = {
  * source DRY without composing — `closeObjects` closes each one truthfully,
  * so `expectMatchesSpec` passes on a correct row and fails on a drifted one.
  */
+/**
+ * #4882: the one recipient-naming order's output, shared by every row that
+ * names its other side. Optional and additive: a client that ignores these
+ * fields behaves as before.
+ */
+const recipientNameSource = {
+  type: ['string', 'null'],
+  enum: ['own_account', 'contact', 'catalog', 'receipt', 'x402', null],
+  description: "Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.",
+} as const
+const recipientName = {
+  type: ['string', 'null'],
+  description:
+    'The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback.',
+} as const
+
 const transactionBaseProperties = {
   hash: { type: 'string' },
   type: { type: 'string', enum: ['native', 'erc20', 'internal'] },
@@ -97,6 +113,8 @@ const transactionBaseProperties = {
   source: { type: 'string', description: "Origin of the row. Known values: 'direct', 'x402', 'mpp_demo', 'mpp_crypto', 'spt', 'stripe_deposit'. Open set — new payment rails add values." },
   x402ResourceUrl: { type: ['string', 'null'] },
   x402MerchantAddress: { type: ['string', 'null'] },
+  recipientName,
+  recipientNameSource,
   paymentId: { type: 'string' },
   paymentProofStatus: { type: ['string', 'null'] },
   paymentFlowStatus: {
@@ -963,6 +981,8 @@ const activityPayment = {
     source: { type: 'string', description: "Falls back to 'direct'." },
     x402_resource_url: { type: ['string', 'null'] },
     x402_merchant_address: { type: ['string', 'null'] },
+    counterparty_name: recipientName,
+    counterparty_name_source: recipientNameSource,
     delivery_reference: {
       type: ['string', 'null'],
       description:
@@ -1053,6 +1073,8 @@ const refusalActivityEntry = {
     chain_id: { type: 'integer' },
     merchant_to: { type: ['string', 'null'], description: 'The merchant/recipient the attempt named, when one was recorded.' },
     resource_url: { type: ['string', 'null'], description: 'The x402 resource the agent tried to pay, when the attempt was resource-scoped.' },
+    counterparty_name: recipientName,
+    counterparty_name_source: recipientNameSource,
     reason: {
       type: 'string',
       enum: ['delegation_budget_exceeded', 'delegation_expired', 'no_delegation_for_target', 'relayer_budget', 'onchain_revert'],
@@ -6718,12 +6740,12 @@ export const openapiSpec = {
                           label: {
                             type: ['string', 'null'],
                             description:
-                              'The five-step naming order (#4332, the /transactions order plus one analytics-only step): the x402 resource host of the merchant\'s most recent payment IN THE WINDOW → one of the user\'s own accounts (address-only across chains; the oldest account wins a shared address) → the contact name → the receipt\'s seller name (top-level `saljare.name`, else the flat `merchant_name`; the analytics-only extension) → null. Null means the client renders "Unknown recipient".',
+                              'The one recipient-naming order (#4882, epic #4879; replaces #4332\'s host-first order): one of the user\'s own accounts (the oldest account wins a shared address) → the contact name → the catalog merchant\'s name (the receiving address of exactly one Haven-curated catalog merchant; a merchant group spans chains, so only when every chain names the same merchant) → the receipt\'s seller name (top-level `saljare.name`, else the flat `merchant_name`; never one that borrows a catalog merchant\'s name at another address) → the x402 resource host of the merchant\'s most recent payment IN THE WINDOW → null. Null means the client renders "Unknown recipient".',
                           },
                           kind: {
                             type: 'string',
-                            enum: ['x402', 'own_account', 'contact', 'receipt', 'unknown'],
-                            description: 'Which naming step produced `label`.',
+                            enum: ['own_account', 'contact', 'catalog', 'receipt', 'x402', 'unknown'],
+                            description: 'Which naming step produced `label` (#4882 adds `catalog`: a Haven-curated catalog merchant\'s name).',
                           },
                           filter_address: {
                             type: 'string',

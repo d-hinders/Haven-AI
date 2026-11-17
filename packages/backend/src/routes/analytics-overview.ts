@@ -14,7 +14,6 @@ import {
   listGasEventsByChainForUser,
   listPerAgentSpendForUser,
   listPerAgentTopMerchantForUser,
-  listReceiptMerchantNamesForUser,
   listRefusalsByDayForUser,
   listTopMerchantsForUser,
   shapeBudgets,
@@ -24,10 +23,7 @@ import {
   countUnsettledSubmittedForUser,
   type DateRange,
 } from '../infra/repositories/analytics.js'
-import {
-  ownAccountNameForAddress,
-  resolveCounterpartyName,
-} from '../modules/transactions/index.js'
+import { loadRecipientNameIndex, resolveRecipientName } from '../modules/transactions/index.js'
 
 /**
  * `GET /analytics/overview` (#2946, slice B of epic #2944).
@@ -184,10 +180,10 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
       const budgetsByAgent = await shapeBudgets(scopedDelegations)
       const budgetBands = computeBudgetBands(budgetsByAgent)
 
-      const contactsByAddress = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
-      // Address-only own-account names (#4332): `LIST_ACCOUNTS_FOR_USER_SQL`
-      // orders `created_at ASC`, so `ownAccountNameForAddress`'s first match
-      // is the OLDEST account when several share an address, on any chain.
+      // #4882: the one recipient-naming order (`counterparty-name.ts`): own
+      // account, contact, catalog, receipt, resource host. A merchant group
+      // aggregates across chains, so the catalog step names it only when every
+      // chain its address is named on names the same merchant (`chainId: null`).
       const ownAccounts = await listAccountsForUser(sub)
       const merchantAddresses = Array.from(
         new Set([
@@ -195,16 +191,11 @@ export default async function analyticsOverviewRoutes(app: FastifyInstance): Pro
           ...scopedPerAgentTopMerchant.map((m) => m.merchant_key),
         ]),
       )
-      const receiptByAddress = await listReceiptMerchantNamesForUser(sub, merchantAddresses)
+      const nameIndex = await loadRecipientNameIndex(sub, merchantAddresses, { accounts: ownAccounts, contacts })
 
-      /** The five-step naming order (Scope §2), from the candidates this route fetched. */
+      /** The recipient-naming order, from the candidates this route fetched. */
       const nameMerchant = (merchantKey: string, x402ResourceUrl: string | null) =>
-        resolveCounterpartyName({
-          x402ResourceUrl,
-          ownAccountName: ownAccountNameForAddress(ownAccounts, merchantKey),
-          contactName: contactsByAddress.get(merchantKey.toLowerCase()) ?? null,
-          receiptName: receiptByAddress.get(merchantKey.toLowerCase()) ?? null,
-        })
+        resolveRecipientName(nameIndex, { address: merchantKey, chainId: null, x402ResourceUrl })
 
       // ── Refusal totals, folded from the per-agent aggregate (no re-query). ──
       let refusedCount = 0

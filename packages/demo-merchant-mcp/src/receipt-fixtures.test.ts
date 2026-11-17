@@ -78,3 +78,30 @@ describe('the rendered receipt text is pinned byte for byte (#4890)', () => {
     })
   }
 })
+
+/**
+ * #4856, characterization: the receipt for the Stripe-recorded product (the
+ * joke) as it is when no Stripe context is passed. Pinned before the Stripe
+ * reference and SEK blocks were added, so a receipt built without them stays
+ * byte for byte what it was — the blocks appear only when the caller says
+ * Stripe will record the payment.
+ */
+describe('the joke receipt without a Stripe context is unchanged (#4856)', () => {
+  const JOKE = {
+    ...PARAMS,
+    productId: 'joke' as const,
+    payerRole: 'agent_delegate' as const,
+    receivingAddress: '0x3333333333333333333333333333333333333333',
+    chainId: 84532,
+    taxDeclaration: null,
+  }
+
+  it('pins the joke receipt JSON and its Swedish and English text', async () => {
+    const invoice = generateInvoice(JOKE)
+    await expect(serialized(invoice.json)).toMatchFileSnapshot('./__snapshots__/receipt-joke.json')
+    await expect(invoice.text).toMatchFileSnapshot('./__snapshots__/receipt-joke.sv.txt')
+    await expect(renderInvoiceText(invoice.json, 'Haven Joke', 'en', 84532)).toMatchFileSnapshot(
+      './__snapshots__/receipt-joke.en.txt',
+    )
+  })
+})

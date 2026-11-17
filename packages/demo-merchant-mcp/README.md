@@ -497,8 +497,9 @@ warning and does not offer the product; it still starts. `/healthz` carries a
 
 **Dev and Stripe sandbox only** (owner decision, 2026-11-17, epic #4849). The
 dev merchant records the joke in a Stripe sandbox, against Base Sepolia. The
-production merchant sets no `STRIPE_*` variable, so its joke is paid to
-`MERCHANT_ADDRESS` through CDP and nothing is sent to a live Stripe account. A
+production merchant sets no `STRIPE_*` variable, so once its CDP key is set
+(epic #4849 operator step) its joke is paid to `MERCHANT_ADDRESS` through CDP,
+and nothing is sent to a live Stripe account. A
 sandbox cannot stand in for production: its deposit address is a Base Sepolia
 address (see *What we learned from Stripe sandbox* below), so a Base mainnet
 transaction cannot be recorded against it, and real USDC sent to that address
@@ -688,8 +689,7 @@ hashes and PaymentIntent IDs only. The logic lives in `src/stripe-reconcile.ts`
 and `src/reconcile-cli.ts` — under the money-path list, because it creates
 PaymentIntents — and `scripts/reconcile-stripe.mjs` is the thin wrapper.
 
-**Who runs it.** The merchant's operator, on dev, after a test batch and at
-each promotion. The merchant itself cannot: it has no database and sleeps.
+**Who runs it.** The merchant's operator, on dev, after a test batch. The merchant itself cannot: it has no database and sleeps.
 
 ### Operator note: changing the Stripe variables changes the quoted address
 

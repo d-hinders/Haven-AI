@@ -6,6 +6,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
+import { receiptNumberForTransaction } from './invoice.js'
 import { formatUsdc } from './products.js'
 import {
   TAX_DECLARATION_DOMAIN,
@@ -312,7 +313,9 @@ describe('demo merchant MCP x402 flow', () => {
 
     expect(duplicate.status).toBe(200)
     expect(duplicateText).toContain(TX_HASH)
-    expect(duplicateText.match(/FAK-2026-\d+/)?.[0]).toBe(text.match(/FAK-2026-\d+/)?.[0])
+    // #4880: either numbering; the number must exist, or the comparison proves nothing.
+    expect(text.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(duplicateText.match(/FAK-[\d-]+/)?.[0]).toBe(text.match(/FAK-[\d-]+/)?.[0])
     expect(submit).toHaveBeenCalledTimes(1)
     // #1273 + review finding on #1302: the cached-duplicate branch must carry
     // the SAME structured summary as the fresh purchase — an agent retrying a
@@ -360,7 +363,8 @@ describe('demo merchant MCP x402 flow', () => {
       settlement_tx_hash: TX_HASH,
     })
     expect(typeof summary.invoice_id).toBe('string')
-    expect(summary.invoice_id).toMatch(/^FAK-\d{4}-\d+$/)
+    // #4880: a payment settled on-chain is numbered from its transaction hash.
+    expect(summary.invoice_id).toBe(receiptNumberForTransaction(TX_HASH))
   })
 
   it('accepts the legacy X-PAYMENT retry header alias', async () => {
@@ -1083,7 +1087,8 @@ describe('display locale and result detail (#1550)', () => {
     expect(enText).toContain('Purchase confirmed')
     expect(svText).toContain('Köp bekräftat')
     // Same invoice number across variants — one document, two renders.
-    expect(svText.match(/FAK-2026-\d+/)?.[0]).toBe(enText.match(/FAK-2026-\d+/)?.[0])
+    expect(enText.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(svText.match(/FAK-[\d-]+/)?.[0]).toBe(enText.match(/FAK-[\d-]+/)?.[0])
     // The replay is byte-identical per variant (ids differ per JSON-RPC call,
     // so compare the tool text, not the envelope).
     const toolText = (raw: string) =>

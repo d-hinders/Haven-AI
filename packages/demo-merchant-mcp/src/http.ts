@@ -352,15 +352,6 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
-    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
-    // has already moved, so a Stripe refusal, timeout or network error must
-    // never delay or refuse the goods. A failure is logged as
-    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
-    // /healthz. A payment served through recovery without a transaction hash
-    // (#4851) records nothing here — the reconciliation script picks it up.
-    // #4866: and only a payment to the CURRENT deposit address — one recovered
-    // to the previous address is logged as `not_recorded`, never sent.
-    recordStripePayment(options.stripe, paymentToolInfo.product, settled)
     // #4855: the buyer's signed tax declaration, if this paid request carried
     // one. Verified against the payer the merchant just settled from — the
     // same key that signed the payment — and treated as absent on ANY failure,
@@ -382,6 +373,18 @@ async function handle(
       taxDeclaration,
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
+    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
+    // has already moved, so a Stripe refusal, timeout or network error must
+    // never delay or refuse the goods. A failure is logged as
+    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
+    // /healthz. A payment served through recovery without a transaction hash
+    // (#4851) records nothing here — the reconciliation script picks it up.
+    // #4866: and only a payment to the CURRENT deposit address — one recovered
+    // to the previous address is logged as `not_recorded`, never sent.
+    // #4880: after the receipt, so the record carries its number, VAT and
+    // buyer keys. Reading the declaration and building the receipt are
+    // synchronous, so this delays nothing.
+    recordStripePayment(options.stripe, paymentToolInfo.product, settled, receiptInvoice.json)
   }
 
   try {

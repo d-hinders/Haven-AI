@@ -1213,8 +1213,9 @@ because the script refuses before connecting:
 - the allowlisted tuple is unset (`purge-qa-throwaways.ts:61`,
   `qa-throwaway-purge.ts:151-158`);
 - `QA_PURGE_DATABASE_URL` is unset at environment and repository level, and so
-  is `DATABASE_URL` (`purge-qa-throwaways.ts:62-65`);
-- dry run is the default anyway (guard 4).
+  is `DATABASE_URL` (`purge-qa-throwaways.ts:62-65`).
+
+Dry run is the default anyway (guard 4).
 
 1. Create the GitHub environment `qa-purge-dev` (Settings → Environments),
    add the three maintainers as required reviewers, and restrict its

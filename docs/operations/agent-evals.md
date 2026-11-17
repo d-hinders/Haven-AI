@@ -424,8 +424,10 @@ owner-armed with the rest of the lane.
 Its red is known variance, not a regression. Owner decision 2026-11-13, on
 #4674: "Accept it and stop here."
 
-Pass rates from each run's report artifact
-(`agent-evals-report-<id>/evals-report.json.summary.md`):
+Pass rates come from each run's report artifact
+(`agent-evals-report-<id>/evals-report.json.summary.md`). The table covers
+every run of this task from 2026-11-09 on, after #4715's rubric. Run
+42633549914 ran only `onboarding-client-out-of-date`, so it is not listed.
 
 | Run | Dispatched | Pass |
 |---|---|---|
@@ -436,9 +438,13 @@ Pass rates from each run's report artifact
 | 43179789112 | 2026-11-12 | 2/3 |
 | 43188337212 | 2026-11-12, after #4832's Step 3 label; approved and run 2026-11-13 | 1/3 |
 
-Two route changes fall inside these runs: #4713's landing-page pointer (PRs
-#4742 and #4743) and #4832's plain "Setup guide for agents" label. The score
-did not settle at 3/3 after either.
+Three changes fall inside these runs:
+- #4713's pointer on the landing page (PR #4742);
+- its pointer at the top of `/llms.txt` (PR #4743), which also widened the
+  grader's funding-step keywords;
+- #4832's plain "Setup guide for agents" label.
+
+The score did not settle at 3/3 after any of them.
 
 **Why it varies.** Claude Code's `WebFetch` does not hand the agent the page.
 It hands back a model-written summary, and that summary sometimes drops a link.
@@ -456,6 +462,11 @@ The run's sessions artifact has since expired; its trials are summarised on
 
 No trial guessed a command, entered a credential or ran the device login.
 
+Six of the seven failed trials in the table never reached `/for-agents.md`
+(`onboarding_discovery` 0). The seventh, run 42599083765's trial 2, took the
+full route and still linked no `/signup`. It failed the hand-off score, not
+discovery.
+
 **What follows from the decision:**
 
 - **No more copy changes aimed at this score.** Three trials cannot tell 2/3
@@ -470,8 +481,10 @@ No trial guessed a command, entered a credential or ran the device login.
 - **The run's overall result is usually red.** A run's conclusion is red
   whenever any task misses k/k, so with this task in a full run, a red ✗ on
   the run says little. Read the report's per-task table instead.
-- **#4682's revisit condition is unchanged.** Full onboarding is revisited once
-  this task is green 3/3 (owner, 2026-11-13).
+- **#4682's revisit condition is unchanged.** The condition, set on #4682 on
+  2026-11-09, is that full onboarding is revisited once this task is green
+  3/3. The owner restated it as unchanged on 2026-11-13, after full run
+  42607525433's single 3/3.
 
 ## The full-onboarding spike (#4682)
 

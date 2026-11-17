@@ -35,7 +35,7 @@ covers:
   - packages/mcp-server/src/x402-expected-wire-contract.test.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
-last-verified: "2026-11-09"
+last-verified: "2026-11-17"
 ---
 
 # Agent QA — run the automated QA layers against dev
@@ -1189,6 +1189,25 @@ so a future restricting reference to `users` or `agents` turns it red.
    `run:` body under bash and fails on an inlined input.
 
 ### Operator steps (once, then per run)
+
+**Status, measured 2026-11-17: the purge has never run, and none of these
+steps is in place.**
+
+- **Waived.** The owner waived all of them on epic #4674 on 2026-11-13.
+  Throwaway `qa-%@haven.test` rows are still on dev.
+- **No database route.** The dev Postgres TCP proxy had been closed since
+  2026-10-29 when this was checked on 2026-11-11. A runner therefore has no
+  route to the database.
+- **No environment.** `qa-purge-dev` was created on 2026-11-11 with one
+  required reviewer (d-hinders, not the three maintainers step 1 asks for) and
+  `dev` as its only deployment branch. It no longer exists:
+  `gh api repos/d-hinders/Haven-AI/environments/qa-purge-dev` returns 404.
+
+Do step 1 before anyone dispatches the workflow. GitHub creates a missing
+environment named by a job, and creates it with no protection rules. A dispatch
+today would therefore run without a reviewer. It would still delete nothing:
+the new environment holds no `QA_PURGE_DATABASE_URL`, and the script refuses
+when that is unset (`purge-qa-throwaways.ts:62-64`).
 
 1. Create the GitHub environment `qa-purge-dev` (Settings → Environments),
    add the three maintainers as required reviewers, and restrict its

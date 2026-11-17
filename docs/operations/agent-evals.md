@@ -26,7 +26,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-11-06"
+last-verified: "2026-11-17"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -417,6 +417,52 @@ environment and a spend, so this slice ships the **recorded-log red** instead:
 `graders.test.ts` proves discovery falls to band 1 on a log that requested
 `/for-agents.md` first, and band 0 when it never arrived. The live red is
 owner-armed with the rest of the lane.
+
+### Known variance: `onboarding-cold-setup` (owner decision 2026-11-13)
+
+**`onboarding-cold-setup` is flaky by nature, and the owner has accepted that.**
+Its red is known variance, not a regression. Owner decision 2026-11-13, on
+#4674: "Accept it and stop here."
+
+The pages behind it did not change between these runs in any way the result
+tracks:
+
+| Run | Date | Pass |
+|---|---|---|
+| 42599083765 | 2026-11-09 | 3/3 |
+| 43045310759 (full) | 2026-11-11 | 2/3 |
+| 43179789112 | 2026-11-12 | 2/3 |
+| 43188337212 (after #4832's Step 3 label) | 2026-11-13 | 1/3 |
+
+**Why it varies.** Claude Code's `WebFetch` does not hand the agent the page.
+It hands back a model-written summary, and that summary sometimes drops a link.
+A cold agent reaches the runbook only through two summaries in a row,
+`/` → `/llms.txt` → `/for-agents.md`. Losing the next link at either hop ends
+the trial short of the runbook.
+
+In run 43188337212:
+- one trial's summary of `/` dropped the `/llms.txt` label;
+- another trial's summary of `/llms.txt` dropped both of its `/for-agents.md`
+  pointers.
+
+No trial guessed a command, entered a credential or ran the device login.
+
+**What follows from the decision:**
+
+- **No more copy changes aimed at this score.** Three trials cannot tell 2/3
+  from 1/3, so a copy tweak cannot be measured.
+- **The grader stays as it is.** It correctly reports an agent that missed the
+  runbook. That agent's hand-off really is weaker. In run 43188337212, one
+  failed trial linked the bare landing page instead of `/signup`, and neither
+  failed trial carried the runbook's network check before funding.
+- **The fewer-hops change is unfiled.** That change would put the first
+  hand-off into `/llms.txt` itself, so an agent that stops early still answers
+  correctly. It is a product change, not a copy tweak.
+- **The run's overall result is usually red.** A run's conclusion is red
+  whenever any task misses k/k, so with this task in a full run, a red ✗ on
+  the run says little. Read the report's per-task table instead.
+- **#4682 still waits for 3/3.** Its condition, revisit full onboarding once
+  this task is green 3/3, is unchanged.
 
 ## The full-onboarding spike (#4682)
 

@@ -109,6 +109,10 @@
       "dependsOn": ["sdk"],
       "note": "packages/merchant-payments (#4890). The shared merchant payment core (the receipt builder and the tax-declaration check first; the Coinbase payment core follows) consumed by the demo merchant and, later, the paywall proxy (#4893). Imports @haven_ai/sdk's edge entry for the declaration signature check, so an SDK change fans out here. Workspace-private; its build/test/typecheck scripts build the SDK first."
     },
+    "paywall_proxy": {
+      "dependsOn": ["merchant_payments"],
+      "note": "packages/paywall-proxy (#4893). The merchant kit's paywall proxy: x402 in front of any HTTP API, settled through @haven_ai/merchant-payments, so a change to the core runs this suite. Workspace-private; its build/test/typecheck scripts build the SDK and merchant-payments first (the core re-exports the SDK's edge entry)."
+    },
     "qa_agent": {
       "dependsOn": ["sdk", "signer"],
       "note": "packages/qa-agent (#3005). Private QA harness; imports @haven_ai/sdk and @haven_ai/signer in src (checked against the real package.json), so both fan out to it. Its job runs the unit tests only -- the live scenario runner is qa-dev.yml's, on QA_* secrets."

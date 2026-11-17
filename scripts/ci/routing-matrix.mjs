@@ -1,7 +1,7 @@
 // The package-to-job routing matrix (#1623, epic #1621).
 //
 // One row per routing decision the CI change classifier makes, with the FULL
-// expected output — all seventeen flags, not just the one that turns true. This is a
+// expected output — all eighteen flags, not just the one that turns true. This is a
 // characterization fixture: it is written to describe what routing does today,
 // before #1624/#1625 make the rule data declarative and #1626 starts enforcing
 // completeness. Refactors are supposed to leave it untouched. A row that has to
@@ -37,7 +37,7 @@ export const RETAINED = 'retained'
  * its expectation from the code under test cannot fail when that code is wrong,
  * which is the one thing a characterization table must not do.
  */
-const ALL = ['code', 'frontend', 'ui', 'ops', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'merchant_payments', 'core', 'qa_agent', 'packages', 'full']
+const ALL = ['code', 'frontend', 'ui', 'ops', 'backend', 'sdk', 'connect', 'mcp', 'mcp_server', 'signer', 'cli', 'demo_merchant', 'merchant_payments', 'paywall_proxy', 'core', 'qa_agent', 'packages', 'full']
 
 /**
  * @typedef {object} RoutingCase
@@ -64,7 +64,7 @@ export const ROUTING_MATRIX = [
       'Same, for the docs/ tree. The docs-quality gates cover these on their own workflow. ' +
       'Re-pointed here from agent-passport.md by #3346, which made the served docs a real ' +
       'exception; this row is also the CONTROL the same issue asks for — another docs/**/*.md ' +
-      'must keep returning all seventeen flags false.',
+      'must keep returning all eighteen flags false.',
   },
   {
     files: ['docs/product/account-recovery.md'],
@@ -212,9 +212,15 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/merchant-payments/src/receipt.ts'],
-    expect: ['code', 'merchant_payments', 'demo_merchant', 'packages'],
+    expect: ['code', 'merchant_payments', 'demo_merchant', 'paywall_proxy', 'packages'],
     kind: CONTRACT,
     why: 'The shared merchant payment core (#4890) has its own job, and the demo merchant declares @haven_ai/merchant-payments, so a change here also runs demo_merchant_checks: the demo merchant is the consumer whose receipts the move must not change.',
+  },
+  {
+    files: ['packages/paywall-proxy/src/handler.ts'],
+    expect: ['code', 'paywall_proxy', 'packages'],
+    kind: CONTRACT,
+    why: 'The paywall proxy (#4893) is a leaf: nothing consumes it, so a change to it fans out to nothing. It consumes merchant-payments, which fans out TO it.',
   },
   {
     files: ['packages/core/src/chains.ts'],
@@ -243,7 +249,7 @@ export const ROUTING_MATRIX = [
   // ─── Dependency propagation ────────────────────────────────────────────────
   {
     files: ['packages/sdk/src/client.ts'],
-    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant', 'merchant_payments', 'packages'],
+    expect: ['code', 'sdk', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant', 'merchant_payments', 'paywall_proxy', 'packages'],
     kind: CONTRACT,
     why: 'Every published package builds on the SDK and the backend is pinned against its wire types, so an SDK edit must run all of them. qa_agent joined in #3005: its tests import the SDK, and its job runs those tests. demo_merchant joined in #4723: the demo merchant imports @haven_ai/sdk at runtime (the merchant-side passport verifier) and demo_merchant_checks runs its suite, so an SDK change can break it with its job never running. Frontend stays out because it consumes @haven_ai/core, not the SDK.',
   },
@@ -355,7 +361,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['packages/sdk/src/agent-guidance.ts'],
-    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant', 'merchant_payments', 'packages'],
+    expect: ['code', 'sdk', 'cli', 'frontend', 'backend', 'connect', 'mcp', 'mcp_server', 'signer', 'qa_agent', 'demo_merchant', 'merchant_payments', 'paywall_proxy', 'packages'],
     kind: CONTRACT,
     why:
       'The canonical agent runbook (#2727). Other packages hold pinned derivations of it so they ' +
@@ -384,6 +390,7 @@ export const ROUTING_MATRIX = [
       'qa_agent',
       'demo_merchant',
       'merchant_payments',
+      'paywall_proxy',
       'packages',
     ],
     kind: CONTRACT,
@@ -421,6 +428,7 @@ export const ROUTING_MATRIX = [
       'qa_agent',
       'demo_merchant',
       'merchant_payments',
+      'paywall_proxy',
       'packages',
     ],
     kind: CONTRACT,
@@ -449,6 +457,7 @@ export const ROUTING_MATRIX = [
       'qa_agent',
       'demo_merchant',
       'merchant_payments',
+      'paywall_proxy',
       'packages',
     ],
     kind: CONTRACT,
@@ -473,6 +482,7 @@ export const ROUTING_MATRIX = [
       'qa_agent',
       'demo_merchant',
       'merchant_payments',
+      'paywall_proxy',
       'packages',
     ],
     kind: CONTRACT,
@@ -734,7 +744,7 @@ export const ROUTING_MATRIX = [
   },
   {
     files: ['scripts/network-map-pins.test.mjs'],
-    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'demo_merchant', 'merchant_payments'],
+    expect: ['code', 'backend', 'sdk', 'signer', 'connect', 'mcp', 'mcp_server', 'qa_agent', 'demo_merchant', 'merchant_payments', 'paywall_proxy'],
     kind: CONTRACT,
     why: 'The network-map pin test (#1478) spans backend, sdk and signer sources, so it must run every job that would have caught the drift. The sdk flag then fans out, which is why connect/mcp/mcp_server (and qa_agent since #3005, demo_merchant since #4723) appear without being named by the rule.',
   },
@@ -858,7 +868,7 @@ export const ROUTING_MATRIX = [
     files: [],
     expect: [],
     kind: CONTRACT,
-    why: 'An empty diff routes nothing — and must still emit all seventeen flags rather than an empty object.',
+    why: 'An empty diff routes nothing — and must still emit all eighteen flags rather than an empty object.',
   },
   {
     files: ['', '   ', 'packages/cli/src/index.ts'],

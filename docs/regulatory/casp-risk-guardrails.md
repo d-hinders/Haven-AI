@@ -89,6 +89,7 @@ covers:
   - packages/signer/src/**
   - packages/demo-merchant-mcp/src/**
   - packages/merchant-payments/src/**
+  - packages/paywall-proxy/src/**
   - scripts/release-bump.mjs
   - scripts/release-version-order.mjs
   - scripts/release-version-constants.mjs

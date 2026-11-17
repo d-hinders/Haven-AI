@@ -224,10 +224,10 @@ Notes:
 
 - `npm run quality` means typecheck and unit tests across workspaces, then
   `build` — which is **not** `--workspaces` but a hand-written ten-package
-  chain, omitting `demo-merchant-mcp`, `merchant-payments` and `qa-agent`.
-  Each has a build script and its own CI job (*Demo merchant checks*,
-  *Merchant payments checks*, *QA agent checks*), and none of those jobs is a
-  required check. `npm run preflight` covers what
+  chain, omitting `demo-merchant-mcp`, `merchant-payments`, `paywall-proxy`
+  and `qa-agent`. Each has a build script and its own CI job (*Demo merchant
+  checks*, *Merchant payments checks*, *Paywall proxy checks*, *QA agent
+  checks*), and none of those jobs is a required check. `npm run preflight` covers what
   `quality` misses.
 - Docs-only CI treats Markdown, agent-skill instructions, client adapters, and `.github/pull_request_template.md` as non-code, with three exceptions (#3346 made the third). Editing `CLAUDE.md` runs the backend suite, because `packages/backend/src/docs-drift` pins the CLAUDE.md API table and chain registry to backend code. Markdown under `packages/frontend/public/` is served content rather than documentation, so it routes `frontend` — and `for-agents.md`, a hand-kept byte copy of the SDK runbook, additionally routes the `sdk` and `cli` jobs that run `lint:runbook-parity` — and, through the `sdk` dependency closure, every package job (#2743). The four sources on the serve-docs allowlist (see `docs/contributing/docs-quality-system.md` § *Docs served to agents*) and `docs/exit/README.md` (read by `non-custody-no-lockin.test.ts`) route `code` + `frontend` too — `code` because the CI gate exits 0 when no code changed, before it ever reads the frontend flag — and the arm is derived from that allowlist, so a fifth served source routes the moment it is allowlisted (#3346). The classifier also diffs with `--no-renames`, so renaming a served source still routes the old spelling. Editing `.github/workflows/*.yml` triggers full workflow checks.
 - Frontend ESLint (`next lint`) is still not a required gate because it currently prompts for ESLint setup; add it only after a dedicated non-interactive lint migration. The blocking frontend **design and copy** gates that DO exist are design-lint (part of *Frontend checks*), the *Banned product-copy terms* copy lint (#902), and the *Design visual regression* job (#897) — both shrink-only-baseline lints fail on NEW violations only. Deliberately a scoped list, not every blocking step in *Frontend checks*: that job also runs typecheck, the wire-type ratchet, the *Visual baseline inventory* (#2318), the unit tests, the build and `lint:runbook-parity` (#2727), none of which is a design or copy gate. The visual-baseline step is the easiest of those to mistake for one: it inventories which screens have baselines, and is not the *Design visual regression* job named above.

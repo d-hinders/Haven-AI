@@ -4299,7 +4299,7 @@ export default function DesignSystemPage() {
         testId="ds-sales-patterns"
         description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. Off, the Settings Sales card says “Keys not accepted while off” as a Detail list row. The show-once credential block is the copy-a-string shape PaymentCredentialsModal and ReplaceSigningKeyModal already share; #4905 extracts it."
       >
-        <div className="grid gap-5 lg:grid-cols-2" data-testid="ds-sales-specimens">
+        <div className="grid items-start gap-5 lg:grid-cols-2" data-testid="ds-sales-specimens">
           <div data-testid="ds-sales-ledger">
             <Card hover={false} className="overflow-hidden">
               <TransactionActivityDayHeader label="Today" />
@@ -4389,6 +4389,7 @@ export default function DesignSystemPage() {
           </Card>
 
           <Card hover={false} className="p-5 lg:col-span-2">
+            <h3 className="mb-3 text-sm font-semibold text-[var(--v2-ink)]">Revenue by product</h3>
             <StackedBarChart
               days={DS_REVENUE_DAYS}
               currency="USD"
@@ -4423,7 +4424,12 @@ export default function DesignSystemPage() {
                 <Button size="sm" variant="ghost" onClick={() => setDsKeyShown((shown) => !shown)}>
                   {dsKeyShown ? 'Hide' : 'Show'}
                 </Button>
-                <CopyButton value={DS_SAMPLE_SALES_KEY} label="Sales key" text="Copy" />
+                <CopyButton
+                  value={DS_SAMPLE_SALES_KEY}
+                  label="Sales key"
+                  text="Copy"
+                  onCopyFailed={() => toast.error('Could not copy Sales key')}
+                />
               </div>
             </div>
           </Card>

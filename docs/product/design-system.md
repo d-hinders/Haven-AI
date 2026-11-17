@@ -2435,6 +2435,12 @@ The `/design-system` specimen follows `PaymentCredentialsModal`, the copy the
 Sales key screens are closest to, with the `sk_merchant_` prefix #4896 fixes
 (owner decision on #4894).
 
+One more question the extraction owns: both copies put Show and Copy **inside**
+the tinted value box. In a modal that box is the code-block surface; inside a
+Card (the Sales Setup tab) it groups sibling controls on a tint, which `CLAUDE.md` §
+UI Surface Hierarchy reserves for code blocks. #4905 decides whether the actions move
+below the box.
+
 **How it differs from `CredentialHandoffCard`** (§ StatusBadge → *What the
 table does not cover*): that card is the download-a-file shape — a credential
 file the user saves, with `Saved` / `Action required` — while this block is
@@ -4032,7 +4038,7 @@ unknown valuation an em dash). Rows group under user-local day headings ("Today"
 "Yesterday" / a short date); the server buckets the groups per day (#3824),
 the client only names the bucket.
 
-**Sales exception: product-first titles** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). This amends the #3810 rule above for the Sales ledger only; every other ledger stays counterparty-first. On Sales the row's `title` is the **product** the sale record names and the subline is the **payer**, because the merchant's question is "what sold", and the payer is the second fact. A payment with no sale record titles **No product recorded** in ink-3 (`mutedTitle`), never a blank and never the payer moved up: the muted ink says the title is an absence, not a product with that name. The row component gains only the opt-in `mutedTitle` (the title's ink); the title text was always caller-supplied, so the product-first rule lives in the Sales caller, as counterparty-first lives in `counterpartyLabel`. A sale's row carries no badge (see § StatusBadge → *Sales*). Shown on `/design-system` → *Sales patterns*.
+**Sales exception: product-first titles** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). This amends the #3810 rule above for the Sales ledger only; every other ledger stays counterparty-first. On Sales the row's `title` is the **product** the sale record names and the subline is the **payer**, because the merchant's question is "what sold", and the payer is the second fact. The payer is one of three kinds (owner decision 2 on #4894): a **contact**, by name; the owner's **own agent**, by name, which is a "Moved between your accounts" row left out of every total; and anyone else as **Wallet** with a short address — including another Haven user's agent, which the merchant is never told uses Haven. A payment with no sale record titles **No product recorded** in ink-3 (`mutedTitle`), never a blank and never the payer moved up: the muted ink says the title is an absence, not a product with that name. The row component gains only the opt-in `mutedTitle` (the title's ink); the title text was always caller-supplied, so the product-first rule lives in the Sales caller, as counterparty-first lives in `counterpartyLabel`. A sale's row carries no badge (see § StatusBadge → *Sales*). Shown on `/design-system` → *Sales patterns*.
 
 ### Transaction detail panel
 

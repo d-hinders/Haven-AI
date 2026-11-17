@@ -52,7 +52,6 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import NetworkPill from '@/components/NetworkPill'
 import { useT } from '@/context/LocaleContext'
 import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
-import { getChainConfig } from '@/lib/chains'
 import { salesCardState } from '@/lib/merchant-services'
 import TurnOnSalesDialog from './TurnOnSalesDialog'
 

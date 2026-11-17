@@ -525,7 +525,7 @@ export const en = {
       networkLabel: 'Network',
       keysLabel: 'Sales keys',
       keysRefused: 'Keys not accepted while off',
-      keysRefusedHelper: 'The kit’s sales reports are refused until Sales is on again.',
+      keysRefusedHelper: 'Sales reports from your merchant kit are refused until Sales is on again.',
       turnOn: 'Turn on Sales',
       turnOff: 'Turn off Sales',
       loading: 'Loading Sales…',

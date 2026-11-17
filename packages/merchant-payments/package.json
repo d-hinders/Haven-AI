@@ -2,7 +2,7 @@
   "name": "@haven_ai/merchant-payments",
   "version": "0.0.0",
   "private": true,
-  "description": "Haven merchant payment core \u2014 the receipt builder and the buyer tax-declaration check shared by the demo merchant and the paywall proxy (#4890, #4889). Not published; consumed via the npm workspace only.",
+  "description": "Haven merchant payment core \u2014 the receipt builder, the buyer tax-declaration check and the Coinbase payment core (payment checks, CDP settlement, settle-once, consumed-payment store) shared by the demo merchant and the paywall proxy (#4890, #4889). Not published; consumed via the npm workspace only.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -25,13 +25,15 @@
   ],
   "license": "UNLICENSED",
   "dependencies": {
-    "@haven_ai/sdk": "*"
+    "@coinbase/x402": "^2.1.0",
+    "@haven_ai/sdk": "*",
+    "@x402/core": "^2.29.0",
+    "viem": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
-    "viem": "^2.0.0",
     "vitest": "^3.2.4"
   }
 }

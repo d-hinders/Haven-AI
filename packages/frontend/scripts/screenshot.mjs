@@ -4700,6 +4700,27 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'disabled')
     },
   },
+  'design-system-sales-patterns': {
+    description:
+      'The Sales patterns section on /design-system — sale rows, the Sales badges, the freshness line, the Spending/Revenue tabs, the revenue chart, the keys-off row and the credential block (#4908)',
+    // An element capture, for the reason `design-system-buttons` gives: the
+    // page is far past Chromium's full-page surface cap. Static showcase
+    // markup, so no fixture overrides.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const section = page.getByTestId('ds-sales-patterns')
+      // Wait on the last specimen as well as the section, so the capture
+      // cannot race the grid's tail.
+      await section.getByText('Keys not accepted while off').waitFor({ timeout: 20_000 })
+      await section.getByRole('tab', { name: 'Revenue' }).waitFor({ timeout: 20_000 })
+      await section.scrollIntoViewIfNeeded()
+      await shoot(section, 'section')
+    },
+  },
   'design-system-buttons': {
     description:
       'The Buttons and badges card on /design-system — variants, the size scale, and the tap-target note',

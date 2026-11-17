@@ -59,6 +59,7 @@ import {
   inTransaction,
 } from '../infra/repositories/smart-accounts.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
+// dep-lint-exempt: the create-additional provisioning must reach the smart-account and hybrid-signer repositories, and `infra/repositories/analytics.ts` imports the accounts barrel — so re-exporting this file from `modules/accounts/index.ts` closes an accounts ↔ repositories cycle. The deep import is the only acyclic path (#4895).
 import {
   createAdditionalHybridAccount,
   CreateAdditionalRefusal,

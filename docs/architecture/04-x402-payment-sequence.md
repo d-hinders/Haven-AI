@@ -1482,6 +1482,21 @@ buyer" without qualification —
 its `kopare.roll` (built by the shared receipt core the demo merchant calls
 since #4890) now carries the same distinction the confirmation text already made.
 
+**#4873 adds the buyer's checkout details to that block.** A merchant can ask
+for a receipt email and a billing or shipping address in its challenge
+(`haven-checkout-details`, the shape
+[`13-checkout-details.md`](13-checkout-details.md) §2 fixes), and Haven answers
+on the paid request with an `X-Checkout-Details` header. A merchant that prints
+them returns them on its receipt, and the buyer block then carries
+`receipt_email`, `billing_address` and `shipping_address` — the wire names, not
+renamed — beside `identifierare`, `typ`, `roll` and `deklaration`. The keys are
+absent when the paid request carried no details, so a receipt without them
+keeps its exact shape. The values are the owner's own data, shown in full
+(owner decision 2026-11-17, see #4868); the merchant does not store them beyond
+the response and does not log them, and the record a merchant sends to Stripe
+does not carry them. The demo merchant is the first merchant that asks
+(`vpn_pro`), and its README says how to try it on dev.
+
 ## Differences From Direct Payments
 
 | Concern | Direct `/payments` | x402 |

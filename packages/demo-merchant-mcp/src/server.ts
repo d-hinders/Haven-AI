@@ -10,6 +10,7 @@ import {
   CHAIN_ID,
   HOSTED_DEMO_MERCHANT_URLS,
   buildProductMetadata,
+  checkoutDetailsForProduct,
   formatUsdc,
   merchantEnvironmentForChain,
   networkDisplayName,
@@ -34,6 +35,7 @@ import {
 } from '@haven_ai/sdk'
 import type { Address } from 'viem'
 import type { ReceiptSellerDetails } from '@haven_ai/merchant-payments'
+import type { CheckoutDetailsField } from '@haven_ai/merchant-payments'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 
@@ -69,6 +71,12 @@ export interface MerchantConfig {
   stripeDepositAddress?: Address
   /** #4856: the seller every receipt carries; absent, the demo seller. */
   receiptSeller?: ReceiptSellerDetails
+  /**
+   * #4873: the dev-only hook that makes one of the checkout-details product's
+   * optional fields required. The in-band quote must advertise the same
+   * request the HTTP 402 does, so it travels with the session's config.
+   */
+  checkoutDetailsRequiredField?: CheckoutDetailsField | null
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -589,6 +597,10 @@ async function completePurchase(
       // #4851: a CDP product's in-band requirements name only what it accepts
       // (EIP-3009), as its HTTP 402 does. The other products are unchanged here.
       ...(productSettlementKind(product) === 'cdp' ? { settlementMethods: product.x402.settlementMethods } : {}),
+      // #4873: the same checkout-details request the HTTP 402 advertises.
+      checkoutDetails: checkoutDetailsForProduct(product, {
+        requiredField: config.checkoutDetailsRequiredField,
+      }),
     })
     return {
       isError: true,

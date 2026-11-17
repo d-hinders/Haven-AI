@@ -9,6 +9,12 @@
  * it is tracked per chain here, not hardcoded.
  */
 import { getAddress, isAddress, type Address } from 'viem'
+import {
+  CHECKOUT_DETAILS_FIELDS,
+  isCheckoutDetailsField,
+  type CheckoutDetailsField,
+  type CheckoutDetailsRequest,
+} from '@haven_ai/merchant-payments'
 
 interface MerchantChainConfig {
   /** The ONE home of the network's display name (#3834). */
@@ -168,6 +174,13 @@ export interface Product {
    * settled, and no other product is settled by CDP.
    */
   stripeRecording?: boolean
+  /**
+   * #4873: the checkout details this product's challenge asks for, in the
+   * shape `docs/architecture/13-checkout-details.md` §2 decided. Absent, the
+   * challenge is unchanged. Read it through `checkoutDetailsForProduct`, never
+   * off this field, so the dev-only required-field hook lives in one place.
+   */
+  checkoutDetails?: CheckoutDetailsRequest
 }
 
 /**
@@ -209,6 +222,75 @@ export function productSettlementKind(product: Product): SettlementKind {
 /** #4851: what one purchase of `product` buys. */
 export function productBillingPeriod(product: Product): BillingPeriod {
   return product.billing ?? 'monthly'
+}
+
+// ── Checkout details (#4873) ─────────────────────────────────────────────────
+// The demo merchant is the first merchant that asks for checkout details. One
+// product asks (`vpn_pro`), and the request rides its 402 challenge as the
+// `haven-checkout-details` extension (docs/architecture/13-checkout-details.md
+// §2). The answer is the `X-Checkout-Details` header on the paid request, read
+// by `acceptCheckoutDetails` in the shared payment core.
+
+/**
+ * #4873: the checkout-details request a product's challenge carries, or
+ * `undefined` when it asks for none.
+ *
+ * `requiredField` is the dev-only hook that turns one of the product's
+ * optional fields into a required one, so the "stopped before paying"
+ * behaviour (#4872) can be exercised on dev. It is off by default: with it
+ * unset, every product's challenge is exactly what it was.
+ */
+export function checkoutDetailsForProduct(
+  product: Product,
+  opts?: { requiredField?: CheckoutDetailsField | null },
+): CheckoutDetailsRequest | undefined {
+  const request = product.checkoutDetails
+  if (!request) return undefined
+  const requiredField = opts?.requiredField
+  if (!requiredField || !request.fields[requiredField]) return request
+  return {
+    fields: {
+      ...request.fields,
+      [requiredField]: { required: true },
+    },
+  }
+}
+
+/** #4873: the env var that exposes the required-field case on dev. */
+export const CHECKOUT_DETAILS_REQUIRED_FIELD_ENV = 'MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD'
+
+/**
+ * #4873: the dev-only required-field hook, read from
+ * `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD`.
+ *
+ * **Testnet-only, enforced in code**, like `MERCHANT_SKIP_SETTLE_PRODUCT`: on
+ * any other chain the merchant refuses to start rather than silently ignore
+ * the flag. A required field changes what a purchase needs before it can be
+ * paid — that is a test hook, not something to leave reachable on a real
+ * chain.
+ *
+ * Unset (the default) means no field is required, so the QA scenarios see the
+ * optional shape the issue asks for.
+ */
+export function requiredCheckoutFieldFromEnv(
+  env: Record<string, string | undefined> = process.env,
+  chainId: number = CHAIN_ID,
+): CheckoutDetailsField | null {
+  const raw = env[CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]?.trim()
+  if (!raw) return null
+  if (!isCheckoutDetailsField(raw)) {
+    throw new Error(
+      `${CHECKOUT_DETAILS_REQUIRED_FIELD_ENV} must be one of ${CHECKOUT_DETAILS_FIELDS.join(', ')}; got "${raw}".`,
+    )
+  }
+  if (chainId !== 84532) {
+    throw new Error(
+      `${CHECKOUT_DETAILS_REQUIRED_FIELD_ENV} is a dev-only hook that makes a checkout field required, ` +
+        'so the "stopped before paying" behaviour can be exercised. ' +
+        `Set MERCHANT_CHAIN_ID=84532 (Base Sepolia) to use it, or unset the flag. Got chain ${chainId}.`,
+    )
+  }
+  return raw
 }
 
 /**
@@ -269,6 +351,20 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description_sv: 'Premium VPN. Obegränsade enheter. Höghastighetsservrar. Dubbel-VPN. 90+ länder.',
     price_usdc: 3_000n,
     category: 'vpn',
+    /**
+     * #4873: the demo merchant's checkout-details product. It asks for a
+     * receipt email and a billing address, both optional, so a paid request
+     * that carries them shows them on the receipt and one that does not is
+     * served exactly as today. `vpn_pro` rather than a product the QA
+     * scenarios buy (`vpn_basic`, `storage_50gb`, the CDP joke): the challenge
+     * of every other product stays byte-identical.
+     */
+    checkoutDetails: {
+      fields: {
+        receipt_email: { required: false },
+        billing_address: { required: false },
+      },
+    },
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   vpn_ultra: {

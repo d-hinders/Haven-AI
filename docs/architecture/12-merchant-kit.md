@@ -1269,6 +1269,7 @@ contact.
 | `fakturadatum`, `forfallodatum` | The payment: the date of `settledAt` in the consumed-payment store, and 30 days later, so a retry on a later day gives the same receipt. |
 | `kopare.identifierare`, `kopare.roll` | The payment: the payer address, which for a Haven agent paying by EIP-3009 is its delegate address (`roll: agent_delegate`), as in section 5. |
 | `kopare.deklaration` | The payment: present only when the request carried an `X-Tax-Declaration` that verifies against the payer, on the payment's chain, and is unexpired. Display only; a declaration that fails any check is treated as absent and never refuses the purchase. |
+| `kopare.receipt_email`, `kopare.billing_address`, `kopare.shipping_address` | The paid request: present only when the merchant asked for the field in its challenge (`haven-checkout-details`, the shape [`13-checkout-details.md`](13-checkout-details.md) §2 fixes) and the request carried it in `X-Checkout-Details` (#4873). Display only; a malformed or oversized header is treated as absent and never refuses the purchase. The demo merchant is the first merchant that asks; the proxy does not ask yet, so its receipts keep their exact shape. |
 | `blockkedje_referens`, `status` | The payment: the settlement transaction hash, and `Betald`. |
 
 ### The VAT rule is a deployment setting

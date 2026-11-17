@@ -125,7 +125,9 @@ text and emoji sequences need them.
   its own, frozen when the payment settled. The demo merchant's indicative
   `belopp_sek` block (#4856) is one of these.
 - **The buyer block is never read here.** `kopare`, including the buyer's VAT
-  number in `kopare.deklaration.moms_nr`, stays out of the statement.
+  number in `kopare.deklaration.moms_nr`, stays out of the statement. The
+  checkout details a merchant may print there (#4873, below) are not read
+  either.
 - **The total is compared, never booked.** When `valuta` is the token Haven
   settled, the stated `totalt_inkl_moms` is compared with the settled amount,
   and the entry's `totalCheck` says `matches` or `differs`. The comparison
@@ -136,6 +138,30 @@ text and emoji sequences need them.
 - **Totals and lines are not checked against each other.** Nothing confirms
   that the lines add up to the totals, or that the amount excluding VAT plus
   the VAT equals the total. The statement reports the receipt as written.
+
+## Buyer block (#4873)
+
+Haven does not read the buyer block for accounting. It is listed here because a
+merchant that asks for checkout details prints them there, and the receipt is
+stored and attached as a PDF as written.
+
+| Key | Meaning |
+|---|---|
+| `kopare.identifierare` | The payer address the merchant verified the payment from |
+| `kopare.typ` | `blockkedjeadress` |
+| `kopare.roll` | `agent_delegate` (EIP-3009) or `agent_delegate_account` (ERC-7710) |
+| `kopare.deklaration` | The accepted tax declaration's display fields (#4855) |
+| `kopare.receipt_email` | The receipt email the paid request carried (#4873) |
+| `kopare.billing_address` | The billing address the paid request carried (#4873) |
+| `kopare.shipping_address` | The shipping address the paid request carried (#4873) |
+
+The three checkout-details keys are present only when the paid request carried
+them; a receipt without them keeps its exact shape. The address shape is the
+one [`13-checkout-details.md`](../architecture/13-checkout-details.md) §2 fixes
+(`line1`, `line2`, `line3`, `city`, `postCode`, `subdivision`, `country`), and
+an absent optional member is omitted. The values are shown in full (owner
+decision 2026-11-17, see #4868): the receipt is the owner's own bookkeeping
+record, and the accounting PDF renders the inline JSON as written.
 
 ## What the statement is not
 

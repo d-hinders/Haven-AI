@@ -13,6 +13,7 @@
  */
 export * from './receipt.js'
 export * from './tax-declaration.js'
+export * from './checkout-details.js'
 export * from './log-range.js'
 export * from './cdp.js'
 export * from './payment-checks.js'

@@ -59,11 +59,11 @@ import {
   inTransaction,
 } from '../infra/repositories/smart-accounts.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
-import { isReservedMerchantIdempotencyKey, RESERVED_IDEMPOTENCY_KEY } from '../domain/merchant-services.js'
 // dep-lint-exempt: the create-additional provisioning must reach the smart-account and hybrid-signer repositories, and `infra/repositories/analytics.ts` imports the accounts barrel — so re-exporting this file from `modules/accounts/index.ts` closes an accounts ↔ repositories cycle. The deep import is the only acyclic path (#4895).
 import {
   createAdditionalHybridAccount,
   CreateAdditionalRefusal,
+  idempotencyKeyRefusal,
   UNSUPPORTED_NETWORK,
   type CreateAdditionalResult,
 } from '../modules/accounts/create-additional.js'
@@ -224,21 +224,8 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         return reply.code(400).send({ error: 'duplicate passkey key_id' })
       }
     }
-    if (idempotency_key !== undefined && (!isString(idempotency_key) || idempotency_key.length === 0)) {
-      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string' })
-    }
-    // #4895: the `merchant-service:` namespace belongs to the merchant-services
-    // route, which derives its own keys there. The spec's `pattern` refuses a
-    // client key in it; this check refuses it too, so the refusal does not
-    // depend on request validation being in `enforce` mode. Without it a user
-    // could create an account under the key the turn-on route derives and have
-    // the merchant marker land on an account they chose.
-    if (idempotency_key !== undefined && isReservedMerchantIdempotencyKey(idempotency_key)) {
-      return reply.code(400).send({
-        error: 'idempotency_key uses a reserved prefix',
-        error_code: RESERVED_IDEMPOTENCY_KEY,
-      })
-    }
+    const keyRefusal = idempotencyKeyRefusal(idempotency_key) // non-empty, and not the reserved namespace (#4895)
+    if (keyRefusal !== null) return reply.code(400).send(keyRefusal)
 
     // #1153: provisioning no longer refuses a single-signer account on a
     // value-bearing chain. The #908 floor became a recommendation shown AFTER

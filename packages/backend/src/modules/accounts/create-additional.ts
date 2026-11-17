@@ -58,6 +58,7 @@ import {
   type PasskeySigner,
 } from '../../rails/hybrid-provisioning.js'
 import { boundedErrorDetails } from '../payments/index.js'
+import { isReservedMerchantIdempotencyKey, RESERVED_IDEMPOTENCY_KEY } from '../../domain/merchant-services.js'
 
 /**
  * The create-additional refusal codes (#4024). Clients branch on these, never
@@ -76,6 +77,30 @@ export const IDEMPOTENCY_KEY_REUSED = 'IDEMPOTENCY_KEY_REUSED'
  * so the code is additive on the same 400.
  */
 export const UNSUPPORTED_NETWORK = 'UNSUPPORTED_NETWORK'
+
+/**
+ * The 400 body for a client-supplied `idempotency_key` `POST /accounts/hybrid`
+ * will not store, or null when the key is absent or acceptable. Both request
+ * shapes store the key, so the route checks it before it branches.
+ *
+ * Two refusals. An empty or non-string key, which the route always refused.
+ * And (#4895) a key in the `merchant-service:` namespace: that namespace
+ * belongs to the merchant-services route, which derives its own keys there.
+ * The spec's `pattern` refuses such a key as well; this check is the one that
+ * does not depend on request validation being in `enforce` mode. Without it a
+ * user could create an account under the key the turn-on route derives and
+ * have the merchant marker land on an account they chose.
+ */
+export function idempotencyKeyRefusal(key: unknown): Record<string, unknown> | null {
+  if (key === undefined) return null
+  if (typeof key !== 'string' || key.length === 0) {
+    return { error: 'idempotency_key must be a non-empty string' }
+  }
+  if (isReservedMerchantIdempotencyKey(key)) {
+    return { error: 'idempotency_key uses a reserved prefix', error_code: RESERVED_IDEMPOTENCY_KEY }
+  }
+  return null
+}
 
 /** Soft cap (#4023): accounts per user per chain. An 11th create answers 422. */
 export const MAX_ACCOUNTS_PER_USER_PER_CHAIN = 10

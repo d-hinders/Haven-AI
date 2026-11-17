@@ -10,7 +10,7 @@
  */
 import { getAddress, type Address, type Hex } from 'viem'
 import { VerifyError, type PaymentPayload, type PaymentRequired, type PaymentRequirements } from '@x402/core/types'
-import { CDP_CALL_TIMEOUT_MS, withCdpTimeout, type CdpSettlementConfig } from './cdp.js'
+import { CDP_CALL_TIMEOUT_MS, CdpTimeoutError, withCdpTimeout, type CdpSettlementConfig } from './cdp.js'
 import {
   AuthorizationAlreadyUsedError,
   PaymentError,
@@ -203,10 +203,16 @@ export async function readAuthorizationUsed(cdp: CdpSettlementConfig, payer: Add
  *   that transaction as the reference;
  * - found, paying anything else, or the whole window empty → refused: this
  *   payment cannot have landed outside its window, so nothing was paid here;
- * - the search failed (a read error or, #4890, the `SETTLE_RESOLVE_MS` bound),
- *   or the window was too long to search in full → served with no reference.
- *   A buyer whose money may have moved is never refused, and this is the
- *   answer the own-key path gives to any used nonce (#1519).
+ * - the search failed with a read error, or the window was too long to search
+ *   in full → served with no reference. A buyer whose money may have moved is
+ *   never refused, and this is the answer the own-key path gives to any used
+ *   nonce (#1519).
+ * - #4890: the search did not finish inside `SETTLE_RESOLVE_MS` (a timeout) →
+ *   NOT served: the outcome is unknown, nothing is delivered and the buyer is
+ *   told to retry the same header (`facilitator_retryable`). Serving here would
+ *   let a payer who cancelled the nonce and signed a long window be served by
+ *   making the search slow, which is the hole the window limit closed (#4851).
+ *   The design answers this case with 503 `settlement_unknown` (#4889 §6).
  */
 export async function recoverUsedAuthorization(p: {
   cdp: CdpSettlementConfig
@@ -225,6 +231,19 @@ export async function recoverUsedAuthorization(p: {
       validBefore: BigInt(p.authorization.validBefore),
     })
   } catch (err) {
+    if (err instanceof CdpTimeoutError) {
+      console.warn('[x402] CDP: authorization used; the search for its transaction did not finish in time', {
+        payer,
+        nonce,
+        error: describeError(err),
+      })
+      throw new PaymentError(
+        `Authorization ${nonce} is marked used on-chain, but the merchant could not finish searching for its ` +
+          'transaction in time, so it cannot tell yet whether this payment landed. Nothing is delivered yet. ' +
+          'Retry the SAME payment header shortly; do not sign a new one.',
+        'facilitator_retryable',
+      )
+    }
     console.warn('[x402] CDP: authorization used, but its transaction could not be found', {
       payer,
       nonce,

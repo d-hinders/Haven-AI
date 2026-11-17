@@ -95,6 +95,18 @@ describe('settleOnce (#4890)', () => {
     expect(submit).toHaveBeenCalledTimes(2)
   })
 
+  it('a store whose release throws does not hide the error the buyer needs (#4890 review S2)', async () => {
+    const store = createInMemoryConsumedPaymentStore()
+    store.release = async () => {
+      throw new Error('disk full')
+    }
+    const settleOnce = createSettleOnce({ store, chainId: 8453, waitForReceipt: async () => {} })
+    const refusal = new PaymentError('Nothing settled — retry the same payment header.', 'facilitator_retryable')
+    await expect(
+      settleOnce({ productId: 'joke', verified: verified(async () => Promise.reject(refusal)), expectedAmount: 10_000n }),
+    ).rejects.toBe(refusal)
+  })
+
   it('an already-used authorization is recorded as settled earlier, with no hash', async () => {
     const { settleOnce, store } = harness()
     const submit = async (): Promise<Hex> => {

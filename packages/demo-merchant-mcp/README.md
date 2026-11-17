@@ -173,7 +173,9 @@ every payment must echo it. Since #2361 the challenge advertises exactly this
 }
 ```
 
-The rule (`assertExtensionsEchoed` in `src/x402.ts`) is the first thing
+The rule (`assertExtensionsEchoed`, in the shared core's
+`packages/merchant-payments/src/payment-checks.ts` since #4890, called from
+`src/x402.ts`) is the first thing
 `verifyAndSettle` does after decoding the payment header — **before** scheme
 dispatch, so it applies identically to `eip3009` and `erc7710` payments and
 runs before any signature recovery, delegation simulation, RPC call or
@@ -467,7 +469,12 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   public Base Sepolia RPC serves 200) refused every window wider than that,
   so on the dev merchant a final refusal was unreachable and the buyer was
   always served. It is reachable there now, as on mainnet. At 200-block
-  windows the 21,600-block cap is up to 108 sequential calls.
+  windows the 21,600-block cap is up to 108 sequential calls. Since #4890
+  each chain read is bounded at 10 s with no retries and the whole search at
+  30 s (`SETTLE_RESOLVE_MS`). A search that runs out of time is not served:
+  the buyer is told the outcome is unknown and to retry the same header
+  (`facilitator_retryable`), because serving it would let a cancelled
+  authorization with a long window be served by a slow search.
 - **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
   (final: CDP refused at verification — including its sanctions and risk
   screening — and the chain shows the authorization unused, or the

@@ -432,9 +432,10 @@ resent identical record is harmless.
 
 ## 6. The consumed-payment store
 
-The shared core keeps settled payments in memory today and serves a settled
-payment again when it is presented again, including after a restart
-(`packages/demo-merchant-mcp/src/x402.ts`). The proxy needs the opposite: a
+The demo merchant keeps settled payments in memory and serves a settled
+payment again when it is presented again, including after a restart (the
+shared core's settle-once coordinator, `packages/merchant-payments/src/settle-once.ts`,
+over the in-memory store in `consumed-payment-store.ts`). The proxy needs the opposite: a
 payment buys one call, remembered across restarts. The core calls a store
 through one interface; each consumer supplies its own implementation and
 policy.
@@ -622,12 +623,12 @@ for its own first forward.
 **The holder has a deadline.** The token hash is trusted for
 `RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`. From `reservedAt` the
 holder's worst case is the core's chain read before verify (the "chain first"
-check in `packages/demo-merchant-mcp/src/x402.ts`, bounded at 10 s as below),
+check in `packages/merchant-payments/src/cdp-settlement.ts`, bounded at 10 s as below),
 verify at 30 s, the upstream slot wait at 10 s (taken after verify, section
 7), settle at 30 s, and `SETTLE_RESOLVE_MS` (30 s): 110 s.
 When the chain-first read finds the authorization already used, the recovery
 that finds its transaction (`recoverUsedAuthorization` and its log-window scan
-in today's core) replaces verify and settle and is bounded in total at
+in the core's `cdp-settlement.ts`) replaces verify and settle and is bounded in total at
 `SETTLE_RESOLVE_MS` (30 s), whatever `validAfter` the buyer chose; not found in
 time, the holder answers 503 `settlement_unknown` as for a lost settle answer.
 Found and checked, the holder takes its upstream slot then (10 s, so this path
@@ -637,12 +638,15 @@ settlement without its token (`settled`) and answers 200
 settled, so the answer stays 2xx, and the retry needs a proof.
 The check that a found event paid this merchant (below) runs inside the
 `SETTLE_RESOLVE_MS` bound, not after it.
-**Every chain read is bounded at 10 s in total.** Today's core sets no read
-timeout: its client is viem's `http()` transport, whose 10 s timeout is per
-attempt and which retries a timed-out read three times, so one hung read can
-take about 41 s. The shared core (#4890) therefore wraps each chain read in its
-own 10 s race, as `withCdpTimeout` does for verify and settle, or builds the
-transport with `retryCount: 0`. The resolve poll starts no read
+**Every chain read is bounded at 10 s in total.** The demo merchant's client
+before #4890 was viem's default `http()` transport, whose 10 s timeout is per
+attempt and which retries a timed-out read three times, so one hung read could
+take about 41 s. The shared core (`packages/merchant-payments/src/cdp.ts`) does
+both: it builds the transport with `retryCount: 0` and a 10 s timeout, and races
+each chain read against `CHAIN_READ_TIMEOUT_MS` (10 s), as `withCdpTimeout`
+does for verify and settle. A recovery search that does not finish inside
+`SETTLE_RESOLVE_MS` is answered "outcome unknown, retry the same header", never
+served. The resolve poll starts no read
 that could end after `SETTLE_RESOLVE_MS` and cuts off one still running at
 that bound, so the 110 s holds and leaves 10 s of margin. The deadline is measured on the process's monotonic clock
 (the deadline only matters within one process, since a restart clears every

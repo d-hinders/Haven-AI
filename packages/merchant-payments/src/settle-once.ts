@@ -252,9 +252,14 @@ export function createSettleOnce<P extends string = string, M extends string = s
           await recordSettled(key, payment.txHash, reservation.reservationToken)
           return payment
         }
-        // `submit` threw before anything is known to have moved: the key is
-        // free again, so a retry reserves it afresh.
-        await store.release(key)
+        // `submit` threw. The demo's rails retry the SAME header after every
+        // such error and re-check the chain on the retry, so the key is freed
+        // for that retry. NOTE (#4890 review): some of these errors mean the
+        // outcome is unknown, not that nothing moved; §6 would mark those
+        // `settlement_unknown`. That needs the persistent store's resolution
+        // path, so it is the proxy's (#4893) to classify; with the demo's
+        // in-memory store, releasing is the existing behaviour.
+        await releaseQuietly(key)
         throw err
       }
       nextAttempt.txHash = txHash
@@ -279,6 +284,18 @@ export function createSettleOnce<P extends string = string, M extends string = s
       if (!nextAttempt.txHash) {
         attempts.delete(key)
       }
+    }
+  }
+
+  async function releaseQuietly(key: string): Promise<void> {
+    // A store that fails here must not hide the error the buyer needs to see.
+    try {
+      await store.release(key)
+    } catch (err) {
+      console.error('[x402] consumed-payment store: release failed', {
+        key,
+        error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      })
     }
   }
 
@@ -310,7 +327,7 @@ export function createSettleOnce<P extends string = string, M extends string = s
         // resubmits instead of re-confirming the dead hash forever. Any other
         // error is treated as transient and keeps the hash for re-confirmation.
         attempts.delete(key)
-        await store.release(key)
+        await releaseQuietly(key)
         throw new PaymentError(
           `Settlement transaction reverted on-chain (${txHash}). ` +
             'Retry the request with the same payment header to resubmit.',

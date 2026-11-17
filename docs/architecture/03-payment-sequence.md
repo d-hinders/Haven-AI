@@ -323,7 +323,7 @@ into one. The live read remains the feed's source; the index is the matching
 substrate — and it costs no second explorer call.
 
 **Row identity (#4903).** A transfer's on-chain identity is its LOG, so the
-dedupe key is `(chain, tx hash, account, log index)` (migration 127). A
+dedupe key is `(chain, tx hash, account, log index)` (migration 128). A
 transaction carrying several USDC transfers to the same account therefore
 lands one row per leg instead of one row per transaction. `log_index` is
 nullable — not every source reports it — so the unknown case keeps its own
@@ -332,7 +332,7 @@ of the same leg still conflicts, while a second leg is a distinct row. A leg
 whose log index becomes known ADOPTS the unknown row written from it (same
 payer and amount) by filling in the index, keeping the row's amount, match and
 `balance_consumed` flag — so the receive balance of an account whose rows were
-collapsed before migration 127 does not move, while every leg is now indexed.
+collapsed before migration 128 does not move, while every leg is now indexed.
 Zero-value transfers are left out for every account.
 
 **The scheduled pass (#4903).** A merchant account that nobody browses used to

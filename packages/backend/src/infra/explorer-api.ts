@@ -65,7 +65,7 @@ export interface RawERC20Transfer {
    * The transfer's log index, when the provider reports one (#4903). Blockscout
    * v2 does (`log_index`); Alchemy's transfers API and Etherscan's `tokentx` do
    * not, and the field is absent there — the receive index then dedupes on the
-   * leg's payer+amount instead (migration 127).
+   * leg's payer+amount instead (migration 128).
    */
   logIndex?: number | null
 }

@@ -47,7 +47,7 @@ export interface InsertInboundTransferInput {
   /**
    * The transfer's log index — the on-chain half of its identity (#4903).
    * `null` when the source does not report one (Alchemy's transfers API, and
-   * every row written before migration 127); the unknown-case unique index
+   * every row written before migration 128); the unknown-case unique index
    * then dedupes on (chain, hash, account, payer, amount).
    */
   logIndex?: number | null

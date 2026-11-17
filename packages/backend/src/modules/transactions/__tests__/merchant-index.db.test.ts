@@ -14,7 +14,7 @@
  * 4. Indexing continues while merchant services are turned OFF — the account
  *    list is the marker, not the setting.
  * 5. `sender_is_own_address` is decided at index time.
- * 6. The reconcile rule for rows collapsed before migration 127: a two-leg
+ * 6. The reconcile rule for rows collapsed before migration 128: a two-leg
  *    transaction replayed over an existing collapsed row adopts that row (it
  *    keeps its amount and its consumed flag) and inserts the missing leg, so
  *    the receive balance is UNCHANGED while every leg is indexed.

@@ -13,7 +13,7 @@
  *    only: the slice's asset is the settlement token, and the ledger is a USDC
  *    receive balance, not a general token inventory. Idempotent per
  *    (chain, hash, account, log index) — and per (chain, hash, account, payer,
- *    amount) when the source reports no log index (migration 127).
+ *    amount) when the source reports no log index (migration 128).
  *
  * 2. `readInboundTransferByTxHash` — one transaction by hash, read from the
  *    CHAIN: the USDC transfers to the account, or none. This is the primitive

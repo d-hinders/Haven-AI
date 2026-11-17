@@ -1,9 +1,9 @@
 import type { PoolClient } from 'pg'
 
-export const version = '127_inbound_transfer_identity'
+export const version = '128_inbound_transfer_identity'
 
 /**
- * 127 — the inbound index's row identity, the per-account cursor, and the
+ * 128 — the inbound index's row identity, the per-account cursor, and the
  * own-address flag (#4903, epic #4885).
  *
  * ## Why the identity changes

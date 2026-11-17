@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { ProductsFileError, RECEIPT_LINE_MAX, loadProductsFile, parseProducts } from './products.js'
 
@@ -86,6 +87,11 @@ describe('products file (design 12 section 3)', () => {
     expect(problems(file([{ ...product, description: `${description}d` , name}]))[0]).toContain('receipt line')
     expect(problems(file([{ ...product, description: 'line one\nline two' }]))[0]).toContain('control')
     expect(problems(file([{ ...product, description: 'zero​width' }]))[0]).toContain('control')
+  })
+
+  it('the example products file shipped with the package is valid', () => {
+    const example = fileURLToPath(new URL('../products.example.json', import.meta.url))
+    expect(loadProductsFile(example).map((p) => p.id)).toEqual(['chat-1k', 'lookup'])
   })
 
   it('loads from a path and refuses a missing file or invalid JSON', () => {

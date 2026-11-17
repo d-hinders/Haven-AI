@@ -40,6 +40,7 @@ import {
 } from '@haven_ai/merchant-payments'
 import { buildChallenge, refusalWithChallenge } from './challenge.js'
 import { secretValues, type ProxyConfig } from './config.js'
+import { DISCOVERY_PATH, buildDiscoveryDocument } from './discovery.js'
 import { applyOutputTokenCap, callUpstream, type UpstreamFailureReason } from './forward.js'
 import { DEFAULT_LIMITS, Gate, IpLimiter, type LimitSettings, type Permit } from './limits.js'
 import { redactor, type LogFn } from './log.js'
@@ -58,6 +59,8 @@ const AT_CAPACITY_RETRY_SECONDS = 10
 export interface ProxyDeps {
   config: ProxyConfig
   products: readonly Product[]
+  /** The products file's last change, for the discovery document's `updated` (§4). */
+  updated?: string
   store: SqliteConsumedPaymentStore
   cdp: CdpSettlementConfig
   log: LogFn
@@ -121,6 +124,13 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   const settlePollMs = deps.settlePollMs ?? 2_000
   const reservationDeadlineMs = deps.reservationDeadlineMs ?? config.reservationDeadlineMs
   const byRoute = indexProducts(deps.products)
+  // §4: the document is built once, from the products file read at startup, so
+  // a change to the file reaches readers when the proxy restarts.
+  const discovery = buildDiscoveryDocument({
+    config,
+    products: deps.products,
+    ...(deps.updated !== undefined ? { updated: deps.updated } : {}),
+  })
   const takeoverMs = config.upstreamTimeoutMs + 30_000
   // A secret that reached a response body by mistake is still never sent.
   const redact = redactor(secretValues(config))
@@ -1008,10 +1018,15 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     const method = req.method ?? 'GET'
     const url = new URL(req.url ?? '/', 'http://proxy.invalid')
 
-    // Unpriced route: health. (The discovery document at /.well-known/x402 is #4891; until it lands that path is an unknown route.)
+    // Unpriced routes: health, and the public discovery document (§4). The
+    // discovery document is served at the x402 well-known path and nowhere
+    // else, outside BASE_PATH, and answering it makes no facilitator call.
     if (method === 'GET' && url.pathname === '/healthz') {
       const ready = store.isWritable()
       return send(res, ready ? 200 : 503, ready ? { status: 'ok', network: config.chain.network } : { status: 'not_ready' })
+    }
+    if ((method === 'GET' || method === 'HEAD') && url.pathname === DISCOVERY_PATH) {
+      return send(res, 200, discovery)
     }
 
     const { basePath } = config

@@ -21,6 +21,13 @@ export interface ProxyConfig {
   chain: ProxyChain
   payTo: Address
   operatorName: string
+  /** The endpoint's human name and description, for the discovery document (§4). */
+  endpointName: string
+  endpointDescription: string
+  /** A URL or address a reader can use to reach the operator (§4). */
+  operatorContact?: string
+  /** A public image URL, for a directory listing (§4). */
+  iconUrl?: string
   productsFile: string
   upstream: {
     baseUrl: URL
@@ -100,6 +107,34 @@ export function loadConfig(env: Env): ProxyConfig {
   const operatorName = required('OPERATOR_NAME')
   if (operatorName && /[\u0000-\u001f\u007f]/.test(operatorName)) {
     problems.push('OPERATOR_NAME must be a single line of text')
+  }
+
+  // §4: the discovery document's `name` and `description` identify the endpoint
+  // to agents and directories, so they are settings like the operator's name.
+  const endpointName = required('ENDPOINT_NAME')
+  if (endpointName && /[\u0000-\u001f\u007f]/.test(endpointName)) {
+    problems.push('ENDPOINT_NAME must be a single line of text')
+  }
+  const endpointDescription = required('ENDPOINT_DESCRIPTION')
+  if (endpointDescription && /[\u0000-\u001f\u007f]/.test(endpointDescription)) {
+    problems.push('ENDPOINT_DESCRIPTION must be a single line of text')
+  }
+
+  const operatorContact = text('OPERATOR_CONTACT')
+  if (operatorContact !== undefined && /[\u0000-\u001f\u007f]/.test(operatorContact)) {
+    problems.push('OPERATOR_CONTACT must be a single line of text')
+  }
+
+  let iconUrl: string | undefined
+  const iconUrlRaw = text('ICON_URL')
+  if (iconUrlRaw !== undefined) {
+    try {
+      const url = new URL(iconUrlRaw)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('scheme')
+      iconUrl = url.toString()
+    } catch {
+      problems.push('ICON_URL must be an http(s) URL')
+    }
   }
 
   const productsFile = required('PRODUCTS_FILE')
@@ -182,6 +217,10 @@ export function loadConfig(env: Env): ProxyConfig {
     chain,
     payTo,
     operatorName,
+    endpointName,
+    endpointDescription,
+    ...(operatorContact !== undefined ? { operatorContact } : {}),
+    ...(iconUrl !== undefined ? { iconUrl } : {}),
     productsFile,
     upstream: { baseUrl, apiKey, authHeader, authScheme },
     basePath,

@@ -665,6 +665,25 @@ export const GOVERNED_PACKAGE_DOCS = [
     'last-verified': '2026-11-17',
   },
   {
+    // The merchant kit's paywall proxy (#4891). Its README is the merchant's
+    // path from clone to a first paid call, so its claims about the settings,
+    // the discovery document and the answers the proxy gives are pinned to the
+    // code that produces them.
+    doc: 'packages/paywall-proxy/README.md',
+    owner: '@d-hinders',
+    status: 'current',
+    covers: [
+      'packages/paywall-proxy/src/**',
+      'packages/paywall-proxy/package.json',
+      'packages/paywall-proxy/products.example.json',
+      'packages/paywall-proxy/.env.example',
+    ],
+    // Registered with the README's first version (#4891): the settings table,
+    // the discovery document's fields and the answer table were written against
+    // src/config.ts, src/discovery.ts and src/handler.ts in the same PR.
+    'last-verified': '2026-11-18',
+  },
+  {
     doc: 'packages/backend/src/modules/accounting/README.md',
     owner: '@AntonioSaaranen',
     status: 'current',

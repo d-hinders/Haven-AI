@@ -1,0 +1,299 @@
+# @haven_ai/paywall-proxy
+
+The merchant kit's paywall proxy: x402 in front of any HTTP API, settled through
+the shared merchant payment core. A merchant that sells an HTTP API takes this
+repository, fills in a products file and a few settings, and accepts x402
+payments without changing their own code and without a Stripe account. The money
+lands in the merchant's own Haven account.
+
+This package is private and is not published. Run it from this repository.
+
+The design this package is built to is
+[`docs/architecture/12-merchant-kit.md`](../../docs/architecture/12-merchant-kit.md).
+Read it before changing behaviour; this README is the merchant's path through it.
+
+## What Haven does not do
+
+- **Haven is not in the payment path.** The buyer pays your address directly,
+  through Coinbase's facilitator. Haven does not relay, hold or forward the
+  payment.
+- **Haven does not hold your keys.** Your upstream API key, your Coinbase
+  credentials and your receiving address are yours and stay in your deployment.
+  Haven never supplies its own Coinbase key; you use your own.
+- **Haven does not settle.** The proxy asks Coinbase's facilitator to verify and
+  settle, and reads the chain when an answer is lost. Haven operates neither.
+- Haven does not operate the proxy and receives nothing from it.
+
+## Licence
+
+The kit has no licence yet. During the pilot it is used under written permission
+from Haven. Do not redistribute it.
+
+## The four parts
+
+| Part | What it is | Required | In this release |
+|---|---|---|---|
+| Paywall proxy | This package. Answers an unpaid call with an x402 challenge, has the payment verified and settled by Coinbase's facilitator, then forwards the call upstream with your API key. | Yes | Yes |
+| Products file | One JSON file mapping a route or model to a fixed price, with an optional output-token cap and a description. | Yes | Yes |
+| Discovery document | A public, machine-readable list of your products, served by the proxy at `/.well-known/x402`. | Yes | Yes |
+| Sales reporter | After each settled call, a small record sent to Haven. | Required for the pilot | Not in this release (#4898) |
+
+## Requirements: what you run and monitor
+
+You run:
+
+- Node 24 and this repository.
+- The proxy process, behind HTTPS on a public host name you control.
+- A products file, and the settings listed in [Step 4](#step-4-set-the-variables).
+- Persistent disk for the consumed-payment store (`PAYMENTS_DB`). Exactly one
+  proxy process uses it at a time: the proxy locks the file at startup and
+  refuses to start while another process holds it. Deploy by stopping the old
+  process before starting the new one, and never run two replicas on one store.
+  Back the file up like a ledger: losing it loses the one-call rule for payments
+  already delivered.
+- A Haven account that receives the money.
+- Your own Coinbase developer (CDP) secret API key.
+- An RPC URL for the network.
+
+You monitor:
+
+- **Settlement.** Verify and settle failures, and facilitator timeouts. A burst
+  means buyers are paying and not being served.
+- **Upstream health.** The rate of `upstream_failed_after_settlement`,
+  `payment_exhausted` and `payment_in_flight` answers, and any
+  `upstream_auth_refused`, which means your own upstream key is wrong.
+- **Retry proofs.** The rate of `payment_retry_needs_proof` answers.
+- **Overage.** `overage` log lines, when an upstream answer runs past the
+  product's output-token cap.
+- **Cost.** Coinbase facilitator usage against the 1,000 free transactions a
+  month, and your upstream provider's spend.
+- **Money.** The receiving account's balance in Haven against the settled calls
+  in the proxy's log.
+- **Disk.** The size of `PAYMENTS_DB`.
+
+## Before you start
+
+1. A Haven account to receive into. On Base Sepolia, you and the paying agent
+   both use Haven's dev environment (the `dev` deployment; its URLs are in
+   [`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)).
+   On Base, both use production. This release runs on Base Sepolia only.
+2. Your own Coinbase developer keys: a CDP secret API key (key id and secret),
+   created in the Coinbase Developer Platform. Haven does not offer its key.
+3. An upstream HTTP API and its API key.
+4. An RPC URL for Base Sepolia.
+
+## Step 1: create the Haven account that receives the money
+
+Create an account in Haven's dev environment and copy its address. That address
+is `PAY_TO`.
+
+What you should see: the account's address in the Haven dashboard, and its
+balance page. Every payment the proxy settles arrives there as USDC.
+
+## Step 2: get your Coinbase developer keys
+
+In the Coinbase Developer Platform, create a secret API key and note the key id
+and the secret. The proxy uses them to call Coinbase's facilitator on Base
+Sepolia.
+
+What you should see: the key listed in the CDP portal, and, once the proxy
+starts, no `CDP_API_KEY_ID is required` refusal.
+
+## Step 3: fill the products file
+
+Copy [`products.example.json`](products.example.json) and edit it. The file is
+JSON, read from `PRODUCTS_FILE`. The proxy refuses to start when the file is
+missing, is not valid JSON, or fails validation, and the refusal names the
+product and the field.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `version` | Yes | The products-file schema version. `1` is the only version. |
+| `products[].id` | Yes | Stable, unique, lower-case identifier. It is the key the discovery document lists. |
+| `products[].name` | No | Human name. When absent the document omits it; the receipt line and the sale record use the `id`. |
+| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after `BASE_PATH`. This is how a buyer calls the product. |
+| `products[].model` | No | When present, the request body's `model` must equal it, or the request is refused before settlement. |
+| `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. A JSON number is refused. |
+| `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product. |
+| `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. The receipt line joins the name and the description and is at most 300 characters. |
+| `products[].input_example` | No | An example request body, carried into the discovery document. It must pass the proxy's own checks, because a directory probes the route with it. |
+| `products[].input_schema` | No | A JSON Schema the request body validates against, for the same block. |
+| `products[].output_example` | No | An example response body, for the same block. |
+
+The network is one setting of the deployment, not a field per product. A
+products file that names a network is refused at startup.
+
+What you should see: the proxy starts, and its `started` log line lists your
+product ids under `products`.
+
+## Step 4: set the variables
+
+Copy [`.env.example`](.env.example) and fill it in. The proxy reads the process
+environment; it does not load a `.env` file itself, so export the variables or
+let your process manager do it.
+
+Required:
+
+| Variable | Meaning |
+|---|---|
+| `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. |
+| `PAY_TO` | The address that receives every payment: your Haven account's address. |
+| `OPERATOR_NAME` | Who operates the endpoint. The discovery document shows it. |
+| `ENDPOINT_NAME` | The endpoint's human name, shown in the discovery document. |
+| `ENDPOINT_DESCRIPTION` | The endpoint's description, shown in the discovery document. |
+| `PRODUCTS_FILE` | The products file from Step 3. |
+| `PAYMENTS_DB` | The consumed-payment store. One proxy process per file. |
+| `UPSTREAM_BASE_URL` | Where paid calls are forwarded. |
+| `UPSTREAM_API_KEY` | The key paid calls are forwarded with. |
+| `CDP_API_KEY_ID` | Your Coinbase developer key id. |
+| `CDP_API_KEY_SECRET` | Your Coinbase developer key secret. |
+| `RPC_URL` | An RPC URL for the network. |
+
+Optional:
+
+| Variable | Meaning |
+|---|---|
+| `OPERATOR_CONTACT` | A URL or address a reader can use to reach you. |
+| `ICON_URL` | A public image URL (JPG, PNG, WebP or GIF), for a directory listing. |
+| `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
+| `UPSTREAM_AUTH_SCHEME` | The scheme before the key. Default `Bearer`; set it empty to send the key bare, for an `x-api-key` style header. |
+| `BASE_PATH` | The path prefix your products' routes are matched under. Empty by default. |
+| `PUBLIC_BASE_URL` | The public origin the challenge names. Must be `https` in production. |
+| `CLIENT_IP_HEADER` | The header your own front proxy sets to the client's address, for the per-IP limits. |
+| `PORT`, `HOST` | Listen address. Defaults `8080` and `0.0.0.0`. |
+| `UPSTREAM_TIMEOUT_MS` | The whole upstream call's deadline, at most `180000`. |
+| `RESERVATION_DEADLINE_MS` | How long the request that reserved a payment is trusted to finish settling, at least `110000`. |
+| `DIRECTORY_LISTING` | Coinbase's directory listing. Off by default, and `on` is refused in this release. |
+
+What you should see: the proxy starts and logs one JSON line per event. The
+first is `started`, with `port`, `network`, `network_label`, `pay_to`,
+`operator`, `products`, `base_path`, `sales_reporting: "off"` and
+`receipt: "off"`. A missing or invalid setting refuses startup and names every
+problem at once, never a secret's value.
+
+## Step 5: run it on Base Sepolia
+
+```bash
+npm run build -w packages/paywall-proxy
+node packages/paywall-proxy/dist/index.js
+```
+
+Then check it:
+
+```bash
+curl -s http://127.0.0.1:8080/healthz
+# {"status":"ok","network":"eip155:84532"}
+
+curl -s http://127.0.0.1:8080/.well-known/x402
+# the discovery document: your products, prices, network, asset, pay_to, operator
+
+curl -s -i -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"your-provider/your-model","messages":[{"role":"user","content":"hi"}]}'
+# HTTP/1.1 402 Payment Required
+# PAYMENT-REQUIRED: <base64 challenge>
+# {"x402Version":2,"resource":{...},"accepts":[{"scheme":"exact","network":"eip155:84532",
+#  "amount":"10000","payTo":"0x...","asset":"0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+#  "extra":{"name":"USDC","version":"2"}}],...}
+```
+
+What you should see: `status: ok` on `/healthz`, your products in the discovery
+document, and a 402 whose challenge carries the product's `price` as `amount`
+and your `PAY_TO` as `payTo`. Nothing is forwarded upstream for an unpaid call.
+
+## Step 6: pay once with a Haven agent
+
+Give a Haven agent the URL of one of your product routes and let it pay. For now
+only a Haven agent with an **open budget** can pay: an agent whose budget is
+pinned to one recipient cannot pay an arbitrary merchant, because the pin
+restricts the transfer to that recipient.
+
+What you should see:
+
+- The agent gets the upstream API's answer, with a `PAYMENT-RESPONSE` header
+  carrying the settlement transaction hash.
+- The proxy logs `payment_settled` and `payment_delivered` for that payment.
+- The USDC arrives in your Haven account, and the transaction is visible on
+  Base Sepolia.
+- The same payment header presented again gets `payment_already_delivered`: one
+  payment buys one call.
+
+If the upstream call fails after settlement, the buyer gets HTTP 200 with
+`error: "upstream_failed_after_settlement"` and the transaction hash. The
+payment settled, so the answer stays 2xx. Serving the call again needs a
+`SIGN-IN-WITH-X` proof signed by the payer, and a Haven agent cannot send that
+proof yet: a Haven buyer whose call failed after settlement has paid for
+nothing, and your log is where you see it. This is an open owner question on the
+epic.
+
+## The discovery document
+
+`GET /.well-known/x402` returns the document. It is built from the products file
+and the deployment's settings, and answering it verifies nothing, settles
+nothing and makes no facilitator call. Changing the products file changes the
+document when the proxy restarts.
+
+| Field | Meaning |
+|---|---|
+| `version` | The kit document version. `1` is the only version. |
+| `operator.name` | Who operates the endpoint: your `OPERATOR_NAME`. |
+| `operator.contact` | Your `OPERATOR_CONTACT`, when set. |
+| `name`, `description` | Your `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. |
+| `network` | The CAIP-2 id, the same value the challenge advertises. |
+| `asset` | The USDC contract address on that network. |
+| `pay_to` | Your receiving address. Every product is paid to it. |
+| `settlement` | `{"scheme":"exact","facilitator":"coinbase-cdp","methods":["eip3009"]}`. |
+| `products[]` | Every product in the products file: `id`, `name`, `route`, `model`, `price`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema` and `output_example`. |
+| `updated` | The products file's last change, an RFC 3339 timestamp. |
+| `icon_url` | Your `ICON_URL`, when set. |
+
+It is not the demo merchant's document. The demo merchant serves
+`/.well-known/haven-demo-merchant` and `/`, and names an `mcp_url`; Haven's SDK
+probes those paths and acts on `mcp_url` for MCP merchants. The kit's document
+is at `/.well-known/x402` only, carries no `mcp_url`, and is a catalogue for
+agents, directories and Haven.
+
+## What the proxy answers
+
+Before settlement it refuses with the narrowest 4xx or 503 and makes no verify
+or settle call. Once a payment has settled it answers 2xx with a machine
+readable body, so Haven never reads a payment that reached you as rejected.
+
+| Condition | Status | Body `error` |
+|---|---|---|
+| No payment header, route is a product | 402 | the x402 challenge |
+| Payment does not match the challenge | 402 | `payment_mismatch` |
+| The facilitator rejects the payment at verify | 402 | `payment_invalid` |
+| Settle failed and the authorization is unused | 402 | `settle_failed` |
+| Route is not in the products file | 404 | `unknown_route` |
+| Body is not JSON, or `model` does not match | 400 | `bad_request` |
+| Product has a cap and the body cannot carry it | 400 | `cap_not_settable` |
+| Body over 1 MiB | 413 | `body_too_large` |
+| Too many unpaid or unverified requests from one address | 429 | `rate_limited` |
+| The facilitator gave no answer, or no capacity | 503 | `facilitator_unavailable`, `at_capacity` |
+| Upstream call failed after settlement | 200 | `upstream_failed_after_settlement` |
+| Same payment while its call is in flight | 200 | `payment_in_flight` |
+| Same payment after its call was delivered | 200 | `payment_already_delivered` |
+| A retry that needs a `SIGN-IN-WITH-X` proof | 200 | `payment_retry_needs_proof` |
+| Settle outcome not known yet | 503 | `settlement_unknown` |
+
+The full table, with the buyer's recourse for each, is section 8 of the design.
+
+## Not in this release
+
+- Sales reporting to Haven (#4898). The proxy logs `sales_reporting: "off"` at
+  startup and sends nothing.
+- Receipts (#4913). The proxy logs `receipt: "off"` and sends no
+  `x-receipt-json` header.
+- Coinbase directory listing (#4887). `DIRECTORY_LISTING=on` is refused at
+  startup.
+- Base mainnet. This release runs on Base Sepolia only. The step for switching
+  to Base is added after the review in #4888 allows it.
+
+## Where the design lives
+
+- [`docs/architecture/12-merchant-kit.md`](../../docs/architecture/12-merchant-kit.md):
+  the design this package is built to.
+- [`docs/security/merchant-key-limits.md`](../../docs/security/merchant-key-limits.md):
+  what a Haven Sales key can and cannot do, for the sales reporter when it
+  lands.

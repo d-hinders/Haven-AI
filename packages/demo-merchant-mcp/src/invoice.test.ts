@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { createInvoiceNumberer, generateInvoice, renderInvoiceText } from './invoice.js'
+import type { SettledPayment } from './x402.js'
+import {
+  RECEIPT_NUMBER_DIGITS,
+  createInvoiceNumberer,
+  generateInvoice,
+  invoiceForPayment,
+  receiptNumberForTransaction,
+  renderInvoiceText,
+  vatAmountsAtomic,
+} from './invoice.js'
 import { PRODUCTS, formatUsdc } from './products.js'
 
 const BASE_PARAMS = {
@@ -360,4 +369,78 @@ describe('generateInvoice — the keys Haven reads lines and VAT by (#4875)', ()
       }
     })
   }
+})
+
+// #4880: the receipt number of a payment settled on-chain comes from its
+// transaction hash, so a restart and the reconciliation script give the same
+// number. Any other payment keeps the counter.
+describe('receipt number from the transaction hash (#4880)', () => {
+  const TX = `0x${'cd'.repeat(32)}` as const
+
+  it('is FAK- and the hash modulo 10^16, zero-padded to sixteen digits', () => {
+    expect(RECEIPT_NUMBER_DIGITS).toBe(16)
+    expect(receiptNumberForTransaction(TX)).toBe(`FAK-${(BigInt(TX) % 10n ** 16n).toString().padStart(16, '0')}`)
+    expect(receiptNumberForTransaction(`0x${'00'.repeat(31)}01`)).toBe('FAK-0000000000000001')
+    expect(receiptNumberForTransaction(TX)).toMatch(/^FAK-\d{16}$/)
+  })
+
+  it('differs for different transactions', () => {
+    expect(receiptNumberForTransaction(`0x${'ab'.repeat(32)}`)).not.toBe(receiptNumberForTransaction(TX))
+  })
+
+  it('keeps the OCR reference a valid 17-digit Luhn number', () => {
+    const { json } = generateInvoice({ ...BASE_PARAMS, invoiceNumber: receiptNumberForTransaction(TX), payerRole: 'agent_delegate' })
+    expect(json.ocr_nummer).toMatch(/^\d{17}$/)
+    expect(json.ocr_nummer.slice(0, 16)).toBe(json.fakturanummer.slice(4))
+    // Validating Luhn over the whole number, check digit included.
+    let sum = 0
+    for (let i = 0; i < json.ocr_nummer.length; i++) {
+      let d = Number(json.ocr_nummer[json.ocr_nummer.length - 1 - i])
+      if (i % 2 === 1) d *= 2
+      if (d > 9) d -= 9
+      sum += d
+    }
+    expect(sum % 10).toBe(0)
+  })
+
+  const payment = (settlement: SettledPayment['settlement'], txHash: `0x${string}` = TX) =>
+    ({
+      productId: 'joke',
+      settlementMethod: 'eip3009',
+      from: '0x2222222222222222222222222222222222222222',
+      to: '0x1111111111111111111111111111111111111111',
+      value: 10_000n,
+      nonce: `0x${'ab'.repeat(32)}`,
+      txHash,
+      settlement,
+    }) as unknown as SettledPayment
+  const opts = { receivingAddress: '0x1111111111111111111111111111111111111111' }
+
+  it('a settled payment gets the same number however many times, and in however many processes, it is issued', () => {
+    // Two payment objects for one transaction: what a restart and a replay look like.
+    const first = invoiceForPayment(payment('settled_onchain'), 'joke', opts).json.fakturanummer
+    const again = invoiceForPayment(payment('settled_onchain'), 'joke', opts).json.fakturanummer
+    expect(first).toBe(receiptNumberForTransaction(TX))
+    expect(again).toBe(first)
+  })
+
+  it('a payment with no transaction to key on keeps the counter', () => {
+    const zero = `0x${'00'.repeat(32)}` as const
+    for (const settlement of ['already_settled_earlier', 'settlement_unknown'] as const) {
+      const { fakturanummer } = invoiceForPayment(payment(settlement, zero), 'joke', opts).json
+      expect(fakturanummer).toMatch(/^FAK-\d{4}-\d+$/)
+    }
+  })
+})
+
+describe('vatAmountsAtomic (#4880)', () => {
+  it('takes 25% out of a VAT-inclusive price under SE_25, and nothing under REVERSE_CHARGE', () => {
+    expect(vatAmountsAtomic(10_000n, 'SE_25')).toEqual({ exclVat: 8_000n, vat: 2_000n, vatPercent: 25 })
+    expect(vatAmountsAtomic(10_000n, 'REVERSE_CHARGE')).toEqual({ exclVat: 10_000n, vat: 0n, vatPercent: 0 })
+  })
+
+  it('is the split the receipt prints', () => {
+    const { json } = generateInvoice({ ...BASE_PARAMS, productId: 'joke', payerRole: 'agent_delegate' })
+    expect(json.moms_belopp).toBe(formatUsdc(vatAmountsAtomic(PRODUCTS.joke.price_usdc, 'SE_25').vat))
+  })
 })

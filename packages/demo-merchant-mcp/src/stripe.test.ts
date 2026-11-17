@@ -16,9 +16,15 @@ import {
   resolveStripeConfig,
   stripeAmountCents,
   stripeApiVersionForChain,
+  stripeDetailsForReconciliation,
+  stripeDetailsForm,
+  stripeDetailsFromReceipt,
+  STRIPE_METADATA_VALUE_MAX,
   type StripeHttpClient,
   type StripeHttpRequest,
 } from './stripe.js'
+import { generateInvoice, receiptNumberForTransaction } from './invoice.js'
+import { PRODUCTS } from './products.js'
 
 const DEPOSIT = '0x2222222222222222222222222222222222222222' as const
 const OLD_DEPOSIT = '0x4444444444444444444444444444444444444444' as const
@@ -650,5 +656,92 @@ describe('paymentIntentState (#4866)', () => {
     const error = new StripeApiError(400, 'invalid_request_error', 'resource_already_exists', 'pi_abcdefgh12')
     expect(error.existingPaymentIntentId).toBe('pi_abcdefgh12')
     expect(error.message).toBe('Stripe answered 400 (invalid_request_error/resource_already_exists)')
+  })
+})
+
+// #4880: the record carries the description, the receipt number, the VAT and,
+// from an accepted declaration only, the buyer — the form fields sent.
+describe('the PaymentIntent carries the receipt (#4880)', () => {
+  const receipt = (taxDeclaration: Parameters<typeof generateInvoice>[0]['taxDeclaration'] = null) =>
+    generateInvoice({
+      invoiceNumber: receiptNumberForTransaction(TX),
+      productId: 'joke',
+      buyerAddress: '0x5555555555555555555555555555555555555555',
+      payerRole: 'agent_delegate',
+      receivingAddress: DEPOSIT,
+      authorizationNonce: `0x${'01'.repeat(32)}`,
+      txHash: TX,
+      settlement: 'settled_onchain',
+      taxDeclaration,
+    }).json
+  const DE = { jurisdiction: 'DE', taxId: 'DE123456789', taxableStatus: 'TAXABLE_PERSON', validUntil: Date.parse('2027-06-30T00:00:00Z') }
+  const SE = { ...DE, jurisdiction: 'SE', taxId: 'SE559412345601' }
+
+  async function formSent(details: Parameters<ReturnType<typeof createStripeRecording>['record']>[0]['details']) {
+    const stripe = fakeStripe()
+    const recording = createStripeRecording(config()!, { http: stripe.client, log: () => {} })
+    await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke', details })
+    return stripe.requests.find((request) => request.method === 'POST')!.form!
+  }
+
+  it('without a declaration: description, number, SE_25 and its VAT in atomic USDC — and no buyer keys at all', async () => {
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt()))
+    const number = receiptNumberForTransaction(TX)
+    expect(form).toMatchObject({
+      description: `Haven Joke — ${number}`,
+      'metadata[receipt_number]': number,
+      'metadata[vat_treatment]': 'SE_25',
+      'metadata[vat_amount]': '2000 (USDC atomic)',
+      'metadata[transaction_hash]': TX,
+      'metadata[product_id]': 'joke',
+    })
+    expect(Object.keys(form).filter((key) => /buyer|recorded_by/.test(key))).toEqual([])
+  })
+
+  it('with a declaration from another EU country: REVERSE_CHARGE, zero VAT, and the buyer’s VAT number and country', async () => {
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)))
+    expect(form).toMatchObject({
+      'metadata[vat_treatment]': 'REVERSE_CHARGE',
+      'metadata[vat_amount]': '0 (USDC atomic)',
+      'metadata[buyer_vat_nr]': 'DE123456789',
+      'metadata[buyer_country]': 'DE',
+    })
+  })
+
+  it('with a Swedish declaration: SE_25 and the buyer keys', async () => {
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(SE)))
+    expect(form).toMatchObject({
+      'metadata[vat_treatment]': 'SE_25',
+      'metadata[vat_amount]': '2000 (USDC atomic)',
+      'metadata[buyer_vat_nr]': 'SE559412345601',
+      'metadata[buyer_country]': 'SE',
+    })
+  })
+
+  it('from reconciliation: the same description and number, recorded_by, and no VAT or buyer keys', async () => {
+    const form = await formSent(stripeDetailsForReconciliation(PRODUCTS.joke, TX))
+    const fromReceipt = stripeDetailsForm(stripeDetailsFromReceipt(PRODUCTS.joke, receipt()))
+    expect(form.description).toBe(fromReceipt.description)
+    expect(form['metadata[receipt_number]']).toBe(fromReceipt['metadata[receipt_number]'])
+    expect(form['metadata[recorded_by]']).toBe('reconciliation')
+    expect(Object.keys(form).filter((key) => /vat|buyer/.test(key))).toEqual([])
+  })
+
+  it('stays inside Stripe’s limits: at most 50 keys, names up to 40 characters, values up to 500', async () => {
+    const form = await formSent({
+      ...stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)),
+      buyerVatNr: 'X'.repeat(900),
+      description: 'D'.repeat(900),
+    })
+    const metadata = Object.keys(form).filter((key) => key.startsWith('metadata['))
+    expect(metadata.length).toBeLessThanOrEqual(50)
+    for (const key of metadata) expect(key.slice('metadata['.length, -1).length).toBeLessThanOrEqual(40)
+    expect(form['metadata[buyer_vat_nr]']).toHaveLength(STRIPE_METADATA_VALUE_MAX)
+    expect(form.description).toHaveLength(STRIPE_METADATA_VALUE_MAX)
+  })
+
+  it('sends nothing new when the caller passes no details', async () => {
+    const form = await formSent(undefined)
+    expect(Object.keys(form).filter((key) => /description|receipt|vat|buyer|recorded_by/.test(key))).toEqual([])
   })
 })

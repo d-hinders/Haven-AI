@@ -1,3 +1,4 @@
+import type { Hex } from 'viem'
 import type { MerchantLocale, ProductId } from './products.js'
 import { CHAIN_ID, PRODUCTS, formatUsdc, networkDisplayName, productBillingPeriod } from './products.js'
 import type { SettledPayment, SettlementState } from './x402.js'
@@ -63,6 +64,48 @@ export function createInvoiceNumberer(seedMs: number = Date.now()): () => string
 }
 
 const nextInvoiceNumber = createInvoiceNumberer()
+
+/** #4880: how many decimal digits of the transaction hash the number carries. */
+export const RECEIPT_NUMBER_DIGITS = 16
+
+/**
+ * #4880: the receipt number of a payment settled on-chain, derived from its
+ * settlement transaction hash alone: `FAK-` and the hash modulo 10^16 as
+ * sixteen decimal digits, zero-padded.
+ *
+ * The same transaction always yields the same number — after a restart, and
+ * in the reconciliation script, which has the hash and nothing else from the
+ * request. The counter above renumbered a payment on every restart, so the
+ * number on the receipt could not be found again in Stripe.
+ *
+ * No date is part of it. The merchant knows the hash when it answers but not
+ * the block's timestamp, and its own clock and the block's can fall on
+ * either side of midnight (or New Year), which would give one payment two
+ * numbers. Sixteen digits keep the OCR reference (`generateOcr`, digits plus
+ * a Luhn digit) at 17 digits, inside the 25 a Swedish OCR allows; two
+ * transactions share a number with probability about 10^-16 per pair.
+ */
+export function receiptNumberForTransaction(txHash: Hex): string {
+  const digits = (BigInt(txHash) % 10n ** BigInt(RECEIPT_NUMBER_DIGITS)).toString().padStart(RECEIPT_NUMBER_DIGITS, '0')
+  return `FAK-${digits}`
+}
+
+/**
+ * The VAT split of a VAT-inclusive price, in USDC base units. #4880: shared
+ * with the Stripe record, so its `vat_amount` is the receipt's VAT amount,
+ * never a second computation.
+ */
+export function vatAmountsAtomic(
+  priceAtomic: bigint,
+  treatment: VatTreatment,
+): { exclVat: bigint; vat: bigint; vatPercent: number } {
+  // #4855: under `REVERSE_CHARGE` the full price is the net amount, the VAT
+  // rate is 0 and the VAT amount is zero (owner decision, 2026-11-16). Under
+  // `SE_25` the price is VAT-inclusive: exkl. moms = inkl. moms / 1.25.
+  if (treatment === 'REVERSE_CHARGE') return { exclVat: priceAtomic, vat: 0n, vatPercent: 0 }
+  const exclVat = (priceAtomic * 100n) / 125n
+  return { exclVat, vat: priceAtomic - exclVat, vatPercent: 25 }
+}
 
 /**
  * Luhn (modulus 10) check digit to APPEND to `base`.
@@ -232,13 +275,9 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   // rate is 0 and the VAT amount is zero (owner decision, 2026-11-16).
   const declaration = params.taxDeclaration ?? null
   const treatment = vatTreatmentFor(declaration)
-  const reverseCharge = treatment === 'REVERSE_CHARGE'
 
   const totalInclMoms = product.price_usdc
-  // exkl. moms = inkl. moms / 1.25
-  const exklMoms = reverseCharge ? totalInclMoms : (totalInclMoms * 100n) / 125n
-  const momsBelopp = reverseCharge ? 0n : totalInclMoms - exklMoms
-  const momsProcent = reverseCharge ? 0 : 25
+  const { exclVat: exklMoms, vat: momsBelopp, vatPercent: momsProcent } = vatAmountsAtomic(totalInclMoms, treatment)
 
   // #2969: only a REAL on-chain settlement gets a reference. Both non-settled
   // states get `null` — never the zero hash, and never a fallback nonce
@@ -514,7 +553,11 @@ export function invoiceForPayment(
   const cached = invoicesByPayment.get(payment)
   if (cached) return cached
   const invoice = generateInvoice({
-    invoiceNumber: nextInvoiceNumber(),
+    // #4880: a payment settled on-chain is numbered from its transaction hash,
+    // so the number is stable and the reconciliation script reproduces it.
+    // Any other payment has no hash to key on and keeps the counter.
+    invoiceNumber:
+      payment.settlement === 'settled_onchain' ? receiptNumberForTransaction(payment.txHash) : nextInvoiceNumber(),
     productId,
     chainId: opts.chainId,
     receivingAddress: opts.receivingAddress,

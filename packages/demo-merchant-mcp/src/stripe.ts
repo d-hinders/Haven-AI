@@ -31,6 +31,13 @@
  *    The recorder therefore reads the PaymentIntent's status — on the search
  *    result, and after a create until a bound — and only a `succeeded` one
  *    counts as recorded.
+ * 5. **The record carries the books (#4880).** The PaymentIntent carries a
+ *    `description` (product name and receipt number) and the receipt's
+ *    number, VAT treatment and VAT amount, plus the buyer's declared VAT
+ *    number and country when the paid request carried an accepted
+ *    declaration — so an accountant can work from the Stripe export alone.
+ *    The reconciliation script has no request, so it records the description
+ *    and the number only, and marks itself `recorded_by=reconciliation`.
  *
  * Vendor facts (docs.stripe.com/payments/machine/x402, re-read 2026-11-16):
  * the API version is `2026-05-27.preview` live and `2026-07-29.preview` in a
@@ -39,6 +46,7 @@
  * cents and Stripe's minimum is one cent.
  */
 import { getAddress, isAddress, type Address, type Hex } from 'viem'
+import { receiptNumberForTransaction, vatAmountsAtomic, type InvoiceJson } from './invoice.js'
 import { CHAIN_ID, type Product, type ProductId } from './products.js'
 
 /** Stripe's network name for the deposit address and the PaymentIntent. */
@@ -371,7 +379,13 @@ export interface StripeRecording {
    * Record one settled payment. Never rejects: a Stripe failure is logged and
    * counted, and the goods are delivered regardless.
    */
-  record(params: { txHash: Hex; amountAtomic: bigint; productId: ProductId }): Promise<StripeRecordResult>
+  record(params: {
+    txHash: Hex
+    amountAtomic: bigint
+    productId: ProductId
+    /** #4880: description and receipt metadata. */
+    details?: StripeRecordDetails
+  }): Promise<StripeRecordResult>
   /** #4866: a log line for a payment deliberately not sent to Stripe. */
   noteNotRecorded(txHash: Hex, reason: string): void
   /** Resolves once every recording started so far has finished. Tests only. */
@@ -412,6 +426,88 @@ async function withTimeout<T>(timeoutMs: number, call: () => Promise<T>): Promis
 export const STRIPE_VERDICT_TIMEOUT_MS = 60_000
 /** #4866: the interval between status reads while Stripe is still deciding. */
 export const STRIPE_VERDICT_POLL_MS = 3_000
+
+/**
+ * #4880: what the PaymentIntent records besides the amount and the hash.
+ * Every key but the description and the number is optional; an absent key is
+ * not sent, never sent empty.
+ */
+export interface StripeRecordDetails {
+  /** Product name and receipt number, as the Dashboard and exports show it. */
+  description: string
+  /** The receipt's `fakturanummer`. */
+  receiptNumber: string
+  /** The receipt's `momsbehandling`. The reconciliation script leaves it out. */
+  vatTreatment?: InvoiceJson['momsbehandling']
+  /** The receipt's VAT amount, in USDC base units. */
+  vatAmountAtomic?: bigint
+  /** The buyer's declared VAT number, from an accepted declaration only. */
+  buyerVatNr?: string
+  /** The buyer's declared country (ISO 3166-1 alpha-2), from an accepted declaration only. */
+  buyerCountry?: string
+  /** `reconciliation` when the reconciliation script recorded it. */
+  recordedBy?: 'reconciliation'
+}
+
+/** Stripe's limit on one metadata value. */
+export const STRIPE_METADATA_VALUE_MAX = 500
+
+/**
+ * #4880: the form fields `details` adds to the create call. Values are cut to
+ * Stripe's 500-character limit, so an unexpected value can shorten a field
+ * but never turn the whole recording into a refusal.
+ */
+export function stripeDetailsForm(details: StripeRecordDetails | undefined): Record<string, string> {
+  if (!details) return {}
+  const clip = (value: string) => value.slice(0, STRIPE_METADATA_VALUE_MAX)
+  const form: Record<string, string> = {
+    description: clip(details.description),
+    'metadata[receipt_number]': clip(details.receiptNumber),
+  }
+  if (details.vatTreatment) form['metadata[vat_treatment]'] = details.vatTreatment
+  if (details.vatAmountAtomic !== undefined) form['metadata[vat_amount]'] = `${details.vatAmountAtomic} (USDC atomic)`
+  if (details.buyerVatNr) form['metadata[buyer_vat_nr]'] = clip(details.buyerVatNr)
+  if (details.buyerCountry) form['metadata[buyer_country]'] = clip(details.buyerCountry)
+  if (details.recordedBy) form['metadata[recorded_by]'] = details.recordedBy
+  return form
+}
+
+/** #4880: the description both recorders send: product name and receipt number. */
+export function stripeDescription(product: Pick<Product, 'name'>, receiptNumber: string): string {
+  return `${product.name} — ${receiptNumber}`
+}
+
+/**
+ * #4880: the record of a payment the merchant served, read off the receipt it
+ * returned — the same number, treatment and VAT amount, and the buyer keys
+ * only when the receipt carries an accepted declaration.
+ */
+export function stripeDetailsFromReceipt(
+  product: Pick<Product, 'name' | 'price_usdc'>,
+  receipt: InvoiceJson,
+): StripeRecordDetails {
+  const declaration = receipt.kopare.deklaration
+  return {
+    description: stripeDescription(product, receipt.fakturanummer),
+    receiptNumber: receipt.fakturanummer,
+    vatTreatment: receipt.momsbehandling,
+    vatAmountAtomic: vatAmountsAtomic(product.price_usdc, receipt.momsbehandling).vat,
+    ...(declaration ? { buyerVatNr: declaration.moms_nr, buyerCountry: declaration.land } : {}),
+  }
+}
+
+/**
+ * #4880: the record the reconciliation script makes. It has the transaction
+ * and nothing from the request, so no VAT treatment and no buyer: a
+ * reverse-charge sale is never recorded as a 25% sale.
+ */
+export function stripeDetailsForReconciliation(
+  product: Pick<Product, 'name'>,
+  txHash: Hex,
+): StripeRecordDetails {
+  const receiptNumber = receiptNumberForTransaction(txHash)
+  return { description: stripeDescription(product, receiptNumber), receiptNumber, recordedBy: 'reconciliation' }
+}
 
 export interface CreateStripeRecordingOptions {
   http?: StripeHttpClient
@@ -491,6 +587,7 @@ export function createStripeRecording(
     txHash: Hex
     cents: number
     productId: ProductId
+    details?: StripeRecordDetails
   }): Promise<PaymentIntentState> {
     const response = await http.request({
       method: 'POST',
@@ -509,6 +606,8 @@ export function createStripeRecording(
         'payment_method_options[crypto][transaction_verification_options][transaction_hash]': params.txHash,
         [`metadata[${STRIPE_TX_HASH_METADATA_KEY}]`]: params.txHash.toLowerCase(),
         'metadata[product_id]': params.productId,
+        // #4880: description, receipt number, VAT and buyer keys.
+        ...stripeDetailsForm(params.details),
       },
       // The epic's idempotency key. It closes the window between the lookup
       // above and this create; it is not what decides "already recorded".
@@ -573,6 +672,7 @@ export function createStripeRecording(
     txHash: Hex
     amountAtomic: bigint
     productId: ProductId
+    details?: StripeRecordDetails
   }): Promise<StripeRecordResult> {
     stats.attempted++
     const cents = stripeAmountCents(params.amountAtomic)
@@ -664,6 +764,8 @@ export function recordStripePayment(
   recording: StripeRecording | undefined,
   product: Product,
   payment: { productId: ProductId; settlement: string; txHash: Hex; value: bigint; to: Address },
+  /** #4880: the receipt the merchant returned for this payment. */
+  receipt?: InvoiceJson,
 ): void {
   if (!recording) return
   if (!product.stripeRecording) return
@@ -673,6 +775,11 @@ export function recordStripePayment(
     return
   }
   void recording
-    .record({ txHash: payment.txHash, amountAtomic: payment.value, productId: payment.productId })
+    .record({
+      txHash: payment.txHash,
+      amountAtomic: payment.value,
+      productId: payment.productId,
+      ...(receipt ? { details: stripeDetailsFromReceipt(product, receipt) } : {}),
+    })
     .catch(() => {})
 }

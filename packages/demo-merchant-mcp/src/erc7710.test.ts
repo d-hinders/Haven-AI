@@ -358,7 +358,9 @@ describe('demo merchant experimental erc7710 rail', () => {
     const duplicate = await postBuyVpn(url, { [PAYMENT_SIGNATURE_HEADER]: header }, 3)
     const duplicateText = await duplicate.text()
     expect(duplicate.status).toBe(200)
-    expect(duplicateText.match(/FAK-2026-\d+/)?.[0]).toBe(text.match(/FAK-2026-\d+/)?.[0])
+    // #4880: either numbering; the number must exist, or the comparison proves nothing.
+    expect(text.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(duplicateText.match(/FAK-[\d-]+/)?.[0]).toBe(text.match(/FAK-[\d-]+/)?.[0])
     expect(erc7710Client.submitRedeemDelegations).toHaveBeenCalledTimes(1)
 
     // The same delegation must not buy a second product in this demo.

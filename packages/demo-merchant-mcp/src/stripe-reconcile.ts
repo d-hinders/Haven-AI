@@ -26,7 +26,7 @@
  * (`log-range.ts`): the public Base Sepolia RPC refuses more than 200 blocks.
  */
 import { getAddress, parseAbiItem, parseEventLogs, type Address, type Hex, type PublicClient } from 'viem'
-import { LogWindows } from './log-range.js'
+import { LogWindows } from '@haven_ai/merchant-payments'
 import { PRODUCTS, USDC_ADDRESS, type ProductId } from './products.js'
 import { stripeDetailsForReconciliation, type StripeRecording } from './stripe.js'
 

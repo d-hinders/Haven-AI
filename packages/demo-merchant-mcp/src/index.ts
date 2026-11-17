@@ -26,7 +26,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { type Address } from 'viem'
-import { LogWindows, parseMaxBlockRange } from './log-range.js'
+import { LogWindows, parseMaxBlockRange } from '@haven_ai/merchant-payments'
 import { createStripeRecording, resolveStripeConfig } from './stripe.js'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)

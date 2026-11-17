@@ -6,6 +6,10 @@ covers:
   - packages/demo-merchant-mcp/src/http.ts
   - packages/demo-merchant-mcp/src/products.ts
   - packages/demo-merchant-mcp/src/cdp.ts
+  - packages/merchant-payments/src/cdp.ts
+  - packages/merchant-payments/src/cdp-settlement.ts
+  - packages/merchant-payments/src/consumed-payment-store.ts
+  - packages/merchant-payments/src/settle-once.ts
   - packages/sdk/src/merchant-discovery.ts
   - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
@@ -67,14 +71,14 @@ on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and 
 
 | Package | Directory | What it holds |
 |---|---|---|
-| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11; the first #4890 PR), and, with the second, the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, and the consumed-payment store interface in section 6. |
+| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11), the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, the settle-exactly-once coordinator, and the consumed-payment store interface in section 6 with an in-memory implementation (the demo merchant's). |
 | `@haven_ai/paywall-proxy` | `packages/paywall-proxy/` | The proxy from #4893: the products file reader, the challenge, the settlement call into the core, the persistent consumed-payment store, the upstream forwarder and the sales reporter. |
 
 Both are `private: true` and pin internal dependencies as `"*"`, as
-`lint:workspace-pins` requires. The core is the code that lives in
+`lint:workspace-pins` requires. The core is the code that lived in
 `packages/demo-merchant-mcp/src/cdp.ts` and the Coinbase path in
-`packages/demo-merchant-mcp/src/x402.ts` today, moved without changing the demo
-merchant's behaviour (#4890). It takes the chain id, the USDC address
+`packages/demo-merchant-mcp/src/x402.ts`, moved without changing the demo
+merchant's behaviour (#4890); the demo merchant now calls it. It takes the chain id, the USDC address
 and the USDC signing domain as parameters; it reads no environment variable and
 has no default chain (#4890). The proxy's chain table supplies those values
 from its one network setting.
@@ -754,7 +758,7 @@ by a later one: it looks for the USDC `AuthorizationUsed` event for the
 authorization's payer and nonce, reading at the latest block as the core does
 today (the event, not `authorizationState`, which is also true for a cancelled
 nonce). The event alone is not enough, as in the core's `paidMerchant`
-(`packages/demo-merchant-mcp/src/cdp.ts`): the record becomes `settled` only
+(`packages/merchant-payments/src/cdp.ts`): the record becomes `settled` only
 when the event's transaction succeeded and moved exactly the product's price
 in USDC from the payer to `PAY_TO`. An authorization used in a transaction
 that did not pay this merchant (`used_elsewhere` in the core) is released and
@@ -818,7 +822,7 @@ outcome decides the record.
 headers and body together. It is set from the budget before the call starts,
 taken from the core's constants: the 10 s chain read before verify, verify at
 `CDP_CALL_TIMEOUT_MS` (30 s), up to 10 s waiting for an upstream slot (section
-7), settle at 30 s (`packages/demo-merchant-mcp/src/cdp.ts`), and
+7), settle at 30 s (`packages/merchant-payments/src/cdp.ts`), and
 `SETTLE_RESOLVE_MS` (30 s), which is 110 s at worst. 110 s plus 180 s is
 290 s, which leaves 10 s of Haven's hosted 300 s delivery wait for transit. That keeps the ordinary case
 well inside Haven's deadline; it does not make a timeout impossible. When

@@ -18,7 +18,7 @@
  */
 import { createPublicClient, http, type PublicClient } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
-import { LogWindows, parseMaxBlockRange } from './log-range.js'
+import { LogWindows, parseMaxBlockRange } from '@haven_ai/merchant-payments'
 import { CHAIN_ID, PRODUCTS } from './products.js'
 import { StripeApiError, createStripeRecording, resolveStripeConfig, type StripeHttpClient } from './stripe.js'
 import { createViemReconcileChainReader, reconcileStripe } from './stripe-reconcile.js'

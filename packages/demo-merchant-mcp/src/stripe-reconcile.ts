@@ -27,8 +27,8 @@
  */
 import { getAddress, parseAbiItem, parseEventLogs, type Address, type Hex, type PublicClient } from 'viem'
 import { LogWindows } from './log-range.js'
-import { USDC_ADDRESS, type ProductId } from './products.js'
-import type { StripeRecording } from './stripe.js'
+import { PRODUCTS, USDC_ADDRESS, type ProductId } from './products.js'
+import { stripeDetailsForReconciliation, type StripeRecording } from './stripe.js'
 
 /** One USDC `Transfer` to the deposit address. */
 export interface DepositTransfer {
@@ -170,6 +170,10 @@ export async function reconcileStripe(params: {
       txHash: transfer.txHash,
       amountAtomic: transfer.value,
       productId: params.productId,
+      // #4880: the description and the receipt number the merchant gave this
+      // transaction, and `recorded_by=reconciliation`. No VAT and no buyer:
+      // the script has no request, so it cannot know the treatment.
+      details: stripeDetailsForReconciliation(PRODUCTS[params.productId], transfer.txHash),
     })
     if (result.status === 'recorded') {
       report.recorded.push({ tx_hash: transfer.txHash, payment_intent: result.paymentIntentId })

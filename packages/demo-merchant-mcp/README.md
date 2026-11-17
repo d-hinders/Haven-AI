@@ -516,6 +516,47 @@ merchant), `2026-05-27.preview` on Base. The network name is `base` on both — 
 sandbox deposit address is a Base Sepolia address, but the parameter does not
 change.
 
+**What the record carries (#4880).** Enough for an accountant to work from the
+Stripe export alone, without the receipt the merchant returned in its API
+response. The receipt is built first and the PaymentIntent is recorded after
+it, still without waiting for Stripe: both steps before it are synchronous.
+
+| Field | Value | When |
+|---|---|---|
+| `description` | product name and receipt number, e.g. `Haven Joke — FAK-0123456789012345` | always |
+| `metadata.receipt_number` | the receipt's `fakturanummer` | always |
+| `metadata.product_id`, `metadata.transaction_hash` | as before | always |
+| `metadata.vat_treatment` | `SE_25` or `REVERSE_CHARGE`, the receipt's `momsbehandling` | merchant only |
+| `metadata.vat_amount` | the receipt's VAT in atomic USDC with the unit, e.g. `2000 (USDC atomic)`: the joke's VAT is a fifth of a cent and cannot be stated in cents | merchant only |
+| `metadata.buyer_vat_nr`, `metadata.buyer_country` | the buyer's declared VAT number and country | only when the paid request carried an accepted declaration (#4855) and each has the shape of one (two letters; a two-letter prefix and 2–13 letters or digits); absent otherwise, never empty |
+| `metadata.recorded_by` | `reconciliation` | reconciliation only |
+
+These fields apply to PaymentIntents recorded from this change on: one
+recorded earlier keeps its metadata, and reconciliation answers
+`already_recorded` for it without updating anything. Values are cut to
+Stripe's 500-character limit. The buyer's company name,
+organisation number and the time its VAT number was checked are not in the
+declaration Haven sends, so they are not recorded. A Stripe refusal caused by
+any of these fields is an ordinary recording failure: logged, counted, and the
+goods delivered. Because the idempotency key is the hash while the parameters
+differ between the merchant and reconciliation, a repeat inside Stripe's ~24 h
+key window can be refused with `idempotency_error`; the recorder then searches
+again and reports the PaymentIntent it finds, and fails only if there is none.
+
+**The receipt number is derived from the transaction (#4880).** A payment
+settled on-chain is numbered `FAK-` and the transaction hash modulo 10^16 as
+sixteen zero-padded digits, so the same transaction always gets the same
+number — after a restart, and in the reconciliation script, which has the hash
+and nothing else. No date is part of it: the merchant knows the hash when it
+answers but not the block's timestamp, and its clock and the block's can fall
+on either side of midnight. The OCR reference built from it stays 17 digits. A
+payment served without a transaction hash keeps the clock-seeded counter
+(`FAK-<year>-<n>`), and that number is never in Stripe: reconciliation later
+records the number derived from the transaction it finds, which differs from
+the one on that buyer's receipt. That receipt carries no transaction reference
+either (`blockkedje_referens` is null), so it cannot be matched to a
+PaymentIntent from the receipt alone.
+
 **"Already recorded" is a read, not the idempotency key.** Stripe prunes
 idempotency keys after about 24 hours, so a key cannot answer "did this
 transaction get recorded?" a day later. The recorder first searches
@@ -597,6 +638,11 @@ so the range is an argument.
   listed as `amount_mismatch` and left alone too.
 - It is idempotent: "already recorded" is the same Stripe read, so a second run
   over the same range creates nothing.
+- It records the description, `product_id` and the receipt number the merchant
+  gives that transaction, plus `recorded_by=reconciliation`, and leaves out
+  `vat_treatment`, `vat_amount` and the buyer keys (#4880): it has no paid
+  request and no declaration, so a reverse-charge sale is never recorded as a
+  25% sale.
 
 The report is JSON on stdout (the recorder's log lines go to stderr):
 `recorded`, `already_recorded`, `pending`, `declined`, `not_recorded` and
@@ -684,6 +730,8 @@ reading balance transactions.
 | `metadata` | Accepted; shown on the PaymentIntent (`product_id`, `transaction_hash`). |
 | `receipt_email` | Accepted at create and returned on the object. |
 | `customer` | The parameter is recognised: an unknown ID is refused with `resource_missing` on `customer`, not `parameter_unknown`. Not tested with a real Customer — the key has no Customers permission and this merchant keeps no customers. |
+| `description` | Accepted (#4880 probe, 2026-11-17). Stripe validates parameters before it checks the transaction: a create for an already-tracked hash with an unknown parameter is refused `parameter_unknown`, one with `description` of the wrong type is refused on `description`, and one with a plain `description` (alone, or with the #4880 metadata keys) gets as far as `resource_already_exists`. |
+| `receipt_url` | Stripe creates a receipt for these payments: the charge (`py_…`, `latest_charge`) carries a `receipt_url` on `pay.stripe.com`, with `receipt_number` null (#4880 probe). It is created after the merchant answers — recording is not awaited — so it is not on the merchant's receipt; find it on the payment in the Dashboard or through `latest_charge.receipt_url`. |
 
 **How Stripe matches the hash.** For both new hashes tried, create answered 200
 with status `processing`, and Stripe checked the transaction afterwards. A hash

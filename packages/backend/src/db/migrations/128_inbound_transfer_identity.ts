@@ -41,8 +41,9 @@ export const version = '128_inbound_transfer_identity'
  *   distinct row (it differs in payer or amount) instead of being swallowed.
  *   Two byte-identical legs in one transaction are indistinguishable from an
  *   explorer that reports no log index; the chain reader (which always has the
- *   log index) separates them, and the explorer-fed row is adopted by it on the
- *   next pass — see the reconcile rule below.
+ *   log index) separates them, and whichever source writes SECOND reconciles
+ *   with the first — adoption when the chain comes second, the mirror guard
+ *   when the explorer does. See "The cross-source rule" below.
  *
  * The old index is dropped: it is strictly weaker than the unknown-case index
  * (same columns, minus payer/amount), so keeping it would only refuse the
@@ -70,6 +71,29 @@ export const version = '128_inbound_transfer_identity'
  * row planted through the old caller-supplied ingest route) is left with
  * `log_index IS NULL` and is never adopted; that route now reads the chain
  * itself, so no such row can be created any more.
+ *
+ * ## The cross-source rule, in BOTH directions
+ *
+ * The two partial indexes are disjoint, so the same leg can arrive from two
+ * sources in either order: the scheduled chain pass (which always has the log
+ * index) and the explorer read (Alchemy reports none). Both orders must land
+ * ONE row:
+ *
+ * - **Explorer first, chain afterwards** — the adoption rule above: the
+ *   known-index leg fills in the unknown row's `log_index` instead of
+ *   inserting a second row.
+ * - **Chain first, explorer afterwards** — the mirror guard in
+ *   `insertInboundTransfer`: an unknown-log-index leg is skipped outright when
+ *   a known-index row already exists for the same `(chain, hash, account,
+ *   payer, amount)`. A partial index cannot span both cases, so this is an
+ *   explicit `WHERE NOT EXISTS` folded into the INSERT (one statement, atomic
+ *   against committed rows), not a third index.
+ *
+ * The receive balance is unchanged in both directions: the adopted row keeps
+ * its `balance_consumed` flag, and the skipped leg never becomes a row. The
+ * match path carries the same rule — `findUnmatchedByTxHash` refuses a row
+ * whose `(chain, hash, account, payer, amount)` leg is already matched — so a
+ * replayed receipt drop cannot match a second row even if one exists.
  *
  * ## The cursor
  *

@@ -48,7 +48,9 @@ export interface InsertInboundTransferInput {
    * The transfer's log index — the on-chain half of its identity (#4903).
    * `null` when the source does not report one (Alchemy's transfers API, and
    * every row written before migration 128); the unknown-case unique index
-   * then dedupes on (chain, hash, account, payer, amount).
+   * then dedupes on (chain, hash, account, payer, amount), and the mirror
+   * guard refuses the leg outright when a known-index row for it already
+   * exists (round-2 F-1).
    */
   logIndex?: number | null
   payerAddress: string
@@ -80,6 +82,31 @@ const INSERT_LEG_SQL = `
  * The unknown-log-index insert (#4903). Same leg re-read → conflict; a second
  * leg of the same transaction → a distinct row, because it differs in payer or
  * amount.
+ *
+ * ## The mirror guard (round-2 F-1)
+ *
+ * The two partial unique indexes are DISJOINT: a row with `log_index = 3` is
+ * invisible to the unknown-case index, so an explorer read that reports no log
+ * index would insert a SECOND row for a leg the chain pass already indexed.
+ * That is the normal merchant sequence — the 5-minute pass writes the leg with
+ * its log index, then the owner opens the dashboard and the explorer read
+ * (Alchemy reports no log index) writes it again.
+ *
+ * A partial index cannot span both cases, so the guard is an explicit
+ * `WHERE NOT EXISTS` folded into the INSERT itself: one statement, one round
+ * trip, and atomic against every row already committed. It is the exact mirror
+ * of `ADOPT_UNKNOWN_LEG_SQL` — same key (chain, hash, account, payer, amount),
+ * opposite direction. Two byte-identical legs of one transaction are
+ * indistinguishable to a source that reports no log index, so skipping the
+ * second is the honest outcome; the chain reader (which always has the log
+ * index) separates them.
+ *
+ * The residual window is a concurrent chain-pass insert of the SAME leg
+ * committing between this statement's snapshot and its own: both writers would
+ * pass their guards. Closing that needs serializable isolation or a lock on a
+ * row that does not exist yet; the window is milliseconds and the next chain
+ * pass cannot re-read the block (the cursor has advanced), so it is recorded as
+ * residual risk rather than paid for on every insert.
  */
 const INSERT_UNKNOWN_LEG_SQL = `
   INSERT INTO inbound_transfers (
@@ -87,7 +114,19 @@ const INSERT_UNKNOWN_LEG_SQL = `
     payer_address, token_address, amount_raw, block_number, block_time,
     sender_is_own_address
   )
-  VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10)
+  SELECT $1::uuid, $2::uuid, $3::integer, $4::varchar, NULL::integer,
+         $5::varchar, $6::varchar, $7::varchar, $8::bigint, $9::timestamptz,
+         $10::boolean
+   WHERE NOT EXISTS (
+     SELECT 1
+       FROM inbound_transfers known
+      WHERE known.account_id = $1::uuid
+        AND known.chain_id = $3::integer
+        AND LOWER(known.tx_hash) = LOWER($4::varchar)
+        AND LOWER(known.payer_address) = LOWER($5::varchar)
+        AND known.amount_raw = $7::varchar
+        AND known.log_index IS NOT NULL
+   )
   ON CONFLICT (chain_id, LOWER(tx_hash), account_id, payer_address, amount_raw) WHERE log_index IS NULL
   DO NOTHING
   RETURNING id`
@@ -99,6 +138,15 @@ const INSERT_UNKNOWN_LEG_SQL = `
  * keeps its amount, its match and its `balance_consumed` flag, so the receive
  * balance does not move. `log_index IS NULL` in the WHERE makes the adoption
  * one-way and race-safe: two replicas cannot both adopt the same row.
+ *
+ * The `NOT EXISTS` on the known-case identity is the defensive half of the
+ * round-2 F-1 fix: if a duplicate unknown row already exists for a leg whose
+ * known-index row is present (a row written before the mirror guard, or the
+ * millisecond race the guard cannot close), adopting it would violate
+ * `idx_inbound_transfers_chain_hash_account_log` and fail the whole ingest
+ * pass for that account — every tick, forever, because the cursor never
+ * advances. Skipping the adoption instead lets the known-index INSERT below
+ * hit its own conflict and return null: no crash, no second row.
  */
 const ADOPT_UNKNOWN_LEG_SQL = `
   UPDATE inbound_transfers
@@ -112,13 +160,22 @@ const ADOPT_UNKNOWN_LEG_SQL = `
      AND payer_address = LOWER($7)
      AND amount_raw = $8
      AND log_index IS NULL
+     AND NOT EXISTS (
+       SELECT 1
+         FROM inbound_transfers known
+        WHERE known.account_id = $1
+          AND known.chain_id = $3
+          AND LOWER(known.tx_hash) = LOWER($4)
+          AND known.log_index = $5
+     )
   RETURNING id`
 
 /**
  * Idempotent ingest (#3333, identity widened by #4903). Returns the new row's
  * id; `null` means this leg was already indexed for THIS account — either it
- * conflicted on the identity, or it adopted a pre-migration row that had no
- * log index.
+ * conflicted on the identity, it adopted a pre-migration row that had no log
+ * index, or (round-2 F-1) the unknown-log-index leg was skipped because a
+ * known-index row for the same leg already exists.
  *
  * One transaction paying two accounts still lands one row per receiving
  * account (round-2 F-2), and one transaction carrying several USDC legs to the
@@ -363,6 +420,23 @@ export async function findUnmatchedInboundTransfers(
  * when every row for that key is already matched: one inbound payment links
  * to ONE settlement — a second receipt for the same hash finds nothing to
  * link.
+ *
+ * ## The already-matched guard (round-2 F-1)
+ *
+ * The `NOT EXISTS` refuses a row whose (chain, hash, account, payer, amount)
+ * leg is ALREADY matched. Without it, a duplicate row — the chain-first /
+ * explorer-after shape F-1 found, or one written before the mirror guard —
+ * would be matched by a replayed receipt drop: `receive.ts` runs the
+ * `x402_payto` branch before the `receiptId` check, so the replay would find
+ * the second row, match it, and `markInboundTransferBalanceConsumed` would
+ * count the same on-chain transfer twice in `inboundReceiveBalanceAtomic`.
+ * With the guard the replay finds nothing (404, the documented "every row for
+ * that key is already matched"), and the balance cannot move.
+ *
+ * The key deliberately includes `amount_raw`: two legs of one transaction with
+ * DIFFERENT amounts are distinct payments and stay independently matchable.
+ * Two byte-identical legs are indistinguishable from any evidence a drop can
+ * carry, so matching one is the honest outcome.
  */
 export async function findUnmatchedByTxHash(
   accountId: string,
@@ -373,17 +447,27 @@ export async function findUnmatchedByTxHash(
 ): Promise<InboundTransferRow | null> {
   const result = await db.query<InboundTransferRow>(
     `
-    SELECT id, account_id, user_id, chain_id, tx_hash, log_index,
-           payer_address, token_address, amount_raw, block_number, block_time,
-           match_kind, matched_receipt_id, matched_payment_intent_id,
-           balance_consumed, sender_is_own_address
-      FROM inbound_transfers
-     WHERE account_id = $1
-       AND user_id = $2
-       AND LOWER(tx_hash) = LOWER($3)
-       AND ($4::text IS NULL OR payer_address = LOWER($4))
-       AND match_kind IS NULL
-     ORDER BY block_time DESC
+    SELECT t.id, t.account_id, t.user_id, t.chain_id, t.tx_hash, t.log_index,
+           t.payer_address, t.token_address, t.amount_raw, t.block_number, t.block_time,
+           t.match_kind, t.matched_receipt_id, t.matched_payment_intent_id,
+           t.balance_consumed, t.sender_is_own_address
+      FROM inbound_transfers t
+     WHERE t.account_id = $1
+       AND t.user_id = $2
+       AND LOWER(t.tx_hash) = LOWER($3)
+       AND ($4::text IS NULL OR t.payer_address = LOWER($4))
+       AND t.match_kind IS NULL
+       AND NOT EXISTS (
+         SELECT 1
+           FROM inbound_transfers m
+          WHERE m.account_id = t.account_id
+            AND m.chain_id = t.chain_id
+            AND LOWER(m.tx_hash) = LOWER(t.tx_hash)
+            AND m.payer_address = t.payer_address
+            AND m.amount_raw = t.amount_raw
+            AND m.match_kind IS NOT NULL
+       )
+     ORDER BY t.block_time DESC
      LIMIT 1`,
     [accountId, userId, txHash, payerAddress ?? null],
   )

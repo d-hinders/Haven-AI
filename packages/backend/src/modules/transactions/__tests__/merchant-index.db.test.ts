@@ -18,6 +18,10 @@
  *    transaction replayed over an existing collapsed row adopts that row (it
  *    keeps its amount and its consumed flag) and inserts the missing leg, so
  *    the receive balance is UNCHANGED while every leg is indexed.
+ * 7. The cross-source rule in BOTH directions (round-2 F-1): the same leg
+ *    written by the chain pass first and the explorer read afterwards lands ONE
+ *    row, and so does the mirror order. The receive balance is unchanged in
+ *    both, and a pre-existing duplicate cannot wedge the pass.
  *
  * The chain read is injected (`MerchantIndexDeps`), so no RPC is involved; the
  * persistence, the unique indexes and the cursor are the real thing.
@@ -29,7 +33,10 @@ import db from '../../../db.js'
 import {
   findInboundIndexCursor,
   inboundReceiveBalanceAtomic,
+  insertInboundTransfer,
   listMerchantAccounts,
+  markInboundTransferBalanceConsumed,
+  matchInboundTransfer,
   upsertInboundIndexCursor,
 } from '../../../infra/repositories/inbound-transfers.js'
 import { ingestInboundTransfers } from '../receive.js'
@@ -372,5 +379,161 @@ describeDb('merchant inbound index (#4903)', () => {
     expect(rows.rows).toHaveLength(2)
     expect(rows.rows[0]).toMatchObject({ log_index: null, amount_raw: '999999999' })
     expect(rows.rows[1]).toMatchObject({ log_index: 1, amount_raw: '1000000' })
+  })
+
+  // ── The cross-source rule, BOTH directions (round-2 F-1) ───────────────────
+  //
+  // The two partial unique indexes are disjoint, so the same on-chain leg can
+  // arrive from two sources in either order: the chain pass (log index known)
+  // and the explorer read (Alchemy reports none). Both orders must land ONE
+  // row and leave the receive balance alone.
+
+  it('indexes a leg ONCE when the chain pass writes it first and the explorer read writes it afterwards (round-2 F-1)', async () => {
+    const seeded = await seedAccount()
+    const sharedHash = `0x${'5'.repeat(64)}`
+    const payer = `0x${'c'.repeat(40)}`
+    const legInput = {
+      accountId: seeded.accountId,
+      userId: seeded.userId,
+      chainId: CHAIN,
+      txHash: sharedHash,
+      payerAddress: payer,
+      tokenAddress: USDC,
+      amountRaw: '1000000',
+      blockNumber: 4_000_000,
+      blockTime: new Date('2026-11-17T00:00:00Z'),
+    }
+
+    // The 5-minute pass: the leg with its log index.
+    const chainRow = await insertInboundTransfer({ ...legInput, logIndex: 3 })
+    expect(chainRow).not.toBeNull()
+
+    // The payment is matched and earned, so the balance is observable.
+    await matchInboundTransfer({
+      transferId: chainRow!,
+      userId: seeded.userId,
+      matchKind: 'receipt',
+      matchedReceiptId: '44444444-4444-4444-8444-444444444444',
+      matchedPaymentIntentId: null,
+    })
+    await markInboundTransferBalanceConsumed(chainRow!, seeded.userId)
+    expect(await inboundReceiveBalanceAtomic(seeded.accountId, seeded.userId)).toBe('1000000')
+
+    // The dashboard read: the same leg from Alchemy, which reports no log index.
+    const explorerRow = await insertInboundTransfer({ ...legInput, logIndex: null })
+    expect(explorerRow).toBeNull()
+
+    const rows = await db.query<{
+      log_index: number | null
+      amount_raw: string
+      balance_consumed: boolean
+    }>(
+      `SELECT log_index, amount_raw, balance_consumed
+         FROM inbound_transfers
+        WHERE account_id = $1`,
+      [seeded.accountId],
+    )
+    expect(rows.rows).toHaveLength(1)
+    expect(rows.rows[0]).toMatchObject({
+      log_index: 3,
+      amount_raw: '1000000',
+      balance_consumed: true,
+    })
+    // The receive balance is UNCHANGED.
+    expect(await inboundReceiveBalanceAtomic(seeded.accountId, seeded.userId)).toBe('1000000')
+  })
+
+  it('indexes a leg ONCE when the explorer read writes it first and the chain pass adopts it afterwards (round-2 F-1, mirror order)', async () => {
+    const seeded = await seedAccount()
+    const sharedHash = `0x${'4'.repeat(64)}`
+    const payer = `0x${'d'.repeat(40)}`
+    const legInput = {
+      accountId: seeded.accountId,
+      userId: seeded.userId,
+      chainId: CHAIN,
+      txHash: sharedHash,
+      payerAddress: payer,
+      tokenAddress: USDC,
+      amountRaw: '1000000',
+      blockNumber: 4_000_000,
+      blockTime: new Date('2026-11-17T00:00:00Z'),
+    }
+
+    // The dashboard read first: the leg with no log index.
+    const explorerRow = await insertInboundTransfer({ ...legInput, logIndex: null })
+    expect(explorerRow).not.toBeNull()
+    await matchInboundTransfer({
+      transferId: explorerRow!,
+      userId: seeded.userId,
+      matchKind: 'receipt',
+      matchedReceiptId: '44444444-4444-4444-8444-444444444444',
+      matchedPaymentIntentId: null,
+    })
+    await markInboundTransferBalanceConsumed(explorerRow!, seeded.userId)
+    expect(await inboundReceiveBalanceAtomic(seeded.accountId, seeded.userId)).toBe('1000000')
+
+    // The chain pass afterwards: the same leg, now with its log index. It
+    // ADOPTS the explorer row instead of inserting a second one.
+    const chainRow = await insertInboundTransfer({ ...legInput, logIndex: 3 })
+    expect(chainRow).toBeNull()
+
+    const rows = await db.query<{
+      log_index: number | null
+      amount_raw: string
+      balance_consumed: boolean
+      match_kind: string | null
+    }>(
+      `SELECT log_index, amount_raw, balance_consumed, match_kind
+         FROM inbound_transfers
+        WHERE account_id = $1`,
+      [seeded.accountId],
+    )
+    expect(rows.rows).toHaveLength(1)
+    expect(rows.rows[0]).toMatchObject({
+      log_index: 3,
+      amount_raw: '1000000',
+      balance_consumed: true,
+      match_kind: 'receipt',
+    })
+    expect(await inboundReceiveBalanceAtomic(seeded.accountId, seeded.userId)).toBe('1000000')
+  })
+
+  it('does not wedge the pass when a duplicate unknown row already exists for a known leg (round-2 F-1 defensive guard)', async () => {
+    const seeded = await seedAccount()
+    const sharedHash = `0x${'3'.repeat(64)}`
+    const payer = `0x${'e'.repeat(40)}`
+
+    // The duplicate F-1 found, planted directly (the mirror guard now refuses
+    // to create it): the known-index row and an unknown-index row for the same
+    // leg. Adopting the unknown row would violate the known-case unique index
+    // and fail every tick for this account, so the adoption must skip it.
+    await db.query(
+      `INSERT INTO inbound_transfers
+         (account_id, user_id, chain_id, tx_hash, log_index, payer_address, token_address,
+          amount_raw, block_number, block_time)
+       VALUES ($1, $2, $3, $4, 3, $5, $6, '1000000', 4000000, NOW()),
+              ($1, $2, $3, $4, NULL, $5, $6, '1000000', 4000000, NOW())`,
+      [seeded.accountId, seeded.userId, CHAIN, sharedHash, payer, USDC],
+    )
+
+    const tick = await runMerchantInboundIndexTick(
+      log,
+      deps({
+        legs: [leg({ txHash: sharedHash, logIndex: 3, payerAddress: payer, amountRaw: '1000000' })],
+      }),
+    )
+
+    // No failure, nothing new indexed, and the cursor still advances.
+    expect(tick.failed).toBe(0)
+    expect(tick.indexed).toBe(0)
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_009_999)
+
+    const rows = await db.query<{ log_index: number | null }>(
+      `SELECT log_index FROM inbound_transfers WHERE account_id = $1 ORDER BY log_index NULLS LAST`,
+      [seeded.accountId],
+    )
+    expect(rows.rows).toHaveLength(2)
+    expect(rows.rows[0]).toMatchObject({ log_index: 3 })
+    expect(rows.rows[1]).toMatchObject({ log_index: null })
   })
 })

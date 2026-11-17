@@ -328,12 +328,23 @@ transaction carrying several USDC transfers to the same account therefore
 lands one row per leg instead of one row per transaction. `log_index` is
 nullable — not every source reports it — so the unknown case keeps its own
 partial unique index on `(chain, tx hash, account, payer, amount)`: a re-read
-of the same leg still conflicts, while a second leg is a distinct row. A leg
-whose log index becomes known ADOPTS the unknown row written from it (same
-payer and amount) by filling in the index, keeping the row's amount, match and
-`balance_consumed` flag — so the receive balance of an account whose rows were
-collapsed before migration 128 does not move, while every leg is now indexed.
-Zero-value transfers are left out for every account.
+of the same leg still conflicts, while a second leg is a distinct row.
+
+**The cross-source rule, in both directions (#4903).** The two partial indexes
+are disjoint, so the same leg can arrive from the chain pass (log index known)
+and from the explorer read (Alchemy reports none) in either order, and both
+orders land ONE row. Explorer first, chain afterwards: the known-index leg
+ADOPTS the unknown row written from it (same payer and amount) by filling in
+the index, keeping the row's amount, match and `balance_consumed` flag. Chain
+first, explorer afterwards: the unknown-index leg is SKIPPED when a
+known-index row already exists for the same `(chain, tx hash, account, payer,
+amount)` — an explicit `WHERE NOT EXISTS` in the insert, because a partial
+index cannot span both cases. The receive balance of an account whose rows
+were collapsed before migration 128 does not move in either direction, while
+every leg is indexed. The match path carries the same rule: a row whose
+`(chain, tx hash, account, payer, amount)` leg is already matched is never
+matched again, so a replayed receipt drop cannot count one on-chain transfer
+twice. Zero-value transfers are left out for every account.
 
 **The scheduled pass (#4903).** A merchant account that nobody browses used to
 be unindexed, and one that received more payments between reads than the

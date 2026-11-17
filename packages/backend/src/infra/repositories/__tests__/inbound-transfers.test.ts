@@ -386,4 +386,83 @@ describeDb('inbound_transfers index (#3333)', () => {
     // No settlement names THIS account and no receipt came with the call.
     expect(result).toEqual({ ok: false, failure: { status: 404, error: 'Nothing to match against — supply a receipt the transfer was paid for' } })
   })
+
+  it('a replayed drop cannot match a second row for the same hash+payer+amount (round-2 F-1)', async () => {
+    const payer = await seedAccount()
+    const receiver = await seedAccount()
+    const txHash = `0x${'5'.repeat(64)}`
+    const payerAddress = `0x${'b'.repeat(40)}`
+    const amountRaw = '1000000'
+
+    // The x402 settlement the account was payTo for — the branch receive.ts
+    // runs BEFORE the receiptId check, which is how a duplicate would be
+    // double-counted.
+    await seedX402Settlement({
+      payerUserId: payer.userId,
+      payerAccountId: payer.accountId,
+      payToAddress: receiver.address,
+      chainId: 8453,
+      txHash,
+    })
+
+    // The duplicate F-1 found, planted directly: the chain pass wrote the leg
+    // with its log index, the explorer read wrote it again with log_index NULL.
+    // insertInboundTransfer now refuses the second row; this bypasses the guard
+    // to prove the MATCH path is safe even if one exists.
+    const known = (await insertInboundTransfer(
+      ingestInput(receiver, { txHash, payerAddress, amountRaw, logIndex: 3 }),
+    ))!
+    await db.query(
+      `INSERT INTO inbound_transfers
+         (account_id, user_id, chain_id, tx_hash, log_index, payer_address, token_address,
+          amount_raw, block_number, block_time)
+       VALUES ($1, $2, 8453, $3, NULL, $4, $5, $6, NULL, $7)`,
+      [
+        receiver.accountId,
+        receiver.userId,
+        txHash,
+        payerAddress,
+        USDC,
+        amountRaw,
+        new Date('2026-09-26T10:00:00Z'),
+      ],
+    )
+
+    // The first drop matches ONE row through the x402_payto branch and earns it.
+    const first = await matchInboundTransferForAccount({
+      accountId: receiver.accountId,
+      userId: receiver.userId,
+      accountAddress: receiver.address,
+      txHash,
+    })
+    expect(first).toEqual({ ok: true, matchKind: 'x402_payto', transferId: known })
+    expect(await inboundReceiveBalanceAtomic(receiver.accountId, receiver.userId)).toBe('1000000')
+
+    // The replay: the same drop again. The duplicate row must NOT be matched —
+    // the already-matched guard refuses it, so the balance cannot double-count.
+    const replay = await matchInboundTransferForAccount({
+      accountId: receiver.accountId,
+      userId: receiver.userId,
+      accountAddress: receiver.address,
+      txHash,
+    })
+    expect(replay.ok).toBe(false)
+    expect((replay as { failure: { status: number } }).failure.status).toBe(404)
+    expect(await inboundReceiveBalanceAtomic(receiver.accountId, receiver.userId)).toBe('1000000')
+
+    // Exactly one of the two rows is matched and consumed.
+    const rows = await db.query<{
+      log_index: number | null
+      match_kind: string | null
+      balance_consumed: boolean
+    }>(
+      `SELECT log_index, match_kind, balance_consumed
+         FROM inbound_transfers
+        WHERE account_id = $1`,
+      [receiver.accountId],
+    )
+    expect(rows.rows).toHaveLength(2)
+    expect(rows.rows.filter((row) => row.match_kind !== null)).toHaveLength(1)
+    expect(rows.rows.filter((row) => row.balance_consumed)).toHaveLength(1)
+  })
 })

@@ -767,6 +767,10 @@ export function createStripeRecording(
 /**
  * #4853: record a settled payment, if this product is the one Stripe records.
  *
+ * Which payments are sent is `stripeRecordingDecision`, shared with the
+ * receipt (#4856) so the receipt says "pending in Stripe" exactly when a
+ * record is sent.
+ *
  * Fire-and-forget on purpose. The payment has already settled, so the goods
  * are owed whatever Stripe answers; awaiting the call would put a third party
  * between the buyer and what they paid for. A failure is logged as
@@ -792,14 +796,13 @@ export function recordStripePayment(
   /** #4880: the receipt the merchant returned for this payment. */
   receipt?: InvoiceJson,
 ): void {
-  if (!recording) return
-  if (!product.stripeRecording) return
-  if (payment.settlement !== 'settled_onchain') return
-  if (getAddress(payment.to) !== getAddress(recording.depositAddress)) {
-    recording.noteNotRecorded(payment.txHash, 'paid_other_address')
+  const decision = stripeRecordingDecision(recording, product, payment)
+  if (decision === 'none') return
+  if (decision === 'paid_other_address') {
+    recording!.noteNotRecorded(payment.txHash, 'paid_other_address')
     return
   }
-  void recording
+  void recording!
     .record({
       txHash: payment.txHash,
       amountAtomic: payment.value,
@@ -807,4 +810,27 @@ export function recordStripePayment(
       ...(receipt ? { details: stripeDetailsFromReceipt(product, receipt) } : {}),
     })
     .catch(() => {})
+}
+
+/**
+ * #4856: whether Stripe will record this payment — the one rule both the
+ * recording (`recordStripePayment`) and the receipt read, so the receipt says
+ * the Stripe reference is pending exactly when a record is sent.
+ *
+ * - `record`: Stripe is on, the product is Stripe-recorded, the payment
+ *   settled on chain and paid the current deposit address.
+ * - `paid_other_address`: as above, but it paid another address (#4866) — not
+ *   sent, logged as `not_recorded`.
+ * - `none`: anything else; nothing is sent.
+ */
+export function stripeRecordingDecision(
+  recording: Pick<StripeRecording, 'depositAddress'> | undefined,
+  product: Pick<Product, 'stripeRecording'>,
+  payment: { settlement: string; to: Address },
+): 'record' | 'paid_other_address' | 'none' {
+  if (!recording) return 'none'
+  if (!product.stripeRecording) return 'none'
+  if (payment.settlement !== 'settled_onchain') return 'none'
+  if (getAddress(payment.to) !== getAddress(recording.depositAddress)) return 'paid_other_address'
+  return 'record'
 }

@@ -24,6 +24,8 @@ import {
 import type { AuthorizationOutcome, CdpChainReader, CdpFacilitator } from './cdp.js'
 import { receiptNumberForTransaction } from './invoice.js'
 import { reconcileStripe } from './stripe-reconcile.js'
+import type { SekRate } from './sek-rate.js'
+import type { ReceiptSellerDetails } from '@haven_ai/merchant-payments'
 import {
   STRIPE_API_VERSION_SANDBOX,
   createStripeRecording,
@@ -153,6 +155,10 @@ async function startServer(
     cdp?: boolean
     fakes?: Fakes
     previousReceivingAddresses?: readonly `0x${string}`[]
+    /** #4856: the cached SEK rate the receipt reads. */
+    sekRate?: { current(): SekRate | undefined }
+    /** #4856: the configured seller. */
+    receiptSeller?: ReceiptSellerDetails
   } = {},
 ) {
   const fakes = opts.fakes ?? makeFakes()
@@ -197,6 +203,8 @@ async function startServer(
     readinessCacheMs: 0,
     cdpConfigured: cdp,
     stripe: recording,
+    ...(opts.sekRate ? { sekRate: opts.sekRate } : {}),
+    ...(opts.receiptSeller ? { receiptSeller: opts.receiptSeller } : {}),
   })
   servers.push(server)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
@@ -683,5 +691,120 @@ describe('the Stripe record carries the receipt (#4880)', () => {
     expect(logs).toContain(`[stripe] record_failed tx=${CDP_TX} reason=invalid_request_error/parameter_unknown`)
     const health = (await (await fetch(`${origin}/healthz`)).json()) as { stripe: { record_failures: number } }
     expect(health.stripe.record_failures).toBe(1)
+  })
+})
+
+/** #4856: the whole receipt the merchant returned, from `x-receipt-json`. */
+function fullReceiptOf(response: Response): Record<string, unknown> & {
+  fakturanummer: string
+  saljare: Record<string, string>
+  stripe_referens?: { status: string; sok_med: { fakturanummer: string; transaktions_hash: string } }
+  belopp_sek?: Record<string, unknown>
+} {
+  return JSON.parse(Buffer.from(response.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
+}
+
+const RATE: SekRate = { rate: 10.0742, source: 'coingecko_spot', fetchedAt: new Date('2026-11-17T12:00:00Z') }
+
+describe('the receipt for a Stripe-recorded payment says the reference is pending (#4856)', () => {
+  it('names the receipt number and transaction hash to find it by, and states the SEK amount with rate, source and time', async () => {
+    const { url } = await startServer({ sekRate: { current: () => RATE } })
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    const receipt = fullReceiptOf(response)
+    expect(receipt.stripe_referens).toEqual({
+      status: 'Väntar',
+      sok_med: { fakturanummer: receiptNumberForTransaction(CDP_TX), transaktions_hash: CDP_TX },
+    })
+    expect(receipt.belopp_sek).toEqual({
+      tillganglig: true,
+      belopp: '0.10',
+      kurs: '10.0742',
+      kalla: 'coingecko_spot',
+      tidpunkt: '2026-11-17T12:00:00.000Z',
+    })
+    // The rendered receipt the tool returns says it too, and never claims
+    // Stripe's own figure.
+    expect(raw).toContain('STRIPE REFERENCE')
+    expect(raw).toContain('Pending')
+    expect(raw).toContain("not Stripe's figure")
+  })
+
+  it('says the SEK amount was not available when no fresh rate is cached', async () => {
+    const { url } = await startServer({ sekRate: { current: () => undefined } })
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+    expect(fullReceiptOf(response).belopp_sek).toEqual({
+      tillganglig: false,
+      status: 'Ej tillgängligt vid köptillfället',
+    })
+    expect(raw).toContain('Not available at the time of purchase')
+  })
+
+  it('says not available when the merchant has no rate feed at all', async () => {
+    const { url } = await startServer()
+    const { response } = await pay(url, await signedHeader(await challenge(url)))
+    expect(fullReceiptOf(response).belopp_sek).toMatchObject({ tillganglig: false })
+    expect(fullReceiptOf(response).stripe_referens?.status).toBe('Väntar')
+  })
+
+  it('never waits for Stripe: the receipt says pending while the Stripe call has not answered', async () => {
+    const { url, recording } = await startServer({ stripeHang: true, sekRate: { current: () => RATE } })
+    const { response } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    // Stripe has recorded nothing when the receipt is returned; the call
+    // times out afterwards, and the receipt said pending all along.
+    expect(recording!.stats()).toMatchObject({ attempted: 1, recorded: 0 })
+    expect(fullReceiptOf(response).stripe_referens?.status).toBe('Väntar')
+    await recording!.flush()
+    expect(recording!.stats().failed).toBe(1)
+  })
+
+  it('carries no Stripe block when Stripe is off', async () => {
+    const { url } = await startServer({ stripe: false, sekRate: { current: () => RATE } })
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    const receipt = fullReceiptOf(response)
+    expect(receipt).not.toHaveProperty('stripe_referens')
+    expect(receipt).not.toHaveProperty('belopp_sek')
+    expect(raw).not.toContain('STRIPE REFERENCE')
+  })
+
+  it('carries no Stripe block for a product Stripe does not record', async () => {
+    const { url } = await startServer({ sekRate: { current: () => RATE } })
+    const vpnCall = callTool('buy_vpn', { plan: 'basic' }, 6)
+    const { response } = await pay(url, await signedHeader(await challenge(url, vpnCall)), 6, vpnCall)
+    expect(response.status).toBe(200)
+    expect(fullReceiptOf(response)).not.toHaveProperty('stripe_referens')
+    expect(fullReceiptOf(response)).not.toHaveProperty('belopp_sek')
+  })
+
+  it('carries no Stripe block for a payment that paid the previous deposit address, which Stripe does not record', async () => {
+    const fakes = makeFakes()
+    fakes.authorizationUsed.mockResolvedValue(true)
+    fakes.findAuthorizationOutcome.mockResolvedValue({ kind: 'settled', txHash: CDP_TX } satisfies AuthorizationOutcome)
+    const before = await startServer({ depositAddress: OLD_DEPOSIT, fakes })
+    const header = await signedHeader(await challenge(before.url))
+    const after = await startServer({
+      depositAddress: DEPOSIT,
+      fakes,
+      previousReceivingAddresses: [OLD_DEPOSIT],
+      sekRate: { current: () => RATE },
+    })
+    const { response } = await pay(after.url, header)
+    await after.recording!.flush()
+    expect(response.status).toBe(200)
+    expect(after.stripe.requests).toHaveLength(0)
+    expect(fullReceiptOf(response)).not.toHaveProperty('stripe_referens')
+  })
+})
+
+describe('the seller on the receipt comes from configuration (#4856)', () => {
+  it('carries the configured seller, keeping the name, org_nr and moms_nr keys', async () => {
+    const receiptSeller = { name: 'Example Seller AB', address: 'Exempelgatan 1', org_nr: '000000-0000', moms_nr: 'SE000000000001' }
+    const { url } = await startServer({ receiptSeller })
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+    expect(fullReceiptOf(response).saljare).toEqual({ ...receiptSeller, crypto_address: DEPOSIT })
+    expect(raw).toContain('Example Seller AB')
+    expect(raw).not.toContain('Haven Demo AB')
   })
 })

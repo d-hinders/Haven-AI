@@ -1219,7 +1219,8 @@ The keys stay the demo's Swedish bookkeeping keys (`fakturanummer`,
 `saljare`, `kopare`, `rader[]`, `belopp_exkl_moms`, `moms_procent`,
 `moms_belopp`, `totalt_inkl_moms`, `momsbehandling`, `valuta`, and the rest of
 `InvoiceJson`). Only the values change: they come from the deployment instead
-of the demo's hard-coded seller. The receipt names no Haven address or
+of the demo merchant's seller (its built-in demo seller, or `MERCHANT_SELLER_*`
+since #4856). The receipt names no Haven address or
 contact.
 
 ### Where each field comes from

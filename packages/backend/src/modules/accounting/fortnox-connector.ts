@@ -219,8 +219,9 @@ export function feedDescription(tx: FeedTransaction): string {
     // A source never costs the receipt's own product names: until every
     // source is dropped, the receipt part must fit whole.
     if (sourceCount > 0 && receipt != null && fitted !== receipt) return null
-    const comment = [...head, fitted, ...kept, ...tail].filter(Boolean).join(' ')
-    return comment.length <= 512 ? comment : null
+    // A protocol payment always has a receipt part (at least "VAT not
+    // stated"), and its budget above already counts the kept sources.
+    return [...head, fitted, ...kept, ...tail].filter(Boolean).join(' ')
   }
   for (let count = sources.length; count >= 0; count -= 1) {
     const comment = build(true, count) ?? build(false, count)

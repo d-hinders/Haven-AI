@@ -175,6 +175,17 @@ describe('the Fortnox comment carries the product and the stated VAT (#4876)', (
     )
     expect(d).toContain('VAT 25 pct 0.0001 USDC, merchant VAT treatment SE 25.')
     expect(d).not.toContain('Product')
+    // Beside a real name, the empty one leaves no stray separator.
+    const mixed = feedDescription(
+      tx({
+        merchantReceipt: {
+          url: null,
+          inlineJson: { ...se25, rader: [{ ...se25.rader[0], beskrivning: '日本' }, { ...se25.rader[0], beskrivning: 'Cloud' }] },
+        },
+      }),
+    )
+    expect(mixed).toContain('Product Cloud.')
+    expect(mixed).not.toContain('Product ,')
   })
 
   it('says "VAT not stated by the merchant" for a protocol payment with no stated lines', () => {

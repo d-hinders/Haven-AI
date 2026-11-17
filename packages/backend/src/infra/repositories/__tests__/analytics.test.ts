@@ -31,6 +31,7 @@ import {
   listRefusalsByDayForUser,
   listTopMerchantsForUser,
   PER_AGENT_SPEND_SQL,
+  RECEIPT_MERCHANT_NAME_MAX_LENGTH,
   shapeBudgets,
   sumFeesTotalsForUser,
   sumTotalsSpendForUser,
@@ -41,6 +42,7 @@ import {
 } from '../analytics.js'
 import type { QueryRow } from '../../transaction.js'
 import { recordPaymentRefusal } from '../payment-refusals.js'
+import { MAX_MERCHANT_NAME_LENGTH } from '../../../modules/catalog/index.js'
 
 let seq = 0
 
@@ -422,13 +424,19 @@ describeDb('analytics-overview repository (#2946)', () => {
     expect(rows[0].agent_ids.sort()).toEqual([agentA, agentB].sort())
   })
 
-  it('receipt-name fallback reads the newest merchant_receipts row for the address', async () => {
-    const userId = await seedUser()
-    const accountId = await seedAccount(userId, 10)
-    const agentId = await seedAgent(userId, accountId)
-    const merchant = `0x${'4'.padStart(40, '0')}`
-    const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: merchant })
+  // ── Receipt-name fallback (#956, #4881) ──────────────────────────────────
 
+  /**
+   * Seed one `machine_payment_evidence` row plus its `merchant_receipts`
+   * document for `paymentId` — the two rows the receipt-name lookup joins.
+   */
+  async function seedReceipt(input: {
+    userId: string
+    agentId: string
+    paymentId: string
+    merchant: string
+    inlineJson: unknown
+  }): Promise<void> {
     const evidence = await db.query<{ id: string }>(
       `INSERT INTO machine_payment_evidence (
          payment_intent_id, agent_id, user_id, rail, tx_hash, chain_id, resource_url,
@@ -436,15 +444,184 @@ describeDb('analytics-overview repository (#2946)', () => {
        ) VALUES ($1, $2, $3, 'x402', $4, 84532, 'https://merchant.example', $5,
                  '0x' || repeat('e', 40), '0x' || repeat('f', 40), 'USDC', '0x' || repeat('b', 40), '1000', '0.001')
        RETURNING id`,
-      [paymentId, agentId, userId, `0x${String(++seq).padStart(64, '1')}`.slice(0, 66), merchant],
+      [input.paymentId, input.agentId, input.userId, `0x${String(++seq).padStart(64, '1')}`.slice(0, 66), input.merchant],
     )
-    await db.query(
-      `INSERT INTO merchant_receipts (evidence_id, inline_json) VALUES ($1, $2)`,
-      [evidence.rows[0].id, JSON.stringify({ merchant_name: 'Acme Corp' })],
-    )
+    await db.query(`INSERT INTO merchant_receipts (evidence_id, inline_json) VALUES ($1, $2)`, [
+      evidence.rows[0].id,
+      JSON.stringify(input.inlineJson),
+    ])
+  }
+
+  /** A payment + its receipt document, for one merchant address. */
+  async function seedMerchantWithReceipt(
+    addrSeed: string,
+    inlineJson: unknown,
+  ): Promise<{ userId: string; merchant: string }> {
+    const userId = await seedUser()
+    // The account address is offset so it never collides with the merchant's.
+    const accountId = await seedAccount(userId, 100 + Number.parseInt(addrSeed, 16))
+    const agentId = await seedAgent(userId, accountId)
+    const merchant = `0x${addrSeed.padStart(40, '0')}`
+    const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: merchant })
+    await seedReceipt({ userId, agentId, paymentId, merchant, inlineJson })
+    return { userId, merchant }
+  }
+
+  it('receipt-name fallback reads the flat merchant_name (receipts captured before #4881)', async () => {
+    const { userId, merchant } = await seedMerchantWithReceipt('4', { merchant_name: 'Acme Corp' })
 
     const names = await listReceiptMerchantNamesForUser(userId, [merchant])
     expect(names.get(merchant.toLowerCase())).toBe('Acme Corp')
+  })
+
+  it('receipt-name fallback reads the seller name from the demo merchant receipt shape (saljare.name)', async () => {
+    // The demo merchant's `x-receipt-json` document verbatim
+    // (`packages/demo-merchant-mcp/src/invoice.ts`): the seller block is
+    // `saljare`, and there is NO `merchant_name` key anywhere in it.
+    const { userId, merchant } = await seedMerchantWithReceipt('5', {
+      fakturanummer: 'FAK-2026-1791972466377',
+      fakturadatum: '2026-11-17',
+      forfallodatum: '2026-12-17',
+      ocr_nummer: '20261791972466377',
+      saljare: {
+        name: 'Haven Demo AB',
+        address: 'Birger Jarlsgatan 57, 113 56 Stockholm',
+        org_nr: '559412-3456',
+        moms_nr: 'SE559412345601',
+        iban: 'SE35 5000 0000 0549 1000 0003',
+        bic: 'ESSESESS',
+        crypto_address: `0x${'0'.repeat(40)}`,
+      },
+      kopare: {
+        identifierare: `0x${'e'.repeat(40)}`,
+        typ: 'blockkedjeadress',
+        roll: 'agent_delegate',
+      },
+      rader: [],
+      belopp_exkl_moms: '0.80',
+      moms_procent: 25,
+      moms_belopp: '0.20',
+      totalt_inkl_moms: '1.00',
+      valuta: 'USDC',
+      momsbehandling: 'SE_25',
+      betalningssatt: 'Kryptovaluta (USDC på Base Sepolia)',
+      blockkedje_referens: null,
+      status: 'Betald',
+    })
+
+    const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+    expect(names.get(merchant.toLowerCase())).toBe('Haven Demo AB')
+  })
+
+  it('a seller block nested under data names no one — the same rule the accounting underlag reads', async () => {
+    const { userId, merchant } = await seedMerchantWithReceipt('6', {
+      data: { fakturanummer: 'FAK-1', saljare: { name: 'Nested Seller AB' } },
+    })
+
+    const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+    expect(names.has(merchant.toLowerCase())).toBe(false)
+  })
+
+  it('matches a checksummed (mixed-case) merchant address in any consumer casing', async () => {
+    const checksummed = '0xAbCdEf0123456789aBcDeF0123456789AbCdEf01'
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 900)
+    const agentId = await seedAgent(userId, accountId)
+    const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: checksummed })
+    await seedReceipt({ userId, agentId, paymentId, merchant: checksummed, inlineJson: { saljare: { name: 'Mixed Case AB' } } })
+
+    for (const asPassed of [checksummed, checksummed.toLowerCase(), checksummed.toUpperCase().replace('0X', '0x')]) {
+      const names = await listReceiptMerchantNamesForUser(userId, [asPassed])
+      expect(names.get(checksummed.toLowerCase())).toBe('Mixed Case AB')
+    }
+  })
+
+  it('saljare.name wins over the flat merchant_name when a receipt carries both', async () => {
+    const { userId, merchant } = await seedMerchantWithReceipt('7', {
+      merchant_name: 'Stale Flat Name',
+      saljare: { name: 'Real Seller AB' },
+    })
+
+    const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+    expect(names.get(merchant.toLowerCase())).toBe('Real Seller AB')
+  })
+
+  it('cleans the seller name: whitespace runs collapse and the ends are trimmed', async () => {
+    const { userId, merchant } = await seedMerchantWithReceipt('8', {
+      saljare: { name: '  Haven \t Demo \n AB  ' },
+    })
+
+    const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+    expect(names.get(merchant.toLowerCase())).toBe('Haven Demo AB')
+  })
+
+  it('an empty, non-string or oversized seller name yields no name', async () => {
+    const empty = await seedMerchantWithReceipt('9', { saljare: { name: '   ' } })
+    const nonString = await seedMerchantWithReceipt('a', { saljare: { name: 42 } })
+    const oversized = await seedMerchantWithReceipt('b', {
+      saljare: { name: 'x'.repeat(RECEIPT_MERCHANT_NAME_MAX_LENGTH + 1) },
+    })
+    // The flat fallback is bounded by the same rule.
+    const oversizedFlat = await seedMerchantWithReceipt('c', {
+      merchant_name: 'y'.repeat(RECEIPT_MERCHANT_NAME_MAX_LENGTH + 1),
+    })
+
+    for (const { userId, merchant } of [empty, nonString, oversized, oversizedFlat]) {
+      const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+      expect(names.has(merchant.toLowerCase())).toBe(false)
+    }
+  })
+
+  it('strips invisible and bidirectional characters: a name of only those, or of no-break spaces, yields no name', async () => {
+    const invisible = await seedMerchantWithReceipt('d1', { saljare: { name: '\u00a0\u200b\u00a0' } })
+    const names = await listReceiptMerchantNamesForUser(invisible.userId, [invisible.merchant])
+    expect(names.has(invisible.merchant.toLowerCase())).toBe(false)
+
+    const spoof = await seedMerchantWithReceipt('d2', { saljare: { name: '\u202eKelta\u0007 AB\u00a0Ltd' } })
+    const spoofNames = await listReceiptMerchantNamesForUser(spoof.userId, [spoof.merchant])
+    expect(spoofNames.get(spoof.merchant.toLowerCase())).toBe('Kelta AB Ltd')
+
+    const unicodeSpaces = await seedMerchantWithReceipt('d6', { saljare: { name: '\u202f\u2009\u3000' } })
+    expect((await listReceiptMerchantNamesForUser(unicodeSpaces.userId, [unicodeSpaces.merchant])).has(unicodeSpaces.merchant.toLowerCase())).toBe(false)
+
+    const lineSep = await seedMerchantWithReceipt('d7', { saljare: { name: 'Haven\u2028Demo\u202fAB' } })
+    expect((await listReceiptMerchantNamesForUser(lineSep.userId, [lineSep.merchant])).get(lineSep.merchant.toLowerCase())).toBe('Haven Demo AB')
+  })
+
+  it('a blank or oversized saljare.name falls back to the flat merchant_name on the same receipt', async () => {
+    const blank = await seedMerchantWithReceipt('d3', { saljare: { name: '   ' }, merchant_name: 'Acme Flat' })
+    expect((await listReceiptMerchantNamesForUser(blank.userId, [blank.merchant])).get(blank.merchant.toLowerCase())).toBe(
+      'Acme Flat',
+    )
+    const big = await seedMerchantWithReceipt('d4', {
+      saljare: { name: 'x'.repeat(RECEIPT_MERCHANT_NAME_MAX_LENGTH + 1) },
+      merchant_name: 'Acme Flat',
+    })
+    expect((await listReceiptMerchantNamesForUser(big.userId, [big.merchant])).get(big.merchant.toLowerCase())).toBe('Acme Flat')
+  })
+
+  it('the newest receipt with a usable name wins; a newer unusable one falls back to the older', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 950)
+    const agentId = await seedAgent(userId, accountId)
+    const merchant = `0x${'d5'.padStart(40, '0')}`
+    const receiptAt = async (name: unknown, hoursAgo: number) => {
+      const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: merchant })
+      await seedReceipt({ userId, agentId, paymentId, merchant, inlineJson: { saljare: { name } } })
+      await db.query(
+        `UPDATE machine_payment_evidence SET created_at = NOW() - ($2 * interval '1 hour') WHERE payment_intent_id = $1`,
+        [paymentId, hoursAgo],
+      )
+    }
+    await receiptAt('Old Name AB', 3)
+    await receiptAt('New Name AB', 2)
+    expect((await listReceiptMerchantNamesForUser(userId, [merchant])).get(merchant)).toBe('New Name AB')
+    await receiptAt('   ', 1)
+    expect((await listReceiptMerchantNamesForUser(userId, [merchant])).get(merchant)).toBe('New Name AB')
+  })
+
+  it('the receipt-name bound is the catalog merchant-name bound (one bound for every display name)', () => {
+    expect(RECEIPT_MERCHANT_NAME_MAX_LENGTH).toBe(MAX_MERCHANT_NAME_LENGTH)
   })
 
   // ── Balance ───────────────────────────────────────────────────────────────

@@ -52,7 +52,7 @@ describe('resolveCounterpartyName', () => {
     ).toEqual({ label: 'Acme AB', kind: 'contact' })
   })
 
-  it('step 4 — the receipt merchant_name is the last resolvable step (the analytics-only extension)', () => {
+  it('step 4 — the receipt seller name is the last resolvable step (the analytics-only extension)', () => {
     expect(
       resolveCounterpartyName({
         x402ResourceUrl: null,

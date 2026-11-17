@@ -17658,7 +17658,7 @@ export interface operations {
                         }[];
                         /** @description Top 10 by spend. */
                         merchants: {
-                            /** @description The five-step naming order (#4332, the /transactions order plus one analytics-only step): the x402 resource host of the merchant's most recent payment IN THE WINDOW → one of the user's own accounts (address-only across chains; the oldest account wins a shared address) → the contact name → the receipt's merchant_name (the analytics-only extension) → null. Null means the client renders "Unknown recipient". */
+                            /** @description The five-step naming order (#4332, the /transactions order plus one analytics-only step): the x402 resource host of the merchant's most recent payment IN THE WINDOW → one of the user's own accounts (address-only across chains; the oldest account wins a shared address) → the contact name → the receipt's seller name (top-level `saljare.name`, else the flat `merchant_name`; the analytics-only extension) → null. Null means the client renders "Unknown recipient". */
                             label: string | null;
                             /**
                              * @description Which naming step produced `label`.

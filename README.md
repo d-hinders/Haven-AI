@@ -17,6 +17,8 @@ covers:
   - packages/signer/package.json
   - packages/connect/package.json
   - packages/demo-merchant-mcp/package.json
+  - packages/merchant-payments/package.json
+  - packages/paywall-proxy/package.json
   - .github/workflows/publish.yml
   - scripts/release-bump.mjs
 last-verified: "2026-10-26"
@@ -98,6 +100,8 @@ This is a TypeScript monorepo:
 | `packages/signer` | `@haven_ai/signer` local edge signer used with hosted MCP; it holds the delegate key locally and exposes sign-only tools |
 | `packages/cli` | `@haven_ai/cli` terminal-native, scriptable parallel to the dashboard (login, reads, backend-only management) |
 | `packages/demo-merchant-mcp` | Internal x402 demo merchant MCP server for Base USDC test purchases and Swedish invoice output |
+| `packages/merchant-payments` | Shared merchant payment core (private): the receipt, the Coinbase settlement path and the consumed-payment store |
+| `packages/paywall-proxy` | Merchant kit paywall proxy (private): x402 in front of any HTTP API, settled through the shared core |
 | `packages/qa-agent` | Internal QA harness for the dev environment: deterministic money-flow scenarios and dev seeding (not published) |
 
 ## Team Docs

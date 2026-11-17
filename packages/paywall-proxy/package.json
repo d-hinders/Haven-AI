@@ -1,0 +1,36 @@
+{
+  "name": "@haven_ai/paywall-proxy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Haven paywall proxy — x402 in front of any HTTP API, settled through the shared merchant payment core (#4893). Not published; run from this repository.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "haven-paywall-proxy": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm --prefix ../sdk run build && npm --prefix ../merchant-payments run build:self && tsup",
+    "start": "node dist/index.js",
+    "test": "npm --prefix ../sdk run build && npm --prefix ../merchant-payments run build:self && vitest run",
+    "typecheck": "npm --prefix ../sdk run build && npm --prefix ../merchant-payments run build:self && tsc --noEmit"
+  },
+  "keywords": [
+    "haven",
+    "internal"
+  ],
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@haven_ai/merchant-payments": "*",
+    "@x402/core": "^2.29.0",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

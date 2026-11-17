@@ -213,6 +213,9 @@ describe('compareStatedTotal (#4875)', () => {
     expect(compareStatedTotal(statement, { token: null, amountAtomic: '500', decimals: 6 })).toBe('not_comparable')
     expect(compareStatedTotal(statement, { token: 'USDC', amountAtomic: '500', decimals: null })).toBe('not_comparable')
     expect(compareStatedTotal(statement, usdc('not a number'))).toBe('not_comparable')
+    // A token with more decimals than the comparison's scale is not compared —
+    // and the entry builder must never throw on one.
+    expect(() => compareStatedTotal(statement, { token: 'USDC', amountAtomic: '500', decimals: 31 })).not.toThrow()
     expect(compareStatedTotal(statement, { token: 'USDC', amountAtomic: '500', decimals: 31 })).toBe('not_comparable')
   })
 })

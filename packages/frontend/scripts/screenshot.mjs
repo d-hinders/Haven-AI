@@ -1752,6 +1752,23 @@ export const FIXTURE_ACCOUNTING_FEED_COMING_SOON = {
 export const FIXTURE_ACCOUNTING_FEED_SELF_HOSTED = { ...FIXTURE_ACCOUNTING_FEED_COMING_SOON, hosted: false }
 
 /**
+ * Merchant services (#4904, epic #4885): the setting the shell reads once.
+ *
+ * OFF with no account — the state every user starts in, and the one the
+ * Settings → Business card renders as "Turn on Sales". The e2e twin is
+ * `merchantServicesOff` in `e2e/fixtures/haven-api.ts`, and
+ * `fixture-shape-parity.test.ts` pins the two shapes together: a key that
+ * exists in one harness and not the other renders `undefined` in exactly one
+ * gate.
+ */
+export const FIXTURE_MERCHANT_SERVICES = {
+  enabled: false,
+  enabled_at: null,
+  disabled_at: null,
+  merchant_account: null,
+}
+
+/**
  * The ATTENTION state (#2869 design review): the destination's sign-in has
  * expired (still the destination, cannot push) and the sweep has given up on
  * three rows. Raises the attention summary, the inline "Stopped retrying"
@@ -2134,6 +2151,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
   if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
   if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
+  // #4904: the merchant-services setting the shell reads once. Keyed so a
+  // capture of `/settings?tab=business` shows the Sales card's real OFF state
+  // rather than `FIXTURE_EMPTY_FALLBACK`'s `{}` (which the hook would read as
+  // a failed read and render as a retry).
+  if (pathname === '/merchant-services') return FIXTURE_MERCHANT_SERVICES
   // Owner company details (#3332): 404 is the DEFAULT state — the flag off,
   // same as a real deployment with `HAVEN_OWNER_COMPANY_DETAILS` unset —
   // so a plain `/settings` route capture shows the section correctly

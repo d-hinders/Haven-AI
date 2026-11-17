@@ -503,6 +503,7 @@ describeDb('analytics-overview repository (#2946)', () => {
       moms_belopp: '0.20',
       totalt_inkl_moms: '1.00',
       valuta: 'USDC',
+      momsbehandling: 'SE_25',
       betalningssatt: 'Kryptovaluta (USDC på Base Sepolia)',
       blockkedje_referens: null,
       status: 'Betald',
@@ -512,13 +513,27 @@ describeDb('analytics-overview repository (#2946)', () => {
     expect(names.get(merchant.toLowerCase())).toBe('Haven Demo AB')
   })
 
-  it('receipt-name fallback reads the nested data.saljare.name form', async () => {
+  it('a seller block nested under data names no one — the same rule the accounting underlag reads', async () => {
     const { userId, merchant } = await seedMerchantWithReceipt('6', {
       data: { fakturanummer: 'FAK-1', saljare: { name: 'Nested Seller AB' } },
     })
 
     const names = await listReceiptMerchantNamesForUser(userId, [merchant])
-    expect(names.get(merchant.toLowerCase())).toBe('Nested Seller AB')
+    expect(names.has(merchant.toLowerCase())).toBe(false)
+  })
+
+  it('matches a checksummed (mixed-case) merchant address in any consumer casing', async () => {
+    const checksummed = '0xAbCdEf0123456789aBcDeF0123456789AbCdEf01'
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 900)
+    const agentId = await seedAgent(userId, accountId)
+    const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: checksummed })
+    await seedReceipt({ userId, agentId, paymentId, merchant: checksummed, inlineJson: { saljare: { name: 'Mixed Case AB' } } })
+
+    for (const asPassed of [checksummed, checksummed.toLowerCase(), checksummed.toUpperCase().replace('0X', '0x')]) {
+      const names = await listReceiptMerchantNamesForUser(userId, [asPassed])
+      expect(names.get(checksummed.toLowerCase())).toBe('Mixed Case AB')
+    }
   })
 
   it('saljare.name wins over the flat merchant_name when a receipt carries both', async () => {

@@ -10,7 +10,7 @@
  *      reads it), from the merchant's most recent payment IN THE WINDOW;
  *   2. one of the user's own accounts → that account's name;
  *   3. a contact → the contact name;
- *   4. the receipt's seller name (`saljare.name` / `data.saljare.name`, with
+ *   4. the receipt's seller name (top-level `saljare.name`, with
  *      the flat `merchant_name` as fallback — `RECEIPT_MERCHANT_NAMES_SQL`,
  *      #4881) — the analytics-only EXTENSION: `/transactions` rows have no
  *      receipt step;

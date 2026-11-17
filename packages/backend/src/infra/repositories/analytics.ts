@@ -697,12 +697,16 @@ export const RECEIPT_MERCHANT_NAME_MAX_LENGTH = 120
  * #4881: the name is read where REAL receipts carry it. The demo merchant's
  * invoice (and any merchant following the same Swedish bookkeeping shape)
  * names the seller under `saljare.name` — `merchant_name` is a key it never
- * sends. The accounting side already reads that block
+ * sends. The accounting side reads the same top-level block
  * (`sellerFromMerchantReceipt`, `modules/accounting/receipt-underlag.ts`), and
- * merchants wrap the document one level deep as often as they send it flat
- * (`{ data: { saljare } }`, see `merchantDocumentShape`), so both forms are
- * accepted. The flat `merchant_name` stays as the LAST fallback for receipts
- * captured before this change.
+ * this lookup reads exactly what it reads: a seller block nested one level
+ * deeper (`{ data: { saljare } }`) names no one here either, so the dashboard
+ * and the accounting document never disagree on who the seller is. The flat
+ * `merchant_name` stays as the LAST fallback for receipts captured before
+ * this change.
+ *
+ * Addresses match case-insensitively on both sides: evidence stores the
+ * merchant address as given, and consumers pass it in their own casing.
  *
  * The value is cleaned and bounded HERE, in the statement, so the
  * `DISTINCT ON` still picks the newest receipt that actually yields a usable
@@ -723,8 +727,6 @@ export const RECEIPT_MERCHANT_NAMES_SQL = `SELECT DISTINCT ON (LOWER(mpe.merchan
         COALESCE(
           CASE WHEN jsonb_typeof(mr.inline_json -> 'saljare' -> 'name') = 'string'
                THEN mr.inline_json -> 'saljare' ->> 'name' END,
-          CASE WHEN jsonb_typeof(mr.inline_json -> 'data' -> 'saljare' -> 'name') = 'string'
-               THEN mr.inline_json -> 'data' -> 'saljare' ->> 'name' END,
           CASE WHEN jsonb_typeof(mr.inline_json -> 'merchant_name') = 'string'
                THEN mr.inline_json ->> 'merchant_name' END
         ),
@@ -734,7 +736,7 @@ export const RECEIPT_MERCHANT_NAMES_SQL = `SELECT DISTINCT ON (LOWER(mpe.merchan
     ) AS receipt_name
   ) candidate
   WHERE mpe.user_id = $1
-    AND mpe.merchant_address = ANY($2)
+    AND LOWER(mpe.merchant_address) = ANY($2)
     AND candidate.receipt_name IS NOT NULL
     AND length(candidate.receipt_name) <= ${RECEIPT_MERCHANT_NAME_MAX_LENGTH}
   ORDER BY LOWER(mpe.merchant_address), mpe.created_at DESC`
@@ -747,7 +749,7 @@ export async function listReceiptMerchantNamesForUser(
   if (merchantAddresses.length === 0) return new Map()
   const result = await db.query<{ merchant_key: string; receipt_name: string }>(
     RECEIPT_MERCHANT_NAMES_SQL,
-    [userId, merchantAddresses],
+    [userId, merchantAddresses.map((a) => a.toLowerCase())],
   )
   return new Map(result.rows.map((r) => [r.merchant_key, r.receipt_name]))
 }

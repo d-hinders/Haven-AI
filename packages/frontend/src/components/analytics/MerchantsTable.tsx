@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { HAVEN_FALLBACK_NAME } from '@haven_ai/core'
 import {
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
@@ -174,7 +175,7 @@ function kindLine(merchant: AnalyticsMerchantRow): string | null {
  *  as-is with no tooltip; there is nothing to elaborate. */
 function LabelCell({ merchant }: { merchant: AnalyticsMerchantRow }) {
   const known = merchant.label !== null
-  const name = merchant.label ?? 'Unknown recipient'
+  const name = merchant.label ?? HAVEN_FALLBACK_NAME.unknownRecipient
   const kind = kindLine(merchant)
   return (
     <Tooltip label={known ? name : merchant.address} mono={!known}>
@@ -332,7 +333,7 @@ function MobileMerchantRow({
   const names = payingAgents.slice(0, MAX_AGENT_NAMES).map((agent) => agent.name)
   const total = payingAgents.length
   const known = merchant.label !== null
-  const name = merchant.label ?? 'Unknown recipient'
+  const name = merchant.label ?? HAVEN_FALLBACK_NAME.unknownRecipient
   const kind = kindLine(merchant)
 
   return (

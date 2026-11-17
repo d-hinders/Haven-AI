@@ -48,6 +48,25 @@ whitespace collapsed, trimmed) and dropped when it is empty or longer than
 120 characters; a flat top-level `merchant_name` is the fallback. A `saljare`
 block nested under another key is not read, here or by the accounting side.
 
+Since #4932 the display side additionally **refuses** a cleaned name that
+names nobody, and treats it as no name at all (the lookup falls back to an
+older usable receipt, then to the flat `merchant_name`):
+
+- **an address** — a full address (`0x…`, 40 hex characters, `0x` or `0X`)
+  or Haven's own short form (`0xA873…DD35`, `0xa873...dd35`,
+  `0xA873 … DD35`);
+- **one of Haven's own fallback words** — "New recipient", "Unknown
+  recipient", "Deposit", "Agent payment", "Machine payment", "Moved between
+  your accounts", "None in this range" — matched exactly after ASCII case
+  folding and whitespace collapsing, or any name starting with "From " or
+  "Returned from ".
+
+**The accounting underlag is the exception.** `sellerFromMerchantReceipt`
+quotes the invoice's seller as written, refusals included: a pinned underlag
+must re-render byte-identically (#4824). The two sides read the same block;
+only the display side refuses these names. The rule is receipt-only by
+design — contact and own-account names are the user's own words.
+
 ## Lines and VAT (#4875)
 
 Read by `receiptStatementFrom` (`receipt-statement.ts`) onto the accounting

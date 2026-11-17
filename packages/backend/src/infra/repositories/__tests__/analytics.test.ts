@@ -32,6 +32,7 @@ import {
   listTopMerchantsForUser,
   PER_AGENT_SPEND_SQL,
   RECEIPT_MERCHANT_NAME_MAX_LENGTH,
+  RECEIPT_NAME_FULL_ADDRESS_PATTERN,
   shapeBudgets,
   sumFeesTotalsForUser,
   sumTotalsSpendForUser,
@@ -43,6 +44,7 @@ import {
 import type { QueryRow } from '../../transaction.js'
 import { recordPaymentRefusal } from '../payment-refusals.js'
 import { MAX_MERCHANT_NAME_LENGTH } from '../../../modules/catalog/index.js'
+import { ETH_ADDRESS_RE } from '@haven_ai/core'
 
 let seq = 0
 
@@ -622,6 +624,140 @@ describeDb('analytics-overview repository (#2946)', () => {
 
   it('the receipt-name bound is the catalog merchant-name bound (one bound for every display name)', () => {
     expect(RECEIPT_MERCHANT_NAME_MAX_LENGTH).toBe(MAX_MERCHANT_NAME_LENGTH)
+  })
+
+  // ── #4932: names Haven refuses ────────────────────────────────────────────
+  //
+  // A receipt's seller name is merchant-written text. Two kinds of it name
+  // nobody: an address (full, or Haven's own short form) and Haven's own
+  // fallback words. A refused name is "no usable name", exactly like an empty
+  // one — so the DISTINCT ON falls back to an older usable receipt and the
+  // flat `merchant_name` fallback still applies. The over-match guard sits
+  // beside them: on unchanged code it passes trivially, which is the point.
+
+  it('an address-shaped seller name names nobody: full, 0X, and Haven’s short form', async () => {
+    const full = '0xAbCdEf0123456789aBcDeF0123456789AbCdEf01'
+    const cases: Array<[string, string]> = [
+      // full, mixed case
+      ['e1', full],
+      // the uppercase 0X prefix a merchant may write
+      ['e2', `0X${full.slice(2)}`],
+      // Haven's own short form (`truncate`, frontend/src/lib/format.ts)
+      ['e3', '0xA873…DD35'],
+      ['e4', '0xa873...dd35'],
+      ['e5', '0xA873 … DD35'],
+      // a zero-width character inside a full address: the check runs on the
+      // CLEANED value, so the strip cannot be used to slip past it
+      ['e6', `0x${full.slice(2, 20)}\u200b${full.slice(20)}`],
+    ]
+
+    for (const [seed, name] of cases) {
+      const { userId, merchant } = await seedMerchantWithReceipt(seed, { saljare: { name } })
+      const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+      expect(names.has(merchant.toLowerCase()), name).toBe(false)
+    }
+  })
+
+  it('Haven’s own fallback words name nobody: any case, extra spaces, and the templated prefixes', async () => {
+    const cases: Array<[string, string]> = [
+      ['f1', 'new recipient'],
+      ['f2', '  UNKNOWN   RECIPIENT  '],
+      ['f3', 'DEPOSIT'],
+      ['f4', 'agent   payment'],
+      ['f5', 'Machine Payment'],
+      ['f6', 'moved between your accounts'],
+      ['f7', 'NONE IN THIS RANGE'],
+      // the frontend's templated fallbacks
+      ['f8', 'From Main account'],
+      ['f9', 'returned from Research assistant'],
+    ]
+
+    for (const [seed, name] of cases) {
+      const { userId, merchant } = await seedMerchantWithReceipt(seed, { saljare: { name } })
+      const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+      expect(names.has(merchant.toLowerCase()), name).toBe(false)
+    }
+  })
+
+  it('a refused name falls back like an empty one: an older usable receipt on the same address wins', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 960)
+    const agentId = await seedAgent(userId, accountId)
+    const merchant = `0x${'fa'.padStart(40, '0')}`
+    const receiptAt = async (name: unknown, hoursAgo: number) => {
+      const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: merchant })
+      await seedReceipt({ userId, agentId, paymentId, merchant, inlineJson: { saljare: { name } } })
+      await db.query(
+        `UPDATE machine_payment_evidence SET created_at = NOW() - ($2 * interval '1 hour') WHERE payment_intent_id = $1`,
+        [paymentId, hoursAgo],
+      )
+    }
+    await receiptAt('Old Name AB', 3)
+    // A newer receipt whose seller name is an address names nobody.
+    await receiptAt('0xA873…DD35', 2)
+    expect((await listReceiptMerchantNamesForUser(userId, [merchant])).get(merchant)).toBe('Old Name AB')
+    // A newer receipt whose seller name is one of Haven's own words names nobody either.
+    await receiptAt('Deposit', 1)
+    expect((await listReceiptMerchantNamesForUser(userId, [merchant])).get(merchant)).toBe('Old Name AB')
+  })
+
+  it('a refused saljare.name falls back to the flat merchant_name on the same receipt', async () => {
+    const address = await seedMerchantWithReceipt('fb', {
+      saljare: { name: '0xA873…DD35' },
+      merchant_name: 'Acme Flat',
+    })
+    expect((await listReceiptMerchantNamesForUser(address.userId, [address.merchant])).get(address.merchant.toLowerCase())).toBe(
+      'Acme Flat',
+    )
+
+    const fallbackWord = await seedMerchantWithReceipt('fc', {
+      saljare: { name: 'Agent payment' },
+      merchant_name: 'Acme Flat',
+    })
+    expect(
+      (await listReceiptMerchantNamesForUser(fallbackWord.userId, [fallbackWord.merchant])).get(
+        fallbackWord.merchant.toLowerCase(),
+      ),
+    ).toBe('Acme Flat')
+  })
+
+  it('over-match guard: real names that merely resemble a refusal still name the seller', async () => {
+    const cases: Array<[string, string]> = [
+      ['fd', 'Deposit Partners AB'],
+      ['fe', '0x Labs'],
+      ['ff', 'Fromage AB'],
+      ['f0', 'Deposits AB'],
+      ['e7', 'Returned fromage AB'],
+    ]
+
+    for (const [seed, name] of cases) {
+      const { userId, merchant } = await seedMerchantWithReceipt(seed, { saljare: { name } })
+      const names = await listReceiptMerchantNamesForUser(userId, [merchant])
+      expect(names.get(merchant.toLowerCase()), name).toBe(name)
+    }
+  })
+
+  it('the SQL full-address pattern is built from core ETH_ADDRESS_RE and agrees with it', () => {
+    // Built from the core source, so the two cannot drift (#4932).
+    expect(RECEIPT_NAME_FULL_ADDRESS_PATTERN).toBe(ETH_ADDRESS_RE.source.replace('^0x', '^0[xX]'))
+
+    const sqlPattern = new RegExp(RECEIPT_NAME_FULL_ADDRESS_PATTERN)
+    const addresses = [
+      '0xAbCdEf0123456789aBcDeF0123456789AbCdEf01',
+      '0xabcdef0123456789abcdef0123456789abcdef01',
+      '0xABCDEF0123456789ABCDEF0123456789ABCDEF01',
+      '0xabcdef0123456789abcdef0123456789abcdef0', // 39 hex
+      '0xabcdef0123456789abcdef0123456789abcdef012', // 41 hex
+      '0xA873…DD35',
+      'Deposit Partners AB',
+    ]
+    for (const address of addresses) {
+      expect(sqlPattern.test(address), address).toBe(ETH_ADDRESS_RE.test(address))
+    }
+
+    // The one deliberate difference: the uppercase `0X` prefix.
+    expect(sqlPattern.test(`0X${'a'.repeat(40)}`)).toBe(true)
+    expect(ETH_ADDRESS_RE.test(`0X${'a'.repeat(40)}`)).toBe(false)
   })
 
   // ── Balance ───────────────────────────────────────────────────────────────

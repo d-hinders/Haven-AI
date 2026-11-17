@@ -1290,7 +1290,7 @@ export async function loadReceiptUnderlagSource(
 //
 // The hash is only ONE of the render inputs that can move between attempts;
 // #4824 pins the rest (the merchant receipt, the delivery reference, the
-// purchase group and the catalog country) at the payment's first render, in
+// purchase group and the catalog country, and since #4877 the product sources) at the payment's first render, in
 // the same JSONB, so a retry reproduces the first attempt's bytes whichever
 // of them was written in between. See the underlag-input pin below.
 //
@@ -1325,10 +1325,11 @@ export async function pinAccountingBookedTx(
 
 // ── Underlag-input pin (#4824) ────────────────────────────────────────────────
 //
-// The underlag is rendered from live reads on every attempt. Four of those
+// The underlag is rendered from live reads on every attempt. Several of those
 // reads can be written AFTER a payment's first render — the merchant receipt
 // (the seller block AND the transaction kind), the delivery reference, the
-// purchase group / parent receipt, and the catalog country. Accounted's
+// purchase group / parent receipt, the catalog country, and (#4877) the
+// catalog name and quote description. Accounted's
 // idempotency key derives from the paymentId alone, so a retry that renders
 // different bytes is refused as `IDEMPOTENCY_KEY_REUSE` and the row ends
 // `skipped` although the document is already in the customer's store.

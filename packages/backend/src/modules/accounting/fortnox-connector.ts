@@ -23,7 +23,7 @@ import type {
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
 import { RECEIPT_STATEMENT_LABEL, VAT_NOT_STATED, asciiFold, receiptStatementFrom } from './receipt-statement.js'
-import { PRODUCT_SOURCE_LABEL, presentSources } from './product-sources.js'
+import { PRODUCT_SOURCE_LABEL, printableSources } from './product-sources.js'
 import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 
@@ -174,9 +174,9 @@ export function feedDescription(tx: FeedTransaction): string {
   })()
   // #3767: the booked hash — the verified merchant settlement when one is
   // recorded (or pinned at the first claim), else the funding hash labelled
-  // as funding. Placed BEFORE `Resource` on purpose: the 512-character slice
-  // cuts from the end, and the worst-case comment (455 chars today) would
-  // otherwise eat a hash appended after `Haven payment`.
+  // as funding. Placed BEFORE `Resource` on purpose: the parts after it are
+  // the ones the budget below gives up, and the final fallback's
+  // 512-character slice cuts from the end.
   const bookedTx = (() => {
     if (!tx.txHash) return null
     return tx.txHashIsFunding ? `Tx ${tx.txHash} (funding leg).` : `Tx ${tx.txHash}.`
@@ -221,7 +221,7 @@ export function feedDescription(tx: FeedTransaction): string {
     if (sourceCount > 0 && receipt != null && fitted !== receipt) return null
     // A protocol payment always has a receipt part (at least "VAT not
     // stated"), and its budget above already counts the kept sources.
-    return [...head, fitted, ...kept, ...tail].filter(Boolean).join(' ')
+    return [...head, fitted, ...kept, ...tail].filter(Boolean).join(' ').slice(0, 512)
   }
   for (let count = sources.length; count >= 0; count -= 1) {
     const comment = build(true, count) ?? build(false, count)
@@ -250,13 +250,12 @@ function capText(text: string, max: number): string {
 function fortnoxSourceParts(tx: FeedTransaction): string[] {
   if (!tx.resourceUrl || !tx.productSources) return []
   const receiptStatesLines = receiptStatementFrom(tx.merchantReceipt?.inlineJson ?? null) !== null
-  return presentSources(tx.productSources).flatMap((source, i) => {
+  return printableSources(tx.productSources).map((source, i) => {
     const text = fortnoxSafeText(asciiFold(source.text))
-    if (text === '') return []
     const isProductLine = !receiptStatesLines && i === 0
     const label = fortnoxSafeText(PRODUCT_SOURCE_LABEL[source.key].replace("merchant's", 'merchants'))
     const body = capText(text, isProductLine ? FORTNOX_PRODUCT_LINE_MAX : FORTNOX_EXTRA_SOURCE_MAX)
-    return [`${isProductLine ? 'Product' : 'Also stated'} (${label}) ${body}.`]
+    return `${isProductLine ? 'Product' : 'Also stated'} (${label}) ${body}.`
   })
 }
 

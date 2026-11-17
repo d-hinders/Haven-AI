@@ -479,7 +479,8 @@ never labelled "stated by the merchant" (owner decision 3 of 2026-11-17,
 The Fortnox `Comments` field carries the same label, the stated VAT, the
 merchant's treatment and the product names. It is folded to the characters
 the field accepts, so "merchants receipt" and "25 pct". Only the product
-names are ever cut to fit the 512 characters. If even the label and the VAT
+names are ever cut to fit the 512 characters (product sources, below, are
+dropped whole rather than cut). If even the label and the VAT
 do not fit, the `Resource` host gives up its room first. If they still do not
 fit, the receipt part is left out entirely: the label and the VAT are never
 partly cut. The booked hash and `Haven payment <id>` are never cut. A
@@ -504,25 +505,38 @@ decisions 4 and 5 (2026-11-17, #4874):
   receipt lines, every source is `Also stated` — none is ever merged into the
   receipt's lines, and VAT stays the merchant's only (`not stated by the
   merchant` with no lines). With no source, the document is unchanged.
-- **Provenance.** The catalog line comes only from `merchant_catalog`; the
-  `catalogName` a caller sends on `POST /x402/authorize` is unverified and is
-  never read. The quote description is the merchant's challenge text as the
+- **Provenance.** The catalog line comes only from `merchant_catalog`, and
+  only when exactly one live `operator` row has the payment's resource URL:
+  one MCP endpoint can carry many products, and a `bazaar` row holds a
+  seller's words, not Haven's. Otherwise the ladder falls to the next source.
+  The `catalogName` a caller sends on `POST /x402/authorize` is unverified and
+  is never read. The quote description is the merchant's challenge text as the
   caller relayed it, so its label says "as reported by the agent".
 - **Cleaning and caps** (`product-sources.ts`). Each source has controls,
   bidirectional marks, the zero-width space and invisible operators stripped,
   whitespace collapsed, and is bounded in code points — catalog name 120,
   quote description 300, delivery reference 512 — cut with `…`. Then folded to
-  ASCII before it is printed.
+  ASCII before it is printed; a source with no letter or digit left once
+  folded is skipped, by both renderers alike.
+- **On the page.** The product line takes up to two rows and every
+  `Also stated` source one row (both cut with `..`), each with its label row.
+  The block takes only the rows the single page has left, so the settlement
+  and authorization sections always stay on it; sources that do not fit are
+  dropped whole, the agent's words first.
 - **Pinned.** The three sources join the #4824 first-render pin
-  (`productSources`). A source written between attempts does not change a
-  retry's bytes, and a pin written before #4877 renders none.
+  (`productSources`, re-cleaned when read). A source written between
+  attempts does not change a retry's bytes, and a pin written before #4877
+  renders none and keeps the 6-line receipt cap it was first rendered under
+  (`UNDERLAG_MAX_RECEIPT_LINES_BEFORE_4877`).
 - **Protocol payments only.** A direct payment has no catalog entry or quote
   (the entry query's direct branch emits typed NULLs) and shows none.
 
 In the Fortnox comment each source is its own part after the receipt part,
 `Product (<label>) <text>.` or `Also stated (<label>) <text>.`, the label
-folded the same way (`merchants`). The product line is capped at 120
-characters and every other source at 80, cut at a word with `..`. When the
+folded the same way (`merchants`). The product line is capped at
+`FORTNOX_PRODUCT_LINE_MAX` (120) characters and every other source at
+`FORTNOX_EXTRA_SOURCE_MAX` (80), cut with `..` — at a word when one ends past
+half the cap. When the
 comment would pass 512 the sources are dropped in reverse ladder order —
 delivery reference, quote description, catalog name — each count tried with
 the `Resource` host before without it, and a source never costs the receipt's
@@ -794,11 +808,12 @@ fails the push without attempting it, so the retry re-runs the whole claim.
 **The underlag-input pin (#4824).** The booked hash is only one of the render
 inputs that can move between attempts. The merchant receipt (the seller block,
 the transaction kind, and since #4876 the receipt lines and VAT), the delivery reference, the purchase group /
-parent receipt and the catalog country are all live reads too, and any of them
+parent receipt and the catalog country are all live reads too (and since #4877 the
+product sources: catalog name and quote description), and any of them
 written after a payment's first render changed the bytes a retry uploaded —
 which Accounted refused as `IDEMPOTENCY_KEY_REUSE`, leaving the row `skipped`
 although the document was already in the customer's store. The connector now
-writes those four inputs to
+writes those inputs to
 `payment_intents.machine_metadata.accounting_underlag_inputs`
 (`PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL`, first-writer-wins) immediately before
 the first upload request, and `loadReceiptUnderlag` renders every retry from
@@ -1191,13 +1206,14 @@ sweep reads the field, `retry-sweep.ts`). Oversize underlag (> 10 MB) is
 gated locally BEFORE any request.
 
 **The render inputs are pinned at the first render (#4824).** The underlag is
-rendered from live reads, and four of them can be written after a payment's
+rendered from live reads, and several of them can be written after a payment's
 first render: the merchant receipt (the seller block, the transaction kind,
 and since #4876 the receipt lines and VAT), the delivery reference, the purchase group / parent receipt, and the
-catalog country. Accounted's idempotency key derives from the payment id
+catalog country (and since #4877 the catalog name and quote description).
+Accounted's idempotency key derives from the payment id
 alone, so a retry that rendered different bytes was refused as
 `IDEMPOTENCY_KEY_REUSE` and the row ended `skipped` although the document was
-already in the customer's store. `pinUnderlagInputs` now freezes those four
+already in the customer's store. `pinUnderlagInputs` now freezes those
 inputs in `payment_intents.machine_metadata->'accounting_underlag_inputs'`
 before the first upload request (first-writer-wins, the #3767 storage shape),
 and `loadReceiptUnderlag` renders every retry from the pin. A first attempt

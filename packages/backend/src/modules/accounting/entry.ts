@@ -492,7 +492,7 @@ const ENTRY_SOURCE_SQL = `
     mc.country AS country,
     -- #4877: the catalog's own name (Haven's data) and the quote description
     -- the authorize stored (#3610) — two of the product sources.
-    mc.name AS catalog_name,
+    mcn.name AS catalog_name,
     pi.machine_metadata->>'description' AS quote_description,
     mao.bas_account AS override_account,
     pf.fee_sek AS fee_sek,
@@ -507,10 +507,19 @@ const ENTRY_SOURCE_SQL = `
   FROM machine_payment_evidence mpe
   LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
   LEFT JOIN LATERAL (
-    SELECT category, country, name FROM merchant_catalog
+    SELECT category, country FROM merchant_catalog
     WHERE resource_url = mpe.resource_url AND status != 'delisted'
     LIMIT 1
   ) mc ON TRUE
+  -- #4877: the "Haven catalog" product name, only when it is unambiguous and
+  -- Haven's own. One MCP endpoint can carry many products (one row per tool
+  -- and arguments), and a bazaar row holds a seller's words, not Haven's: the
+  -- name is read only when exactly one live operator row has this resource
+  -- URL, otherwise the ladder falls to the next source.
+  LEFT JOIN LATERAL (
+    SELECT CASE WHEN count(*) = 1 THEN min(name) END AS name FROM merchant_catalog
+    WHERE resource_url = mpe.resource_url AND status != 'delisted' AND source = 'operator'
+  ) mcn ON TRUE
   LEFT JOIN merchant_account_overrides mao
     ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
   LEFT JOIN payment_fees pf

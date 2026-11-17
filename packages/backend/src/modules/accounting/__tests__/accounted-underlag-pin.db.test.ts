@@ -1,17 +1,18 @@
 /**
  * #4824 on the REAL database: a retry of the same payment, after a lost
  * answer, ends `pushed` with ONE underlag at the provider — whichever of the
- * four mutable render sources was written in between.
+ * mutable render sources was written in between.
  *
  * The measured shape: the first upload succeeds, its answer is lost, something
  * the underlag is rendered from changes, and the retry is refused by the
- * provider as a reuse of the idempotency key with different bytes. The four
+ * provider as a reuse of the idempotency key with different bytes. The
  * sources that can move after a payment's first render are:
  *
  *   1. the merchant receipt — the seller block AND the transaction kind;
  *   2. the delivery reference;
  *   3. the purchase group and parent receipt;
- *   4. the catalog country.
+ *   4. the catalog country;
+ *   5. (#4877) the product sources — catalog name, quote description, delivery reference.
  *
  * The remedy (owner decision 2026-11-12) pins the INPUTS at the payment's
  * first render, in `payment_intents.machine_metadata`, and renders every retry
@@ -554,6 +555,41 @@ describeDb('Accounted underlag-input pin (#4824)', () => {
     expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
     const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
     expect(pdf).not.toContain('Forged Catalog')
+    expect(pdf).not.toContain('Haven catalog')
+  })
+
+  /** A further catalog row on the same resource URL — one MCP endpoint, another product. */
+  async function seedCatalogRow(name: string, over: { toolName?: string; source?: string } = {}): Promise<void> {
+    const merchant = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name) VALUES ($1, $2) RETURNING id`,
+      [`catalog-row-${++seq}`, name],
+    )
+    await db.query(
+      `INSERT INTO merchant_catalog (name, description, category, resource_url, rail, protocol, tool_name, source, merchant_id)
+       VALUES ($1, 'another product', 'software', $2, 'x402', 'mcp', $3, $4, $5)`,
+      [name, RESOURCE_URL, over.toolName ?? `tool-${++seq}`, over.source ?? 'operator', merchant.rows[0].id],
+    )
+  }
+
+  it('#4877 — two live catalog rows on one resource URL: no "Haven catalog" line, the next source is the product', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await writeAllSources(seeded)
+    await seedCatalogRow('CloudNest 1 TB')
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('Haven catalog')
+    expect(pdf).not.toContain('CloudNest 1 TB')
+    expect(pdf).toContain('Product        A VPN month, 5 devices')
+  })
+
+  it('#4877 — a bazaar (seller-listed) catalog row is never presented as the Haven catalog', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await seedCatalogRow('Seller Words VPN', { source: 'bazaar' })
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('Seller Words VPN')
     expect(pdf).not.toContain('Haven catalog')
   })
 })

@@ -118,6 +118,44 @@ describe('the product-source ladder on the underlag (#4877)', () => {
     expect(s).not.toContain('Also stated')
   })
 
+  it('the source block takes only the rows the page has left, dropping the agent\'s words first', () => {
+    const big = `${'9'.repeat(30)}.${'9'.repeat(30)}`
+    const full = statement({
+      ...se25,
+      rader: Array.from({ length: 50 }, () => ({
+        beskrivning: 'y'.repeat(300), antal: 1, apris_exkl_moms: big, moms_procent: 25, moms_belopp: big, totalt_inkl_moms: big,
+      })),
+    })
+    const s = render({
+      receiptStatement: full,
+      productSources: ALL,
+      resourceUrl: `https://${'sub.'.repeat(40)}merchant.example/${'route/'.repeat(20)}`,
+      description: `api.merchant.example - ${'route/'.repeat(25)}x (purchase)`,
+      fundingTxHash: `0x${'ee'.repeat(32)}`,
+      ledgerCurrency: 'EUR',
+    })
+    expect((s.match(/\) Tj T\*/g) ?? []).length).toBeLessThanOrEqual(UNDERLAG_MAX_PAGE_LINES)
+    expect(s).toContain(`Also stated    ${ALL.catalogName}`)
+    expect(s).not.toContain(ALL.deliveryReference)
+    expect(s).toContain('settlement is proven only by the on-chain transaction above.')
+  })
+
+  it('a source that folds to nothing is skipped, so the next one is the product line', () => {
+    const s = render({ receiptStatement: null, productSources: { ...ALL, catalogName: '日本語' } })
+    expect(s).toContain(`Product        ${ALL.quoteDescription}`)
+    expect(s).not.toContain('(Haven catalog)')
+  })
+
+  it('a pin from before #4877 keeps the 6-line cap it was first rendered under', () => {
+    const seven = statement({ ...se25, rader: Array.from({ length: 7 }, () => se25.rader[0]) })
+    const before = render({ receiptStatement: seven, productSources: undefined })
+    expect(before).toContain('Line 6 ')
+    expect(before).toContain('...and 1 more lines')
+    const after = render({ receiptStatement: seven, productSources: NO_PRODUCT_SOURCES })
+    expect(after).not.toContain('Line 6 ')
+    expect(after).toContain('...and 2 more lines')
+  })
+
   it('a pin from before #4877 (no productSources) renders none, byte-identical', () => {
     const before = underlagFromData(DATA).pdf
     expect(underlagFromData({ ...DATA, productSources: undefined }).pdf.equals(before)).toBe(true)
@@ -142,10 +180,16 @@ describe('the product-source ladder on the underlag (#4877)', () => {
       quoteDescription: 'q'.repeat(PRODUCT_SOURCE_MAX.quoteDescription),
       deliveryReference: 'd'.repeat(PRODUCT_SOURCE_MAX.deliveryReference),
     })
-    for (const receiptStatement of [statement(many), null]) {
+    // `valuta: 'USDC'` with a total that differs, so the `Total check` row
+    // renders too; a long resource URL and description wrap the header.
+    const differs = checkedReceiptStatement({ ...many, valuta: 'USDC' }, { token: 'USDC', amountAtomic: '500', chainId: 84532 })!
+    expect(differs.totalCheck).toBe('differs')
+    for (const receiptStatement of [statement(many), differs, null]) {
       const s = render({
         receiptStatement,
         productSources: maxed,
+        resourceUrl: `https://${'sub.'.repeat(30)}merchant.example/paid/${'route/'.repeat(10)}`,
+        description: `api.merchant.example - ${'route/'.repeat(25)}x (purchase)`,
         fundingTxHash: `0x${'ee'.repeat(32)}`,
         ledgerCurrency: 'EUR',
         purchaseGroupId: 'group-1',
@@ -153,6 +197,7 @@ describe('the product-source ladder on the underlag (#4877)', () => {
       })
       expect((s.match(/\) Tj T\*/g) ?? []).length).toBeLessThanOrEqual(UNDERLAG_MAX_PAGE_LINES)
       expect(s).toContain('Signature      ')
+      expect(s).toContain('settlement is proven only by the on-chain transaction above.')
     }
   })
 })
@@ -180,6 +225,12 @@ describe('the product sources in the Fortnox comment (#4877)', () => {
     for (const productSources of [NO_PRODUCT_SOURCES, ALL, only('deliveryReference')]) {
       expect(feedDescription(tx({ productSources }))).toContain(' merchant.example - vpn (purchase). ')
     }
+  })
+
+  it('a source that folds to nothing is skipped here too, so both documents name the same product', () => {
+    const d = feedDescription(tx({ productSources: { ...ALL, catalogName: '日本語' } }))
+    expect(d).toContain('Product (In the merchants price quote, as reported by the agent) Encrypted cloud storage')
+    expect(d).not.toContain('Haven catalog')
   })
 
   it('a direct payment carries no source', () => {

@@ -22,6 +22,8 @@
  * receipt lines, and VAT is only ever the merchant's stated VAT.
  */
 
+import { asciiFold } from './receipt-statement.js'
+
 export interface ProductSources {
   catalogName: string | null
   quoteDescription: string | null
@@ -79,4 +81,14 @@ export function productSourcesFrom(raw: {
 /** The sources present, in ladder order. */
 export function presentSources(sources: ProductSources): Array<{ key: ProductSourceKey; text: string }> {
   return PRODUCT_SOURCE_ORDER.flatMap((key) => (sources[key] ? [{ key, text: sources[key]! }] : []))
+}
+
+/**
+ * The sources a document can print: present, and with a letter or digit left
+ * once folded to ASCII. A source that folds to nothing (an all-CJK name) is
+ * skipped by every renderer alike, so the underlag and the Fortnox comment
+ * agree on which source is the product line.
+ */
+export function printableSources(sources: ProductSources): Array<{ key: ProductSourceKey; text: string }> {
+  return presentSources(sources).filter((s) => /[A-Za-z0-9]/.test(asciiFold(s.text)))
 }

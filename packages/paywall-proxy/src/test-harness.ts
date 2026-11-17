@@ -10,11 +10,13 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
+import { createSIWxPayload, encodeSIWxHeader, type CompleteSIWxInfo } from '@x402/extensions/sign-in-with-x'
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse, VerifyResponse } from '@x402/core/types'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import type { Address, Hex } from 'viem'
 import type { AuthorizationOutcome, CdpChainReader, CdpFacilitator } from '@haven_ai/merchant-payments'
 import { startProxy, type RunningProxy, type StartOverrides } from './main.js'
+import type { SiwxChallenge } from './siwx.js'
 
 export const PAY_TO = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' as Address
 export const UPSTREAM_KEY = 'sk-upstream-SECRET-0123456789'
@@ -231,6 +233,8 @@ export async function startHarness(options: {
     },
     settleResolveMs: 40,
     settlePollMs: 5,
+    // Every test calls from 127.0.0.1: the per-IP limits are raised here and driven at their real values in limits tests.
+    limits: { unpaidBurst: 10_000, unpaidPerMinute: 600_000, unpaidConcurrentPerIp: 10_000, upstreamSlotWaitMs: 200 },
     ...options.overrides,
     ...overrides,
   })
@@ -256,12 +260,24 @@ export interface Buyer {
   address: Address
   /** Fetch a challenge, then sign a payment for it. */
   pay(h: Pick<Harness, 'base'>, path: string, init: RequestInit & { amountOverride?: string; validBeforeOffset?: number; resourceUrl?: string; omitResource?: boolean }): Promise<{ header: string; payload: PaymentPayload; challenge: PaymentRequired }>
+  /**
+   * Answer the proxy's SIGN-IN-WITH-X challenge with the payer key, through the
+   * reference client (`@x402/extensions`), which Haven's signer matches byte
+   * for byte.
+   */
+  signIn(challenge: SiwxChallenge, url: string): Promise<string>
+}
+
+export async function signInAs(account: ReturnType<typeof privateKeyToAccount>, challenge: SiwxChallenge, url: string): Promise<string> {
+  const info = { ...challenge.info, chainId: challenge.supportedChains[0]!.chainId, type: 'eip191' } as CompleteSIWxInfo
+  return encodeSIWxHeader(await createSIWxPayload(info, account, url))
 }
 
 export function newBuyer(): Buyer {
   const account = privateKeyToAccount(generatePrivateKey())
   return {
     address: account.address,
+    signIn: (challenge, url) => signInAs(account, challenge, url),
     async pay(h, path, init) {
       const { amountOverride, validBeforeOffset, resourceUrl, omitResource, ...fetchInit } = init
       const unpaid = await fetch(`${h.base}${path}`, fetchInit)

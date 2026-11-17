@@ -31,8 +31,17 @@ const { calls, repo, accounting } = vi.hoisted(() => {
   }
 })
 
-vi.mock('../../../infra/repositories/machine-payments.js', () => repo)
-vi.mock('../../accounting/index.js', () => accounting)
+vi.mock('../../../infra/repositories/machine-payments.js', () => ({
+  findEvidenceAnchorForAgent: repo.findEvidenceAnchorForAgent,
+  insertMerchantReceiptOnce: repo.insertMerchantReceiptOnce,
+  getMerchantReceiptRow: repo.getMerchantReceiptRow,
+}))
+vi.mock('../../accounting/index.js', () => ({
+  lateAttachMerchantReceipt: accounting.lateAttachMerchantReceipt,
+  lateAttachAccountedMerchantReceipt: accounting.lateAttachAccountedMerchantReceipt,
+  lateAttachIgdrasilMerchantReceipt: accounting.lateAttachIgdrasilMerchantReceipt,
+  feedSettledPaymentBestEffort: accounting.feedSettledPaymentBestEffort,
+}))
 
 const { handleMerchantReceiptCapture } = await import('../merchant-receipt.js')
 

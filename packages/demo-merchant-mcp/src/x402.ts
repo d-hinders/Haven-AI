@@ -30,6 +30,7 @@ import {
 } from '@haven_ai/sdk'
 import {
   AuthorizationAlreadyUsedError,
+  CHECKOUT_DETAILS_EXTENSION,
   ERC7710_TRANSFER_METHOD,
   MAX_TIMEOUT_SECONDS,
   NONCE_RE,
@@ -41,6 +42,7 @@ import {
   assertResourceMatches,
   assertSettlementConsistent,
   buildSettledPayment as buildCoreSettledPayment,
+  checkoutDetailsExtensionEntry,
   clampReason,
   createInMemoryConsumedPaymentStore,
   createSettleOnce,
@@ -54,6 +56,7 @@ import {
   settleThroughCdp,
   verifyAuthorization,
   verifyCdpAuthorization,
+  type CheckoutDetailsRequest,
   type ConsumedPaymentStore,
   type DecisionReasonCode,
   type Eip3009Authorization,
@@ -150,11 +153,23 @@ export interface PassportVerifierConfig {
  * a sweep. Set both env values on a service that is not mid-quote; the
  * operator step is named in `docs/operations/railway-services.md`.
  */
-export function demoMerchantExtensions(passport?: PassportVerifierConfig | null): Record<string, unknown> {
-  if (!passport) return DEMO_MERCHANT_EXTENSIONS
+export function demoMerchantExtensions(
+  passport?: PassportVerifierConfig | null,
+  checkoutDetails?: CheckoutDetailsRequest | null,
+): Record<string, unknown> {
+  const base: Record<string, unknown> = passport
+    ? {
+        ...DEMO_MERCHANT_EXTENSIONS,
+        [HAVEN_PASSPORT_EXTENSION]: { info: {} },
+      }
+    : DEMO_MERCHANT_EXTENSIONS
+  // #4873: a product that asks for checkout details advertises the request in
+  // its challenge. Every other product's challenge is unchanged, and the
+  // client echoes this entry verbatim like every other extension (#2361).
+  if (!checkoutDetails) return base
   return {
-    ...DEMO_MERCHANT_EXTENSIONS,
-    [HAVEN_PASSPORT_EXTENSION]: { info: {} },
+    ...base,
+    [CHECKOUT_DETAILS_EXTENSION]: checkoutDetailsExtensionEntry(checkoutDetails),
   }
 }
 const HEX_BYTES_RE = /^0x(?:[0-9a-fA-F]{2})+$/
@@ -649,6 +664,11 @@ export interface X402PaymentProcessor {
      * IGNORED in the 402 it actually served. The 402 is the one that decides.
      */
     settlementMethods?: readonly SettlementMethod[]
+    /**
+     * #4873: the product's checkout-details request, when it asks for one.
+     * Absent, the challenge advertises no `haven-checkout-details` entry.
+     */
+    checkoutDetails?: CheckoutDetailsRequest
   }): PaymentRequired
   paymentRequiredHeader(paymentRequired: PaymentRequired): string
   paymentResponseHeader(response: SettleResponse): string
@@ -1307,6 +1327,11 @@ export function buildPaymentRequired(params: {
   facilitatorAddresses?: Address[]
   /** #4723: when set, the challenge also advertises `haven-passport`. */
   passport?: PassportVerifierConfig | null
+  /**
+   * #4873: when set, the challenge also advertises `haven-checkout-details`
+   * with this request. Absent, the challenge is unchanged.
+   */
+  checkoutDetails?: CheckoutDetailsRequest | null
 }): PaymentRequired {
   const methods = orderedSettlementMethods(params.settlementMethod, params.settlementMethods)
   const eip3009Option: PaymentRequirements = {
@@ -1346,7 +1371,7 @@ export function buildPaymentRequired(params: {
     // defects reached mainnet (#2288's header name, #2360's missing echoes).
     // Kept deliberately small: the whole challenge rides an HTTP header, and
     // the echo doubles it back.
-    extensions: demoMerchantExtensions(params.passport),
+    extensions: demoMerchantExtensions(params.passport, params.checkoutDetails),
     error: 'Payment required',
   }
 }

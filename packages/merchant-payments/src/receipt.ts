@@ -1,4 +1,5 @@
 import { vatTreatmentFor, type AcceptedTaxDeclaration, type VatRule, type VatTreatment } from './tax-declaration.js'
+import type { AcceptedCheckoutDetails, CheckoutAddress } from './checkout-details.js'
 
 // The receipt (`x-receipt-json`) and its rendered text, shared by the demo
 // merchant and the paywall proxy (#4890, #4913; docs/architecture/12-merchant-kit.md §11).
@@ -87,6 +88,12 @@ export interface ReceiptParams {
    * never the price.
    */
   taxDeclaration?: AcceptedTaxDeclaration | null
+  /**
+   * #4873: the checkout details the paid request carried, or absent/null when
+   * it carried none (or carried one the merchant could not read). Display
+   * only: it adds fields to the buyer block and never changes the price.
+   */
+  checkoutDetails?: AcceptedCheckoutDetails | null
   /** The wire hash; rendered only when `settlement === 'settled_onchain'`. */
   txHash: string
   /** #2969: explicit settlement truth. */
@@ -123,6 +130,18 @@ export interface InvoiceJson {
      * so this block shows only what it does carry.
      */
     deklaration?: BuyerDeclaration
+    /**
+     * #4873: present ONLY when the paid request carried checkout details.
+     *
+     * The names are the wire names `docs/architecture/13-checkout-details.md`
+     * §2 fixes (`receipt_email`, `billing_address`, `shipping_address`) and no
+     * slice renames them, so a merchant that later adopts the compliance-fields
+     * extension reads the same names off this receipt. The address shape is
+     * that extension's `buyer.address` shape (EN 16931 BG-8).
+     */
+    receipt_email?: string
+    billing_address?: CheckoutAddress
+    shipping_address?: CheckoutAddress
   }
   rader: InvoiceRow[]
   belopp_exkl_moms: string
@@ -273,6 +292,8 @@ export function buildReceipt(params: ReceiptParams): InvoiceJson {
   // #4855: the treatment is display-only and never changes the price.
   const declaration = params.taxDeclaration ?? null
   const treatment = vatTreatmentFor(declaration, params.vatRule)
+  // #4873: display-only too, and absent when the request carried none.
+  const checkout = params.checkoutDetails ?? null
 
   const totalInclMoms = params.line.priceAtomic
   const { exclVat: exklMoms, vat: momsBelopp, vatPercent: momsProcent } = vatAmountsAtomic(totalInclMoms, treatment)
@@ -303,6 +324,11 @@ export function buildReceipt(params: ReceiptParams): InvoiceJson {
       // #4855: absent when there is no accepted declaration, so a receipt
       // without one keeps its exact shape.
       ...(declaration ? { deklaration: buyerDeclarationBlock(declaration) } : {}),
+      // #4873: absent when the paid request carried no checkout details, so a
+      // receipt without them keeps its exact shape.
+      ...(checkout?.receiptEmail ? { receipt_email: checkout.receiptEmail } : {}),
+      ...(checkout?.billingAddress ? { billing_address: checkout.billingAddress } : {}),
+      ...(checkout?.shippingAddress ? { shipping_address: checkout.shippingAddress } : {}),
     },
     rader: [row],
     belopp_exkl_moms: formatUsdcAtomic(exklMoms),
@@ -377,7 +403,7 @@ SÄLJARE
 
 KÖPARE
   Blockkedjeadress: ${inv.kopare.identifierare}
-${buyerDeclarationLinesSv(inv)}
+${buyerCheckoutLinesSv(inv)}${buyerDeclarationLinesSv(inv)}
 ────────────────────────────────────────────────────────────
   Fakturanummer:   ${inv.fakturanummer}
   Fakturadatum:    ${inv.fakturadatum}
@@ -407,6 +433,42 @@ ${blockchainReferenceSection(inv, 'BLOCKKEDJEREFERENS')}  Status: ${inv.status}
   Frågor: ${supportContact}
 ════════════════════════════════════════════════════════════
 `.trimStart()
+}
+
+/**
+ * #4873: the checkout-details lines, Swedish render. Empty when the paid
+ * request carried none, so every other receipt keeps its exact bytes.
+ */
+function buyerCheckoutLinesSv(inv: InvoiceJson): string {
+  const k = inv.kopare
+  let out = ''
+  if (k.receipt_email) out += `  E-post:           ${k.receipt_email}\n`
+  if (k.billing_address) out += `  Fakturaadress:\n${addressLines(k.billing_address, '    ')}`
+  if (k.shipping_address) out += `  Leveransadress:\n${addressLines(k.shipping_address, '    ')}`
+  return out
+}
+
+/** #4873: the checkout-details lines, English render. Empty when none. */
+function buyerCheckoutLinesEn(inv: InvoiceJson): string {
+  const k = inv.kopare
+  let out = ''
+  if (k.receipt_email) out += `  Email: ${k.receipt_email}\n`
+  if (k.billing_address) out += `  Billing address:\n${addressLines(k.billing_address, '    ')}`
+  if (k.shipping_address) out += `  Shipping address:\n${addressLines(k.shipping_address, '    ')}`
+  return out
+}
+
+/**
+ * #4873: one address, one line per member, in the order §2 documents. An
+ * absent optional member prints nothing; the postal code and the city share a
+ * line, as an address is written.
+ */
+function addressLines(address: CheckoutAddress, indent: string): string {
+  const lines = [address.line1, address.line2, address.line3].filter((line): line is string => Boolean(line))
+  lines.push([address.postCode, address.city].filter((part): part is string => Boolean(part)).join(' '))
+  if (address.subdivision) lines.push(address.subdivision)
+  lines.push(address.country)
+  return lines.map((line) => `${indent}${line}\n`).join('')
 }
 
 /** #4855: the declaration lines, Swedish render. Empty without a declaration. */
@@ -454,7 +516,7 @@ SELLER
 PAYER
   Blockchain address: ${inv.kopare.identifierare}
   Role: ${inv.kopare.roll === 'agent_delegate_account' ? 'agent delegate account (erc7710 delegator) — paid on behalf of an owner treasury account not visible to this merchant' : 'agent delegate address (eip3009)'}
-${buyerDeclarationLinesEn(inv)}
+${buyerCheckoutLinesEn(inv)}${buyerDeclarationLinesEn(inv)}
 ────────────────────────────────────────────────────────────
   Invoice number:  ${inv.fakturanummer}
   Invoice date:    ${inv.fakturadatum}

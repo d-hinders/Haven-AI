@@ -348,6 +348,7 @@ describe('the per-IP limits (§7)', () => {
       for (let i = 0; i < 2; i++) {
         const res = await present(kind === 'local' ? second.header : (i === 0 ? first : second).header)
         expect(res.status).toBe(402)
+        expect((await res.json()).error).toBe(kind === 'local' ? 'payment_mismatch' : 'payment_invalid')
       }
     }
     expect((await fetch(`${h.base}${CHAT_PATH}`, chatRequest())).status).toBe(429)

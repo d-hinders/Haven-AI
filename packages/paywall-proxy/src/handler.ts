@@ -819,6 +819,8 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     } finally {
       // Every earlier exit gives the verify token back: a chain-first read that found the authorization used, or a read that failed.
       verifyPermit.release()
+      // Before any await: a slot granted from here on is given back and sends no settle.
+      watched.held.done = true
     }
 
     try {
@@ -873,7 +875,6 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         }
       }
     } finally {
-      watched.held.done = true
       releaseSlot()
       holders.delete(pay.key)
     }

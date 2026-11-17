@@ -134,9 +134,9 @@ export async function handleMerchantReceiptCapture(
   const result = await captureMerchantReceipt({ paymentId, agentId, url, inlineJson: json })
   if (!result.ok) return { statusCode: result.code, body: { error: result.error } }
   if (result.stored) {
-    // #956 late attach: for x402 the feed has usually ALREADY pushed the
-    // invoice (it fires at funding confirmation; the merchant receipt
-    // arrives at the retry seconds later) — attach retroactively.
+    // #956 late attach: the feed normally waits for this receipt (#4876),
+    // but when the receipt arrives after the wait ran out — or after a push
+    // made before #4876 — the invoice is ALREADY pushed: attach retroactively.
     // Fire-and-forget: capture must never block or fail on feed state.
     // Every destination gets the chance (#3918 added Accounted, #4521
     // Igdrasil): each one returns immediately unless ITS pushed underlag row

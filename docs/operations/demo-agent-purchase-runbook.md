@@ -7,7 +7,7 @@ covers:
   - packages/frontend/src/app/demo/page.tsx
   - packages/frontend/src/lib/demo-md-content.ts
   - packages/frontend/src/lib/demo-gate.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Demo Runbook — Agent Purchase, End to End (incl. Fortnox/SIE)
@@ -112,8 +112,9 @@ inte plånbok" story.
 
 ## Act 4 — The bookkeeping (~2 min)
 
-**A. Fortnox-feeden (the wow):** the feed pushes on settlement (when the
-connection's `auto_feed` is on), or immediately from `/accounting` → **Sync
+**A. Fortnox-feeden (the wow):** the feed pushes a few seconds after the
+purchase, once the merchant's receipt arrives — or two minutes after
+settlement if none does (when the connection's `auto_feed` is on), or immediately from `/accounting` → **Sync
 now** (`POST /accounting/feed/sync`). Not `POST /accounting/fortnox/push`:
 that is the legacy asserting voucher push (410 unless
 `HAVEN_LEGACY_BOOKKEEPING_ENABLED`), not this flow. Open the Fortnox sandbox: the purchase appears as a

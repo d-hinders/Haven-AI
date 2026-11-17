@@ -551,6 +551,28 @@ describe('the reserved merchant-service idempotency namespace (#4895)', () => {
     }
   })
 
+  it('an empty key is still refused by the handler, with the sentence it always had', async () => {
+    // The check moved into `idempotencyKeyRefusal` with the namespace check
+    // (#4895); this pins that the move kept it.
+    const bare = Fastify({ logger: false })
+    await bare.register(fastifyJwt, { secret: 'test-secret' })
+    await bare.register(hybridAccountRoutes, { prefix: '/accounts' })
+    try {
+      const calls = mockDb({})
+      const res = await bare.inject({
+        method: 'POST',
+        url: '/accounts/hybrid',
+        headers: { authorization: `Bearer ${bare.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })}` },
+        payload: { chain_id: 84532, source_account_id: SOURCE_ID, key_id: 'cred-1', idempotency_key: '' },
+      })
+      expect(res.statusCode, res.body).toBe(400)
+      expect(res.json()).toEqual({ error: 'idempotency_key must be a non-empty string' })
+      expect(calls.some(([q]) => /INSERT INTO smart_accounts/.test(q))).toBe(false)
+    } finally {
+      await bare.close()
+    }
+  })
+
   it('still accepts an ordinary key — the refusal is the namespace, not idempotency keys', async () => {
     mockDb({})
     const res = await app.inject({

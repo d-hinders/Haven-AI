@@ -4522,7 +4522,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserAccount',
         summary: 'Unlink an account from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.',
+          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes the oldest remaining account that is not the merchant account; when none remains the user has no default account (#4895). Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key, and for the merchant account (#4895).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
@@ -4546,7 +4546,7 @@ export const openapiSpec = {
         tags: ['Dashboard'],
         operationId: 'setDefaultUserAccount',
         summary: 'Make a linked account the default.',
-        description: 'Exactly one account is default per user; setting one clears the previous.',
+        description: 'At most one account is default per user; setting one clears the previous. The merchant account cannot be made the default (#4895).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
@@ -9833,14 +9833,17 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), or the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED).',
+              'The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED), or the derived address is already registered (error_code MERCHANT_ACCOUNT_ALREADY_REGISTERED).',
           },
           '422': {
             ...errorResponse,
             description:
               'The source account has no passkey to copy (SOURCE_HAS_NO_PASSKEY), the key_id is not one of its passkeys (KEY_NOT_ON_SOURCE), or the per-user per-chain account cap is reached (ACCOUNT_CAP_REACHED).',
           },
-          '502': { ...errorResponse, description: 'The account address could not be derived.' },
+          '502': {
+            ...errorResponse,
+            description: 'The account address could not be derived: error_code MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE.',
+          },
         },
       },
       delete: {
@@ -11638,7 +11641,7 @@ export const openapiSpec = {
           disabled_at: {
             type: ['string', 'null'],
             format: 'date-time',
-            description: 'GET only: when merchant services were last turned off.',
+            description: 'GET only: when merchant services were last turned off. Null when they were never on.',
           },
           merchant_account: {
             type: ['object', 'null'],

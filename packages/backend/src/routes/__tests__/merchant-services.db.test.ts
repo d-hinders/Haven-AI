@@ -277,6 +277,25 @@ describeDb('merchant services on the real database (#4895)', () => {
     expect(defaults.rows).toEqual([{ id: ordinary.rows[0].id }])
   })
 
+  it('turning off records a turn-off time only when the setting was on', async () => {
+    const { userId, sourceId } = await seedUserWithSource([KEY_A])
+
+    // Never on: the row exists afterwards, with no turn-off time.
+    expect((await call(userId, 'DELETE')).statusCode).toBe(200)
+    expect((await call(userId, 'GET')).json()).toMatchObject({ enabled: false, enabled_at: null, disabled_at: null })
+
+    await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })
+    await call(userId, 'DELETE')
+    const first = (await call(userId, 'GET')).json()
+    expect(first.enabled).toBe(false)
+    expect(first.disabled_at).not.toBeNull()
+
+    // Off again while already off: the time does not move.
+    await sleep(20)
+    await call(userId, 'DELETE')
+    expect((await call(userId, 'GET')).json().disabled_at).toBe(first.disabled_at)
+  })
+
   it('refuses a different network with MERCHANT_ACCOUNT_ON_OTHER_NETWORK, never the key-reuse code', async () => {
     const { userId, sourceId } = await seedUserWithSource([KEY_A])
     const on = await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })

@@ -48,9 +48,12 @@
  * Two tabs, or a double click, both reach the "is there already a merchant
  * account?" read. `lockMerchantSetting` takes a row lock on the caller's
  * setting row, so the second request waits for the first to commit and then
- * sees its account. Without the lock both would read "none", both would create
- * an account, and the partial unique index would refuse the second MARK only
- * after a second account row and its salt-counter bump had been written.
+ * sees its account. Without the lock both would read "none" and both would
+ * enter the creation logic. The derived idempotency key would still stop a
+ * second account row — the loser conflicts on the key's unique index and
+ * answers the winner — but only after it had derived an address and drawn a
+ * salt-counter value it then throws away. The lock makes the read above
+ * authoritative, so the second request never reaches the creation logic.
  *
  * ## Money path
  *
@@ -79,6 +82,8 @@ import {
   UNSUPPORTED_NETWORK,
 } from '../modules/accounts/create-additional.js'
 import {
+  MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE,
+  MERCHANT_ACCOUNT_ALREADY_REGISTERED,
   MERCHANT_ACCOUNT_NAME,
   MERCHANT_ACCOUNT_ON_OTHER_NETWORK,
   MERCHANT_SETUP_DETAILS_REQUIRED,
@@ -224,7 +229,15 @@ export default async function merchantServiceRoutes(app: FastifyInstance): Promi
       })
     } catch (err) {
       if (err instanceof MerchantRefusal) return reply.code(err.status).send(err.body)
-      if (err instanceof CreateAdditionalRefusal) return reply.code(err.status).send(err.body)
+      if (err instanceof CreateAdditionalRefusal) {
+        // The creation logic has two refusals with no code of its own: the
+        // address could not be derived (502) and the derived address is
+        // already registered (409). The dialog branches on codes, so this
+        // route names them; `POST /accounts/hybrid` answers them as it did.
+        const fallback =
+          err.status === 502 ? MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE : MERCHANT_ACCOUNT_ALREADY_REGISTERED
+        return reply.code(err.status).send({ ...err.body, error_code: err.body.error_code ?? fallback })
+      }
       throw err
     }
 

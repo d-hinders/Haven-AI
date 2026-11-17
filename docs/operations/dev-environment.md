@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-11-09"
+last-verified: "2026-11-17"
 ---
 
 # Dev environment
@@ -571,10 +571,11 @@ Isolation rules that are non-negotiable for a payments product:
   `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
-  table). #4709's `POST /user/visits` and `GET /dashboard/since` are the latest
-  rows: both live in modules already enforced (`routes/user.ts`,
-  `routes/dashboard.ts`), so the table gained two rows and no module entered
-  shadow. New modules are born ENFORCED with their own `enforcedModules`
+  table). #4709's `POST /user/visits` and `GET /dashboard/since` joined
+  modules already enforced (`routes/user.ts`, `routes/dashboard.ts`), so the
+  table gained two rows and no module entered shadow. #4895's three
+  `/merchant-services` rows are a new module, `routes/merchant-services.ts`,
+  listed from its first commit. New modules are born ENFORCED with their own `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
   prefix) followed the #3167 precedent exactly, and #3329's two new modules
   did the same — the owner-auth `routes/agent-task-budgets.ts` (one GET under

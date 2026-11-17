@@ -21,6 +21,10 @@
  *   and the turn-on request left out the network, the source account or the
  *   passkey id. All three are required the FIRST time and none is needed once
  *   the merchant account exists; `missing` names the absent fields.
+ * - `MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE` / `MERCHANT_ACCOUNT_ALREADY_REGISTERED`
+ *   — the two create-additional refusals that carry no code of their own (the
+ *   address could not be derived; the derived address is already registered).
+ *   The turn-on route names them so the dialog never has to read a sentence.
  * - `MERCHANT_ACCOUNT_UNLINK_REFUSED` — unlinking the merchant account would
  *   delete the account row and its indexed payments with it.
  * - `MERCHANT_ACCOUNT_DEFAULT_REFUSED` — the merchant account cannot be the
@@ -28,6 +32,8 @@
  */
 export const MERCHANT_ACCOUNT_ON_OTHER_NETWORK = 'MERCHANT_ACCOUNT_ON_OTHER_NETWORK'
 export const MERCHANT_SETUP_DETAILS_REQUIRED = 'MERCHANT_SETUP_DETAILS_REQUIRED'
+export const MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE = 'MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE'
+export const MERCHANT_ACCOUNT_ALREADY_REGISTERED = 'MERCHANT_ACCOUNT_ALREADY_REGISTERED'
 export const MERCHANT_ACCOUNT_UNLINK_REFUSED = 'MERCHANT_ACCOUNT_UNLINK_REFUSED'
 export const MERCHANT_ACCOUNT_DEFAULT_REFUSED = 'MERCHANT_ACCOUNT_DEFAULT_REFUSED'
 

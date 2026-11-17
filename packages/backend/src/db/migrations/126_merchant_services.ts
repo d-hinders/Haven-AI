@@ -16,7 +16,8 @@ export const version = '126_merchant_services'
  *   the feature off records `enabled = false` and keeps the row: the account
  *   and its history survive, and turning it back on reuses the same account.
  *   `enabled_at` / `disabled_at` are history, not state — `enabled` is the
- *   state, and the timestamps say when it last moved.
+ *   state. `enabled_at` is when the feature was FIRST turned on and
+ *   `disabled_at` is when it was last turned off.
  *
  * - **The marker is per ACCOUNT** — "this account is the one merchant
  *   payments land in". It is a column on `smart_accounts`, because that is
@@ -34,7 +35,7 @@ export const version = '126_merchant_services'
  * two concurrent turn-ons, or a future caller that forgets the check, would
  * otherwise be able to mark two accounts. The index makes the second mark a
  * `23505` instead of a second merchant account. It is partial so the
- * thousands of non-merchant rows per user cost nothing and stay unconstrained.
+ * non-merchant rows cost nothing and stay unconstrained.
  *
  * ## Money path
  *

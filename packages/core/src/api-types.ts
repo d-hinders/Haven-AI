@@ -1414,7 +1414,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink an account from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.
+         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes the oldest remaining account that is not the merchant account; when none remains the user has no default account (#4895). Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key, and for the merchant account (#4895).
          */
         delete: operations["unlinkUserAccount"];
         options?: never;
@@ -1432,7 +1432,7 @@ export type paths = {
         get?: never;
         /**
          * Make a linked account the default.
-         * @description Exactly one account is default per user; setting one clears the previous.
+         * @description At most one account is default per user; setting one clears the previous. The merchant account cannot be made the default (#4895).
          */
         put: operations["setDefaultUserAccount"];
         post?: never;
@@ -4871,7 +4871,7 @@ export type components = {
             enabled_at?: string | null;
             /**
              * Format: date-time
-             * @description GET only: when merchant services were last turned off.
+             * @description GET only: when merchant services were last turned off. Null when they were never on.
              */
             disabled_at?: string | null;
             merchant_account: {
@@ -24488,7 +24488,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), or the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED). */
+            /** @description The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED), or the derived address is already registered (error_code MERCHANT_ACCOUNT_ALREADY_REGISTERED). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -24518,7 +24518,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The account address could not be derived. */
+            /** @description The account address could not be derived: error_code MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE. */
             502: {
                 headers: {
                     [name: string]: unknown;

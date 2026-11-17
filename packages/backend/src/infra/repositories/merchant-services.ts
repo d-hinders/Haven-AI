@@ -37,9 +37,10 @@ export interface MerchantAccountRow {
  * The `DO UPDATE` is a deliberate no-op write: it takes the row lock that
  * serialises two concurrent turn-ons for one user, which is what makes the
  * "is there already a merchant account?" read below authoritative. Without it
- * two tabs could both read "no merchant account" and both create one — the
- * partial unique index would then refuse the second MARK, but only after a
- * second account row had been created and its salt counter bumped.
+ * two tabs could both read "no merchant account" and both enter the creation
+ * logic; the derived idempotency key would still stop a second account row,
+ * but only after the loser had derived an address and drawn a salt-counter
+ * value.
  *
  * A missing row is created with `enabled = false`; the caller enables it.
  */
@@ -76,15 +77,19 @@ export const ENABLE_MERCHANT_SETTING_SQL = `UPDATE merchant_service_settings
        WHERE user_id = $1
        RETURNING user_id, enabled, enabled_at, disabled_at`
 
-/** Turn the setting off. The account and its history stay; only the flag moves. */
+/**
+ * Turn the setting off. The account and its history stay; only the flag moves.
+ * `disabled_at` moves only when the setting WAS on, so turning off a feature
+ * that is already off (or was never on) records no turn-off time.
+ */
 export const DISABLE_MERCHANT_SETTING_SQL = `UPDATE merchant_service_settings
        SET enabled = false,
-           disabled_at = NOW(),
+           disabled_at = CASE WHEN enabled THEN NOW() ELSE disabled_at END,
            updated_at = NOW()
        WHERE user_id = $1
        RETURNING user_id, enabled, enabled_at, disabled_at`
 
-/** The dashboard read. Null when the user never turned the feature on. */
+/** The dashboard read. No row when the user has never called turn-on or turn-off. */
 export const READ_MERCHANT_SETTING_SQL = `SELECT user_id, enabled, enabled_at, disabled_at
        FROM merchant_service_settings
        WHERE user_id = $1`
@@ -134,7 +139,7 @@ export async function disableMerchantSetting(
   return result.rows[0]
 }
 
-/** The caller's setting, or null when they never turned the feature on. */
+/** The caller's setting, or null when no row exists (never turned on or off). */
 export async function readMerchantSetting(
   userId: string,
   db: Executor = pool,

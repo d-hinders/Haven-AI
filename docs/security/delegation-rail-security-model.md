@@ -51,6 +51,10 @@ covers:
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/modules/accounts/create-additional.ts
+  - packages/backend/src/routes/merchant-services.ts
+  - packages/backend/src/domain/merchant-services.ts
+  - packages/backend/src/db/migrations/126_merchant_services.ts
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
@@ -1017,9 +1021,20 @@ key with that account's passkey would replay that signup account, which is
 still the caller's own.) The same answer applies when two attempts with one
 key race inside their transactions: the one that loses on the key's unique
 index re-reads the committed winner and answers it (or the 409), and its own
-counter bump rolls back. Every refusal on
-this path carries an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
-`SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`).
+counter bump rolls back. The source, passkey and cap refusals on
+this path carry an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
+`SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`), as do a
+reused key (`IDEMPOTENCY_KEY_REUSED`) and a chain the rail does not serve
+(`UNSUPPORTED_NETWORK`, #4895).
+
+**One key namespace is reserved (#4895).** `POST /accounts/hybrid` refuses a
+client-supplied `idempotency_key` that starts with `merchant-service:`, on
+either request shape. The merchant-services turn-on route derives its own key
+there and marks the account created under it as the merchant account; a user
+who could create an account under that key first would choose which account
+the marker lands on. The request schema refuses such a key (`pattern`), and
+the handler refuses it again with `RESERVED_IDEMPOTENCY_KEY`, so the refusal
+holds when request validation is switched to `shadow` or `off`.
 
 **Backups do not carry over.** Only the one named passkey is copied. A backup
 passkey or wallet on the source account is not added to the new one, so the

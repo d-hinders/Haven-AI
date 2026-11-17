@@ -84,6 +84,8 @@ interface MockOpts {
   chainCount?: string
   replay?: { id: string; account_address: string; chain_id: number; created_at: string } | null
   insertConflicts?: boolean
+  /** The derived address is already one of the caller's accounts. */
+  addressTaken?: boolean
 }
 
 /** Pattern-matched DB mock (#775), the shape the sibling route suites use. */
@@ -160,7 +162,7 @@ function mockDb(opts: MockOpts = {}) {
       return Promise.resolve({ rows: [{ last_allocated: '1' }] })
     }
     if (/SELECT id FROM smart_accounts/.test(s)) {
-      return Promise.resolve({ rows: [] })
+      return Promise.resolve({ rows: opts.addressTaken ? [{ id: SOURCE_ID }] : [] })
     }
     if (/INSERT INTO smart_accounts/.test(s)) {
       return Promise.resolve({
@@ -390,6 +392,38 @@ describe('merchant services routes (#4895)', () => {
       const res = await call('POST', '/merchant-services', TURN_ON)
       expect(res.statusCode).toBe(422)
       expect(res.json()).toMatchObject({ error_code: 'ACCOUNT_CAP_REACHED', cap: 10, chain_id: 84532 })
+    })
+
+    it('names the two create-additional refusals that carry no code of their own', async () => {
+      // 502: the address could not be derived.
+      mockDb({})
+      mockCompute.mockRejectedValue(new Error('rpc down'))
+      const derive = await call('POST', '/merchant-services', TURN_ON)
+      expect(derive.statusCode).toBe(502)
+      expect(derive.json()).toMatchObject({
+        error: 'Could not derive the account address',
+        error_code: 'MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE',
+      })
+      expectMatchesSpec('POST', '/merchant-services', derive.json(), '502')
+
+      // 409: the derived address is already one of the caller's accounts.
+      mockCompute.mockResolvedValue(HYBRID)
+      const calls = mockDb({ addressTaken: true })
+      const taken = await call('POST', '/merchant-services', TURN_ON)
+      expect(taken.statusCode).toBe(409)
+      expect(taken.json()).toMatchObject({
+        error: 'Account already registered',
+        error_code: 'MERCHANT_ACCOUNT_ALREADY_REGISTERED',
+      })
+      expect(calls.some(([s]) => /SET is_merchant_account = true/.test(s))).toBe(false)
+      expect(calls.some(([s]) => /SET enabled = true/.test(s))).toBe(false)
+    })
+
+    it('passes a create-additional refusal that HAS a code through unchanged', async () => {
+      mockDb({ replay: { id: ACCOUNT_ID, account_address: HYBRID, chain_id: 8453, created_at: '2026-11-17T00:00:00Z' } })
+      const res = await call('POST', '/merchant-services', TURN_ON)
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED' })
     })
 
     it('a retried turn-on answers the account the first attempt created — 200, created false', async () => {

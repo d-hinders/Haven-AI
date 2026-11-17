@@ -1581,7 +1581,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
   // fixture has no stored challenge at all — and run WITH an anchored
   // passport, so the absence of the reference is the advertisement rule's
   // doing, not merely the absence of a passport.
-  it('CHARACTERIZATION (merchant did not advertise haven-passport): the X-PAYMENT payload carries exactly the erc7710 keys', async () => {
+  it('CHARACTERIZATION (merchant did not advertise haven-passport): the payment-header payload carries exactly the erc7710 keys', async () => {
     const res = await settleOk([
       { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: '0x' + 'ab'.repeat(32) },
     ])

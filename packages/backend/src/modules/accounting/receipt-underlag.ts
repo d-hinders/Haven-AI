@@ -221,10 +221,12 @@ function receiptStatementLines(data: ReceiptUnderlagData): string[] {
   shown.forEach((line, i) => {
     const label = `Line ${i + 1}`.padEnd(15, ' ')
     out.push(...indentedWrap(label, asciiFold(line.description), UNDERLAG_MAX_DESCRIPTION_ROWS))
+    // Two rows, so an ordinary receipt's figures — 6-decimal USDC amounts —
+    // print whole, each with its currency; `fitRow` only backstops the
+    // parser's extreme figures.
     out.push(
-      fitRow(
-        `               qty ${plainNumber(line.quantity)}, net ${line.unitPriceExclVat} ${cur} each, VAT ${plainNumber(line.vatPercent)}% ${line.vatAmount} ${cur}, total ${line.totalInclVat} ${cur}`,
-      ),
+      fitRow(`               qty ${plainNumber(line.quantity)}, net ${line.unitPriceExclVat} ${cur} each`),
+      fitRow(`               VAT ${plainNumber(line.vatPercent)}% ${line.vatAmount} ${cur}, total ${line.totalInclVat} ${cur}`),
     )
   })
   if (statement.lines.length > shown.length) {
@@ -255,10 +257,17 @@ function fitRow(row: string, width = 88): string {
   return row.length <= width ? row : `${row.slice(0, width - 2)}..`
 }
 
-/** A stated number as plain text: no exponent, no float noise. */
+/**
+ * A stated number as plain text, at its stated precision: no float noise
+ * (`0.30000000000000004` → `0.3`), no exponent (`4e-7` → `0.0000004`), and
+ * never rounded to a different figure (`0.0000004` stays `0.0000004`).
+ */
 function plainNumber(value: number): string {
   if (Number.isInteger(value)) return String(value)
-  return String(Number(value.toFixed(6)))
+  const v = Number(value.toPrecision(15))
+  const s = String(v)
+  if (!s.includes('e')) return s
+  return v.toFixed(20).replace(/0+$/, '').replace(/\.$/, '')
 }
 
 /** Render the underlag document (pure — the pilot script uses it directly). */

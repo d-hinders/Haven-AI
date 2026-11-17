@@ -57,7 +57,8 @@ describe('the underlag shows the receipt lines (#4876)', () => {
     const s = render({ receiptStatement: statement(se25) })
     expect(s).toContain("MERCHANT RECEIPT LINES \\(On the merchant's receipt, as reported by the agent\\)")
     expect(s).toContain('Line 1         CloudNest 50 GB - Saker krypterad molnlagring.')
-    expect(s).toContain('qty 1, net 0.0004 USDC each, VAT 25% 0.0001 USDC, total 0.0005 USDC')
+    expect(s).toContain('qty 1, net 0.0004 USDC each)')
+    expect(s).toContain('VAT 25% 0.0001 USDC, total 0.0005 USDC)')
     expect(s).toContain('Receipt net    0.0004 USDC')
     expect(s).toContain('Receipt VAT    25% 0.0001 USDC')
     expect(s).toContain('Receipt total  0.0005 USDC')
@@ -66,6 +67,30 @@ describe('the underlag shows the receipt lines (#4876)', () => {
     expect(s).not.toContain('Total check')
     expect(s).toContain('Amount         0.0005 USDC \\(500 atomic units\\)')
     expect(s).not.toContain('not stated by the merchant')
+  })
+
+  it('6-decimal USDC figures print whole, each with its currency', () => {
+    const line = {
+      beskrivning: 'Annual plan',
+      antal: 2,
+      apris_exkl_moms: '123.456789',
+      moms_procent: 25,
+      moms_belopp: '61.728395',
+      totalt_inkl_moms: '308.641973',
+    }
+    const receipt = { ...se25, rader: [line], belopp_exkl_moms: '246.913578', moms_belopp: '61.728395', totalt_inkl_moms: '308.641973' }
+    const s = render({ receiptStatement: statement(receipt, '308641973') })
+    expect(s).toContain('(               qty 2, net 123.456789 USDC each) Tj')
+    expect(s).toContain('(               VAT 25% 61.728395 USDC, total 308.641973 USDC) Tj')
+    expect(s).toContain('(Receipt total  308.641973 USDC) Tj')
+    expect(s).not.toContain('..) Tj')
+  })
+
+  it('stated numbers print at their own precision, never rounded to another figure', () => {
+    const receipt = { ...se25, rader: [{ ...se25.rader[0], antal: 0.0000004, moms_procent: 12.3456789 }] }
+    const s = render({ receiptStatement: statement(receipt) })
+    expect(s).toContain('qty 0.0000004, net')
+    expect(s).toContain('VAT 12.3456789% ')
   })
 
   it('a reverse-charge receipt shows its stated zero VAT, not "not stated"', () => {

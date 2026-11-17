@@ -82,7 +82,6 @@ list before #4379.
 - `packages/backend/src/domain/machine-payment-lifecycle.ts`
 - `packages/backend/src/domain/x402-settlement-timing.ts`
 - `packages/backend/src/domain/x402-sweep-window.ts`
-- `packages/backend/src/domain/merchant-services.ts`
 - `packages/backend/src/infra/chain/relayer-reads.ts`
 
 ### Budget scope
@@ -216,16 +215,13 @@ behaviour.
 into `modules/accounts/create-additional.ts` so the merchant-services route can
 reuse it inside its own transaction; the #1892 accident-of-location rule, and the
 extraction would otherwise have taken the creation decision off the perimeter
-while the route kept its label for the signup and signer handlers. The same PR
-adds `routes/merchant-services.ts` — turning merchant services on creates a
-spend-capable account and marks it as the account merchant payments are received
-into — and `domain/merchant-services.ts`, which holds the refusal codes and the
-`merchant-service:` idempotency-key namespace the turn-on route derives its keys
-in. That namespace is what stops a user pre-creating an account under the derived
-key and having the merchant marker land on it.
+while the route kept its label for the signup and signer handlers. It is listed
+under *Funds recovery, gas, the outbound queue and persistence* above, beside
+the other `modules/accounts/` entry, and stays on the runtime list because the
+route it came out of is on it. The merchant-services route and its vocabulary
+are on the control list: see *Merchant services* below.
 
 - `packages/backend/src/routes/hybrid-accounts.ts`
-- `packages/backend/src/routes/merchant-services.ts`
 
 ### Signing schemes and the edge signer
 
@@ -440,6 +436,25 @@ smoke and check scripts.
 
 - `packages/backend/src/ops/**`
 - `packages/backend/scripts/cancel-stuck-attest-lane.ts`
+
+### Merchant services
+
+#4895. `routes/merchant-services.ts` turns merchant services on and off: turning
+them on creates a spend-capable account and marks it as the account merchant
+payments are received into. `domain/merchant-services.ts` holds the refusal
+codes and the `merchant-service:` idempotency-key namespace the turn-on route
+derives its keys in. That namespace is what stops a user pre-creating an account
+under the derived key and having the merchant marker land on it.
+
+Control, not runtime (owner decision 2026-11-17, recorded on #4895; the
+same rule as the lane cancel and the paywall proxy): no QA scenario calls
+`POST /merchant-services`, so a green run says nothing about these two files.
+They move to the runtime list when a QA leg drives the route. The creation
+logic the route calls, `modules/accounts/create-additional.ts`, is on the
+runtime list.
+
+- `packages/backend/src/domain/merchant-services.ts`
+- `packages/backend/src/routes/merchant-services.ts`
 
 ### The merchant kit's paywall proxy
 

@@ -145,8 +145,8 @@ product's receiving address (#4850): `MERCHANT_ADDRESS`, or the Stripe deposit
 address for the joke when Stripe recording is on (#4853, below). On the
 merchant's side Haven takes part only as the seller of its own demo products:
 no Haven key, account or delegation of the merchant's is in that transfer. On
-the payer's side, a Haven agent pays from its own Haven account: with ERC-7710
-the transfer comes from the agent's smart account through the Haven-built
+the payer's side, a Haven agent pays from the account it acts for: with
+ERC-7710 the transfer comes from that smart account through the Haven-built
 settlement delegation the merchant redeems; with EIP-3009 the payer is the
 agent's delegate wallet, which Haven's bridge funded from the agent's budget
 just before — that funding leg is Haven's, not the merchant's.

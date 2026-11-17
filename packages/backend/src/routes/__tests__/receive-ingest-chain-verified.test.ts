@@ -1,7 +1,8 @@
-// db-mock-exempt: no database behaviour is under test here. The ownership read
-// and the chain read are mocked at their seams, so this suite pins the ROUTE
-// contract: the ingest route reads the chain and refuses a caller's description
-// of a transfer. The persistence is proven on the real-Postgres harness in
+// db-mock-exempt: no database behaviour is under test here. The ownership read,
+// the chain read and the row insert are mocked at their seams, so this suite
+// pins the ROUTE contract and the module's refusal logic: the ingest route reads
+// the chain and refuses a caller's description of a transfer. The persistence is
+// proven on the real-Postgres harness in
 // `modules/transactions/__tests__/merchant-index.db.test.ts` and
 // `receive-ingest-characterization.test.ts`.
 /**
@@ -15,7 +16,9 @@
  * What is pinned:
  *
  * 1. A body naming a payer, amount, token or block time is refused with 400 —
- *    not silently ignored, so a caller cannot believe it planted a row.
+ *    not silently ignored, so a caller cannot believe it planted a row. The
+ *    schema refuses it, and the handler refuses it too when request validation
+ *    is shadow/off.
  * 2. The route indexes the legs the CHAIN reports, and nothing else.
  * 3. A transaction that did not pay the account is a 404 and writes nothing.
  * 4. An unreadable chain is a 503 and writes nothing — never "there is none".
@@ -28,7 +31,8 @@ import fastifyJwt from '@fastify/jwt'
 const mocks = vi.hoisted(() => ({
   findAccountOwnership: vi.fn(),
   readByHash: vi.fn(),
-  ingest: vi.fn(),
+  insert: vi.fn(),
+  ownAddresses: vi.fn(),
 }))
 
 vi.mock('../../infra/repositories/transaction-history.js', async (importOriginal) => {
@@ -36,12 +40,20 @@ vi.mock('../../infra/repositories/transaction-history.js', async (importOriginal
   return { ...actual, findAccountOwnership: (...a: unknown[]) => mocks.findAccountOwnership(...a) }
 })
 
-vi.mock('../../modules/transactions/index.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../modules/transactions/index.js')>()
+vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/chain-read.js')>()
   return {
     ...actual,
-    readInboundTransferByTxHash: (...a: unknown[]) => mocks.readByHash(...a),
-    ingestInboundTransfers: (...a: unknown[]) => mocks.ingest(...a),
+    readInboundTransfersByTxHash: (...a: unknown[]) => mocks.readByHash(...a),
+  }
+})
+
+vi.mock('../../infra/repositories/inbound-transfers.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/repositories/inbound-transfers.js')>()
+  return {
+    ...actual,
+    insertInboundTransfer: (...a: unknown[]) => mocks.insert(...a),
+    listOwnAccountAddresses: (...a: unknown[]) => mocks.ownAddresses(...a),
   }
 })
 
@@ -93,7 +105,8 @@ describe('POST /receive/:accountAddress/ingest — chain-verified (#4903)', () =
     vi.clearAllMocks()
     mocks.findAccountOwnership.mockResolvedValue([{ id: ACCOUNT_ID }])
     mocks.readByHash.mockResolvedValue({ ok: true, legs: [LEG] })
-    mocks.ingest.mockResolvedValue(1)
+    mocks.insert.mockResolvedValue('row-id')
+    mocks.ownAddresses.mockResolvedValue([])
   })
 
   function post(payload: Record<string, unknown>) {
@@ -110,14 +123,17 @@ describe('POST /receive/:accountAddress/ingest — chain-verified (#4903)', () =
 
     expect(res.statusCode, res.body).toBe(200)
     expect(res.json()).toEqual({ ingested: true, legs_indexed: 1, tx_hash: TX })
-    expect(mocks.readByHash).toHaveBeenCalledWith({
+    expect(mocks.readByHash).toHaveBeenCalledWith(84532, ACCOUNT, TX)
+    expect(mocks.insert).toHaveBeenCalledTimes(1)
+    expect(mocks.insert.mock.calls[0]![0]).toMatchObject({
+      accountId: ACCOUNT_ID,
+      userId: 'user-1',
       chainId: 84532,
-      accountAddress: ACCOUNT,
       txHash: TX,
+      logIndex: 3,
+      payerAddress: LEG.payerAddress,
+      amountRaw: '1000000',
     })
-    expect(mocks.ingest).toHaveBeenCalledTimes(1)
-    const [, legs] = mocks.ingest.mock.calls[0]!
-    expect(legs).toEqual([LEG])
   })
 
   it('refuses a caller-supplied payer, amount, token or block time', async () => {
@@ -126,7 +142,7 @@ describe('POST /receive/:accountAddress/ingest — chain-verified (#4903)', () =
       expect(res.statusCode, `${field}: ${res.body}`).toBe(400)
     }
     expect(mocks.readByHash).not.toHaveBeenCalled()
-    expect(mocks.ingest).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it('refuses them in the HANDLER too, when request validation is off', async () => {
@@ -141,7 +157,7 @@ describe('POST /receive/:accountAddress/ingest — chain-verified (#4903)', () =
       expect(res.json().error).toMatch(/reads the chain/)
     }
     expect(mocks.readByHash).not.toHaveBeenCalled()
-    expect(mocks.ingest).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it('requires a well-formed tx_hash', async () => {
@@ -157,7 +173,7 @@ describe('POST /receive/:accountAddress/ingest — chain-verified (#4903)', () =
 
     expect(res.statusCode, res.body).toBe(404)
     expect(res.json().error).toMatch(/No USDC transfer to this account/)
-    expect(mocks.ingest).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it('503s and writes nothing when the chain could not be read', async () => {
@@ -166,7 +182,7 @@ describe('POST /receive/:accountAddress/ingest — chain-verified (#4903)', () =
     const res = await post({ tx_hash: TX })
 
     expect(res.statusCode, res.body).toBe(503)
-    expect(mocks.ingest).not.toHaveBeenCalled()
+    expect(mocks.insert).not.toHaveBeenCalled()
   })
 
   it('403s another user account and never reads the chain', async () => {

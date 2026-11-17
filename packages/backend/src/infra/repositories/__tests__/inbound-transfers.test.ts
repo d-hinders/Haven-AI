@@ -78,7 +78,7 @@ describeDb('inbound_transfers index (#3333)', () => {
     expect(id).not.toBeNull()
   })
 
-  it('is idempotent per (chain, tx hash, account) — a re-read explorer window cannot double-count', async () => {
+  it('is idempotent per (chain, tx hash, account, leg) — a re-read explorer window cannot double-count', async () => {
     const seeded = await seedAccount()
     const input = ingestInput(seeded)
     const first = await insertInboundTransfer(input)
@@ -95,14 +95,18 @@ describeDb('inbound_transfers index (#3333)', () => {
     const second = await seedAccount()
     const sharedHash = `0x${'d'.repeat(64)}`
 
-    const firstRow = (await insertInboundTransfer(ingestInput(first, { txHash: sharedHash })))!
-    const secondRow = (await insertInboundTransfer(ingestInput(second, { txHash: sharedHash })))!
+    const firstInput = ingestInput(first, { txHash: sharedHash })
+    const secondInput = ingestInput(second, { txHash: sharedHash })
+    const firstRow = (await insertInboundTransfer(firstInput))!
+    const secondRow = (await insertInboundTransfer(secondInput))!
     expect(firstRow).not.toBeNull()
     expect(secondRow).not.toBeNull()
 
-    // A re-read of the same explorer window duplicates nothing for either account.
-    expect(await insertInboundTransfer(ingestInput(first, { txHash: sharedHash }))).toBeNull()
-    expect(await insertInboundTransfer(ingestInput(second, { txHash: sharedHash }))).toBeNull()
+    // A re-read of the same explorer window duplicates nothing for either
+    // account: the same leg (same payer, same amount) conflicts on the
+    // unknown-log-index identity (#4903).
+    expect(await insertInboundTransfer(firstInput)).toBeNull()
+    expect(await insertInboundTransfer(secondInput)).toBeNull()
 
     const rows = await db.query<{ account_id: string }>(
       `SELECT account_id FROM inbound_transfers WHERE LOWER(tx_hash) = LOWER($1)`,

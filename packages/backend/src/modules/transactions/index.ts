@@ -82,12 +82,15 @@ export {
 } from './period.js'
 export {
   ingestInboundTransfers,
+  ingestInboundTransferByTxHash,
   explorerRowsToLegs,
   readInboundTransferByTxHash,
+  TX_HASH_PATTERN,
   matchInboundTransferForAccount,
   findX402PaytoSettlement,
   type InboundMatchResult,
   type InboundTransferLeg,
+  type IngestByTxHashResult,
   type ChainInboundLeg,
   type ChainReadResult,
 } from './receive.js'

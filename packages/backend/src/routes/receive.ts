@@ -21,9 +21,9 @@ import {
   insertInboundReceiptDrop,
 } from '../infra/repositories/inbound-transfers.js'
 import {
-  ingestInboundTransfers,
+  ingestInboundTransferByTxHash,
   matchInboundTransferForAccount,
-  readInboundTransferByTxHash,
+  TX_HASH_PATTERN,
 } from '../modules/transactions/index.js'
 import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.js'
 
@@ -45,11 +45,9 @@ import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.
  *   pinned server-side at submit; neither token nor recipient comes from
  *   the request body.
  * - `POST /:accountAddress/ingest` — the ingestion hook for tests and the
- *   eventual indexer tick. Owner-scoped: an owner indexes rows into their
- *   OWN ledger only. Since #4903 it takes only `tx_hash` and reads the
- *   transaction from the CHAIN — a caller-supplied payer, amount, token or
- *   block time is refused, so a row for a hash that did not pay the account
- *   cannot be created through any route.
+ *   eventual indexer tick. Owner-scoped. Since #4903 it takes only `tx_hash`
+ *   and reads the transaction from the CHAIN; a caller-supplied payer, amount,
+ *   token or block time is refused, so no planted row can become a sale.
  *
  * UNAUTHENTICATED-BUT-SIGNED (the #3333 receipt drop):
  *
@@ -91,7 +89,6 @@ function asString(value: unknown): string | null {
 }
 
 const ETH_ADDRESS_RE_STRICT = /^0x[0-9a-fA-F]{40}$/
-const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 
 /**
  * The payer-signed receipt drop: recover the signer from the EIP-191 personal
@@ -106,7 +103,7 @@ function receiptDropSigner(body: ReceiptDropBody): string | null {
   const payerAddress = asString(body.payer_address)
   const signature = asString(body.signature)
   if (!txHash || !amountRaw || !payerAddress || !signature) return null
-  if (!TX_HASH_RE.test(txHash)) return null
+  if (!TX_HASH_PATTERN.test(txHash)) return null
   if (!ETH_ADDRESS_RE_STRICT.test(payerAddress)) return null
   if (!/^0x[0-9a-fA-F]+$/.test(signature)) return null
   if (!Number.isInteger(Number(amountRaw)) || BigInt(amountRaw) <= 0n) return null
@@ -438,18 +435,14 @@ export default async function receiveRoutes(
       },
     )
 
-    // Ingestion hook for tests and the eventual indexer tick: records the
-    // inbound USDC transfers a transaction actually carried to this account.
-    //
-    // #4903 decision: this route VERIFIES AGAINST THE CHAIN. It used to insert
-    // a row from values the caller sent, with no chain check — a row planted
-    // through it would block the real one, and could then be matched as a sale.
-    // It now takes only `tx_hash`, reads the transaction's receipt from the
-    // chain, and indexes the settlement-token transfers whose `to` is this
-    // account. A caller-supplied payer, amount, token or block time is refused
-    // outright, so no row for a hash that did not pay the account can be
-    // created through any route.
-    ownerApp.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: { tx_hash?: unknown } }>(
+    // Ingestion hook for tests and the eventual indexer tick. #4903 decision:
+    // this route VERIFIES AGAINST THE CHAIN — it takes only `tx_hash`, reads
+    // the receipt, and indexes the settlement-token transfers whose `to` is
+    // this account. A caller-supplied payer, amount, token or block time is
+    // refused, so no row for a hash that did not pay the account can be
+    // created through any route. The work lives in the module; this handler is
+    // the ownership check and the status mapping.
+    ownerApp.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: Record<string, unknown> }>(
       '/:accountAddress/ingest',
       async (request, reply) => {
         const { sub } = request.user as { sub: string }
@@ -462,50 +455,25 @@ export default async function receiveRoutes(
           return reply.code(400).send({ error: 'Invalid address' })
         }
 
-        // The chain is the only source of a transfer's facts. A body that
-        // names any of them is refused rather than silently ignored, so a
-        // caller cannot believe it planted a row.
-        const body = (request.body ?? {}) as Record<string, unknown>
-        const callerSupplied = ['payer_address', 'amount_raw', 'token_address', 'block_time', 'block_number']
-        if (callerSupplied.some((field) => body[field] !== undefined)) {
-          return reply.code(400).send({
-            error: 'The ingest route reads the chain: it takes only tx_hash. payer_address, amount_raw, token_address, block_time and block_number are not accepted.',
-          })
-        }
-
-        const txHash = asString(body.tx_hash)
-        if (!txHash || !TX_HASH_RE.test(txHash)) {
-          return reply.code(400).send({ error: 'tx_hash is required' })
-        }
-
         const ownershipRows = await findAccountOwnership(sub, accountAddress, chain.chainId)
         if (ownershipRows.length === 0) {
           return reply.code(403).send({ error: 'Not your account' })
         }
-        const accountId = ownershipRows[0].id
 
-        const read = await readInboundTransferByTxHash({
-          chainId: chain.chainId,
-          accountAddress,
-          txHash,
+        const result = await ingestInboundTransferByTxHash({
+          account: {
+            id: ownershipRows[0].id,
+            userId: sub,
+            accountAddress,
+            chainId: chain.chainId,
+          },
+          body: (request.body ?? {}) as Record<string, unknown>,
+          log: request.log,
         })
-        if (!read.ok) {
-          // An RPC outage is "not known yet", never "this transaction did not
-          // pay you": nothing is written and the caller may retry.
-          return reply.code(503).send({ error: 'The chain could not be read; nothing was indexed' })
+        if (!result.ok) {
+          return reply.code(result.failure.status).send({ error: result.failure.error })
         }
-        if (read.legs.length === 0) {
-          return reply.code(404).send({
-            error: 'No USDC transfer to this account in that transaction',
-          })
-        }
-
-        const indexed = await ingestInboundTransfers(
-          { id: accountId, userId: sub, accountAddress, chainId: chain.chainId },
-          read.legs,
-          request.log,
-        )
-        return { ingested: indexed > 0, legs_indexed: indexed, tx_hash: txHash }
+        return result.value
       },
     )
   })

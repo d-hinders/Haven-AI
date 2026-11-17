@@ -220,6 +220,82 @@ export async function readInboundTransferByTxHash(input: {
   return readInboundTransfersByTxHash(input.chainId, input.accountAddress, input.txHash)
 }
 
+/** A transaction hash: 32 bytes, no checksummed form. */
+export const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * The body fields the ingest route refuses. The chain is the only source of a
+ * transfer's facts, so a caller naming any of them is refused rather than
+ * silently ignored — otherwise it could believe it planted a row.
+ */
+const INGEST_CALLER_SUPPLIED_FIELDS = [
+  'payer_address',
+  'amount_raw',
+  'token_address',
+  'block_time',
+  'block_number',
+] as const
+
+export type IngestByTxHashResult =
+  | { ok: true; value: { ingested: boolean; legs_indexed: number; tx_hash: string } }
+  | { ok: false; failure: { status: 400 | 404 | 503; error: string } }
+
+/**
+ * The whole chain-verified ingest (#4903), so the route stays a thin shell:
+ * refuse a caller's description of the transfer, read the transaction from the
+ * chain, index the settlement-token legs to the account. The failure statuses
+ * are decided HERE, where the cause is known — never re-derived from message
+ * text at the route.
+ */
+export async function ingestInboundTransferByTxHash(input: {
+  account: IngestInboundTransferAccount
+  body: Record<string, unknown>
+  log: InboundIngestLogger
+}): Promise<IngestByTxHashResult> {
+  const supplied = INGEST_CALLER_SUPPLIED_FIELDS.filter(
+    (field) => input.body[field] !== undefined,
+  )
+  if (supplied.length > 0) {
+    return {
+      ok: false,
+      failure: {
+        status: 400,
+        error: `The ingest route reads the chain: it takes only tx_hash. ${supplied.join(', ')} not accepted.`,
+      },
+    }
+  }
+
+  const rawHash = input.body.tx_hash
+  const txHash =
+    typeof rawHash === 'string' && TX_HASH_PATTERN.test(rawHash) ? rawHash : null
+  if (!txHash) {
+    return { ok: false, failure: { status: 400, error: 'tx_hash is required' } }
+  }
+
+  const read = await readInboundTransfersByTxHash(
+    input.account.chainId,
+    input.account.accountAddress,
+    txHash,
+  )
+  if (!read.ok) {
+    // An RPC outage is "not known yet", never "this transaction did not pay
+    // you": nothing is written and the caller may retry.
+    return {
+      ok: false,
+      failure: { status: 503, error: 'The chain could not be read; nothing was indexed' },
+    }
+  }
+  if (read.legs.length === 0) {
+    return {
+      ok: false,
+      failure: { status: 404, error: 'No USDC transfer to this account in that transaction' },
+    }
+  }
+
+  const indexed = await ingestInboundTransfers(input.account, read.legs, input.log)
+  return { ok: true, value: { ingested: indexed > 0, legs_indexed: indexed, tx_hash: txHash } }
+}
+
 /** Re-exported so callers of the module do not reach into `chain-read.ts`. */
 export type { ChainInboundLeg, ChainReadResult }
 

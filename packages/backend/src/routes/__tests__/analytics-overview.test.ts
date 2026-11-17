@@ -91,6 +91,14 @@ vi.mock('../../infra/repositories/agents.js', async (importOriginal) => ({
   agentExistsForUser: mockAgentExistsForUser,
 }))
 
+// #4882: the catalog step's two reads — no catalog in this suite, so neither
+// names anything (and the borrowing rule has nothing to block).
+vi.mock('../../infra/repositories/merchants.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listCatalogRecipientNames: vi.fn(async () => []),
+  listCatalogMerchantNameAddresses: vi.fn(async () => []),
+}))
+
 vi.mock('../../infra/repositories/smart-accounts.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listAccountsForUser: mockListAccountsForUser,

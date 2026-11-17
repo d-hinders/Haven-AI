@@ -67,8 +67,9 @@ const REQUIRED_SELLER_KEYS = ['name', 'address', 'org_nr', 'moms_nr'] as const
  * variable set, the demo seller, so the receipt is unchanged. With the four
  * required ones set (name, address, org_nr, moms_nr), that seller, plus
  * `iban` and `bic` only when each is set — a real seller never inherits the
- * demo's bank details. With some but not all four required ones set, a
- * warning naming the missing variables and the demo seller: a
+ * demo's bank details. With any `MERCHANT_SELLER_*` set but one of the four
+ * required ones missing (`IBAN` or `BIC` alone included), a warning naming
+ * the missing variables and the demo seller: a
  * half-configured seller is a mistake, not a reason to refuse payments.
  */
 export function resolveReceiptSeller(

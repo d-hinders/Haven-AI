@@ -12,6 +12,7 @@ import {
   checkedReceiptStatement,
   type CheckedReceiptStatement,
 } from './receipt-statement.js'
+import { NO_PRODUCT_SOURCES, PRODUCT_SOURCE_LABEL, presentSources, type ProductSources } from './product-sources.js'
 
 /**
  * Receipt underlag for the reporting feed (epic #491, P2 #498).
@@ -124,6 +125,14 @@ export interface ReceiptUnderlagData {
    * render's bytes.
    */
   receiptStatement?: CheckedReceiptStatement | null
+  /**
+   * #4877: the product sources below the receipt lines — Haven's catalog
+   * name, the merchant's quote description, the agent's delivery reference
+   * (`product-sources.ts`). ABSENT (undefined) is a document whose first
+   * render predates #4877 (a pin without `productSources`) and renders none,
+   * so a retry keeps its bytes.
+   */
+  productSources?: ProductSources
 }
 
 export interface ReceiptUnderlag {
@@ -195,7 +204,7 @@ function indentedWrap(label: string, text: string, maxRows: number, width = 88):
  * With each description capped at `UNDERLAG_MAX_DESCRIPTION_ROWS` printed rows,
  * the whole document stays inside the single page (`UNDERLAG_MAX_PAGE_LINES`).
  */
-export const UNDERLAG_MAX_RECEIPT_LINES = 6
+export const UNDERLAG_MAX_RECEIPT_LINES = 5
 /** Printed rows one product description may take; longer text is cut with "..". */
 export const UNDERLAG_MAX_DESCRIPTION_ROWS = 2
 /** Text rows the single 842pt page holds at the renderer's 11pt leading from y=800. */
@@ -243,6 +252,29 @@ function receiptStatementLines(data: ReceiptUnderlagData): string[] {
   if (statement.totalCheck === 'differs') {
     out.push('Total check    receipt total differs from the amount settled; settled amount booked')
   }
+  return out
+}
+
+/**
+ * #4877: the product sources, each under its own label. With no receipt lines
+ * the highest source present is the product line (`Product`, up to two rows);
+ * every other source present — all of them when the receipt states lines —
+ * is its own `Also stated` row. Each is followed by its label row. A direct
+ * payment, and a document whose first render predates #4877, show none.
+ */
+function productSourceLines(data: ReceiptUnderlagData): string[] {
+  if (data.resourceUrl == null || data.productSources === undefined) return []
+  const sources = presentSources(data.productSources)
+  if (sources.length === 0) return []
+  const receiptStatesLines = data.receiptStatement != null
+  const out: string[] = ['']
+  sources.forEach((source, i) => {
+    const isProductLine = !receiptStatesLines && i === 0
+    const tag = (isProductLine ? 'Product' : 'Also stated').padEnd(15, ' ')
+    const text = asciiFold(source.text)
+    out.push(...(isProductLine ? indentedWrap(tag, text, 2) : [fitRow(`${tag}${text}`)]))
+    out.push(fitRow(`               (${PRODUCT_SOURCE_LABEL[source.key]})`))
+  })
   return out
 }
 
@@ -343,6 +375,7 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     `Parent receipt ${data.parentReceiptRef ?? 'n/a'}`,
     ...(data.resourceUrl != null ? [`Receipt ref    ${data.receiptRef}`] : []),
     ...receiptStatementLines(data),
+    ...productSourceLines(data),
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -557,6 +590,20 @@ export function pinnedUnderlagInputs(raw: unknown): PinnedUnderlagInputs | null 
     // #4876: only a pin written by a build that renders the receipt block
     // carries the marker; any other value reads as a pre-#4876 pin.
     receiptLines: p.receiptLines === true,
+    // #4877: only a pin written by a build that renders the product sources
+    // carries them; any other shape reads as a pre-#4877 pin (none rendered).
+    productSources: pinnedProductSources(p.productSources),
+  }
+}
+
+function pinnedProductSources(raw: unknown): ProductSources | undefined {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const r = raw as Record<string, unknown>
+  const text = (v: unknown) => (typeof v === 'string' ? v : null)
+  return {
+    catalogName: text(r.catalogName),
+    quoteDescription: text(r.quoteDescription),
+    deliveryReference: text(r.deliveryReference),
   }
 }
 
@@ -575,6 +622,7 @@ export function underlagPinFromTransaction(tx: FeedTransaction): AccountingUnder
     parentReceiptRef: tx.parentReceiptRef,
     merchantCountry: tx.counterparty.country,
     receiptLines: true,
+    productSources: tx.productSources ?? NO_PRODUCT_SOURCES,
   }
 }
 
@@ -627,6 +675,9 @@ export async function loadReceiptUnderlag(
   // receipt — so a retry renders the first render's lines. A pin written
   // before #4876 has no `receiptLines` marker: its first render showed no
   // block, so the retry shows none either (undefined) and keeps its bytes.
+  // #4877: the product sources — the pinned ones (absent on a pre-#4877 pin,
+  // which then renders none) or the live ones.
+  const productSources = pin ? pin.productSources : (tx.productSources ?? NO_PRODUCT_SOURCES)
   const receiptStatement =
     pin && !pin.receiptLines
       ? undefined
@@ -678,5 +729,6 @@ export async function loadReceiptUnderlag(
     signHash: row.sign_hash,
     signature: row.signature,
     receiptStatement,
+    productSources,
   })
 }

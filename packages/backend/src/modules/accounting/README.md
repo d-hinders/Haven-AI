@@ -267,6 +267,16 @@ description names the counterparty's canonical address
 (`0x1517…799a (transfer)`), because it has no merchant name and no resource
 host to name.
 
+**The product line is separate (#4877).** `FeedTransaction.productSources`
+carries what was bought when the merchant's receipt states no lines: the
+`merchant_catalog.name` for the resource URL (Haven's own data, never the
+unverified wire `catalogName`), the quote description
+(`machine_metadata.description`, caller-relayed) and the agent's
+`delivery_reference`, each cleaned and bounded in `product-sources.ts`. They
+print beside `Description`, never in it, each under its own label, so
+`description` stays derived and agent-proof as above. The ladder and the
+labels are in [`accounting-feed.md`](../../../../../docs/operations/accounting-feed.md).
+
 A connector carries the two values where its API allows it — Fortnox's
 free-text `Comments` field does, with `/` folded to `-` for its character
 restriction (error 2000359); Accounted's upload takes exactly `file` +

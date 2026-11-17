@@ -228,6 +228,10 @@ describeDb('direct payments produce an accounting underlag (#4533)', () => {
     // content stream (see pdfEscape), as at receipt-underlag.test.ts:158.
     expect(pdf).toContain('Transaction    transfer')
     expect(pdf).toContain(`Description    ${OUTSIDE} \\(transfer\\)`)
+    // #4877: the direct branch emits typed NULLs, so no product source.
+    expect(tx.productSources).toEqual({ catalogName: null, quoteDescription: null, deliveryReference: null })
+    expect(pdf).not.toContain('Also stated')
+    expect(pdf).not.toContain('(Product ')
   })
 
   it('AC 4: firing the hook twice still leaves exactly one row and one document', async () => {

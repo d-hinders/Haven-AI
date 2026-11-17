@@ -458,7 +458,7 @@ never labelled "stated by the merchant" (owner decision 3 of 2026-11-17,
 #4874).
 
 - **What is printed.** One line per product, at most
-  `UNDERLAG_MAX_RECEIPT_LINES` (6). The rest are counted and stay on the
+  `UNDERLAG_MAX_RECEIPT_LINES` (5). The rest are counted and stay on the
   merchant's own receipt PDF. Each description is cut at
   `UNDERLAG_MAX_DESCRIPTION_ROWS` (2) printed rows, marked with `..`, so the
   single page stays inside its `UNDERLAG_MAX_PAGE_LINES` (72) rows. Each line
@@ -485,6 +485,48 @@ fit, the receipt part is left out entirely: the label and the VAT are never
 partly cut. The booked hash and `Haven payment <id>` are never cut. A
 protocol payment with no stated lines gets `VAT not stated by the merchant.`
 in the comment, and a direct payment gets nothing.
+
+**What was bought, when the receipt states no lines (#4877).** The underlag
+gets a product line, separate from `Description` (which stays Haven-derived,
+#4532). It comes from the first source present — the ladder of owner
+decisions 4 and 5 (2026-11-17, #4874):
+
+| Rung | Source | Label |
+|---|---|---|
+| 1 | The merchant's receipt lines (above) | On the merchant's receipt, as reported by the agent |
+| 2 | `merchant_catalog.name` for the payment's resource URL | Haven catalog |
+| 3 | The quote description, `machine_metadata.description` (#3610) | In the merchant's price quote, as reported by the agent |
+| 4 | The agent's `delivery_reference` (#3778) | Stated by the agent |
+
+- **The product line.** With no receipt lines, the highest present source
+  prints as `Product` (two rows at most), its label on the row below. Every
+  other present source prints as its own `Also stated` row, labelled. With
+  receipt lines, every source is `Also stated` — none is ever merged into the
+  receipt's lines, and VAT stays the merchant's only (`not stated by the
+  merchant` with no lines). With no source, the document is unchanged.
+- **Provenance.** The catalog line comes only from `merchant_catalog`; the
+  `catalogName` a caller sends on `POST /x402/authorize` is unverified and is
+  never read. The quote description is the merchant's challenge text as the
+  caller relayed it, so its label says "as reported by the agent".
+- **Cleaning and caps** (`product-sources.ts`). Each source has controls,
+  bidirectional marks, the zero-width space and invisible operators stripped,
+  whitespace collapsed, and is bounded in code points — catalog name 120,
+  quote description 300, delivery reference 512 — cut with `…`. Then folded to
+  ASCII before it is printed.
+- **Pinned.** The three sources join the #4824 first-render pin
+  (`productSources`). A source written between attempts does not change a
+  retry's bytes, and a pin written before #4877 renders none.
+- **Protocol payments only.** A direct payment has no catalog entry or quote
+  (the entry query's direct branch emits typed NULLs) and shows none.
+
+In the Fortnox comment each source is its own part after the receipt part,
+`Product (<label>) <text>.` or `Also stated (<label>) <text>.`, the label
+folded the same way (`merchants`). The product line is capped at 120
+characters and every other source at 80, cut at a word with `..`. When the
+comment would pass 512 the sources are dropped in reverse ladder order —
+delivery reference, quote description, catalog name — each count tried with
+the `Resource` host before without it, and a source never costs the receipt's
+own product names. The booked hash and `Haven payment <id>` are never cut.
 
 The field-by-field shape, and how a malformed receipt reads, is
 [`merchant-receipt-shape.md`](merchant-receipt-shape.md).

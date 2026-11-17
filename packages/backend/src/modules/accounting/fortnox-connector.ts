@@ -23,6 +23,7 @@ import type {
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
 import { RECEIPT_STATEMENT_LABEL, VAT_NOT_STATED, asciiFold, receiptStatementFrom } from './receipt-statement.js'
+import { PRODUCT_SOURCE_LABEL, presentSources } from './product-sources.js'
 import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 
@@ -203,15 +204,59 @@ export function feedDescription(tx: FeedTransaction): string {
   // fit, the `Resource` host — which the attached document carries anyway —
   // gives up its room first.
   const receipt = fortnoxReceiptText(tx)
-  const build = (withResource: boolean): string | null => {
+  // #4877: the product sources, each its own labelled part after the receipt
+  // part, capped (the product line 120 characters, every other 80). When the
+  // comment would pass 512 they are dropped in reverse ladder order — the
+  // delivery reference, then the quote description, then the catalog name —
+  // each count tried with the `Resource` host before without it.
+  const sources = fortnoxSourceParts(tx)
+  const build = (withResource: boolean, sourceCount: number): string | null => {
     const tail = [bookedTx, withResource ? resource : null, reference]
-    const fixed = [...head, ...tail].filter(Boolean).join(' ')
+    const kept = sources.slice(0, sourceCount)
+    const fixed = [...head, ...kept, ...tail].filter(Boolean).join(' ')
     const fitted = receipt == null ? null : fitReceiptText(receipt, 512 - fixed.length - 1)
     if (receipt != null && fitted == null) return null
-    return [...head, fitted, ...tail].filter(Boolean).join(' ')
+    // A source never costs the receipt's own product names: until every
+    // source is dropped, the receipt part must fit whole.
+    if (sourceCount > 0 && receipt != null && fitted !== receipt) return null
+    const comment = [...head, fitted, ...kept, ...tail].filter(Boolean).join(' ')
+    return comment.length <= 512 ? comment : null
   }
-  const comment = build(true) ?? build(false) ?? [...head, bookedTx, reference].filter(Boolean).join(' ')
-  return comment.slice(0, 512)
+  for (let count = sources.length; count >= 0; count -= 1) {
+    const comment = build(true, count) ?? build(false, count)
+    if (comment) return comment
+  }
+  return [...head, bookedTx, reference].filter(Boolean).join(' ').slice(0, 512)
+}
+
+/** #4877: a source's comment text is capped here, at a word, marked "..". */
+const FORTNOX_PRODUCT_LINE_MAX = 120
+const FORTNOX_EXTRA_SOURCE_MAX = 80
+
+function capText(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max - 2)
+  const atWord = cut.lastIndexOf(' ')
+  return `${(atWord > max / 2 ? cut.slice(0, atWord) : cut).replace(/[ ,]+$/, '')}..`
+}
+
+/**
+ * #4877: the product sources as comment parts, in ladder order, each under
+ * its label folded to the field's characters. With no receipt lines the first
+ * present source is the product line (`Product`, 120 characters); every other
+ * is its own part (80). A direct payment has none.
+ */
+function fortnoxSourceParts(tx: FeedTransaction): string[] {
+  if (!tx.resourceUrl || !tx.productSources) return []
+  const receiptStatesLines = receiptStatementFrom(tx.merchantReceipt?.inlineJson ?? null) !== null
+  return presentSources(tx.productSources).flatMap((source, i) => {
+    const text = fortnoxSafeText(asciiFold(source.text))
+    if (text === '') return []
+    const isProductLine = !receiptStatesLines && i === 0
+    const label = fortnoxSafeText(PRODUCT_SOURCE_LABEL[source.key].replace("merchant's", 'merchants'))
+    const body = capText(text, isProductLine ? FORTNOX_PRODUCT_LINE_MAX : FORTNOX_EXTRA_SOURCE_MAX)
+    return [`${isProductLine ? 'Product' : 'Also stated'} (${label}) ${body}.`]
+  })
 }
 
 /**

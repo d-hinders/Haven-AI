@@ -467,4 +467,93 @@ describeDb('Accounted underlag-input pin (#4824)', () => {
     expect(attempts).toHaveLength(1)
     expect(attempts[0].bytes.toString('latin1')).toContain('Receipt VAT    25% 0.0001 USDC')
   })
+
+  // ── #4877: the product sources on the underlag, under the same pin ───────
+
+  /** All three sources: Haven's catalog name, the quote description, the agent's words. */
+  async function writeAllSources(seeded: Seeded): Promise<void> {
+    await seedCatalogCountry('SE')
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata || '{"description":"A VPN month, 5 devices"}'::jsonb
+       WHERE id = $1`,
+      [seeded.intentId],
+    )
+    await db.query(`UPDATE machine_payment_evidence SET delivery_reference = $2 WHERE id = $1`, [
+      seeded.evidenceId,
+      'VPN for the research agent',
+    ])
+  }
+
+  it('#4877 — every source written before the first render is on the underlag, each under its own label, and pinned', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await writeAllSources(seeded)
+
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).toContain('Product        NordShield VPN')
+    expect(pdf).toContain('\\(Haven catalog\\)')
+    expect(pdf).toContain('Also stated    A VPN month, 5 devices')
+    expect(pdf).toContain("\\(In the merchant's price quote, as reported by the agent\\)")
+    expect(pdf).toContain('Also stated    VPN for the research agent')
+    expect(pdf).toContain('\\(Stated by the agent\\)')
+    expect((await pinOf(seeded.intentId))?.productSources).toEqual({
+      catalogName: 'NordShield VPN',
+      quoteDescription: 'A VPN month, 5 devices',
+      deliveryReference: 'VPN for the research agent',
+    })
+  })
+
+  it('#4877 — sources written between attempts: the retry replays the first bytes, with none of them', async () => {
+    const { state, paymentId } = await lostAnswerThenRetry(writeAllSources)
+    const attempts = underlagAttempts(state, paymentId)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1].sha256).toBe(attempts[0].sha256)
+    expect(attempts[0].bytes.toString('latin1')).not.toContain('NordShield VPN')
+    expect((await pinOf(paymentId))?.productSources).toEqual({
+      catalogName: null,
+      quoteDescription: null,
+      deliveryReference: null,
+    })
+  })
+
+  it('#4877 — a pin written before #4877 (no productSources) renders none, so a retry straddling the deploy keeps its bytes', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await writeAllSources(seeded)
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata || jsonb_build_object(
+         'accounting_underlag_inputs', $2::jsonb) WHERE id = $1`,
+      [
+        seeded.intentId,
+        JSON.stringify({
+          merchantReceipt: null,
+          receiptLines: true,
+          transactionKind: 'unknown',
+          description: 'merchant.example - vpn',
+          purchaseGroupId: null,
+          parentReceiptRef: null,
+          merchantCountry: null,
+        }),
+      ],
+    )
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('NordShield VPN')
+    expect(pdf).not.toContain('Also stated')
+  })
+
+  it('#4877 — a catalog name on the wire never becomes the "Haven catalog" line: only merchant_catalog is', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata
+         || '{"catalogName":"Forged Catalog","catalog_name":"Forged Catalog"}'::jsonb WHERE id = $1`,
+      [seeded.intentId],
+    )
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('Forged Catalog')
+    expect(pdf).not.toContain('Haven catalog')
+  })
 })

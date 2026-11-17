@@ -4,6 +4,7 @@ status: current
 covers:
   - packages/backend/src/modules/accounting/receipt-statement.ts
   - packages/backend/src/modules/accounting/receipt-underlag.ts
+  - packages/backend/src/modules/accounting/product-sources.ts
   - packages/backend/src/modules/accounting/entry.ts
   - packages/backend/src/modules/accounting/transaction-kind.ts
   - packages/backend/src/infra/repositories/machine-payments.ts
@@ -112,6 +113,12 @@ VAT figures as verified. Wherever they are shown (#4876) they are labelled "On
 the merchant's receipt, as reported by the agent", never "stated by the
 merchant" (owner decision 3 of 2026-11-17 on #4874). Where they are printed,
 and what a document says when a receipt states none, is in
+[`accounting-feed.md`](accounting-feed.md).
+
+When a receipt states no lines, the document falls back to the other sources
+Haven stores — the Haven catalog name, the quote description and the agent's
+delivery reference (#4877) — each under a label naming who supplied it, never
+the receipt's label. The ladder is in
 [`accounting-feed.md`](accounting-feed.md).
 
 The statement also does not decide the transaction kind. A receipt with no

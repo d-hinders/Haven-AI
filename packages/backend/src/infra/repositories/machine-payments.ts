@@ -1365,6 +1365,12 @@ export interface AccountingUnderlagPin {
    * lacks it, and its retries render no block, so their bytes never move.
    */
   receiptLines?: boolean
+  /**
+   * #4877: the product sources at the first render — Haven's catalog name,
+   * the merchant's quote description, the agent's delivery reference. A pin
+   * written before #4877 lacks them and renders none, so its bytes never move.
+   */
+  productSources?: { catalogName: string | null; quoteDescription: string | null; deliveryReference: string | null }
 }
 
 export const PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL = `UPDATE payment_intents

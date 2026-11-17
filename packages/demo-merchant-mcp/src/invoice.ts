@@ -55,15 +55,7 @@ const MERCHANT_IDENTITY = {
  * (`packages/backend/src/modules/accounting/receipt-statement.ts`,
  * `docs/operations/merchant-receipt-shape.md`). `invoice.test.ts` pins them.
  */
-export type InvoiceSeller = typeof MERCHANT_IDENTITY & {
-  /**
-   * USDC on the merchant's network (see `networkDisplayName`): the address
-   * THIS payment was made out to. #4850: the purchased product's receiving
-   * address, passed in per invoice — no longer read from `MERCHANT_ADDRESS`
-   * at import, which named one address for every product.
-   */
-  crypto_address: string
-}
+export type { InvoiceSeller } from '@haven_ai/merchant-payments'
 
 /**
  * Invoice numbering. The demo merchant has no store, so the counter is
@@ -133,6 +125,7 @@ export interface InvoiceParams {
 export function generateInvoice(params: InvoiceParams): Invoice {
   const product = PRODUCTS[params.productId]
   const chainId = params.chainId ?? CHAIN_ID
+  const network = { sv: networkDisplayName(chainId, 'sv'), en: networkDisplayName(chainId, 'en') }
   const json: InvoiceJson = buildReceipt({
     invoiceNumber: params.invoiceNumber,
     // Always the SWEDISH description (#1550). #4851: a one-time product is
@@ -145,7 +138,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     },
     seller: MERCHANT_IDENTITY,
     receivingAddress: params.receivingAddress,
-    network: { sv: networkDisplayName(chainId, 'sv'), en: networkDisplayName(chainId, 'en') },
+    network,
     vatRule: VAT_RULE,
     buyerAddress: params.buyerAddress,
     payerRole: params.payerRole,
@@ -157,7 +150,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
   const text = renderReceiptText(json, {
     productName: product.name,
     locale: 'sv',
-    networkEn: networkDisplayName(chainId, 'en'),
+    network,
     supportContact: SUPPORT_CONTACT,
   })
   return { json, text }
@@ -178,7 +171,9 @@ export function renderInvoiceText(
   return renderReceiptText(inv, {
     productName,
     locale,
-    networkEn: networkDisplayName(chainId, 'en'),
+    // The Swedish render reads the network from the document itself, so only
+    // the English render looks the chain up, exactly as before the move.
+    network: { sv: '', en: locale === 'sv' ? '' : networkDisplayName(chainId, 'en') },
     supportContact: SUPPORT_CONTACT,
   })
 }

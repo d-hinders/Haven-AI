@@ -579,6 +579,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // change to that slice must re-implicate it.
     covers: [
       'packages/demo-merchant-mcp/src/**',
+      // #4890: the receipt the README describes is built in the shared core.
+      'packages/merchant-payments/src/**',
       'packages/mcp-server/src/tools/paid-mcp-completion.ts',
       'packages/sdk/src/x402.ts',
     ],

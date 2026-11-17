@@ -28,7 +28,7 @@ import {
 export const X_TAX_DECLARATION_HEADER = 'X-Tax-Declaration'
 
 /**
- * The two treatments this demo merchant displays. `SE_25` is Swedish VAT at
+ * The two treatments a receipt can display. `SE_25` is Swedish VAT at
  * 25% taken out of the price; `REVERSE_CHARGE` is the EU intra-business case
  * where the buyer accounts for the VAT and the price is shown net.
  *

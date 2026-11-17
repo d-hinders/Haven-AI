@@ -340,7 +340,7 @@ export const ROUTING_MATRIX = [
     expect: ['code', 'packages'],
     kind: CONTRACT,
     why:
-      'The runtime import-cycle pass over the eleven packages dep-lint does not scan (#4763). ' +
+      'The runtime import-cycle pass over the packages dep-lint does not scan (#4763). ' +
       'It lives outside every tree it polices and only packages_checks runs it, so weakening ' +
       'it must route that job — the same reason every other guard here has an arm.',
   },

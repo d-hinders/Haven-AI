@@ -1,0 +1,44 @@
+════════════════════════════════════════════════════════════
+                         FAKTURA
+════════════════════════════════════════════════════════════
+
+SÄLJARE
+  Haven Demo AB
+  Birger Jarlsgatan 57, 113 56 Stockholm
+  Org.nr:       559412-3456
+  Momsreg.nr:   SE559412345601
+
+KÖPARE
+  Blockkedjeadress: 0x2222222222222222222222222222222222222222
+
+────────────────────────────────────────────────────────────
+  Fakturanummer:   FAK-2026-00099
+  Fakturadatum:    2026-11-17
+  Förfallodatum:   2026-12-17
+  OCR-nummer:      2026000998
+────────────────────────────────────────────────────────────
+
+TJÄNSTER
+
+  CloudNest 50 GB — Säker krypterad molnlagring. 50 GB. Fildelning och automatisk synk ingår. (1 månad)
+  Antal: 1  Á-pris exkl. moms: 0.0004 USDC
+
+────────────────────────────────────────────────────────────
+  Belopp exkl. moms:   0.0004 USDC
+  Moms 25%:              0.0001 USDC
+  TOTALT inkl. moms:   0.0005 USDC
+────────────────────────────────────────────────────────────
+
+  Valuta:           USDC
+  Betalningssätt:   Kryptovaluta (USDC på Base)
+  Mottagaradress:   0x1111111111111111111111111111111111111111
+
+BLOCKKEDJEREFERENS
+  Tx: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+
+  Status: Betald
+
+════════════════════════════════════════════════════════════
+  Tack för ditt köp av CloudNest 50 GB!
+  Frågor: support@haven.xyz
+════════════════════════════════════════════════════════════

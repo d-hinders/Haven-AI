@@ -6,7 +6,7 @@ covers:
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
   - packages/backend/src/config.ts
-last-verified: "2026-11-06"
+last-verified: "2026-11-17"
 ---
 
 # Railway Services
@@ -58,10 +58,11 @@ service variables, and Demo-merchant reads no files from disk.
 The Demo-merchant build command stays `npm ci && npm run build -w
 packages/demo-merchant-mcp` — **do not change it in Railway.** Since #4723 the
 package imports `@haven_ai/sdk` at runtime (the merchant-side passport
-verifier), and its own `build`, `test` and `typecheck` scripts now build
-`packages/core` and `packages/sdk` first, the same way the backend's scripts
-do. So the Railway command is unchanged and the SDK is always built before the
-merchant that consumes it.
+verifier), and since #4890 `@haven_ai/merchant-payments` (the shared receipt
+and payment core). Its own `build`, `test` and `typecheck` scripts build
+`packages/core`, `packages/sdk` and `packages/merchant-payments` first, the
+same way the backend's scripts do. So the Railway command is unchanged and both
+are always built before the merchant that consumes them.
 
 `ci.yml`'s `demo_merchant_checks` job runs `npm run smoke:start -w
 packages/demo-merchant-mcp` after the build: it spawns the built

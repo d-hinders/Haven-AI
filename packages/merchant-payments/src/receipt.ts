@@ -332,8 +332,11 @@ export interface ReceiptTextOptions {
   /** The product name in the closing thank-you line. */
   productName: string
   locale: 'sv' | 'en'
-  /** The English network name; the Swedish render reads `betalningssatt`. */
-  networkEn: string
+  /**
+   * The network, the same value the receipt was built with. The Swedish
+   * render reads `betalningssatt`; the English render names `network.en`.
+   */
+  network: ReceiptNetwork
   /** Where the buyer asks questions; printed on the last line. */
   supportContact: string
 }
@@ -346,7 +349,7 @@ export interface ReceiptTextOptions {
 export function renderReceiptText(inv: InvoiceJson, opts: ReceiptTextOptions): string {
   return opts.locale === 'sv'
     ? buildReceiptTextSv(inv, opts.productName, opts.supportContact)
-    : buildReceiptTextEn(inv, opts.productName, opts.networkEn, opts.supportContact)
+    : buildReceiptTextEn(inv, opts.productName, opts.network.en, opts.supportContact)
 }
 
 /**

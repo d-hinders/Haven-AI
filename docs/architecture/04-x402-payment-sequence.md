@@ -1478,8 +1478,8 @@ and [`party-model.ts`](../../packages/backend/src/openapi/party-model.ts). It
 also closed the one place the demo merchant's OWN invoice document (as
 opposed to the confirmation text quoted above) still called this address "the
 buyer" without qualification —
-[`invoice.ts`](../../packages/demo-merchant-mcp/src/invoice.ts)'s `kopare.roll`
-now carries the same distinction the confirmation text already made.
+its `kopare.roll` (built by the shared receipt core the demo merchant calls
+since #4890) now carries the same distinction the confirmation text already made.
 
 ## Differences From Direct Payments
 

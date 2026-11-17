@@ -673,14 +673,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Runtime import cycles across the eleven packages (#4763)
+      - name: Runtime import cycles across the packages dep-lint does not scan (#4763)
         # Blocking and unwaivable, like `no-circular` everywhere else. Rule 7 of
         # docs/architecture/10-module-boundaries.md was checked on backend and
-        # core only; this pass covers the other eleven packages under the
+        # core only; this pass covers every other package under the
         # owner's RUNTIME definition (type-only imports are not edges). It runs
         # here, not in backend_checks, because a PR touching only frontend, ui,
-        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp or
-        # qa-agent never triggers that job — which is how the SDK's runtime
+        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp,
+        # merchant-payments or qa-agent never triggers that job — which is how the SDK's runtime
         # cycle survived. Self-tested for the same reason as lint:deps above:
         # a gate that cannot fire is worse than no gate.
         run: |

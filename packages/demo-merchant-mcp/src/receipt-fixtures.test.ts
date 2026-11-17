@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { generateInvoice } from './invoice.js'
+import { generateInvoice, renderInvoiceText } from './invoice.js'
 
 /**
  * #4890: the two backend accounting fixtures are the demo merchant's receipt,
@@ -48,4 +48,33 @@ describe('the backend receipt fixtures are the demo merchant builder output (#48
     }
     expect(serialized(generateInvoice({ ...PARAMS, taxDeclaration }).json)).toBe(fixture)
   })
+})
+
+/**
+ * The rendered receipt text is part of the receipt too: the Swedish text is
+ * `generateInvoice(...).text`, and the English one is what the MCP tool
+ * shows. Both are pinned whole, per fixture, so a moved or edited renderer
+ * cannot change a single character unnoticed. The pinned files were produced
+ * by the pre-move builder and the moved one alike (#4890).
+ */
+describe('the rendered receipt text is pinned byte for byte (#4890)', () => {
+  const declaration = {
+    jurisdiction: 'DE',
+    taxId: 'DE123456789',
+    taxableStatus: 'TAXABLE_PERSON',
+    validUntil: Date.parse('2027-06-30T12:00:00Z'),
+  }
+  for (const [name, taxDeclaration] of [
+    ['se25', null],
+    ['reverse-charge', declaration],
+  ] as const) {
+    it(`pins the Swedish and English text of the ${name} receipt`, async () => {
+      const invoice = generateInvoice({ ...PARAMS, taxDeclaration })
+      await expect(invoice.text).toMatchFileSnapshot(`./__snapshots__/receipt-${name}.sv.txt`)
+      await expect(renderInvoiceText(invoice.json, 'CloudNest 50 GB', 'en', 8453)).toMatchFileSnapshot(
+        `./__snapshots__/receipt-${name}.en.txt`,
+      )
+      expect(renderInvoiceText(invoice.json, 'CloudNest 50 GB', 'sv', 8453)).toBe(invoice.text)
+    })
+  }
 })

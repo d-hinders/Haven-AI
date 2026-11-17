@@ -81,7 +81,7 @@ describe('renderReceiptText takes the support contact and network as parameters 
       const text = renderReceiptText(json, {
         productName: 'Inference',
         locale,
-        networkEn: 'Base Sepolia testnet',
+        network: KIT_MERCHANT.network,
         supportContact: 'help@example.se',
       })
       expect(text).toContain('help@example.se')
@@ -94,7 +94,7 @@ describe('renderReceiptText takes the support contact and network as parameters 
     const text = renderReceiptText(json, {
       productName: 'Inference',
       locale: 'en',
-      networkEn: 'Base Sepolia testnet',
+      network: KIT_MERCHANT.network,
       supportContact: 'help@example.se',
     })
     expect(text).toContain('Cryptocurrency (USDC on Base Sepolia testnet)')

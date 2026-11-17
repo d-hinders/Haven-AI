@@ -324,3 +324,40 @@ describe('generateInvoice — buyer declaration and VAT treatment (#4855)', () =
     )
   })
 })
+
+/**
+ * #4875: Haven's accounting reads the lines and VAT off this receipt by these
+ * keys and types (`packages/backend/src/modules/accounting/receipt-statement.ts`,
+ * `docs/operations/merchant-receipt-shape.md`). A rename here would turn every
+ * demo purchase's lines into "not stated" with no other test failing.
+ */
+describe('generateInvoice — the keys Haven reads lines and VAT by (#4875)', () => {
+  const DECIMAL = /^\d+(\.\d+)?$/
+  for (const [name, taxDeclaration] of [
+    ['SE_25', undefined],
+    ['REVERSE_CHARGE', DE_DECLARATION],
+  ] as const) {
+    it(`${name}: rader, the totals, momsbehandling and valuta keep their keys and types`, () => {
+      const { json } = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate', taxDeclaration })
+      const top = json as unknown as Record<string, unknown>
+      for (const key of ['belopp_exkl_moms', 'moms_belopp', 'totalt_inkl_moms']) {
+        expect(typeof top[key], key).toBe('string')
+        expect(top[key]).toMatch(DECIMAL)
+      }
+      expect(typeof top.moms_procent).toBe('number')
+      expect(top.valuta).toBe('USDC')
+      expect(top.momsbehandling).toBe(name)
+      expect(Array.isArray(top.rader)).toBe(true)
+      expect(json.rader.length).toBeGreaterThan(0)
+      for (const row of json.rader as unknown as Array<Record<string, unknown>>) {
+        expect(typeof row.beskrivning).toBe('string')
+        expect(typeof row.antal).toBe('number')
+        for (const key of ['apris_exkl_moms', 'moms_belopp', 'totalt_inkl_moms']) {
+          expect(typeof row[key], key).toBe('string')
+          expect(row[key]).toMatch(DECIMAL)
+        }
+        expect(typeof row.moms_procent).toBe('number')
+      }
+    })
+  }
+})

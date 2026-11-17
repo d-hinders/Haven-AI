@@ -1,9 +1,11 @@
 // dep-lint-exempt: both statements assemble their WHERE/LIMIT at runtime around the shared ENTRY_SOURCE_SQL join fragment, so there is no fixed statement for db-schema-smoke to PREPARE; extraction needs the fragment redesigned first (beyond #999's ~100-line budget)
 import pool from '../../db.js'
 import { isSupportedLedgerCurrency, type LedgerCurrency } from '../../domain/ledger-currency.js'
+import { getChain } from '../../domain/chains.js'
 import { vatTreatmentForCountry } from '../../domain/vat.js'
 // dep-lint-exempt: the transactions barrel re-exports transactions/accounting.ts, which imports the accounting barrel, so importing toCanonicalAddress through it closes an accounting ↔ transactions cycle; normalize.ts is a zero-import leaf (#4379)
 import { toCanonicalAddress } from '../transactions/normalize.js'
+import { compareStatedTotal, receiptStatementFrom, type ReceiptStatement, type ReceiptTotalCheck } from './receipt-statement.js'
 import {
   deriveTransactionKind,
   transactionDescription,
@@ -146,6 +148,14 @@ export interface AccountingEntry {
   parentReceiptRef: string | null
   /** The merchant's OWN receipt when the agent captured one (#956); absent/null = none. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
+  /**
+   * #4875: the product lines and VAT figures the merchant's receipt states
+   * (`receipt-statement.ts`), with how its total compares with what Haven
+   * settled. Null when the receipt states none that can be read, or there is
+   * no receipt. Reported, not verified: the receipt is relayed by the agent.
+   * The amount booked stays `amountAtomic` / `amountHuman` either way.
+   */
+  receiptStatement?: (ReceiptStatement & { totalCheck: ReceiptTotalCheck }) | null
 }
 
 /** Shape selected from `machine_payment_evidence` for one settled payment. */
@@ -408,6 +418,37 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
       row.merchant_receipt_url != null || row.merchant_receipt_json != null
         ? { url: row.merchant_receipt_url ?? null, inlineJson: row.merchant_receipt_json ?? null }
         : null,
+    receiptStatement: receiptStatementForEntry(row),
+  }
+}
+
+/**
+ * #4875: the receipt's stated lines and VAT, plus the total check against the
+ * settled token amount. Compared only in the same currency
+ * (`compareStatedTotal`).
+ */
+function receiptStatementForEntry(
+  row: AccountingEntrySourceRow,
+): (ReceiptStatement & { totalCheck: ReceiptTotalCheck }) | null {
+  const statement = receiptStatementFrom(row.merchant_receipt_json ?? null)
+  if (statement === null) return null
+  return {
+    ...statement,
+    totalCheck: compareStatedTotal(statement, {
+      token: row.token_symbol,
+      amountAtomic: row.amount_raw,
+      decimals: tokenDecimals(row.chain_id, row.token_symbol),
+    }),
+  }
+}
+
+/** The settled token's decimals from the chain registry; null when unknown. */
+function tokenDecimals(chainId: number, tokenSymbol: string): number | null {
+  try {
+    const token = Object.values(getChain(chainId).tokens).find((t) => t.symbol === tokenSymbol)
+    return token ? token.decimals : null
+  } catch {
+    return null
   }
 }
 

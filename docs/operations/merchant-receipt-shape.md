@@ -39,6 +39,14 @@ is optional; a missing, blank or non-string value is treated as absent.
 | `saljare.org_nr` | The seller's organisation number |
 | `saljare.moms_nr` | The seller's VAT registration number |
 
+`saljare.name` also names the payee on the dashboard (#4881, the receipt
+step of the recipient-naming order): the activity feed, analytics, the
+top-merchant and first-payment cards, and transaction search. There it is
+cleaned (control, invisible and bidirectional characters stripped,
+whitespace collapsed, trimmed) and dropped when it is empty or longer than
+120 characters; a flat top-level `merchant_name` is the fallback. A `saljare`
+block nested under another key is not read, here or by the accounting side.
+
 ## Lines and VAT (#4875)
 
 Read by `receiptStatementFrom` (`receipt-statement.ts`) onto the accounting

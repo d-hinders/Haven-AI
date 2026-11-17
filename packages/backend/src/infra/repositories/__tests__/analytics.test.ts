@@ -572,6 +572,48 @@ describeDb('analytics-overview repository (#2946)', () => {
     }
   })
 
+  it('strips invisible and bidirectional characters: a name of only those, or of no-break spaces, yields no name', async () => {
+    const invisible = await seedMerchantWithReceipt('d1', { saljare: { name: ' ​ ' } })
+    const names = await listReceiptMerchantNamesForUser(invisible.userId, [invisible.merchant])
+    expect(names.has(invisible.merchant.toLowerCase())).toBe(false)
+
+    const spoof = await seedMerchantWithReceipt('d2', { saljare: { name: '‮Kelta\u0007 AB Ltd' } })
+    const spoofNames = await listReceiptMerchantNamesForUser(spoof.userId, [spoof.merchant])
+    expect(spoofNames.get(spoof.merchant.toLowerCase())).toBe('Kelta AB Ltd')
+  })
+
+  it('a blank or oversized saljare.name falls back to the flat merchant_name on the same receipt', async () => {
+    const blank = await seedMerchantWithReceipt('d3', { saljare: { name: '   ' }, merchant_name: 'Acme Flat' })
+    expect((await listReceiptMerchantNamesForUser(blank.userId, [blank.merchant])).get(blank.merchant.toLowerCase())).toBe(
+      'Acme Flat',
+    )
+    const big = await seedMerchantWithReceipt('d4', {
+      saljare: { name: 'x'.repeat(RECEIPT_MERCHANT_NAME_MAX_LENGTH + 1) },
+      merchant_name: 'Acme Flat',
+    })
+    expect((await listReceiptMerchantNamesForUser(big.userId, [big.merchant])).get(big.merchant.toLowerCase())).toBe('Acme Flat')
+  })
+
+  it('the newest receipt with a usable name wins; a newer unusable one falls back to the older', async () => {
+    const userId = await seedUser()
+    const accountId = await seedAccount(userId, 950)
+    const agentId = await seedAgent(userId, accountId)
+    const merchant = `0x${'d5'.padStart(40, '0')}`
+    const receiptAt = async (name: unknown, hoursAgo: number) => {
+      const paymentId = await seedPayment({ agentId, userId, usdValue: 1, merchantAddress: merchant })
+      await seedReceipt({ userId, agentId, paymentId, merchant, inlineJson: { saljare: { name } } })
+      await db.query(
+        `UPDATE machine_payment_evidence SET created_at = NOW() - ($2 * interval '1 hour') WHERE payment_intent_id = $1`,
+        [paymentId, hoursAgo],
+      )
+    }
+    await receiptAt('Old Name AB', 3)
+    await receiptAt('New Name AB', 2)
+    expect((await listReceiptMerchantNamesForUser(userId, [merchant])).get(merchant)).toBe('New Name AB')
+    await receiptAt('   ', 1)
+    expect((await listReceiptMerchantNamesForUser(userId, [merchant])).get(merchant)).toBe('New Name AB')
+  })
+
   it('the receipt-name bound is the catalog merchant-name bound (one bound for every display name)', () => {
     expect(RECEIPT_MERCHANT_NAME_MAX_LENGTH).toBe(MAX_MERCHANT_NAME_LENGTH)
   })

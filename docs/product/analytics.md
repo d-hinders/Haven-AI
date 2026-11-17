@@ -208,7 +208,8 @@ x402 resource its most recent payment in the range called, else the name of
 one of your own accounts at that address (address-only, across chains; the
 oldest account wins a shared address), else your contact's name for that
 address, else the seller name on the merchant's receipt (its `saljare.name`,
-since #4881; a receipt's flat `merchant_name` as the older fallback), else
+since #4881; a receipt's flat `merchant_name` when that yields no usable
+name), else
 nothing — the row
 shows "Unknown recipient" where the transaction history says "New
 recipient", with the naming step as a KIND line under the name: "Your

@@ -108,7 +108,16 @@ export const LIST_ACCOUNTS_WITH_TYPE_FOR_USER_SQL = `SELECT id, account_address,
 
 export const FIND_OWNED_ACCOUNT_ADDRESS_SQL = `SELECT id, account_address FROM smart_accounts WHERE id = $1 AND user_id = $2`
 
-export const FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM smart_accounts WHERE id = $1 AND user_id = $2`
+/**
+ * The unlink / make-default ownership read.
+ *
+ * #4895: it also carries `account_address` (make-default needs it for the
+ * legacy mirror) and `is_merchant_account` (both routes refuse the merchant
+ * account). One read, so the two refusals cannot disagree about which account
+ * is the merchant account.
+ */
+export const FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL = `SELECT id, account_address, is_default, is_merchant_account
+       FROM smart_accounts WHERE id = $1 AND user_id = $2`
 
 /**
  * The funding read's ownership check (#2534).
@@ -180,12 +189,20 @@ export async function findOwnedAccountAddress(
   return result.rows[0] ?? null
 }
 
+export interface OwnedAccountFlagRow {
+  id: string
+  account_address: string
+  is_default: boolean
+  /** #4895: the merchant marker. Unlink and make-default both refuse it. */
+  is_merchant_account: boolean
+}
+
 export async function findOwnedAccountDefaultFlag(
   accountId: string,
   userId: string,
   db: Executor = pool,
-): Promise<{ id: string; is_default: boolean } | null> {
-  const result = await db.query<{ id: string; is_default: boolean }>(
+): Promise<OwnedAccountFlagRow | null> {
+  const result = await db.query<OwnedAccountFlagRow>(
     FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL,
     [accountId, userId],
   )

@@ -1,0 +1,243 @@
+/**
+ * Merchant services — turning them on and off, and the dashboard read
+ * (#4895, epic #4885).
+ *
+ * ## What this route does
+ *
+ * A signed-in user with at least one account calls `POST /merchant-services`
+ * to turn merchant services on. In ONE transaction the route:
+ *
+ *   1. records the per-user setting (`merchant_service_settings.enabled`),
+ *   2. creates a dedicated account through the SAME create-additional path the
+ *      New account dialog uses (`modules/accounts/create-additional.ts`), and
+ *   3. marks that account as the merchant account
+ *      (`smart_accounts.is_merchant_account`).
+ *
+ * The request carries what the existing path takes — the network, the user's
+ * existing account and the id of one of its passkeys. It names NO account to
+ * mark: the account is the one this request creates. The server receives no
+ * passkey assertion; it checks that the passkey id belongs to the source
+ * account, and the session is the authentication.
+ *
+ * `DELETE /merchant-services` records the setting as off and keeps the account
+ * and its history. `GET /merchant-services` returns the setting and the
+ * merchant account for the dashboard.
+ *
+ * ## One merchant account per user, on one network
+ *
+ * The database enforces the first half: `smart_accounts_one_merchant_per_user`
+ * is a partial unique index on `(user_id) WHERE is_merchant_account`
+ * (migration 126). The second half is this route's: the network chosen when
+ * merchant services are first turned on is permanent for the pilot, so a
+ * turn-on naming a different chain is refused with
+ * `MERCHANT_ACCOUNT_ON_OTHER_NETWORK` — never with the generic key-reuse code,
+ * because the existing-merchant-account check runs BEFORE the creation logic
+ * and therefore before any idempotency key is derived.
+ *
+ * ## Why the setting row is locked first
+ *
+ * Two tabs, or a double click, both reach the "is there already a merchant
+ * account?" read. `lockMerchantSetting` takes a row lock on the caller's
+ * setting row, so the second request waits for the first to commit and then
+ * sees its account. Without the lock both would read "none", both would create
+ * an account, and the partial unique index would refuse the second MARK only
+ * after a second account row and its salt-counter bump had been written.
+ *
+ * ## Money path
+ *
+ * The route creates a spend-capable account and decides which account merchant
+ * payments are received into, so it carries the money-path rate limit and sits
+ * on the money-path perimeter. Nothing here moves funds or signs anything.
+ */
+import { FastifyInstance } from 'fastify'
+import { authMiddleware } from '../middleware/auth.js'
+import { moneyPathRateLimit } from '../middleware/rate-limit.js'
+import { DELEGATION_RAIL_CHAIN_IDS } from '../rails/delegation-contracts.js'
+import { inTransaction } from '../infra/repositories/smart-accounts.js'
+import {
+  disableMerchantSetting,
+  enableMerchantSetting,
+  findMerchantAccountForUser,
+  lockMerchantSetting,
+  markMerchantAccount,
+  readMerchantSetting,
+  type MerchantAccountRow,
+} from '../infra/repositories/merchant-services.js'
+import {
+  createAdditionalHybridAccount,
+  CreateAdditionalRefusal,
+  UNSUPPORTED_NETWORK,
+} from '../modules/accounts/create-additional.js'
+import {
+  MERCHANT_ACCOUNT_NAME,
+  MERCHANT_ACCOUNT_ON_OTHER_NETWORK,
+  merchantIdempotencyKey,
+} from '../domain/merchant-services.js'
+
+interface TurnOnBody {
+  /** The network the merchant account is created on. Permanent for the pilot. */
+  chain_id: number
+  /** An account the caller owns; the merchant account's owner passkey is copied from it. */
+  source_account_id: string
+  /** The WebAuthn credential the user authenticated with; must be on the source account. */
+  key_id: string
+}
+
+/**
+ * A refusal raised INSIDE the turn-on transaction. Thrown rather than returned
+ * so the transaction rolls back — a refused turn-on must commit nothing, not
+ * even the setting row's `updated_at`.
+ */
+class MerchantRefusal extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: Record<string, unknown>,
+  ) {
+    super(String(body.error ?? 'merchant services refused'))
+    this.name = 'MerchantRefusal'
+  }
+}
+
+/** The wire shape of the merchant account. */
+function serializeMerchantAccount(row: MerchantAccountRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    account_address: row.account_address,
+    chain_id: Number(row.chain_id),
+    name: row.name,
+    created_at: row.created_at,
+  }
+}
+
+export default async function merchantServiceRoutes(app: FastifyInstance): Promise<void> {
+  app.addHook('onRequest', authMiddleware)
+
+  /**
+   * Turn merchant services on.
+   *
+   * 201 when this request created the account, 200 when it answered an
+   * existing one (a repeat, a retry, or the second tab). Both carry the same
+   * body; `created` says which happened.
+   */
+  app.post<{ Body: TurnOnBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const { chain_id, source_account_id, key_id } = request.body ?? {}
+
+    // The network check runs before anything is written, and carries a code
+    // the dialog can branch on (#4895) — the create-additional path answers
+    // this case with a sentence and no code.
+    if (!DELEGATION_RAIL_CHAIN_IDS.has(chain_id)) {
+      return reply.code(400).send({
+        error: `Merchant services are not available on chain ${chain_id} yet`,
+        error_code: UNSUPPORTED_NETWORK,
+        supported: [...DELEGATION_RAIL_CHAIN_IDS],
+      })
+    }
+
+    let outcome: { account: MerchantAccountRow; created: boolean }
+    try {
+      outcome = await inTransaction(async (tx) => {
+        // Serialise concurrent turn-ons for this user. See the header.
+        await lockMerchantSetting(sub, tx)
+
+        // The existing-merchant-account check runs BEFORE the creation logic,
+        // so a repeat answers the account whichever passkey the request names
+        // — and a different network is refused with its own code rather than
+        // reaching the idempotency key.
+        const existing = await findMerchantAccountForUser(sub, tx)
+        if (existing !== null) {
+          if (Number(existing.chain_id) !== chain_id) {
+            throw new MerchantRefusal(409, {
+              error:
+                `Merchant services are already on for chain ${existing.chain_id}. ` +
+                "The merchant account's network is permanent for the pilot.",
+              error_code: MERCHANT_ACCOUNT_ON_OTHER_NETWORK,
+              chain_id: Number(existing.chain_id),
+            })
+          }
+          await enableMerchantSetting(sub, tx)
+          return { account: existing, created: false }
+        }
+
+        // The SAME creation the New account dialog uses, inside THIS
+        // transaction — so the setting, the account and the marker commit
+        // together or not at all.
+        const created = await createAdditionalHybridAccount(
+          {
+            userId: sub,
+            chainId: chain_id,
+            sourceAccountId: source_account_id,
+            keyId: key_id,
+            name: MERCHANT_ACCOUNT_NAME,
+            idempotencyKey: merchantIdempotencyKey(chain_id),
+          },
+          tx,
+          // This transaction has its own writes to commit after the replay
+          // (the marker and the setting), so a conflict-path replay must NOT
+          // roll it back. The setting-row lock makes that path unreachable
+          // here anyway; the flag keeps the marker from being skipped if it
+          // ever fires.
+          { rollbackOnReplay: false },
+        )
+
+        await markMerchantAccount(sub, created.account.id, tx)
+        // Re-read so the reply carries the row's name and created_at, not the
+        // creation result's narrower shape.
+        const account = await findMerchantAccountForUser(sub, tx)
+        if (account === null) {
+          throw new Error('merchant account missing inside the transaction that marked it')
+        }
+        await enableMerchantSetting(sub, tx)
+        return { account, created: !created.replayed }
+      })
+    } catch (err) {
+      if (err instanceof MerchantRefusal) return reply.code(err.status).send(err.body)
+      if (err instanceof CreateAdditionalRefusal) return reply.code(err.status).send(err.body)
+      throw err
+    }
+
+    return reply.code(outcome.created ? 201 : 200).send({
+      enabled: true,
+      created: outcome.created,
+      merchant_account: serializeMerchantAccount(outcome.account),
+    })
+  })
+
+  /**
+   * Turn merchant services off.
+   *
+   * Records the setting and keeps the account and its history — the account is
+   * NOT unlinked, and the marker stays, so turning the feature back on reuses
+   * the same account. Idempotent: turning off when it was never on answers the
+   * same body.
+   */
+  app.delete('/', async (request) => {
+    const { sub } = request.user as { sub: string }
+    const account = await inTransaction(async (tx) => {
+      await lockMerchantSetting(sub, tx)
+      await disableMerchantSetting(sub, tx)
+      return findMerchantAccountForUser(sub, tx)
+    })
+    return {
+      enabled: false,
+      merchant_account: account === null ? null : serializeMerchantAccount(account),
+    }
+  })
+
+  /**
+   * The dashboard read: the setting and the merchant account, in one
+   * authenticated call. Both reads are scoped to the caller, so another user's
+   * setting is never returned.
+   */
+  app.get('/', async (request) => {
+    const { sub } = request.user as { sub: string }
+    const setting = await readMerchantSetting(sub)
+    const account = await findMerchantAccountForUser(sub)
+    return {
+      enabled: setting?.enabled ?? false,
+      enabled_at: setting?.enabled_at ?? null,
+      disabled_at: setting?.disabled_at ?? null,
+      merchant_account: account === null ? null : serializeMerchantAccount(account),
+    }
+  })
+}

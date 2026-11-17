@@ -316,6 +316,10 @@ describe('index.ts readers', () => {
       'routes/ops.ts',
       // #3597: brand-new module with no live caller, born ENFORCED.
       'routes/feedback.ts',
+      // #4895: merchant services — brand-new money-path module, born ENFORCED
+      // (its request body is closed, so a body naming an account to mark is
+      // refused by the schema).
+      'routes/merchant-services.ts',
     ])
   })
 })

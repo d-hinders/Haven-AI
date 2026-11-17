@@ -5,19 +5,26 @@ covers:
   - packages/backend/src/modules/transactions/counterparty-name.ts
   - packages/backend/src/modules/transactions/recipient-name-index.ts
   - packages/backend/src/infra/repositories/merchants.ts
+  - packages/backend/src/routes/agent-activity.ts
+  - packages/backend/src/modules/transactions/csv-export.ts
 last-verified: "2026-11-17"
 ---
 
 # How Haven names who you paid
 
-Wherever Haven shows the other side of a payment, it names it in **one
-order** (#4882, epic #4879). Every surface uses the same order:
+Haven names the other side of a payment in **one order** (#4882, epic
+#4879), computed once on the server:
 
-- the dashboard's activity feed, top merchant, the agent cards' last payment
-  and the first-payment card;
-- the transactions list, its search and its CSV export;
-- analytics' merchants table;
-- an agent's Activity tab and its CSV export.
+- **Shown on screen today:** analytics' merchants table and each agent's top
+  merchant; the dashboard's top merchant, the agent cards' last payment and
+  the first-payment card.
+- **Carried by the API, shown on screen in #4883:** the dashboard activity
+  feed's names, the transactions list rows (`recipientName`), and an agent's
+  Activity tab rows (`counterparty_name`). Until #4883 those three screens
+  still title a paid-API row by its host first.
+- **Search and exports:** transactions search matches every name the order
+  can find for a row (all of steps 1–4, not only the winner); the
+  transactions CSV and the agent ledger CSV name rows in this order.
 
 ## The order
 
@@ -28,14 +35,21 @@ The first source that has a name wins:
 2. **Your contact.** The name you saved for the address in your address book.
 3. **The Haven catalog's merchant.** Used when the address is the receiving
    address of exactly one Haven-curated merchant in the catalog, on that
-   network. An address that two merchants advertise names neither. A
-   merchant whose payment challenge recorded no address matches nothing.
-   Seller-listed catalog entries never name a payment.
+   network, and that merchant's active, verified paid-API offers there all
+   name this one address (none disagrees, none leaves it unstated — the same
+   "verified" the merchant-locked budget uses). An address that two merchants
+   advertise names neither. Seller-listed catalog entries never name a
+   payment. Where a row adds up payments across networks (analytics'
+   merchants, the dashboard's top merchant), the catalog names it only when
+   every network names the same merchant.
 4. **The seller name on the merchant's receipt.** The receipt's top-level
    `saljare.name`, else its flat `merchant_name`. A receipt cannot borrow a
-   catalog merchant's name: if the seller name equals a catalog merchant's
-   name (ignoring case and spacing) and the payment did not go to one of that
-   merchant's addresses, the receipt name is not used.
+   catalog merchant's name: names are compared after folding case, spacing,
+   punctuation, invisible characters and accents away, and if the seller
+   name matches any catalog merchant's (a seller-listed one included) while
+   the payment did not go to an address a CURATED entry records for that
+   name, the receipt name is not used. If that check cannot be read, no
+   receipt name is used at all.
 5. **The paid API's host**, for example `api.example.com`.
 6. **Nothing.** The screen shows its own fallback: "Unknown recipient" or
    "New recipient".
@@ -54,7 +68,12 @@ and receipts (#4099).
   refusals follows this order too. It used to be host first, then your own
   account, then your contact.
 
-The address columns are unchanged.
+The address columns are unchanged. In the transactions CSV this means a row
+can name one party and show another's address: on the funding leg of a
+paid-API payment, `counterparty_name` names the merchant (the party the
+payment was for) while `counterparty_address` stays the agent's funding
+address the money moved to, as before. The agent ledger CSV names and shows
+the same address.
 
 ## What a catalog or receipt name is, and is not
 
@@ -67,6 +86,9 @@ The address columns are unchanged.
   that advertised someone else's address would name that person's payments.
   This is the risk the owner accepted on 2026-11-17 (#4882), limited to
   Haven-curated entries.
+- **The borrowing check compares spelling, not appearance.** A name written
+  in another script (a Cyrillic "а" for a Latin "a"), or with no Latin letter
+  or digit at all, is not caught by it.
 
 ## For developers
 

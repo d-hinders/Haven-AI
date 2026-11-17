@@ -8,6 +8,7 @@ import {
 import { machinePaymentLifecycle } from '../domain/machine-payment-lifecycle.js'
 import { deriveSettlementTracking } from '../domain/settlement-tracking.js'
 import { agentExistsForUser, listAgentNamesForUser } from '../infra/repositories/agents.js'
+import { listBasicAccountsForUser } from '../infra/repositories/transaction-history.js'
 import {
   EXPORT_ROW_CAP,
   refuseCsvExportOverCap,
@@ -381,7 +382,9 @@ function refusalTarget(r: AgentRefusalRow): RecipientTarget {
 }
 
 /** One read of each name source over a page's recipients (fail-soft by source). */
-const ledgerNames = (sub: string, targets: RecipientTarget[]) => loadRecipientNameIndex(sub, targets.map((t) => t.address))
+// The ledger names own accounts on every rail (a retired Safe included), as it did before #4882.
+const ledgerNames = async (sub: string, targets: RecipientTarget[]) =>
+  loadRecipientNameIndex(sub, targets.map((t) => t.address), { accounts: await listBasicAccountsForUser(sub) })
 
 function isoDate(value: string | Date): string {
   return new Date(value).toISOString()

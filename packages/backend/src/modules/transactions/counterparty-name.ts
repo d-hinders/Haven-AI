@@ -56,9 +56,10 @@ export interface RecipientNameIndex {
   /** Receipt seller names, keyed by lowercased address. */
   receipts: ReadonlyMap<string, string>
   /**
-   * The receiving addresses (lowercased) of every catalog merchant whose
-   * normalised name equals a receipt name in `receipts` — the input of the
-   * borrowing rule. A name absent from the map is no catalog merchant's.
+   * Keyed by `recipientNameKey`: for every catalog merchant (any source) whose
+   * name key equals a receipt name's, the receiving addresses (lowercased)
+   * its CURATED rows record — the input of the borrowing rule. A key absent
+   * from the map is no catalog merchant's name.
    */
   catalogNameAddresses: ReadonlyMap<string, ReadonlySet<string>>
 }
@@ -79,9 +80,17 @@ export interface RecipientTarget {
   x402ResourceUrl: string | null
 }
 
-/** The name normalisation the borrowing rule compares by: trimmed, whitespace collapsed, case-folded. */
-export function normaliseRecipientName(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toLowerCase()
+/**
+ * The key the receipt-borrowing rule compares names by: the compatibility
+ * decomposition (NFKD), lower-cased, with everything but ASCII letters and
+ * digits removed — so spacing, punctuation, zero-width characters and
+ * accents cannot separate a borrowed name from the original. The SQL side
+ * (`NAME_KEY_SQL`, `infra/repositories/merchants.ts`) computes the same key.
+ * A name with no ASCII letter or digit has an empty key and is not compared
+ * (a residual: non-Latin names and look-alike letters from another script).
+ */
+export function recipientNameKey(name: string): string {
+  return name.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 /**
@@ -124,7 +133,8 @@ function catalogName(index: RecipientNameIndex, key: string, chainId: number | n
 function receiptName(index: RecipientNameIndex, key: string): string | null {
   const name = index.receipts.get(key)
   if (!name) return null
-  const catalogAddresses = index.catalogNameAddresses.get(normaliseRecipientName(name))
+  const key2 = recipientNameKey(name)
+  const catalogAddresses = key2 === '' ? undefined : index.catalogNameAddresses.get(key2)
   if (catalogAddresses && !catalogAddresses.has(key)) return null
   return name
 }

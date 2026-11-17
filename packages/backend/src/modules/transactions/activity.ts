@@ -474,9 +474,10 @@ export async function buildActivityGroups(
         source: sample.source ?? null,
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
-        // Contacts and receipts first, then the user's own accounts (#4099)
-        // — the export's order. A deposit is named only when it came from
-        // another own account; its group holds that sender alone.
+        // #4882: the one naming order (`resolveRecipientName`, wired by the
+        // route); the contact-then-own-account lookups are only the fallback
+        // for a caller that does not wire it. A deposit is named only when it
+        // came from another own account; its group holds that sender alone.
         merchantName:
           sample.direction === 'out'
             ? resolveRecipientName

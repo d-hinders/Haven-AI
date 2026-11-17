@@ -13,7 +13,7 @@ import { listContactsForUser } from '../../infra/repositories/contacts.js'
 import { listReceiptMerchantNamesForUser } from '../../infra/repositories/analytics.js'
 import { listCatalogMerchantNameAddresses, listCatalogRecipientNames } from '../../infra/repositories/merchants.js'
 import { listAccountsForUser } from '../../infra/repositories/smart-accounts.js'
-import { normaliseRecipientName, type RecipientNameIndex } from './counterparty-name.js'
+import { recipientNameKey, type RecipientNameIndex } from './counterparty-name.js'
 
 export interface LoadRecipientNameIndexOptions {
   /** The user's accounts, `created_at ASC`, when the caller already read them. */
@@ -45,16 +45,16 @@ export async function loadRecipientNameIndex(
     catalog.set(key, entries)
   }
 
-  const receiptNormNames = [...new Set([...receipts.values()].map(normaliseRecipientName))]
+  const receiptNameKeys = [...new Set([...receipts.values()].map(recipientNameKey))].filter((k) => k !== '')
   // Fail-CLOSED for the borrowing rule: without it a receipt could borrow a
   // catalog name, so when the read fails no receipt name is used at all.
-  const nameRows = await listCatalogMerchantNameAddresses(receiptNormNames).catch(() => null)
+  const nameRows = await listCatalogMerchantNameAddresses(receiptNameKeys).catch(() => null)
   const usableReceipts = nameRows === null ? new Map<string, string>() : receipts
   const catalogNameAddresses = new Map<string, Set<string>>()
   for (const row of nameRows ?? []) {
-    const set = catalogNameAddresses.get(row.norm_name) ?? new Set<string>()
+    const set = catalogNameAddresses.get(row.name_key) ?? new Set<string>()
     if (row.pay_to) set.add(row.pay_to.toLowerCase())
-    catalogNameAddresses.set(row.norm_name, set)
+    catalogNameAddresses.set(row.name_key, set)
   }
 
   return {

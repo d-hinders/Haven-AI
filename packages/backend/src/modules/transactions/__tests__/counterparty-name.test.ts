@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_RECIPIENT_NAME_INDEX,
   allRecipientNames,
-  normaliseRecipientName,
+  recipientNameKey,
   recipientAddressOf,
   recipientNameWithoutHost,
   resolveRecipientName,
@@ -86,19 +86,19 @@ describe('resolveRecipientName — the one order', () => {
   it('step 4 — a receipt cannot borrow a catalog merchant name at an address that is not that merchant’s', () => {
     const borrowing = index({
       receipts: new Map([[ADDR, '  nordshield   VPN ']]),
-      catalogNameAddresses: new Map([['nordshield vpn', new Set([OTHER])]]),
+      catalogNameAddresses: new Map([['nordshieldvpn', new Set([OTHER])]]),
     })
     expect(resolveRecipientName(borrowing, target())).toEqual({ label: 'api.nordshield.example', kind: 'x402' })
     // At the merchant's own address the same receipt name is used.
     const own = index({
       receipts: new Map([[ADDR, 'NordShield VPN']]),
-      catalogNameAddresses: new Map([['nordshield vpn', new Set([ADDR])]]),
+      catalogNameAddresses: new Map([['nordshieldvpn', new Set([ADDR])]]),
     })
     expect(resolveRecipientName(own, target()).label).toBe('NordShield VPN')
     // A catalog merchant with no recorded address: the name is never borrowable.
     const noAddress = index({
       receipts: new Map([[ADDR, 'NordShield VPN']]),
-      catalogNameAddresses: new Map([['nordshield vpn', new Set<string>()]]),
+      catalogNameAddresses: new Map([['nordshieldvpn', new Set<string>()]]),
     })
     expect(resolveRecipientName(noAddress, target({ x402ResourceUrl: null })).label).toBeNull()
   })
@@ -139,7 +139,10 @@ describe('the helpers', () => {
     expect(recipientAddressOf({ ...row, direction: 'in' })).toBe('0xfrom')
   })
 
-  it('normaliseRecipientName trims, collapses whitespace and case-folds', () => {
-    expect(normaliseRecipientName('  Klara\t Data   AB ')).toBe('klara data ab')
+  it('recipientNameKey folds case, spacing, punctuation, zero-width characters and accents away', () => {
+    expect(recipientNameKey('  Klara\t Data   AB ')).toBe('klaradataab')
+    expect(recipientNameKey('Nord\u200bShield-VPN')).toBe('nordshieldvpn')
+    expect(recipientNameKey('Café\u00a0Brasil')).toBe('cafebrasil')
+    expect(recipientNameKey('日本')).toBe('')
   })
 })

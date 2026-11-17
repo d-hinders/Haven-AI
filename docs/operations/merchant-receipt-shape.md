@@ -39,10 +39,11 @@ is optional; a missing, blank or non-string value is treated as absent.
 | `saljare.org_nr` | The seller's organisation number |
 | `saljare.moms_nr` | The seller's VAT registration number |
 
-`saljare.name` also names the payee on the dashboard (#4881, the receipt
-step of the recipient-naming order): the activity feed, analytics, the
-top-merchant and first-payment cards, and transaction search. There it is
-cleaned (control, invisible and bidirectional characters stripped,
+`saljare.name` also names the payee wherever Haven names a counterparty: it
+is the receipt step of the one recipient-naming order (#4881, #4882), and
+[`recipient-names.md`](../product/recipient-names.md) lists the surfaces and
+the rule that keeps a receipt from borrowing a catalog merchant's name. It
+is cleaned (control, invisible and bidirectional characters stripped,
 whitespace collapsed, trimmed) and dropped when it is empty or longer than
 120 characters; a flat top-level `merchant_name` is the fallback. A `saljare`
 block nested under another key is not read, here or by the accounting side.

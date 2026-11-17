@@ -3878,10 +3878,10 @@ export type components = {
             merchant_to: string | null;
             /** @description The x402 resource the agent tried to pay, when the attempt was resource-scoped. */
             resource_url: string | null;
-            /** @description The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback. */
+            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
             counterparty_name?: string | null;
             /**
-             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
              * @enum {string|null}
              */
             counterparty_name_source?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
@@ -6201,10 +6201,10 @@ export type components = {
             source?: string;
             x402ResourceUrl?: string | null;
             x402MerchantAddress?: string | null;
-            /** @description The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback. */
+            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
             recipientName?: string | null;
             /**
-             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
              * @enum {string|null}
              */
             recipientNameSource?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
@@ -6317,10 +6317,10 @@ export type components = {
             source?: string;
             x402ResourceUrl?: string | null;
             x402MerchantAddress?: string | null;
-            /** @description The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback. */
+            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
             recipientName?: string | null;
             /**
-             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
              * @enum {string|null}
              */
             recipientNameSource?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
@@ -6872,7 +6872,7 @@ export type components = {
                     x402ResourceUrl: string | null;
                     /** @description One representative recipient address. */
                     to: string | null;
-                    /** @description Contact name, else receipt name, for the merchant address; null when neither exists. */
+                    /** @description The merchant name in the one recipient-naming order without the host step (#4882): one of the user's own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name, for the merchant address; null when none exists. The host rides beside it as `x402ResourceUrl`. */
                     merchantName: string | null;
                 } | null;
                 /** @description Payment intents with status failed in the 7-day window. */
@@ -6918,7 +6918,7 @@ export type components = {
             x402ResourceUrl: string | null;
             /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits, and the receiving own account’s address on a folded move (`ownTransfer`, #4268). */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row. */
+            /** @description The counterparty name in the one recipient-naming order without the host step (#4882): one of the user's own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name (it replaced #4099's contact-and-receipt-first order); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row. */
             merchantName: string | null;
             /** @description Outbound groups only (#4117): the label of the user's own account the money left — a contact name saved for it first, else the account's own name. Every member of the group left that one account. Absent on deposits and when no name resolves. */
             fromAccountName?: string;
@@ -7015,7 +7015,7 @@ export type components = {
             eurValue: number | null;
             /** @description Booked SEK at settle time; null when the row was never priced. */
             sekValue: number | null;
-            /** @description Contact name, else receipt-merchant name, for the counterparty. Null when neither exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4). */
+            /** @description The counterparty name in the one recipient-naming order without the host step (#4882): one of the user's own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name. Null when none exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4). */
             merchantName: string | null;
             /** @description The x402 resource URL, whose HOST is the last displayable counterparty name. Null on a non-x402 payment. */
             x402ResourceUrl: string | null;
@@ -17048,10 +17048,10 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
-                            /** @description The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback. */
+                            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
                             counterparty_name?: string | null;
                             /**
-                             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+                             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
                              * @enum {string|null}
                              */
                             counterparty_name_source?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
@@ -17402,10 +17402,10 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
-                            /** @description The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback. */
+                            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
                             counterparty_name?: string | null;
                             /**
-                             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+                             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
                              * @enum {string|null}
                              */
                             counterparty_name_source?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
@@ -17683,7 +17683,7 @@ export interface operations {
                                 chain_id?: number;
                             }[];
                             top_merchant: {
-                                /** @description The five-step naming order (x402 resource host → own account → contact → receipt → none, #4332); null when nothing resolved — the client renders "Unknown recipient". */
+                                /** @description The one recipient-naming order (#4882, replacing #4332's host-first order): own account → contact → Haven-curated catalog merchant (across chains only when every chain names the same merchant) → receipt seller name → x402 resource host → none; null when nothing resolved — the client renders "Unknown recipient". */
                                 label: string | null;
                                 /** @example 0x1111111111111111111111111111111111111111 */
                                 address: string;
@@ -22796,7 +22796,7 @@ export interface operations {
                 direction?: "in" | "out";
                 /** @description #4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler. */
                 chainId?: number;
-                /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved name (contact, receipt merchant, or another of the user's accounts), the agent name, and the counterparty address (partial match). */
+                /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved names (every name source of the one naming order, #4882: another of the user's accounts, a contact, the Haven-curated catalog merchant, the receipt seller name), the agent name, and the counterparty address (partial match). */
                 search?: string;
                 /** @description #4095: a rolling window `[now − N×24h, now)` (owner rule, epic #3801: rolling days, no calendar month). Mutually exclusive with `from`/`to`. */
                 period?: "7d" | "30d" | "90d";

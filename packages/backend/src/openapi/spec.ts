@@ -71,12 +71,12 @@ const tokenSymbol = {
 const recipientNameSource = {
   type: ['string', 'null'],
   enum: ['own_account', 'contact', 'catalog', 'receipt', 'x402', null],
-  description: "Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.",
+  description: "Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.",
 } as const
 const recipientName = {
   type: ['string', 'null'],
   description:
-    'The recipient name in the one naming order (#4882): own account, contact, catalog merchant, receipt seller, resource host. Null when nothing named the recipient — the client renders its own fallback.',
+    'The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback.',
 } as const
 
 const transactionBaseProperties = {
@@ -6722,7 +6722,7 @@ export const openapiSpec = {
                             type: ['object', 'null'],
                             required: ['label', 'address'],
                             properties: {
-                              label: { type: ['string', 'null'], description: 'The five-step naming order (x402 resource host → own account → contact → receipt → none, #4332); null when nothing resolved — the client renders "Unknown recipient".' },
+                              label: { type: ['string', 'null'], description: 'The one recipient-naming order (#4882, replacing #4332\'s host-first order): own account → contact → Haven-curated catalog merchant (across chains only when every chain names the same merchant) → receipt seller name → x402 resource host → none; null when nothing resolved — the client renders "Unknown recipient".' },
                               address: address,
                             },
                           },
@@ -9048,7 +9048,7 @@ export const openapiSpec = {
           { name: 'tokenKey', in: 'query', schema: { type: 'string', pattern: TOKEN_KEY_PATTERN, examples: ['8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'] }, description: '`<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler.' },
           { name: 'direction', in: 'query', schema: { type: 'string', enum: ['in', 'out'] }, description: '#4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only).' },
           { name: 'chainId', in: 'query', schema: { type: 'integer', minimum: 1, examples: [8453] }, description: '#4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler.' },
-          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: "#4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved name (contact, receipt merchant, or another of the user's accounts), the agent name, and the counterparty address (partial match)." },
+          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: "#4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved names (every name source of the one naming order, #4882: another of the user's accounts, a contact, the Haven-curated catalog merchant, the receipt seller name), the agent name, and the counterparty address (partial match)." },
           { name: 'period', in: 'query', schema: { type: 'string', enum: ['7d', '30d', '90d'] }, description: '#4095: a rolling window `[now − N×24h, now)` (owner rule, epic #3801: rolling days, no calendar month). Mutually exclusive with `from`/`to`.' },
           { name: 'from', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range start calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. Sent together with `to`; mutually exclusive with `period`.' },
           { name: 'to', in: 'query', schema: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }, description: '#4095: custom-range end calendar date `YYYY-MM-DD`, inclusive of the whole day in `tz`. A `from` after `to` is a structured 400.' },
@@ -14562,7 +14562,7 @@ export const openapiSpec = {
                   key: { type: 'string', description: 'The merchant identity: the x402 resource host, else the recipient address.' },
                   x402ResourceUrl: { type: ['string', 'null'], description: 'One representative x402 resource URL of this merchant\u2019s rows.' },
                   to: { type: ['string', 'null'], description: 'One representative recipient address.' },
-                  merchantName: { type: ['string', 'null'], description: 'Contact name, else receipt name, for the merchant address; null when neither exists.' },
+                  merchantName: { type: ['string', 'null'], description: 'The merchant name in the one recipient-naming order without the host step (#4882): one of the user\'s own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name, for the merchant address; null when none exists. The host rides beside it as `x402ResourceUrl`.' },
                 },
                 additionalProperties: false,
               },
@@ -14635,7 +14635,7 @@ export const openapiSpec = {
           source: { type: ['string', 'null'], description: "The newest member's source, e.g. `x402`." },
           x402ResourceUrl: { type: ['string', 'null'], description: 'The newest member’s x402 resource URL, when it is an x402 payment.' },
           to: { type: 'string', description: 'The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits, and the receiving own account’s address on a folded move (`ownTransfer`, #4268).' },
-          merchantName: { type: ['string', 'null'], description: 'Contact or receipt-merchant name resolved for the counterparty, else the name of the user\'s own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user\'s own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row.' },
+          merchantName: { type: ['string', 'null'], description: 'The counterparty name in the one recipient-naming order without the host step (#4882): one of the user\'s own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name (it replaced #4099\'s contact-and-receipt-first order); null otherwise. On a deposit it is set only for a transfer from another of the user\'s own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row.' },
           fromAccountName: { type: 'string', description: 'Outbound groups only (#4117): the label of the user\'s own account the money left — a contact name saved for it first, else the account\'s own name. Every member of the group left that one account. Absent on deposits and when no name resolves.' },
           ownTransfer: {
             type: 'object',
@@ -14792,7 +14792,7 @@ export const openapiSpec = {
           merchantName: {
             type: ['string', 'null'],
             description:
-              'Contact name, else receipt-merchant name, for the counterparty. Null when neither exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4).',
+              'The counterparty name in the one recipient-naming order without the host step (#4882): one of the user\'s own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name. Null when none exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4).',
           },
           x402ResourceUrl: {
             type: ['string', 'null'],

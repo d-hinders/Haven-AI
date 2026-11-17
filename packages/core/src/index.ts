@@ -17,8 +17,8 @@
 
 export { ETH_ADDRESS_RE, UUID_RE, isAddress } from './address.js'
 
-// The shared x402 resource-hostname parser (#4332) — step 1 of the analytics
-// naming order and the frontend ledger's title, from one definition.
+// The shared x402 resource-hostname parser (#4332) — the host step of the one
+// naming order (#4882) and the frontend ledger's title, from one definition.
 export { parseX402Hostname } from './x402-hostname.js'
 
 // Pure atomic<->decimal token amount conversion (#994) — the shared

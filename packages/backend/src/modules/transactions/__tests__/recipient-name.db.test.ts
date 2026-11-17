@@ -85,7 +85,7 @@ async function seedReceipt(userId: string, merchant: string, sellerName: string)
 }
 
 const names = async (addresses: string[]) =>
-  (await listCatalogRecipientNames(addresses)).map((r) => `${r.chain_id}:${r.pay_to}:${r.name}`).sort()
+  (await listCatalogRecipientNames(addresses)).map((r) => `${Number(r.chain_id)}:${r.pay_to}:${r.name}`).sort()
 
 describeDb('the catalog step of the recipient-naming order (#4882)', () => {
   beforeAll(initDbHarness)
@@ -154,13 +154,34 @@ describeDb('the catalog step of the recipient-naming order (#4882)', () => {
     expect((await listCatalogRecipientNames([checksummed])).map((r) => r.name)).toEqual(['Cased'])
   })
 
-  it('the borrowing lookup returns a catalog name with each address it is paid at, by normalised name', async () => {
-    const m = await seedMerchant('  NordShield   VPN ')
+  it('the borrowing lookup returns a catalog name with each address a CURATED row records, by name key', async () => {
+    const m = await seedMerchant('  Nord\u200bShield   VPN ')
     await seedOffer(m, addr(12))
     await seedOffer(m, null)
-    const rows = await listCatalogMerchantNameAddresses(['nordshield vpn'])
-    expect(rows.map((r) => r.pay_to).sort()).toEqual([addr(12), null].sort())
-    expect(rows.every((r) => r.norm_name === 'nordshield vpn')).toBe(true)
+    const bazaar = await seedMerchant('NordShield-VPN')
+    await seedOffer(bazaar, addr(13), { source: 'bazaar' })
+    const rows = await listCatalogMerchantNameAddresses(['nordshieldvpn'])
+    // The bazaar row's address is not an allowed one: only curated rows vouch.
+    expect(rows.map((r) => r.pay_to).filter(Boolean)).toEqual([addr(12)])
+    expect(rows.every((r) => r.name_key === 'nordshieldvpn')).toBe(true)
+  })
+
+  it('a merchant whose verified offers on a network disagree, or leave one unstated, names neither address', async () => {
+    const split = await seedMerchant('Split')
+    await seedOffer(split, addr(14))
+    await seedOffer(split, addr(15))
+    const unstated = await seedMerchant('Unstated')
+    await seedOffer(unstated, addr(16))
+    await seedOffer(unstated, null)
+    expect(await names([addr(14), addr(15), addr(16)])).toEqual([])
+  })
+
+  it('a chain id beyond int4 is read, not an error that drops every name', async () => {
+    const big = await seedMerchant('Big Chain')
+    const base = await seedMerchant('Base Merchant')
+    await seedOffer(big, addr(17), { network: 'eip155:11297108109' })
+    await seedOffer(base, addr(18))
+    expect(await names([addr(17), addr(18)])).toEqual([`11297108109:${addr(17)}:Big Chain`, `8453:${addr(18)}:Base Merchant`].sort())
   })
 })
 
@@ -180,6 +201,29 @@ describeDb('loadRecipientNameIndex end to end (#4882)', () => {
     expect(at(addr(20))).toEqual({ label: 'NordShield VPN', kind: 'catalog' })
     expect(at(addr(21))).toEqual({ label: null, kind: 'unknown' })
     expect(at(addr(22))).toEqual({ label: 'Klara Data AB', kind: 'receipt' })
+  })
+
+  it('a seller-listed (bazaar) copy of a curated name cannot make its own address an allowed one', async () => {
+    const userId = await seedUser()
+    const curated = await seedMerchant('NordShield VPN')
+    await seedOffer(curated, addr(23))
+    const copy = await seedMerchant('NordShield VPN')
+    await seedOffer(copy, addr(24), { source: 'bazaar' })
+    await seedReceipt(userId, addr(24), 'NordShield VPN')
+    const index = await loadRecipientNameIndex(userId, [addr(24)], { accounts: [], contacts: [] })
+    expect(resolveRecipientName(index, { address: addr(24), chainId: 8453, x402ResourceUrl: null })).toEqual({
+      label: null,
+      kind: 'unknown',
+    })
+  })
+
+  it('a look-alike spelling (zero-width, punctuation, accents) still counts as borrowing', async () => {
+    const userId = await seedUser()
+    const m = await seedMerchant('NordShield VPN')
+    await seedOffer(m, addr(25))
+    await seedReceipt(userId, addr(26), 'Nord\u200bShiéld-VPN')
+    const index = await loadRecipientNameIndex(userId, [addr(26)], { accounts: [], contacts: [] })
+    expect(resolveRecipientName(index, { address: addr(26), chainId: 8453, x402ResourceUrl: null }).label).toBeNull()
   })
 
   it('reads contacts and own accounts itself when the caller passes none', async () => {

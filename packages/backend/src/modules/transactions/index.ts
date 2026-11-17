@@ -117,7 +117,7 @@ export {
 export {
   EMPTY_RECIPIENT_NAME_INDEX,
   allRecipientNames,
-  normaliseRecipientName,
+  recipientNameKey,
   recipientAddressOf,
   recipientNameSnakeWire,
   recipientNameWithoutHost,

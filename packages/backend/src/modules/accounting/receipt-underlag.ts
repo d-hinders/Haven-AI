@@ -12,6 +12,7 @@ import {
   checkedReceiptStatement,
   type CheckedReceiptStatement,
 } from './receipt-statement.js'
+import { NO_PRODUCT_SOURCES, PRODUCT_SOURCE_LABEL, printableSources, productSourcesFrom, type ProductSources } from './product-sources.js'
 
 /**
  * Receipt underlag for the reporting feed (epic #491, P2 #498).
@@ -124,6 +125,14 @@ export interface ReceiptUnderlagData {
    * render's bytes.
    */
   receiptStatement?: CheckedReceiptStatement | null
+  /**
+   * #4877: the product sources below the receipt lines — Haven's catalog
+   * name, the merchant's quote description, the agent's delivery reference
+   * (`product-sources.ts`). ABSENT (undefined) is a document whose first
+   * render predates #4877 (a pin without `productSources`) and renders none,
+   * so a retry keeps its bytes.
+   */
+  productSources?: ProductSources
 }
 
 export interface ReceiptUnderlag {
@@ -194,8 +203,16 @@ function indentedWrap(label: string, text: string, maxRows: number, width = 88):
  * The most receipt lines one single-page document lists; the rest are counted.
  * With each description capped at `UNDERLAG_MAX_DESCRIPTION_ROWS` printed rows,
  * the whole document stays inside the single page (`UNDERLAG_MAX_PAGE_LINES`).
+ * 5 since #4877 (6 before), to leave rows for the product sources.
  */
-export const UNDERLAG_MAX_RECEIPT_LINES = 6
+export const UNDERLAG_MAX_RECEIPT_LINES = 5
+/**
+ * #4877: the cap a document whose first render predates #4877 (a pin without
+ * `productSources`) was rendered under. #4877 lowered the cap to 5 to make
+ * room for the product-source rows; such a pin keeps 6, so a retry keeps its
+ * bytes.
+ */
+export const UNDERLAG_MAX_RECEIPT_LINES_BEFORE_4877 = 6
 /** Printed rows one product description may take; longer text is cut with "..". */
 export const UNDERLAG_MAX_DESCRIPTION_ROWS = 2
 /** Text rows the single 842pt page holds at the renderer's 11pt leading from y=800. */
@@ -216,7 +233,8 @@ function receiptStatementLines(data: ReceiptUnderlagData): string[] {
   const statement = data.receiptStatement
   if (statement === null) return [`VAT            not stated by the merchant`]
   const cur = statement.currency
-  const shown = statement.lines.slice(0, UNDERLAG_MAX_RECEIPT_LINES)
+  const cap = data.productSources === undefined ? UNDERLAG_MAX_RECEIPT_LINES_BEFORE_4877 : UNDERLAG_MAX_RECEIPT_LINES
+  const shown = statement.lines.slice(0, cap)
   const out = ['', fitRow(`MERCHANT RECEIPT LINES (${RECEIPT_STATEMENT_LABEL})`)]
   shown.forEach((line, i) => {
     const label = `Line ${i + 1}`.padEnd(15, ' ')
@@ -244,6 +262,39 @@ function receiptStatementLines(data: ReceiptUnderlagData): string[] {
     out.push('Total check    receipt total differs from the amount settled; settled amount booked')
   }
   return out
+}
+
+/**
+ * #4877: the product sources, each under its own label. With no receipt lines
+ * the highest source present is the product line (`Product`, up to two rows);
+ * every other source present — all of them when the receipt states lines —
+ * is its own `Also stated` row. Each is followed by its label row. A direct
+ * payment, and a document whose first render predates #4877, show none.
+ */
+function productSourceLines(data: ReceiptUnderlagData, roomRows: number): string[] {
+  if (data.resourceUrl == null || data.productSources === undefined) return []
+  const receiptStatesLines = data.receiptStatement != null
+  // One group of rows per source, in ladder order: its text, then its label.
+  const groups = printableSources(data.productSources).map((source, i) => {
+    const isProductLine = !receiptStatesLines && i === 0
+    const tag = (isProductLine ? 'Product' : 'Also stated').padEnd(15, ' ')
+    const text = asciiFold(source.text)
+    return [
+      ...(isProductLine ? indentedWrap(tag, text, 2) : [fitRow(`${tag}${text}`)]),
+      fitRow(`               (${PRODUCT_SOURCE_LABEL[source.key]})`),
+    ]
+  })
+  // The block takes only the rows the page has left, so the settlement and
+  // authorization sections below it always stay on the page: sources are
+  // dropped whole in reverse ladder order (the agent's words first).
+  const out: string[] = []
+  let used = 1 // the blank row above the block
+  for (const group of groups) {
+    if (used + group.length > roomRows) break
+    out.push(...group)
+    used += group.length
+  }
+  return out.length > 0 ? ['', ...out] : []
 }
 
 /**
@@ -343,6 +394,8 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     `Parent receipt ${data.parentReceiptRef ?? 'n/a'}`,
     ...(data.resourceUrl != null ? [`Receipt ref    ${data.receiptRef}`] : []),
     ...receiptStatementLines(data),
+  ]
+  const after = [
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -378,6 +431,9 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
           'settlement is proven only by the on-chain transaction above.',
         ]),
   ]
+  // #4877: the product sources fill what the page has left, never more.
+  const usedRows = [...lines, ...after].flatMap((l) => wrap(l)).length
+  lines.push(...productSourceLines(data, UNDERLAG_MAX_PAGE_LINES - usedRows), ...after)
   return {
     // ASCII-only filename; Fortnox rejects exotic characters in metadata too.
     // Cap the id part, never the extension — an extensionless upload risks
@@ -557,12 +613,23 @@ export function pinnedUnderlagInputs(raw: unknown): PinnedUnderlagInputs | null 
     // #4876: only a pin written by a build that renders the receipt block
     // carries the marker; any other value reads as a pre-#4876 pin.
     receiptLines: p.receiptLines === true,
+    // #4877: only a pin written by a build that renders the product sources
+    // carries them; any other shape reads as a pre-#4877 pin (none rendered).
+    productSources: pinnedProductSources(p.productSources),
   }
+}
+
+function pinnedProductSources(raw: unknown): ProductSources | undefined {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const r = raw as Record<string, unknown>
+  // Re-cleaned: the pin is stored data, never trusted into a document as is.
+  // Cleaning is idempotent, so a retry's bytes do not move.
+  return productSourcesFrom({ catalogName: r.catalogName, quoteDescription: r.quoteDescription, deliveryReference: r.deliveryReference })
 }
 
 /**
  * #4824: the inputs a render of `tx` would use, in the shape the pin stores.
- * The four mutable sources and nothing else — the FX capture, `Settled at`,
+ * The mutable sources (#4824, and #4877's product sources) and nothing else — the FX capture, `Settled at`,
  * the booked hash (#3767), the authorization block and the ledger currency
  * are already stable between attempts.
  */
@@ -575,6 +642,7 @@ export function underlagPinFromTransaction(tx: FeedTransaction): AccountingUnder
     parentReceiptRef: tx.parentReceiptRef,
     merchantCountry: tx.counterparty.country,
     receiptLines: true,
+    productSources: tx.productSources ?? NO_PRODUCT_SOURCES,
   }
 }
 
@@ -627,6 +695,9 @@ export async function loadReceiptUnderlag(
   // receipt — so a retry renders the first render's lines. A pin written
   // before #4876 has no `receiptLines` marker: its first render showed no
   // block, so the retry shows none either (undefined) and keeps its bytes.
+  // #4877: the product sources — the pinned ones (absent on a pre-#4877 pin,
+  // which then renders none) or the live ones.
+  const productSources = pin ? pin.productSources : (tx.productSources ?? NO_PRODUCT_SOURCES)
   const receiptStatement =
     pin && !pin.receiptLines
       ? undefined
@@ -678,5 +749,6 @@ export async function loadReceiptUnderlag(
     signHash: row.sign_hash,
     signature: row.signature,
     receiptStatement,
+    productSources,
   })
 }

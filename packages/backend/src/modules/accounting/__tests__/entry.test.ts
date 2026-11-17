@@ -396,3 +396,15 @@ describe('the booked hash (#3767)', () => {
     }
   })
 })
+
+describe('toAccountingEntry: product sources (#4877)', () => {
+  it('reads the three sources, cleaned and bounded, and leaves the Haven-derived description untouched', () => {
+    const plain = toAccountingEntry(row())
+    const e = toAccountingEntry(
+      row({ catalog_name: ' NordShield\u202e VPN ', quote_description: 'A VPN\nmonth', delivery_reference: 'x'.repeat(600) }),
+    )
+    expect(e.productSources).toEqual({ catalogName: 'NordShield VPN', quoteDescription: 'A VPN month', deliveryReference: `${'x'.repeat(511)}…` })
+    expect(e.transactionDescription).toBe(toAccountingEntry(row({ delivery_reference: 'x'.repeat(600) })).transactionDescription)
+    expect(plain.productSources).toEqual({ catalogName: null, quoteDescription: null, deliveryReference: null })
+  })
+})

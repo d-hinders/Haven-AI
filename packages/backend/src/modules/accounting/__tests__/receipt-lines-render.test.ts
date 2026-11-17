@@ -4,6 +4,7 @@ import reverseCharge from './fixtures/merchant-receipts/demo-merchant-reverse-ch
 import { UNDERLAG_MAX_PAGE_LINES, UNDERLAG_MAX_RECEIPT_LINES, underlagFromData, type ReceiptUnderlagData } from '../receipt-underlag.js'
 import { feedDescription } from '../fortnox-connector.js'
 import { asciiFold, checkedReceiptStatement, type CheckedReceiptStatement } from '../receipt-statement.js'
+import { NO_PRODUCT_SOURCES } from '../product-sources.js'
 import { feedTransaction } from './connector-conformance.js'
 
 /**
@@ -118,7 +119,8 @@ describe('the underlag shows the receipt lines (#4876)', () => {
 
   it('lists at most the cap of lines on the single page and counts the rest', () => {
     const many = { ...se25, rader: Array.from({ length: UNDERLAG_MAX_RECEIPT_LINES + 3 }, () => se25.rader[0]) }
-    const s = render({ receiptStatement: statement(many) })
+    // A #4877-era render (the sources pinned, here none).
+    const s = render({ receiptStatement: statement(many), productSources: NO_PRODUCT_SOURCES })
     expect(s).toContain(`Line ${UNDERLAG_MAX_RECEIPT_LINES} `)
     expect(s).not.toContain(`Line ${UNDERLAG_MAX_RECEIPT_LINES + 1} `)
     expect(s).toContain("...and 3 more lines on the merchant's receipt \\(attached\\)")

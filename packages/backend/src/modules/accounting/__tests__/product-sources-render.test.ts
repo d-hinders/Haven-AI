@@ -56,11 +56,11 @@ const DATA: ReceiptUnderlagData = {
   signature: '0x' + '34'.repeat(65),
 }
 
-const ALL: ProductSources = {
+const ALL = {
   catalogName: 'CloudNest 50 GB',
   quoteDescription: 'Encrypted cloud storage, 50 GB, one month',
   deliveryReference: 'Bought storage for the backup job',
-}
+} satisfies ProductSources
 const only = (key: keyof ProductSources): ProductSources => ({ ...NO_PRODUCT_SOURCES, [key]: ALL[key] })
 
 const render = (over: Partial<ReceiptUnderlagData>) => underlagFromData({ ...DATA, ...over }).pdf.toString('latin1')

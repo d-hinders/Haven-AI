@@ -108,8 +108,11 @@ text and emoji sequences need them.
 
 The receipt is relayed by the agent and is not signed by the merchant. The
 statement reports what the receipt says; nothing in Haven treats the lines or
-VAT figures as verified. How a document labels them is decided where they are
-shown (#4876).
+VAT figures as verified. Wherever they are shown (#4876) they are labelled "On
+the merchant's receipt, as reported by the agent", never "stated by the
+merchant" (owner decision 3 of 2026-11-17 on #4874). Where they are printed,
+and what a document says when a receipt states none, is in
+[`accounting-feed.md`](accounting-feed.md).
 
 The statement also does not decide the transaction kind. A receipt with no
 `rader` can still be classed as a purchase by `merchantDocumentShape`

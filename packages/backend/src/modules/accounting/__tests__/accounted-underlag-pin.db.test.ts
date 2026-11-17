@@ -41,6 +41,7 @@ import { clearConnectors, registerConnector } from '../connector.js'
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { ACCOUNTED } from '../registry.js'
 import { accountedRouter, ACCOUNTED_DOCUMENT_ID, ACCOUNTED_MERCHANT_DOCUMENT_ID } from './accounted-test-router.js'
+import se25 from './fixtures/merchant-receipts/demo-merchant-se25.json' with { type: 'json' }
 
 const KEY = randomBytes(32).toString('base64')
 const DOC_REF = `accounted:document:${ACCOUNTED_DOCUMENT_ID}`
@@ -379,5 +380,59 @@ describeDb('Accounted underlag-input pin (#4824)', () => {
     // The receipt also decides the kind (rung 3): an invoice-shaped document
     // is a purchase.
     expect(pdf).toContain('Transaction    purchase')
+  })
+
+  // ── #4876: the receipt lines on the underlag, under the same pin ─────────
+
+  it('#4876 — a receipt with lines captured before the first render puts the lines on the underlag, and the pin carries the marker', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await captureReceipt(seeded.evidenceId, se25)
+
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).toContain("MERCHANT RECEIPT LINES \\(On the merchant's receipt, as reported by the agent\\)")
+    expect(pdf).toContain('Receipt VAT    25% 0.0001 USDC')
+    expect((await pinOf(seeded.intentId))?.receiptLines).toBe(true)
+  })
+
+  it('#4876 — a receipt with lines captured between attempts: the retry replays "VAT not stated", byte for byte', async () => {
+    const { state, paymentId } = await lostAnswerThenRetry(async (seeded) => {
+      await captureReceipt(seeded.evidenceId, se25)
+    })
+    const attempts = underlagAttempts(state, paymentId)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1].sha256).toBe(attempts[0].sha256)
+    const first = attempts[0].bytes.toString('latin1')
+    expect(first).toContain('VAT not stated by the merchant')
+    expect(first).not.toContain('MERCHANT RECEIPT LINES')
+  })
+
+  it('#4876 — a pin written before #4876 (no marker) renders no receipt block, so a retry straddling the deploy keeps its bytes', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await captureReceipt(seeded.evidenceId, se25)
+    // The pre-#4876 pin shape: the receipt pinned, no `receiptLines` marker.
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata || jsonb_build_object(
+         'accounting_underlag_inputs', $2::jsonb) WHERE id = $1`,
+      [
+        seeded.intentId,
+        JSON.stringify({
+          merchantReceipt: { url: null, inlineJson: se25 },
+          transactionKind: 'purchase',
+          description: 'merchant.example - vpn (purchase)',
+          purchaseGroupId: null,
+          parentReceiptRef: null,
+          merchantCountry: null,
+        }),
+      ],
+    )
+
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).toContain('Haven Demo AB')
+    expect(pdf).not.toContain('MERCHANT RECEIPT LINES')
+    expect(pdf).not.toContain('not stated by the merchant')
   })
 })

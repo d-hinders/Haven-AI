@@ -6,6 +6,13 @@ import {
 import { safeGetBinary, type SafeFetchOptions, type SsrfRefusal } from '../../infra/http/ssrf-guard.js'
 import type { FeedTransaction } from './feed-transaction.js'
 import { TRANSACTION_KINDS, type TransactionKind } from './transaction-kind.js'
+import {
+  RECEIPT_STATEMENT_LABEL,
+  VAT_NOT_STATED,
+  asciiFold,
+  checkedReceiptStatement,
+  type CheckedReceiptStatement,
+} from './receipt-statement.js'
 
 /**
  * Receipt underlag for the reporting feed (epic #491, P2 #498).
@@ -108,6 +115,16 @@ export interface ReceiptUnderlagData {
   delegate: string | null
   signHash: string | null
   signature: string | null
+  /**
+   * #4876: the product lines and VAT the merchant's receipt states
+   * (`receipt-statement.ts`), rendered under "On the merchant's receipt, as
+   * reported by the agent". `null` is "none stated": a protocol payment's
+   * document then says "VAT not stated by the merchant". ABSENT (undefined) is
+   * a document whose first render predates #4876 — a pin without the
+   * `receiptLines` marker — and renders neither, so a retry keeps the first
+   * render's bytes.
+   */
+  receiptStatement?: CheckedReceiptStatement | null
 }
 
 export interface ReceiptUnderlag {
@@ -156,6 +173,64 @@ export function receiptPdf(lines: string[]): Buffer {
   for (const off of offsets) out += `${String(off).padStart(10, '0')} 00000 n \n`
   out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`
   return Buffer.from(out, 'latin1')
+}
+
+/**
+ * #4876: wrap `text` under a 15-column label, continuation lines indented to
+ * the same column, every line inside the renderer's 88 so it never re-wraps.
+ */
+function indentedWrap(label: string, text: string, width = 88): string[] {
+  const indent = ' '.repeat(15)
+  const room = width - indent.length
+  const out: string[] = []
+  for (let i = 0; i < text.length; i += room) {
+    out.push(`${i === 0 ? label : indent}${text.slice(i, i + room)}`)
+  }
+  return out.length > 0 ? out : [label]
+}
+
+/** The most receipt lines one single-page document lists; the rest are counted. */
+export const UNDERLAG_MAX_RECEIPT_LINES = 8
+
+/**
+ * #4876: the document's merchant-receipt block. Only on a protocol payment
+ * (one with a resource URL) — a direct payment is a transfer, and "VAT not
+ * stated by the merchant" would be a fact about a merchant it never had.
+ * Absent `receiptStatement` (a pre-#4876 pin) renders nothing.
+ *
+ * Every figure carries the receipt's own currency and is never converted: the
+ * document's SEK and ledger figures above stay Haven's. Only the MERCHANT's
+ * VAT treatment is shown (owner decision 2), labelled as the merchant's.
+ */
+function receiptStatementLines(data: ReceiptUnderlagData): string[] {
+  if (data.resourceUrl == null || data.receiptStatement === undefined) return []
+  const statement = data.receiptStatement
+  if (statement === null) return [`VAT            ${VAT_NOT_STATED}`]
+  const cur = statement.currency
+  const shown = statement.lines.slice(0, UNDERLAG_MAX_RECEIPT_LINES)
+  const out = ['', `MERCHANT RECEIPT LINES (${RECEIPT_STATEMENT_LABEL})`]
+  shown.forEach((line, i) => {
+    const label = `Line ${i + 1}`.padEnd(15, ' ')
+    out.push(...indentedWrap(label, asciiFold(line.description)))
+    out.push(
+      `               qty ${line.quantity}, net ${line.unitPriceExclVat} ${cur} each, VAT ${line.vatPercent}% ${line.vatAmount} ${cur}, total ${line.totalInclVat} ${cur}`,
+    )
+  })
+  if (statement.lines.length > shown.length) {
+    out.push(`               ...and ${statement.lines.length - shown.length} more lines on the merchant's receipt (attached)`)
+  }
+  out.push(
+    `Receipt net    ${statement.totals.exclVat} ${cur}`,
+    `Receipt VAT    ${statement.totals.vatPercent}% ${statement.totals.vatAmount} ${cur}`,
+    `Receipt total  ${statement.totals.inclVat} ${cur}`,
+  )
+  if (statement.merchantVatTreatment) {
+    out.push(`VAT treatment  ${statement.merchantVatTreatment} (the merchant's)`)
+  }
+  if (statement.totalCheck === 'differs') {
+    out.push('Total check    receipt total differs from the amount settled; settled amount booked')
+  }
+  return out
 }
 
 /** Render the underlag document (pure — the pilot script uses it directly). */
@@ -230,6 +305,7 @@ export function underlagFromData(data: ReceiptUnderlagData): ReceiptUnderlag {
     `Purchase group ${data.purchaseGroupId ?? 'ungrouped'}`,
     `Parent receipt ${data.parentReceiptRef ?? 'n/a'}`,
     ...(data.resourceUrl != null ? [`Receipt ref    ${data.receiptRef}`] : []),
+    ...receiptStatementLines(data),
     '',
     'ON-CHAIN SETTLEMENT',
     `Chain id       ${data.chainId ?? 'n/a'}`,
@@ -441,6 +517,9 @@ export function pinnedUnderlagInputs(raw: unknown): PinnedUnderlagInputs | null 
     purchaseGroupId: typeof p.purchaseGroupId === 'string' ? p.purchaseGroupId : null,
     parentReceiptRef: typeof p.parentReceiptRef === 'string' ? p.parentReceiptRef : null,
     merchantCountry: typeof p.merchantCountry === 'string' ? p.merchantCountry : null,
+    // #4876: only a pin written by a build that renders the receipt block
+    // carries the marker; any other value reads as a pre-#4876 pin.
+    receiptLines: p.receiptLines === true,
   }
 }
 
@@ -458,6 +537,7 @@ export function underlagPinFromTransaction(tx: FeedTransaction): AccountingUnder
     purchaseGroupId: tx.purchaseGroupId,
     parentReceiptRef: tx.parentReceiptRef,
     merchantCountry: tx.counterparty.country,
+    receiptLines: true,
   }
 }
 
@@ -506,6 +586,18 @@ export async function loadReceiptUnderlag(
   // source, unchanged. #4824: both read the pin when one exists.
   const merchantReceipt = pin ? pin.merchantReceipt : (tx.merchantReceipt ?? null)
   const seller = sellerFromMerchantReceipt(merchantReceipt?.inlineJson ?? null)
+  // #4876: the receipt's lines and VAT, from the SAME (pinned or live)
+  // receipt — so a retry renders the first render's lines. A pin written
+  // before #4876 has no `receiptLines` marker: its first render showed no
+  // block, so the retry shows none either (undefined) and keeps its bytes.
+  const receiptStatement =
+    pin && !pin.receiptLines
+      ? undefined
+      : checkedReceiptStatement(merchantReceipt?.inlineJson ?? null, {
+          token: tx.token,
+          amountAtomic: tx.amountAtomic,
+          chainId: row.chain_id,
+        })
   return underlagFromData({
     paymentId: tx.paymentId,
     settledAt: tx.settledAt,
@@ -548,5 +640,6 @@ export async function loadReceiptUnderlag(
     delegate: row.delegate_address,
     signHash: row.sign_hash,
     signature: row.signature,
+    receiptStatement,
   })
 }

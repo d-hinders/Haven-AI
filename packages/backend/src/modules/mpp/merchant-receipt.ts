@@ -26,6 +26,7 @@ import {
   insertMerchantReceiptOnce,
 } from '../../infra/repositories/machine-payments.js'
 import {
+  feedSettledPaymentBestEffort,
   lateAttachAccountedMerchantReceipt,
   lateAttachIgdrasilMerchantReceipt,
   lateAttachMerchantReceipt,
@@ -140,18 +141,22 @@ export async function handleMerchantReceiptCapture(
     // Every destination gets the chance (#3918 added Accounted, #4521
     // Igdrasil): each one returns immediately unless ITS pushed underlag row
     // exists, and each swallows its own failure so one cannot touch another.
-    void lateAttachMerchantReceipt(result.userId, paymentId, {
-      url: url ?? null,
-      inlineJson: json ?? null,
-    }).catch(() => {})
-    void lateAttachAccountedMerchantReceipt(result.userId, paymentId, {
-      url: url ?? null,
-      inlineJson: json ?? null,
-    }).catch(() => {})
-    void lateAttachIgdrasilMerchantReceipt(result.userId, paymentId, {
-      url: url ?? null,
-      inlineJson: json ?? null,
-    }).catch(() => {})
+    //
+    // #4876: then FEED. The feed holds an x402 payment until its receipt
+    // arrives (the receipt wait, `domain/merchant-receipt-wait.ts`), so this
+    // capture is what releases it — with the receipt's product lines on the
+    // document. The late attaches run first and are awaited (settled, never
+    // thrown): a payment already pushed before the wait existed, or after it
+    // ran out, gets its attachment, and the feed then finds it pushed and
+    // no-ops; a payment still held is not pushed yet, so every late attach
+    // no-ops and the feed pushes it once, receipt included.
+    const receipt = { url: url ?? null, inlineJson: json ?? null }
+    const userId = result.userId
+    void Promise.allSettled([
+      lateAttachMerchantReceipt(userId, paymentId, receipt),
+      lateAttachAccountedMerchantReceipt(userId, paymentId, receipt),
+      lateAttachIgdrasilMerchantReceipt(userId, paymentId, receipt),
+    ]).then(() => feedSettledPaymentBestEffort(userId, paymentId))
   }
   return {
     statusCode: result.stored ? 201 : 200,

@@ -27,8 +27,8 @@
  *
  * `routes/__tests__/hybrid-accounts.test.ts` and
  * `routes/__tests__/hybrid-accounts-create-race.db.test.ts` are the
- * characterization tests for that claim: they were written against the inline
- * version and are unchanged by the extraction.
+ * characterization tests for that claim: their create-additional cases were
+ * written against the inline version and are unchanged by the extraction.
  *
  * ## Refusals
  *

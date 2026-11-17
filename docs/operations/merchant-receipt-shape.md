@@ -68,12 +68,13 @@ A decimal string is 1–30 digits, optionally followed by a point and 1–30 mor
 digits, such as `"0.0005"` or `"0"`. Amounts given as numbers, negative
 amounts, exponents, `"1."` and `".5"` are not accepted.
 
-A code is ASCII letters, digits and `_`, starting with a letter, at most 32
-characters. It is read case-insensitively and stored upper-case, so `usdc`
-reads as `USDC`.
+A code is read case-insensitively: it is upper-cased, then must be ASCII
+letters, digits and `_`, starting with a letter, at most 32 characters. It is
+stored upper-case, so `usdc` reads as `USDC`.
 
 After trimming, a description may not contain control characters, line or paragraph
-separators, bidirectional marks, overrides or isolates, or a zero-width space.
+separators, bidirectional marks, overrides or isolates, a zero-width space,
+word joiner or invisible operator, or a byte-order mark.
 The zero-width joiner and non-joiner are allowed, because Persian and Indic
 text and emoji sequences need them.
 

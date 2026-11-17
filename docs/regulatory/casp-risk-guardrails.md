@@ -278,7 +278,9 @@ Haven backend
 > counterparty. Same discipline as the #956 note below, which is careful not to
 > let a true narrow claim stand in for a broader one.
 >
-> Since #4722 the reference enters the `X-PAYMENT` payload only when the
+> Since #4722 the reference enters the x402 payment payload (sent under
+> `PAYMENT-SIGNATURE` alone since #4754, because only a v2 402 can advertise the
+> extension) only when the
 > merchant's 402 advertised the `haven-passport` x402 extension, and only inside
 > that echoed extension. Extensions sit outside the signed EIP-3009
 > authorization and outside the erc7710 `permissionContext`, so the reference
@@ -1029,15 +1031,16 @@ alone could not say which. Re-measured on `ffca80f36` with the same scope:
 modules plus that directory's `README.md`; 103 tracked files in all) — the
 second matching the old "49" by coincidence, not because that figure had a
 scope. Re-measured again on `6165f1376` with the same scope: **17** and **51**
-(50 `.ts` modules plus the `README.md`; 143 tracked files in all). That is the point: requote it with its denominator or
+(50 `.ts` modules plus the `README.md`; 112 tracked files in all). That is the point: requote it with its denominator or
 not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
-**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120, #4381).**
-Measured at `6165f1376`, the pin asserts **56 of the 77
-globs**: the 58 runtime `globs` minus the two `EXEMPT` entries above, and none
-of the 19 `controlGlobs` (measured at `fc8ac1eb6` it was 52 of 71 — 54 runtime
+**The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120, #4381, #4890).**
+Measured at `83d3faff5`, the pin asserts **57 of the 78
+globs**: the 59 runtime `globs` minus the two `EXEMPT` entries above, and none
+of the 19 `controlGlobs` (measured at `6165f1376` it was 56 of 77 — 58 runtime
+globs and 19 control globs; at `fc8ac1eb6` 52 of 71 — 54 runtime
 globs and 17 control globs; at `ffca80f36` 50 of 67 — 52 runtime globs and 15
 control globs; at `82540f71b` with #4122 applied, before #4120
 added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
@@ -1049,10 +1052,12 @@ added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `pack
 `routes/agent-sub-budgets.ts`, and the SDK's `task-budget-guards.ts` and
 `sub-budget-guards.ts`), #4122 `packages/sdk/src/merchant-completion.ts`
 (the SDK's post-funding merchant-answer decision), #4120 (PR #4153)
-`packages/sdk/src/merchant-answer.ts`, and #4381
+`packages/sdk/src/merchant-answer.ts`, #4381
 `packages/backend/src/domain/x402-settlement-timing.ts` and
 `domain/x402-sweep-window.ts` (the settlement-window constants moved out of
-`modules/x402/`); all were already covered
+`modules/x402/`), and #4890 `packages/merchant-payments/src/**` (the merchant
+payment core moved out of the demo merchant, which joined `covers:` in #4890's
+own PR); all were already covered
 here — budget-scope since #3648, the budget families since #3659, the SDK
 files by `packages/sdk/src/**`, and the two domain files joined `covers:` in
 #4381's own PR — so the pin was satisfied on arrival each
@@ -1358,25 +1363,34 @@ is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
 
-**This pass (2026-11-17, at dev `6165f1376`) covered the whole body.** Every
-section was read, and the claims the week's commits could have moved were
-checked against the code at that head: the "Current state" blockquotes (the
-erc7710 settlement observer, the passport reference and its #4722
-extension-gating, the merchant-receipt SSRF path), the Hard Architecture
-Invariants (passkey public-only storage, the task-/sub-budget narrowing
-exception, the retired-rail 410s, the #1985 dust-Safe disclosure), Red Lines
-1–11 with their executable proofs (`non-custody-onchain-gate.contract.test.ts`
-still binds only the two fail-open pre-checks, #3500 and #3503;
+**This pass (2026-11-17) read the body at dev `6165f1376`.** The claims the
+week's commits could have moved were checked against the code at that head:
+the "Current state" blockquotes (the erc7710 settlement observer, the passport
+reference and its #4722 extension-gating, the merchant-receipt SSRF path), the
+Hard Architecture Invariants (passkey public-only storage, the task-/sub-budget
+narrowing exception, the retired-rail 410s, the #1985 dust-Safe disclosure),
+Red Lines 1–11 with their executable proofs
+(`non-custody-onchain-gate.contract.test.ts` still proves the payment path
+binds none of the retired coverage arithmetic and passes a chain refusal on
+with nothing written — the route's own budget comparisons remain the two
+fail-open pre-checks, #3500 and #3503, as the evidence table says;
 `non-custody-onchain-enforcer.contract.test.ts` still `eth_call`s the deployed
 enforcers), the relayer/binding/receipt key roles, the refusal ledger, the
 `covers:` maintenance section, and the release-plumbing and agent-authority
-sections. Two measured figures in the `covers:` section had drifted and are
-corrected below (the money-path glob counts and the two `infra/` layer sizes);
-no authority, custody or refusal claim changed. Not covered by this pass: the
-external legal references (Finansinspektionen, MiCA, ESMA, EBA), which are
-citations rather than code claims, and the frozen historical log below
-2026-08-12, which is a record of what was true when written and is superseded
-by the shard convention.
+sections. Three things were corrected: the passport blockquote's header name
+(#4754), and above, the money-path glob counts and the two `infra/` layer
+sizes. No authority, custody or refusal claim changed.
+
+**Limits of this pass.** The read at `6165f1376` was the audit builder's; the
+independent review of it spot-checked the claims named above against the code
+and did not re-read the whole body. Commits merged after `6165f1376` were not
+re-read, except that the glob counts above were re-measured at `83d3faff5`;
+among them #4890 (`92bc2c81c`, `9b35188c1`) added
+`packages/merchant-payments/src/**` to the money-path runtime globs and to
+`covers:`. Not covered at all: the external legal references
+(Finansinspektionen, MiCA, ESMA, EBA), which are citations rather than code
+claims, and the frozen historical log below 2026-08-12, which is a record of
+what was true when written and is superseded by the shard convention.
 
 ## Verification log
 
@@ -1407,7 +1421,7 @@ PRs in one day, 2026-08-12, #1366). Separate FILES merge cleanly the way
 separate lines never quite did. The bullet list below is the frozen
 historical log up to 2026-08-12; `last-verified` above now means a genuine
 re-read of the BODY claims (the weekly docs audit — `docs-audit.yml`, Mondays,
-upserting tracking issue #4865; #1248 was one closed instance of it), never a
+keeping one open tracking issue titled *Docs staleness audit (weekly)*; #1248 was one closed instance of it), never a
 per-PR bump.
 
 - **#997** — covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it.

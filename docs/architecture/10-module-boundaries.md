@@ -193,8 +193,8 @@ The rule is checked on every workspace package, but not under one definition:
   package's `src` with `tsPreCompilationDeps: false`: a **type-only import is
   not an edge**. It resolves each package's own `tsconfig.json` (so the
   frontend's `@/` alias is a real edge) and reads `.tsx` as well as `.ts`. Every
-  one is at zero (twelve packages as of #4890, which added
-  `packages/merchant-payments`).
+  one is at zero (thirteen packages as of #4893, which added
+  `packages/paywall-proxy`; #4890 added `packages/merchant-payments`).
 
 The split is an owner decision (2026-11-10, on
 [#4763](https://github.com/d-hinders/Haven-AI/issues/4763)): **runtime cycles

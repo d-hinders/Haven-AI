@@ -134,9 +134,9 @@ respectively, out of 78 (`npm run preflight -- --list --all` at `1579908a4`);
 the rest are the per-workflow one-offs.
 
 Even the covered part is not total: root `build` is **not** `--workspaces`, it is
-a hand-written ten-package chain. Twelve packages have a build script and it
-omits two — `demo-merchant-mcp`, which IS a CI gate, and `qa-agent`, which is
-not. A hand-maintained second copy of the workspace list, drifted, which is the
+a hand-written ten-package chain. Fourteen packages have a build script and it
+omits four — `demo-merchant-mcp`, `merchant-payments` and `paywall-proxy`,
+which ARE CI gates, and `qa-agent`, which is not. A hand-maintained second copy of the workspace list, drifted, which is the
 same failure this battery exists to stop, one level down.
 
 `npm run preflight` also runs workflow-authored commands locally. That is the

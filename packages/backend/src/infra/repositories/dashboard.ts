@@ -859,8 +859,8 @@ export async function listDashboardMerchants(
 /**
  * Each agent's ALL-TIME latest confirmed payment — `lastPaymentAt` plus the
  * raw counterparty fields (#3803). The counterparty name is resolved by the
- * caller from `merchant_address` (contacts win, then merchant receipts —
- * analytics' label order); `source`, `x402ResourceUrl` and `to` are returned
+ * caller from `merchant_address` and `chain_id` in the one naming order
+ * (#4882, `counterparty-name.ts`); `source`, `x402ResourceUrl` and `to` are returned
  * raw, never as a display label.
  */
 export const AGENT_LAST_PAYMENT_SQL = `SELECT DISTINCT ON (pi.agent_id)
@@ -869,7 +869,8 @@ export const AGENT_LAST_PAYMENT_SQL = `SELECT DISTINCT ON (pi.agent_id)
          pi.source,
          pi.x402_resource_url,
          pi.to_address,
-         COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address) AS merchant_address
+         COALESCE(pi.merchant_address, pi.x402_merchant_address, pi.to_address) AS merchant_address,
+         pi.chain_id
   FROM payment_intents pi
   JOIN agents a ON a.id = pi.agent_id
   ${DELEGATION_RAIL_JOIN}
@@ -885,6 +886,8 @@ export interface AgentLastPaymentRow {
   x402_resource_url: string | null
   to_address: string | null
   merchant_address: string | null
+  /** #4882: the payment's chain — the catalog step of the naming order is chain-keyed. */
+  chain_id: number
 }
 
 /** `userId` is REQUIRED. */

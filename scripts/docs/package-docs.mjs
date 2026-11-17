@@ -653,7 +653,14 @@ export const GOVERNED_PACKAGE_DOCS = [
     // rewritten to say what #4866 changed. Verified against src/stripe.ts,
     // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/log-range.ts,
     // src/cdp.ts and src/http.ts. Nothing else re-verified in this pass.
-    'last-verified': '2026-11-16',
+    // #4880: ADDED "What the record carries" and "The receipt number is
+    // derived from the transaction" to § "Stripe recording", a
+    // § "Reconciliation" bullet, and the `description` / `receipt_url` rows in
+    // the #4854 sandbox table. The two rows are a sandbox probe on 2026-11-17,
+    // not a repository measurement; the rest was verified against
+    // src/stripe.ts, src/invoice.ts, src/stripe-reconcile.ts and src/http.ts.
+    // Nothing else re-verified in this pass.
+    'last-verified': '2026-11-17',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

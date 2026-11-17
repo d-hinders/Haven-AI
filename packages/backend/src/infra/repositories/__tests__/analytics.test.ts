@@ -573,13 +573,19 @@ describeDb('analytics-overview repository (#2946)', () => {
   })
 
   it('strips invisible and bidirectional characters: a name of only those, or of no-break spaces, yields no name', async () => {
-    const invisible = await seedMerchantWithReceipt('d1', { saljare: { name: ' ​ ' } })
+    const invisible = await seedMerchantWithReceipt('d1', { saljare: { name: '\u00a0\u200b\u00a0' } })
     const names = await listReceiptMerchantNamesForUser(invisible.userId, [invisible.merchant])
     expect(names.has(invisible.merchant.toLowerCase())).toBe(false)
 
-    const spoof = await seedMerchantWithReceipt('d2', { saljare: { name: '‮Kelta\u0007 AB Ltd' } })
+    const spoof = await seedMerchantWithReceipt('d2', { saljare: { name: '\u202eKelta\u0007 AB\u00a0Ltd' } })
     const spoofNames = await listReceiptMerchantNamesForUser(spoof.userId, [spoof.merchant])
     expect(spoofNames.get(spoof.merchant.toLowerCase())).toBe('Kelta AB Ltd')
+
+    const unicodeSpaces = await seedMerchantWithReceipt('d6', { saljare: { name: '\u202f\u2009\u3000' } })
+    expect((await listReceiptMerchantNamesForUser(unicodeSpaces.userId, [unicodeSpaces.merchant])).has(unicodeSpaces.merchant.toLowerCase())).toBe(false)
+
+    const lineSep = await seedMerchantWithReceipt('d7', { saljare: { name: 'Haven\u2028Demo\u202fAB' } })
+    expect((await listReceiptMerchantNamesForUser(lineSep.userId, [lineSep.merchant])).get(lineSep.merchant.toLowerCase())).toBe('Haven Demo AB')
   })
 
   it('a blank or oversized saljare.name falls back to the flat merchant_name on the same receipt', async () => {

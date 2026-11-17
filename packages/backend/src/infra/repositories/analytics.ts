@@ -690,18 +690,23 @@ export const RECEIPT_MERCHANT_NAME_MAX_LENGTH = 120
 
 /**
  * Characters a receipt-supplied name loses before it is shown (#4881): C0 and
- * C1 controls, DEL, line and paragraph separators, bidirectional marks,
+ * C1 controls, DEL, bidirectional marks,
  * overrides and isolates, the zero-width space, word joiner and invisible
  * operators, and the BOM — the set `product-sources.ts` strips from source
  * text (the zero-width joiner and non-joiner stay, for Persian, Indic and
- * emoji sequences). Tabs and newlines are whitespace and collapse instead.
+ * emoji sequences). Tabs, newlines, VT/FF, NEL and the line and paragraph
+ * separators are whitespace and collapse instead, keeping the word break.
  * Written as Postgres regex escapes, so the result does not depend on the
  * database's locale.
  */
 const RECEIPT_NAME_STRIP_CLASS =
-  '[\\u0001-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f-\\u009f\\u061c\\u200b\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]'
-/** Whitespace, including the no-break space, which `[[:space:]]` misses under a C locale. */
-const RECEIPT_NAME_SPACE_CLASS = '[[:space:]\\u00a0]+'
+  '[\\u0001-\\u0008\\u000e-\\u001f\\u007f-\\u0084\\u0086-\\u009f\\u061c\\u200b\\u200e\\u200f\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]'
+/**
+ * Whitespace, named explicitly so the result does not depend on the locale:
+ * `[[:space:]]` under a C locale misses the no-break spaces, the Unicode
+ * spaces and the line and paragraph separators. Each run becomes one space.
+ */
+const RECEIPT_NAME_SPACE_CLASS = '[[:space:]\\u000b\\u000c\\u0085\\u00a0\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]+'
 
 /** One receipt name candidate, cleaned, bounded: NULL when not a usable name. */
 function receiptNameCandidate(path: string): string {

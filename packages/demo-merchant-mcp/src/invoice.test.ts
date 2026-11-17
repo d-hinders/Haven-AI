@@ -341,6 +341,7 @@ describe('generateInvoice — the keys Haven reads lines and VAT by (#4875)', ()
       const { json } = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate', taxDeclaration })
       const top = json as unknown as Record<string, unknown>
       for (const key of ['belopp_exkl_moms', 'moms_belopp', 'totalt_inkl_moms']) {
+        expect(typeof top[key], key).toBe('string')
         expect(top[key]).toMatch(DECIMAL)
       }
       expect(typeof top.moms_procent).toBe('number')
@@ -351,6 +352,7 @@ describe('generateInvoice — the keys Haven reads lines and VAT by (#4875)', ()
         expect(typeof row.beskrivning).toBe('string')
         expect(typeof row.antal).toBe('number')
         for (const key of ['apris_exkl_moms', 'moms_belopp', 'totalt_inkl_moms']) {
+          expect(typeof row[key], key).toBe('string')
           expect(row[key]).toMatch(DECIMAL)
         }
         expect(typeof row.moms_procent).toBe('number')

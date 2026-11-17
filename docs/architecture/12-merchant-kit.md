@@ -455,6 +455,8 @@ export interface ConsumedPaymentRecord {
   amount: string
   /** The authorization's `validBefore`, in seconds. */
   validBefore: number
+  /** When the key was reserved; bounds how long a `settling` record's holder is trusted. */
+  reservedAt: string
   /** Generated once, at reservation; the sale record's `merchant_reference`. */
   merchantReference: string
   /**
@@ -544,7 +546,10 @@ export interface ConsumedPaymentStore {
 The core calls `reserve` before it sends a payment for verification, and
 `markSettled`, `markSettlementUnknown` or `release` around its verify and
 settle calls, in a `finally` so that a request that throws still leaves the
-record in one of those states: **every failure before settlement releases the reservation**, a
+record in one of those states. The `finally` calls `release` only when the
+settle call was never sent; once it may have been sent, it calls
+`markSettlementUnknown`, never `release`, because a released key whose
+settlement landed could be reserved again. **Every failure before settlement releases the reservation**, a
 verify rejection included, so a header that never verifies cannot hold a key.
 The key contains the payer and the nonce, which are public once the payment
 settles (USDC's `AuthorizationUsed` event emits both), so **the key alone
@@ -604,14 +609,33 @@ chain read. Only a `settlement_unknown` record (the holder has answered 503
 and cleared its token) or a `settling` record with no token hash (after a
 restart) is resolved by a later request, and only into `settled`. So the
 holder's own `markSettled` cannot lose a race to another request, and the
-request that paid never needs a proof for its own first forward. **Every other forward requires a
+request that paid never needs a proof for its own first forward.
+
+**The holder has a deadline.** The token hash is trusted for
+`RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`: the holder's own worst
+case, a 10 s slot wait, verify and settle at 30 s each and `SETTLE_RESOLVE_MS`
+(30 s), is 100 s, and each chain read inside the resolve poll has its own 10 s
+timeout. A later request that finds a `settling` record older than that treats
+it as tokenless: it clears the hash in one conditional update (state still
+`settling`, `reservedAt` unchanged) and then resolves the record into
+`settled`. A holder that hung and wakes late then gets `not_settleable`, and so
+does a holder whose hash a restart cleared. **On `not_settleable` the holder
+reads the record again and answers by its state, as any later request would:**
+its own buyer then needs a proof, the same loss path as a restart mid-settle.
+
+**One proxy process per `PAYMENTS_DB`.** Clearing every token hash at startup
+is safe only because no other process holds one. The proxy takes an exclusive
+lock on the file at startup and refuses to start while another process holds
+it, so a rolling deploy stops the old process before the new one serves, and
+the proxy does not run as more than one replica on one store. **Every other forward requires a
 `SIGN-IN-WITH-X` header** (CAIP-122) signed by the record's payer address.
 Without a valid one the answer is 200 `payment_retry_needs_proof` with a
 challenge: nothing is forwarded and no forward is used. Haven's signer already
 signs this proof (`haven_sign_siwx`). A buyer whose client cannot sign it gets
-no forward at all once the reserving request has not forwarded its payment: a
-failed first forward, a settlement found later on the chain, a restart
-mid-settle. Its payment can then only be refunded by hand from the merchant's
+no further forward whenever the reserving request's own first forward does not
+deliver: it failed, it never ran (a settlement found later on the chain, a
+restart mid-settle, a holder past its deadline), or the proxy restarted
+mid-forward. Its payment can then only be refunded by hand from the merchant's
 log.
 
 **The challenge.** The answers that leave a record a proof could forward
@@ -635,25 +659,31 @@ cannot answer it:
 - `supportedChains` offers the payment's chain as `eip155:<chainId>` with type
   `eip191`. The signer checks it against its own credential's chain, which for
   a Haven buyer is the payment's chain;
-- every field is a single-line string.
+- every string field is a single line, and no scalar field is anything but a
+  string.
 
 **The challenge nonces are the proxy's, not the store's.** The proxy keeps
 them in its own table in the `PAYMENTS_DB` file, outside the
 `ConsumedPaymentStore` interface: **one live nonce per payment key**, issued
-again unchanged until it expires, so a stranger replaying a public header
-cannot grow the table. A proof is accepted only for that key's live nonce,
-before it expires, and only once; accepting it retires the nonce, and the next
-answer issues a new one. A proof whose recovered address is not the record's
-`payer` is answered `payment_retry_needs_proof` with the same challenge.
-`payment_retry_needs_proof` answers count against the per-IP limit for unpaid
-requests (section 7). The demo merchant needs neither: it serves a cached
+again unchanged while at least 60 s of it remain and replaced by a fresh one
+after that, so a stranger replaying a public header cannot grow the table.
+Expired rows are pruned on the same write. A proof is accepted only for that
+key's live nonce, before it expires, and only once; accepting it retires the
+nonce, and the next answer issues a new one. A proof whose recovered address is
+not the record's `payer` is answered `payment_retry_needs_proof` with the same
+challenge. **Known-key answers that forward nothing are not rate-limited**,
+like any paid request (section 7): each costs one store read and at most one
+nonce write per key per nonce lifetime, and no upstream call, so a replayed
+public header buys a stranger nothing and costs the merchant almost nothing.
+A 429 there would also be a non-2xx answer to a settled payment, which Haven
+would read as a rejection after funding (section 8). The demo merchant needs neither: it serves a cached
 result again and makes no second upstream call, so it asks for no proof.
 
 ### The states
 
 | State | Meaning | Next states |
 |---|---|---|
-| `settling` | Reserved; verify and settle are in progress, in the reserving request (or that request's process died). | `forwarding` (settled by the reserving request), `settled` (resolved after a restart), `settlement_unknown`, removed |
+| `settling` | Reserved; verify and settle are in progress, in the reserving request (or that request's process died). | `forwarding` (settled by the reserving request), `settled` (resolved by a later request after a restart or after `RESERVATION_DEADLINE_MS`), `settlement_unknown`, removed |
 | `settlement_unknown` | The reserving request did not learn the settle outcome within `SETTLE_RESOLVE_MS`, answered 503 and cleared its token; chain recovery has not yet found a transaction. | `settled`, removed |
 | `settled` | Settlement was confirmed by a request that does not hold the reservation (chain resolution of a `settlement_unknown` record, or of a `settling` one after a restart), and the transaction hash is recorded. The call has not been forwarded; forwarding it needs a proof. | `forwarding` |
 | `forwarding` | The upstream call is in flight. `forwardingStartedAt` bounds it. | `delivered`, `failed` |
@@ -705,8 +735,9 @@ paid: the record is released and the payment is refused as unsettled (402
   delivered record, and the merchant serves the cached result. Nothing is
   persisted, so a restart forgets settled payments, exactly as today.
 - **Proxy.** A SQLite file at `PAYMENTS_DB`, using the built-in `node:sqlite`
-  module (the repository runs Node 24, so no new dependency). One table keyed
-  on `key`, with the fields above. A payment buys one call: a `delivered`
+  module (the repository runs Node 24, so no new dependency). A payments
+  table keyed on `key`, with the fields above plus the token hash, and the
+  challenge-nonce table (above). A payment buys one call: a `delivered`
   record is never forwarded again, a `failed` record is forwarded again on the
   same payment, and no payment is forwarded more than three times in all.
 
@@ -837,8 +868,10 @@ it.
 Unpaid requests are limited per client IP: 60 requests a minute with a burst of
 10, and at most 10 concurrent unpaid requests per IP. Over the limit the proxy
 answers 429 with `Retry-After` and no challenge. Paid requests are not
-rate-limited by the proxy; the payment is the limit. A request answered
-`payment_retry_needs_proof` counts as unpaid (section 6). A global cap of 32
+rate-limited by the proxy; the payment is the limit. That includes a known
+key's answers that forward nothing (section 6): a request carrying a payment
+header is never answered 429, so an honest payer behind a busy shared address
+can always retry. A global cap of 32
 concurrent upstream calls bounds the merchant's own spend: a paid request waits
 up to 10 s for a slot before settlement, and if no slot is free it is refused
 with 503 before any verify or settle call, so nothing is settled for a call
@@ -1169,7 +1202,8 @@ What the merchant runs:
   because the #4890 core is Coinbase's client), optionally `VAT_RULE` with the seller settings (section 11) and `DIRECTORY_LISTING` with `ICON_URL` (section 4, off by default), and, for sales
   reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY`;
 - persistent disk for the consumed-payment store (`PAYMENTS_DB`) and the
-  sales outbox (`SALES_OUTBOX`). Losing `PAYMENTS_DB` loses the one-call rule
+  sales outbox (`SALES_OUTBOX`), used by exactly one proxy process at a time
+  (the proxy locks `PAYMENTS_DB` at startup, section 6). Losing `PAYMENTS_DB` loses the one-call rule
   for payments already delivered, so it is backed up like any other
   ledger;
 - a health route, `GET /healthz`, which needs no payment and reports
@@ -1211,7 +1245,7 @@ merchant key takes effect on the next sales report.
 - The sales ingest route's path and the merchant key's format are #4897's.
 - The licence and the distribution decision come after the pilot (owner decision on [#4884](https://github.com/d-hinders/Haven-AI/issues/4884)).
 - Listing a deployment in Coinbase's directory, and any other directory, is outside the kit epic (#4884) and parked in #4887; section 4 names the fields and keeps them off by default.
-- **Open question (owner):** a Haven buyer has paid for nothing, until a Haven-side retry path exists, in three cases: its call fails after settlement (section 8); its settle outcome is unknown, the proxy answers 503 `settlement_unknown`, and the settle lands later (section 6); and Haven's own 300 s deadline passes first when every step runs to its limit (section 6). Does the pilot accept that, with the merchant refunding by hand from its log, or is a Haven-side retry (which would present the payment again with a `SIGN-IN-WITH-X` proof) built before the first live payment? Asked on #4884.
+- **Open question (owner):** a Haven buyer has paid for nothing, until a Haven-side retry path exists, whenever its payment needs any forward other than the reserving request's first, because that forward needs a `SIGN-IN-WITH-X` proof the SDK does not send yet (section 6). The cases: its call fails after settlement (section 8); its settle outcome is unknown, the proxy answers 503 `settlement_unknown`, and the settle lands later; the proxy restarts mid-settle, or the holder passes `RESERVATION_DEADLINE_MS`, and the settle had landed; the proxy crashes mid-forward; and Haven's own 300 s deadline passes first when every step runs to its limit (all section 6). Does the pilot accept that, with the merchant refunding by hand from its log, or is a Haven-side retry (which would present the payment again with a `SIGN-IN-WITH-X` proof) built before the first live payment? Asked on #4884.
 - A periodic statement that sums a buyer's per-call receipts is later work (section 11).
 - ERC-7710 support, and advertising it when a facilitator supports it, is
   #4887's. The kit advertises EIP-3009 only.

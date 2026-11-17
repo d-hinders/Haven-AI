@@ -491,8 +491,9 @@ node -e 'import("./scripts/ci/qa-freshness.mjs").then(async (q) => { const fs = 
 # Visual gate: app routes no visual spec shoots.
 comm -23 <(find packages/frontend/src/app -name 'page.tsx' | sed -E 's#packages/frontend/src/app##; s#/page\.tsx$##; s#/\([^)]*\)##g; s#^$#/#' | sort -u) <(rg -o "'/[a-z][a-z0-9/-]*'" packages/frontend/e2e/*.visual.spec.ts | sed -E "s/.*:'([^']*)'/\1/" | sort -u)
 # Docs-quality boundary: Markdown neither front-mattered nor in the
-# packages/** manifest.
-git ls-files '*.md' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l
+# packages/** manifest. Markdown under a fixtures/ directory is excluded: it
+# is test input, not documentation (#4804).
+git ls-files '*.md' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | grep -vE '(^|/)fixtures/' | wc -l
 # Second half — exit branches: for each gate, the branches on which it
 # returns green WITHOUT exercising the content it claims to check. Re-read
 # them from the script; for qa-freshness.mjs at 893d74f6 they are:
@@ -517,7 +518,13 @@ docs-boundary count pinned** — `git ls-tree -r --name-only <sha>` rather than
 `git ls-files`, which reads the live worktree: re-taken unpinned on a branch
 that ADDS a Markdown file, this block reads 44 where the pinned figure is 43,
 and the extra file is the reader's own change. (Observed on this block's own
-review; the same hazard is why block 5 prints its SHA.) On `e0617aa9f`:
+review; the same hazard is why block 5 prints its SHA.) **The count leaves out
+Markdown under a `fixtures/` directory** (`grep -vE '(^|/)fixtures/'`, #4804):
+those files are inputs to a test, not documentation, and the row's tolerance is
+exact, so each fixture a test gained flagged the weekly re-measurement. The
+exclusion removes nothing at `e0617aa9f`, so the 43 and 44 above stand; at
+`9871885a9` it removes the seven `scripts/docs/fixtures/issue-method/*.md`
+files, 52 to 45. On `e0617aa9f`:
 copy lint 111 unscanned files, 14 with hits — the frontend's 4, unchanged
 from the glob's reading, plus 10 files at the SDK's top level the glob could
 not see, carrying 16 hits: 6 in agent-facing strings (one each in six files)

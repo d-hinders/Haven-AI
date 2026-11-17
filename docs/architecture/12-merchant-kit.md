@@ -609,22 +609,25 @@ that forward, however exactly it rebuilds the header.
 request, which makes no verify, settle or chain read. Only a
 `settlement_unknown` record (the holder has answered 503 and cleared its
 token) or a `settling` record with no token hash (after a restart, or cleared
-past the deadline, below) is resolved by a later request, and only into
-`settled`. So a holder that finishes within `RESERVATION_DEADLINE_MS` cannot
+past the deadline, below) is resolved by a later request, from the
+chain, and a payment found there becomes `settled`, never `forwarding`. So a holder that finishes within `RESERVATION_DEADLINE_MS` cannot
 lose its `markSettled` to another request, and its buyer never needs a proof
 for its own first forward.
 
 **The holder has a deadline.** The token hash is trusted for
-`RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`: the holder's own worst
-case, a 10 s slot wait, verify and settle at 30 s each and `SETTLE_RESOLVE_MS`
-(30 s), is 100 s. Each chain read inside the resolve poll has its own 10 s
-timeout, and the poll starts no read that could end after `SETTLE_RESOLVE_MS`,
-so the 100 s holds. The deadline is measured on the process's monotonic clock
+`RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`. The upstream slot is
+taken before `reserve`, so a request waiting for one holds no reservation.
+From `reservedAt` the holder's worst case is the core's chain read before
+verify (the "chain first" check in `packages/demo-merchant-mcp/src/x402.ts`,
+10 s), verify and settle at 30 s each, and `SETTLE_RESOLVE_MS` (30 s): 100 s.
+Every chain read has its own 10 s timeout, and the resolve poll starts no read
+that could end after `SETTLE_RESOLVE_MS` and cuts off one still running at
+that bound, so the 100 s holds and leaves 20 s of margin. The deadline is measured on the process's monotonic clock
 (the deadline only matters within one process, since a restart clears every
 token hash), with `reservedAt` recorded for the log. A later request that finds a `settling` record older than that treats
 it as tokenless: it clears the hash in one conditional update (state still
-`settling`, `reservedAt` unchanged) and then resolves the record into
-`settled`. When that update changes no row, the holder got there first: the
+`settling`, `reservedAt` unchanged) and then resolves it from the chain as
+after a restart. When that update changes no row, the holder got there first: the
 later request reads the record again and answers by its state, and never
 resolves on a failed clear. A holder that hung and wakes late then gets `not_settleable`, and so
 does a holder whose hash a restart cleared. **On `not_settleable` the holder
@@ -759,7 +762,7 @@ paid: the record is released and the payment is refused as unsettled (402
 | Situation | Answer |
 |---|---|
 | Unknown key | Reserve, verify, settle. An unknown key is never served without a settlement. |
-| `settling` or `settlement_unknown` after a restart | Resolve from the chain as above. When the event is found the record becomes `settled` (the reservation's holder is gone), and the request is forwarded only with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. Answer 503 `settlement_unknown` while the authorization is still valid and no event is found; 402 `settle_failed` after `validBefore`. |
+| `settling` or `settlement_unknown` after a restart, or `settling` past `RESERVATION_DEADLINE_MS` | Resolve from the chain as above. When the event is found the record becomes `settled` (the reservation's holder is gone), and the request is forwarded only with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. Answer 503 `settlement_unknown` while the authorization is still valid and no event is found; 402 `settle_failed` after `validBefore`. |
 | `settled` after a restart | Forward with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. The settlement is recorded and the call was never made. |
 | `forwarding` after a restart, older than the takeover threshold | Mark `failed`, then forward (within the cap) with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. The process that was forwarding is gone and no call runs past its deadline. |
 | `forwarding` after a restart, younger than the takeover threshold | Answer `payment_in_flight` (200) with `retry_after_seconds` set to the remaining time. |
@@ -786,10 +789,10 @@ outcome decides the record.
 `UPSTREAM_TIMEOUT_MS` (180 s) is **one total deadline for the whole call**,
 headers and body together. It is set from the budget before the call starts,
 taken from the core's constants: up to 10 s waiting for an upstream slot
-(section 7), verify and settle at `CDP_CALL_TIMEOUT_MS` (30 s) each
-(`packages/demo-merchant-mcp/src/cdp.ts`), and `SETTLE_RESOLVE_MS` (30 s),
-which is 100 s at worst. 100 s plus 180 s is 280 s, which leaves 20 s of
-Haven's hosted 300 s delivery wait for transit. That keeps the ordinary case
+(section 7), the 10 s chain read before verify, verify and settle at
+`CDP_CALL_TIMEOUT_MS` (30 s) each (`packages/demo-merchant-mcp/src/cdp.ts`),
+and `SETTLE_RESOLVE_MS` (30 s), which is 110 s at worst. 110 s plus 180 s is
+290 s, which leaves 10 s of Haven's hosted 300 s delivery wait for transit. That keeps the ordinary case
 well inside Haven's deadline; it does not make a timeout impossible. When
 every step runs to its limit Haven can still time out first, and records the
 payment as funded but undelivered, which is the open owner question in
@@ -871,7 +874,7 @@ it.
   the same payment can be retried, within the cap of three forwards, with a
   smaller output cap.
 - Upstream deadline: 180 s for the whole call, headers and body together
-  (`UPSTREAM_TIMEOUT_MS`, section 6), set so that the 100 s worst-case budget
+  (`UPSTREAM_TIMEOUT_MS`, section 6), set so that the 110 s worst-case budget
   before the call plus the call stays inside the 300 s Haven's hosted path
   waits for a delivery. A call that
   exceeds it is failed.

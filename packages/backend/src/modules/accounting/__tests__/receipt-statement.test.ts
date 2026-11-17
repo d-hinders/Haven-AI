@@ -106,6 +106,14 @@ describe('receiptStatementFrom (#4875)', () => {
     expect(statement?.lines[0].description).toHaveLength(RECEIPT_STATEMENT_MAX_TEXT)
   })
 
+  it('keeps legitimate text: Swedish letters, dashes, emoji sequences and joiner-using scripts', () => {
+    for (const text of ['Molnlagring — 50 GB, åäö ÅÄÖ', 'Familjepaket 👨\u200d👩\u200d👧', 'می\u200cخواهم', '€ 5 – ½']) {
+      const receipt = clone(se25)
+      receipt.rader[0].beskrivning = text
+      expect(receiptStatementFrom(receipt)?.lines[0].description).toBe(text)
+    }
+  })
+
   it('reads a code case-insensitively and stores it upper-case', () => {
     expect(receiptStatementFrom({ ...clone(se25), valuta: ' usdc ', momsbehandling: 'se_25' })).toMatchObject({
       currency: 'USDC',
@@ -135,7 +143,9 @@ describe('receiptStatementFrom (#4875)', () => {
       ['a description with a C1 control', (r) => { r.rader[0].beskrivning = 'Line\u0085break' }],
       ['a description with a bidi override', (r) => { r.rader[0].beskrivning = 'Storage \u202e0.01 USDC' }],
       ['a description with a bidi isolate', (r) => { r.rader[0].beskrivning = 'Storage \u2066x\u2069' }],
-      ['a description with a zero-width character', (r) => { r.rader[0].beskrivning = 'Stor\u200bage' }],
+      ['a description with a zero-width space', (r) => { r.rader[0].beskrivning = 'Stor\u200bage' }],
+      ['a description with an Arabic letter mark', (r) => { r.rader[0].beskrivning = 'Storage \u061c50' }],
+      ['a description with a line separator', (r) => { r.rader[0].beskrivning = 'Storage\u2028Total 0.00' }],
       ['a quantity above the cap', (r) => { r.rader[0].antal = RECEIPT_STATEMENT_MAX_QUANTITY + 1 }],
       ['an amount with more than 30 whole digits', (r) => { r.totalt_inkl_moms = '1'.repeat(31) }],
       ['an amount with more than 30 decimal places', (r) => { r.totalt_inkl_moms = `0.${'1'.repeat(31)}` }],

@@ -89,13 +89,17 @@ const DECIMAL = /^\d{1,30}(\.\d{1,30})?$/
 /** An upper-case code: `USDC`, `SE_25`, `REVERSE_CHARGE`. */
 const CODE = /^[A-Z][A-Z0-9_]*$/
 /**
- * Characters a description may not carry: C0 and C1 controls, DEL, the
- * bidirectional overrides and isolates, and zero-width characters. A line
+ * Characters a description may not carry: C0 and C1 controls, DEL, the line
+ * and paragraph separators, the bidirectional marks, overrides and isolates,
+ * the zero-width space and invisible operators, and the BOM. A line
  * description is printed on an accounting document (#4876), where a bidi
  * override could make one line read as another.
+ *
+ * The zero-width joiner and non-joiner (U+200C, U+200D) are allowed: Persian
+ * and Indic text and emoji sequences need them, and they reorder nothing.
  */
 // eslint-disable-next-line no-control-regex
-const FORBIDDEN_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/
+const FORBIDDEN_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)

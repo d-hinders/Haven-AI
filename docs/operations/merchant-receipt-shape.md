@@ -5,6 +5,8 @@ covers:
   - packages/backend/src/modules/accounting/receipt-statement.ts
   - packages/backend/src/modules/accounting/receipt-underlag.ts
   - packages/backend/src/modules/accounting/entry.ts
+  - packages/backend/src/modules/accounting/transaction-kind.ts
+  - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/sdk/src/merchant-completion.ts
 last-verified: "2026-11-17"
@@ -66,12 +68,14 @@ A decimal string is 1–30 digits, optionally followed by a point and 1–30 mor
 digits, such as `"0.0005"` or `"0"`. Amounts given as numbers, negative
 amounts, exponents, `"1."` and `".5"` are not accepted.
 
-A code is letters, digits and `_`, starting with a letter, at most 32
+A code is ASCII letters, digits and `_`, starting with a letter, at most 32
 characters. It is read case-insensitively and stored upper-case, so `usdc`
 reads as `USDC`.
 
-A description may not contain control characters, bidirectional overrides or
-isolates, or zero-width characters.
+After trimming, a description may not contain control characters, line or paragraph
+separators, bidirectional marks, overrides or isolates, or a zero-width space.
+The zero-width joiner and non-joiner are allowed, because Persian and Indic
+text and emoji sequences need them.
 
 **How the read behaves**
 

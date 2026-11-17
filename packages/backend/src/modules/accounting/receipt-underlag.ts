@@ -8,7 +8,6 @@ import type { FeedTransaction } from './feed-transaction.js'
 import { TRANSACTION_KINDS, type TransactionKind } from './transaction-kind.js'
 import {
   RECEIPT_STATEMENT_LABEL,
-  VAT_NOT_STATED,
   asciiFold,
   checkedReceiptStatement,
   type CheckedReceiptStatement,
@@ -215,32 +214,51 @@ export const UNDERLAG_MAX_PAGE_LINES = 72
 function receiptStatementLines(data: ReceiptUnderlagData): string[] {
   if (data.resourceUrl == null || data.receiptStatement === undefined) return []
   const statement = data.receiptStatement
-  if (statement === null) return [`VAT            ${VAT_NOT_STATED}`]
+  if (statement === null) return [`VAT            not stated by the merchant`]
   const cur = statement.currency
   const shown = statement.lines.slice(0, UNDERLAG_MAX_RECEIPT_LINES)
-  const out = ['', `MERCHANT RECEIPT LINES (${RECEIPT_STATEMENT_LABEL})`]
+  const out = ['', fitRow(`MERCHANT RECEIPT LINES (${RECEIPT_STATEMENT_LABEL})`)]
   shown.forEach((line, i) => {
     const label = `Line ${i + 1}`.padEnd(15, ' ')
     out.push(...indentedWrap(label, asciiFold(line.description), UNDERLAG_MAX_DESCRIPTION_ROWS))
     out.push(
-      `               qty ${line.quantity}, net ${line.unitPriceExclVat} ${cur} each, VAT ${line.vatPercent}% ${line.vatAmount} ${cur}, total ${line.totalInclVat} ${cur}`,
+      fitRow(
+        `               qty ${plainNumber(line.quantity)}, net ${line.unitPriceExclVat} ${cur} each, VAT ${plainNumber(line.vatPercent)}% ${line.vatAmount} ${cur}, total ${line.totalInclVat} ${cur}`,
+      ),
     )
   })
   if (statement.lines.length > shown.length) {
     out.push(`               ...and ${statement.lines.length - shown.length} more lines on the merchant's receipt (attached)`)
   }
   out.push(
-    `Receipt net    ${statement.totals.exclVat} ${cur}`,
-    `Receipt VAT    ${statement.totals.vatPercent}% ${statement.totals.vatAmount} ${cur}`,
-    `Receipt total  ${statement.totals.inclVat} ${cur}`,
+    fitRow(`Receipt net    ${statement.totals.exclVat} ${cur}`),
+    fitRow(`Receipt VAT    ${plainNumber(statement.totals.vatPercent)}% ${statement.totals.vatAmount} ${cur}`),
+    fitRow(`Receipt total  ${statement.totals.inclVat} ${cur}`),
   )
   if (statement.merchantVatTreatment) {
-    out.push(`VAT treatment  ${statement.merchantVatTreatment} (the merchant's)`)
+    out.push(fitRow(`VAT treatment  ${statement.merchantVatTreatment} (the merchant's)`))
   }
   if (statement.totalCheck === 'differs') {
     out.push('Total check    receipt total differs from the amount settled; settled amount booked')
   }
   return out
+}
+
+/**
+ * #4876: one printed row. Merchant figures are bounded by the parser but can
+ * still run long (61-character amounts, a 32-character currency), and a row
+ * the renderer re-wrapped would spend rows the page does not have — the
+ * settlement and authorization sections below the block would fall off it.
+ * Every row of the block is therefore cut to the renderer's 88, marked "..".
+ */
+function fitRow(row: string, width = 88): string {
+  return row.length <= width ? row : `${row.slice(0, width - 2)}..`
+}
+
+/** A stated number as plain text: no exponent, no float noise. */
+function plainNumber(value: number): string {
+  if (Number.isInteger(value)) return String(value)
+  return String(Number(value.toFixed(6)))
 }
 
 /** Render the underlag document (pure — the pilot script uses it directly). */

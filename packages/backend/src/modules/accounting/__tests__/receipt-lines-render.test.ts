@@ -82,6 +82,7 @@ describe('the underlag shows the receipt lines (#4876)', () => {
     expect(s).toContain('1 manad')
     expect(s).not.toMatch(/S\?ker|m\?nad/)
     expect(asciiFold('Molnlagring — 1 månad, engångsköp, Straße')).toBe('Molnlagring - 1 manad, engangskop, Strasse')
+    expect(asciiFold('Łódź Œuvre ﬁle Þór ı')).toBe('Lodz OEuvre file Thor i')
   })
 
   it('says when the receipt total differs from what was settled, and still books the settled amount', () => {
@@ -98,8 +99,25 @@ describe('the underlag shows the receipt lines (#4876)', () => {
     expect(s).toContain("...and 3 more lines on the merchant's receipt \\(attached\\)")
   })
 
-  it('the worst case — every line at the cap with a maximal description — still fits the single page', () => {
-    const many = { ...se25, rader: Array.from({ length: 50 }, () => ({ ...se25.rader[0], beskrivning: 'y'.repeat(300) })) }
+  it('the worst case the parser admits — maximal descriptions, figures, currency and treatment — still fits the single page', () => {
+    const big = `${'9'.repeat(30)}.${'9'.repeat(30)}`
+    const many = {
+      ...se25,
+      valuta: 'U'.repeat(32),
+      momsbehandling: 'T'.repeat(32),
+      belopp_exkl_moms: big,
+      moms_belopp: big,
+      totalt_inkl_moms: big,
+      moms_procent: 0.30000000000000004,
+      rader: Array.from({ length: 50 }, () => ({
+        beskrivning: 'y'.repeat(300),
+        antal: 0.30000000000000004,
+        apris_exkl_moms: big,
+        moms_procent: 0.30000000000000004,
+        moms_belopp: big,
+        totalt_inkl_moms: big,
+      })),
+    }
     const s = render({
       receiptStatement: statement(many, '1000'),
       fundingTxHash: `0x${'ee'.repeat(32)}`,
@@ -109,13 +127,19 @@ describe('the underlag shows the receipt lines (#4876)', () => {
     })
     const rows = (s.match(/\) Tj T\*/g) ?? []).length
     expect(rows).toBeLessThanOrEqual(UNDERLAG_MAX_PAGE_LINES)
-    // A description longer than its rows is cut, visibly.
+    // A description longer than its rows is cut, visibly, and the settlement
+    // and authorization sections below the block are still on the page.
     expect(s).toContain('yy..')
+    expect(s).toContain('ON-CHAIN SETTLEMENT')
+    expect(s).toContain('Signature      ')
+    // Numbers print plainly: no float noise.
+    expect(s).not.toContain('0.30000000000000004')
+    expect(s).toContain('qty 0.3,')
   })
 
   it('a protocol payment whose receipt states no lines says "VAT not stated by the merchant"', () => {
     const s = render({ receiptStatement: null })
-    expect(s).toContain('VAT            VAT not stated by the merchant')
+    expect(s).toContain('VAT            not stated by the merchant')
     expect(s).toContain('Description    merchant.example - storage \\(purchase\\)')
     expect(s).not.toContain('MERCHANT RECEIPT LINES')
   })
@@ -143,6 +167,14 @@ describe('the Fortnox comment carries the product and the stated VAT (#4876)', (
     expect(d).toContain('Product CloudNest 50 GB - Saker krypterad molnlagring.')
     expect(d).toMatch(/^[A-Za-z0-9 .,()-]+$/)
     expect(d).toContain('Haven payment pay-123.')
+  })
+
+  it('a product name that folds to nothing is left out, never sent as a bare "Product"', () => {
+    const d = feedDescription(
+      tx({ merchantReceipt: { url: null, inlineJson: { ...se25, rader: [{ ...se25.rader[0], beskrivning: '日本' }] } } }),
+    )
+    expect(d).toContain('VAT 25 pct 0.0001 USDC, merchant VAT treatment SE 25.')
+    expect(d).not.toContain('Product')
   })
 
   it('says "VAT not stated by the merchant" for a protocol payment with no stated lines', () => {

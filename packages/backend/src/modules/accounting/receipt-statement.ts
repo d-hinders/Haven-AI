@@ -1,4 +1,3 @@
-import { getChain } from '../../domain/chains.js'
 /**
  * The product lines and VAT figures a merchant states on its own receipt
  * (#4875, epic #4874) — read, never derived.
@@ -35,6 +34,8 @@ import { getChain } from '../../domain/chains.js'
  * This module reports what the receipt says; how a document labels it is
  * #4876's decision, and nothing here treats the figures as verified.
  */
+
+import { getChain } from '../../domain/chains.js'
 
 /** The most lines read off one receipt; more and the receipt is not stated. */
 export const RECEIPT_STATEMENT_MAX_LINES = 50
@@ -263,9 +264,10 @@ export const VAT_NOT_STATED = 'VAT not stated by the merchant'
 
 /**
  * #4876: fold merchant text to plain ASCII for the two filing outputs (the
- * underlag PDF and the Fortnox comment), which accept nothing else. Letters
- * keep their base form (`å` → `a`, `é` → `e`, `ß` → `ss`) and dashes and quotes
- * their ASCII twins, so "Molnlagring — 1 månad, engångsköp" reads
+ * underlag PDF and the Fortnox comment), which accept nothing else. Latin
+ * letters keep their base form (`å` → `a`, `é` → `e`, `ß` → `ss`, `ł` → `l`,
+ * `Œ` → `OE`), compatibility forms their plain spelling (`ﬁ` → `fi`), and
+ * dashes and quotes their ASCII twins, so "Molnlagring — 1 månad, engångsköp" reads
  * "Molnlagring - 1 manad, engangskop" rather than a row of `?`. What has no
  * ASCII form still becomes `?`, as the renderer always did.
  */
@@ -276,9 +278,9 @@ export function asciiFold(text: string): string {
     .replace(/[“”„″]/g, '"')
     .replace(/ /g, ' ')
     .replace(/ß/g, 'ss')
-    .replace(/[Ææ]/g, (c) => (c === 'Æ' ? 'AE' : 'ae'))
-    .replace(/[Øø]/g, (c) => (c === 'Ø' ? 'O' : 'o'))
-    .normalize('NFD')
+    .replace(/[ÆæŒœ]/g, (c) => ({ Æ: 'AE', æ: 'ae', Œ: 'OE', œ: 'oe' })[c] ?? c)
+    .replace(/[ØøŁłĐđÞþðı]/g, (c) => ({ Ø: 'O', ø: 'o', Ł: 'L', ł: 'l', Đ: 'D', đ: 'd', Þ: 'Th', þ: 'th', ð: 'd', ı: 'i' })[c] ?? c)
+    .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^\x20-\x7e]/g, '?')
 }

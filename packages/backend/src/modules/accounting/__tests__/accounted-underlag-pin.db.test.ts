@@ -83,7 +83,7 @@ interface Seeded {
  * one transaction, so the #3767 grace deferral never applies and the push is
  * immediate.
  */
-async function seedSettled(userId: string, agentId: string): Promise<Seeded> {
+async function seedSettled(userId: string, agentId: string, settledSecondsAgo = 300): Promise<Seeded> {
   const intentId = randomUUID()
   const txHash = `0x${String(++seq).padStart(64, 'a')}`.slice(0, 66)
   await db.query(
@@ -95,15 +95,16 @@ async function seedSettled(userId: string, agentId: string): Promise<Seeded> {
         x402_merchant_address, delegation_hash, created_at)
      VALUES ($1, $2, $3, $4, ${CHAIN}, 'USDC', $5, $6,
              '1000', '0.001', '0x00000000000000000000000000000000000000d1', 0, $7,
-             'confirmed', $8, NOW() - interval '5 minutes',
+             'confirmed', $8, NOW() - ($11 * interval '1 second'),
              NOW() + interval '10 minutes', 'x402', 'x402', 'erc7710',
              '{"settlement_scheme":"erc7710"}'::jsonb, $9, $9, $6, $6, $10,
-             NOW() - interval '5 minutes')`,
+             NOW() - ($11 * interval '1 second'))`,
     [
       intentId, agentId, userId, PAYER, TOKEN, MERCHANT,
       `0x${String(++seq).padStart(64, 'b')}`.slice(0, 66),
       txHash, RESOURCE_URL,
       `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
+      settledSecondsAgo,
     ],
   )
   const evidence = await db.query<{ id: string }>(
@@ -113,9 +114,9 @@ async function seedSettled(userId: string, agentId: string): Promise<Seeded> {
         amount_raw, amount_human, confirmed_at, amount_sek, fx_rates)
      VALUES ($1, $2, $3, 'x402', 'payment_confirmed', $4, ${CHAIN},
              $5, $6, $7, 'USDC', $8, '1000', '0.001',
-             NOW() - interval '5 minutes', '10.42', '{"SEK":10.42}'::jsonb)
+             NOW() - ($9 * interval '1 second'), '10.42', '{"SEK":10.42}'::jsonb)
      RETURNING id`,
-    [intentId, agentId, userId, txHash, RESOURCE_URL, PAYER, MERCHANT, TOKEN],
+    [intentId, agentId, userId, txHash, RESOURCE_URL, PAYER, MERCHANT, TOKEN, settledSecondsAgo],
   )
   return { intentId, evidenceId: evidence.rows[0].id }
 }
@@ -404,7 +405,7 @@ describeDb('Accounted underlag-input pin (#4824)', () => {
     expect(attempts).toHaveLength(2)
     expect(attempts[1].sha256).toBe(attempts[0].sha256)
     const first = attempts[0].bytes.toString('latin1')
-    expect(first).toContain('VAT not stated by the merchant')
+    expect(first).toContain('VAT            not stated by the merchant')
     expect(first).not.toContain('MERCHANT RECEIPT LINES')
   })
 
@@ -434,5 +435,36 @@ describeDb('Accounted underlag-input pin (#4824)', () => {
     expect(pdf).toContain('Haven Demo AB')
     expect(pdf).not.toContain('MERCHANT RECEIPT LINES')
     expect(pdf).not.toContain('not stated by the merchant')
+  })
+
+  it('#4876 — the receipt wait end to end: held inside the window with no sync row, then pushed with "VAT not stated" once it passes', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId, 30)
+
+    // Inside the window, no receipt: held. No sync row, no upload, no attempt.
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'not_fed' })
+    expect(await getSyncState(userId, 'accounted', seeded.intentId)).toBeNull()
+    expect(underlagAttempts(state, seeded.intentId)).toHaveLength(0)
+
+    // The window passes with no receipt: pushed once, saying so.
+    await db.query(
+      `UPDATE machine_payment_evidence SET confirmed_at = NOW() - interval '3 minutes' WHERE id = $1`,
+      [seeded.evidenceId],
+    )
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const attempts = underlagAttempts(state, seeded.intentId)
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].bytes.toString('latin1')).toContain('VAT            not stated by the merchant')
+  })
+
+  it('#4876 — a receipt captured inside the window releases the hold, and the lines are on the one push', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId, 30)
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'not_fed' })
+    await captureReceipt(seeded.evidenceId, se25)
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const attempts = underlagAttempts(state, seeded.intentId)
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].bytes.toString('latin1')).toContain('Receipt VAT    25% 0.0001 USDC')
   })
 })

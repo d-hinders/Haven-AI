@@ -23,7 +23,7 @@ import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/hel
 import { upsertConnection } from '../../../infra/repositories/accounting-connections.js'
 import { listDueRetrySyncs } from '../../../infra/repositories/accounting-feed-syncs.js'
 import { SECRETS_KEY_ENV, encryptSecrets } from '../../../infra/secrets.js'
-import { MERCHANT_RECEIPT_WAIT_MIN } from '../../../domain/merchant-receipt-wait.js'
+import { MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS, MERCHANT_RECEIPT_WAIT_MIN } from '../../../domain/merchant-receipt-wait.js'
 import { activateProvider } from '../connections.js'
 
 const CHAIN = 84532
@@ -123,6 +123,17 @@ describeDb('the sweep feeds a payment the merchant-receipt wait held (#4876)', (
     expect(await due()).toEqual([])
     const afterGrace = await seedX402(userId, agentId, GRACE_MIN * 60 + 60, { settlement_scheme: 'eip3009' })
     expect(await due()).toEqual([afterGrace])
+  })
+
+  it('a payment the receipt wait held is taken only inside the sweep horizon; the #3767 arm keeps no horizon', async () => {
+    const { userId, agentId } = await seedUserWithDestination()
+    const days = (n: number) => n * 86_400
+    const recent = await seedX402(userId, agentId, days(MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS) - 3_600, { settlement_scheme: 'erc7710' })
+    await seedX402(userId, agentId, days(MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS) + 3_600, { settlement_scheme: 'erc7710' })
+    const oldUnsettled = await seedX402(userId, agentId, days(MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS) + 3_600, {
+      settlement_scheme: 'eip3009',
+    })
+    expect(await due()).toEqual([recent, oldUnsettled].sort())
   })
 
   it('a payment with no settlement scheme, or one already pinned or synced, is not selected by this arm', async () => {

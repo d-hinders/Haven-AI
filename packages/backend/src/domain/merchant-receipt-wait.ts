@@ -19,6 +19,15 @@
 /** Minutes an x402 payment with no merchant receipt waits before it is fed. */
 export const MERCHANT_RECEIPT_WAIT_MIN = 2
 
+/**
+ * How far back the retry sweep takes a payment the receipt wait held (#4876).
+ * The wait's own window is minutes; a row still unfed days later is one the
+ * feed keeps declining for a reason the sweep's query does not mirror, and
+ * re-selecting it every tick would spend the sweep's batch on it. Older
+ * payments are fed by Sync now or the backfill.
+ */
+export const MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS = 7
+
 /** True once the receipt wait has passed for a payment settled at `settledAt`. */
 export function merchantReceiptWaitElapsed(settledAt: string, now: number = Date.now()): boolean {
   const settled = new Date(settledAt).getTime()

@@ -471,7 +471,7 @@ never labelled "stated by the merchant" (owner decision 3 of 2026-11-17,
   from the amount Haven settled, a `Total check` line says so. The settled
   amount is what is booked.
 - **No stated lines.** A protocol payment whose receipt states no lines, or
-  has no receipt, prints `VAT not stated by the merchant`. A direct payment
+  has no receipt, prints a `VAT` line reading `not stated by the merchant`. A direct payment
   has no merchant and prints neither.
 - **Text.** Merchant text is folded to ASCII before it is printed: letters
   keep their base form (`å` → `a`), dashes and quotes their ASCII twins.
@@ -802,7 +802,13 @@ claiming): same connection/auto-feed/FX gates; eip3009 or erc7710 (#4876);
 no booked-hash pin; no sync row; past the receipt window (`$8`, #4876). An
 eip3009 payment must also have its settlement recorded or the #3767 grace
 passed. Before #4876 the arm took only eip3009 payments with no recorded
-settlement, past the grace.
+settlement, past the grace, and that case still has no horizon. The rows
+#4876 added (erc7710, and eip3009 with its settlement recorded) are taken only
+inside `MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS` (7 days). A row the feed keeps
+declining for a reason the query does not mirror (an entitlement, a
+ledger-currency FX gap) therefore cannot occupy the sweep's batch for ever,
+and a deploy does not push old history into closed periods. An older payment
+is fed by Sync now or the backfill.
 
 ## The merchant receipt: wait, then push (#4876)
 
@@ -829,7 +835,8 @@ scheme, never receive a receipt, and are not held.
   eip3009 or erc7710 payment with no sync row once the receipt window has
   passed. An eip3009 payment also needs its settlement recorded or the
   #3767 grace passed. It is pushed with `VAT not stated by the
-  merchant`.
+  merchant`. A payment older than the sweep horizon (7 days) is left to Sync
+  now and the backfill.
 - **The receipt arrives after the first render.** Where the destination pins
   (Accounted, Igdrasil), the pin keeps the first render's bytes, so the underlag still says `VAT not stated by the merchant`.
   The merchant's PDF is late-attached as before.

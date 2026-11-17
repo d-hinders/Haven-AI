@@ -225,10 +225,13 @@ function fitReceiptText(text: string, budget: number): string | null {
   const productAt = text.indexOf(' Product ')
   const keep = productAt === -1 ? text.length : productAt
   if (budget < keep) return null
+  // At least one character of a product name must survive the cut, else the
+  // product part is left out rather than sent as a bare "Product..".
+  const firstName = keep + ' Product '.length
   const cut = text.slice(0, budget - 2)
   const atWord = cut.lastIndexOf(' ')
-  const trimmed = (atWord > keep ? cut.slice(0, atWord) : cut.slice(0, keep)).trimEnd()
-  return trimmed.length > keep ? `${trimmed}..` : text.slice(0, keep)
+  const trimmed = (atWord > firstName ? cut.slice(0, atWord) : cut).replace(/[ ,]+$/, '')
+  return trimmed.length > firstName ? `${trimmed}..` : text.slice(0, keep)
 }
 
 /**
@@ -245,13 +248,16 @@ function fortnoxReceiptText(tx: FeedTransaction): string | null {
   const statement = receiptStatementFrom(tx.merchantReceipt?.inlineJson ?? null)
   if (statement === null) return `${VAT_NOT_STATED}.`
   const label = fortnoxSafeText(RECEIPT_STATEMENT_LABEL.replace("merchant's", 'merchants'))
-  const products = statement.lines.map((l) => fortnoxSafeText(asciiFold(l.description))).join(', ')
+  const products = statement.lines
+    .map((l) => fortnoxSafeText(asciiFold(l.description)))
+    .filter((name) => name.length > 0)
+    .join(', ')
   const cur = fortnoxSafeText(statement.currency)
   const vat = `VAT ${statement.totals.vatPercent} pct ${statement.totals.vatAmount} ${cur}`
   const treatment = statement.merchantVatTreatment
     ? `, merchant VAT treatment ${fortnoxSafeText(statement.merchantVatTreatment.replace(/_/g, ' '))}`
     : ''
-  return `${label}. ${vat}${treatment}. Product ${products}.`
+  return `${label}. ${vat}${treatment}.${products ? ` Product ${products}.` : ''}`
 }
 
 async function fortnoxGet<T>(accessToken: string, path: string, fetchImpl: typeof fetch): Promise<T> {

@@ -15,13 +15,16 @@ last-verified: "2026-11-17"
 Haven names the other side of a payment in **one order** (#4882, epic
 #4879), computed once on the server:
 
-- **Shown on screen today:** analytics' merchants table and each agent's top
-  merchant; the dashboard's top merchant, the agent cards' last payment and
-  the first-payment card.
-- **Carried by the API, shown on screen in #4883:** the dashboard activity
-  feed's names, the transactions list rows (`recipientName`), and an agent's
-  Activity tab rows (`counterparty_name`). Until #4883 those three screens
-  still title a paid-API row by its host first.
+- **On screen:** analytics' merchants table and each agent's top merchant;
+  the dashboard's top merchant, the agent cards' last payment and the
+  first-payment card; and, since #4883, the dashboard activity feed, the
+  transactions list and its detail drawer, and an agent's Activity tab
+  (payments and refused attempts). An outgoing row's title is the server's
+  name; the paid API's host or the browser's own lookups stand in only when
+  the server named nobody. An incoming row keeps its rule: "From <account>"
+  for another of your own accounts, else "Deposit".
+- **The analytics kind line** under a name reads "Paid API" for a catalog
+  merchant, as for a host-named one.
 - **Search and exports:** transactions search matches every name the order
   can find for a row (all of steps 1–4, not only the winner); the
   transactions CSV and the agent ledger CSV name rows in this order.

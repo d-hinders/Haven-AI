@@ -34,7 +34,7 @@ import type { AnalyticsAgentRow, AnalyticsMerchantRow, AnalyticsRangeValue } fro
  *
  * "Paid to" shows the NAME — the API's own resolution (`merchants[].label`,
  * nullable since #4332) — with a KIND line under it: "Your account"
- * (`own_account`), "Paid API" (`x402`), or the short address for an unknown
+ * (`own_account`), "Paid API" (`x402`, and `catalog` since #4883), or the short address for an unknown
  * recipient (`kind: 'unknown'`, label null). A contact or receipt name needs
  * no kind line: the name already says what resolved it. The Address COLUMN is
  * gone — an address is metadata, shown in the mobile disclosure and the
@@ -154,7 +154,7 @@ function PayingAgentsCell({ agents }: { agents: StackedAgent[] }) {
 
 /**
  * The kind line under "Paid to" (#4333): the naming step that produced the
- * label, in words. `own_account` and `x402` name the KIND of counterparty; an
+ * label, in words. `own_account`, `x402` and `catalog` name the KIND of counterparty; an
  * unknown recipient shows the short address there (the address is already
  * metadata the reader can reach in the tooltip — the KIND line is where the
  * issue puts its visible short form). A contact or receipt name needs no
@@ -162,7 +162,9 @@ function PayingAgentsCell({ agents }: { agents: StackedAgent[] }) {
  */
 function kindLine(merchant: AnalyticsMerchantRow): string | null {
   if (merchant.kind === 'own_account') return 'Your account'
-  if (merchant.kind === 'x402') return 'Paid API'
+  // #4883: a catalog merchant is a paid API Haven lists — the name says who,
+  // the kind line says what, exactly as for a host-named one.
+  if (merchant.kind === 'x402' || merchant.kind === 'catalog') return 'Paid API'
   if (merchant.kind === 'unknown') return unknownRecipientShortAddress(merchant.address)
   return null
 }

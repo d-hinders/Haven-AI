@@ -20,7 +20,7 @@ export function isDelegateSweep(tx: Pick<AggregatedTransaction, 'activityType'>)
  */
 export type CounterpartyFields = Pick<
   AggregatedTransaction,
-  'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId'
+  'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId' | 'recipientName'
 >
 
 /**
@@ -132,11 +132,27 @@ function ownAccountSenderName(
  * #3824) — the groups expose no chain-scoped address map, so the client
  * cannot re-run the `accountNamesByAddress` lookup itself.
  *
+ * #4883: the server names the counterparty in Haven's one naming order
+ * (#4882: own account, contact, catalog merchant, receipt seller, resource
+ * host) — `tx.recipientName` on `/transactions` rows, `options.resolvedName`
+ * on the activity groups and the agent ledger. On an outgoing row that name
+ * wins over every browser-side fallback, the resource host included, so the
+ * screens and the API agree on who was paid. The browser's own lookups
+ * (host, source title, own account, contact) only stand in when the server
+ * named nobody. An incoming row keeps its #4099 rule ("From <account>" or
+ * "Deposit"): a server name there is the sender's, and the title names a
+ * sender only when it is another of the user's own accounts.
+ *
  * The default mode is byte-identical to the pre-#3810 behaviour. The list
  * rows pass `{ noAddress: true }` (#3811), and so does
  * `TransactionDetailPanel` since #4267: its title matches the row, and every
  * address sits shortened under its Technical details.
  */
+/** #4883: the server-resolved counterparty name, when it named one. */
+function serverName(tx: CounterpartyFields, options: { resolvedName?: string | null }): string | null {
+  return options.resolvedName || tx.recipientName || null
+}
+
 export function counterpartyLabel(
   tx: CounterpartyFields,
   resolveAddress?: (address: string) => string | null,
@@ -151,6 +167,7 @@ export function counterpartyLabel(
     }
     if (isMachinePaymentSource(tx.source)) {
       return (
+        serverName(tx, options) ??
         parseX402Hostname(tx.x402ResourceUrl) ??
         paymentSourceTitle(tx.source) ??
         'Agent payment'
@@ -174,7 +191,7 @@ export function counterpartyLabel(
       accountNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
       accountNamesByAddress?.get(addressKey)
     return (
-      options.resolvedName ??
+      serverName(tx, options) ??
       accountName ??
       resolveAddress?.(address) ??
       'New recipient'

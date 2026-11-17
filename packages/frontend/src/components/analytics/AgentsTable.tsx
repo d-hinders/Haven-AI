@@ -173,7 +173,8 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
 
 /**
  * The top-merchant cell. `top_merchant.label` is nullable since #4332 (null =
- * nothing resolved — no contact, no receipt name, no x402 host), and #4333
+ * nothing resolved in the one naming order — no own account, contact,
+ * catalog merchant, receipt name or x402 host, #4882), and #4333
  * renders that as "Unknown recipient": the NAME cell never shows an address.
  * The full address rides the tooltip (elaboration on a truncated form — the
  * one thing a tooltip is for), and the monogram is keyed on the name either

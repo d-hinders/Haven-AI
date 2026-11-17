@@ -121,3 +121,12 @@ describe('activityToTransaction — a confirmed row carries no badge (#4608)', (
     })
   })
 })
+
+describe('activityToTransaction — the server’s payee name (#4883)', () => {
+  it('carries counterparty_name onto the row as recipientName, and null when absent', () => {
+    expect(activityToTransaction(item({ counterparty_name: 'NordShield VPN' }), 'Atlas', 'Main').recipientName).toBe(
+      'NordShield VPN',
+    )
+    expect(activityToTransaction(item(), 'Atlas', 'Main').recipientName).toBeNull()
+  })
+})

@@ -1,3 +1,4 @@
+import { parseX402Hostname } from '@haven_ai/core'
 import { formatFiatDisplay, SUB_CENT_THRESHOLD } from '@/lib/format'
 
 /**
@@ -97,11 +98,11 @@ export function merchantNameFromParts(parts: {
 }): string | null {
   if (parts.merchantName) return parts.merchantName
   if (parts.x402ResourceUrl) {
-    try {
-      return new URL(parts.x402ResourceUrl).host
-    } catch {
-      // An unparseable resource URL has no name to show — fall through.
-    }
+    // #4883: the same hostname parse the server's naming order and the
+    // transaction rows use (`parseX402Hostname`), so a port never splits one
+    // merchant into two labels.
+    const host = parseX402Hostname(parts.x402ResourceUrl)
+    if (host) return host
   }
   return null
 }

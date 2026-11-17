@@ -278,6 +278,8 @@ export function activityToTransaction(
     source: item.source as AggregatedTransaction['source'],
     x402ResourceUrl: item.x402_resource_url ?? null,
     x402MerchantAddress: item.x402_merchant_address ?? null,
+    // #4883: the server's name for the payee, in the one naming order (#4882).
+    recipientName: item.counterparty_name ?? null,
     deliveryReference: item.delivery_reference ?? null,
     // The eip3009 legs, named (#3763), so the detail panel can link the
     // funding leg and list the settlement beside it (#4267).
@@ -379,7 +381,8 @@ export function refusalRowView(
       },
       resolveAddress,
       accountNamesByAddress,
-      { noAddress: true },
+      // #4883: the server's name for the attempted payee wins, as on the rows.
+      { noAddress: true, resolvedName: item.counterparty_name ?? null },
     ),
     subline: refusalRowSubline(item.reason),
     // Unsigned by construction: `formatAllowanceForToken` has no sign, and

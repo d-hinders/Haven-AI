@@ -753,8 +753,9 @@ with a stretched name link:
 - **⋯ menu:** Pause payments or Resume payments, Move to organization (only
   when organizations exist), and Remove; Remove from list for a revoked agent;
   Restore to list for an archived one.
-- **Footer, one line:** "Last paid {age} · {merchant}" — the merchant's name,
-  else the x402 resource host, never an address — else "Connected {age}"
+- **Footer, one line:** "Last paid {age} · {merchant}" — the server's name
+  for the merchant (Haven's one naming order, #4882), else the x402 resource
+  hostname, never an address — else "Connected {age}"
   (`mcp_last_seen_at`; "Last seen {age}" for an agent the overview does not
   cover, which can no longer connect), else "No payments yet". An agent the
   overview does not cover (revoked) never claims "No payments yet". The dashboard rows keep
@@ -1301,8 +1302,10 @@ Money and risk clarity:
   currency mode).
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
   every row renders through
-  `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
-  title, a resolved name, "Deposit", "From <account>" for a transfer from
+  `counterpartyLabel`'s no-address mode: on an outgoing row the server's
+  name in Haven's one naming order (#4882, #4883; see
+  [`recipient-names.md`](recipient-names.md)), else the merchant's hostname,
+  the source title or a browser-resolved name; "Deposit", "From <account>" for a transfer from
   another of the user's own accounts (#4099 — the dashboard reads the server's
   name, the ledgers the chain-keyed own-account map), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the address
@@ -1346,7 +1349,8 @@ Money and risk clarity:
   sit under Technical details: "Transaction" (the funding leg, also the
   footer's "View on explorer") and "Settlement transaction". Scheme-less and
   erc7710 rows are one transaction. Neither the row nor the drawer names the
-  protocol (#2357, #4267): the row title is the resource hostname and the
+  protocol (#2357, #4267): the row title is the server's name for the
+  merchant (#4883), the resource hostname when it named none, and the
   drawer calls it a "Paid request".
 - The row's subline names who acted and, with two or more accounts, the
   account — never a `From … -> To …` line (#4266). Only a move between the

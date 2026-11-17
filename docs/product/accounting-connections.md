@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/accounting/ApiKeyConnectModal.tsx
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
-last-verified: "2026-09-20"
+last-verified: "2026-11-17"
 ---
 
 # Accounting connections
@@ -42,8 +42,9 @@ the retry sweep, what on-call reads when something is stuck — is in
 
 - **Settings → Accounting** is where a connection is made, changed and removed
   (owner decision 2026-09-11; the card ships in #2868). One row per provider
-  the user can actually connect to or has connected: Fortnox and Accounted
-  (live, over a pasted API key). **Coming-soon providers are hidden**
+  the user can actually connect to or has connected: Fortnox (live, over its
+  own OAuth2 approval) and Accounted (live, over a pasted API key).
+  **Coming-soon providers are hidden**
   (2026-10-23, #4359 — superseding the 2026-09-11 decision to list them as
   *Coming soon*): a provider that is not live, or live but not configured on
   the deployment, renders no row, and when nothing qualifies the whole card

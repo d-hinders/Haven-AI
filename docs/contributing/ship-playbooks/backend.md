@@ -5,7 +5,7 @@ covers:
   - packages/backend/src/openapi/**
   - scripts/db-mock-ratchet.mjs
   - packages/backend/src/infra/__tests__/helpers/db-harness.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Backend / API playbook

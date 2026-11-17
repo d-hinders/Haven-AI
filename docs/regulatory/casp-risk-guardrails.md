@@ -96,7 +96,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-11-02"
+last-verified: "2026-11-17"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails
@@ -1025,17 +1025,20 @@ all, so 26 of them were tests. Neither reading landed on 49, so the old figure
 either counted a scope nobody wrote down or had simply moved, and the number
 alone could not say which. Re-measured on `ffca80f36` with the same scope:
 **`infra/chain/**` is 16** and **`infra/repositories/**` is 49** (48 `.ts`
-modules plus the `README.md`; 103 tracked files in all). The second now matches
-the old "49" by coincidence, not because that figure had a scope. That is the point: requote it with its denominator or
+modules plus that directory's `README.md`; 103 tracked files in all) — the
+second matching the old "49" by coincidence, not because that figure had a
+scope. Re-measured again on `6165f1376` with the same scope: **17** and **51**
+(50 `.ts` modules plus the `README.md`; 143 tracked files in all). That is the point: requote it with its denominator or
 not at all. The `EXEMPT` map's own comments in
 `scripts/ci/money-path.test.mjs` carry the same two bare counts and drift the
 same way.
 
 **The floor is measured, and the number moves (#2300, #3098, #3283, #3649, #3661, #4122, #4120, #4381).**
-Measured at `fc8ac1eb6`, the pin asserts **52 of the 71
-globs**: the 54 runtime `globs` minus the two `EXEMPT` entries above, and none
-of the 17 `controlGlobs` (measured at `ffca80f36` it was 50 of 67 — 52 runtime
-globs and 15 control globs; at `82540f71b` with #4122 applied, before #4120
+Measured at `6165f1376`, the pin asserts **56 of the 77
+globs**: the 58 runtime `globs` minus the two `EXEMPT` entries above, and none
+of the 19 `controlGlobs` (measured at `fc8ac1eb6` it was 52 of 71 — 54 runtime
+globs and 17 control globs; at `ffca80f36` 50 of 67 — 52 runtime globs and 15
+control globs; at `82540f71b` with #4122 applied, before #4120
 added `packages/sdk/src/merchant-answer.ts`, it was 49 of 66). #3098 added `packages/demo-merchant-mcp/src/**`,
 #3283 (PR #3286) the four `packages/sdk/src/` signing-guard files and
 `userop-binding.ts`, #3649 `packages/backend/src/modules/budget-scope/**`
@@ -1344,15 +1347,35 @@ is still re-derived server-side from the authenticated subject, whether API-key
 generation stays server-side, where the user JWT is stored and sent, and whether
 anything in the client began deciding rather than relaying.
 
-## Scope of the current `last-verified` (2026-11-02, weekly docs audit #4605)
+## Scope of the current `last-verified` (2026-11-17, weekly docs audit #4865)
 
 The front-matter date is date-only by the #1496 chain reset, which leaves it
-unable to say **how much** of the document a re-verification covered. That
+unable to say **how much** of the document a verification pass covered. That
 matters more here than on an ordinary doc: this one is long, it is `contract:
 true`, and a bump read as covering the whole body when it covered a third of it
 is the failure a `last-verified` exists to prevent. So the scope lives here,
 where it has room to be honest, and it is rewritten — not appended to — by
 whoever bumps the date next.
+
+**This pass (2026-11-17, at dev `6165f1376`) covered the whole body.** Every
+section was read, and the claims the week's commits could have moved were
+checked against the code at that head: the "Current state" blockquotes (the
+erc7710 settlement observer, the passport reference and its #4722
+extension-gating, the merchant-receipt SSRF path), the Hard Architecture
+Invariants (passkey public-only storage, the task-/sub-budget narrowing
+exception, the retired-rail 410s, the #1985 dust-Safe disclosure), Red Lines
+1–11 with their executable proofs (`non-custody-onchain-gate.contract.test.ts`
+still binds only the two fail-open pre-checks, #3500 and #3503;
+`non-custody-onchain-enforcer.contract.test.ts` still `eth_call`s the deployed
+enforcers), the relayer/binding/receipt key roles, the refusal ledger, the
+`covers:` maintenance section, and the release-plumbing and agent-authority
+sections. Two measured figures in the `covers:` section had drifted and are
+corrected below (the money-path glob counts and the two `infra/` layer sizes);
+no authority, custody or refusal claim changed. Not covered by this pass: the
+external legal references (Finansinspektionen, MiCA, ESMA, EBA), which are
+citations rather than code claims, and the frozen historical log below
+2026-08-12, which is a record of what was true when written and is superseded
+by the shard convention.
 
 ## Verification log
 
@@ -1383,7 +1406,7 @@ PRs in one day, 2026-08-12, #1366). Separate FILES merge cleanly the way
 separate lines never quite did. The bullet list below is the frozen
 historical log up to 2026-08-12; `last-verified` above now means a genuine
 re-read of the BODY claims (the weekly docs audit — `docs-audit.yml`, Mondays,
-upserting tracking issue #3645; #1248 was one closed instance of it), never a
+upserting tracking issue #4865; #1248 was one closed instance of it), never a
 per-PR bump.
 
 - **#997** — covers updated (lib/machine-payments.ts moved into modules/mpp/**; the shared token-resolution primitive lives in domain/payment-token.ts) — no perimeter change, the same routes/repositories still enforce it.

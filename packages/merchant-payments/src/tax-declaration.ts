@@ -5,8 +5,10 @@ import {
 } from '@haven_ai/sdk/edge'
 
 /**
- * #4855: the buyer's signed tax declaration, as the demo merchant reads it off
- * a paid request, and the VAT treatment it implies.
+ * #4855: the buyer's signed tax declaration, as a merchant reads it off a
+ * paid request, and the VAT treatment it implies. #4890: moved from the demo
+ * merchant to the shared payment core unchanged, apart from the VAT rule,
+ * which is now the caller's parameter (`vatTreatmentFor`).
  *
  * The declaration is DISPLAY ONLY. It never gates a purchase: every failure —
  * a missing header, a malformed payload, a bad signature, a signer that is not
@@ -181,14 +183,24 @@ export function acceptTaxDeclaration(params: {
 }
 
 /**
- * The display treatment for a Swedish seller of an electronic service:
+ * #4890: the VAT rules a merchant can configure. One exists, the Swedish rule
+ * the demo merchant has always applied (#4889 §11, `VAT_RULE`): a Swedish
+ * seller of an electronic service. The rule is the merchant's decision; the
+ * core applies what it is given and has no default.
+ */
+export const VAT_RULES = ['SE_25_WITH_EU_REVERSE_CHARGE'] as const
+export type VatRule = (typeof VAT_RULES)[number]
+
+/**
+ * The display treatment under `rule`. For `SE_25_WITH_EU_REVERSE_CHARGE`:
  * `SE_25` when the declared country is Sweden or there is no accepted
  * declaration, `REVERSE_CHARGE` when it is another EU country.
  *
  * A non-EU jurisdiction falls back to `SE_25`: no non-EU treatment is built,
  * and a Haven buyer only ever sends a declaration for an EU VAT number.
  */
-export function vatTreatmentFor(declaration: AcceptedTaxDeclaration | null): VatTreatment {
+export function vatTreatmentFor(declaration: AcceptedTaxDeclaration | null, rule: VatRule): VatTreatment {
+  if (rule !== 'SE_25_WITH_EU_REVERSE_CHARGE') throw new Error(`Unsupported VAT rule: ${String(rule)}`)
   if (!declaration) return 'SE_25'
   const country = declaration.jurisdiction.trim().toUpperCase()
   if (country === 'SE') return 'SE_25'

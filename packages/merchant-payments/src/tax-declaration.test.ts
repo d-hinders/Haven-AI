@@ -8,7 +8,9 @@ import {
   encodeTaxDeclarationHeader,
   taxPrincipalId,
 } from '@haven_ai/sdk/edge'
-import { acceptTaxDeclaration, vatTreatmentFor, type AcceptedTaxDeclaration } from './tax-declaration.js'
+import { acceptTaxDeclaration, vatTreatmentFor, type AcceptedTaxDeclaration, type VatRule } from './tax-declaration.js'
+
+const RULE: VatRule = 'SE_25_WITH_EU_REVERSE_CHARGE'
 
 const PAYER_KEY = `0x${'01'.repeat(32)}` as const
 const OTHER_KEY = `0x${'02'.repeat(32)}` as const
@@ -143,22 +145,26 @@ describe('vatTreatmentFor (#4855)', () => {
   })
 
   it('is SE_25 with no accepted declaration', () => {
-    expect(vatTreatmentFor(null)).toBe('SE_25')
+    expect(vatTreatmentFor(null, RULE)).toBe('SE_25')
   })
 
   it('is SE_25 for a Swedish declaration', () => {
-    expect(vatTreatmentFor(declaration('SE'))).toBe('SE_25')
-    expect(vatTreatmentFor(declaration('se'))).toBe('SE_25')
+    expect(vatTreatmentFor(declaration('SE'), RULE)).toBe('SE_25')
+    expect(vatTreatmentFor(declaration('se'), RULE)).toBe('SE_25')
   })
 
   it('is REVERSE_CHARGE for another EU country', () => {
     for (const country of ['DE', 'FR', 'NL', 'ES', 'GR', 'IE']) {
-      expect(vatTreatmentFor(declaration(country))).toBe('REVERSE_CHARGE')
+      expect(vatTreatmentFor(declaration(country), RULE)).toBe('REVERSE_CHARGE')
     }
   })
 
   it('falls back to SE_25 for a non-EU jurisdiction — no non-EU treatment is built', () => {
-    expect(vatTreatmentFor(declaration('US'))).toBe('SE_25')
-    expect(vatTreatmentFor(declaration('GB'))).toBe('SE_25')
+    expect(vatTreatmentFor(declaration('US'), RULE)).toBe('SE_25')
+    expect(vatTreatmentFor(declaration('GB'), RULE)).toBe('SE_25')
+  })
+
+  it('refuses a rule it does not implement — the core has no default rule (#4890)', () => {
+    expect(() => vatTreatmentFor(null, 'SE_12' as unknown as VatRule)).toThrow(/Unsupported VAT rule/)
   })
 })

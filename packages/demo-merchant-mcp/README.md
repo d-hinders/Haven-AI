@@ -6,8 +6,11 @@ supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns a
 Swedish-style invoice.
 
 This package is a technical demo for a merchant-controlled wallet, not a Haven
-custody, facilitator, acquiring, fiat/card, third-party merchant settlement, or
-merchant-of-record product. Funds do not flow through Haven.
+custody, facilitator, acquiring, fiat/card or third-party merchant settlement
+product. Haven is the merchant only of its own demo products and receives
+payment only for them; it receives or moves no funds on behalf of anyone else.
+The joke product is verified and settled by Coinbase's facilitator (CDP); every
+other product is settled by the merchant's own key.
 
 ## What It Demonstrates
 
@@ -818,6 +821,52 @@ for at most 200 blocks, and the script asks for the whole range in one call: a
 1,001-block range failed with RPC error -32614 ("eth_getLogs is limited to a 200
 range") and a stack trace. Since #4866 the script reads in windows that RPC
 serves and an error ends in one line with exit 3; see § *Reconciliation*.
+
+### The receipt for the Stripe product (#4856)
+
+The receipt is built before Stripe is contacted (#4880), and the merchant
+never waits for Stripe (#4853), so when it answers no PaymentIntent ID and no
+Stripe SEK figure exist yet. When Stripe will record the payment — Stripe on,
+the joke, settled on chain, paid to the current deposit address
+(`stripeRecordingDecision` in `src/stripe.ts`, the same rule the recording
+uses) — the receipt carries two more blocks, in its JSON and in both rendered
+texts, before the closing thank-you box:
+
+- `stripe_referens`: `status: "Väntar"` (pending) and `sok_med`, the receipt
+  number and the transaction hash. Those are the PaymentIntent's
+  `receipt_number` and `transaction_hash` metadata, so the payment is found in
+  the Stripe Dashboard by either.
+- `belopp_sek`: an indicative SEK amount, never Stripe's own figure. With a
+  rate: `tillganglig: true`, `belopp` (SEK, two decimals), `kurs` (SEK per
+  USDC), `kalla` (`coingecko_spot`) and `tidpunkt` (when the rate was read).
+  Without one: `tillganglig: false`, `status: "Ej tillgängligt vid
+  köptillfället"` (not available at the time of purchase). The merchant never
+  estimates a rate.
+
+The rate is CoinGecko's spot price for USD Coin in SEK, the source Haven's
+backend records its own SEK values from. `src/sek-rate.ts` reads it at startup
+and every 10 minutes in the background, only while Stripe recording is on; the
+purchase path only reads the cached value. A rate older than an hour, or a
+merchant that has not read one yet, gives "not available". A failed read keeps
+the previous rate until it ages out.
+
+Every other receipt — every other product, the joke with Stripe off, and a
+payment that paid the previous deposit address — is unchanged: no new keys and
+the same text, byte for byte (`src/receipt-fixtures.test.ts`).
+
+### Seller details (#4856)
+
+The seller block comes from configuration. With no `MERCHANT_SELLER_*`
+variable set it is the demo seller (`Haven Demo AB`, with its demo bank
+details), exactly as before. To carry a real seller, set all four of
+`MERCHANT_SELLER_NAME`, `MERCHANT_SELLER_ADDRESS`, `MERCHANT_SELLER_ORG_NR` and
+`MERCHANT_SELLER_MOMS_NR`, and optionally `MERCHANT_SELLER_IBAN` and
+`MERCHANT_SELLER_BIC`. A configured seller never inherits the demo's bank
+details. With some but not all four required ones set, the merchant warns,
+naming the missing variables, and keeps the demo seller. The keys stay `name`,
+`org_nr` and `moms_nr`: Haven's accounting reads them off the receipt
+(`packages/backend/src/modules/accounting/receipt-underlag.ts`). The startup
+banner names the seller and whether it is the demo one.
 
 ## Agent Passport check (advisory, #4723)
 

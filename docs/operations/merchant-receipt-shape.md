@@ -91,9 +91,11 @@ text and emoji sequences need them.
   and `moms_belopp: "0"` states a VAT of zero.
 - **Other keys are ignored.** Keys not listed here, at the top level or on a
   line, do not affect the read. A merchant can add an order id, more seller
-  details or a different invoice-number format.
+  details or a different invoice-number format. The demo merchant's
+  `stripe_referens` (#4856) is one of these.
 - **Merchant-stated SEK figures are not read.** The SEK value Haven books is
-  its own, frozen when the payment settled.
+  its own, frozen when the payment settled. The demo merchant's indicative
+  `belopp_sek` block (#4856) is one of these.
 - **The buyer block is never read here.** `kopare`, including the buyer's VAT
   number in `kopare.deklaration.moms_nr`, stays out of the statement.
 - **The total is compared, never booked.** When `valuta` is the token Haven

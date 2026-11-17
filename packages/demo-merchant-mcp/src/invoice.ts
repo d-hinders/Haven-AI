@@ -3,12 +3,13 @@ import {
   receiptNumberForTransaction,
   renderReceiptText,
   type AcceptedTaxDeclaration,
-  type Invoice,
   type InvoiceJson,
+  type ReceiptSellerDetails,
   type VatRule,
 } from '@haven_ai/merchant-payments'
 import type { MerchantLocale, ProductId } from './products.js'
 import { CHAIN_ID, PRODUCTS, networkDisplayName, productBillingPeriod } from './products.js'
+import type { SekRate } from './sek-rate.js'
 import type { SettledPayment, SettlementState } from './x402.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
@@ -35,13 +36,176 @@ export {
 } from '@haven_ai/merchant-payments'
 
 // ── Merchant identity ────────────────────────────────────────────────────────
-const MERCHANT_IDENTITY = {
+/**
+ * The demo seller: what every receipt carries when no seller is configured.
+ * #4856: a deployment that is a real seller sets `MERCHANT_SELLER_*`
+ * instead (`resolveReceiptSeller`).
+ */
+export const DEMO_SELLER: ReceiptSellerDetails = {
   name: 'Haven Demo AB',
   address: 'Birger Jarlsgatan 57, 113 56 Stockholm',
   org_nr: '559412-3456',
   moms_nr: 'SE559412345601',
   iban: 'SE35 5000 0000 0549 1000 0003',
   bic: 'ESSESESS',
+}
+
+/** #4856: the seller variables, in the order their keys appear on the receipt. */
+export const SELLER_ENV = {
+  name: 'MERCHANT_SELLER_NAME',
+  address: 'MERCHANT_SELLER_ADDRESS',
+  org_nr: 'MERCHANT_SELLER_ORG_NR',
+  moms_nr: 'MERCHANT_SELLER_MOMS_NR',
+  iban: 'MERCHANT_SELLER_IBAN',
+  bic: 'MERCHANT_SELLER_BIC',
+} as const
+
+const REQUIRED_SELLER_KEYS = ['name', 'address', 'org_nr', 'moms_nr'] as const
+
+/**
+ * #4856: the seller block from configuration. With no `MERCHANT_SELLER_*`
+ * variable set, the demo seller, so the receipt is unchanged. With the four
+ * required ones set (name, address, org_nr, moms_nr), that seller, plus
+ * `iban` and `bic` only when each is set — a real seller never inherits the
+ * demo's bank details. With some but not all four required ones set, a
+ * warning naming the missing variables and the demo seller: a
+ * half-configured seller is a mistake, not a reason to refuse payments.
+ */
+export function resolveReceiptSeller(
+  env: Record<string, string | undefined>,
+  warn: (message: string) => void = console.warn,
+): ReceiptSellerDetails {
+  const value = (key: keyof typeof SELLER_ENV) => env[SELLER_ENV[key]]?.trim() || undefined
+  const anySet = (Object.keys(SELLER_ENV) as (keyof typeof SELLER_ENV)[]).some((key) => value(key))
+  if (!anySet) return DEMO_SELLER
+  const missing = REQUIRED_SELLER_KEYS.filter((key) => !value(key))
+  if (missing.length > 0) {
+    warn(
+      `Seller details are incomplete: set ${missing.map((key) => SELLER_ENV[key]).join(', ')} too. ` +
+        'Receipts carry the demo seller until all four of name, address, org_nr and moms_nr are set.',
+    )
+    return DEMO_SELLER
+  }
+  const seller: ReceiptSellerDetails = {
+    name: value('name')!,
+    address: value('address')!,
+    org_nr: value('org_nr')!,
+    moms_nr: value('moms_nr')!,
+  }
+  const iban = value('iban')
+  const bic = value('bic')
+  if (iban) seller.iban = iban
+  if (bic) seller.bic = bic
+  return seller
+}
+
+// ── Stripe reference and SEK amount (#4856) ──────────────────────────────────
+//
+// The receipt for a payment Stripe will record is built before Stripe is
+// contacted (#4880) and the merchant never waits for Stripe (#4853), so no
+// PaymentIntent ID and no Stripe SEK figure exist when it answers. The receipt
+// says the reference is pending and names the receipt number and transaction
+// hash to find it by in Stripe (the PaymentIntent's `receipt_number` and
+// `transaction_hash` metadata), and states an indicative SEK amount with its
+// rate, source and time — or says none was available. Demo merchant only: the
+// shared core (`@haven_ai/merchant-payments`) does not carry these blocks.
+
+/** #4856: the Stripe reference on the receipt; always pending at answer time. */
+export interface StripeReferenceBlock {
+  status: 'Väntar'
+  /** The two values the PaymentIntent can be found by in Stripe. */
+  sok_med: { fakturanummer: string; transaktions_hash: string }
+}
+
+/** #4856: the SEK amount on the receipt. Never Stripe's own figure. */
+export type SekAmountBlock =
+  | {
+      tillganglig: true
+      /** SEK, two decimals. */
+      belopp: string
+      /** SEK per 1 USDC. */
+      kurs: string
+      kalla: SekRate['source']
+      /** ISO time the rate was read. */
+      tidpunkt: string
+    }
+  | { tillganglig: false; status: 'Ej tillgängligt vid köptillfället' }
+
+/** The demo merchant's receipt: the core document plus the #4856 blocks. */
+export type DemoInvoiceJson = InvoiceJson & {
+  stripe_referens?: StripeReferenceBlock
+  belopp_sek?: SekAmountBlock
+}
+
+export interface DemoInvoice {
+  json: DemoInvoiceJson
+  text: string
+}
+
+/** #4856: what the caller knows about Stripe when the receipt is built. */
+export interface StripeReceiptContext {
+  /** The fresh cached rate, or `undefined` when none is available. */
+  sekRate: SekRate | undefined
+}
+
+/** SEK for an atomic USDC amount at `rate`, two decimals. */
+export function sekAmountText(priceAtomic: bigint, rate: number): string {
+  return ((Number(priceAtomic) / 1_000_000) * rate).toFixed(2)
+}
+
+function sekAmountBlock(priceAtomic: bigint, sekRate: SekRate | undefined): SekAmountBlock {
+  if (!sekRate) return { tillganglig: false, status: 'Ej tillgängligt vid köptillfället' }
+  return {
+    tillganglig: true,
+    belopp: sekAmountText(priceAtomic, sekRate.rate),
+    kurs: String(Number(sekRate.rate.toFixed(6))),
+    kalla: sekRate.source,
+    tidpunkt: sekRate.fetchedAt.toISOString(),
+  }
+}
+
+function stripeSectionsText(inv: DemoInvoiceJson, locale: MerchantLocale): string {
+  let out = ''
+  const ref = inv.stripe_referens
+  if (ref) {
+    out +=
+      locale === 'sv'
+        ? `STRIPE-REFERENS\n` +
+          `  Väntar — betalningen registreras i Stripe efter köpet.\n` +
+          `  Sök med fakturanummer: ${ref.sok_med.fakturanummer}\n` +
+          `  eller transaktions-hash: ${ref.sok_med.transaktions_hash}\n\n`
+        : `STRIPE REFERENCE\n` +
+          `  Pending — the payment is recorded in Stripe after the purchase.\n` +
+          `  Find it by receipt number: ${ref.sok_med.fakturanummer}\n` +
+          `  or transaction hash: ${ref.sok_med.transaktions_hash}\n\n`
+  }
+  const sek = inv.belopp_sek
+  if (sek) {
+    out += locale === 'sv' ? `BELOPP I SEK (indikativt, inte Stripes belopp)\n` : `AMOUNT IN SEK (indicative, not Stripe's figure)\n`
+    out += sek.tillganglig
+      ? locale === 'sv'
+        ? `  ${sek.belopp} SEK — kurs ${sek.kurs} SEK/USDC (${sek.kalla}, ${sek.tidpunkt})\n\n`
+        : `  ${sek.belopp} SEK — rate ${sek.kurs} SEK/USDC (${sek.kalla}, ${sek.tidpunkt})\n\n`
+      : locale === 'sv'
+        ? `  Ej tillgängligt vid köptillfället.\n\n`
+        : `  Not available at the time of purchase.\n\n`
+  }
+  return out
+}
+
+const RULE = '═'.repeat(60)
+
+/**
+ * Insert the #4856 sections before the receipt text's closing frame (the
+ * thank-you box). Returns the text unchanged when the receipt has neither
+ * block, so every other receipt keeps its exact bytes.
+ */
+function withStripeSections(text: string, inv: DemoInvoiceJson, locale: MerchantLocale): string {
+  const sections = stripeSectionsText(inv, locale)
+  if (!sections) return text
+  const closing = text.lastIndexOf(RULE, text.lastIndexOf(RULE) - 1)
+  if (closing < 0) return text + sections
+  return text.slice(0, closing) + sections + text.slice(closing)
 }
 
 /**
@@ -120,9 +284,18 @@ export interface InvoiceParams {
    * now; a test injects it to reproduce a receipt byte for byte.
    */
   now?: Date
+  /** #4856: the configured seller; defaults to the demo seller. */
+  seller?: ReceiptSellerDetails
+  /**
+   * #4856: present only when Stripe will record this payment
+   * (`stripeRecordingDecision` answers `record`). Then, and only for a payment
+   * settled on chain, the receipt carries the pending Stripe reference and the
+   * SEK amount. Absent, the receipt is exactly the core document.
+   */
+  stripe?: StripeReceiptContext
 }
 
-export function generateInvoice(params: InvoiceParams): Invoice {
+export function generateInvoice(params: InvoiceParams): DemoInvoice {
   const product = PRODUCTS[params.productId]
   const chainId = params.chainId ?? CHAIN_ID
   const network = { sv: networkDisplayName(chainId, 'sv'), en: networkDisplayName(chainId, 'en') }
@@ -136,7 +309,7 @@ export function generateInvoice(params: InvoiceParams): Invoice {
       priceAtomic: product.price_usdc,
       billingPeriod: productBillingPeriod(product),
     },
-    seller: MERCHANT_IDENTITY,
+    seller: params.seller ?? DEMO_SELLER,
     receivingAddress: params.receivingAddress,
     network,
     vatRule: VAT_RULE,
@@ -147,13 +320,26 @@ export function generateInvoice(params: InvoiceParams): Invoice {
     settlement: params.settlement,
     now: params.now,
   })
-  const text = renderReceiptText(json, {
+  // #4856: the Stripe reference needs the hash it is found by, so it is added
+  // only for a payment settled on chain (the only kind Stripe records).
+  const demoJson: DemoInvoiceJson =
+    params.stripe && params.settlement === 'settled_onchain'
+      ? {
+          ...json,
+          stripe_referens: {
+            status: 'Väntar',
+            sok_med: { fakturanummer: json.fakturanummer, transaktions_hash: params.txHash },
+          },
+          belopp_sek: sekAmountBlock(product.price_usdc, params.stripe.sekRate),
+        }
+      : json
+  const text = renderReceiptText(demoJson, {
     productName: product.name,
     locale: 'sv',
     network,
     supportContact: SUPPORT_CONTACT,
   })
-  return { json, text }
+  return { json: demoJson, text: withStripeSections(text, demoJson, 'sv') }
 }
 
 /**
@@ -163,19 +349,19 @@ export function generateInvoice(params: InvoiceParams): Invoice {
  * the demo default; `sv` reproduces the classic FAKTURA render byte-for-byte.
  */
 export function renderInvoiceText(
-  inv: InvoiceJson,
+  inv: DemoInvoiceJson,
   productName: string,
   locale: MerchantLocale,
   chainId: number = CHAIN_ID,
 ): string {
-  return renderReceiptText(inv, {
+  return withStripeSections(renderReceiptText(inv, {
     productName,
     locale,
     // The Swedish render reads the network from the document itself, so only
     // the English render looks the chain up, exactly as before the move.
     network: { sv: '', en: locale === 'sv' ? '' : networkDisplayName(chainId, 'en') },
     supportContact: SUPPORT_CONTACT,
-  })
+  }), inv, locale)
 }
 
 export { nextInvoiceNumber }
@@ -191,13 +377,23 @@ export { nextInvoiceNumber }
 // #4850: keyed by payment alone, so every caller must pass the SAME
 // `receivingAddress` for a payment — the purchased product's
 // (`productReceivingAddress`). Whichever caller runs first fixes the invoice.
-const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
+//
+// #4856: so are `seller` and `stripe`. The HTTP layer builds the invoice
+// first (before the MCP handler runs) and passes both; the handler's later
+// call replays the cached invoice.
+const invoicesByPayment = new WeakMap<SettledPayment, DemoInvoice>()
 
 export function invoiceForPayment(
   payment: SettledPayment,
   productId: ProductId,
-  opts: { receivingAddress: string; chainId?: number; taxDeclaration?: AcceptedTaxDeclaration | null },
-): Invoice {
+  opts: {
+    receivingAddress: string
+    chainId?: number
+    taxDeclaration?: AcceptedTaxDeclaration | null
+    seller?: ReceiptSellerDetails
+    stripe?: StripeReceiptContext
+  },
+): DemoInvoice {
   const cached = invoicesByPayment.get(payment)
   if (cached) return cached
   const invoice = generateInvoice({
@@ -220,6 +416,8 @@ export function invoiceForPayment(
     authorizationNonce: payment.nonce,
     txHash: payment.txHash,
     settlement: payment.settlement,
+    seller: opts.seller,
+    stripe: opts.stripe,
   })
   invoicesByPayment.set(payment, invoice)
   return invoice

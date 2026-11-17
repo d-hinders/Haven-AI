@@ -28,6 +28,8 @@ import {
 import { type Address } from 'viem'
 import { LogWindows, parseMaxBlockRange } from './log-range.js'
 import { createStripeRecording, resolveStripeConfig } from './stripe.js'
+import { DEMO_SELLER, resolveReceiptSeller } from './invoice.js'
+import { createSekRateFeed, SEK_RATE_SOURCE } from './sek-rate.js'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
@@ -229,6 +231,17 @@ const STRIPE_CONFIG = resolveStripeConfig({
 })
 const STRIPE_RECORDING = STRIPE_CONFIG ? createStripeRecording(STRIPE_CONFIG) : undefined
 
+// #4856: the seller on every receipt. With no MERCHANT_SELLER_* set, the demo
+// seller, so the receipt is unchanged.
+const RECEIPT_SELLER = resolveReceiptSeller(process.env)
+
+// #4856: the USDC→SEK rate the Stripe-recorded product's receipt states. Kept
+// warm in the background and only read on the purchase path, so it never
+// delays a purchase; started only when Stripe recording is on, since no other
+// receipt shows a SEK amount.
+const SEK_RATE_FEED = STRIPE_RECORDING ? createSekRateFeed() : undefined
+SEK_RATE_FEED?.start()
+
 // #4853: a deposit address this merchant quoted before the current one, and
 // still honours for a payment that already settled to it. Operator-supplied —
 // the payment's own `payTo` is attacker-chosen and cannot be the test.
@@ -253,6 +266,8 @@ const server = createDemoMerchantServer({
   passport: PASSPORT_CONFIG,
   cdpConfigured: Boolean(CDP_CONFIG),
   stripe: STRIPE_RECORDING,
+  receiptSeller: RECEIPT_SELLER,
+  sekRate: SEK_RATE_FEED,
 })
 
 server.listen(PORT, () => {
@@ -289,6 +304,14 @@ server.listen(PORT, () => {
             : '')
       : '  Stripe:    not configured — the joke is paid to MERCHANT_ADDRESS',
   )
+  // #4856: the seller every receipt carries, and where the joke receipt's
+  // SEK rate comes from. Names no credential.
+  console.log(
+    RECEIPT_SELLER === DEMO_SELLER
+      ? `  Seller:    ${RECEIPT_SELLER.name} (demo seller; MERCHANT_SELLER_* unset)`
+      : `  Seller:    ${RECEIPT_SELLER.name} (${RECEIPT_SELLER.org_nr}, from MERCHANT_SELLER_*)`,
+  )
+  if (SEK_RATE_FEED) console.log(`  SEK rate:  ${SEK_RATE_SOURCE}, refreshed in the background; never awaited`)
   console.log()
   console.log(
     `Products: vpn_basic $${formatUsdc(PRODUCTS.vpn_basic.price_usdc)} | ` +

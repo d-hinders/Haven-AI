@@ -35,8 +35,9 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from '@haven_ai/merchant-payments'
-import { recordStripePayment, type StripeRecording } from './stripe.js'
+import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration, type ReceiptSellerDetails } from '@haven_ai/merchant-payments'
+import { recordStripePayment, stripeRecordingDecision, type StripeRecording } from './stripe.js'
+import type { SekRateFeed } from './sek-rate.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
@@ -67,6 +68,17 @@ export interface DemoMerchantServerOptions {
    * the product keeps `MERCHANT_ADDRESS` and `/healthz` has no `stripe` block.
    */
   stripe?: StripeRecording
+  /**
+   * #4856: the seller every receipt carries (`resolveReceiptSeller`).
+   * Absent, the demo seller.
+   */
+  receiptSeller?: ReceiptSellerDetails
+  /**
+   * #4856: the cached USDC→SEK rate the receipt for a Stripe-recorded payment
+   * states. Only `current()` is read on the purchase path. Absent, that
+   * receipt says the SEK amount was not available.
+   */
+  sekRate?: Pick<SekRateFeed, 'current'>
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -366,11 +378,18 @@ async function handle(
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
+    // #4856: when Stripe will record this payment, the receipt says the
+    // Stripe reference is pending and states the SEK amount from the cached
+    // rate (or that none was available). Reading the cache never waits.
+    const stripeWillRecord =
+      stripeRecordingDecision(options.stripe, paymentToolInfo.product, settled) === 'record'
     const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
       receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
         stripeDepositAddress: options.stripe?.depositAddress,
       }),
       taxDeclaration,
+      seller: options.receiptSeller,
+      ...(stripeWillRecord ? { stripe: { sekRate: options.sekRate?.current() } } : {}),
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
     // #4853: record the settled payment in Stripe. Fire-and-forget: the money
@@ -594,6 +613,7 @@ async function getSession(
     // #4853: the in-band quote must name the same receiving address the HTTP
     // 402 does, so the deposit address travels with the session's config.
     stripeDepositAddress: options.stripe?.depositAddress,
+    receiptSeller: options.receiptSeller,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,

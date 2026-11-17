@@ -1,0 +1,52 @@
+════════════════════════════════════════════════════════════
+                         FAKTURA
+════════════════════════════════════════════════════════════
+
+SÄLJARE
+  Haven Demo AB
+  Birger Jarlsgatan 57, 113 56 Stockholm
+  Org.nr:       559412-3456
+  Momsreg.nr:   SE559412345601
+
+KÖPARE
+  Blockkedjeadress: 0x2222222222222222222222222222222222222222
+
+────────────────────────────────────────────────────────────
+  Fakturanummer:   FAK-2026-00099
+  Fakturadatum:    2026-11-17
+  Förfallodatum:   2026-12-17
+  OCR-nummer:      2026000998
+────────────────────────────────────────────────────────────
+
+TJÄNSTER
+
+  Haven Joke — Ett skämt, levererat direkt. Verifieras och avräknas av Coinbases x402-facilitator (CDP). (engångsköp)
+  Antal: 1  Á-pris exkl. moms: 0.008 USDC
+
+────────────────────────────────────────────────────────────
+  Belopp exkl. moms:   0.008 USDC
+  Moms 25%:              0.002 USDC
+  TOTALT inkl. moms:   0.01 USDC
+────────────────────────────────────────────────────────────
+
+  Valuta:           USDC
+  Betalningssätt:   Kryptovaluta (USDC på Base Sepolia testnät)
+  Mottagaradress:   0x3333333333333333333333333333333333333333
+
+BLOCKKEDJEREFERENS
+  Tx: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+
+  Status: Betald
+
+STRIPE-REFERENS
+  Väntar — betalningen registreras i Stripe efter köpet.
+  Sök med fakturanummer: FAK-2026-00099
+  eller transaktions-hash: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+
+BELOPP I SEK (indikativt, inte Stripes belopp)
+  0.10 SEK — kurs 10.0742 SEK/USDC (coingecko_spot, 2026-11-17T11:55:00.000Z)
+
+════════════════════════════════════════════════════════════
+  Tack för ditt köp av Haven Joke!
+  Frågor: support@haven.xyz
+════════════════════════════════════════════════════════════

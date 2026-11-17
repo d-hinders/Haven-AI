@@ -2796,7 +2796,11 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.
 - Do not describe demo x402 endpoints as production merchant settlement,
-  facilitator, acquiring, fiat/card, or merchant-of-record products.
+  facilitator, acquiring or fiat/card products. Haven is the merchant only of
+  its own demo products and receives payment only for them; it receives or
+  moves no funds on behalf of anyone else. The joke product is verified and
+  settled by Coinbase's facilitator (CDP); every other product is settled by
+  the merchant's own key.
 - Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
   before changing x402/MPP flows or merchant-facing demos.
 

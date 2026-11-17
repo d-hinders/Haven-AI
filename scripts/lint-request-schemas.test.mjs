@@ -320,6 +320,10 @@ describe('index.ts readers', () => {
       // (its request body is closed, so a body naming an account to mark is
       // refused by the schema).
       'routes/merchant-services.ts',
+      // #4896: the Sales key's dashboard routes — brand-new money-path module,
+      // born ENFORCED (its create body is closed, so a body naming an account
+      // to bind the key to is refused by the schema).
+      'routes/merchant-keys.ts',
     ])
   })
 })

@@ -215,6 +215,9 @@ function containsForbiddenField(value: unknown, forbidden: ReadonlySet<string>):
 
 function looksLikeRawPathOrSecret(value: string): boolean {
   if (/sk_agent_[0-9a-f]/i.test(value)) return true
+  // #4896: a merchant key is a live credential too — the connector's report
+  // must not carry one.
+  if (/sk_merchant_[0-9a-f]/i.test(value)) return true
   if (/0x[0-9a-fA-F]{64}/.test(value)) return true
   if (value.includes('/') || value.includes('\\')) return true
   return false

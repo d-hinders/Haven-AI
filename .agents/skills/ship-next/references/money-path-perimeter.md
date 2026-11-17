@@ -296,6 +296,7 @@ the code (#1905).
 ### Agent authentication
 
 - `packages/backend/src/middleware/agentAuth.ts`
+- `packages/backend/src/middleware/merchantAuth.ts`
 
 ### The hosted MCP tool surface
 
@@ -455,6 +456,23 @@ runtime list.
 
 - `packages/backend/src/domain/merchant-services.ts`
 - `packages/backend/src/routes/merchant-services.ts`
+
+#4896. `routes/merchant-keys.ts` is the Sales key's dashboard surface: it mints
+the receive-only credential the merchant routes accept, lists the account's keys
+by prefix, and revokes one. `domain/merchant-keys.ts` holds the fixed
+`sk_merchant_` prefix (baked into two published packages' secret scrubbers), the
+refusal codes and the one hashing rule. The check that ACCEPTS the key on the
+merchant routes is `middleware/merchantAuth.ts`, which is on the runtime list
+above beside `agentAuth.ts` — it decides whether a bearer credential
+authenticates a request, which is the same job that file is listed for.
+
+Control, not runtime (owner decision 2026-11-17, recorded on #4895 and applied
+again here): no QA scenario calls `POST`/`GET`/`DELETE /merchant-keys`, so a
+green run says nothing about these two files. They move to the runtime list when
+a QA leg drives the routes.
+
+- `packages/backend/src/domain/merchant-keys.ts`
+- `packages/backend/src/routes/merchant-keys.ts`
 
 ### The merchant kit's paywall proxy
 

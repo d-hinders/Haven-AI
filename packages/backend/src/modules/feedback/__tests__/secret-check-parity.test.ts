@@ -72,12 +72,13 @@ describe('CLI/backend secret-check parity (#3597)', () => {
     // assertion below passes over an empty array and proves nothing.
     expect(cliPatterns.length).toBeGreaterThan(0)
 
-    // The backend's own six patterns, written out exactly as they appear in
+    // The backend's own seven patterns, written out exactly as they appear in
     // `secret-check.ts` — pinned here rather than re-derived, so a change to
     // either file's wording (not just its regex) is visible in a diff on
     // THIS line, the one place both copies are named side by side.
     const backendPatterns = [
       '/sk_agent_[A-Za-z0-9]/',
+      '/sk_merchant_[A-Za-z0-9]/',
       '/hv_setup_[A-Za-z0-9]/',
       '/\\beyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\b/',
       '/\\b(api[_-]?key|key|token|secret)=[^&\\s"\'\\\\)]+/i',

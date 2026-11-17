@@ -65,6 +65,7 @@ covers:
   - packages/backend/src/modules/accounting/**
   - packages/backend/src/modules/accounts/mainnet-gate.ts
   - packages/backend/src/middleware/agentAuth.ts
+  - packages/backend/src/middleware/merchantAuth.ts
   - packages/backend/src/middleware/accountingFeed.ts
   - packages/backend/src/db/migrations/**
   - packages/backend/src/routes/agents.ts
@@ -74,8 +75,10 @@ covers:
   - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/hybrid-accounts.ts
   - packages/backend/src/routes/merchant-services.ts
+  - packages/backend/src/routes/merchant-keys.ts
   - packages/backend/src/modules/accounts/create-additional.ts
   - packages/backend/src/domain/merchant-services.ts
+  - packages/backend/src/domain/merchant-keys.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/modules/agents/rekey-*.ts

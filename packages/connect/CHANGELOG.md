@@ -15,6 +15,14 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+### Changed
+
+- **The connector redacts the Sales key (#4896).** `redactSecrets` now replaces
+  a `sk_merchant_…` credential — the receive-only key a merchant's server uses
+  to report sales to Haven — with `sk_merchant_[redacted]`, the same way it
+  already redacts an agent key. Log lines and `--json` records cannot carry one.
+  No update needed.
+
 ## 0.14.0-alpha.0 — 2026-11-11
 
 ### Changed

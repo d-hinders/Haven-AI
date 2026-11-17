@@ -1,9 +1,13 @@
 const API_KEY_RE = /sk_agent_[A-Za-z0-9]+/g
+// #4896: the receive-only merchant key. Its own prefix, so a merchant key in a
+// log line or a `--json` record is redacted like an agent key.
+const MERCHANT_KEY_RE = /sk_merchant_[A-Za-z0-9]+/g
 const PRIVATE_KEY_RE = /0x[0-9a-fA-F]{64}/g
 
 export function redactSecrets(value: string): string {
   return value
     .replace(API_KEY_RE, 'sk_agent_[redacted]')
+    .replace(MERCHANT_KEY_RE, 'sk_merchant_[redacted]')
     .replace(PRIVATE_KEY_RE, '0x[redacted-private-key]')
 }
 

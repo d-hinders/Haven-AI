@@ -34,6 +34,8 @@ export interface StartOverrides {
   log?: LogFn
   settleResolveMs?: number
   settlePollMs?: number
+  /** Tests only: a holder deadline shorter than the config allows. */
+  reservationDeadlineMs?: number
   now?: () => Date
 }
 
@@ -66,6 +68,7 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       ...(overrides.fetchImpl ? { fetchImpl: overrides.fetchImpl } : {}),
       ...(overrides.settleResolveMs !== undefined ? { settleResolveMs: overrides.settleResolveMs } : {}),
       ...(overrides.settlePollMs !== undefined ? { settlePollMs: overrides.settlePollMs } : {}),
+      ...(overrides.reservationDeadlineMs !== undefined ? { reservationDeadlineMs: overrides.reservationDeadlineMs } : {}),
       ...(overrides.now ? { now: overrides.now } : {}),
     })
     const server = createServer((req, res) => {

@@ -214,7 +214,7 @@ export const ROUTING_MATRIX = [
     files: ['packages/merchant-payments/src/receipt.ts'],
     expect: ['code', 'merchant_payments', 'demo_merchant', 'paywall_proxy', 'packages'],
     kind: CONTRACT,
-    why: 'The shared merchant payment core (#4890) has its own job, and the demo merchant declares @haven_ai/merchant-payments, so a change here also runs demo_merchant_checks: the demo merchant is the consumer whose receipts the move must not change.',
+    why: 'The shared merchant payment core (#4890) has its own job, and the demo merchant declares @haven_ai/merchant-payments, so a change here also runs demo_merchant_checks (the demo merchant is the consumer whose receipts the move must not change) and, since #4893, paywall_proxy_checks.',
   },
   {
     files: ['packages/paywall-proxy/src/handler.ts'],

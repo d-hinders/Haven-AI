@@ -107,7 +107,7 @@
     },
     "merchant_payments": {
       "dependsOn": ["sdk"],
-      "note": "packages/merchant-payments (#4890). The shared merchant payment core (the receipt builder and the tax-declaration check first; the Coinbase payment core follows) consumed by the demo merchant and, later, the paywall proxy (#4893). Imports @haven_ai/sdk's edge entry for the declaration signature check, so an SDK change fans out here. Workspace-private; its build/test/typecheck scripts build the SDK first."
+      "note": "packages/merchant-payments (#4890). The shared merchant payment core (the receipt builder and the tax-declaration check first; the Coinbase payment core follows) consumed by the demo merchant and the paywall proxy (#4893). Imports @haven_ai/sdk's edge entry for the declaration signature check, so an SDK change fans out here. Workspace-private; its build/test/typecheck scripts build the SDK first."
     },
     "paywall_proxy": {
       "dependsOn": ["merchant_payments"],

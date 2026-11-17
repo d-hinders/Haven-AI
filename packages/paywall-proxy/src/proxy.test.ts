@@ -662,7 +662,11 @@ describe('settlement whose outcome is unknown', () => {
     expect(await h.proxy.store.get(key)).toBeNull()
   })
 
-  it('a payment already used on the chain whose transaction is found is forwarded by the holder, with no settle call', async () => {
+  // Review of #4893 (B1): this test used to assert the holder FORWARDS here. A
+  // transfer this proxy never sent may be anyone's replay of an authorization
+  // that is public in calldata (another proxy on the same PAY_TO, a store
+  // restored from a backup), so it now buys nothing without a proof.
+  it('a payment already used on the chain that this proxy never settled is recorded settled and not forwarded without a proof', async () => {
     h = await startHarness()
     const buyer = newBuyer()
     const paid = await buyer.pay(h, CHAT_PATH, chatRequest())
@@ -671,8 +675,38 @@ describe('settlement whose outcome is unknown', () => {
     h.chain.outcome = { kind: 'settled', txHash: TX as `0x${string}` }
     const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }))
     expect(res.status).toBe(200)
+    expect((await res.json()).error).toBe('payment_retry_needs_proof')
     expect(h.facilitator.settleCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+    const key = `eip3009:84532:${auth.from}:${auth.nonce}`.toLowerCase()
+    expect((await h.proxy.store.get(key))?.state).toBe('settled')
+  })
+
+  it('a buyer Expect header is not forwarded, so a settled call still reaches the upstream with the real fetch', async () => {
+    h = await startHarness()
+    const buyer = newBuyer()
+    const paid = await buyer.pay(h, CHAT_PATH, chatRequest())
+    const { request } = await import('node:http')
+    const url = new URL(`${h.base}${CHAT_PATH}`)
+    const init = chatRequest({ 'payment-signature': paid.header })
+    const body = String(init.body)
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = request(
+        { host: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { ...(init.headers as Record<string, string>), 'content-length': String(Buffer.byteLength(body)), expect: '100-continue', connection: 'keep-alive, x-hop' , 'x-hop': 'secret-hop' } },
+        (res) => {
+          res.resume()
+          res.on('end', () => resolve(res.statusCode ?? 0))
+        },
+      )
+      req.on('error', reject)
+      req.on('continue', () => req.end(body))
+      req.flushHeaders()
+    })
+    expect(status).toBe(200)
     expect(h.upstream.seen).toHaveLength(1)
+    const forwarded = h.upstream.seen[0].headers as Record<string, unknown>
+    expect(forwarded.expect).toBeUndefined()
+    expect(forwarded['x-hop']).toBeUndefined()
   })
 
   it('a used authorization whose transaction cannot be read yet is 503 settlement_unknown and is never served', async () => {
@@ -725,7 +759,7 @@ describe('settlement whose outcome is unknown', () => {
   })
 
   it('a holder past RESERVATION_DEADLINE_MS loses its reservation: a later request resolves from the chain and the holder is not forwarded', async () => {
-    h = await startHarness({ env: { RESERVATION_DEADLINE_MS: '60' } })
+    h = await startHarness({ overrides: { reservationDeadlineMs: 60 } })
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -804,5 +838,15 @@ describe('no self-settlement', () => {
       const text = readFileSync(`${dir}${file}`, 'utf8')
       expect(forbidden.test(text), `${file} must not hold a key or submit a transaction`).toBe(false)
     }
+  })
+})
+
+describe('the merchant reference (§5)', () => {
+  it('is sale_<ulid>: 26 Crockford base32 characters that sort by creation time', async () => {
+    const { newMerchantReference } = await import('./handler.js')
+    const a = newMerchantReference(1_800_000_000_000)
+    const b = newMerchantReference(1_800_000_000_001)
+    expect(a).toMatch(/^sale_[0-9A-HJKMNP-TV-Z]{26}$/)
+    expect(a.slice(0, 15) < b.slice(0, 15)).toBe(true)
   })
 })

@@ -42,6 +42,8 @@ export interface ProxyConfig {
 
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 180_000
 export const DEFAULT_RESERVATION_DEADLINE_MS = 120_000
+/** §6: the reserving request's worst case from `reservedAt` (read 10 + verify 30 + slot 10 + settle 30 + resolve 30). */
+export const HOLDER_WORST_CASE_MS = 110_000
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -151,6 +153,15 @@ export function loadConfig(env: Env): ProxyConfig {
 
   const upstreamTimeoutMs = positiveInt('UPSTREAM_TIMEOUT_MS', DEFAULT_UPSTREAM_TIMEOUT_MS)
   const reservationDeadlineMs = positiveInt('RESERVATION_DEADLINE_MS', DEFAULT_RESERVATION_DEADLINE_MS)
+  // Review of #4893: two guarantees in §6 rest on these values. The 110 s
+  // budget before the call plus the call must stay inside Haven's 300 s wait,
+  // and a holder that finishes its 110 s worst case must still hold its token.
+  if (upstreamTimeoutMs > DEFAULT_UPSTREAM_TIMEOUT_MS) {
+    problems.push(`UPSTREAM_TIMEOUT_MS may not exceed ${DEFAULT_UPSTREAM_TIMEOUT_MS} (the design's 300 s budget)`)
+  }
+  if (reservationDeadlineMs < HOLDER_WORST_CASE_MS) {
+    problems.push(`RESERVATION_DEADLINE_MS may not be below ${HOLDER_WORST_CASE_MS} (the holder's worst case)`)
+  }
 
   if (problems.length > 0 || !chain) throw new ConfigError(problems)
 

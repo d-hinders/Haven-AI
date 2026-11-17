@@ -11,7 +11,7 @@
  * submits a transaction: it asks Coinbase's facilitator through the shared
  * core, and reads the chain to learn what happened when the answer is lost.
  */
-import { randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getAddress, isAddress, type Address, type Hex } from 'viem'
 import { SettleError, VerifyError, type PaymentPayload, type PaymentRequired, type SettleResponse } from '@x402/core/types'
@@ -60,6 +60,8 @@ export interface ProxyDeps {
   /** How long a holder polls the chain for a lost settle answer. Default `SETTLE_RESOLVE_MS`. */
   settleResolveMs?: number
   settlePollMs?: number
+  /** Tests only; the deployed proxy uses the config's (bounded) value. */
+  reservationDeadlineMs?: number
 }
 
 interface Problem {
@@ -107,6 +109,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   const now = deps.now ?? (() => new Date())
   const settleResolveMs = deps.settleResolveMs ?? SETTLE_RESOLVE_MS
   const settlePollMs = deps.settlePollMs ?? 2_000
+  const reservationDeadlineMs = deps.reservationDeadlineMs ?? config.reservationDeadlineMs
   const byRoute = indexProducts(deps.products)
   const takeoverMs = config.upstreamTimeoutMs + 30_000
   // A secret that reached a response body by mistake is still never sent.
@@ -378,7 +381,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       case 'settling': {
         const startedAt = holders.get(record.key)
         if (startedAt !== undefined) {
-          if (performance.now() - startedAt < config.reservationDeadlineMs) return settlementUnknown(res)
+          if (performance.now() - startedAt < reservationDeadlineMs) return settlementUnknown(res)
           // The holder is past its deadline: void its token in one conditional update, then resolve from the chain.
           holders.delete(record.key)
           const cleared = await store.clearReservation(record.key, record.reservedAt)
@@ -497,16 +500,26 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   }
 
   type HolderOutcome =
-    | { kind: 'settled'; txHash: Hex }
+    /**
+     * `bySelf`: this holder's own settle call moved the money (its answer, or
+     * the chain after the holder sent it). Only then may the holder make the
+     * proof-free first forward. A transfer the chain-first read found that this
+     * holder never sent may be anyone's replay of a public authorization
+     * (review of #4893): it is recorded `settled`, and a forward needs a proof.
+     */
+    | { kind: 'settled'; txHash: Hex; bySelf: boolean }
     | { kind: 'refused'; error: string; message: string }
     | { kind: 'unknown' }
     | { kind: 'unavailable' }
 
   /** Settle as the reservation's holder, and decide what each failure leaves in the store. */
-  async function settleAsHolder(pay: PaymentContext, verified: VerifiedCheck): Promise<HolderOutcome> {
+  async function settleAsHolder(
+    pay: PaymentContext,
+    verified: VerifiedCheck,
+    watched: ReturnType<typeof watchSettlement>,
+  ): Promise<HolderOutcome> {
     // SECOND PR: the upstream slot is taken between verify and settle.
     const { authorization } = pay
-    const watched = watchSettlement()
     try {
       const txHash = await settleThroughCdp({
         cdp: watched.config,
@@ -515,11 +528,15 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         authorization,
         expired: verified.expired,
       })
-      return { kind: 'settled', txHash }
+      return { kind: 'settled', txHash, bySelf: true }
     } catch (err) {
       if (err instanceof AuthorizationAlreadyUsedError) {
-        // The chain says the money moved. A transaction found settles it; no transaction found is "cannot tell yet".
-        return err.txHash ? { kind: 'settled', txHash: err.txHash } : { kind: 'unknown' }
+        // The chain says the money moved. A transaction found settles it; no
+        // transaction found is "cannot tell yet". It is this holder's own
+        // settlement only if this holder sent the settle call.
+        return err.txHash
+          ? { kind: 'settled', txHash: err.txHash, bySelf: watched.seen.settleSent }
+          : { kind: 'unknown' }
       }
       if (err instanceof PaymentError && err.reasonCode === 'facilitator_refused') {
         return watched.seen.verifyRefused
@@ -541,19 +558,31 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     }
   }
 
-  /** The settle call was sent and its answer is lost: poll the chain up to `SETTLE_RESOLVE_MS`. */
+  /**
+   * The settle call was sent and its answer is lost: poll the chain up to
+   * `SETTLE_RESOLVE_MS`, on the monotonic clock. Each read is raced against
+   * the time left, so no read runs past the bound (§6, review of #4893).
+   */
   async function pollLostSettle(authorization: Eip3009Authorization, definiteFailure: boolean): Promise<HolderOutcome> {
-    const deadline = Date.now() + settleResolveMs
+    const deadline = performance.now() + settleResolveMs
     for (;;) {
-      const outcome = await learnChainOutcome(authorization)
-      if (outcome.kind === 'settled') return outcome
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) break
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const outcome = await Promise.race([
+        learnChainOutcome(authorization),
+        new Promise<ChainOutcome>((resolve) => {
+          timer = setTimeout(() => resolve({ kind: 'unknown' }), remaining)
+        }),
+      ]).finally(() => clearTimeout(timer))
+      if (outcome.kind === 'settled') return { ...outcome, bySelf: true }
       if (outcome.kind === 'refused') {
         return { kind: 'refused', error: 'payment_mismatch', message: 'This authorization was used in a transaction that did not pay this merchant. Nothing was paid here and nothing is delivered.' }
       }
       if (outcome.kind === 'unused' && expiredAt(authorization)) {
         return { kind: 'refused', error: 'settle_failed', message: 'The payment was never settled and its authorization has expired, so nothing was paid.' }
       }
-      if (Date.now() + settlePollMs >= deadline) break
+      if (performance.now() + settlePollMs >= deadline) break
       await new Promise((resolve) => setTimeout(resolve, settlePollMs))
     }
     if (definiteFailure) {
@@ -575,11 +604,12 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     // The payment checks, before any facilitator call (§8 "Before settlement").
     let verified: VerifiedCheck
     try {
-      // The payment must name the resource it was made for. The core skips the
-      // resource check when a payload omits it, and then a payment made for
-      // another product at the same price would verify against this one's
-      // challenge (#4893: a payment for product A is never forwarded on B).
-      // Haven's SDK always sends it (packages/sdk/src/x402.ts).
+      // The payment must name the resource it was made for: the core skips the
+      // resource check when a payload omits it. This refuses a client that
+      // omits or mismatches it; it is not what binds a payment to its product
+      // (the resource is not signed). A fresh payment is bound by the amount
+      // and payee it signed, a known one by its recorded product. Haven's SDK
+      // always sends it (packages/sdk/src/x402.ts).
       if (!pay.payload.resource?.url) {
         throw new PaymentError('Payment resource does not match quoted resource: the payment names no resource')
       }
@@ -604,20 +634,22 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       payer: pay.payer,
       amount: product.price.toString(),
       validBefore: Number(pay.authorization.validBefore),
-      merchantReference: randomUUID(),
+      merchantReference: newMerchantReference(),
       authorizationDigest: pay.digest,
       now: now().toISOString(),
     })
     if (!reserved.reserved) return answerKnown(ctx, pay, reserved.record)
 
     holders.set(pay.key, performance.now())
+    const watched = watchSettlement()
     let outcome: HolderOutcome
     try {
-      outcome = await settleAsHolder(pay, verified)
+      outcome = await settleAsHolder(pay, verified, watched)
     } catch (err) {
-      // Never leave a reservation behind: a throw before verify made no call, anything later may have.
+      // §6's `finally` rule: release only when the settle call was provably
+      // never sent; once it may have been, the outcome is unknown, never released.
       log('settle_unexpected_error', { key: pay.key, error: describeError(err) })
-      outcome = { kind: 'unavailable' }
+      outcome = watched.seen.settleSent || watched.seen.chainSaidUsed ? { kind: 'unknown' } : { kind: 'unavailable' }
     }
 
     try {
@@ -642,10 +674,16 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
           return settlementUnknown(res)
         case 'settled': {
           // SECOND PR seam: the upstream slot is taken here; none free releases nothing (settled) and answers at_capacity_after_settlement.
+          // The proof-free first forward is for this holder's own settlement
+          // only. A transfer it did not send is recorded without the token:
+          // the holder gives its reservation up first (settlement_unknown
+          // clears the token hash), then records `settled`, so a forward needs
+          // a SIGN-IN-WITH-X proof.
+          if (!outcome.bySelf) await store.markSettlementUnknown(pay.key, now().toISOString())
           const result = await store.markSettled(pay.key, {
             txHash: outcome.txHash,
             settledAt: now().toISOString(),
-            reservationToken: reserved.reservationToken,
+            ...(outcome.bySelf ? { reservationToken: reserved.reservationToken } : {}),
           })
           if (result === 'forward') {
             log('payment_settled', { key: pay.key, tx_hash: outcome.txHash, product_id: product.id })
@@ -855,4 +893,24 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       }
     }
   }
+}
+
+const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+
+/**
+ * §5: the sale record's `merchant_reference`, `sale_<ulid>`, generated once at
+ * reservation. A ULID: 48 bits of millisecond time and 80 random bits, in
+ * Crockford base32 (26 characters), so references sort by creation time.
+ */
+export function newMerchantReference(nowMs: number = Date.now()): string {
+  let time = ''
+  let t = nowMs
+  for (let i = 0; i < 10; i++) {
+    time = CROCKFORD[t % 32] + time
+    t = Math.floor(t / 32)
+  }
+  const bytes = randomBytes(16)
+  let random = ''
+  for (let i = 0; i < 16; i++) random += CROCKFORD[bytes[i] % 32]
+  return `sale_${time}${random}`
 }

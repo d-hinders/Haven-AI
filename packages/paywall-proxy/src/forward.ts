@@ -24,6 +24,10 @@ export const STRIPPED_REQUEST_HEADERS: ReadonlySet<string> = new Set(
     'TE',
     'Trailer',
     'Upgrade',
+    // Review of #4893: Node's fetch refuses an `Expect` header ("expect header
+    // not supported"), so forwarding a buyer's `Expect: 100-continue` failed
+    // every settled call before it reached the upstream.
+    'Expect',
     'X-Forwarded-For',
     'X-Forwarded-Host',
     'X-Forwarded-Proto',
@@ -69,8 +73,17 @@ export function buildUpstreamHeaders(
   upstream: ProxyConfig['upstream'],
 ): Headers {
   const headers = new Headers()
+  // Hop-by-hop headers the buyer named in `Connection` are not forwarded either.
+  const connection = incoming.connection ?? incoming.Connection
+  const hopByHop = new Set(
+    (Array.isArray(connection) ? connection.join(',') : connection ?? '')
+      .split(',')
+      .map((token) => token.trim().toLowerCase())
+      .filter(Boolean),
+  )
   for (const [name, value] of Object.entries(incoming)) {
-    if (value === undefined || STRIPPED_REQUEST_HEADERS.has(name.toLowerCase())) continue
+    const lower = name.toLowerCase()
+    if (value === undefined || STRIPPED_REQUEST_HEADERS.has(lower) || hopByHop.has(lower)) continue
     headers.set(name, Array.isArray(value) ? value.join(', ') : value)
   }
   // `set` replaces whatever the buyer sent under this name, case-insensitively.

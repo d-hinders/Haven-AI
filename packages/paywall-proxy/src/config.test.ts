@@ -132,3 +132,11 @@ describe('starting the proxy', () => {
     await proxy.close()
   })
 })
+
+describe('the timing settings stay inside the design bounds (review of #4893)', () => {
+  it('refuses an UPSTREAM_TIMEOUT_MS above 180 s and a RESERVATION_DEADLINE_MS below the holder worst case', () => {
+    expect(problems({ ...base, UPSTREAM_TIMEOUT_MS: '180001' }).join(' ')).toMatch(/UPSTREAM_TIMEOUT_MS may not exceed/)
+    expect(problems({ ...base, RESERVATION_DEADLINE_MS: '109999' }).join(' ')).toMatch(/RESERVATION_DEADLINE_MS may not be below/)
+    expect(problems({ ...base, UPSTREAM_TIMEOUT_MS: '60000', RESERVATION_DEADLINE_MS: '150000' })).toEqual([])
+  })
+})

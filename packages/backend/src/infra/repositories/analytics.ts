@@ -678,19 +678,65 @@ export async function listTopMerchantsForUser(
 }
 
 /**
+ * The longest seller name the receipt lookup will return. The same bound the
+ * catalog applies to a submitted merchant name (`MAX_MERCHANT_NAME_LENGTH`,
+ * `modules/catalog/submission-merchant-fields.ts`) — one bound for every
+ * merchant display name, so a receipt cannot smuggle in a longer one. Kept as
+ * its own constant rather than imported: `infra/repositories` does not depend
+ * on the catalog module, and suites that mock that module wholesale would
+ * otherwise have to grow every constant it exports.
+ */
+export const RECEIPT_MERCHANT_NAME_MAX_LENGTH = 120
+
+/**
  * Best-effort merchant-name fallback from a merchant-issued receipt (#956),
  * for the (bounded, <=10) merchant addresses the top-merchants list just
  * produced. `contacts` still wins in the shaping layer — this is only the
  * SECOND-choice label, read from the newest receipt on file for the address.
+ *
+ * #4881: the name is read where REAL receipts carry it. The demo merchant's
+ * invoice (and any merchant following the same Swedish bookkeeping shape)
+ * names the seller under `saljare.name` — `merchant_name` is a key it never
+ * sends. The accounting side already reads that block
+ * (`sellerFromMerchantReceipt`, `modules/accounting/receipt-underlag.ts`), and
+ * merchants wrap the document one level deep as often as they send it flat
+ * (`{ data: { saljare } }`, see `merchantDocumentShape`), so both forms are
+ * accepted. The flat `merchant_name` stays as the LAST fallback for receipts
+ * captured before this change.
+ *
+ * The value is cleaned and bounded HERE, in the statement, so the
+ * `DISTINCT ON` still picks the newest receipt that actually yields a usable
+ * name: whitespace runs collapse to one space, the ends are trimmed, and a
+ * name that is empty, non-string or longer than
+ * `RECEIPT_MERCHANT_NAME_MAX_LENGTH` yields no name at all (the row is
+ * filtered out, never truncated — a truncated seller name is a wrong seller
+ * name).
  */
 export const RECEIPT_MERCHANT_NAMES_SQL = `SELECT DISTINCT ON (LOWER(mpe.merchant_address))
     LOWER(mpe.merchant_address) AS merchant_key,
-    mr.inline_json ->> 'merchant_name' AS receipt_name
+    candidate.receipt_name
   FROM machine_payment_evidence mpe
   JOIN merchant_receipts mr ON mr.evidence_id = mpe.id
+  CROSS JOIN LATERAL (
+    SELECT NULLIF(
+      btrim(regexp_replace(
+        COALESCE(
+          CASE WHEN jsonb_typeof(mr.inline_json -> 'saljare' -> 'name') = 'string'
+               THEN mr.inline_json -> 'saljare' ->> 'name' END,
+          CASE WHEN jsonb_typeof(mr.inline_json -> 'data' -> 'saljare' -> 'name') = 'string'
+               THEN mr.inline_json -> 'data' -> 'saljare' ->> 'name' END,
+          CASE WHEN jsonb_typeof(mr.inline_json -> 'merchant_name') = 'string'
+               THEN mr.inline_json ->> 'merchant_name' END
+        ),
+        '[[:space:]]+', ' ', 'g'
+      )),
+      ''
+    ) AS receipt_name
+  ) candidate
   WHERE mpe.user_id = $1
     AND mpe.merchant_address = ANY($2)
-    AND mr.inline_json ->> 'merchant_name' IS NOT NULL
+    AND candidate.receipt_name IS NOT NULL
+    AND length(candidate.receipt_name) <= ${RECEIPT_MERCHANT_NAME_MAX_LENGTH}
   ORDER BY LOWER(mpe.merchant_address), mpe.created_at DESC`
 
 export async function listReceiptMerchantNamesForUser(

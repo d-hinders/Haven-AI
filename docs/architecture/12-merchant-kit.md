@@ -16,7 +16,8 @@ covers:
   - .github/workflows/publish.yml
   - packages/backend/src/routes/machine-payments.ts
   - packages/demo-merchant-mcp/src/invoice.ts
-  - packages/demo-merchant-mcp/src/tax-declaration.ts
+  - packages/merchant-payments/src/receipt.ts
+  - packages/merchant-payments/src/tax-declaration.ts
   - packages/backend/src/modules/accounting/receipt-statement.ts
   - packages/backend/src/modules/accounting/receipt-underlag.ts
   - packages/backend/src/modules/mpp/merchant-receipt.ts
@@ -1186,8 +1187,9 @@ one.
 
 ## 11. The receipt
 
-The kit returns the same receipt the demo merchant returns today
-(`packages/demo-merchant-mcp/src/invoice.ts`), so Haven's buyer-side
+The kit returns the same receipt the demo merchant returns today, built by
+the shared core's `buildReceipt` (`packages/merchant-payments/src/receipt.ts`,
+which the demo merchant calls from `packages/demo-merchant-mcp/src/invoice.ts`), so Haven's buyer-side
 accounting reads a kit receipt with no change: its reader
 (`packages/backend/src/modules/accounting/receipt-statement.ts`, documented
 field by field in `docs/operations/merchant-receipt-shape.md`) is the

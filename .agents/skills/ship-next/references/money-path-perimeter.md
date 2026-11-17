@@ -312,6 +312,18 @@ through `QA_DEMO_MERCHANT_URL`. Scoped to `src/**` like the hosted MCP entry.
 
 - `packages/demo-merchant-mcp/src/**`
 
+### The shared merchant payment core
+
+#4890. The package the demo merchant and the paywall proxy (#4893) both settle
+through: the receipt builder and the buyer's tax-declaration check first, then the
+Coinbase facilitator client, the pre-verification checks and the chain recovery.
+The code was on this list as `packages/demo-merchant-mcp/src/**` before the move;
+the #1892 accident-of-location rule keeps it on. Runtime, not control: the demo
+merchant runs it on every paid request, and the money-flow harness pays the demo
+merchant through `QA_DEMO_MERCHANT_URL`. Scoped to `src/**` like the demo merchant.
+
+- `packages/merchant-payments/src/**`
+
 ### Migrations
 
 - `packages/backend/src/db/migrations/**`

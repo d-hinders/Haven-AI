@@ -19,6 +19,7 @@ import { SettleError, VerifyError, type PaymentPayload, type PaymentRequired, ty
 import { encodePaymentRequiredHeader, encodePaymentResponseHeader } from '@x402/core/http'
 import {
   AuthorizationAlreadyUsedError,
+  CDP_CALL_TIMEOUT_MS,
   MAX_FORWARDS_PER_PAYMENT,
   NONCE_RE,
   PaymentError,
@@ -586,13 +587,19 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
    */
   function watchSettlement(verifyPermit: Permit) {
     const seen = { verifyRefused: false, settleSent: false, settleRefused: false, chainSaidUsed: false, noSlot: false }
-    const held: { slot: Permit | null } = { slot: null }
+    const held: { slot: Permit | null; done: boolean } = { slot: null, done: false }
+    // Review of #4893: the slot wait is its own step in the 110 s budget (§6),
+    // not part of settle's 30 s. The core bounds each wrapped call at
+    // `timeoutMs`, so that outer bound is widened by the wait (and a margin, so
+    // it never fires first), and each facilitator call is bounded here at the
+    // core's own per-call value.
+    const callMs = cdp.timeoutMs ?? CDP_CALL_TIMEOUT_MS
     const config: CdpSettlementConfig = {
-      timeoutMs: cdp.timeoutMs,
+      timeoutMs: callMs + limits.upstreamSlotWaitMs + 1_000,
       facilitator: {
         async verify(payload, requirements) {
           try {
-            const result = await cdp.facilitator.verify(payload, requirements)
+            const result = await within(callMs, 'verify', cdp.facilitator.verify(payload, requirements))
             if (!result.isValid) seen.verifyRefused = true
             return result
           } catch (err) {
@@ -610,10 +617,16 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
               // Not sent: the core reads the chain, finds the authorization unused, and answers retryable.
               throw new Error('no upstream slot within the wait')
             }
+            if (held.done) {
+              // The request has already answered: never send a settle for a released reservation.
+              held.slot.release()
+              seen.noSlot = true
+              throw new Error('the request finished before a slot came free')
+            }
           }
           seen.settleSent = true
           try {
-            const result = await cdp.facilitator.settle(payload, requirements)
+            const result = await within(callMs, 'settle', cdp.facilitator.settle(payload, requirements))
             if (!result.success) seen.settleRefused = true
             return result
           } catch (err) {
@@ -860,6 +873,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         }
       }
     } finally {
+      watched.held.done = true
       releaseSlot()
       holders.delete(pay.key)
     }
@@ -1089,6 +1103,17 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       }
     }
   }
+}
+
+/** Race a facilitator call against its own bound; a call that does not answer in time is "did not answer". */
+function within<T>(ms: number, label: string, call: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    call,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} did not answer within ${ms} ms`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'

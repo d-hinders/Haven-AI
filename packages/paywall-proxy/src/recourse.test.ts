@@ -7,7 +7,8 @@
 import { request as httpRequest } from 'node:http'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { VerifyResponse } from '@x402/core/types'
+import { encodePaymentSignatureHeader } from '@x402/core/http'
+import type { SettleResponse, VerifyResponse } from '@x402/core/types'
 import { DEFAULT_LIMITS, type LimitSettings } from './limits.js'
 import {
   CHAT_BODY,
@@ -222,6 +223,31 @@ describe('the upstream slot cap (§7)', () => {
   })
 })
 
+describe('the slot wait is its own step, not part of settle\'s timeout (review of #4893)', () => {
+  it('a settle that answers inside its own bound still settles after a long slot wait', async () => {
+    h = await startHarness({
+      env: { UPSTREAM_TIMEOUT_MS: '250' },
+      upstream: { hang: true },
+      overrides: { limits: { ...LOOSE, upstreamConcurrency: 1, upstreamSlotWaitMs: 1_000 } },
+    })
+    await h.restart({ cdp: { facilitator: h.facilitator, chain: h.chain, timeoutMs: 200 } })
+    const other = paidChat(newBuyer())
+    await until(() => h.upstream.seen.length === 1)
+
+    const buyer = newBuyer()
+    const paid = await buyer.pay(h, CHAT_PATH, chatRequest())
+    // Answers in 150 ms: inside settle's 200 ms, but not once ~250 ms of slot wait is taken from it.
+    h.facilitator.settleResult = () =>
+      new Promise<SettleResponse>((resolve) => setTimeout(() => resolve({ success: true, transaction: TX, network: 'eip155:84532' }), 150))
+    const pending = present(paid.header)
+    await other
+    h.upstream.behaviour = { ...h.upstream.behaviour, hang: false }
+    const res = await pending
+    expect(res.status).toBe(200)
+    expect((await h.proxy.store.get(keyOf(paid)))?.state).toBe('delivered')
+  })
+})
+
 describe('the verify cap (§7)', () => {
   it('an unknown key over the cap is 503 at_capacity before it is reserved, and the token comes back on every exit', async () => {
     h = await startHarness({ overrides: { limits: { ...LOOSE, verifyConcurrency: 1 } } })
@@ -295,6 +321,34 @@ describe('the per-IP limits (§7)', () => {
     for (let i = 0; i < 3; i++) {
       const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': 'not a payment' }))
       expect(res.status).toBe(402)
+    }
+    expect((await fetch(`${h.base}${CHAT_PATH}`, chatRequest())).status).toBe(429)
+  })
+
+  it.each([
+    ['a known key whose digest does not match', 'mismatch'],
+    ['a payment that does not match the challenge', 'local'],
+    ['a payment the facilitator refuses at verify', 'refused'],
+  ] as const)('%s counts against the address', async (_label, kind) => {
+    h = await startHarness({ overrides: { limits: { ...REAL, unpaidBurst: 4 } } })
+    const buyer = newBuyer()
+    // Two challenges fetched: two tokens; two failing headers take the last two.
+    const first = await buyer.pay(h, CHAT_PATH, chatRequest())
+    const second = await newBuyer().pay(h, CHAT_PATH, kind === 'local' ? { ...chatRequest(), amountOverride: '1' } : chatRequest())
+    if (kind === 'mismatch') {
+      expect((await present(first.header)).status).toBe(200)
+      for (let i = 0; i < 2; i++) {
+        const forged = structuredClone(first.payload)
+        ;(forged.payload as { signature: string }).signature = `0x${String(i + 1).repeat(130)}`
+        const res = await present(encodePaymentSignatureHeader(forged))
+        expect((await res.json()).error).toBe('payment_mismatch')
+      }
+    } else {
+      if (kind === 'refused') h.facilitator.verifyResult = { isValid: false, invalidReason: 'invalid_signature' } as VerifyResponse
+      for (let i = 0; i < 2; i++) {
+        const res = await present(kind === 'local' ? second.header : (i === 0 ? first : second).header)
+        expect(res.status).toBe(402)
+      }
     }
     expect((await fetch(`${h.base}${CHAT_PATH}`, chatRequest())).status).toBe(429)
   })

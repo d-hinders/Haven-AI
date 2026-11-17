@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import se25 from './fixtures/merchant-receipts/demo-merchant-se25.json' with { type: 'json' }
 import reverseCharge from './fixtures/merchant-receipts/demo-merchant-reverse-charge.json' with { type: 'json' }
+import { toFeedTransaction } from '../feed-transaction.js'
+import { toAccountingEntry, type AccountingEntrySourceRow } from '../entry.js'
 import {
+  RECEIPT_STATEMENT_MAX_CODE,
   RECEIPT_STATEMENT_MAX_LINES,
+  RECEIPT_STATEMENT_MAX_QUANTITY,
   RECEIPT_STATEMENT_MAX_TEXT,
   compareStatedTotal,
   receiptStatementFrom,
@@ -89,6 +93,26 @@ describe('receiptStatementFrom (#4875)', () => {
     expect(receiptStatementFrom({ ...clone(se25), rader: [] })).toBeNull()
   })
 
+  it('reads the bounds inclusively: 50 lines, a 300-character description, the largest quantity, a 32-character code', () => {
+    const receipt = clone(se25) as unknown as Record<string, unknown> & { rader: Array<Record<string, unknown>> }
+    receipt.rader = Array.from({ length: RECEIPT_STATEMENT_MAX_LINES }, () => ({
+      ...receipt.rader[0],
+      beskrivning: `  ${'x'.repeat(RECEIPT_STATEMENT_MAX_TEXT)}  `,
+      antal: RECEIPT_STATEMENT_MAX_QUANTITY,
+    }))
+    receipt.momsbehandling = 'S'.repeat(RECEIPT_STATEMENT_MAX_CODE)
+    const statement = receiptStatementFrom(receipt)
+    expect(statement?.lines).toHaveLength(RECEIPT_STATEMENT_MAX_LINES)
+    expect(statement?.lines[0].description).toHaveLength(RECEIPT_STATEMENT_MAX_TEXT)
+  })
+
+  it('reads a code case-insensitively and stores it upper-case', () => {
+    expect(receiptStatementFrom({ ...clone(se25), valuta: ' usdc ', momsbehandling: 'se_25' })).toMatchObject({
+      currency: 'USDC',
+      merchantVatTreatment: 'SE_25',
+    })
+  })
+
   it('a receipt with no momsbehandling still reads, with no merchant treatment', () => {
     const { momsbehandling: _m, ...noTreatment } = clone(se25)
     expect(receiptStatementFrom(noTreatment)?.merchantVatTreatment).toBeNull()
@@ -108,6 +132,16 @@ describe('receiptStatementFrom (#4875)', () => {
       ['an empty description', (r) => { r.rader[0].beskrivning = '   ' }],
       ['an oversized description', (r) => { r.rader[0].beskrivning = 'x'.repeat(RECEIPT_STATEMENT_MAX_TEXT + 1) }],
       ['a description with a control character', (r) => { r.rader[0].beskrivning = 'Line\u0000break' }],
+      ['a description with a C1 control', (r) => { r.rader[0].beskrivning = 'Line\u0085break' }],
+      ['a description with a bidi override', (r) => { r.rader[0].beskrivning = 'Storage \u202e0.01 USDC' }],
+      ['a description with a bidi isolate', (r) => { r.rader[0].beskrivning = 'Storage \u2066x\u2069' }],
+      ['a description with a zero-width character', (r) => { r.rader[0].beskrivning = 'Stor\u200bage' }],
+      ['a quantity above the cap', (r) => { r.rader[0].antal = RECEIPT_STATEMENT_MAX_QUANTITY + 1 }],
+      ['an amount with more than 30 whole digits', (r) => { r.totalt_inkl_moms = '1'.repeat(31) }],
+      ['an amount with more than 30 decimal places', (r) => { r.totalt_inkl_moms = `0.${'1'.repeat(31)}` }],
+      ['an amount with a trailing point', (r) => { r.totalt_inkl_moms = '1.' }],
+      ['an amount with a leading point', (r) => { r.totalt_inkl_moms = '.5' }],
+      ['a currency code longer than the cap', (r) => { r.valuta = 'U'.repeat(RECEIPT_STATEMENT_MAX_CODE + 1) }],
       ['a line that is not an object', (r) => { r.rader.push('a line' as unknown as Record<string, unknown>) }],
       ['too many lines', (r) => { r.rader = Array.from({ length: RECEIPT_STATEMENT_MAX_LINES + 1 }, () => ({ ...r.rader[0] })) }],
       ['rader not an array', (r) => { (r as Record<string, unknown>).rader = { 0: r.rader[0] } }],
@@ -152,20 +186,56 @@ describe('receiptStatementFrom (#4875)', () => {
 
 describe('compareStatedTotal (#4875)', () => {
   const statement = receiptStatementFrom(se25)!
+  const usdc = (amountAtomic: string | null) => ({ token: 'USDC', amountAtomic, decimals: 6 })
 
-  it('matches when the stated total in the settled token equals the settled amount, at any scale', () => {
-    expect(compareStatedTotal(statement, 'USDC', '0.0005')).toBe('matches')
-    expect(compareStatedTotal(statement, 'usdc', '0.000500')).toBe('matches')
+  it('matches when the stated total in the settled token equals the settled atomic amount', () => {
+    expect(compareStatedTotal(statement, usdc('500'))).toBe('matches')
+    expect(compareStatedTotal(statement, { token: 'usdc', amountAtomic: '500', decimals: 6 })).toBe('matches')
+    expect(compareStatedTotal({ ...statement, totals: { ...statement.totals, inclVat: '0.000500' } }, usdc('500'))).toBe(
+      'matches',
+    )
   })
 
   it('differs when the receipt total and the settled amount disagree', () => {
-    expect(compareStatedTotal(statement, 'USDC', '0.001')).toBe('differs')
+    expect(compareStatedTotal(statement, usdc('1000'))).toBe('differs')
   })
 
-  it('is not comparable in another currency, or with no settled amount', () => {
-    expect(compareStatedTotal({ ...statement, currency: 'SEK' }, 'USDC', '0.0005')).toBe('not_comparable')
-    expect(compareStatedTotal(statement, 'USDC', null)).toBe('not_comparable')
-    expect(compareStatedTotal(statement, null, '0.0005')).toBe('not_comparable')
-    expect(compareStatedTotal(statement, 'USDC', 'not a number')).toBe('not_comparable')
+  it('compares at the token\'s full precision, not a six-place display amount', () => {
+    const eth = { ...statement, currency: 'ETH', totals: { ...statement.totals, inclVat: '1.00' } }
+    // 1.0000004 ETH formats as "1.00" for display; the receipt's 1.00 does not match it.
+    expect(compareStatedTotal(eth, { token: 'ETH', amountAtomic: '1000000400000000000', decimals: 18 })).toBe('differs')
+    expect(compareStatedTotal(eth, { token: 'ETH', amountAtomic: '1000000000000000000', decimals: 18 })).toBe('matches')
+  })
+
+  it('is not comparable in another currency, or with no settled amount or decimals', () => {
+    expect(compareStatedTotal({ ...statement, currency: 'SEK' }, usdc('500'))).toBe('not_comparable')
+    expect(compareStatedTotal(statement, usdc(null))).toBe('not_comparable')
+    expect(compareStatedTotal(statement, { token: null, amountAtomic: '500', decimals: 6 })).toBe('not_comparable')
+    expect(compareStatedTotal(statement, { token: 'USDC', amountAtomic: '500', decimals: null })).toBe('not_comparable')
+    expect(compareStatedTotal(statement, usdc('not a number'))).toBe('not_comparable')
+    expect(compareStatedTotal(statement, { token: 'USDC', amountAtomic: '500', decimals: 31 })).toBe('not_comparable')
+  })
+})
+
+describe('the statement stays off the feed until #4876 decides its labelling (#4875)', () => {
+  it('toFeedTransaction carries no receiptStatement: the feed is the same bytes with or without it', () => {
+    const row = {
+      id: 'ev-1', payment_intent_id: 'pi-1', approval_request_id: null, tx_hash: `0x${'a'.repeat(64)}`,
+      chain_id: 84532, merchant_address: '0x00000000000000000000000000000000000000aa',
+      payer_address: '0x00000000000000000000000000000000000000f1', token_symbol: 'USDC',
+      amount_raw: '500', amount_human: '0.0005', amount_sek: '0.0052', fx_rate_sek: '10.42',
+      fx_source: 'test', fx_at: '2026-11-17T00:00:00Z', fx_rates: { SEK: 10.42 },
+      confirmed_at: '2026-11-17T00:00:00Z', created_at: '2026-11-17T00:00:00Z',
+      resource_url: 'https://demo-merchant.example/x402/buy_storage', country: null,
+      merchant_receipt_url: null, merchant_receipt_json: se25,
+    } as unknown as AccountingEntrySourceRow
+    const withStatement = toAccountingEntry(row)
+    expect(withStatement.receiptStatement).not.toBeNull()
+    // The raw receipt already travels with the entry (#956); the statement
+    // must add nothing on top of it.
+    const { receiptStatement: _statement, ...withoutStatement } = withStatement
+    const fed = toFeedTransaction(withStatement, { ledgerCurrency: 'SEK' })
+    expect(fed).not.toHaveProperty('receiptStatement')
+    expect(JSON.stringify(fed)).toBe(JSON.stringify(toFeedTransaction(withoutStatement, { ledgerCurrency: 'SEK' })))
   })
 })

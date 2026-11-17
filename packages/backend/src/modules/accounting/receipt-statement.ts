@@ -39,8 +39,10 @@
 export const RECEIPT_STATEMENT_MAX_LINES = 50
 /** The longest line description read, in characters, after trimming. */
 export const RECEIPT_STATEMENT_MAX_TEXT = 300
-/** The longest stated currency or VAT-treatment code. */
-const MAX_CODE = 32
+/** The longest stated currency or VAT-treatment code, in characters. */
+export const RECEIPT_STATEMENT_MAX_CODE = 32
+/** The largest quantity read on one line. */
+export const RECEIPT_STATEMENT_MAX_QUANTITY = 1_000_000
 
 export interface ReceiptStatementLine {
   /** `beskrivning`, trimmed, as stated. */
@@ -79,12 +81,21 @@ export interface ReceiptStatement {
   }
 }
 
-/** A non-negative decimal: digits, optionally a point and more digits. */
+/**
+ * A non-negative decimal: 1–30 digits, optionally a point and 1–30 more. No
+ * sign, no exponent, no leading or trailing point.
+ */
 const DECIMAL = /^\d{1,30}(\.\d{1,30})?$/
 /** An upper-case code: `USDC`, `SE_25`, `REVERSE_CHARGE`. */
 const CODE = /^[A-Z][A-Z0-9_]*$/
+/**
+ * Characters a description may not carry: C0 and C1 controls, DEL, the
+ * bidirectional overrides and isolates, and zero-width characters. A line
+ * description is printed on an accounting document (#4876), where a bidi
+ * override could make one line read as another.
+ */
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f]/
+const FORBIDDEN_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -101,7 +112,7 @@ function percent(value: unknown): number | null {
 function code(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim().toUpperCase()
-  return trimmed.length > 0 && trimmed.length <= MAX_CODE && CODE.test(trimmed) ? trimmed : null
+  return trimmed.length > 0 && trimmed.length <= RECEIPT_STATEMENT_MAX_CODE && CODE.test(trimmed) ? trimmed : null
 }
 
 function line(value: unknown): ReceiptStatementLine | null {
@@ -109,11 +120,11 @@ function line(value: unknown): ReceiptStatementLine | null {
   const raw = value.beskrivning
   if (typeof raw !== 'string') return null
   const description = raw.trim()
-  if (description.length === 0 || description.length > RECEIPT_STATEMENT_MAX_TEXT || CONTROL.test(description)) {
+  if (description.length === 0 || description.length > RECEIPT_STATEMENT_MAX_TEXT || FORBIDDEN_TEXT.test(description)) {
     return null
   }
   const quantity = value.antal
-  if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1_000_000) return null
+  if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity <= 0 || quantity > RECEIPT_STATEMENT_MAX_QUANTITY) return null
   const unitPriceExclVat = amount(value.apris_exkl_moms)
   const vatPercent = percent(value.moms_procent)
   const vatAmount = amount(value.moms_belopp)
@@ -160,11 +171,13 @@ export function receiptStatementFrom(inlineJson: unknown): ReceiptStatement | nu
   }
 }
 
+const SCALE = 30
+
 /** A non-negative decimal string as a fixed-point bigint at 30 places. */
 function toFixed30(value: string): bigint | null {
   if (!DECIMAL.test(value)) return null
   const [whole, fraction = ''] = value.split('.')
-  return BigInt(whole + fraction.padEnd(30, '0'))
+  return BigInt(whole + fraction.padEnd(SCALE, '0'))
 }
 
 /**
@@ -172,18 +185,24 @@ function toFixed30(value: string): bigint | null {
  * compared ONLY when the receipt's currency is the settled token — a SEK or
  * EUR total says nothing about a USDC transfer. The amount booked is always
  * Haven's settled amount; this only says whether the receipt agrees.
+ *
+ * The settled side is the ATOMIC amount at the token's registry decimals,
+ * never the display-formatted human amount, which is cut to six places and
+ * would let an 18-decimal token compare equal when it is not.
  */
 export type ReceiptTotalCheck = 'matches' | 'differs' | 'not_comparable'
 
 export function compareStatedTotal(
   statement: Pick<ReceiptStatement, 'currency' | 'totals'>,
-  settledToken: string | null,
-  settledAmountHuman: string | null,
+  settled: { token: string | null; amountAtomic: string | null; decimals: number | null },
 ): ReceiptTotalCheck {
-  if (settledToken === null || settledAmountHuman === null) return 'not_comparable'
-  if (statement.currency !== settledToken.trim().toUpperCase()) return 'not_comparable'
+  const { token, amountAtomic, decimals } = settled
+  if (token === null || amountAtomic === null || decimals === null) return 'not_comparable'
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > SCALE) return 'not_comparable'
+  if (!/^\d{1,60}$/.test(amountAtomic)) return 'not_comparable'
+  if (statement.currency !== token.trim().toUpperCase()) return 'not_comparable'
   const stated = toFixed30(statement.totals.inclVat)
-  const settled = toFixed30(settledAmountHuman.trim())
-  if (stated === null || settled === null) return 'not_comparable'
-  return stated === settled ? 'matches' : 'differs'
+  if (stated === null) return 'not_comparable'
+  const settledFixed = BigInt(amountAtomic) * 10n ** BigInt(SCALE - decimals)
+  return stated === settledFixed ? 'matches' : 'differs'
 }

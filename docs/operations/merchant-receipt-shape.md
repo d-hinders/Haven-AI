@@ -3,15 +3,17 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/modules/accounting/receipt-statement.ts
+  - packages/backend/src/modules/accounting/receipt-underlag.ts
   - packages/backend/src/modules/accounting/entry.ts
   - packages/demo-merchant-mcp/src/invoice.ts
+  - packages/sdk/src/merchant-completion.ts
 last-verified: "2026-11-17"
 ---
 
 # The merchant receipt shape Haven reads
 
-A merchant can return its own receipt with a paid response, as JSON in the
-`x-receipt-json` header. The agent's SDK relays it to Haven
+A merchant can return its own receipt with a paid response, as base64-encoded
+JSON in the `x-receipt-json` header. The agent's SDK relays it to Haven
 (`POST /machine-payments/:id/merchant-receipt`), and Haven stores it in
 `merchant_receipts`, first write wins. This page lists the fields Haven reads
 from that receipt, and what it does with each.
@@ -24,7 +26,7 @@ accounting entries sends the same keys.
 ## Seller block
 
 Read by `sellerFromMerchantReceipt` (`receipt-underlag.ts`, #3918). Each value
-is optional; a missing or non-string value is treated as absent.
+is optional; a missing, blank or non-string value is treated as absent.
 
 | Key | Meaning |
 |---|---|
@@ -46,23 +48,30 @@ entry's `receiptStatement`.
 | `moms_procent` | number, 0–100 | VAT rate |
 | `moms_belopp` | decimal string | VAT amount |
 | `totalt_inkl_moms` | decimal string | Total including VAT |
-| `valuta` | upper-case code, e.g. `USDC` | The currency every amount is in |
-| `momsbehandling` | upper-case code, optional | The merchant's own VAT treatment, e.g. `SE_25`, `REVERSE_CHARGE` |
+| `valuta` | code, e.g. `USDC` | The currency every amount is in |
+| `momsbehandling` | code, optional | The merchant's own VAT treatment, e.g. `SE_25`, `REVERSE_CHARGE` |
 
 **Each line in `rader`**
 
 | Key | Type | Meaning |
 |---|---|---|
-| `beskrivning` | string, 1–300 characters, no control characters | What was sold |
-| `antal` | number, greater than 0 | Quantity |
+| `beskrivning` | string, 1–300 characters after trimming | What was sold |
+| `antal` | number, greater than 0 and at most 1,000,000 | Quantity |
 | `apris_exkl_moms` | decimal string | Unit price excluding VAT |
 | `moms_procent` | number, 0–100 | VAT rate on the line |
 | `moms_belopp` | decimal string | VAT amount on the line |
 | `totalt_inkl_moms` | decimal string | Line total including VAT |
 
-A decimal string is digits with an optional decimal point, such as `"0.0005"`
-or `"0"`. Amounts given as numbers, negative amounts and exponents are not
-accepted.
+A decimal string is 1–30 digits, optionally followed by a point and 1–30 more
+digits, such as `"0.0005"` or `"0"`. Amounts given as numbers, negative
+amounts, exponents, `"1."` and `".5"` are not accepted.
+
+A code is letters, digits and `_`, starting with a letter, at most 32
+characters. It is read case-insensitively and stored upper-case, so `usdc`
+reads as `USDC`.
+
+A description may not contain control characters, bidirectional overrides or
+isolates, or zero-width characters.
 
 **How the read behaves**
 
@@ -81,9 +90,14 @@ accepted.
   number in `kopare.deklaration.moms_nr`, stays out of the statement.
 - **The total is compared, never booked.** When `valuta` is the token Haven
   settled, the stated `totalt_inkl_moms` is compared with the settled amount,
-  and the entry's `totalCheck` says `matches` or `differs`. In any other
-  currency it says `not_comparable`. The amount booked is always the amount
+  and the entry's `totalCheck` says `matches` or `differs`. The comparison
+  uses the settled atomic amount at the token's full precision. In any other
+  currency, or when Haven has no settled amount or does not know the token's
+  decimals, it says `not_comparable`. The amount booked is always the amount
   Haven settled.
+- **Totals and lines are not checked against each other.** Nothing confirms
+  that the lines add up to the totals, or that the amount excluding VAT plus
+  the VAT equals the total. The statement reports the receipt as written.
 
 ## What the statement is not
 

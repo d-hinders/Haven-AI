@@ -348,6 +348,7 @@ describe('generateInvoice — the keys Haven reads lines and VAT by (#4875)', ()
       expect(top.valuta).toBe('USDC')
       expect(top.momsbehandling).toBe(name)
       expect(Array.isArray(top.rader)).toBe(true)
+      expect(json.rader.length).toBeGreaterThan(0)
       for (const row of json.rader as unknown as Array<Record<string, unknown>>) {
         expect(typeof row.beskrivning).toBe('string')
         expect(typeof row.antal).toBe('number')

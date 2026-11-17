@@ -472,6 +472,13 @@ export function stripeDetailsForm(details: StripeRecordDetails | undefined): Rec
   return form
 }
 
+/**
+ * #4880: the shape of a VAT number Stripe may record: a two-letter prefix and
+ * 2–13 letters or digits (the EU forms run from 8 to 12 characters after the
+ * prefix). A shape, not a validity check.
+ */
+const VAT_NUMBER_SHAPE = /^[A-Z]{2}[A-Z0-9]{2,13}$/
+
 /** #4880: the description both recorders send: product name and receipt number. */
 export function stripeDescription(product: Pick<Product, 'name'>, receiptNumber: string): string {
   return `${product.name} — ${receiptNumber}`
@@ -487,12 +494,18 @@ export function stripeDetailsFromReceipt(
   receipt: InvoiceJson,
 ): StripeRecordDetails {
   const declaration = receipt.kopare.deklaration
+  // #4880: the declaration's fields are what the payer signed, checked by
+  // #4855 for presence, not shape. Only a two-letter country and a VAT-number
+  // shape are recorded in Stripe; anything else is left out rather than sent.
+  const buyerCountry = declaration && /^[A-Z]{2}$/.test(declaration.land) ? declaration.land : undefined
+  const buyerVatNr = declaration && VAT_NUMBER_SHAPE.test(declaration.moms_nr) ? declaration.moms_nr : undefined
   return {
     description: stripeDescription(product, receipt.fakturanummer),
     receiptNumber: receipt.fakturanummer,
     vatTreatment: receipt.momsbehandling,
     vatAmountAtomic: vatAmountsAtomic(product.price_usdc, receipt.momsbehandling).vat,
-    ...(declaration ? { buyerVatNr: declaration.moms_nr, buyerCountry: declaration.land } : {}),
+    ...(buyerVatNr ? { buyerVatNr } : {}),
+    ...(buyerCountry ? { buyerCountry } : {}),
   }
 }
 
@@ -696,6 +709,18 @@ export function createStripeRecording(
           const id = err.existingPaymentIntentId
           const state = await withTimeout(timeoutMs, () => readPaymentIntent(id))
           return settle(params.txHash, await awaitVerdict(state), false)
+        }
+        // #4880: the idempotency key is the hash, but the parameters now
+        // differ between recorders (the merchant sends VAT and buyer keys,
+        // reconciliation does not; two requests can carry different
+        // declarations). Within the key's ~24 h Stripe answers a repeat with
+        // `idempotency_error` — meaning a create for this transaction already
+        // happened, which the search missed (it is eventually consistent).
+        // Search again rather than report a PaymentIntent that exists as a
+        // failure.
+        if (err instanceof StripeApiError && err.type === 'idempotency_error') {
+          const found = await withTimeout(timeoutMs, () => findRecorded(params.txHash))
+          if (found) return settle(params.txHash, await awaitVerdict(found), false)
         }
         throw err
       }

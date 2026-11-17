@@ -740,6 +740,45 @@ describe('the PaymentIntent carries the receipt (#4880)', () => {
     expect(form.description).toHaveLength(STRIPE_METADATA_VALUE_MAX)
   })
 
+  it('leaves out a declared country or VAT number that does not have the shape of one', async () => {
+    const odd = { ...DE, jurisdiction: 'Germany', taxId: 'call me <script>' }
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(odd)))
+    expect(Object.keys(form).filter((key) => /buyer/.test(key))).toEqual([])
+    // ...while a well-formed one is kept (the shape check can say yes).
+    const kept = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)))
+    expect(kept['metadata[buyer_vat_nr]']).toBe('DE123456789')
+  })
+
+  it('an idempotency_error is a create that already happened: the recorder searches again instead of failing', async () => {
+    let searches = 0
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.method === 'GET') {
+          searches++
+          // Stripe's search is eventually consistent: the first read misses it.
+          return { status: 200, body: { data: searches > 1 ? [{ id: 'pi_3IdemAlready01', status: 'succeeded' }] : [] } }
+        }
+        return { status: 400, body: { error: { type: 'idempotency_error' } } }
+      },
+    }
+    const recording = createStripeRecording(config()!, { http, log: () => {} })
+    const result = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke', details: stripeDetailsForReconciliation(PRODUCTS.joke, TX) })
+    expect(result).toEqual({ status: 'already_recorded', paymentIntentId: 'pi_3IdemAlready01' })
+    expect(recording.stats().failed).toBe(0)
+  })
+
+  it('an idempotency_error the second search cannot explain is still a failure', async () => {
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.method === 'GET') return { status: 200, body: { data: [] } }
+        return { status: 400, body: { error: { type: 'idempotency_error' } } }
+      },
+    }
+    const recording = createStripeRecording(config()!, { http, log: () => {} })
+    const result = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })
+    expect(result).toEqual({ status: 'failed', reason: 'idempotency_error' })
+  })
+
   it('sends nothing new when the caller passes no details', async () => {
     const form = await formSent(undefined)
     expect(Object.keys(form).filter((key) => /description|receipt|vat|buyer|recorded_by/.test(key))).toEqual([])

@@ -22,6 +22,8 @@ covers:
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/merchant-payments/src/receipt.ts
   - packages/merchant-payments/src/tax-declaration.ts
+  - packages/merchant-payments/src/authorization-digest.ts
+  - packages/paywall-proxy/src/**
   - packages/backend/src/modules/accounting/receipt-statement.ts
   - packages/backend/src/modules/accounting/receipt-underlag.ts
   - packages/backend/src/modules/mpp/merchant-receipt.ts
@@ -466,8 +468,11 @@ export interface ConsumedPaymentRecord {
   /** Generated once, at reservation; the sale record's `merchant_reference`. */
   merchantReference: string
   /**
-   * SHA-256 of the full signed authorization as presented: from, to, value,
-   * validAfter, validBefore, nonce and the signature.
+   * SHA-256 of the full signed authorization: from, to, value, validAfter,
+   * validBefore, nonce and the signature, in a canonical form (addresses and
+   * hex lower-cased, integers in decimal) so the same authorization always
+   * gives the same digest (`authorizationDigest` in the core). A change to the
+   * encoding would turn every known key into `payment_mismatch`.
    */
   authorizationDigest: string
   txHash?: string
@@ -631,11 +636,14 @@ that finds its transaction (`recoverUsedAuthorization` and its log-window scan
 in the core's `cdp-settlement.ts`) replaces verify and settle and is bounded in total at
 `SETTLE_RESOLVE_MS` (30 s), whatever `validAfter` the buyer chose; not found in
 time, the holder answers 503 `settlement_unknown` as for a lost settle answer.
-Found and checked, the holder takes its upstream slot then (10 s, so this path
-is 10 + 30 + 10 = 50 s, never the binding case). If none is free it records the
-settlement without its token (`settled`) and answers 200
-`at_capacity_after_settlement`, as a known-key forward does: the payment has
-settled, so the answer stays 2xx, and the retry needs a proof.
+**Found and checked, the holder does not forward it** (amended by the review of
+#4893). This holder never sent that settlement, and the authorization is
+public in its calldata, so the request may be anyone's replay: another proxy on
+the same `PAY_TO`, or a store restored from a backup that predates the
+delivery. The holder records the settlement without its token (`settled`) and
+answers 200 `payment_retry_needs_proof`: the payment settled, so the answer
+stays 2xx, and a forward needs a `SIGN-IN-WITH-X` proof from the payer. The one
+proof-free forward is a settlement the holder itself sent.
 The check that a found event paid this merchant (below) runs inside the
 `SETTLE_RESOLVE_MS` bound, not after it.
 **Every chain read is bounded at 10 s in total.** The demo merchant's client
@@ -1061,6 +1069,7 @@ and settle.
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Rate limit: an unpaid request, or an unknown-key payment header from an IP over the limit (section 7) | 429 | `rate_limited` | No | No payment yet; rejected after funding if a Haven agent funded its delegate | Retry after `Retry-After`; verify, then sweep the delegate if funded |
+| Coinbase's facilitator gave no answer at verify, or the settle call was never sent (the reservation is released; nothing settled) | 503 | `facilitator_unavailable`, with `Retry-After` | No | Rejected after funding if a Haven agent funded its delegate | Retry the same header after `Retry-After`; otherwise verify, then sweep the delegate |
 | No verify capacity (before reserve), or no upstream slot within 10 s after verify (the reservation is released; nothing settled) | 503 | `at_capacity` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 
@@ -1115,7 +1124,10 @@ end of the table. The body's `error` field carries the outcome:
 The response carries the standard `PAYMENT-RESPONSE` header with the settlement
 transaction hash, so Haven can anchor the evidence. `reason` is one of
 `upstream_timeout`, `upstream_unreachable`, `upstream_status`,
-`upstream_auth_refused`, `response_too_large` or `buyer_disconnected`. The
+`upstream_auth_refused`, `response_too_large` or `buyer_disconnected`. A body
+shorter than its `Content-Length`, a stream error mid-body, and an
+event stream that ends without `data: [DONE]` are reported as
+`upstream_unreachable`: the upstream did not deliver a complete answer. The
 same payment presented again, with a `SIGN-IN-WITH-X` proof signed by the
 payer over the challenge in this answer, gets the call it paid for, within the
 cap, because the store recorded `failed`.
@@ -1303,8 +1315,16 @@ What the merchant runs:
   `BASE_PATH` (the path prefix the products' routes are matched under; empty by
   default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
   `UPSTREAM_AUTH_SCHEME` when the upstream wants them), Coinbase facilitator
-  credentials (the pilot settles through Coinbase's facilitator only,
-  because the #4890 core is Coinbase's client), optionally `VAT_RULE` with the seller settings (section 11) and `DIRECTORY_LISTING` with `ICON_URL` (section 4, off by default), and, for sales
+  credentials `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (the pilot settles
+  through Coinbase's facilitator only, because the #4890 core is Coinbase's
+  client), `RPC_URL` (the chain reads that resolve a lost settle answer and a
+  used authorization), `PAYMENTS_DB`, optionally `PUBLIC_BASE_URL` (the
+  public origin the challenge's `resource.url` names; it must be `https` in
+  production, and without it the proxy derives `http://<Host>`), `PORT` and
+  `HOST`, `UPSTREAM_TIMEOUT_MS` (at most 180 s) and `RESERVATION_DEADLINE_MS`
+  (at least the holder's 110 s worst case), which the proxy refuses to start
+  outside those bounds, an empty `UPSTREAM_AUTH_SCHEME` sending the key bare
+  (an `x-api-key` style header), optionally `VAT_RULE` with the seller settings (section 11) and `DIRECTORY_LISTING` with `ICON_URL` (section 4, off by default), and, for sales
   reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY`;
 - persistent disk for the consumed-payment store (`PAYMENTS_DB`) and the
   sales outbox (`SALES_OUTBOX`), used by exactly one proxy process at a time
@@ -1315,7 +1335,11 @@ What the merchant runs:
   ledger, by an in-process backup (the `backup()` function of `node:sqlite`) or a disk
   snapshot: the exclusive lock shuts every other process out of the file,
   readers included, so an external `sqlite3 .backup` cannot run while the
-  proxy does;
+  proxy does. A restored backup is safe for payments delivered after it: a
+  later presentation finds the settlement on the chain and, never having sent
+  it, does not forward it without a proof (section 6). One `PAY_TO` per
+  `PAYMENTS_DB`: two stores on one receiving address would each owe the payer
+  a proof-backed call;
 - a health route, `GET /healthz`, which needs no payment and reports
   readiness (the upstream key present, the store and outbox writable);
 - a Haven account that receives the money, with Sales turned on (#4885) when

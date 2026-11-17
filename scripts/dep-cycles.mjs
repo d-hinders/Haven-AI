@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Runtime import-cycle lint across the packages `dep-lint` does not scan
-// (#4763): eleven then, twelve since #4890 added packages/merchant-payments.
+// (#4763): eleven then, twelve since #4890 added packages/merchant-payments,
+// thirteen since #4893 added packages/paywall-proxy.
 //
 // Rule 7 of docs/architecture/10-module-boundaries.md — "the graph is
 // acyclic", the one unwaivable rule — was checked on two of the thirteen

@@ -425,3 +425,17 @@ smoke and check scripts.
 
 - `packages/backend/src/ops/**`
 - `packages/backend/scripts/cancel-stuck-attest-lane.ts`
+
+### The merchant kit's paywall proxy
+
+#4893. The proxy decides when a payment counts as made and releases a paid
+upstream call on it: the challenge, the refusals before settlement, the
+consumed-payment store with its one-call policy, and the forward carrying the
+merchant's upstream key. It settles through the shared core, which is on the
+runtime list (`packages/merchant-payments/src/**`).
+
+Control, not runtime (owner decision 2026-11-16, recorded on #4893): no QA
+scenario drives the proxy yet, so a green run says nothing about it. It moves to
+the runtime list once #4892 deploys it with a harness address.
+
+- `packages/paywall-proxy/src/**`

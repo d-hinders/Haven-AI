@@ -3,7 +3,7 @@
 // Two layers, and the second is the one that keeps this useful over time:
 //
 //   1. Every row in routing-matrix.mjs is asserted against the classifier, on
-//      ALL SEVENTEEN outputs. Asserting only the flag expected to be true would miss
+//      ALL EIGHTEEN outputs. Asserting only the flag expected to be true would miss
 //      the failure that actually matters — a rule that turns on MORE than it
 //      should, quietly running (or skipping) a job nobody looked at.
 //
@@ -28,7 +28,7 @@ import {
 } from './change-classifier.mjs'
 import { ROUTING_MATRIX, CONTRACT, RETAINED } from './routing-matrix.mjs'
 
-/** Expand a row's true-flag list into the full seventeen-flag object. */
+/** Expand a row's true-flag list into the full eighteen-flag object. */
 function expectedOutputs(expect) {
   const outputs = Object.fromEntries(OUTPUT_NAMES.map((name) => [name, false]))
   for (const name of expect) {
@@ -40,7 +40,7 @@ function expectedOutputs(expect) {
 
 const label = (row) => `${row.kind}: ${row.files.length ? row.files.join(' + ') : '(empty diff)'}`
 
-describe('the routing matrix — all seventeen outputs per row', () => {
+describe('the routing matrix — all eighteen outputs per row', () => {
   for (const row of ROUTING_MATRIX) {
     test(label(row), () => {
       assert.deepEqual(
@@ -168,7 +168,7 @@ describe('the matrix covers the rules', () => {
   test('deleting any propagation rule breaks at least one row', () => {
     // The question worth asking is not "does some row trigger this rule" —
     // every full-matrix row trivially satisfies every propagation rule, since
-    // all seventeen flags are already true there, so that version passes even with
+    // all eighteen flags are already true there, so that version passes even with
     // the isolating fixtures deleted. The question is whether any fixture would
     // NOTICE the rule going away. So delete it and look for a row that changes.
     //

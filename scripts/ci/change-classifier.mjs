@@ -10,7 +10,7 @@
 // logic that decides whether a guard runs is exactly the logic that must not
 // be untestable.
 //
-// The contract with ci.yml is the SEVENTEEN output names below, emitted as
+// The contract with ci.yml is the EIGHTEEN output names below, emitted as
 // `name=value` lines. Nothing here decides what a job does with a flag; this
 // only answers "was this surface touched, or does something it depends on
 // force it true".
@@ -63,6 +63,7 @@ export const OUTPUT_NAMES = Object.freeze([
   'cli',
   'demo_merchant',
   'merchant_payments',
+  'paywall_proxy',
   'core',
   'qa_agent',
   'packages',
@@ -331,6 +332,12 @@ export const SURFACE_RULES = Object.freeze([
     surfaces: ['code', 'merchant_payments', 'packages'],
   },
   {
+    // The merchant kit's paywall proxy (#4893). It consumes merchant-payments,
+    // so the dependency table fans a core change out to this job too.
+    patterns: ['packages/paywall-proxy/*'],
+    surfaces: ['code', 'paywall_proxy', 'packages'],
+  },
+  {
     // The shared kernel (#3005). It has its own job now, so it no longer falls
     // to the catch-all below; frontend and backend fan out to it in reverse
     // through the dependency table, which is what runs THEIR suites on a core
@@ -423,16 +430,16 @@ export const PROPAGATION_RULES = Object.freeze([
   ),
 ])
 
-/** All seventeen flags false. */
+/** All eighteen flags false. */
 const noSurfaces = () => Object.fromEntries(OUTPUT_NAMES.map((name) => [name, false]))
 
-/** All seventeen flags true — what `workflow_dispatch` forces. */
+/** All eighteen flags true — what `workflow_dispatch` forces. */
 export function allSurfaces() {
   return Object.fromEntries(OUTPUT_NAMES.map((name) => [name, true]))
 }
 
 /**
- * Classify an explicit list of changed paths into the seventeen output flags.
+ * Classify an explicit list of changed paths into the eighteen output flags.
  *
  * `propagationRules` is a seam for tests, not a runtime knob — CI always uses
  * the default. It exists so the characterization matrix can ask "would any

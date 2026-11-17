@@ -520,7 +520,7 @@ export const en = {
     companyDetails: {
       title: 'Company details',
       description:
-        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into.',
+        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into. You can also save a receipt email and billing and shipping addresses.',
       // History: #3332's review rounds shaped a longer paragraph (VIES named,
       // the SE VAT encoding, a support-erasure sentence), and the "receipts"
       // sentence stays in `description` above.
@@ -556,6 +556,40 @@ export const en = {
         vatNumber: 'VAT number (optional)',
         vatNumberPlaceholder: 'e.g. SE556677889901',
         vatNumberHelp: 'Include the two-letter country prefix, e.g. "SE556677889901".',
+        // #4870. The sign-up email is a SUGGESTION here, never a stored
+        // value: nothing is saved until the owner saves, and nothing is sent
+        // to a merchant by this slice.
+        receiptEmail: 'Receipt email (optional)',
+        receiptEmailPlaceholder: 'e.g. name@example.com',
+        receiptEmailHelp: 'Where a merchant should send the receipt. We suggest your sign-up email; it is saved only when you save.',
+      },
+
+      /**
+       * #4870: the two structured addresses. The per-field labels are keyed
+       * `<address>.<field>` because the card renders the same five inputs
+       * twice and each label must be unique on the page — "Billing city" and
+       * "Shipping city", never two "City" labels a screen reader cannot tell
+       * apart.
+       */
+      addresses: {
+        billingTitle: 'Billing address (optional)',
+        shippingTitle: 'Shipping address (optional)',
+        sameAsBilling: 'Shipping address is the same as billing',
+        line1Placeholder: 'e.g. Sveavagen 1',
+        line2Placeholder: 'e.g. 4 tr',
+        postCodePlaceholder: 'e.g. 111 57',
+        cityPlaceholder: 'e.g. Stockholm',
+        countryPlaceholder: 'Choose a country',
+        'billing.line1': 'Billing street address',
+        'billing.line2': 'Billing street address line 2',
+        'billing.postCode': 'Billing postal code',
+        'billing.city': 'Billing city',
+        'billing.country': 'Billing country',
+        'shipping.line1': 'Shipping street address',
+        'shipping.line2': 'Shipping street address line 2',
+        'shipping.postCode': 'Shipping postal code',
+        'shipping.city': 'Shipping city',
+        'shipping.country': 'Shipping country',
       },
 
       validation: {
@@ -571,6 +605,16 @@ export const en = {
         // Matches `ORG_NUMBER_RE` (`^[A-Za-z0-9 .\-/]{1,32}$`) in the same file.
         orgNumberInvalidChars: 'Organisation number can only contain letters, numbers, spaces, and . - /',
         vatNumberTooLong: 'Enter a VAT number using 32 characters or fewer.',
+        // #4870. Matches `EMAIL_RE` and `ADDRESS_MAX_LENGTHS` in the same file.
+        receiptEmailInvalid: 'Enter a receipt email address, e.g. "name@example.com".',
+        receiptEmailTooLong: 'Enter a receipt email address using 254 characters or fewer.',
+        addressLine1Required: 'Enter a street address.',
+        addressLine1TooLong: 'Enter a street address using 70 characters or fewer.',
+        addressLine2TooLong: 'Enter a street address line using 70 characters or fewer.',
+        addressPostCodeTooLong: 'Enter a postal code using 16 characters or fewer.',
+        addressCityRequired: 'Enter a city.',
+        addressCityTooLong: 'Enter a city using 50 characters or fewer.',
+        addressCountryInvalid: 'Choose a country.',
       },
 
       save: 'Save',
@@ -594,7 +638,7 @@ export const en = {
         action: 'Remove company details',
         confirmTitle: 'Remove your company details?',
         confirmBody:
-          'This deletes your legal name, country, organisation number and VAT number from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
+          'This deletes your legal name, country, organisation number, VAT number, receipt email and addresses from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
         confirm: 'Remove',
         cancel: 'Keep details',
         // #4570: the confirm button's own verb while the delete is in flight,

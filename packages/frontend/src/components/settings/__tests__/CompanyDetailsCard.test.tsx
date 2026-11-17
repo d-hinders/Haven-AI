@@ -21,6 +21,20 @@ vi.mock('@/lib/api', async () => {
   return { ApiRequestError: actual.ApiRequestError, api: mockApi }
 })
 
+/**
+ * #4870: the card prefills the receipt email from the SIGN-UP email, which it
+ * reads through `useAuth`. Mocking the hook keeps this suite on the card's own
+ * behaviour instead of booting the real provider's `GET /auth/me`.
+ */
+const SIGNUP_EMAIL = 'ada@example.se'
+vi.mock('@/context/AuthContext', async () => {
+  const actual = await vi.importActual<typeof import('@/context/AuthContext')>('@/context/AuthContext')
+  return {
+    ...actual,
+    useAuth: () => ({ user: { id: 'u1', name: 'Ada', email: SIGNUP_EMAIL } }),
+  }
+})
+
 import { ApiRequestError } from '@/lib/api'
 import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
 import { BusinessDataProvider } from '@/components/settings/BusinessDataContext'
@@ -50,6 +64,9 @@ function details(overrides: Partial<CompanyDetails> = {}): CompanyDetails {
     vat_number: 'SE556677889901',
     vies_status: 'valid',
     vies_checked_at: '2026-09-20T10:00:00.000Z',
+    receipt_email: null,
+    billing_address: null,
+    shipping_address: null,
     created_at: '2026-09-01T00:00:00.000Z',
     updated_at: '2026-09-20T10:00:00.000Z',
     ...overrides,
@@ -125,9 +142,13 @@ describe('CompanyDetailsCard — gating', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add company details' }))
     await waitFor(() => expect(screen.getByTestId('company-details-form')).toBeInTheDocument())
     expect(screen.getByLabelText('Legal name')).toHaveValue('')
-    // The picker starts on its placeholder.
+    // The picker starts on its placeholder. Scoped to the top-level picker:
+    // #4870 adds two more country pickers (billing and shipping), each with
+    // its own placeholder option.
     expect(screen.getByLabelText('Country')).toHaveValue('')
-    expect(screen.getByRole('option', { name: 'Choose a country', selected: true })).toBeInTheDocument()
+    expect(
+      within(screen.getByLabelText('Country')).getByRole('option', { name: 'Choose a country', selected: true }),
+    ).toBeInTheDocument()
   })
 
   it('renders the saved details when present', async () => {
@@ -185,8 +206,11 @@ describe('CompanyDetailsCard — validation and save', () => {
     renderCard()
     await revealEmptyForm()
     // Country NAMES, not codes — via `Intl.DisplayNames` in the user's locale.
-    expect(screen.getByRole('option', { name: 'Sweden' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Germany' })).toBeInTheDocument()
+    // Scoped to the top-level picker: #4870 adds billing and shipping pickers
+    // with the same option labels.
+    const topCountry = within(screen.getByLabelText('Country'))
+    expect(topCountry.getByRole('option', { name: 'Sweden' })).toBeInTheDocument()
+    expect(topCountry.getByRole('option', { name: 'Germany' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
     fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
     fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
@@ -233,6 +257,10 @@ describe('CompanyDetailsCard — validation and save', () => {
       country: 'SE',
       org_number: '556677-8899',
       vat_number: 'SE556677889901',
+      // #4870: the sign-up email is prefilled, so saving the form stores it.
+      receipt_email: SIGNUP_EMAIL,
+      billing_address: null,
+      shipping_address: null,
     })
   })
 
@@ -246,6 +274,133 @@ describe('CompanyDetailsCard — validation and save', () => {
     await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
     const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
     expect(body.vat_number).toBeNull()
+  })
+
+  /**
+   * #4870 — the receipt email and the two structured addresses.
+   *
+   * The sign-up email is a PREFILL, never a stored value: it appears when
+   * nothing is stored and is saved only when the owner saves. The addresses
+   * are optional as a whole, and "shipping same as billing" is a form
+   * convenience, not a stored flag.
+   */
+  describe('receipt email and addresses (#4870)', () => {
+    it('prefills the receipt email from the sign-up email when nothing is stored', async () => {
+      mockApi.get.mockImplementation(() => noRow())
+      renderCard()
+      await revealEmptyForm()
+      expect(screen.getByLabelText('Receipt email (optional)')).toHaveValue(SIGNUP_EMAIL)
+    })
+
+    it('shows the stored receipt email instead of the sign-up email', async () => {
+      mockApi.get.mockImplementation(() => Promise.resolve(details({ receipt_email: 'billing@acme.se' })))
+      renderCard()
+      await waitFor(() => expect(screen.getByLabelText('Receipt email (optional)')).toHaveValue('billing@acme.se'))
+    })
+
+    it('saves the receipt email and both addresses', async () => {
+      mockApi.get.mockImplementation(() => noRow())
+      mockApi.put.mockImplementation((_path: string, body: unknown) => Promise.resolve(details({ ...(body as PutBody) })))
+      renderCard()
+      await revealEmptyForm()
+      fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+      fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+      fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+      fireEvent.change(screen.getByLabelText('Receipt email (optional)'), { target: { value: 'billing@acme.se' } })
+      fireEvent.change(screen.getByLabelText('Billing street address'), { target: { value: 'Sveavagen 1' } })
+      fireEvent.change(screen.getByLabelText('Billing postal code'), { target: { value: '111 57' } })
+      fireEvent.change(screen.getByLabelText('Billing city'), { target: { value: 'Stockholm' } })
+      fireEvent.change(screen.getByLabelText('Billing country'), { target: { value: 'SE' } })
+      fireEvent.change(screen.getByLabelText('Shipping street address'), { target: { value: 'Storgatan 2' } })
+      fireEvent.change(screen.getByLabelText('Shipping city'), { target: { value: 'Goteborg' } })
+      fireEvent.change(screen.getByLabelText('Shipping country'), { target: { value: 'SE' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+      const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
+      expect(body.receipt_email).toBe('billing@acme.se')
+      expect(body.billing_address).toEqual({
+        line1: 'Sveavagen 1',
+        city: 'Stockholm',
+        postCode: '111 57',
+        country: 'SE',
+      })
+      expect(body.shipping_address).toEqual({ line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' })
+    })
+
+    it('"Shipping address is the same as billing" saves the billing address as the shipping address', async () => {
+      mockApi.get.mockImplementation(() => noRow())
+      mockApi.put.mockImplementation((_path: string, body: unknown) => Promise.resolve(details({ ...(body as PutBody) })))
+      renderCard()
+      await revealEmptyForm()
+      fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+      fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+      fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+      fireEvent.change(screen.getByLabelText('Billing street address'), { target: { value: 'Sveavagen 1' } })
+      fireEvent.change(screen.getByLabelText('Billing city'), { target: { value: 'Stockholm' } })
+      fireEvent.change(screen.getByLabelText('Billing country'), { target: { value: 'SE' } })
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Shipping address is the same as billing' }))
+      // The shipping block is hidden while the box is ticked.
+      expect(screen.queryByLabelText('Shipping street address')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+      const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
+      expect(body.shipping_address).toEqual(body.billing_address)
+    })
+
+    it('clears the receipt email to null when the box is emptied', async () => {
+      mockApi.get.mockImplementation(() => Promise.resolve(details({ receipt_email: 'billing@acme.se' })))
+      mockApi.put.mockImplementation((_path: string, body: unknown) => Promise.resolve(details({ ...(body as PutBody) })))
+      renderCard()
+      await waitFor(() => expect(screen.getByLabelText('Receipt email (optional)')).toHaveValue('billing@acme.se'))
+      fireEvent.change(screen.getByLabelText('Receipt email (optional)'), { target: { value: '' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+      const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
+      expect(body.receipt_email).toBeNull()
+    })
+
+    it('blocks submit when an address is partly filled, naming the missing field', async () => {
+      mockApi.get.mockImplementation(() => noRow())
+      renderCard()
+      await revealEmptyForm()
+      fireEvent.change(screen.getByLabelText('Legal name'), { target: { value: 'Ada Lovelace AB' } })
+      fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'SE' } })
+      fireEvent.change(screen.getByLabelText('Organisation number'), { target: { value: '556677-8899' } })
+      fireEvent.change(screen.getByLabelText('Billing street address'), { target: { value: 'Sveavagen 1' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(await screen.findByText('Enter a city.')).toBeInTheDocument()
+      expect(mockApi.put).not.toHaveBeenCalled()
+    })
+
+    it('carries over line3 and subdivision from the stored address instead of dropping them', async () => {
+      mockApi.get.mockImplementation(() =>
+        Promise.resolve(
+          details({
+            billing_address: {
+              line1: 'Sveavagen 1',
+              line3: 'Box 12',
+              city: 'Stockholm',
+              subdivision: 'SE-AB',
+              country: 'SE',
+            },
+          }),
+        ),
+      )
+      mockApi.put.mockImplementation((_path: string, body: unknown) => Promise.resolve(details({ ...(body as PutBody) })))
+      renderCard()
+      await waitFor(() => expect(screen.getByLabelText('Billing street address')).toHaveValue('Sveavagen 1'))
+      fireEvent.change(screen.getByLabelText('Billing street address'), { target: { value: 'Sveavagen 2' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+      const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
+      expect(body.billing_address).toEqual({
+        line1: 'Sveavagen 2',
+        line3: 'Box 12',
+        city: 'Stockholm',
+        subdivision: 'SE-AB',
+        country: 'SE',
+      })
+    })
   })
 
   it('surfaces the backend 400 message verbatim', async () => {

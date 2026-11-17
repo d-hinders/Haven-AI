@@ -17,6 +17,24 @@ export type { Executor }
 
 export type ViesStatus = 'pending' | 'valid' | 'invalid' | 'not_verifiable'
 
+/**
+ * The structured address shape (#4870), owned by
+ * `docs/architecture/13-checkout-details.md` § *The address shape* and stored
+ * verbatim as one JSONB value per address. `line1`, `city` and `country` are
+ * required; the rest are omitted from the JSON when the owner left them
+ * blank — never stored as `null` or as an empty string.
+ */
+export interface OwnerAddress {
+  line1: string
+  line2?: string
+  line3?: string
+  city: string
+  postCode?: string
+  subdivision?: string
+  /** ISO 3166-1 alpha-2, uppercase. */
+  country: string
+}
+
 export interface OwnerCompanyDetailsRow {
   user_id: string
   legal_name: string
@@ -25,12 +43,26 @@ export interface OwnerCompanyDetailsRow {
   vat_number: string | null
   vies_status: ViesStatus | null
   vies_checked_at: string | null
+  /** #4870: optional, stored only when the owner saves one. */
+  receipt_email: string | null
+  /** #4870: optional structured address, `null` when not saved. */
+  billing_address: OwnerAddress | null
+  /** #4870: optional structured address, `null` when not saved. */
+  shipping_address: OwnerAddress | null
   created_at: string
   updated_at: string
 }
 
+/**
+ * The stored row's columns, in one place: every statement below returns the
+ * same shape, and a column added to the table is added here once rather than
+ * to five `RETURNING` lists that can drift apart.
+ */
+const ROW_COLUMNS = `user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at,
+  receipt_email, billing_address, shipping_address, created_at, updated_at`
+
 export const GET_OWNER_COMPANY_DETAILS_SQL = `
-  SELECT user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
+  SELECT ${ROW_COLUMNS}
   FROM owner_company_details
   WHERE user_id = $1
 `
@@ -56,17 +88,29 @@ export interface UpsertOwnerCompanyDetailsInput {
    */
   vies_status: ViesStatus | null
   vies_checked_at: string | null
+  /**
+   * #4870. Required, not optional, for the same reason every other field is:
+   * this write REPLACES the row. The route's "omitted keeps, `null` clears"
+   * rule is resolved in `modules/owner-profile/service.ts`, which reads the
+   * previous row and passes the merged value here — so a caller that forgets
+   * one of these cannot silently wipe it, because it does not compile.
+   */
+  receipt_email: string | null
+  billing_address: OwnerAddress | null
+  shipping_address: OwnerAddress | null
 }
 
 /**
  * One row per user — insert or replace, never a partial update. The route
- * layer reads the existing row first (to decide the vies_status transition),
- * so a partial-update UPSERT would only invite two callers disagreeing about
+ * layer reads the existing row first (to decide the vies_status transition,
+ * and since #4870 to merge the three optional fields the request omitted), so
+ * a partial-update UPSERT would only invite two callers disagreeing about
  * what "unspecified" means for a nullable column.
  */
 export const UPSERT_OWNER_COMPANY_DETAILS_SQL = `
-  INSERT INTO owner_company_details (user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at)
-  VALUES ($1, $2, $3, $4, $5, $6, $7)
+  INSERT INTO owner_company_details (user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at,
+    receipt_email, billing_address, shipping_address)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
   ON CONFLICT (user_id) DO UPDATE SET
     legal_name = EXCLUDED.legal_name,
     country = EXCLUDED.country,
@@ -74,8 +118,11 @@ export const UPSERT_OWNER_COMPANY_DETAILS_SQL = `
     vat_number = EXCLUDED.vat_number,
     vies_status = EXCLUDED.vies_status,
     vies_checked_at = EXCLUDED.vies_checked_at,
+    receipt_email = EXCLUDED.receipt_email,
+    billing_address = EXCLUDED.billing_address,
+    shipping_address = EXCLUDED.shipping_address,
     updated_at = NOW()
-  RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
+  RETURNING ${ROW_COLUMNS}
 `
 
 export async function upsertOwnerCompanyDetails(
@@ -91,6 +138,12 @@ export async function upsertOwnerCompanyDetails(
     input.vat_number,
     input.vies_status,
     input.vies_checked_at,
+    input.receipt_email,
+    // Explicit JSON, never a bare object: node-postgres would serialise it
+    // too, but saying so here keeps the jsonb column's value unambiguous at
+    // the call site and independent of the driver's own coercion rules.
+    input.billing_address === null ? null : JSON.stringify(input.billing_address),
+    input.shipping_address === null ? null : JSON.stringify(input.shipping_address),
   ])
   return result.rows[0]
 }
@@ -120,7 +173,7 @@ export const SET_VIES_RESULT_SQL = `
   UPDATE owner_company_details
   SET vies_status = $2, vies_checked_at = $3, updated_at = NOW()
   WHERE user_id = $1 AND vat_number = $4 AND vies_status = 'pending'
-  RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
+  RETURNING ${ROW_COLUMNS}
 `
 
 /**
@@ -161,7 +214,7 @@ export const MARK_VIES_PENDING_SQL = `
   UPDATE owner_company_details
   SET vies_status = 'pending', vies_checked_at = NULL, updated_at = NOW()
   WHERE user_id = $1 AND vat_number IS NOT NULL
-  RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
+  RETURNING ${ROW_COLUMNS}
 `
 
 /**
@@ -194,7 +247,7 @@ export const CLAIM_STALE_PENDING_SQL = `
     AND vies_status = 'pending'
     AND vat_number IS NOT NULL
     AND updated_at < NOW() - ($2 || ' minutes')::INTERVAL
-  RETURNING user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at, created_at, updated_at
+  RETURNING ${ROW_COLUMNS}
 `
 
 export async function claimStalePendingForUser(

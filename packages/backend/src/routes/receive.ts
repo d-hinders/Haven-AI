@@ -18,10 +18,13 @@ import {
   inboundReceiveBalanceAtomic,
   listInboundTransfers,
   findAccountIdByAddressAndChain,
-  insertInboundTransfer,
   insertInboundReceiptDrop,
 } from '../infra/repositories/inbound-transfers.js'
-import { matchInboundTransferForAccount } from '../modules/transactions/index.js'
+import {
+  ingestInboundTransfers,
+  matchInboundTransferForAccount,
+  readInboundTransferByTxHash,
+} from '../modules/transactions/index.js'
 import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.js'
 
 /**
@@ -43,7 +46,10 @@ import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.
  *   the request body.
  * - `POST /:accountAddress/ingest` — the ingestion hook for tests and the
  *   eventual indexer tick. Owner-scoped: an owner indexes rows into their
- *   OWN ledger only.
+ *   OWN ledger only. Since #4903 it takes only `tx_hash` and reads the
+ *   transaction from the CHAIN — a caller-supplied payer, amount, token or
+ *   block time is refused, so a row for a hash that did not pay the account
+ *   cannot be created through any route.
  *
  * UNAUTHENTICATED-BUT-SIGNED (the #3333 receipt drop):
  *
@@ -271,6 +277,7 @@ export default async function receiveRoutes(
           off_ramp_destination: destination ? destinationBody(destination) : null,
           transfers: rows.map((row) => ({
             tx_hash: row.tx_hash,
+            log_index: row.log_index,
             payer_address: row.payer_address,
             amount_raw: row.amount_raw,
             amount_formatted: formatUsdc(row.amount_raw, decimals),
@@ -279,6 +286,8 @@ export default async function receiveRoutes(
             matched_payment_intent_id: row.matched_payment_intent_id,
             matched_receipt_id: row.matched_receipt_id,
             balance_consumed: row.balance_consumed,
+            // #4903: decided at index time, not derived at read time.
+            sender_is_own_address: row.sender_is_own_address,
             // Unmatched = unearned (#3333): the flag the UI renders as
             // "Unmatched", and the state nothing is delivered on.
             earned: row.match_kind !== null,
@@ -429,11 +438,18 @@ export default async function receiveRoutes(
       },
     )
 
-    // Ingestion hook for tests and the eventual indexer tick: records one
-    // inbound USDC transfer against the account. Owner-scoped like the rest
-    // of the plugin (the production indexer runs server-side with the
-    // account's own ownership already resolved).
-    ownerApp.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: { tx_hash?: unknown; payer_address?: unknown; token_address?: unknown; amount_raw?: unknown; block_time?: unknown; block_number?: unknown } }>(
+    // Ingestion hook for tests and the eventual indexer tick: records the
+    // inbound USDC transfers a transaction actually carried to this account.
+    //
+    // #4903 decision: this route VERIFIES AGAINST THE CHAIN. It used to insert
+    // a row from values the caller sent, with no chain check — a row planted
+    // through it would block the real one, and could then be matched as a sale.
+    // It now takes only `tx_hash`, reads the transaction's receipt from the
+    // chain, and indexes the settlement-token transfers whose `to` is this
+    // account. A caller-supplied payer, amount, token or block time is refused
+    // outright, so no row for a hash that did not pay the account can be
+    // created through any route.
+    ownerApp.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: { tx_hash?: unknown } }>(
       '/:accountAddress/ingest',
       async (request, reply) => {
         const { sub } = request.user as { sub: string }
@@ -445,16 +461,21 @@ export default async function receiveRoutes(
         if (!isValidAddress(accountAddress)) {
           return reply.code(400).send({ error: 'Invalid address' })
         }
-        const txHash = asString(request.body?.tx_hash)
-        const payerAddress = asString(request.body?.payer_address)
-        const amountRaw = asString(request.body?.amount_raw)
-        if (!txHash || !TX_HASH_RE.test(txHash) || !payerAddress || !ETH_ADDRESS_RE_STRICT.test(payerAddress) || !amountRaw) {
-          return reply.code(400).send({ error: 'tx_hash, payer_address and amount_raw are required' })
+
+        // The chain is the only source of a transfer's facts. A body that
+        // names any of them is refused rather than silently ignored, so a
+        // caller cannot believe it planted a row.
+        const body = (request.body ?? {}) as Record<string, unknown>
+        const callerSupplied = ['payer_address', 'amount_raw', 'token_address', 'block_time', 'block_number']
+        if (callerSupplied.some((field) => body[field] !== undefined)) {
+          return reply.code(400).send({
+            error: 'The ingest route reads the chain: it takes only tx_hash. payer_address, amount_raw, token_address, block_time and block_number are not accepted.',
+          })
         }
-        const blockTimeRaw = asString(request.body?.block_time)
-        const blockTime = blockTimeRaw ? new Date(blockTimeRaw) : new Date()
-        if (Number.isNaN(blockTime.getTime())) {
-          return reply.code(400).send({ error: 'block_time must be an ISO timestamp' })
+
+        const txHash = asString(body.tx_hash)
+        if (!txHash || !TX_HASH_RE.test(txHash)) {
+          return reply.code(400).send({ error: 'tx_hash is required' })
         }
 
         const ownershipRows = await findAccountOwnership(sub, accountAddress, chain.chainId)
@@ -462,23 +483,29 @@ export default async function receiveRoutes(
           return reply.code(403).send({ error: 'Not your account' })
         }
         const accountId = ownershipRows[0].id
-        const tokenAddress = usdcAddressForChain(chain.chainId)
-        if (!tokenAddress) {
-          return reply.code(400).send({ error: `No USDC token configured on chain ${chain.chainId}` })
+
+        const read = await readInboundTransferByTxHash({
+          chainId: chain.chainId,
+          accountAddress,
+          txHash,
+        })
+        if (!read.ok) {
+          // An RPC outage is "not known yet", never "this transaction did not
+          // pay you": nothing is written and the caller may retry.
+          return reply.code(503).send({ error: 'The chain could not be read; nothing was indexed' })
+        }
+        if (read.legs.length === 0) {
+          return reply.code(404).send({
+            error: 'No USDC transfer to this account in that transaction',
+          })
         }
 
-        const id = await insertInboundTransfer({
-          accountId,
-          userId: sub,
-          chainId: chain.chainId,
-          txHash,
-          payerAddress,
-          tokenAddress,
-          amountRaw,
-          blockNumber: asString(request.body?.block_number) ? Number(request.body?.block_number) : null,
-          blockTime,
-        })
-        return { ingested: id !== null, id }
+        const indexed = await ingestInboundTransfers(
+          { id: accountId, userId: sub, accountAddress, chainId: chain.chainId },
+          read.legs,
+          request.log,
+        )
+        return { ingested: indexed > 0, legs_indexed: indexed, tx_hash: txHash }
       },
     )
   })

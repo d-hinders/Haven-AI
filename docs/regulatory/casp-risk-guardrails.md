@@ -47,6 +47,9 @@ covers:
   - packages/backend/src/infra/repositories/smart-accounts.ts
   - packages/backend/src/infra/repositories/inbound-transfers.ts
   - packages/backend/src/modules/transactions/receive.ts
+  - packages/backend/src/modules/transactions/chain-read.ts
+  - packages/backend/src/modules/transactions/merchant-index.ts
+  - packages/backend/src/background-jobs.ts
   - packages/backend/src/modules/transactions/off-ramp.ts
   - packages/backend/src/routes/receive.ts
   - packages/backend/src/infra/repositories/payment-refusals.ts

@@ -82,10 +82,22 @@ export {
 } from './period.js'
 export {
   ingestInboundTransfers,
+  explorerRowsToLegs,
+  readInboundTransferByTxHash,
   matchInboundTransferForAccount,
   findX402PaytoSettlement,
   type InboundMatchResult,
+  type InboundTransferLeg,
+  type ChainInboundLeg,
+  type ChainReadResult,
 } from './receive.js'
+export {
+  runMerchantInboundIndexTick,
+  productionMerchantIndexDeps,
+  MAX_BLOCKS_PER_PASS,
+  type MerchantIndexDeps,
+  type MerchantIndexTickResult,
+} from './merchant-index.js'
 export {
   findOffRampDestination,
   setOffRampDestination,

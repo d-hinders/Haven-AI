@@ -32,6 +32,8 @@ export interface InboundTransferRow {
   matched_receipt_id: string | null
   matched_payment_intent_id: string | null
   balance_consumed: boolean
+  /** Decided at index time (#4903): the payer is one of the owner's own addresses. */
+  sender_is_own_address: boolean
 }
 
 /** How the row was linked to evidence — the two shapes #3333 names, keyed on the tx hash. */
@@ -42,46 +44,133 @@ export interface InsertInboundTransferInput {
   userId: string
   chainId: number
   txHash: string
+  /**
+   * The transfer's log index — the on-chain half of its identity (#4903).
+   * `null` when the source does not report one (Alchemy's transfers API, and
+   * every row written before migration 127); the unknown-case unique index
+   * then dedupes on (chain, hash, account, payer, amount).
+   */
   logIndex?: number | null
   payerAddress: string
   tokenAddress: string
   amountRaw: string
   blockNumber?: number | null
   blockTime: Date
+  /** Whether the payer is one of the owner's own addresses, decided HERE (#4903). */
+  senderIsOwnAddress?: boolean
 }
 
-const INSERT_INGEST_SQL = `
+/**
+ * The known-log-index insert (#4903). The conflict target names the partial
+ * unique index and repeats its predicate, which is how Postgres infers a
+ * partial index from `ON CONFLICT`.
+ */
+const INSERT_LEG_SQL = `
   INSERT INTO inbound_transfers (
     account_id, user_id, chain_id, tx_hash, log_index,
-    payer_address, token_address, amount_raw, block_number, block_time
+    payer_address, token_address, amount_raw, block_number, block_time,
+    sender_is_own_address
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-  ON CONFLICT (chain_id, LOWER(tx_hash), account_id) DO NOTHING
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+  ON CONFLICT (chain_id, LOWER(tx_hash), account_id, log_index) WHERE log_index IS NOT NULL
+  DO NOTHING
   RETURNING id`
 
 /**
- * Idempotent ingest: the unique index on (chain_id, LOWER(tx_hash), account_id)
- * is the dedupe, so re-reading an explorer window cannot double-count an
- * inbound payment — while one tx paying two accounts still lands one row per
- * receiving account (round-2 F-2; the old chain+hash key silently deleted the
- * second account's row). Returns the row id; `null` means the transfer was
- * already indexed for THIS account.
+ * The unknown-log-index insert (#4903). Same leg re-read → conflict; a second
+ * leg of the same transaction → a distinct row, because it differs in payer or
+ * amount.
+ */
+const INSERT_UNKNOWN_LEG_SQL = `
+  INSERT INTO inbound_transfers (
+    account_id, user_id, chain_id, tx_hash, log_index,
+    payer_address, token_address, amount_raw, block_number, block_time,
+    sender_is_own_address
+  )
+  VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, $10)
+  ON CONFLICT (chain_id, LOWER(tx_hash), account_id, payer_address, amount_raw) WHERE log_index IS NULL
+  DO NOTHING
+  RETURNING id`
+
+/**
+ * The reconcile rule (#4903): a leg whose log index is now known ADOPTS the
+ * unknown row the old identity wrote from that same leg — same chain, hash,
+ * account, payer and amount — by filling in its `log_index`. The adopted row
+ * keeps its amount, its match and its `balance_consumed` flag, so the receive
+ * balance does not move. `log_index IS NULL` in the WHERE makes the adoption
+ * one-way and race-safe: two replicas cannot both adopt the same row.
+ */
+const ADOPT_UNKNOWN_LEG_SQL = `
+  UPDATE inbound_transfers
+     SET log_index = $5,
+         sender_is_own_address = $6,
+         updated_at = NOW()
+   WHERE account_id = $1
+     AND user_id = $2
+     AND chain_id = $3
+     AND LOWER(tx_hash) = LOWER($4)
+     AND payer_address = LOWER($7)
+     AND amount_raw = $8
+     AND log_index IS NULL
+  RETURNING id`
+
+/**
+ * Idempotent ingest (#3333, identity widened by #4903). Returns the new row's
+ * id; `null` means this leg was already indexed for THIS account — either it
+ * conflicted on the identity, or it adopted a pre-migration row that had no
+ * log index.
+ *
+ * One transaction paying two accounts still lands one row per receiving
+ * account (round-2 F-2), and one transaction carrying several USDC legs to the
+ * same account now lands one row per LEG instead of collapsing them.
  */
 export async function insertInboundTransfer(
   input: InsertInboundTransferInput,
   db: Executor = pool,
 ): Promise<string | null> {
-  const result = await db.query<{ id: string }>(INSERT_INGEST_SQL, [
+  const logIndex = input.logIndex ?? null
+  const senderIsOwnAddress = input.senderIsOwnAddress ?? false
+
+  if (logIndex !== null) {
+    const adopted = await db.query<{ id: string }>(ADOPT_UNKNOWN_LEG_SQL, [
+      input.accountId,
+      input.userId,
+      input.chainId,
+      input.txHash,
+      logIndex,
+      senderIsOwnAddress,
+      input.payerAddress,
+      input.amountRaw,
+    ])
+    if (adopted.rowCount === 1) return null
+
+    const result = await db.query<{ id: string }>(INSERT_LEG_SQL, [
+      input.accountId,
+      input.userId,
+      input.chainId,
+      input.txHash,
+      logIndex,
+      input.payerAddress.toLowerCase(),
+      input.tokenAddress.toLowerCase(),
+      input.amountRaw,
+      input.blockNumber ?? null,
+      input.blockTime,
+      senderIsOwnAddress,
+    ])
+    return result.rows[0]?.id ?? null
+  }
+
+  const result = await db.query<{ id: string }>(INSERT_UNKNOWN_LEG_SQL, [
     input.accountId,
     input.userId,
     input.chainId,
     input.txHash,
-    input.logIndex ?? null,
     input.payerAddress.toLowerCase(),
     input.tokenAddress.toLowerCase(),
     input.amountRaw,
     input.blockNumber ?? null,
     input.blockTime,
+    senderIsOwnAddress,
   ])
   return result.rows[0]?.id ?? null
 }
@@ -93,6 +182,103 @@ export async function findOwnerUserIdForAccount(accountId: string): Promise<stri
     [accountId],
   )
   return result.rows[0]?.user_id ?? null
+}
+
+// ── The scheduled merchant index (#4903) ─────────────────────────────────────
+
+export interface MerchantAccountRow {
+  accountId: string
+  userId: string
+  accountAddress: string
+  chainId: number
+  createdAt: Date
+}
+
+/**
+ * Every account marked as a merchant account (#4895's marker), with the owner
+ * and the chain the pass must read. Deliberately NOT filtered by
+ * `merchant_service_settings.enabled`: indexing continues while merchant
+ * services are turned off, so the account's history stays complete (#4903).
+ */
+export async function listMerchantAccounts(db: Executor = pool): Promise<MerchantAccountRow[]> {
+  const result = await db.query<{
+    account_id: string
+    user_id: string
+    account_address: string
+    chain_id: number
+    created_at: Date
+  }>(
+    `SELECT id AS account_id, user_id, account_address, chain_id, created_at
+       FROM smart_accounts
+      WHERE is_merchant_account = true
+      ORDER BY created_at ASC`,
+  )
+  return result.rows.map((row) => ({
+    accountId: row.account_id,
+    userId: row.user_id,
+    accountAddress: row.account_address,
+    chainId: row.chain_id,
+    createdAt: row.created_at,
+  }))
+}
+
+export interface InboundIndexCursor {
+  chainId: number
+  /** The highest block the pass has fully indexed. */
+  lastIndexedBlock: number
+}
+
+/** The account's index cursor, or null when the pass has never run for it. */
+export async function findInboundIndexCursor(
+  accountId: string,
+  db: Executor = pool,
+): Promise<InboundIndexCursor | null> {
+  const result = await db.query<{ chain_id: number; last_indexed_block: string }>(
+    `SELECT chain_id, last_indexed_block
+       FROM inbound_index_cursors
+      WHERE account_id = $1`,
+    [accountId],
+  )
+  const row = result.rows[0]
+  if (!row) return null
+  return { chainId: row.chain_id, lastIndexedBlock: Number(row.last_indexed_block) }
+}
+
+/**
+ * Advance the account's cursor. Monotonic: a pass that finishes out of order
+ * (two replicas, one slower) can never move the cursor BACKWARDS and make the
+ * next pass re-read a range it already covered.
+ */
+export async function upsertInboundIndexCursor(
+  input: { accountId: string; chainId: number; lastIndexedBlock: number },
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO inbound_index_cursors (account_id, chain_id, last_indexed_block)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (account_id) DO UPDATE
+        SET last_indexed_block = GREATEST(inbound_index_cursors.last_indexed_block, EXCLUDED.last_indexed_block),
+            chain_id = EXCLUDED.chain_id,
+            updated_at = NOW()`,
+    [input.accountId, input.chainId, input.lastIndexedBlock],
+  )
+}
+
+/**
+ * The owner's own addresses — the set `sender_is_own_address` is decided
+ * against at index time (#4903). Today it is every `smart_accounts` row the
+ * user owns; #4897 defines the set for merchant sales and may widen it, which
+ * is why the flag is recorded per row rather than derived at read time.
+ */
+export async function listOwnAccountAddresses(
+  userId: string,
+  db: Executor = pool,
+): Promise<string[]> {
+  const result = await db.query<{ address: string }>(
+    'SELECT LOWER(account_address) AS address FROM smart_accounts WHERE user_id = $1',
+    [userId],
+  )
+  return result.rows.map((row) => row.address)
 }
 
 /**
@@ -148,7 +334,7 @@ const FIND_UNMATCHED_FOR_ACCOUNT_SQL = `
   SELECT id, account_id, user_id, chain_id, tx_hash, log_index,
          payer_address, token_address, amount_raw, block_number, block_time,
          match_kind, matched_receipt_id, matched_payment_intent_id,
-         balance_consumed
+         balance_consumed, sender_is_own_address
     FROM inbound_transfers
    WHERE account_id = $1
      AND user_id = $2
@@ -190,7 +376,7 @@ export async function findUnmatchedByTxHash(
     SELECT id, account_id, user_id, chain_id, tx_hash, log_index,
            payer_address, token_address, amount_raw, block_number, block_time,
            match_kind, matched_receipt_id, matched_payment_intent_id,
-           balance_consumed
+           balance_consumed, sender_is_own_address
       FROM inbound_transfers
      WHERE account_id = $1
        AND user_id = $2
@@ -268,6 +454,7 @@ export interface InboundReceiveLedgerRow {
   id: string
   chain_id: number
   tx_hash: string
+  log_index: number | null
   payer_address: string
   amount_raw: string
   block_time: Date
@@ -275,12 +462,13 @@ export interface InboundReceiveLedgerRow {
   matched_payment_intent_id: string | null
   matched_receipt_id: string | null
   balance_consumed: boolean
+  sender_is_own_address: boolean
 }
 
 const LIST_LEDGER_SQL = `
-  SELECT id, chain_id, tx_hash, payer_address, amount_raw, block_time,
+  SELECT id, chain_id, tx_hash, log_index, payer_address, amount_raw, block_time,
          match_kind, matched_payment_intent_id, matched_receipt_id,
-         balance_consumed
+         balance_consumed, sender_is_own_address
     FROM inbound_transfers
    WHERE account_id = $1
      AND user_id = $2

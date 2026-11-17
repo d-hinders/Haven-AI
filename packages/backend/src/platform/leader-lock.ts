@@ -105,6 +105,15 @@ export const LEADER_LOCK_KEYS = {
    * the ops console's #3602) filters `expires_at > NOW()` itself.
    */
   feedbackSweep: 811012,
+  /**
+   * The scheduled merchant inbound index (#4903, epic #4885) — walks every
+   * account marked as a merchant account and reads every USDC transfer into it
+   * since the last indexed block, straight from the chain. Leader-gated
+   * because every replica would otherwise run the same `eth_getLogs` scan and
+   * the RPC cost is the expensive part; correctness does not depend on it (the
+   * row identity is idempotent and the cursor only moves forward).
+   */
+  merchantInboundIndex: 811013,
 } as const
 
 /**

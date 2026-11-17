@@ -171,6 +171,11 @@ export interface InvoiceParams {
   txHash: string
   /** #2969: explicit settlement truth — see `SettlementState`. */
   settlement: SettlementState
+  /**
+   * #4890: the clock the invoice and due dates are read from. Defaults to
+   * now; a test injects it to reproduce a receipt byte for byte.
+   */
+  now?: Date
 }
 
 export interface Invoice {
@@ -265,7 +270,7 @@ const STATUS_BY_SETTLEMENT: Record<SettlementState, InvoiceJson['status']> = {
 
 export function generateInvoice(params: InvoiceParams): Invoice {
   const product = PRODUCTS[params.productId]
-  const today = new Date()
+  const today = params.now ? new Date(params.now.getTime()) : new Date()
   const dueDate = new Date(today)
   dueDate.setDate(dueDate.getDate() + 30)
 

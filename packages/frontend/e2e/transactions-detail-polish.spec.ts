@@ -24,6 +24,7 @@ import {
   depositTransaction,
   dismissMobileSidebar,
   failedTransaction,
+  measureDialogOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
   serveTransactions,
@@ -93,6 +94,60 @@ test.describe('detail panel polish — header alignment (A)', () => {
     expect(Math.abs(closeBox!.y - rowBox!.y - 16)).toBeLessThanOrEqual(1)
     expect(Math.abs(titleBox!.y - rowBox!.y - 16)).toBeLessThanOrEqual(1)
   })
+})
+
+test.describe('detail panel polish — the title wraps a long unbroken name (G)', () => {
+  // #4931: since #4883 the drawer title is the server's counterparty name, and
+  // a receipt seller or catalog name can run to
+  // `RECEIPT_MERCHANT_NAME_MAX_LENGTH` (120) characters with no spaces. The
+  // header row is not a scroll box, so without `break-words` the title spills
+  // past the close button and the panel's right edge — off-screen at 390,
+  // where the panel is full width.
+  const LONG_NAME = 'A'.repeat(120)
+
+  for (const width of VIEWPORTS) {
+    test(`a 120-character unbroken name wraps inside the header (${width})`, async ({ page }) => {
+      const browserErrors = collectBrowserErrors(page)
+      await mockHavenApi(page)
+      // The shared feed's first row, named by the server with the longest name
+      // a receipt seller can carry. Overlaid per test, so no baseline moves.
+      await serveTransactions(page, [{ ...dashboardTransaction, recipientName: LONG_NAME }])
+      await seedAuthenticatedSession(page)
+      const dialog = await openPanel(page, width, LONG_NAME)
+
+      const title = dialog.getByRole('heading', { name: LONG_NAME })
+      await expect(title).toBeVisible()
+      const close = dialog.getByRole('button', { name: 'Close' })
+      const titleBox = await title.boundingBox()
+      const closeBox = await close.boundingBox()
+      expect(titleBox, 'the long title renders').not.toBeNull()
+      expect(closeBox, 'the close button renders').not.toBeNull()
+      expect(
+        titleBox!.x + titleBox!.width,
+        `title right edge ${titleBox!.x + titleBox!.width} vs close left edge ${closeBox!.x}`,
+      ).toBeLessThanOrEqual(closeBox!.x)
+
+      // The rendered text, not just the box: without `break-words` the h2's
+      // box still ends at the flex track while its text runs past it.
+      const textRight = await title.evaluate((el) => {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        return range.getBoundingClientRect().right
+      })
+      expect(textRight, `title text right edge ${textRight} vs close left edge ${closeBox!.x}`).toBeLessThanOrEqual(
+        closeBox!.x,
+      )
+
+      const overlay = await measureDialogOverflow(page)
+      expect(overlay, `detail panel overflows: ${JSON.stringify(overlay)}`).toMatchObject({
+        dialogFound: true,
+        dialogCount: 1,
+        overlayOverflows: false,
+        offenderCount: 0,
+      })
+      expect(unexpectedBrowserErrors(browserErrors)).toEqual([])
+    })
+  }
 })
 
 test.describe('detail panel polish — the when-line separator (B)', () => {

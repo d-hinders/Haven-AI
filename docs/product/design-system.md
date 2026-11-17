@@ -134,7 +134,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-06
+last-verified: 2026-11-17
 ---
 
 # Haven Design System
@@ -566,6 +566,14 @@ go on the panel, where `box-sizing: border-box` takes them out of the scroll
 body between the header and footer rows — not on the rows themselves, because
 `footer` is optional: `TransactionDetailPanel` passes one only for a record with
 a real transaction hash (#4267), so the inset has to hold with and without it.
+
+The panel's title `<h2>` carries `break-words` (#4931). Since #4883 the drawer
+title is the server's counterparty name, and a receipt seller or catalog name
+can run to 120 characters with no spaces; the header row is not a scroll box, so
+an unbroken name would spill past the close button and the panel's right edge —
+off-screen at 390, where the panel is full width. `break-words`
+(`overflow-wrap: break-word`) wraps it inside the header; `break-all` is wrong
+here because it would split a normal two-word title mid-word.
 
 **Keep `backdrop-filter` off anything that spans a safe-area band** (#2819). The
 top bar originally grew the blurred `<header>` itself by `--v2-safe-top`, putting

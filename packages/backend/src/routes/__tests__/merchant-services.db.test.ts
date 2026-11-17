@@ -8,7 +8,11 @@
  *     whoever writes it;
  *   - the setting, the account and the marker commit together — a refusal
  *     leaves none of the three behind;
- *   - turning off and on again reuses the same account;
+ *   - turning off and on again reuses the same account, with no network and
+ *     no passkey id in the second request;
+ *   - a refused first turn-on (fields missing, network not served) leaves no
+ *     setting row behind;
+ *   - unlinking the default account never promotes the merchant account;
  *   - two concurrent turn-ons create ONE account (the setting-row lock plus the
  *     derived idempotency key);
  *   - the created account is not the default and has no agents.
@@ -31,6 +35,7 @@ vi.mock('../../rails/hybrid-provisioning.js', async (importOriginal) => {
 })
 
 const merchantServiceRoutes = (await import('../merchant-services.js')).default
+const { deleteAccountForUser } = await import('../../infra/repositories/smart-accounts.js')
 
 const KEY_A = '0x' + 'a1'.repeat(16)
 const KEY_B = '0x' + 'b2'.repeat(16)
@@ -126,7 +131,7 @@ describeDb('merchant services on the real database (#4895)', () => {
       chain_id: 84532,
       is_default: false,
       is_merchant_account: true,
-      name: 'Merchant account',
+      name: 'Sales',
     })
     expect(await settingRows(userId)).toEqual([{ enabled: true }])
 
@@ -198,12 +203,78 @@ describeDb('merchant services on the real database (#4895)', () => {
     // The account and its marker survive.
     expect(await merchantRows(userId)).toHaveLength(1)
 
-    const backOn = await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })
+    // Back on with NO network and NO passkey id: the approved dialog asks
+    // for neither once the account exists.
+    const backOn = await call(userId, 'POST')
     expect(backOn.statusCode, backOn.body).toBe(200)
     expect(backOn.json()).toMatchObject({ enabled: true, created: false })
     expect(backOn.json().merchant_account.id).toBe(accountId)
+    expect(await settingRows(userId)).toEqual([{ enabled: true }])
+    expect(await merchantRows(userId)).toHaveLength(1)
+
+    // And with the full first-time body, which a client may still send.
+    await call(userId, 'DELETE')
+    const withBody = await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })
+    expect(withBody.statusCode, withBody.body).toBe(200)
+    expect(withBody.json().merchant_account.id).toBe(accountId)
     expect(await merchantRows(userId)).toHaveLength(1)
     expect(mockCompute).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['no body', undefined, 'MERCHANT_SETUP_DETAILS_REQUIRED'],
+    ['no passkey id', { chain_id: 84532, source_account_id: 'SOURCE' }, 'MERCHANT_SETUP_DETAILS_REQUIRED'],
+    ['a network that is not served', { chain_id: 1, source_account_id: 'SOURCE', key_id: KEY_A }, 'UNSUPPORTED_NETWORK'],
+  ])('a first turn-on with %s is refused and leaves no setting row', async (_label, body, code) => {
+    const { userId, sourceId } = await seedUserWithSource([KEY_A])
+    const payload = body && { ...body, source_account_id: sourceId }
+
+    const res = await call(userId, 'POST', payload)
+    expect(res.statusCode, res.body).toBe(400)
+    expect(res.json()).toMatchObject({ error_code: code })
+
+    // The lock created the setting row inside the transaction; the refusal
+    // rolled it back.
+    expect(await settingRows(userId)).toEqual([])
+    expect(await merchantRows(userId)).toEqual([])
+    expect(mockCompute).not.toHaveBeenCalled()
+  })
+
+  it('unlinking the default account never promotes the merchant account to default', async () => {
+    const { userId, sourceId } = await seedUserWithSource([KEY_A])
+    const on = await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })
+    expect(on.statusCode, on.body).toBe(201)
+
+    // The source account is the default and the merchant account is the only
+    // other one: the promotion that follows the unlink has no candidate.
+    expect(await deleteAccountForUser(sourceId, userId, true)).toBe(true)
+
+    const left = await db.query<{ is_default: boolean; is_merchant_account: boolean }>(
+      `SELECT is_default, is_merchant_account FROM smart_accounts WHERE user_id = $1`,
+      [userId],
+    )
+    expect(left.rows).toEqual([{ is_default: false, is_merchant_account: true }])
+  })
+
+  it('POSITIVE CONTROL: unlinking the default account still promotes an ordinary account', async () => {
+    const { userId, sourceId } = await seedUserWithSource([KEY_A])
+    const on = await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })
+    expect(on.statusCode, on.body).toBe(201)
+    // An ordinary account, created AFTER the merchant account: the promotion
+    // must pass over the older merchant row to reach it.
+    const ordinary = await db.query<{ id: string }>(
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, created_at)
+       VALUES ($1, $2, 84532, 'delegation', 'delegator_hybrid', false, NOW() + INTERVAL '1 minute') RETURNING id`,
+      [userId, '0x' + randomUUID().replace(/-/g, '').padEnd(40, '0').slice(0, 40)],
+    )
+
+    expect(await deleteAccountForUser(sourceId, userId, true)).toBe(true)
+
+    const defaults = await db.query<{ id: string }>(
+      `SELECT id FROM smart_accounts WHERE user_id = $1 AND is_default`,
+      [userId],
+    )
+    expect(defaults.rows).toEqual([{ id: ordinary.rows[0].id }])
   })
 
   it('refuses a different network with MERCHANT_ACCOUNT_ON_OTHER_NETWORK, never the key-reuse code', async () => {

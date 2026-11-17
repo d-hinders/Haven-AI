@@ -446,8 +446,10 @@ account with `409 MERCHANT_ACCOUNT_UNLINK_REFUSED`; turning merchant services
 off keeps the account and its history, which is the supported way to stop
 receiving. `PUT /user/accounts/:accountId/default` refuses it too, with
 `409 MERCHANT_ACCOUNT_DEFAULT_REFUSED`, because the receiving account must not
-also be the default spending account. Both refusals are database reads on the
-marker — they grant nothing, sign nothing, and touch no chain.
+also be the default spending account. The promotion that follows unlinking the
+default account skips it for the same reason, so a user whose only remaining
+account is the merchant account has no default account. All three are database
+reads on the marker — they grant nothing, sign nothing, and touch no chain.
 
 **Credential revocation closes new grant lifecycle steps (#2025).** An agent
 already revoked at request entry cannot build or activate a fresh delegation:

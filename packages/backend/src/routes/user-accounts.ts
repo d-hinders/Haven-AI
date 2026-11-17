@@ -142,12 +142,14 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
       // #4895: unlinking is a hard DELETE of the account row, and the indexed
       // payments go with it. The merchant account is the account merchant
       // payments are received into, so it is refused while it holds the
-      // marker — turning merchant services off keeps the account and its
-      // history, which is the supported way to stop receiving.
+      // marker. Nothing clears the marker for the pilot: turning merchant
+      // services off keeps the account and its history, and that is the
+      // supported way to stop receiving — it does not make the account
+      // unlinkable, so the sentence must not say it does.
       if (owned.is_merchant_account) {
         return reply.code(409).send({
           error:
-            'This Haven wallet is your merchant account. Turn merchant services off before unlinking it.',
+            'This Haven wallet is your Sales account and cannot be unlinked. To stop receiving, turn merchant services off.',
           error_code: MERCHANT_ACCOUNT_UNLINK_REFUSED,
         })
       }

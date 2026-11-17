@@ -343,8 +343,18 @@ export const HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
            AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
        ) AS in_flight`
 
+/**
+ * The account promoted to default when the default account is unlinked.
+ *
+ * #4895: the merchant account is never a candidate. Make-default refuses it
+ * (`MERCHANT_ACCOUNT_DEFAULT_REFUSED`), and this promotion is the other way an
+ * account becomes the default — without the filter, unlinking the default
+ * account of a user whose only other account is the merchant account would
+ * promote it. With no other account left the user has no default, the same
+ * state as before their first account.
+ */
 export const FIND_OLDEST_ACCOUNT_FOR_USER_SQL = `SELECT id, account_address FROM smart_accounts
-             WHERE user_id = $1
+             WHERE user_id = $1 AND NOT is_merchant_account
              ORDER BY created_at ASC
              LIMIT 1`
 

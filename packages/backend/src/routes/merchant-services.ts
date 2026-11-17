@@ -13,11 +13,18 @@
  *   3. marks that account as the merchant account
  *      (`smart_accounts.is_merchant_account`).
  *
- * The request carries what the existing path takes — the network, the user's
- * existing account and the id of one of its passkeys. It names NO account to
- * mark: the account is the one this request creates. The server receives no
- * passkey assertion; it checks that the passkey id belongs to the source
- * account, and the session is the authentication.
+ * The FIRST turn-on carries what the existing path takes — the network, the
+ * user's existing account and the id of one of its passkeys. It names NO
+ * account to mark: the account is the one this request creates. The server
+ * receives no passkey assertion; it checks that the passkey id belongs to the
+ * source account, and the session is the authentication.
+ *
+ * Once the merchant account exists, turning merchant services back on needs
+ * none of the three: the route answers the existing account without calling
+ * the creation logic, so there is no network to choose and no passkey to copy.
+ * The dialog sends an empty request then. All three fields are therefore
+ * optional in the schema and required by the handler only when there is no
+ * merchant account yet (`MERCHANT_SETUP_DETAILS_REQUIRED`).
  *
  * `DELETE /merchant-services` records the setting as off and keeps the account
  * and its history. `GET /merchant-services` returns the setting and the
@@ -32,7 +39,9 @@
  * turn-on naming a different chain is refused with
  * `MERCHANT_ACCOUNT_ON_OTHER_NETWORK` — never with the generic key-reuse code,
  * because the existing-merchant-account check runs BEFORE the creation logic
- * and therefore before any idempotency key is derived.
+ * and therefore before any idempotency key is derived. It also runs before
+ * the supported-network check, so any network other than the account's gets
+ * that one code, served or not.
  *
  * ## Why the setting row is locked first
  *
@@ -72,16 +81,21 @@ import {
 import {
   MERCHANT_ACCOUNT_NAME,
   MERCHANT_ACCOUNT_ON_OTHER_NETWORK,
+  MERCHANT_SETUP_DETAILS_REQUIRED,
   merchantIdempotencyKey,
 } from '../domain/merchant-services.js'
 
+/**
+ * Every field is optional on the wire: required the first time, when the
+ * account is created, and not needed once the merchant account exists.
+ */
 interface TurnOnBody {
   /** The network the merchant account is created on. Permanent for the pilot. */
-  chain_id: number
+  chain_id?: number
   /** An account the caller owns; the merchant account's owner passkey is copied from it. */
-  source_account_id: string
+  source_account_id?: string
   /** The WebAuthn credential the user authenticated with; must be on the source account. */
-  key_id: string
+  key_id?: string
 }
 
 /**
@@ -120,20 +134,10 @@ export default async function merchantServiceRoutes(app: FastifyInstance): Promi
    * existing one (a repeat, a retry, or the second tab). Both carry the same
    * body; `created` says which happened.
    */
-  app.post<{ Body: TurnOnBody }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
+  app.post<{ Body: TurnOnBody | null }>('/', { config: moneyPathRateLimit }, async (request, reply) => {
     const { sub } = request.user as { sub: string }
+    // Turning merchant services back on sends no body at all.
     const { chain_id, source_account_id, key_id } = request.body ?? {}
-
-    // The network check runs before anything is written, and carries a code
-    // the dialog can branch on (#4895) — the create-additional path answers
-    // this case with a sentence and no code.
-    if (!DELEGATION_RAIL_CHAIN_IDS.has(chain_id)) {
-      return reply.code(400).send({
-        error: `Merchant services are not available on chain ${chain_id} yet`,
-        error_code: UNSUPPORTED_NETWORK,
-        supported: [...DELEGATION_RAIL_CHAIN_IDS],
-      })
-    }
 
     let outcome: { account: MerchantAccountRow; created: boolean }
     try {
@@ -142,12 +146,13 @@ export default async function merchantServiceRoutes(app: FastifyInstance): Promi
         await lockMerchantSetting(sub, tx)
 
         // The existing-merchant-account check runs BEFORE the creation logic,
-        // so a repeat answers the account whichever passkey the request names
-        // — and a different network is refused with its own code rather than
-        // reaching the idempotency key.
+        // so turning merchant services back on answers the account with no
+        // network and no passkey in the request — and a network that IS named
+        // and differs is refused with its own code rather than reaching the
+        // idempotency key.
         const existing = await findMerchantAccountForUser(sub, tx)
         if (existing !== null) {
-          if (Number(existing.chain_id) !== chain_id) {
+          if (chain_id !== undefined && Number(existing.chain_id) !== chain_id) {
             throw new MerchantRefusal(409, {
               error:
                 `Merchant services are already on for chain ${existing.chain_id}. ` +
@@ -158,6 +163,32 @@ export default async function merchantServiceRoutes(app: FastifyInstance): Promi
           }
           await enableMerchantSetting(sub, tx)
           return { account: existing, created: false }
+        }
+
+        // No merchant account yet, so this request creates it and needs all
+        // three fields. Every refusal below is thrown, so the setting row the
+        // lock created rolls back with the transaction.
+        const missing = [
+          ...(chain_id === undefined ? ['chain_id'] : []),
+          ...(source_account_id === undefined ? ['source_account_id'] : []),
+          ...(key_id === undefined ? ['key_id'] : []),
+        ]
+        if (chain_id === undefined || source_account_id === undefined || key_id === undefined) {
+          throw new MerchantRefusal(400, {
+            error: `Turning merchant services on for the first time needs ${missing.join(', ')}`,
+            error_code: MERCHANT_SETUP_DETAILS_REQUIRED,
+            missing,
+          })
+        }
+
+        // A code the dialog can branch on (#4895) — the create-additional
+        // path answered this case with a sentence and no code.
+        if (!DELEGATION_RAIL_CHAIN_IDS.has(chain_id)) {
+          throw new MerchantRefusal(400, {
+            error: `Merchant services are not available on chain ${chain_id} yet`,
+            error_code: UNSUPPORTED_NETWORK,
+            supported: [...DELEGATION_RAIL_CHAIN_IDS],
+          })
         }
 
         // The SAME creation the New account dialog uses, inside THIS

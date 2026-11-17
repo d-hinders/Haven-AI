@@ -4536,7 +4536,7 @@ export const openapiSpec = {
           '409': {
             ...errorResponse,
             description:
-              'The account remains linked while a delegation, recovery, or re-key is in progress. Also (#4895) the account is the merchant account: error_code MERCHANT_ACCOUNT_UNLINK_REFUSED — unlinking deletes the account row and its indexed payments, so turn merchant services off instead.',
+              'The account remains linked while a delegation, recovery, or re-key is in progress. Also (#4895) the account is the merchant account: error_code MERCHANT_ACCOUNT_UNLINK_REFUSED — unlinking deletes the account row and its indexed payments. Turning merchant services off stops receiving and keeps the account.',
           },
         },
       },
@@ -5750,7 +5750,7 @@ export const openapiSpec = {
           '400': {
             ...errorResponse,
             description:
-              'Bad owner configuration, a chain the delegation rail does not serve (error_code UNSUPPORTED_NETWORK, with `supported` — #4895), a mixed/ambiguous request shape, or an idempotency_key in the reserved `merchant-service:` namespace (#4895).',
+              'Bad owner configuration, a chain the delegation rail does not serve (error_code UNSUPPORTED_NETWORK, with `supported` — #4895), a mixed/ambiguous request shape, or an idempotency_key in the reserved `merchant-service:` namespace (error_code RESERVED_IDEMPOTENCY_KEY when the handler refuses it — #4895).',
           },
           '401': errorResponse,
           '404': {
@@ -9775,32 +9775,35 @@ export const openapiSpec = {
         operationId: 'turnOnMerchantServices',
         summary: 'Turn merchant services on: record the setting and create the merchant account.',
         description:
-          'One request, one transaction (#4895, epic #4885). Records the per-user setting, creates a dedicated account through the SAME create-additional path the New account dialog uses (the owner passkey is copied SERVER-SIDE from `source_account_id`; the server receives no passkey assertion and the session is the authentication), and marks that account as the merchant account. The request names NO account to mark — the account is the one this request creates, and a body carrying any other property is refused by this schema (`additionalProperties: false`). The account is created with a fixed server-side name, is never the default, has no agents or budgets, and counts toward the existing per-network account limit. There is ONE merchant account per user, enforced by a partial unique index on the marker; the network chosen when merchant services are first turned on is permanent for the pilot, so a turn-on naming a different chain is refused with `MERCHANT_ACCOUNT_ON_OTHER_NETWORK`. A repeat, a retry or a second tab answers the existing account (200) instead of creating a second one: the route derives its idempotency key in the `merchant-service:` namespace, which `POST /accounts/hybrid` refuses from clients.',
+          'One request, one transaction (#4895, epic #4885). Records the per-user setting, creates a dedicated account through the SAME create-additional path the New account dialog uses (the owner passkey is copied SERVER-SIDE from `source_account_id`; the server receives no passkey assertion and the session is the authentication), and marks that account as the merchant account. The request names NO account to mark — the account is the one this request creates, and a body carrying any other property is refused by this schema (`additionalProperties: false`). The account is created with the name "Sales", set on the server (the owner can rename it later), is never the default, has no agents or budgets, and counts toward the existing per-network account limit. There is ONE merchant account per user, enforced by a partial unique index on the marker; the network chosen when merchant services are first turned on is permanent for the pilot, so a turn-on naming a different chain is refused with `MERCHANT_ACCOUNT_ON_OTHER_NETWORK`. The three body fields are required the FIRST time, when the account is created (`MERCHANT_SETUP_DETAILS_REQUIRED` names the missing ones), and none is needed once the merchant account exists: turning merchant services back on sends no body, or an empty one. A repeat, a retry or a second tab answers the existing account (200) instead of creating a second one: the route derives its idempotency key in the `merchant-service:` namespace, which `POST /accounts/hybrid` refuses from clients.',
         security: [{ DashboardJwt: [] }],
         requestBody: {
-          required: true,
+          // Not required: turning merchant services back on, with the
+          // merchant account already there, sends no body.
+          required: false,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['chain_id', 'source_account_id', 'key_id'],
+                // No `required`: the three fields are required by the handler
+                // only when there is no merchant account yet.
                 additionalProperties: false,
                 properties: {
                   chain_id: {
                     type: 'integer',
                     description:
-                      'The network the merchant account is created on. Permanent for the pilot once merchant services are on.',
+                      'The network the merchant account is created on. Required the first time; permanent for the pilot once merchant services are on. Optional afterwards, and refused with MERCHANT_ACCOUNT_ON_OTHER_NETWORK when it differs from the merchant account\'s network.',
                   },
                   source_account_id: {
                     type: 'string',
                     format: 'uuid',
                     description:
-                      'An account the caller owns. The merchant account\'s owner passkey is copied from this row\'s stored signer set.',
+                      'An account the caller owns. The merchant account\'s owner passkey is copied from this row\'s stored signer set. Required the first time; not read once the merchant account exists.',
                   },
                   key_id: {
                     type: 'string',
                     description:
-                      'The WebAuthn credential the user authenticated with. Must be a passkey on the source account; the merchant account derives from it alone.',
+                      'The WebAuthn credential the user authenticated with. Must be a passkey on the source account; the merchant account derives from it alone. Required the first time; not read once the merchant account exists.',
                   },
                 },
               },
@@ -9814,13 +9817,13 @@ export const openapiSpec = {
           },
           '200': {
             description:
-              'Merchant services are on and the caller already had a merchant account on this network — a repeat, a retry, or the second tab. `created` is false.',
+              'Merchant services are on and the caller already had a merchant account — turning merchant services back on, a repeat, a retry, or the second tab. `created` is false.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantServicesState' } } },
           },
           '400': {
             ...errorResponse,
             description:
-              'The network is not served by the delegation rail: error_code UNSUPPORTED_NETWORK, with `supported`.',
+              'There is no merchant account yet and the request left out a field it needs (error_code MERCHANT_SETUP_DETAILS_REQUIRED, with `missing`), or the network is not served by the delegation rail (error_code UNSUPPORTED_NETWORK, with `supported`).',
           },
           '401': errorResponse,
           '404': {

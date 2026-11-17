@@ -10,15 +10,17 @@
  *
  * What is pinned, in the order the route checks it:
  *
- * 1. The network check runs before anything is written and carries
- *    `UNSUPPORTED_NETWORK` — the create-additional path answers that case with
- *    a sentence and no code.
- * 2. The existing-merchant-account check runs BEFORE the creation logic, so a
- *    repeat answers the account whichever passkey the request names, and a
- *    different network is refused with `MERCHANT_ACCOUNT_ON_OTHER_NETWORK`
- *    rather than reaching the idempotency key.
+ * 1. The existing-merchant-account check runs BEFORE the creation logic, so
+ *    turning merchant services back on answers the account with no network
+ *    and no passkey in the request, and a network that is named and differs is
+ *    refused with `MERCHANT_ACCOUNT_ON_OTHER_NETWORK` rather than reaching the
+ *    idempotency key.
+ * 2. With no merchant account yet, the three fields are required
+ *    (`MERCHANT_SETUP_DETAILS_REQUIRED`) and the network must be served
+ *    (`UNSUPPORTED_NETWORK` — the create-additional path answered that case
+ *    with a sentence and no code). Neither refusal creates anything.
  * 3. The creation is the create-additional path, with the derived key in the
- *    reserved `merchant-service:` namespace, the fixed server-side name, and
+ *    reserved `merchant-service:` namespace, the server-side name "Sales", and
  *    `is_default` false.
  * 4. Every create-additional refusal code reaches the client unchanged.
  * 5. The request body is closed: a body naming an account to mark is refused
@@ -68,7 +70,7 @@ const CREATED_ACCOUNT: MerchantRow = {
   id: ACCOUNT_ID,
   account_address: HYBRID,
   chain_id: 84532,
-  name: 'Merchant account',
+  name: 'Sales',
   created_at: '2026-11-17T00:00:00Z',
 }
 
@@ -172,6 +174,19 @@ function mockDb(opts: MockOpts = {}) {
 
 const TURN_ON = { chain_id: 84532, source_account_id: SOURCE_ID, key_id: 'cred-1' }
 
+/** A refused turn-on: no derivation, no account row, no marker, setting never enabled. */
+function expectNothingCreated(calls: Array<[string, unknown[]]>) {
+  expect(mockCompute).not.toHaveBeenCalled()
+  for (const fragment of [
+    /INSERT INTO hybrid_deploy_salt_counters/,
+    /INSERT INTO smart_accounts/,
+    /SET is_merchant_account = true/,
+    /SET enabled = true/,
+  ]) {
+    expect(calls.some(([s]) => fragment.test(s)), String(fragment)).toBe(false)
+  }
+}
+
 describe('merchant services routes (#4895)', () => {
   let app: FastifyInstance
   let token: string
@@ -226,7 +241,7 @@ describe('merchant services routes (#4895)', () => {
           id: ACCOUNT_ID,
           account_address: HYBRID,
           chain_id: 84532,
-          name: 'Merchant account',
+          name: 'Sales',
         },
       })
       expectMatchesSpec('POST', '/merchant-services', res.json(), '201')
@@ -241,9 +256,9 @@ describe('merchant services routes (#4895)', () => {
       expect(markAt).toBeLessThan(enableAt)
 
       // The account is created through the create-additional path, with the
-      // derived key in the reserved namespace and the fixed server-side name.
+      // derived key in the reserved namespace and the server-side name.
       const insert = calls.find(([s]) => /INSERT INTO smart_accounts/.test(s))!
-      expect(insert[1][3]).toBe('Merchant account') // name
+      expect(insert[1][3]).toBe('Sales') // name
       expect(insert[1][4]).toBe(false) // is_default — never the default
       expect(insert[1][8]).toBe('merchant-service:84532') // idempotency key
     })
@@ -277,7 +292,7 @@ describe('merchant services routes (#4895)', () => {
       expect(calls.some(([s]) => /create_idempotency_key = \$2/.test(s))).toBe(false)
     })
 
-    it('refuses an unsupported network with UNSUPPORTED_NETWORK before writing anything', async () => {
+    it('refuses an unsupported network with UNSUPPORTED_NETWORK and creates nothing', async () => {
       const calls = mockDb({})
       const res = await call('POST', '/merchant-services', { ...TURN_ON, chain_id: 1 })
 
@@ -285,7 +300,50 @@ describe('merchant services routes (#4895)', () => {
       expect(res.json()).toMatchObject({ error_code: 'UNSUPPORTED_NETWORK' })
       expect(Array.isArray(res.json().supported)).toBe(true)
       expectMatchesSpec('POST', '/merchant-services', res.json(), '400')
-      expect(calls).toHaveLength(0)
+      // The creation logic never ran and the setting was never enabled. That
+      // the locked setting row rolls back is proven on the real database.
+      expectNothingCreated(calls)
+    })
+
+    it.each([
+      ['no body at all', undefined],
+      ['an empty body', {}],
+    ])('turning back on with %s answers the existing merchant account — 200, created false', async (_label, payload) => {
+      const calls = mockDb({ merchantAccount: CREATED_ACCOUNT })
+      const res = await call('POST', '/merchant-services', payload)
+
+      expect(res.statusCode, res.body).toBe(200)
+      expect(res.json()).toEqual({ enabled: true, created: false, merchant_account: CREATED_ACCOUNT })
+      expectMatchesSpec('POST', '/merchant-services', res.json(), '200')
+      expect(calls.some(([s]) => /SET enabled = true/.test(s))).toBe(true)
+      expect(mockCompute).not.toHaveBeenCalled()
+      expect(calls.some(([s]) => /INSERT INTO hybrid_deploy_salt_counters/.test(s))).toBe(false)
+      expect(calls.some(([s]) => /INSERT INTO smart_accounts/.test(s))).toBe(false)
+    })
+
+    it('refuses a named network that differs from the merchant account\'s even when it is not a served one', async () => {
+      const calls = mockDb({ merchantAccount: CREATED_ACCOUNT })
+      const res = await call('POST', '/merchant-services', { chain_id: 1 })
+
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'MERCHANT_ACCOUNT_ON_OTHER_NETWORK', chain_id: 84532 })
+      expect(calls.some(([s]) => /SET enabled = true/.test(s))).toBe(false)
+    })
+
+    it.each([
+      ['no body at all', undefined, ['chain_id', 'source_account_id', 'key_id']],
+      ['an empty body', {}, ['chain_id', 'source_account_id', 'key_id']],
+      ['no network', { source_account_id: SOURCE_ID, key_id: 'cred-1' }, ['chain_id']],
+      ['no source account', { chain_id: 84532, key_id: 'cred-1' }, ['source_account_id']],
+      ['no passkey id', { chain_id: 84532, source_account_id: SOURCE_ID }, ['key_id']],
+    ])('the first turn-on with %s is refused with MERCHANT_SETUP_DETAILS_REQUIRED', async (_label, payload, missing) => {
+      const calls = mockDb({})
+      const res = await call('POST', '/merchant-services', payload)
+
+      expect(res.statusCode, res.body).toBe(400)
+      expect(res.json()).toMatchObject({ error_code: 'MERCHANT_SETUP_DETAILS_REQUIRED', missing })
+      expectMatchesSpec('POST', '/merchant-services', res.json(), '400')
+      expectNothingCreated(calls)
     })
 
     it('refuses a body that names an account to mark — the schema closes the body', async () => {
@@ -454,7 +512,43 @@ describe('the reserved merchant-service idempotency namespace (#4895)', () => {
       },
     })
     expect(res.statusCode).toBe(400)
+    // The SCHEMA's refusal, not the handler's: the handler answers
+    // RESERVED_IDEMPOTENCY_KEY, and is proven separately below.
+    expect(res.json()).toMatchObject({ error_code: 'invalid_request' })
     expect(calls).toHaveLength(0)
+  })
+
+  it('the handler refuses the reserved namespace too, with request validation off', async () => {
+    // `HAVEN_REQUEST_VALIDATION=off|shadow` is a documented kill switch; the
+    // schema refuses nothing there, so the namespace must not depend on it.
+    const bare = Fastify({ logger: false })
+    await bare.register(fastifyJwt, { secret: 'test-secret' })
+    await bare.register(hybridAccountRoutes, { prefix: '/accounts' })
+    try {
+      const calls = mockDb({})
+      for (const payload of [
+        { chain_id: 84532, source_account_id: SOURCE_ID, key_id: 'cred-1', idempotency_key: 'merchant-service:84532' },
+        // The signup shape stores the key too.
+        {
+          chain_id: 84532,
+          passkeys: [{ key_id: 'cred-1', x: PASSKEY.public_key_x, y: PASSKEY.public_key_y }],
+          idempotency_key: 'merchant-service:anything',
+        },
+      ]) {
+        const res = await bare.inject({
+          method: 'POST',
+          url: '/accounts/hybrid',
+          headers: { authorization: `Bearer ${bare.jwt.sign({ sub: 'user-1', email: 'ada@example.com' })}` },
+          payload,
+        })
+        expect(res.statusCode, res.body).toBe(400)
+        expect(res.json()).toMatchObject({ error_code: 'RESERVED_IDEMPOTENCY_KEY' })
+      }
+      expect(calls.some(([s]) => /INSERT INTO smart_accounts/.test(s))).toBe(false)
+      expect(mockCompute).not.toHaveBeenCalled()
+    } finally {
+      await bare.close()
+    }
   })
 
   it('still accepts an ordinary key — the refusal is the namespace, not idempotency keys', async () => {

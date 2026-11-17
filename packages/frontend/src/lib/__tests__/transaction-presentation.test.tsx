@@ -469,6 +469,16 @@ describe('counterpartyLabel uses the server-resolved name (#4883)', () => {
     ).toBe('Deposit')
   })
 
+  it('an address-shaped server name is not a name: the row falls back and never shows the address', () => {
+    const address = '0xA87300000000000000000000000000000000DD35'
+    expect(counterpartyLabel(tx({ ...PAID, recipientName: address }), undefined, undefined, { noAddress: true })).toBe(
+      'api.nordshield.example',
+    )
+    expect(
+      counterpartyLabel(tx({ direction: 'out', source: 'direct', recipientName: address }), undefined, undefined, { noAddress: true }),
+    ).toBe('New recipient')
+  })
+
   it('an empty server name counts as none and never surfaces a raw address', () => {
     const label = counterpartyLabel(tx({ direction: 'out', source: 'direct', recipientName: '' }), undefined, undefined, {
       noAddress: true,

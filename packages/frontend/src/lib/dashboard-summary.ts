@@ -26,8 +26,8 @@ import { formatFiatDisplay, SUB_CENT_THRESHOLD } from '@/lib/format'
  *    most two agents. The dominant split prints figures only when both the
  *    agent's share and the total are at or above the threshold.
  * 4. **No raw address is ever named.** The merchant renders through #3810's
- *    counterparty rules (`merchantDisplayName`): contact name, else receipt
- *    name, else the x402 resource HOST. A bare recipient address has no
+ *    counterparty rules (`merchantDisplayName`): the server's name in the one
+ *    naming order (#4882), else the x402 resource hostname. A bare recipient address has no
  *    displayable name — the sentence falls back to a count, not the address.
  *
  * The spend figures are #3803's NET definition (booked-or-repriced fiat with
@@ -88,8 +88,8 @@ export function merchantDisplayName(
 }
 
 /**
- * The two displayable-name sources, in order: the resolved contact/receipt
- * name, then the x402 resource HOST (#4707 reuses this for the first-payment
+ * The two displayable-name sources, in order: the server's name in the one
+ * naming order (#4882), then the x402 resource hostname (#4707 reuses this for the first-payment
  * card, whose wire shape carries no `key`). A bare address is never a name.
  */
 export function merchantNameFromParts(parts: {

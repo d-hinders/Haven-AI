@@ -58,7 +58,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-08"
+last-verified: "2026-11-17"
 ---
 
 # Haven Screen Recipes
@@ -1330,7 +1330,8 @@ Money and risk clarity:
   detection is not exact on every provider, and the reason lives in the code.
 - The ROW leads with the counterparty (above), never "Agent payment by …" (#4266), and so does the detail drawer's title (#4267). "You" is reserved for human-initiated payments only (#2097): a transaction with no attribution never says "you" — the drawer's header line reads "Sent from", "Paid from" or "Attempted from" <account>, naming no actor.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
-  one merchant-facing row titled with the merchant's hostname. On the
+  one merchant-facing row titled with the server's name for the merchant,
+  else its hostname (#4883). On the
   eip3009 bridge the funding leg is REAL and present on every payment (#946):
   the account funds the agent's delegate key first, then the delegate pays
   the merchant from the agent's signed authorization. The row still

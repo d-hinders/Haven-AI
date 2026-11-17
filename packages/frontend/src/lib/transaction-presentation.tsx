@@ -1,6 +1,6 @@
 import { TransactionMovement } from '@/components/haven'
 import type { AmountCurrency } from '@/components/haven/Amount'
-import { shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
+import { isAddress, shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
@@ -114,6 +114,17 @@ function ownAccountSenderName(
 }
 
 /**
+ * #4883: the server-resolved counterparty name, when it named one. A name
+ * that is itself an address is still an address (the `agentMerchantLabel`
+ * rule): a receipt seller name is merchant-written text, so an address-shaped
+ * one is not a name and the row falls back as if the server named nobody.
+ */
+function serverName(tx: CounterpartyFields, options: { resolvedName?: string | null }): string | null {
+  const name = (options.resolvedName || tx.recipientName || '').trim()
+  return name && !isAddress(name) ? name : null
+}
+
+/**
  * The counterparty half of a movement line. `transactionMovement` renders it
  * inside "From … → To …"; the dashboard (#3810) reads it DIRECTLY as the
  * merchant-first row title.
@@ -134,8 +145,9 @@ function ownAccountSenderName(
  *
  * #4883: the server names the counterparty in Haven's one naming order
  * (#4882: own account, contact, catalog merchant, receipt seller, resource
- * host) — `tx.recipientName` on `/transactions` rows, `options.resolvedName`
- * on the activity groups and the agent ledger. On an outgoing row that name
+ * host) — `tx.recipientName` on `/transactions` and agent-ledger payment
+ * rows, `options.resolvedName` on the activity groups (no host step there:
+ * the host rides beside it) and refusal rows. On an outgoing row that name
  * wins over every browser-side fallback, the resource host included, so the
  * screens and the API agree on who was paid. The browser's own lookups
  * (host, source title, own account, contact) only stand in when the server
@@ -148,11 +160,6 @@ function ownAccountSenderName(
  * `TransactionDetailPanel` since #4267: its title matches the row, and every
  * address sits shortened under its Technical details.
  */
-/** #4883: the server-resolved counterparty name, when it named one. */
-function serverName(tx: CounterpartyFields, options: { resolvedName?: string | null }): string | null {
-  return options.resolvedName || tx.recipientName || null
-}
-
 export function counterpartyLabel(
   tx: CounterpartyFields,
   resolveAddress?: (address: string) => string | null,
@@ -247,6 +254,8 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
     to: item.to,
     from: item.account_address ?? '',
     chainId: item.chain_id ?? 0,
+    // #4883: the server's name for the payee (#4882's one order).
+    recipientName: item.counterparty_name ?? null,
   }
 }
 

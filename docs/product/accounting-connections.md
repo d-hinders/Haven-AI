@@ -42,8 +42,9 @@ the retry sweep, what on-call reads when something is stuck — is in
 
 - **Settings → Accounting** is where a connection is made, changed and removed
   (owner decision 2026-09-11; the card ships in #2868). One row per provider
-  the user can actually connect to or has connected: Fortnox and Accounted
-  (live, over a pasted API key). **Coming-soon providers are hidden**
+  the user can actually connect to or has connected: Fortnox (live, over its
+  own OAuth2 approval) and Accounted (live, over a pasted API key).
+  **Coming-soon providers are hidden**
   (2026-10-23, #4359 — superseding the 2026-09-11 decision to list them as
   *Coming soon*): a provider that is not live, or live but not configured on
   the deployment, renders no row, and when nothing qualifies the whole card
@@ -182,9 +183,10 @@ exactly the bytes Haven sent.
   made. Pressing **Check in Accounted** answers from Haven's own delivery
   record — no call to Accounted, and nothing in their audit trail either.
 - **Delivery can be refused.** A key missing the write scope (*Needs more
-  access*), a document over Accounted's 10 MB limit, or a payment whose
-  evidence changed after the document was already stored are shown as not
-  fed, with the reason on the row. Each is final until the underlying cause
+  access*), a document over Accounted's 10 MB limit, or, for a payment first
+  rendered before #4824's input pin, evidence that changed after the document
+  was stored (a payment rendered since then retries with the same bytes) are
+  shown as not fed, with the reason on the row. Each is final until the underlying cause
   changes; none is retried behind your back.
 - **Your accountant books from the document.** Haven does not create journal
   entries or supplier invoices in Accounted — the document is the record, and

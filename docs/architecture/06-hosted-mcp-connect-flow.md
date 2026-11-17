@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/modules/x402/delegation-authorize.ts
   - packages/backend/src/modules/x402/authorize.ts
   - packages/frontend/src/components/connect-agent/WaitingForConnector.tsx
-last-verified: "2026-11-02"
+last-verified: "2026-11-17"
 ---
 
 # Haven — Hosted MCP Connect Flow And Edge-Signing Contract

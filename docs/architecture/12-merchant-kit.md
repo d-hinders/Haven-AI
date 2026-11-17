@@ -504,7 +504,8 @@ export interface ConsumedPaymentStore {
    *   forwardCount 1, and the answer is `forward`. This is the in-process
    *   first forward, the only one that needs no proof.
    * - Without a token: a `settlement_unknown` record, or a `settling` record
-   *   with no token hash (cleared at startup), becomes `settled`, and the
+   *   with no token hash (cleared at startup, or by a later request past
+   *   `RESERVATION_DEADLINE_MS`), becomes `settled`, and the
    *   answer is `settled`. Forwarding it needs a proof.
    * - Anything else changes nothing and answers `not_settleable`; the caller
    *   reads the record again and answers by its state.
@@ -602,32 +603,41 @@ hash at startup**, so a restart voids the exemption for every payment in
 progress. No other request ever holds the token, so no other request can make
 that forward, however exactly it rebuilds the header.
 
-**While the holder is alive, no other request resolves the payment.** A
-`settling` record that still has a token hash is answered 503
-`settlement_unknown` to any other request, which makes no verify, settle or
-chain read. Only a `settlement_unknown` record (the holder has answered 503
-and cleared its token) or a `settling` record with no token hash (after a
-restart) is resolved by a later request, and only into `settled`. So the
-holder's own `markSettled` cannot lose a race to another request, and the
-request that paid never needs a proof for its own first forward.
+**Within its deadline, no other request resolves the holder's payment.** A
+`settling` record that still has a token hash and is younger than
+`RESERVATION_DEADLINE_MS` is answered 503 `settlement_unknown` to any other
+request, which makes no verify, settle or chain read. Only a
+`settlement_unknown` record (the holder has answered 503 and cleared its
+token) or a `settling` record with no token hash (after a restart, or cleared
+past the deadline, below) is resolved by a later request, and only into
+`settled`. So a holder that finishes within `RESERVATION_DEADLINE_MS` cannot
+lose its `markSettled` to another request, and its buyer never needs a proof
+for its own first forward.
 
 **The holder has a deadline.** The token hash is trusted for
 `RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`: the holder's own worst
 case, a 10 s slot wait, verify and settle at 30 s each and `SETTLE_RESOLVE_MS`
-(30 s), is 100 s, and each chain read inside the resolve poll has its own 10 s
-timeout. A later request that finds a `settling` record older than that treats
+(30 s), is 100 s. Each chain read inside the resolve poll has its own 10 s
+timeout, and the poll starts no read that could end after `SETTLE_RESOLVE_MS`,
+so the 100 s holds. The deadline is measured on the process's monotonic clock
+(the deadline only matters within one process, since a restart clears every
+token hash), with `reservedAt` recorded for the log. A later request that finds a `settling` record older than that treats
 it as tokenless: it clears the hash in one conditional update (state still
 `settling`, `reservedAt` unchanged) and then resolves the record into
-`settled`. A holder that hung and wakes late then gets `not_settleable`, and so
+`settled`. When that update changes no row, the holder got there first: the
+later request reads the record again and answers by its state, and never
+resolves on a failed clear. A holder that hung and wakes late then gets `not_settleable`, and so
 does a holder whose hash a restart cleared. **On `not_settleable` the holder
 reads the record again and answers by its state, as any later request would:**
 its own buyer then needs a proof, the same loss path as a restart mid-settle.
 
 **One proxy process per `PAYMENTS_DB`.** Clearing every token hash at startup
-is safe only because no other process holds one. The proxy takes an exclusive
-lock on the file at startup and refuses to start while another process holds
-it, so a rolling deploy stops the old process before the new one serves, and
-the proxy does not run as more than one replica on one store. **Every other forward requires a
+is safe only because no other process holds one. The proxy opens the database with
+`PRAGMA locking_mode=EXCLUSIVE` and a write transaction at startup, and refuses
+to start on `SQLITE_BUSY`; the operating system drops that lock when the
+process dies, so a crash never blocks the next start. That makes deploying by
+stop-then-start, never overlapping, and one replica per store, a requirement on
+the operator (section 12). **Every other forward requires a
 `SIGN-IN-WITH-X` header** (CAIP-122) signed by the record's payer address.
 Without a valid one the answer is 200 `payment_retry_needs_proof` with a
 challenge: nothing is forwarded and no forward is used. Haven's signer already
@@ -671,10 +681,13 @@ Expired rows are pruned on the same write. A proof is accepted only for that
 key's live nonce, before it expires, and only once; accepting it retires the
 nonce, and the next answer issues a new one. A proof whose recovered address is
 not the record's `payer` is answered `payment_retry_needs_proof` with the same
-challenge. **Known-key answers that forward nothing are not rate-limited**,
-like any paid request (section 7): each costs one store read and at most one
-nonce write per key per nonce lifetime, and no upstream call, so a replayed
-public header buys a stranger nothing and costs the merchant almost nothing.
+challenge. **Answers to a known key whose digest matches, and that forward
+nothing, are not rate-limited** (section 7). For a settled payment, the only
+kind whose header is public, each costs one store read and at most one nonce
+write per key per nonce lifetime, and no upstream call, so a replayed public
+header buys a stranger nothing and costs the merchant almost nothing; the
+states that read the chain (`settlement_unknown`, `settling` without a token)
+are reached before the header is public.
 A 429 there would also be a non-2xx answer to a settled payment, which Haven
 would read as a rejection after funding (section 8). The demo merchant needs neither: it serves a cached
 result again and makes no second upstream call, so it asks for no proof.
@@ -685,7 +698,7 @@ result again and makes no second upstream call, so it asks for no proof.
 |---|---|---|
 | `settling` | Reserved; verify and settle are in progress, in the reserving request (or that request's process died). | `forwarding` (settled by the reserving request), `settled` (resolved by a later request after a restart or after `RESERVATION_DEADLINE_MS`), `settlement_unknown`, removed |
 | `settlement_unknown` | The reserving request did not learn the settle outcome within `SETTLE_RESOLVE_MS`, answered 503 and cleared its token; chain recovery has not yet found a transaction. | `settled`, removed |
-| `settled` | Settlement was confirmed by a request that does not hold the reservation (chain resolution of a `settlement_unknown` record, or of a `settling` one after a restart), and the transaction hash is recorded. The call has not been forwarded; forwarding it needs a proof. | `forwarding` |
+| `settled` | Settlement was confirmed by a request that does not hold the reservation (chain resolution of a `settlement_unknown` record, or of a `settling` one after a restart or past `RESERVATION_DEADLINE_MS`), and the transaction hash is recorded. The call has not been forwarded; forwarding it needs a proof. | `forwarding` |
 | `forwarding` | The upstream call is in flight. `forwardingStartedAt` bounds it. | `delivered`, `failed` |
 | `delivered` | The upstream gave a complete answer the proxy can pass on (below) and the proxy wrote it to the buyer. | none |
 | `failed` | The upstream call failed. The payment may be served again. | `forwarding`, `exhausted` |
@@ -867,11 +880,14 @@ it.
 
 Unpaid requests are limited per client IP: 60 requests a minute with a burst of
 10, and at most 10 concurrent unpaid requests per IP. Over the limit the proxy
-answers 429 with `Retry-After` and no challenge. Paid requests are not
-rate-limited by the proxy; the payment is the limit. That includes a known
-key's answers that forward nothing (section 6): a request carrying a payment
-header is never answered 429, so an honest payer behind a busy shared address
-can always retry. A global cap of 32
+answers 429 with `Retry-After` and no challenge. **A request with a payment
+header for an unknown key counts against the same limit**, checked before it
+is reserved: a header that has not verified is not yet a payment, and anyone
+can sign one with an empty key. A 429 there comes before settlement, so a
+Haven buyer recovers through verify-then-sweep (section 8). **A request whose
+header matches a known key's digest is never answered 429**, so a payer whose
+payment settled can always retry from behind a busy shared address (section 6).
+A payment that verified is its own limit. A global cap of 32
 concurrent upstream calls bounds the merchant's own spend: a paid request waits
 up to 10 s for a slot before settlement, and if no slot is free it is refused
 with 503 before any verify or settle call, so nothing is settled for a call
@@ -958,7 +974,7 @@ key, the payment checks below; then reserve, verify and settle.
 | Body is not JSON, or `model` does not match the product | 400 | `bad_request` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Verify, then sweep the delegate |
-| Unpaid rate limit | 429 | `rate_limited` | No | No payment yet | Retry after `Retry-After` |
+| Rate limit: an unpaid request, or a payment header for an unknown key (section 7) | 429 | `rate_limited` | No | No payment yet; rejected after funding if a Haven agent funded its delegate | Retry after `Retry-After`; verify, then sweep the delegate if funded |
 | No upstream slot | 503 | `at_capacity` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 
@@ -1203,7 +1219,9 @@ What the merchant runs:
   reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY`;
 - persistent disk for the consumed-payment store (`PAYMENTS_DB`) and the
   sales outbox (`SALES_OUTBOX`), used by exactly one proxy process at a time
-  (the proxy locks `PAYMENTS_DB` at startup, section 6). Losing `PAYMENTS_DB` loses the one-call rule
+  (the proxy locks `PAYMENTS_DB` at startup, section 6), so the deployment
+  stops the old process before it starts the new one and never runs a second
+  replica on the same store. Losing `PAYMENTS_DB` loses the one-call rule
   for payments already delivered, so it is backed up like any other
   ledger;
 - a health route, `GET /healthz`, which needs no payment and reports

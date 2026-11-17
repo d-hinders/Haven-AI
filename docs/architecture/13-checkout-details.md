@@ -300,18 +300,18 @@ rides a separate header, which only the merchant receives.
 **The answer's budget is 1,536 bytes**, measured as the encoded header value
 (the base64url string), excluding the header name and separator.
 
-The largest answer the shape allows is **1,423 bytes encoded** (1,067 bytes of
+The largest answer the shape allows is **1,426 bytes encoded** (1,069 bytes of
 JSON):
 
 | Part | Bytes |
 |---|---|
 | Envelope (`{"version":1,...}` and the three keys) | 71 |
 | `receipt_email` at 254 characters | 254 |
-| Two addresses at their maximum lengths (371 bytes of JSON each) | 742 |
-| **JSON total** | **1,067** |
-| **base64url total** (`ceil(1,067 × 4 / 3)`) | **1,423** |
+| Two addresses at their maximum lengths (372 bytes of JSON each) | 744 |
+| **JSON total** | **1,069** |
+| **base64url total** (`ceil(1,069 × 4 / 3)`) | **1,426** |
 
-The budget is that plus 113 bytes of slack, for a future optional field or a
+The budget is that plus 110 bytes of slack, for a future optional field or a
 longer header name. No address the shape allows reaches it.
 
 ### The paid request's headers stay under 16 KB
@@ -322,24 +322,55 @@ headers that matter are `PAYMENT-SIGNATURE`, which echoes the merchant's whole
 `extensions` including this request entry, plus this answer.
 
 Measured on 2026-11-17 with the SDK's own `x402V2PaymentEnvelope` and
-`encodeBase64Json`, with the largest answer (1,423 bytes) and the request entry
+`encodeBase64Json`, with the largest answer (1,426 bytes) and the request entry
 (680 bytes of JSON) echoed:
 
 | Case | `PAYMENT-SIGNATURE` line | Answer line | Other headers | Block | Headroom |
 |---|---|---|---|---|---|
-| EIP-3009, request echo | 2,129 | 1,445 | 227 | 3,801 | 12,583 |
-| EIP-3009, request and bazaar echo | 3,281 | 1,445 | 227 | 4,953 | 11,431 |
-| erc7710 (the repository's own fixture), request echo | 6,317 | 1,445 | 227 | 7,989 | 8,395 |
+| EIP-3009, request echo | 2,129 | 1,448 | 227 | 3,804 | 12,580 |
+| EIP-3009, request and bazaar echo | 3,281 | 1,448 | 227 | 4,956 | 11,428 |
+| erc7710 (the repository's own fixture), request echo | 6,321 | 1,448 | 227 | 7,996 | 8,388 |
 
 Each line is the header name, a colon and a space, the value, and CRLF. The
-`PAYMENT-SIGNATURE` values are 2,108, 3,260 and 6,296 bytes; the answer value
-is 1,423 bytes. The other headers are `content-type`, `accept`, `user-agent`,
+`PAYMENT-SIGNATURE` values are 2,108, 3,260 and 6,300 bytes; the answer value
+is 1,426 bytes. The other headers are `content-type`, `accept`, `user-agent`,
 `mcp-session-id` and `x402-wallet`. The erc7710 fixture is the repository's own
 conservative lower bound (`packages/sdk/src/x402-erc7710-header-size.test.ts`);
-a real delegation chain is larger, and the 8,395 bytes of headroom is what
+a real delegation chain is larger, and the 8,388 bytes of headroom is what
 absorbs it.
 
-The payment header would have to exceed **14,712 bytes** before the largest
+The two encodings are different and are named separately. `encodeBase64Json`
+is standard base64 **with** padding, and it produces the `PAYMENT-SIGNATURE`
+value. The answer header is base64url **without** padding, the tax
+declaration's encoding (`encodeTaxDeclarationHeader` in
+`packages/sdk/src/tax-declaration.ts`), and it produces the answer value.
+
+The inputs, so the numbers can be reproduced:
+
+- `resource`:
+  `{"url":"https://merchant.test/v3/compat/chat/completions","description":"One chat completion on openai/gpt-6-sol, up to 1,000 output tokens.","mimeType":"application/json"}`.
+- `accepted`:
+  `{"scheme":"exact","network":"eip155:8453","amount":"10000","payTo":"0x1212121212121212121212121212121212121212","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}`.
+- `payload`:
+  `{"signature":S,"authorization":{"from":"0x1212121212121212121212121212121212121212","to":"0x1212121212121212121212121212121212121212","value":"10000","validAfter":"0","validBefore":"1794950000","nonce":N}}`,
+  where `S` is `0x` followed by `ab` repeated 65 times and `N` is `0x`
+  followed by `cd` repeated 32 times.
+- `extensions`: `{"haven-checkout-details": <the section 2 entry>}`. The bazaar
+  row adds
+  `"bazaar":{"info":{"input":{"model":"openai/gpt-6-sol","messages":[{"role":"user","content":X}]},"output":{"example":{"id":"chatcmpl-1","choices":[{"message":{"content":Y}}]}}},"schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}}`,
+  where `X` is `"x"` repeated 200 times and `Y` is `"y"` repeated 400 times.
+- The erc7710 row is the repository's fixture object (`erc7710Header()` in
+  `packages/sdk/src/x402-erc7710-header-size.test.ts`) with the same
+  `extensions` added. It is built directly rather than through
+  `x402V2PaymentEnvelope`, because the fixture carries `scheme` and `network`
+  at the top level.
+- The other headers are `content-type: application/json`,
+  `accept: application/json, text/event-stream`,
+  `user-agent: haven-sdk/0.0.0 (node 24)`, `mcp-session-id: "a" repeated 36
+  times` and `x402-wallet: 0x1212121212121212121212121212121212121212`; with
+  their CRLFs they are 227 bytes.
+
+The payment header would have to exceed **14,709 bytes** before the largest
 answer pushed the block over the ceiling. The 431 that #4754 fixed was a
 4,969-byte EIP-3009 header sent under both names after funding; a v2 payload
 now goes out under `PAYMENT-SIGNATURE` alone, so that doubling is gone.
@@ -383,9 +414,9 @@ the request and refuses before payment when a required field cannot be shared.
 ### ERC-7710
 
 **ERC-7710 payments carry the answer.** The answer is unsigned and
-scheme-independent, and the measured erc7710 block (a 6,317-byte
-`PAYMENT-SIGNATURE` line, the 1,445-byte answer line and 227 bytes of other
-headers, 7,989 in all) leaves 8,395 bytes of headroom. On erc7710 the paid
+scheme-independent, and the measured erc7710 block (a 6,321-byte
+`PAYMENT-SIGNATURE` line, the 1,448-byte answer line and 227 bytes of other
+headers, 7,996 in all) leaves 8,388 bytes of headroom. On erc7710 the paid
 request is sent by the agent (the state-direct path) or by Haven's server (the
 hosted completion), and both carry the header.
 

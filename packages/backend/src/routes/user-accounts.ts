@@ -3,13 +3,16 @@ import { authMiddleware } from '../middleware/auth.js'
 import { retiredSafeInflowHandler, retiredSafeInflowRoute } from '../middleware/safe-inflow-retired.js'
 import {
   deleteAccountForUser,
-  findOwnedAccountAddress,
   findOwnedAccountDefaultFlag,
   findOwnedAccountForFunding,
   listAccountsForUser,
   renameAccountForUser,
   setDefaultAccountForUser,
 } from '../infra/repositories/smart-accounts.js'
+import {
+  MERCHANT_ACCOUNT_DEFAULT_REFUSED,
+  MERCHANT_ACCOUNT_UNLINK_REFUSED,
+} from '../domain/merchant-services.js'
 import { getChainClient } from '../infra/chain/index.js'
 import {
   balanceFreshness,
@@ -101,9 +104,20 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
       const { accountId } = request.params
 
       // Verify the account belongs to the user
-      const owned = await findOwnedAccountAddress(accountId, sub)
+      const owned = await findOwnedAccountDefaultFlag(accountId, sub)
       if (!owned) {
         return reply.code(404).send({ error: 'Account not found' })
+      }
+
+      // #4895: the merchant account is the account merchant payments are
+      // received into. Making it the default would put the user's ordinary
+      // spending on the receiving account, so it is refused with a code the
+      // dialog branches on.
+      if (owned.is_merchant_account) {
+        return reply.code(409).send({
+          error: 'Your merchant account cannot be your default account',
+          error_code: MERCHANT_ACCOUNT_DEFAULT_REFUSED,
+        })
       }
 
       await setDefaultAccountForUser(accountId, owned.account_address, sub)
@@ -123,6 +137,21 @@ export default async function userAccountsRoutes(app: FastifyInstance): Promise<
       const owned = await findOwnedAccountDefaultFlag(accountId, sub)
       if (!owned) {
         return reply.code(404).send({ error: 'Account not found' })
+      }
+
+      // #4895: unlinking is a hard DELETE of the account row, and the indexed
+      // payments go with it. The merchant account is the account merchant
+      // payments are received into, so it is refused while it holds the
+      // marker. Nothing clears the marker for the pilot: turning merchant
+      // services off keeps the account and its history, and that is the
+      // supported way to stop receiving — it does not make the account
+      // unlinkable, so the sentence must not say it does.
+      if (owned.is_merchant_account) {
+        return reply.code(409).send({
+          error:
+            'This Haven wallet is your Sales account and cannot be unlinked. To stop receiving, turn merchant services off.',
+          error_code: MERCHANT_ACCOUNT_UNLINK_REFUSED,
+        })
       }
 
       const deleted = await deleteAccountForUser(accountId, sub, owned.is_default)

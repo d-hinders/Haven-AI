@@ -278,6 +278,7 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toMatch(/not available on chain/i)
+    expect(res.json().error_code).toBe('UNSUPPORTED_NETWORK') // #4895, additive on the same 400
   })
 
   it('passkey + EOA owner counts as two signers', async () => {
@@ -354,6 +355,7 @@ describe('#908 mainnet signer floor (provisioning gate)', () => {
     })
     expect(res.statusCode).toBe(400)
     expect(res.json().error).toMatch(/not available on chain/i)
+    expect(res.json().error_code).toBe('UNSUPPORTED_NETWORK') // #4895, additive on the same 400
   })
 })
 

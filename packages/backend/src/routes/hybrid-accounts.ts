@@ -52,9 +52,6 @@ import { insertHybridAccountPasskey, listAccountPasskeys, passkeyEnrollmentDates
 import {
   allocateHybridDeploySalt,
   countAccountsForUser,
-  countAccountsForUserOnChain,
-  findAccountByCreateIdempotencyKey,
-  findDelegatorHybridAccountForUser,
   findHybridAccountByAddressForReplay,
   findHybridAccountByAddressForUser,
   findOwnedHybridAccount,
@@ -62,20 +59,20 @@ import {
   inTransaction,
 } from '../infra/repositories/smart-accounts.js'
 import { boundedErrorDetails } from '../modules/payments/index.js'
-
-/** Soft cap (#4023): accounts per user per chain. A 11th create answers 422. */
-const MAX_ACCOUNTS_PER_USER_PER_CHAIN = 10
+// dep-lint-exempt: the create-additional provisioning must reach the smart-account and hybrid-signer repositories, and `infra/repositories/analytics.ts` imports the accounts barrel — so re-exporting this file from `modules/accounts/index.ts` closes an accounts ↔ repositories cycle. The deep import is the only acyclic path (#4895).
+import {
+  createAdditionalHybridAccount,
+  CreateAdditionalRefusal,
+  idempotencyKeyRefusal,
+  UNSUPPORTED_NETWORK,
+  type CreateAdditionalResult,
+} from '../modules/accounts/create-additional.js'
 
 /**
- * The create-additional refusal codes (#4024). Clients branch on these, never
- * on the sentence — the New account dialog maps each one
- * (`packages/frontend/src/lib/new-account.ts` carries the same constants).
+ * The create-additional refusal codes (#4024) and the soft cap live with the
+ * extracted creation logic (`modules/accounts/create-additional.ts`, #4895) —
+ * one copy, so the merchant-services route and this one cannot drift.
  */
-const SOURCE_ACCOUNT_NOT_FOUND = 'SOURCE_ACCOUNT_NOT_FOUND'
-const SOURCE_HAS_NO_PASSKEY = 'SOURCE_HAS_NO_PASSKEY'
-const KEY_NOT_ON_SOURCE = 'KEY_NOT_ON_SOURCE'
-const ACCOUNT_CAP_REACHED = 'ACCOUNT_CAP_REACHED'
-const IDEMPOTENCY_KEY_REUSED = 'IDEMPOTENCY_KEY_REUSED'
 
 interface CreateHybridBody {
   chain_id?: number
@@ -125,48 +122,6 @@ const HEX_COORD_RE = /^0x[0-9a-fA-F]{1,64}$/
  */
 function isString(value: unknown): value is string {
   return Object.prototype.toString.call(value) === '[object String]'
-}
-
-/**
- * The answer to a create-additional that names an idempotency key some row of
- * the caller's already carries (#4024). Used twice: by the pre-check before
- * anything is validated, and by the insert's conflict path when a concurrent
- * attempt with the same key committed first. A key reused for a DIFFERENT
- * request is refused, as the send_idempotency_key pattern does
- * (payments.ts findPaymentReplay): the stored row pins the chain and its one
- * passkey, so another chain_id or key_id is a 409, never the first account.
- * The source account is not stored on the new row, so it cannot be pinned.
- */
-async function answerCreateReplay(
-  replay: { id: string; account_address: string; chain_id: number; created_at: string },
-  request: { chainId: number; keyId: string },
-  executor?: Parameters<typeof listAccountPasskeys>[1],
-): Promise<{ status: 201 | 409; body: Record<string, unknown> }> {
-  const replayKeys = await listAccountPasskeys(replay.id, executor)
-  const sameKey = replayKeys.some((k) => k.key_id.toLowerCase() === request.keyId.toLowerCase())
-  const mismatch = Number(replay.chain_id) !== request.chainId ? 'chain_id' : !sameKey ? 'key_id' : null
-  if (mismatch) {
-    return {
-      status: 409,
-      body: {
-        error: `idempotency_key already belongs to an account with a different ${mismatch}`,
-        error_code: IDEMPOTENCY_KEY_REUSED,
-        id: replay.id,
-      },
-    }
-  }
-  return {
-    status: 201,
-    body: {
-      id: replay.id,
-      account_address: replay.account_address,
-      // The STORED row's chain, not the request's (#4024).
-      chain_id: Number(replay.chain_id),
-      account_type: 'delegator_hybrid',
-      deployed: false,
-      created_at: replay.created_at,
-    },
-  }
 }
 
 export default async function hybridAccountRoutes(app: FastifyInstance): Promise<void> {
@@ -269,9 +224,8 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         return reply.code(400).send({ error: 'duplicate passkey key_id' })
       }
     }
-    if (idempotency_key !== undefined && (!isString(idempotency_key) || idempotency_key.length === 0)) {
-      return reply.code(400).send({ error: 'idempotency_key must be a non-empty string' })
-    }
+    const keyRefusal = idempotencyKeyRefusal(idempotency_key) // non-empty, and not the reserved namespace (#4895)
+    if (keyRefusal !== null) return reply.code(400).send(keyRefusal)
 
     // #1153: provisioning no longer refuses a single-signer account on a
     // value-bearing chain. The #908 floor became a recommendation shown AFTER
@@ -286,6 +240,9 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     if (!DELEGATION_RAIL_CHAIN_IDS.has(chainId)) {
       return reply.code(400).send({
         error: `Hybrid accounts are not available on chain ${chainId} yet`,
+        // #4895: the merchant-services dialog branches on a code. Additive on
+        // the same 400 — the sentence and `supported` are unchanged.
+        error_code: UNSUPPORTED_NETWORK,
         supported: [...DELEGATION_RAIL_CHAIN_IDS],
       })
     }
@@ -296,71 +253,67 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
     const recordWaiver =
       waiverAcknowledged && isValueBearingChain(chainId) && signerCount < 2
 
-    // ── Create-additional ──────────────────────────────────────────────────
-    let ownerPasskeys: PasskeySigner[]
-    let saltKey: string
+    // ── Create-additional (#4023) ──────────────────────────────────────────
+    //
+    // #4895: the logic moved to `modules/accounts/create-additional.ts` so the
+    // merchant-services route can reuse it inside ITS transaction — the
+    // setting and the merchant marker commit with the account. Behaviour is
+    // unchanged; the #4024 replay/race suites are the characterization tests.
     if (isAdditional) {
-      // Idempotent replay FIRST (#1207's rule, account-shaped; #4024): before
-      // the source, key and cap are checked, and before anything is derived
-      // or written, a retried create answers the FIRST account. The order is
-      // the point. Until #4024 the cap ran first, so a retried 10th create
-      // whose response was lost got "cap reached" instead of the account it
-      // had already made — and a client could not tell the two apart. The
-      // read is scoped to the caller (`sub`), so a key never replays another
-      // user's row; another user's identical key is simply a new create.
-      //
-      // A key reused for a different request is refused (answerCreateReplay).
-      if (idempotency_key) {
-        const replay = await findAccountByCreateIdempotencyKey(sub, idempotency_key)
-        if (replay !== null) {
-          const answer = await answerCreateReplay(replay, { chainId, keyId: String(key_id) })
-          return reply.code(answer.status).send(answer.body)
+      let result: CreateAdditionalResult
+      try {
+        result = await inTransaction((tx) =>
+          createAdditionalHybridAccount(
+            {
+              userId: sub,
+              chainId,
+              sourceAccountId: source_account_id as string,
+              keyId: String(key_id),
+              name,
+              idempotencyKey: idempotency_key,
+              singleSignerWaiverAt: recordWaiver ? new Date().toISOString() : null,
+            },
+            tx,
+          ),
+        )
+      } catch (err) {
+        if (err instanceof CreateAdditionalRefusal) {
+          if (err.status === 201) {
+            // The conflict-path replay (#4024): the account exists, and the
+            // transaction rolled back the counter bump it drew. Answer the
+            // winner with the 201 shape intact.
+            return reply.code(201).send({
+              id: err.body.id,
+              account_address: err.body.account_address,
+              chain_id: err.body.chain_id,
+              account_type: 'delegator_hybrid',
+              deployed: false,
+              created_at: err.body.created_at,
+            })
+          }
+          return reply.code(err.status).send(err.body)
         }
+        throw err
       }
-
-      // Resolve the owner passkey from the SOURCE row: the server copies the
-      // ONE named passkey's coordinates from the source account's stored
-      // signer set — never from the request. Each refusal carries an
-      // error_code (#4024).
-      const source = await findDelegatorHybridAccountForUser(sub, source_account_id as string)
-      if (source === null) {
-        return reply.code(404).send({ error: 'Source account not found', error_code: SOURCE_ACCOUNT_NOT_FOUND })
-      }
-      const sourceSigners = await listAccountPasskeys(source.id)
-      if (sourceSigners.length === 0) {
-        return reply.code(422).send({
-          error: 'The source account has no passkey to copy, so it cannot secure an additional account',
-          error_code: SOURCE_HAS_NO_PASSKEY,
-        })
-      }
-      const named = sourceSigners.find((s) => s.key_id.toLowerCase() === String(key_id).toLowerCase())
-      if (!named) {
-        return reply.code(422).send({ error: 'key_id is not a passkey on the source account', error_code: KEY_NOT_ON_SOURCE })
-      }
-      ownerPasskeys = [{ keyId: named.key_id, x: BigInt(named.public_key_x), y: BigInt(named.public_key_y) }]
-      saltKey = named.key_id
-
-      // Soft cap (#4023): 10 accounts per user per chain. Deliberately soft —
-      // the cap bounds accident and abuse, not a business rule.
-      const cap = await countAccountsForUserOnChain(sub, chainId)
-      if (cap >= BigInt(MAX_ACCOUNTS_PER_USER_PER_CHAIN)) {
-        return reply.code(422).send({
-          error: `This user already has ${MAX_ACCOUNTS_PER_USER_PER_CHAIN} accounts on chain ${chainId}`,
-          error_code: ACCOUNT_CAP_REACHED,
-          cap: MAX_ACCOUNTS_PER_USER_PER_CHAIN,
-          chain_id: chainId,
-        })
-      }
-    } else {
-      ownerPasskeys = parsedPasskeys
-      // The counter is per (user, signer): a passkey account counters on its
-      // PRIMARY passkey; an EOA-only account on the owner address. Two
-      // accounts built from different signers derive different addresses at
-      // the same salt anyway — the counter exists so the SAME signer never
-      // derives the same address twice, even after an unlink (the counter
-      // table survives the hard DELETE; migration 114).
-      saltKey = parsedPasskeys[0]?.keyId ?? `eoa:${String(owner_address).toLowerCase()}`
+      return reply.code(201).send({
+        id: result.account.id,
+        account_address: result.account.account_address,
+        chain_id: result.account.chain_id,
+        account_type: 'delegator_hybrid',
+        deployed: false,
+        created_at: result.account.created_at,
+      })
     }
+
+    // ── Signup ─────────────────────────────────────────────────────────────
+    const ownerPasskeys: PasskeySigner[] = parsedPasskeys
+    // The counter is per (user, signer): a passkey account counters on its
+    // PRIMARY passkey; an EOA-only account on the owner address. Two
+    // accounts built from different signers derive different addresses at
+    // the same salt anyway — the counter exists so the SAME signer never
+    // derives the same address twice, even after an unlink (the counter
+    // table survives the hard DELETE; migration 114).
+    const saltKey = parsedPasskeys[0]?.keyId ?? `eoa:${String(owner_address).toLowerCase()}`
 
     // ONE transaction (#4023): the counter bump, the derived row and the
     // copied passkeys commit together or not at all. Before this they were
@@ -383,7 +336,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       let accountAddress: string
       try {
         accountAddress = await computeUserHybridAccountAddress(chainId, {
-          ownerAddress: isAdditional ? undefined : (owner_address as `0x${string}` | undefined),
+          ownerAddress: owner_address as `0x${string}` | undefined,
           passkeys: ownerPasskeys,
           deploySalt,
         })
@@ -403,7 +356,7 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
       // becomes the default — the additional INSERT passes false whatever the
       // count; only this signup path may set it).
       const totalCount = await countAccountsForUser(sub, tx)
-      const isFirst = !isAdditional && totalCount === 0n
+      const isFirst = totalCount === 0n
 
       const inserted = await insertHybridAccount(
         {
@@ -414,8 +367,8 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
           // pure-passkey account has none — its config lives in
           // hybrid_account_passkeys.
           name: name?.trim() || 'My account',
-          isDefault: isAdditional ? false : isFirst,
-          ownerAddress: isAdditional ? null : (owner_address?.toLowerCase() ?? null),
+          isDefault: isFirst,
+          ownerAddress: owner_address?.toLowerCase() ?? null,
           singleSignerWaiverAt: recordWaiver ? new Date().toISOString() : null,
           deploySalt,
           // ON CONFLICT DO NOTHING: the UNIQUE(user_id, chain_id,
@@ -427,25 +380,12 @@ export default async function hybridAccountRoutes(app: FastifyInstance): Promise
         tx,
       )
       if (inserted === null) {
-        // The insert hit a unique index and wrote nothing. Two can fire.
+        // The insert hit a unique index and wrote nothing. For the SIGNUP
+        // shape only the address index can fire: the idempotency-key re-read
+        // is create-additional's (#4024) and lives in
+        // `modules/accounts/create-additional.ts` now.
         //
-        // (1) UNIQUE(user_id, create_idempotency_key) — the in-flight retry
-        // (#4024): the client timed out while the first create was still in
-        // its transaction and retried with the same key. Both passed the
-        // pre-check (no row yet); this one waited on the counter row, drew
-        // counter N+1, derived a DIFFERENT address, and lost on the key. The
-        // winner has committed, so this statement sees it: answer it exactly
-        // as the pre-check would (the same pin). Throwing a refusal rolls
-        // this transaction back, so the counter bump is not kept.
-        if (isAdditional && idempotency_key) {
-          const keyWinner = await findAccountByCreateIdempotencyKey(sub, idempotency_key, tx)
-          if (keyWinner !== null) {
-            const answer = await answerCreateReplay(keyWinner, { chainId, keyId: String(key_id) }, tx)
-            if (answer.status === 409) throw new RegistrationRefusal(409, answer.body)
-            throw new RegistrationRefusal(201, { __replay: true, ...answer.body })
-          }
-        }
-        // (2) UNIQUE(user_id, chain_id, LOWER(account_address)) — the
+        // UNIQUE(user_id, chain_id, LOWER(account_address)) — the
         // unique-address race. The winner is either this user's own
         // concurrent create (answer it — the idempotency contract) or another
         // user's row at the same derived address (impossible without shared

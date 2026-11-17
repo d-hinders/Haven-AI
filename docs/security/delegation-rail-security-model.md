@@ -51,6 +51,10 @@ covers:
   - packages/backend/src/middleware/retired-safe-names.ts
   - packages/backend/src/modules/agents/rekey-*.ts
   - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/modules/accounts/create-additional.ts
+  - packages/backend/src/routes/merchant-services.ts
+  - packages/backend/src/domain/merchant-services.ts
+  - packages/backend/src/db/migrations/126_merchant_services.ts
   - packages/backend/src/infra/repositories/agents.ts
   - packages/backend/src/infra/repositories/dashboard.ts
   - packages/backend/src/infra/repositories/transaction-history.ts
@@ -84,7 +88,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-11-12"
+last-verified: "2026-11-17"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -436,6 +440,20 @@ The unlink guard also refuses while an agent re-key is in flight, so the
 account binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no
 chain.
+
+**The merchant account cannot be unlinked or made default (#4895).** Turning
+merchant services on creates a dedicated account and marks it
+(`smart_accounts.is_merchant_account`, one per user by a partial unique index —
+migration 126). Unlinking is a hard `DELETE` of the account row and its indexed
+payments go with it, so `DELETE /user/accounts/:accountId` refuses the merchant
+account with `409 MERCHANT_ACCOUNT_UNLINK_REFUSED`; turning merchant services
+off keeps the account and its history, which is the supported way to stop
+receiving. `PUT /user/accounts/:accountId/default` refuses it too, with
+`409 MERCHANT_ACCOUNT_DEFAULT_REFUSED`, because the receiving account must not
+also be the default spending account. The promotion that follows unlinking the
+default account skips it for the same reason, so a user whose only remaining
+account is the merchant account has no default account. All three are database
+reads on the marker — they grant nothing, sign nothing, and touch no chain.
 
 **Credential revocation closes new grant lifecycle steps (#2025).** An agent
 already revoked at request entry cannot build or activate a fresh delegation:
@@ -1003,9 +1021,20 @@ key with that account's passkey would replay that signup account, which is
 still the caller's own.) The same answer applies when two attempts with one
 key race inside their transactions: the one that loses on the key's unique
 index re-reads the committed winner and answers it (or the 409), and its own
-counter bump rolls back. Every refusal on
-this path carries an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
-`SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`).
+counter bump rolls back. The source, passkey and cap refusals on
+this path carry an `error_code` (`SOURCE_ACCOUNT_NOT_FOUND`,
+`SOURCE_HAS_NO_PASSKEY`, `KEY_NOT_ON_SOURCE`, `ACCOUNT_CAP_REACHED`), as do a
+reused key (`IDEMPOTENCY_KEY_REUSED`) and a chain the rail does not serve
+(`UNSUPPORTED_NETWORK`, #4895).
+
+**One key namespace is reserved (#4895).** `POST /accounts/hybrid` refuses a
+client-supplied `idempotency_key` that starts with `merchant-service:`, on
+either request shape. The merchant-services turn-on route derives its own key
+there and marks the account created under it as the merchant account; a user
+who could create an account under that key first would choose which account
+the marker lands on. The request schema refuses such a key (`pattern`), and
+the handler refuses it again with `RESERVED_IDEMPOTENCY_KEY`, so the refusal
+holds when request validation is switched to `shadow` or `off`.
 
 **Backups do not carry over.** Only the one named passkey is copied. A backup
 passkey or wallet on the source account is not added to the new one, so the

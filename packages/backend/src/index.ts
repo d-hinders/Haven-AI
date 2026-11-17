@@ -96,6 +96,7 @@ import { opsOnchainReaders } from './modules/ops/onchain-readers.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
+import merchantServiceRoutes from './routes/merchant-services.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
@@ -299,6 +300,12 @@ installRequestValidation(app, {
     // yet — born ENFORCED, same rule as `routes/receive.ts` / `routes/ops.ts`
     // above (no existing caller a stricter schema could break).
     'routes/feedback.ts',
+    // #4895: merchant services is a BRAND NEW module — born ENFORCED on the
+    // same rule. It is money-path (it creates a spend-capable account and
+    // decides which account merchant payments land in), and its request body
+    // is closed (`additionalProperties: false`) so a body naming an account to
+    // mark is refused by the schema, not by a handler check.
+    'routes/merchant-services.ts',
   ],
 })
 
@@ -582,6 +589,10 @@ await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 // #3078: the merchant layer over the catalog — read-only, same auth door.
 await app.register(merchantRoutes, { prefix: '/merchants' })
+// #4895: turning merchant services on and off, and the dashboard read. The
+// turn-on route creates a dedicated account through the create-additional
+// path and marks it as the merchant account, in one transaction.
+await app.register(merchantServiceRoutes, { prefix: '/merchant-services' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns

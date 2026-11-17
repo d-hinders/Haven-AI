@@ -124,6 +124,7 @@ import * as agentsAvatarTintSupersededHolds from './122_agents_avatar_tint_super
 import * as purchaseCorrelationKey from './123_purchase_correlation_key.js'
 import * as userVisits from './124_user_visits.js'
 import * as anchorCalldataCallSemantics from './125_anchor_calldata_call_semantics.js'
+import * as merchantServices from './126_merchant_services.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -307,4 +308,5 @@ export const migrations: Migration[] = [
   purchaseCorrelationKey,
   userVisits,
   anchorCalldataCallSemantics,
+  merchantServices,
 ]

@@ -5,6 +5,7 @@ import {
   AgentPaymentPhaseDescriptions,
   AgentPaymentRail,
 } from '../domain/agent-payment-taxonomy.js'
+import { MERCHANT_IDEMPOTENCY_KEY_PREFIX } from '../domain/merchant-services.js'
 
 /** The accounting period bounds: an ISO date prefix. The handlers always
  *  refused anything else (`ISO_DATE_RE` in routes/accounting.ts); since #3030
@@ -4543,7 +4544,7 @@ export const openapiSpec = {
         operationId: 'unlinkUserAccount',
         summary: 'Unlink an account from the Haven account.',
         description:
-          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.',
+          'Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes the oldest remaining account that is not the merchant account; when none remains the user has no default account (#4895). Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key, and for the merchant account (#4895).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
@@ -4556,7 +4557,8 @@ export const openapiSpec = {
           '404': errorResponse,
           '409': {
             ...errorResponse,
-            description: 'The account remains linked while a delegation, recovery, or re-key is in progress.',
+            description:
+              'The account remains linked while a delegation, recovery, or re-key is in progress. Also (#4895) the account is the merchant account: error_code MERCHANT_ACCOUNT_UNLINK_REFUSED — unlinking deletes the account row and its indexed payments. Turning merchant services off stops receiving and keeps the account.',
           },
         },
       },
@@ -4566,7 +4568,7 @@ export const openapiSpec = {
         tags: ['Dashboard'],
         operationId: 'setDefaultUserAccount',
         summary: 'Make a linked account the default.',
-        description: 'Exactly one account is default per user; setting one clears the previous.',
+        description: 'At most one account is default per user; setting one clears the previous. The merchant account cannot be made the default (#4895).',
         security: [{ DashboardJwt: [] }],
         parameters: [{ name: 'accountId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'Linked-account id.' }],
         responses: {
@@ -4577,6 +4579,11 @@ export const openapiSpec = {
           '400': errorResponse,
           '401': errorResponse,
           '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'The account is the merchant account (#4895): error_code MERCHANT_ACCOUNT_DEFAULT_REFUSED — the merchant account receives merchant payments and cannot also be the default spending account.',
+          },
         },
       },
     },
@@ -5720,8 +5727,15 @@ export const openapiSpec = {
                     // The column is VARCHAR(128) (migration 114): a longer key
                     // is a 400 here, not a 500 inside the transaction (#4024).
                     maxLength: 128,
+                    // #4895: the `merchant-service:` namespace belongs to the
+                    // merchant-services route, which derives its own keys
+                    // there. A client-supplied key in that namespace is
+                    // refused, so a user cannot pre-create an account under
+                    // the key the turn-on route will derive and have the
+                    // merchant marker land on it.
+                    pattern: `^(?!${MERCHANT_IDEMPOTENCY_KEY_PREFIX})`,
                     description:
-                      '#4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account\'s chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED.',
+                      '#4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account\'s chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED. Keys in the reserved `merchant-service:` namespace are refused (#4895).',
                   },
                   single_signer_waiver: {
                     type: 'object',
@@ -5755,7 +5769,11 @@ export const openapiSpec = {
               },
             },
           },
-          '400': { ...errorResponse, description: 'Bad owner configuration, a chain the delegation rail does not serve, or a mixed/ambiguous request shape.' },
+          '400': {
+            ...errorResponse,
+            description:
+              'Bad owner configuration, a chain the delegation rail does not serve (error_code UNSUPPORTED_NETWORK, with `supported` — #4895), a mixed/ambiguous request shape, or an idempotency_key in the reserved `merchant-service:` namespace (error_code RESERVED_IDEMPOTENCY_KEY when the handler refuses it — #4895).',
+          },
           '401': errorResponse,
           '404': {
             ...errorResponse,
@@ -9773,6 +9791,114 @@ export const openapiSpec = {
         },
       },
     },
+    '/merchant-services': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'turnOnMerchantServices',
+        summary: 'Turn merchant services on: record the setting and create the merchant account.',
+        description:
+          'One request, one transaction (#4895, epic #4885). Records the per-user setting, creates a dedicated account through the SAME create-additional path the New account dialog uses (the owner passkey is copied SERVER-SIDE from `source_account_id`; the server receives no passkey assertion and the session is the authentication), and marks that account as the merchant account. The request names NO account to mark — the account is the one this request creates, and a body carrying any other property is refused by this schema (`additionalProperties: false`). The account is created with the name "Sales", set on the server (the owner can rename it later), is never the default, has no agents or budgets, and counts toward the existing per-network account limit. There is ONE merchant account per user, enforced by a partial unique index on the marker; the network chosen when merchant services are first turned on is permanent for the pilot, so a turn-on naming a different chain is refused with `MERCHANT_ACCOUNT_ON_OTHER_NETWORK`. The three body fields are required the FIRST time, when the account is created (`MERCHANT_SETUP_DETAILS_REQUIRED` names the missing ones), and none is needed once the merchant account exists: turning merchant services back on sends no body, or an empty one. A repeat, a retry or a second tab answers the existing account (200) instead of creating a second one: the route derives its idempotency key in the `merchant-service:` namespace, which `POST /accounts/hybrid` refuses from clients.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          // Not required: turning merchant services back on, with the
+          // merchant account already there, sends no body.
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                // No `required`: the three fields are required by the handler
+                // only when there is no merchant account yet.
+                additionalProperties: false,
+                properties: {
+                  chain_id: {
+                    type: 'integer',
+                    description:
+                      'The network the merchant account is created on. Required the first time; permanent for the pilot once merchant services are on. Optional afterwards, and refused with MERCHANT_ACCOUNT_ON_OTHER_NETWORK when it differs from the merchant account\'s network.',
+                  },
+                  source_account_id: {
+                    type: 'string',
+                    format: 'uuid',
+                    description:
+                      'An account the caller owns. The merchant account\'s owner passkey is copied from this row\'s stored signer set. Required the first time; not read once the merchant account exists.',
+                  },
+                  key_id: {
+                    type: 'string',
+                    description:
+                      'The WebAuthn credential the user authenticated with. Must be a passkey on the source account; the merchant account derives from it alone. Required the first time; not read once the merchant account exists.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Merchant services are on and this request created the merchant account.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantServicesState' } } },
+          },
+          '200': {
+            description:
+              'Merchant services are on and the caller already had a merchant account — turning merchant services back on, a repeat, a retry, or the second tab. `created` is false.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantServicesState' } } },
+          },
+          '400': {
+            ...errorResponse,
+            description:
+              'There is no merchant account yet and the request left out a field it needs (error_code MERCHANT_SETUP_DETAILS_REQUIRED, with `missing`), or the network is not served by the delegation rail (error_code UNSUPPORTED_NETWORK, with `supported`).',
+          },
+          '401': errorResponse,
+          '404': {
+            ...errorResponse,
+            description: 'The named source account is not an account the caller owns: error_code SOURCE_ACCOUNT_NOT_FOUND.',
+          },
+          '409': {
+            ...errorResponse,
+            description:
+              'The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED), or the derived address is already registered, or the account already under the derived key is the caller\'s default account and cannot be marked (error_code MERCHANT_ACCOUNT_ALREADY_REGISTERED).',
+          },
+          '422': {
+            ...errorResponse,
+            description:
+              'The source account has no passkey to copy (SOURCE_HAS_NO_PASSKEY), the key_id is not one of its passkeys (KEY_NOT_ON_SOURCE), or the per-user per-chain account cap is reached (ACCOUNT_CAP_REACHED).',
+          },
+          '502': {
+            ...errorResponse,
+            description: 'The account address could not be derived: error_code MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE.',
+          },
+        },
+      },
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'turnOffMerchantServices',
+        summary: 'Turn merchant services off.',
+        description:
+          'Records the setting as off and KEEPS the merchant account and its history (#4895). The account is not unlinked and the marker stays, so turning merchant services back on reuses the same account. Idempotent: turning off when it was never on answers the same body.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'Merchant services are off. `merchant_account` is the account that will be reused, or null.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantServicesState' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getMerchantServices',
+        summary: 'Read the merchant-services setting and the merchant account.',
+        description:
+          'The dashboard read (#4895): the setting and the merchant account in one authenticated call. Both reads are scoped to the caller, so another user\'s setting is never returned. `enabled` is false and `merchant_account` is null for a user who never turned merchant services on.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The caller\'s merchant-services state.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantServicesState' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
     '/merchants': {
       get: {
         tags: ['Catalog'],
@@ -11510,6 +11636,47 @@ export const openapiSpec = {
         required: ['success'],
         properties: { success: { type: 'boolean' } },
         additionalProperties: false,
+      },
+      /**
+       * #4895: the merchant-services state — the per-user setting plus the
+       * merchant account. Returned by all three `/merchant-services`
+       * operations, so the dialog reads one shape whichever call it made.
+       *
+       * `created` is POST-only (true when that request created the account);
+       * `enabled_at` / `disabled_at` are GET-only history. `merchant_account`
+       * is null for a user who never turned merchant services on.
+       */
+      MerchantServicesState: {
+        type: 'object',
+        required: ['enabled', 'merchant_account'],
+        properties: {
+          enabled: { type: 'boolean' },
+          created: {
+            type: 'boolean',
+            description: 'POST only: true when this request created the merchant account, false when it answered an existing one.',
+          },
+          enabled_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'GET only: when merchant services were FIRST turned on. Turning them off and on again does not move it.',
+          },
+          disabled_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'GET only: when merchant services were last turned off. Null when they were never on.',
+          },
+          merchant_account: {
+            type: ['object', 'null'],
+            required: ['id', 'account_address', 'chain_id', 'name', 'created_at'],
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              account_address: address,
+              chain_id: { type: 'integer' },
+              name: { type: 'string' },
+              created_at: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
       },
       /**
        * Agent label (#3167). A tag in the user's own vocabulary, carried by

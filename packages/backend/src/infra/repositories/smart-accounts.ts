@@ -108,7 +108,16 @@ export const LIST_ACCOUNTS_WITH_TYPE_FOR_USER_SQL = `SELECT id, account_address,
 
 export const FIND_OWNED_ACCOUNT_ADDRESS_SQL = `SELECT id, account_address FROM smart_accounts WHERE id = $1 AND user_id = $2`
 
-export const FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL = `SELECT id, is_default FROM smart_accounts WHERE id = $1 AND user_id = $2`
+/**
+ * The unlink / make-default ownership read.
+ *
+ * #4895: it also carries `account_address` (make-default needs it for the
+ * legacy mirror) and `is_merchant_account` (both routes refuse the merchant
+ * account). One read, so the two refusals cannot disagree about which account
+ * is the merchant account.
+ */
+export const FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL = `SELECT id, account_address, is_default, is_merchant_account
+       FROM smart_accounts WHERE id = $1 AND user_id = $2`
 
 /**
  * The funding read's ownership check (#2534).
@@ -180,12 +189,20 @@ export async function findOwnedAccountAddress(
   return result.rows[0] ?? null
 }
 
+export interface OwnedAccountFlagRow {
+  id: string
+  account_address: string
+  is_default: boolean
+  /** #4895: the merchant marker. Unlink and make-default both refuse it. */
+  is_merchant_account: boolean
+}
+
 export async function findOwnedAccountDefaultFlag(
   accountId: string,
   userId: string,
   db: Executor = pool,
-): Promise<{ id: string; is_default: boolean } | null> {
-  const result = await db.query<{ id: string; is_default: boolean }>(
+): Promise<OwnedAccountFlagRow | null> {
+  const result = await db.query<OwnedAccountFlagRow>(
     FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL,
     [accountId, userId],
   )
@@ -268,7 +285,7 @@ export const SET_ACCOUNT_DEFAULT_SQL = `UPDATE smart_accounts SET is_default = t
 /**
  * Point the user's default at `accountId` and keep the legacy mirror in sync —
  * one transaction, exactly the route's BEGIN/COMMIT block. The route checks
- * ownership first (`findOwnedAccountAddress`), and every statement here is
+ * ownership first (`findOwnedAccountDefaultFlag`), and every statement here is
  * tenant-scoped as well (#3227): for an account `userId` does not own, the
  * clear and the set match no row and the mirror is left untouched — a silent
  * no-op, the same posture as `renameAccountForUser`.
@@ -326,8 +343,18 @@ export const HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
            AND ar.stage IN ('preflight', 'revoked', 'metered', 'issued')
        ) AS in_flight`
 
+/**
+ * The account promoted to default when the default account is unlinked.
+ *
+ * #4895: the merchant account is never a candidate. Make-default refuses it
+ * (`MERCHANT_ACCOUNT_DEFAULT_REFUSED`), and this promotion is the other way an
+ * account becomes the default — without the filter, unlinking the default
+ * account of a user whose only other account is the merchant account would
+ * promote it. With no other account left the user has no default, the same
+ * state as before their first account.
+ */
 export const FIND_OLDEST_ACCOUNT_FOR_USER_SQL = `SELECT id, account_address FROM smart_accounts
-             WHERE user_id = $1
+             WHERE user_id = $1 AND NOT is_merchant_account
              ORDER BY created_at ASC
              LIMIT 1`
 

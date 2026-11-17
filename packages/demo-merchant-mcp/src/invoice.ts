@@ -1,7 +1,16 @@
+import {
+  buildReceipt,
+  receiptNumberForTransaction,
+  renderReceiptText,
+  type AcceptedTaxDeclaration,
+  type InvoiceJson,
+  type ReceiptSellerDetails,
+  type VatRule,
+} from '@haven_ai/merchant-payments'
 import type { MerchantLocale, ProductId } from './products.js'
-import { CHAIN_ID, PRODUCTS, formatUsdc, networkDisplayName, productBillingPeriod } from './products.js'
+import { CHAIN_ID, PRODUCTS, networkDisplayName, productBillingPeriod } from './products.js'
+import type { SekRate } from './sek-rate.js'
 import type { SettledPayment, SettlementState } from './x402.js'
-import { vatTreatmentFor, type AcceptedTaxDeclaration, type VatTreatment } from './tax-declaration.js'
 
 // #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
 // Swedish bookkeeping artifact by design — it feeds the `x-receipt-json`
@@ -9,9 +18,30 @@ import { vatTreatmentFor, type AcceptedTaxDeclaration, type VatTreatment } from 
 // the display-locale switch never touches it: keys, values, and `beskrivning`
 // stay Swedish regardless of the buyer-facing locale. Only the human-readable
 // render gains an English variant, via `renderInvoiceText`.
+//
+// #4890: the receipt builder, its rendered text, the receipt number, the VAT
+// amounts and the declaration check live in `@haven_ai/merchant-payments`,
+// shared with the paywall proxy. This module keeps what is the DEMO
+// merchant's: its seller, its product table, its support contact, its VAT
+// rule, the counter for payments with no transaction hash, and the
+// per-payment cache.
+
+export {
+  RECEIPT_NUMBER_DIGITS,
+  receiptNumberForTransaction,
+  vatAmountsAtomic,
+  type BuyerDeclaration,
+  type Invoice,
+  type InvoiceJson,
+} from '@haven_ai/merchant-payments'
 
 // ── Merchant identity ────────────────────────────────────────────────────────
-const MERCHANT_IDENTITY = {
+/**
+ * The demo seller: what every receipt carries when no seller is configured.
+ * #4856: a deployment that is a real seller sets `MERCHANT_SELLER_*`
+ * instead (`resolveReceiptSeller`).
+ */
+export const DEMO_SELLER: ReceiptSellerDetails = {
   name: 'Haven Demo AB',
   address: 'Birger Jarlsgatan 57, 113 56 Stockholm',
   org_nr: '559412-3456',
@@ -20,20 +50,177 @@ const MERCHANT_IDENTITY = {
   bic: 'ESSESESS',
 }
 
+/** #4856: the seller variables, in the order their keys appear on the receipt. */
+export const SELLER_ENV = {
+  name: 'MERCHANT_SELLER_NAME',
+  address: 'MERCHANT_SELLER_ADDRESS',
+  org_nr: 'MERCHANT_SELLER_ORG_NR',
+  moms_nr: 'MERCHANT_SELLER_MOMS_NR',
+  iban: 'MERCHANT_SELLER_IBAN',
+  bic: 'MERCHANT_SELLER_BIC',
+} as const
+
+const REQUIRED_SELLER_KEYS = ['name', 'address', 'org_nr', 'moms_nr'] as const
+
+/**
+ * #4856: the seller block from configuration. With no `MERCHANT_SELLER_*`
+ * variable set, the demo seller, so the receipt is unchanged. With the four
+ * required ones set (name, address, org_nr, moms_nr), that seller, plus
+ * `iban` and `bic` only when each is set — a real seller never inherits the
+ * demo's bank details. With any `MERCHANT_SELLER_*` set but one of the four
+ * required ones missing (`IBAN` or `BIC` alone included), a warning naming
+ * the missing variables and the demo seller: a
+ * half-configured seller is a mistake, not a reason to refuse payments.
+ */
+export function resolveReceiptSeller(
+  env: Record<string, string | undefined>,
+  warn: (message: string) => void = console.warn,
+): ReceiptSellerDetails {
+  const value = (key: keyof typeof SELLER_ENV) => env[SELLER_ENV[key]]?.trim() || undefined
+  const anySet = (Object.keys(SELLER_ENV) as (keyof typeof SELLER_ENV)[]).some((key) => value(key))
+  if (!anySet) return DEMO_SELLER
+  const missing = REQUIRED_SELLER_KEYS.filter((key) => !value(key))
+  if (missing.length > 0) {
+    warn(
+      `Seller details are incomplete: set ${missing.map((key) => SELLER_ENV[key]).join(', ')} too. ` +
+        'Receipts carry the demo seller until all four of name, address, org_nr and moms_nr are set.',
+    )
+    return DEMO_SELLER
+  }
+  const seller: ReceiptSellerDetails = {
+    name: value('name')!,
+    address: value('address')!,
+    org_nr: value('org_nr')!,
+    moms_nr: value('moms_nr')!,
+  }
+  const iban = value('iban')
+  const bic = value('bic')
+  if (iban) seller.iban = iban
+  if (bic) seller.bic = bic
+  return seller
+}
+
+// ── Stripe reference and SEK amount (#4856) ──────────────────────────────────
+//
+// The receipt for a payment Stripe will record is built before Stripe is
+// contacted (#4880) and the merchant never waits for Stripe (#4853), so no
+// PaymentIntent ID and no Stripe SEK figure exist when it answers. The receipt
+// says the reference is pending and names the receipt number and transaction
+// hash to find it by in Stripe (the PaymentIntent's `receipt_number` and
+// `transaction_hash` metadata), and states an indicative SEK amount with its
+// rate, source and time — or says none was available. Demo merchant only: the
+// shared core (`@haven_ai/merchant-payments`) does not carry these blocks.
+
+/** #4856: the Stripe reference on the receipt; always pending at answer time. */
+export interface StripeReferenceBlock {
+  status: 'Väntar'
+  /** The two values the PaymentIntent can be found by in Stripe. */
+  sok_med: { fakturanummer: string; transaktions_hash: string }
+}
+
+/** #4856: the SEK amount on the receipt. Never Stripe's own figure. */
+export type SekAmountBlock =
+  | {
+      tillganglig: true
+      /** SEK, two decimals. */
+      belopp: string
+      /** SEK per 1 USDC. */
+      kurs: string
+      kalla: SekRate['source']
+      /** ISO time the rate was read. */
+      tidpunkt: string
+    }
+  | { tillganglig: false; status: 'Ej tillgängligt vid köptillfället' }
+
+/** The demo merchant's receipt: the core document plus the #4856 blocks. */
+export type DemoInvoiceJson = InvoiceJson & {
+  stripe_referens?: StripeReferenceBlock
+  belopp_sek?: SekAmountBlock
+}
+
+export interface DemoInvoice {
+  json: DemoInvoiceJson
+  text: string
+}
+
+/** #4856: what the caller knows about Stripe when the receipt is built. */
+export interface StripeReceiptContext {
+  /** The fresh cached rate, or `undefined` when none is available. */
+  sekRate: SekRate | undefined
+}
+
+/** SEK for an atomic USDC amount at `rate`, two decimals. */
+export function sekAmountText(priceAtomic: bigint, rate: number): string {
+  return ((Number(priceAtomic) / 1_000_000) * rate).toFixed(2)
+}
+
+function sekAmountBlock(priceAtomic: bigint, sekRate: SekRate | undefined): SekAmountBlock {
+  if (!sekRate) return { tillganglig: false, status: 'Ej tillgängligt vid köptillfället' }
+  return {
+    tillganglig: true,
+    belopp: sekAmountText(priceAtomic, sekRate.rate),
+    kurs: String(Number(sekRate.rate.toFixed(6))),
+    kalla: sekRate.source,
+    tidpunkt: sekRate.fetchedAt.toISOString(),
+  }
+}
+
+function stripeSectionsText(inv: DemoInvoiceJson, locale: MerchantLocale): string {
+  let out = ''
+  const ref = inv.stripe_referens
+  if (ref) {
+    out +=
+      locale === 'sv'
+        ? `STRIPE-REFERENS\n` +
+          `  Väntar — betalningen skickas till Stripe efter köpet.\n` +
+          `  Sök med fakturanummer: ${ref.sok_med.fakturanummer}\n` +
+          `  eller transaktions-hash: ${ref.sok_med.transaktions_hash}\n\n`
+        : `STRIPE REFERENCE\n` +
+          `  Pending — the payment is sent to Stripe after the purchase.\n` +
+          `  Find it by receipt number: ${ref.sok_med.fakturanummer}\n` +
+          `  or transaction hash: ${ref.sok_med.transaktions_hash}\n\n`
+  }
+  const sek = inv.belopp_sek
+  if (sek) {
+    out += locale === 'sv' ? `BELOPP I SEK (indikativt, inte Stripes belopp)\n` : `AMOUNT IN SEK (indicative, not Stripe's figure)\n`
+    out += sek.tillganglig
+      ? locale === 'sv'
+        ? `  ${sek.belopp} SEK — kurs ${sek.kurs} SEK/USDC (${sek.kalla}, ${sek.tidpunkt})\n\n`
+        : `  ${sek.belopp} SEK — rate ${sek.kurs} SEK/USDC (${sek.kalla}, ${sek.tidpunkt})\n\n`
+      : locale === 'sv'
+        ? `  Ej tillgängligt vid köptillfället.\n\n`
+        : `  Not available at the time of purchase.\n\n`
+  }
+  return out
+}
+
+const RULE = '═'.repeat(60)
+
+/**
+ * Insert the #4856 sections before the receipt text's closing frame (the
+ * thank-you box). Returns the text unchanged when the receipt has neither
+ * block, so every other receipt keeps its exact bytes.
+ */
+function withStripeSections(text: string, inv: DemoInvoiceJson, locale: MerchantLocale): string {
+  const sections = stripeSectionsText(inv, locale)
+  if (!sections) return text
+  const closing = text.lastIndexOf(RULE, text.lastIndexOf(RULE) - 1)
+  if (closing < 0) return text + sections
+  return text.slice(0, closing) + sections + text.slice(closing)
+}
+
 /**
  * The seller block. Its keys are a contract: Haven's accounting reads
  * `name`, `org_nr` and `moms_nr` off the receipt
  * (`packages/backend/src/modules/accounting/receipt-underlag.ts`).
+ * #4875: so are the line and total keys — `rader[]` (`beskrivning`, `antal`,
+ * `apris_exkl_moms`, `moms_procent`, `moms_belopp`, `totalt_inkl_moms`),
+ * `belopp_exkl_moms`, `moms_procent`, `moms_belopp`, `totalt_inkl_moms`,
+ * `momsbehandling` and `valuta`
+ * (`packages/backend/src/modules/accounting/receipt-statement.ts`,
+ * `docs/operations/merchant-receipt-shape.md`). `invoice.test.ts` pins them.
  */
-export type InvoiceSeller = typeof MERCHANT_IDENTITY & {
-  /**
-   * USDC on the merchant's network (see `networkDisplayName`): the address
-   * THIS payment was made out to. #4850: the purchased product's receiving
-   * address, passed in per invoice — no longer read from `MERCHANT_ADDRESS`
-   * at import, which named one address for every product.
-   */
-  crypto_address: string
-}
+export type { InvoiceSeller } from '@haven_ai/merchant-payments'
 
 /**
  * Invoice numbering. The demo merchant has no store, so the counter is
@@ -58,38 +245,14 @@ export function createInvoiceNumberer(seedMs: number = Date.now()): () => string
 
 const nextInvoiceNumber = createInvoiceNumberer()
 
+/** The demo merchant's support contact, printed on the receipt text. */
+const SUPPORT_CONTACT = 'support@haven.xyz'
+
 /**
- * Luhn (modulus 10) check digit to APPEND to `base`.
- *
- * #3422: the digit is computed before it exists, so the RIGHTMOST digit of
- * the base is the first one doubled. The validating form of the same
- * algorithm starts one position further left, because there the rightmost
- * digit is the check digit itself. Using that form here produced a wrong
- * digit whenever the two forms' sums differ mod 10, which is about nine OCRs
- * in ten.
+ * The demo merchant's VAT rule: a Swedish seller of an electronic service,
+ * with EU reverse charge for an accepted declaration (#4855).
  */
-function luhnCheckDigit(base: string): number {
-  let sum = 0
-  let double = true
-  for (let i = base.length - 1; i >= 0; i--) {
-    let d = parseInt(base[i], 10)
-    if (double) d *= 2
-    if (d > 9) d -= 9
-    sum += d
-    double = !double
-  }
-  return (10 - (sum % 10)) % 10
-}
-
-function generateOcr(invoiceNumber: string): string {
-  // Use numeric part of invoice number as OCR base
-  const base = invoiceNumber.replace(/\D/g, '')
-  return `${base}${luhnCheckDigit(base)}`
-}
-
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
+const VAT_RULE: VatRule = 'SE_25_WITH_EU_REVERSE_CHARGE'
 
 export interface InvoiceParams {
   /** Merchant chain for the payment-method text; defaults to `CHAIN_ID`. */
@@ -101,289 +264,83 @@ export interface InvoiceParams {
    * #2960: which party `buyerAddress` actually is. The merchant only ever
    * observes the address it verified the payment FROM — the delegate EOA on
    * `eip3009`, the delegate SMART account (`delegator`) on `erc7710` — never
-   * the owner's treasury account, which is not knowable merchant-side (it
-   * never appears in the x402 payload on either scheme). This is what
-   * carries that distinction onto the invoice instead of an unqualified
-   * "buyer".
+   * the owner's treasury account, which is not knowable merchant-side.
    */
   payerRole: 'agent_delegate' | 'agent_delegate_account'
   /** #4850: the purchased product's receiving address (`productReceivingAddress`). */
   receivingAddress: string
   /**
    * #4855: the buyer's accepted tax declaration, or absent/null when the
-   * request carried none (or carried one the merchant refused). Display only —
-   * it changes the buyer block and the VAT treatment, never the price.
+   * request carried none (or carried one the merchant refused). Display only.
    */
   taxDeclaration?: AcceptedTaxDeclaration | null
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
-  /** The wire hash — rendered only when `settlement === 'settled_onchain'`
-   *  (the zero hash on the two non-settled states, never printed). */
+  /** The wire hash — rendered only when `settlement === 'settled_onchain'`. */
   txHash: string
   /** #2969: explicit settlement truth — see `SettlementState`. */
   settlement: SettlementState
-}
-
-export interface Invoice {
-  /** Structured data optimised for Swedish bookkeeping / accounting systems */
-  json: InvoiceJson
-  /** Human-readable Swedish invoice text */
-  text: string
-}
-
-export interface InvoiceJson {
-  fakturanummer: string
-  fakturadatum: string
-  forfallodatum: string
-  ocr_nummer: string
-  saljare: InvoiceSeller
-  kopare: {
-    identifierare: string
-    typ: 'blockkedjeadress'
-    /**
-     * #2960, additive — which party `identifierare` is (see
-     * `InvoiceParams.payerRole`). Never read by `buildInvoiceText` (the
-     * Swedish render stays byte-for-byte per #1550); the English render
-     * uses it to avoid calling a delegate address "the buyer".
-     */
-    roll: 'agent_delegate' | 'agent_delegate_account'
-    /**
-     * #4855: present ONLY when the merchant accepted a signed declaration.
-     * Absent otherwise, so a receipt without one is unchanged apart from
-     * `momsbehandling`. The declaration carries no company name and no
-     * organisation number, so this block shows only what it does carry.
-     */
-    deklaration?: BuyerDeclaration
-  }
-  rader: InvoiceRow[]
-  belopp_exkl_moms: string
-  moms_procent: number
-  moms_belopp: string
-  totalt_inkl_moms: string
   /**
-   * #4855: the display treatment the amounts above follow. `SE_25` is the
-   * unchanged Swedish 25% VAT taken out of the price; `REVERSE_CHARGE` shows
-   * the full price as net with 0% VAT and a zero VAT amount. Display only —
-   * the merchant applies the rule, it does not compute or file tax.
+   * #4890: the clock the invoice and due dates are read from. Defaults to
+   * now; a test injects it to reproduce a receipt byte for byte.
    */
-  momsbehandling: VatTreatment
-  valuta: 'USDC'
-  /** `Kryptovaluta (USDC på <network>)`; mainnet is exactly `... på Base)` (#1550, #3834). */
-  betalningssatt: `Kryptovaluta (USDC på ${string})`
+  now?: Date
+  /** #4856: the configured seller; defaults to the demo seller. */
+  seller?: ReceiptSellerDetails
   /**
-   * #2969: `null` on both non-settled states — never the zero hash. Only
-   * `settlement === 'settled_onchain'` carries a real transaction reference.
+   * #4856: present only when Stripe will record this payment
+   * (`stripeRecordingDecision` answers `record`). Then, and only for a payment
+   * settled on chain, the receipt carries the pending Stripe reference and the
+   * SEK amount. Absent, the receipt is exactly the core document.
    */
-  blockkedje_referens: string | null
-  /**
-   * #2969: 'Betald' only for `settlement === 'settled_onchain'`. The other
-   * two `SettlementState`s each get their own honest status — 'already
-   * settled earlier, no reference' is distinct from 'delivered, unconfirmed'.
-   */
-  status: 'Betald' | 'Betald i tidigare transaktion — referens saknas' | 'Levererad — ej bekräftad på kedjan'
+  stripe?: StripeReceiptContext
 }
 
-/**
- * #4855: the buyer block's declaration fields. Swedish keys, like the rest of
- * the bookkeeping document (#1550). `giltig_till` is the ISO date of the
- * declaration's `validUntil`.
- */
-export interface BuyerDeclaration {
-  /** Declared country, ISO 3166-1 alpha-2. */
-  land: string
-  /** The buyer's VAT number. */
-  moms_nr: string
-  /** The declared taxable status, e.g. `TAXABLE_PERSON`. */
-  status: string
-  /** ISO date the declaration is valid until. */
-  giltig_till: string
-}
-
-interface InvoiceRow {
-  beskrivning: string
-  antal: number
-  apris_exkl_moms: string
-  moms_procent: number
-  moms_belopp: string
-  totalt_inkl_moms: string
-}
-
-const STATUS_BY_SETTLEMENT: Record<SettlementState, InvoiceJson['status']> = {
-  settled_onchain: 'Betald',
-  already_settled_earlier: 'Betald i tidigare transaktion — referens saknas',
-  settlement_unknown: 'Levererad — ej bekräftad på kedjan',
-}
-
-export function generateInvoice(params: InvoiceParams): Invoice {
+export function generateInvoice(params: InvoiceParams): DemoInvoice {
   const product = PRODUCTS[params.productId]
-  const today = new Date()
-  const dueDate = new Date(today)
-  dueDate.setDate(dueDate.getDate() + 30)
-
-  // #4855: the treatment is display-only and never changes the price. Under
-  // `SE_25` the price is VAT-inclusive and 25% is taken out of it, exactly as
-  // before. Under `REVERSE_CHARGE` the full price is the net amount, the VAT
-  // rate is 0 and the VAT amount is zero (owner decision, 2026-11-16).
-  const declaration = params.taxDeclaration ?? null
-  const treatment = vatTreatmentFor(declaration)
-  const reverseCharge = treatment === 'REVERSE_CHARGE'
-
-  const totalInclMoms = product.price_usdc
-  // exkl. moms = inkl. moms / 1.25
-  const exklMoms = reverseCharge ? totalInclMoms : (totalInclMoms * 100n) / 125n
-  const momsBelopp = reverseCharge ? 0n : totalInclMoms - exklMoms
-  const momsProcent = reverseCharge ? 0 : 25
-
-  // #2969: only a REAL on-chain settlement gets a reference. Both non-settled
-  // states get `null` — never the zero hash, and never a fallback nonce
-  // dressed up as a reference for a transaction that may not exist at all
-  // (`already_settled_earlier` names no hash this process observed).
-  const blockRef = params.settlement === 'settled_onchain' ? `Tx: ${params.txHash}` : null
-
-  const ocr = generateOcr(params.invoiceNumber)
-
-  const row: InvoiceRow = {
-    // Always the SWEDISH description — this is the bookkeeping document, not
-    // the display surface (#1550, see module comment).
-    // #4851: a one-time product is not a month of anything.
-    beskrivning: `${product.name} — ${product.description_sv} (${productBillingPeriod(product) === 'monthly' ? '1 månad' : 'engångsköp'})`,
-    antal: 1,
-    apris_exkl_moms: formatUsdc(exklMoms),
-    moms_procent: momsProcent,
-    moms_belopp: formatUsdc(momsBelopp),
-    totalt_inkl_moms: formatUsdc(totalInclMoms),
-  }
-
-  const json: InvoiceJson = {
-    fakturanummer: params.invoiceNumber,
-    fakturadatum: isoDate(today),
-    forfallodatum: isoDate(dueDate),
-    ocr_nummer: ocr,
-    saljare: { ...MERCHANT_IDENTITY, crypto_address: params.receivingAddress },
-    kopare: {
-      identifierare: params.buyerAddress,
-      typ: 'blockkedjeadress',
-      roll: params.payerRole,
-      // #4855: absent when there is no accepted declaration, so a receipt
-      // without one keeps its exact previous shape.
-      ...(declaration ? { deklaration: buyerDeclarationBlock(declaration) } : {}),
+  const chainId = params.chainId ?? CHAIN_ID
+  const network = { sv: networkDisplayName(chainId, 'sv'), en: networkDisplayName(chainId, 'en') }
+  const json: InvoiceJson = buildReceipt({
+    invoiceNumber: params.invoiceNumber,
+    // Always the SWEDISH description (#1550). #4851: a one-time product is
+    // not a month of anything.
+    line: {
+      name: product.name,
+      description: product.description_sv,
+      priceAtomic: product.price_usdc,
+      billingPeriod: productBillingPeriod(product),
     },
-    rader: [row],
-    belopp_exkl_moms: formatUsdc(exklMoms),
-    moms_procent: momsProcent,
-    moms_belopp: formatUsdc(momsBelopp),
-    totalt_inkl_moms: formatUsdc(totalInclMoms),
-    momsbehandling: treatment,
-    valuta: 'USDC',
-    betalningssatt: `Kryptovaluta (USDC på ${networkDisplayName(params.chainId ?? CHAIN_ID, 'sv')})`,
-    blockkedje_referens: blockRef,
-    status: STATUS_BY_SETTLEMENT[params.settlement],
-  }
-
-  const text = buildInvoiceText(json, product.name)
-
-  return { json, text }
-}
-
-/** #4855: the four declaration fields the buyer block shows. */
-function buyerDeclarationBlock(declaration: AcceptedTaxDeclaration): BuyerDeclaration {
-  return {
-    land: declaration.jurisdiction,
-    moms_nr: declaration.taxId,
-    status: declaration.taxableStatus,
-    giltig_till: isoDate(new Date(declaration.validUntil)),
-  }
-}
-
-/**
- * #2969: the blockchain reference section is present only when there is a
- * real one to show (`settlement === 'settled_onchain'`). Printing the zero
- * hash for the other two states was the bug this issue exists to fix — the
- * fix is to say nothing rather than print a fake reference, so the section
- * (heading + value + trailing blank line) is omitted entirely when
- * `blockkedje_referens` is `null`.
- */
-function blockchainReferenceSection(inv: InvoiceJson, heading: string): string {
-  if (inv.blockkedje_referens === null) return ''
-  return `${heading}\n  ${inv.blockkedje_referens}\n\n`
-}
-
-function buildInvoiceText(inv: InvoiceJson, productName: string): string {
-  const row = inv.rader[0]
-  return `
-════════════════════════════════════════════════════════════
-                         FAKTURA
-════════════════════════════════════════════════════════════
-
-SÄLJARE
-  ${inv.saljare.name}
-  ${inv.saljare.address}
-  Org.nr:       ${inv.saljare.org_nr}
-  Momsreg.nr:   ${inv.saljare.moms_nr}
-
-KÖPARE
-  Blockkedjeadress: ${inv.kopare.identifierare}
-${buyerDeclarationLinesSv(inv)}
-────────────────────────────────────────────────────────────
-  Fakturanummer:   ${inv.fakturanummer}
-  Fakturadatum:    ${inv.fakturadatum}
-  Förfallodatum:   ${inv.forfallodatum}
-  OCR-nummer:      ${inv.ocr_nummer}
-────────────────────────────────────────────────────────────
-
-TJÄNSTER
-
-  ${row.beskrivning}
-  Antal: ${row.antal}  Á-pris exkl. moms: ${row.apris_exkl_moms} USDC
-
-────────────────────────────────────────────────────────────
-  Belopp exkl. moms:   ${inv.belopp_exkl_moms} USDC
-  Moms ${inv.moms_procent}%:              ${inv.moms_belopp} USDC
-  TOTALT inkl. moms:   ${inv.totalt_inkl_moms} USDC
-${reverseChargeLinesSv(inv)}────────────────────────────────────────────────────────────
-
-  Valuta:           ${inv.valuta}
-  Betalningssätt:   ${inv.betalningssatt}
-  Mottagaradress:   ${inv.saljare.crypto_address}
-
-${blockchainReferenceSection(inv, 'BLOCKKEDJEREFERENS')}  Status: ${inv.status}
-
-════════════════════════════════════════════════════════════
-  Tack för ditt köp av ${productName}!
-  Frågor: support@haven.xyz
-════════════════════════════════════════════════════════════
-`.trimStart()
-}
-
-/**
- * #4855: the buyer block's declaration lines, Swedish render. Empty when the
- * merchant accepted no declaration, so a receipt without one is byte-for-byte
- * what it was before (#1550).
- */
-function buyerDeclarationLinesSv(inv: InvoiceJson): string {
-  const d = inv.kopare.deklaration
-  if (!d) return ''
-  return (
-    `  Land:             ${d.land}\n` +
-    `  Momsreg.nr:       ${d.moms_nr}\n` +
-    `  Status:           ${d.status}\n` +
-    `  Deklaration giltig till: ${d.giltig_till}\n`
-  )
-}
-
-/**
- * #4855: the reverse-charge note, Swedish render. Empty under `SE_25`, so the
- * Swedish invoice is unchanged for every purchase without an EU declaration.
- * Names BOTH VAT numbers, as the treatment requires.
- */
-function reverseChargeLinesSv(inv: InvoiceJson): string {
-  const d = inv.kopare.deklaration
-  if (inv.momsbehandling !== 'REVERSE_CHARGE' || !d) return ''
-  return (
-    `  Omvänd betalningsskyldighet (reverse charge) — köparen redovisar momsen.\n` +
-    `  Säljarens momsreg.nr: ${inv.saljare.moms_nr}\n` +
-    `  Köparens momsreg.nr: ${d.moms_nr}\n`
-  )
+    seller: params.seller ?? DEMO_SELLER,
+    receivingAddress: params.receivingAddress,
+    network,
+    vatRule: VAT_RULE,
+    buyerAddress: params.buyerAddress,
+    payerRole: params.payerRole,
+    taxDeclaration: params.taxDeclaration ?? null,
+    txHash: params.txHash,
+    settlement: params.settlement,
+    now: params.now,
+  })
+  // #4856: the Stripe reference needs the hash it is found by, so it is added
+  // only for a payment settled on chain (the only kind Stripe records).
+  const demoJson: DemoInvoiceJson =
+    params.stripe && params.settlement === 'settled_onchain'
+      ? {
+          ...json,
+          stripe_referens: {
+            status: 'Väntar',
+            sok_med: { fakturanummer: json.fakturanummer, transaktions_hash: params.txHash },
+          },
+          belopp_sek: sekAmountBlock(product.price_usdc, params.stripe.sekRate),
+        }
+      : json
+  const text = renderReceiptText(demoJson, {
+    productName: product.name,
+    locale: 'sv',
+    network,
+    supportContact: SUPPORT_CONTACT,
+  })
+  return { json: demoJson, text: withStripeSections(text, demoJson, 'sv') }
 }
 
 /**
@@ -393,96 +350,19 @@ function reverseChargeLinesSv(inv: InvoiceJson): string {
  * the demo default; `sv` reproduces the classic FAKTURA render byte-for-byte.
  */
 export function renderInvoiceText(
-  inv: InvoiceJson,
+  inv: DemoInvoiceJson,
   productName: string,
   locale: MerchantLocale,
   chainId: number = CHAIN_ID,
 ): string {
-  return locale === 'sv' ? buildInvoiceText(inv, productName) : buildInvoiceTextEn(inv, productName, chainId)
-}
-
-const STATUS_EN: Record<InvoiceJson['status'], string> = {
-  Betald: 'Paid',
-  'Betald i tidigare transaktion — referens saknas': 'Paid in an earlier transaction — reference unavailable',
-  'Levererad — ej bekräftad på kedjan': 'Delivered — not confirmed on-chain',
-}
-
-function buildInvoiceTextEn(inv: InvoiceJson, productName: string, chainId: number): string {
-  const row = inv.rader[0]
-  return `
-════════════════════════════════════════════════════════════
-                         INVOICE
-════════════════════════════════════════════════════════════
-
-SELLER
-  ${inv.saljare.name}
-  ${inv.saljare.address}
-  Org. no:      ${inv.saljare.org_nr}
-  VAT reg. no:  ${inv.saljare.moms_nr}
-
-PAYER
-  Blockchain address: ${inv.kopare.identifierare}
-  Role: ${inv.kopare.roll === 'agent_delegate_account' ? 'agent delegate account (erc7710 delegator) — paid on behalf of an owner treasury account not visible to this merchant' : 'agent delegate address (eip3009)'}
-${buyerDeclarationLinesEn(inv)}
-────────────────────────────────────────────────────────────
-  Invoice number:  ${inv.fakturanummer}
-  Invoice date:    ${inv.fakturadatum}
-  Due date:        ${inv.forfallodatum}
-  OCR number:      ${inv.ocr_nummer}
-────────────────────────────────────────────────────────────
-
-SERVICES
-
-  ${row.beskrivning}
-  Quantity: ${row.antal}  Unit price excl. VAT: ${row.apris_exkl_moms} USDC
-
-────────────────────────────────────────────────────────────
-  Amount excl. VAT:    ${inv.belopp_exkl_moms} USDC
-  VAT ${inv.moms_procent}%:             ${inv.moms_belopp} USDC
-  TOTAL incl. VAT:     ${inv.totalt_inkl_moms} USDC
-${reverseChargeLinesEn(inv)}────────────────────────────────────────────────────────────
-
-  Currency:          ${inv.valuta}
-  Payment method:    Cryptocurrency (USDC on ${networkDisplayName(chainId, 'en')})
-  Recipient address: ${inv.saljare.crypto_address}
-
-${blockchainReferenceSection(inv, 'BLOCKCHAIN REFERENCE')}  Status: ${STATUS_EN[inv.status]}
-
-════════════════════════════════════════════════════════════
-  Thank you for purchasing ${productName}!
-  Questions: support@haven.xyz
-════════════════════════════════════════════════════════════
-`.trimStart()
-}
-
-/**
- * #4855: the buyer block's declaration lines, English render. Empty when the
- * merchant accepted no declaration, so the English render is unchanged for
- * every purchase without one.
- */
-function buyerDeclarationLinesEn(inv: InvoiceJson): string {
-  const d = inv.kopare.deklaration
-  if (!d) return ''
-  return (
-    `  Country: ${d.land}\n` +
-    `  VAT reg. no: ${d.moms_nr}\n` +
-    `  Status: ${d.status}\n` +
-    `  Declaration valid until: ${d.giltig_till}\n`
-  )
-}
-
-/**
- * #4855: the reverse-charge note, English render. Empty under `SE_25`. Names
- * BOTH VAT numbers, as the treatment requires.
- */
-function reverseChargeLinesEn(inv: InvoiceJson): string {
-  const d = inv.kopare.deklaration
-  if (inv.momsbehandling !== 'REVERSE_CHARGE' || !d) return ''
-  return (
-    `  Reverse charge — the buyer accounts for the VAT.\n` +
-    `  Seller VAT reg. no: ${inv.saljare.moms_nr}\n` +
-    `  Buyer VAT reg. no: ${d.moms_nr}\n`
-  )
+  return withStripeSections(renderReceiptText(inv, {
+    productName,
+    locale,
+    // The Swedish render reads the network from the document itself, so only
+    // the English render looks the chain up, exactly as before the move.
+    network: { sv: '', en: locale === 'sv' ? '' : networkDisplayName(chainId, 'en') },
+    supportContact: SUPPORT_CONTACT,
+  }), inv, locale)
 }
 
 export { nextInvoiceNumber }
@@ -498,17 +378,31 @@ export { nextInvoiceNumber }
 // #4850: keyed by payment alone, so every caller must pass the SAME
 // `receivingAddress` for a payment — the purchased product's
 // (`productReceivingAddress`). Whichever caller runs first fixes the invoice.
-const invoicesByPayment = new WeakMap<SettledPayment, Invoice>()
+//
+// #4856: so are `seller` and `stripe`. The HTTP layer builds the invoice
+// first (before the MCP handler runs) and passes both; the handler's later
+// call replays the cached invoice.
+const invoicesByPayment = new WeakMap<SettledPayment, DemoInvoice>()
 
 export function invoiceForPayment(
   payment: SettledPayment,
   productId: ProductId,
-  opts: { receivingAddress: string; chainId?: number; taxDeclaration?: AcceptedTaxDeclaration | null },
-): Invoice {
+  opts: {
+    receivingAddress: string
+    chainId?: number
+    taxDeclaration?: AcceptedTaxDeclaration | null
+    seller?: ReceiptSellerDetails
+    stripe?: StripeReceiptContext
+  },
+): DemoInvoice {
   const cached = invoicesByPayment.get(payment)
   if (cached) return cached
   const invoice = generateInvoice({
-    invoiceNumber: nextInvoiceNumber(),
+    // #4880: a payment settled on-chain is numbered from its transaction hash,
+    // so the number is stable and the reconciliation script reproduces it.
+    // Any other payment has no hash to key on and keeps the counter.
+    invoiceNumber:
+      payment.settlement === 'settled_onchain' ? receiptNumberForTransaction(payment.txHash) : nextInvoiceNumber(),
     productId,
     chainId: opts.chainId,
     receivingAddress: opts.receivingAddress,
@@ -523,6 +417,8 @@ export function invoiceForPayment(
     authorizationNonce: payment.nonce,
     txHash: payment.txHash,
     settlement: payment.settlement,
+    seller: opts.seller,
+    stripe: opts.stripe,
   })
   invoicesByPayment.set(payment, invoice)
   return invoice

@@ -254,9 +254,19 @@ async function seedFixture(): Promise<{
      RETURNING id`,
     [p1, a3, userId, `0x${String(++seq).padStart(64, '1')}`.slice(0, 66), MERCHANT_RECEIPT],
   )
+  // Receipt name for MERCHANT_RECEIPT (the analytics-only step), seeded in the
+  // demo merchant's REAL receipt shape (#4881): the seller block is `saljare`
+  // and there is no `merchant_name` key. The golden's `label` assertion below
+  // is unchanged, so this proves the real shape reaches the wire.
   await db.query(`INSERT INTO merchant_receipts (evidence_id, inline_json) VALUES ($1, $2)`, [
     evidence.rows[0].id,
-    JSON.stringify({ merchant_name: 'Klara Data AB' }),
+    JSON.stringify({
+      fakturanummer: 'FAK-2026-1791972466377',
+      saljare: { name: 'Klara Data AB', org_nr: '559412-3456', moms_nr: 'SE559412345601' },
+      totalt_inkl_moms: '4.00',
+      valuta: 'USDC',
+      status: 'Betald',
+    }),
   ])
 
   await seedDelegation(a1)

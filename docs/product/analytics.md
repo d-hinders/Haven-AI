@@ -25,7 +25,7 @@ covers:
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-11-02"
+last-verified: "2026-11-17"
 ---
 
 # Analytics
@@ -207,7 +207,10 @@ A merchant's label is resolved by the API in a fixed order: the host of the
 x402 resource its most recent payment in the range called, else the name of
 one of your own accounts at that address (address-only, across chains; the
 oldest account wins a shared address), else your contact's name for that
-address, else the name on the payment's receipt, else nothing — the row
+address, else the seller name on the merchant's receipt (its `saljare.name`,
+since #4881; a receipt's flat `merchant_name` when that yields no usable
+name), else
+nothing — the row
 shows "Unknown recipient" where the transaction history says "New
 recipient", with the naming step as a KIND line under the name: "Your
 account" (own account), "Paid API" (x402 host), or the short address for an

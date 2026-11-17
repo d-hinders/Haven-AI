@@ -35,8 +35,9 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from './tax-declaration.js'
-import { recordStripePayment, type StripeRecording } from './stripe.js'
+import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration, type ReceiptSellerDetails } from '@haven_ai/merchant-payments'
+import { recordStripePayment, stripeRecordingDecision, type StripeRecording } from './stripe.js'
+import type { SekRateFeed } from './sek-rate.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
@@ -67,6 +68,17 @@ export interface DemoMerchantServerOptions {
    * the product keeps `MERCHANT_ADDRESS` and `/healthz` has no `stripe` block.
    */
   stripe?: StripeRecording
+  /**
+   * #4856: the seller every receipt carries (`resolveReceiptSeller`).
+   * Absent, the demo seller.
+   */
+  receiptSeller?: ReceiptSellerDetails
+  /**
+   * #4856: the cached USDC→SEK rate the receipt for a Stripe-recorded payment
+   * states. Only `current()` is read on the purchase path. Absent, that
+   * receipt says the SEK amount was not available.
+   */
+  sekRate?: Pick<SekRateFeed, 'current'>
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -271,6 +283,10 @@ async function handle(
       // the issue asks for; it is process-local (the merchant sleeps after
       // ~10 minutes), so the durable signal is the `[stripe] record_failed
       // tx=<hash>` log line the reconciliation runbook greps for.
+      // #4866: `recorded` counts only PaymentIntents Stripe accepted
+      // (`succeeded`); `pending` and `declined` count the ones it had not
+      // decided by the bound and the ones it declined (`[stripe]
+      // record_declined`, permanent for that transaction).
       ...(options.stripe
         ? {
             stripe: {
@@ -279,6 +295,8 @@ async function handle(
               api_version: options.stripe.apiVersion,
               network: options.stripe.network,
               recorded: options.stripe.stats().recorded,
+              pending: options.stripe.stats().pending,
+              declined: options.stripe.stats().declined,
               record_failures: options.stripe.stats().failed,
             },
           }
@@ -346,13 +364,6 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
-    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
-    // has already moved, so a Stripe refusal, timeout or network error must
-    // never delay or refuse the goods. A failure is logged as
-    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
-    // /healthz. A payment served through recovery without a transaction hash
-    // (#4851) records nothing here — the reconciliation script picks it up.
-    recordStripePayment(options.stripe, paymentToolInfo.product, settled)
     // #4855: the buyer's signed tax declaration, if this paid request carried
     // one. Verified against the payer the merchant just settled from — the
     // same key that signed the payment — and treated as absent on ANY failure,
@@ -367,13 +378,32 @@ async function handle(
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
+    // #4856: when Stripe will record this payment, the receipt says the
+    // Stripe reference is pending and states the SEK amount from the cached
+    // rate (or that none was available). Reading the cache never waits.
+    const stripeWillRecord =
+      stripeRecordingDecision(options.stripe, paymentToolInfo.product, settled) === 'record'
     const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
       receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
         stripeDepositAddress: options.stripe?.depositAddress,
       }),
       taxDeclaration,
+      seller: options.receiptSeller,
+      ...(stripeWillRecord ? { stripe: { sekRate: options.sekRate?.current() } } : {}),
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
+    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
+    // has already moved, so a Stripe refusal, timeout or network error must
+    // never delay or refuse the goods. A failure is logged as
+    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
+    // /healthz. A payment served through recovery without a transaction hash
+    // (#4851) records nothing here — the reconciliation script picks it up.
+    // #4866: and only a payment to the CURRENT deposit address — one recovered
+    // to the previous address is logged as `not_recorded`, never sent.
+    // #4880: after the receipt, so the record carries its number, VAT and
+    // buyer keys. Reading the declaration and building the receipt are
+    // synchronous, so this delays nothing.
+    recordStripePayment(options.stripe, paymentToolInfo.product, settled, receiptInvoice.json)
   }
 
   try {
@@ -583,6 +613,7 @@ async function getSession(
     // #4853: the in-band quote must name the same receiving address the HTTP
     // 402 does, so the deposit address travels with the session's config.
     stripeDepositAddress: options.stripe?.depositAddress,
+    receiptSeller: options.receiptSeller,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,

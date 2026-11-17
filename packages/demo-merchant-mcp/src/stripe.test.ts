@@ -12,12 +12,19 @@ import {
   StripeApiError,
   createStripeRecording,
   encodeStripeForm,
+  paymentIntentState,
   resolveStripeConfig,
   stripeAmountCents,
   stripeApiVersionForChain,
+  stripeDetailsForReconciliation,
+  stripeDetailsForm,
+  stripeDetailsFromReceipt,
+  STRIPE_METADATA_VALUE_MAX,
   type StripeHttpClient,
   type StripeHttpRequest,
 } from './stripe.js'
+import { generateInvoice, receiptNumberForTransaction } from './invoice.js'
+import { PRODUCTS } from './products.js'
 
 const DEPOSIT = '0x2222222222222222222222222222222222222222' as const
 const OLD_DEPOSIT = '0x4444444444444444444444444444444444444444' as const
@@ -66,7 +73,7 @@ function fakeStripe(opts: { failCreate?: boolean; failSearch?: boolean; hang?: b
         const query = new URLSearchParams(request.path.split('?')[1] ?? '').get('query') ?? ''
         const tx = /transaction_hash'\]\s*:\s*'([^']+)'/.exec(query)?.[1]
         const id = tx ? byTx.get(tx) : undefined
-        return { status: 200, body: { data: id ? [{ id }] : [] } }
+        return { status: 200, body: { data: id ? [{ id, status: 'succeeded' }] : [] } }
       }
       if (opts.failCreate) {
         return { status: 402, body: { error: { type: 'card_error', code: 'crypto_declined' } } }
@@ -77,7 +84,7 @@ function fakeStripe(opts: { failCreate?: boolean; failSearch?: boolean; hang?: b
       if (key) {
         const held = idempotencyKeys.get(key)
         if (held && now - held.at < IDEMPOTENCY_KEY_RETENTION_MS) {
-          return { status: 200, body: { id: held.id } }
+          return { status: 200, body: { id: held.id, status: 'succeeded' } }
         }
         // Stripe prunes the key after ~24h: it no longer answers for the create.
         if (held) idempotencyKeys.delete(key)
@@ -86,7 +93,7 @@ function fakeStripe(opts: { failCreate?: boolean; failSearch?: boolean; hang?: b
       intents.set(id, { id, form: request.form ?? {} })
       byTx.set(tx, id)
       if (key) idempotencyKeys.set(key, { id, at: now })
-      return { status: 200, body: { id } }
+      return { status: 200, body: { id, status: 'succeeded' } }
     },
   }
   return {
@@ -309,7 +316,7 @@ describe('createStripeRecording (#4853)', () => {
 
     expect(second).toEqual({ status: 'already_recorded', paymentIntentId: 'pi_test_1' })
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(1)
-    expect(recording.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, failed: 0 })
+    expect(recording.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, pending: 0, declined: 0, failed: 0 })
   })
 
   it('records nothing a day later, when Stripe has forgotten the idempotency key (#4853, review S5)', async () => {
@@ -328,7 +335,7 @@ describe('createStripeRecording (#4853)', () => {
     expect(second).toEqual({ status: 'already_recorded', paymentIntentId: 'pi_test_1' })
     expect(stripe.intents.size).toBe(1)
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(1)
-    expect(recording.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, failed: 0 })
+    expect(recording.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, pending: 0, declined: 0, failed: 0 })
   })
 
   it('records a different transaction separately', async () => {
@@ -349,7 +356,7 @@ describe('createStripeRecording (#4853)', () => {
     expect(result).toEqual({ status: 'failed', reason: 'card_error/crypto_declined' })
     expect(lines).toEqual([`[stripe] record_failed tx=${TX} reason=card_error/crypto_declined`])
     for (const line of lines) expect(line).not.toContain(FAKE_KEY)
-    expect(recording.stats()).toEqual({ attempted: 1, recorded: 0, alreadyRecorded: 0, failed: 1 })
+    expect(recording.stats()).toEqual({ attempted: 1, recorded: 0, alreadyRecorded: 0, pending: 0, declined: 0, failed: 1 })
   })
 
   it('logs a lookup failure the same way', async () => {
@@ -449,4 +456,331 @@ describe('each off condition that leaves the joke offered warns and keeps MERCHA
       ).toBe(MERCHANT)
     })
   }
+})
+
+/**
+ * #4866: Stripe verifies a `transaction_verification` PaymentIntent AFTER the
+ * create returns. These model what the #4854 sandbox run showed: create
+ * answers 200 `processing`; Stripe later moves it to `succeeded`, or declines
+ * it (`requires_payment_method` with `last_payment_error.code`
+ * `payment_method_provider_decline`) — and refuses a second PaymentIntent for
+ * the same transaction with `resource_already_exists`, naming the one that
+ * tracks it.
+ */
+function verdictStripe(opts: {
+  /** Statuses the PaymentIntent reports, in order: on create, then on each read. */
+  statuses?: string[]
+  /** What the search finds for the transaction. */
+  searchHit?: { id: string; status: string; code?: string }
+  /** Create refused as Stripe refuses a duplicate, naming this PaymentIntent. */
+  alreadyExists?: { id: string; status: string }
+} = {}) {
+  const requests: StripeHttpRequest[] = []
+  const statuses = [...(opts.statuses ?? ['succeeded'])]
+  let current = statuses[0]!
+  const intent = (id: string, status: string) =>
+    status === 'requires_payment_method'
+      ? { id, status, last_payment_error: { code: 'payment_method_provider_decline', message: 'The payment has invalid information.' } }
+      : { id, status }
+  const client: StripeHttpClient = {
+    async request(request) {
+      requests.push(request)
+      if (request.method === 'GET' && request.path.startsWith('/v1/payment_intents/search')) {
+        const hit = opts.searchHit
+        return { status: 200, body: { data: hit ? [intent(hit.id, hit.status)] : [] } }
+      }
+      if (request.method === 'GET') {
+        const id = decodeURIComponent(request.path.split('/').pop()!)
+        if (opts.alreadyExists && id === opts.alreadyExists.id) return { status: 200, body: intent(id, opts.alreadyExists.status) }
+        statuses.shift()
+        current = statuses[0] ?? current
+        return { status: 200, body: intent(id, current) }
+      }
+      if (opts.alreadyExists) {
+        return {
+          status: 400,
+          body: {
+            error: {
+              type: 'invalid_request_error',
+              code: 'resource_already_exists',
+              param: 'payment_method_options[crypto][transaction_verification_options]',
+              message: `Another PaymentIntent already exists for these transaction_verification_options. PaymentIntent \`${opts.alreadyExists.id}\` is already tracking this transaction.`,
+            },
+          },
+        }
+      }
+      return { status: 200, body: intent('pi_verdict_1', current) }
+    },
+  }
+  return { client, requests }
+}
+
+function verdictRecording(stripe: ReturnType<typeof verdictStripe>, lines: string[] = []) {
+  return createStripeRecording(config()!, {
+    http: stripe.client,
+    log: (line) => lines.push(line),
+    sleep: async () => {},
+    verdictPollMs: 1_000,
+    verdictTimeoutMs: 5_000,
+  })
+}
+
+describe('the recorder reports Stripe’s verdict, not the create call’s (#4866)', () => {
+  it('a PaymentIntent Stripe declines after create is reported declined, never recorded', async () => {
+    const stripe = verdictStripe({ statuses: ['processing', 'processing', 'requires_payment_method'] })
+    const lines: string[] = []
+    const recording = verdictRecording(stripe, lines)
+
+    const result = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })
+
+    expect(result).toEqual({
+      status: 'declined',
+      paymentIntentId: 'pi_verdict_1',
+      created: true,
+      declineCode: 'payment_method_provider_decline',
+    })
+    expect(recording.stats()).toMatchObject({ recorded: 0, declined: 1, pending: 0, failed: 0 })
+    expect(lines).toEqual([
+      `[stripe] submitted tx=${TX} payment_intent=pi_verdict_1`,
+      `[stripe] record_declined tx=${TX} payment_intent=pi_verdict_1 code=payment_method_provider_decline`,
+    ])
+    // Stripe's message never reaches the log.
+    for (const line of lines) expect(line).not.toContain('invalid information')
+  })
+
+  it('processing then succeeded is recorded, and only then', async () => {
+    const stripe = verdictStripe({ statuses: ['processing', 'succeeded'] })
+    const lines: string[] = []
+    const recording = verdictRecording(stripe, lines)
+
+    expect(await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })).toEqual({
+      status: 'recorded',
+      paymentIntentId: 'pi_verdict_1',
+    })
+    expect(lines).toEqual([
+      `[stripe] submitted tx=${TX} payment_intent=pi_verdict_1`,
+      `[stripe] recorded tx=${TX} payment_intent=pi_verdict_1`,
+    ])
+    expect(recording.stats()).toMatchObject({ recorded: 1, declined: 0, pending: 0 })
+  })
+
+  it('still processing at the bound: pending, not recorded', async () => {
+    const stripe = verdictStripe({ statuses: Array(20).fill('processing') })
+    const lines: string[] = []
+    const recording = verdictRecording(stripe, lines)
+
+    expect(await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })).toEqual({
+      status: 'pending',
+      paymentIntentId: 'pi_verdict_1',
+      created: true,
+    })
+    // 5 s bound at 1 s intervals: five reads after the create, then it stops.
+    expect(stripe.requests.filter((request) => request.path === '/v1/payment_intents/pi_verdict_1')).toHaveLength(5)
+    expect(lines.at(-1)).toBe(`[stripe] record_pending tx=${TX} payment_intent=pi_verdict_1`)
+    expect(recording.stats()).toMatchObject({ recorded: 0, pending: 1 })
+  })
+
+  it('a failed status read ends the wait: pending, never recorded, and the recording does not reject', async () => {
+    const requests: StripeHttpRequest[] = []
+    const client: StripeHttpClient = {
+      async request(request) {
+        requests.push(request)
+        if (request.path.startsWith('/v1/payment_intents/search')) return { status: 200, body: { data: [] } }
+        if (request.method === 'GET') return { status: 500, body: { error: { type: 'api_error' } } }
+        return { status: 200, body: { id: 'pi_3ReadFails0001', status: 'processing' } }
+      },
+    }
+    const recording = createStripeRecording(config()!, {
+      http: client,
+      log: () => {},
+      sleep: async () => {},
+      verdictPollMs: 1_000,
+      verdictTimeoutMs: 5_000,
+    })
+    expect(await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })).toEqual({
+      status: 'pending',
+      paymentIntentId: 'pi_3ReadFails0001',
+      created: true,
+    })
+    // One failed read, then it stops asking.
+    expect(requests.filter((request) => request.path === '/v1/payment_intents/pi_3ReadFails0001')).toHaveLength(1)
+    expect(recording.stats()).toMatchObject({ recorded: 0, pending: 1, failed: 0 })
+  })
+
+  it('a declined PaymentIntent the search finds is reported declined, and nothing is created', async () => {
+    const stripe = verdictStripe({ searchHit: { id: 'pi_old_declined', status: 'requires_payment_method' } })
+    const recording = verdictRecording(stripe)
+
+    expect(await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })).toEqual({
+      status: 'declined',
+      paymentIntentId: 'pi_old_declined',
+      created: false,
+      declineCode: 'payment_method_provider_decline',
+    })
+    expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(0)
+  })
+
+  it('resource_already_exists: reads the PaymentIntent Stripe names instead of failing opaquely', async () => {
+    const stripe = verdictStripe({ alreadyExists: { id: 'pi_3TracksItAlready9', status: 'succeeded' } })
+    const lines: string[] = []
+    const recording = verdictRecording(stripe, lines)
+
+    expect(await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })).toEqual({
+      status: 'already_recorded',
+      paymentIntentId: 'pi_3TracksItAlready9',
+    })
+    expect(stripe.requests.at(-1)!.path).toBe('/v1/payment_intents/pi_3TracksItAlready9')
+    for (const line of lines) expect(line).not.toContain('Another PaymentIntent')
+  })
+})
+
+describe('paymentIntentState (#4866)', () => {
+  it('maps Stripe statuses to a verdict', () => {
+    expect(paymentIntentState({ id: 'pi_a', status: 'succeeded' })).toEqual({ id: 'pi_a', verdict: 'succeeded' })
+    expect(paymentIntentState({ id: 'pi_a', status: 'processing' })).toEqual({ id: 'pi_a', verdict: 'pending' })
+    expect(paymentIntentState({ id: 'pi_a' })).toEqual({ id: 'pi_a', verdict: 'pending' })
+    expect(paymentIntentState({ id: 'pi_a', status: 'canceled' })).toEqual({ id: 'pi_a', verdict: 'declined' })
+    expect(
+      paymentIntentState({ id: 'pi_a', status: 'requires_payment_method', last_payment_error: { code: 'payment_method_provider_decline' } }),
+    ).toEqual({ id: 'pi_a', verdict: 'declined', declineCode: 'payment_method_provider_decline' })
+    expect(paymentIntentState({ status: 'succeeded' })).toBeUndefined()
+  })
+
+  it('never passes an unsafe decline code into a log line', () => {
+    expect(
+      paymentIntentState({ id: 'pi_a', status: 'requires_payment_method', last_payment_error: { code: 'x y\nz' } }),
+    ).toEqual({ id: 'pi_a', verdict: 'declined' })
+  })
+
+  it('StripeApiError keeps only the PaymentIntent a resource_already_exists names', () => {
+    const error = new StripeApiError(400, 'invalid_request_error', 'resource_already_exists', 'pi_abcdefgh12')
+    expect(error.existingPaymentIntentId).toBe('pi_abcdefgh12')
+    expect(error.message).toBe('Stripe answered 400 (invalid_request_error/resource_already_exists)')
+  })
+})
+
+// #4880: the record carries the description, the receipt number, the VAT and,
+// from an accepted declaration only, the buyer — the form fields sent.
+describe('the PaymentIntent carries the receipt (#4880)', () => {
+  const receipt = (taxDeclaration: Parameters<typeof generateInvoice>[0]['taxDeclaration'] = null) =>
+    generateInvoice({
+      invoiceNumber: receiptNumberForTransaction(TX),
+      productId: 'joke',
+      buyerAddress: '0x5555555555555555555555555555555555555555',
+      payerRole: 'agent_delegate',
+      receivingAddress: DEPOSIT,
+      authorizationNonce: `0x${'01'.repeat(32)}`,
+      txHash: TX,
+      settlement: 'settled_onchain',
+      taxDeclaration,
+    }).json
+  const DE = { jurisdiction: 'DE', taxId: 'DE123456789', taxableStatus: 'TAXABLE_PERSON', validUntil: Date.parse('2027-06-30T00:00:00Z') }
+  const SE = { ...DE, jurisdiction: 'SE', taxId: 'SE559412345601' }
+
+  async function formSent(details: Parameters<ReturnType<typeof createStripeRecording>['record']>[0]['details']) {
+    const stripe = fakeStripe()
+    const recording = createStripeRecording(config()!, { http: stripe.client, log: () => {} })
+    await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke', details })
+    return stripe.requests.find((request) => request.method === 'POST')!.form!
+  }
+
+  it('without a declaration: description, number, SE_25 and its VAT in atomic USDC — and no buyer keys at all', async () => {
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt()))
+    const number = receiptNumberForTransaction(TX)
+    expect(form).toMatchObject({
+      description: `Haven Joke — ${number}`,
+      'metadata[receipt_number]': number,
+      'metadata[vat_treatment]': 'SE_25',
+      'metadata[vat_amount]': '2000 (USDC atomic)',
+      'metadata[transaction_hash]': TX,
+      'metadata[product_id]': 'joke',
+    })
+    expect(Object.keys(form).filter((key) => /buyer|recorded_by/.test(key))).toEqual([])
+  })
+
+  it('with a declaration from another EU country: REVERSE_CHARGE, zero VAT, and the buyer’s VAT number and country', async () => {
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)))
+    expect(form).toMatchObject({
+      'metadata[vat_treatment]': 'REVERSE_CHARGE',
+      'metadata[vat_amount]': '0 (USDC atomic)',
+      'metadata[buyer_vat_nr]': 'DE123456789',
+      'metadata[buyer_country]': 'DE',
+    })
+  })
+
+  it('with a Swedish declaration: SE_25 and the buyer keys', async () => {
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(SE)))
+    expect(form).toMatchObject({
+      'metadata[vat_treatment]': 'SE_25',
+      'metadata[vat_amount]': '2000 (USDC atomic)',
+      'metadata[buyer_vat_nr]': 'SE559412345601',
+      'metadata[buyer_country]': 'SE',
+    })
+  })
+
+  it('from reconciliation: the same description and number, recorded_by, and no VAT or buyer keys', async () => {
+    const form = await formSent(stripeDetailsForReconciliation(PRODUCTS.joke, TX))
+    const fromReceipt = stripeDetailsForm(stripeDetailsFromReceipt(PRODUCTS.joke, receipt()))
+    expect(form.description).toBe(fromReceipt.description)
+    expect(form['metadata[receipt_number]']).toBe(fromReceipt['metadata[receipt_number]'])
+    expect(form['metadata[recorded_by]']).toBe('reconciliation')
+    expect(Object.keys(form).filter((key) => /vat|buyer/.test(key))).toEqual([])
+  })
+
+  it('stays inside Stripe’s limits: at most 50 keys, names up to 40 characters, values up to 500', async () => {
+    const form = await formSent({
+      ...stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)),
+      buyerVatNr: 'X'.repeat(900),
+      description: 'D'.repeat(900),
+    })
+    const metadata = Object.keys(form).filter((key) => key.startsWith('metadata['))
+    expect(metadata.length).toBeLessThanOrEqual(50)
+    for (const key of metadata) expect(key.slice('metadata['.length, -1).length).toBeLessThanOrEqual(40)
+    expect(form['metadata[buyer_vat_nr]']).toHaveLength(STRIPE_METADATA_VALUE_MAX)
+    expect(form.description).toHaveLength(STRIPE_METADATA_VALUE_MAX)
+  })
+
+  it('leaves out a declared country or VAT number that does not have the shape of one', async () => {
+    const odd = { ...DE, jurisdiction: 'Germany', taxId: 'call me <script>' }
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(odd)))
+    expect(Object.keys(form).filter((key) => /buyer/.test(key))).toEqual([])
+    // ...while a well-formed one is kept (the shape check can say yes).
+    const kept = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)))
+    expect(kept['metadata[buyer_vat_nr]']).toBe('DE123456789')
+  })
+
+  it('an idempotency_error is a create that already happened: the recorder searches again instead of failing', async () => {
+    let searches = 0
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.method === 'GET') {
+          searches++
+          // Stripe's search is eventually consistent: the first read misses it.
+          return { status: 200, body: { data: searches > 1 ? [{ id: 'pi_3IdemAlready01', status: 'succeeded' }] : [] } }
+        }
+        return { status: 400, body: { error: { type: 'idempotency_error' } } }
+      },
+    }
+    const recording = createStripeRecording(config()!, { http, log: () => {} })
+    const result = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke', details: stripeDetailsForReconciliation(PRODUCTS.joke, TX) })
+    expect(result).toEqual({ status: 'already_recorded', paymentIntentId: 'pi_3IdemAlready01' })
+    expect(recording.stats().failed).toBe(0)
+  })
+
+  it('an idempotency_error the second search cannot explain is still a failure', async () => {
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.method === 'GET') return { status: 200, body: { data: [] } }
+        return { status: 400, body: { error: { type: 'idempotency_error' } } }
+      },
+    }
+    const recording = createStripeRecording(config()!, { http, log: () => {} })
+    const result = await recording.record({ txHash: TX, amountAtomic: 10_000n, productId: 'joke' })
+    expect(result).toEqual({ status: 'failed', reason: 'idempotency_error' })
+  })
+
+  it('sends nothing new when the caller passes no details', async () => {
+    const form = await formSent(undefined)
+    expect(Object.keys(form).filter((key) => /description|receipt|vat|buyer|recorded_by/.test(key))).toEqual([])
+  })
 })

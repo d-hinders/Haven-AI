@@ -37,6 +37,7 @@ is canonical; exported PNG and SVG files are convenience artifacts.
 | 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Current disabled zero-fee backend scaffold plus future per-rail settlement design; no fee transfer executes today. |
 | 10 | [Module Boundaries](10-module-boundaries.md) | Deciding where new backend code goes, or reviewing a change that moves it. Target module structure and the dependency rules CI enforces (epic #980). |
 | 11 | [L0 Agent Passport — EAS schema](11-agent-passport-schema.md) | Working on agent identity: what L0 attests (governance, not identity), the schema fields, the dual address binding, the zero-address sentinel, the revocation model and re-anchoring after a re-key — Haven's verifier decides, the chain is an eventually-consistent anchor (epic #970). |
+| 12 | [Merchant kit: design](12-merchant-kit.md) | Building or reviewing the merchant kit (epic #4884): the four parts, the two workspace-private packages, the products file, the discovery document, the sale record, the consumed-payment store, the proxy's refusals and the settlement cost per call. |
 
 The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
 artifacts for shipping that feature; they now live in

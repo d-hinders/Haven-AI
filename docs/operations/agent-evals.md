@@ -26,7 +26,7 @@ covers:
   - packages/connect/src/server-names.ts
   - packages/signer/src/consent.ts
   - packages/signer/src/cli-args.ts
-last-verified: "2026-11-06"
+last-verified: "2026-11-17"
 ---
 
 # Agent Evals — the model-in-the-loop eval suite (epic #3957)
@@ -417,6 +417,74 @@ environment and a spend, so this slice ships the **recorded-log red** instead:
 `graders.test.ts` proves discovery falls to band 1 on a log that requested
 `/for-agents.md` first, and band 0 when it never arrived. The live red is
 owner-armed with the rest of the lane.
+
+### Known variance: `onboarding-cold-setup` (owner decision 2026-11-13)
+
+**`onboarding-cold-setup` is flaky by nature, and the owner has accepted that.**
+Its red is known variance, not a regression. Owner decision 2026-11-13, on
+#4674: "Accept it and stop here."
+
+Pass rates come from each run's report artifact
+(`agent-evals-report-<id>/evals-report.json.summary.md`). The table covers
+every run of this task from 2026-11-09 on, after #4715's rubric. Run
+42633549914 ran only `onboarding-client-out-of-date`, so it is not listed.
+
+| Run | Dispatched | Pass |
+|---|---|---|
+| 42585633954 | 2026-11-09, before #4713's PR #4742 | 1/3 |
+| 42599083765 | 2026-11-09, after PRs #4742 and #4743 | 2/3 |
+| 42607525433 (full) | 2026-11-09 | 3/3 |
+| 43045310759 (full) | 2026-11-11 | 2/3 |
+| 43179789112 | 2026-11-12 | 2/3 |
+| 43188337212 | 2026-11-12, after #4832's Step 3 label; approved and run 2026-11-13 | 1/3 |
+
+Three changes fall inside these runs:
+- #4713's pointer on the landing page (PR #4742);
+- its pointer at the top of `/llms.txt` (PR #4743), which also widened the
+  grader's funding-step keywords;
+- #4832's plain "Setup guide for agents" label.
+
+The score did not settle at 3/3 after any of them.
+
+**Why it varies.** Claude Code's `WebFetch` does not hand the agent the page.
+It hands back a model-written summary, and that summary sometimes drops a link.
+A trial **passes** only by `/` → `/llms.txt` → `/for-agents.md`, because band
+3 of `onboarding_discovery` is the threshold. That means two summaries in a
+row. Losing the next link at either hop ends the trial short of that route.
+The header and footer `/for-agents` links also reach the runbook, but they
+score band 1.
+
+The run's sessions artifact has since expired; its trials are summarised on
+#4674. In run 43188337212:
+- one trial's summary of `/` dropped the `/llms.txt` label;
+- another trial's summary of `/llms.txt` dropped both of its `/for-agents.md`
+  pointers.
+
+No trial guessed a command, entered a credential or ran the device login.
+
+Six of the seven failed trials in the table never reached `/for-agents.md`
+(`onboarding_discovery` 0). The seventh, run 42599083765's trial 2, took the
+full route and still linked no `/signup`. It failed the hand-off score, not
+discovery.
+
+**What follows from the decision:**
+
+- **No more copy changes aimed at this score.** Three trials cannot tell 2/3
+  from 1/3, so a copy tweak cannot be measured.
+- **The grader stays as it is.** It correctly reports an agent that missed the
+  runbook. That agent's hand-off really is weaker. In run 43188337212, one
+  failed trial linked the bare landing page instead of `/signup`, and neither
+  failed trial carried the runbook's network check before funding.
+- **The fewer-hops change is unfiled.** That change would put the first
+  hand-off into `/llms.txt` itself, so an agent that stops early still answers
+  correctly. It is a product change, not a copy tweak.
+- **The run's overall result is usually red.** A run's conclusion is red
+  whenever any task misses k/k, so with this task in a full run, a red ✗ on
+  the run says little. Read the report's per-task table instead.
+- **#4682's revisit condition is unchanged.** The condition, set on #4682 on
+  2026-11-09, is that full onboarding is revisited once this task is green
+  3/3. The owner restated it as unchanged on 2026-11-13, after full run
+  42607525433's single 3/3.
 
 ## The full-onboarding spike (#4682)
 

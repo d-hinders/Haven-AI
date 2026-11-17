@@ -21,6 +21,7 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
+  - packages/demo-merchant-mcp/src/products.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-protocol.ts
@@ -1478,8 +1479,8 @@ and [`party-model.ts`](../../packages/backend/src/openapi/party-model.ts). It
 also closed the one place the demo merchant's OWN invoice document (as
 opposed to the confirmation text quoted above) still called this address "the
 buyer" without qualification —
-[`invoice.ts`](../../packages/demo-merchant-mcp/src/invoice.ts)'s `kopare.roll`
-now carries the same distinction the confirmation text already made.
+its `kopare.roll` (built by the shared receipt core the demo merchant calls
+since #4890) now carries the same distinction the confirmation text already made.
 
 ## Differences From Direct Payments
 
@@ -2796,7 +2797,11 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.
 - Do not describe demo x402 endpoints as production merchant settlement,
-  facilitator, acquiring, fiat/card, or merchant-of-record products.
+  facilitator, acquiring or fiat/card products. Haven is the merchant only of
+  its own demo products and receives payment only for them; it receives or
+  moves no funds on behalf of anyone else. The joke product is verified and
+  settled by Coinbase's facilitator (CDP); every other product is settled by
+  the merchant's own key.
 - Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
   before changing x402/MPP flows or merchant-facing demos.
 

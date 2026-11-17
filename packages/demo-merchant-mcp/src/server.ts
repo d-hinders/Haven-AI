@@ -33,6 +33,7 @@ import {
   type PassportStanding,
 } from '@haven_ai/sdk'
 import type { Address } from 'viem'
+import type { ReceiptSellerDetails } from '@haven_ai/merchant-payments'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 
@@ -66,6 +67,8 @@ export interface MerchantConfig {
    * `merchantAddress`.
    */
   stripeDepositAddress?: Address
+  /** #4856: the seller every receipt carries; absent, the demo seller. */
+  receiptSeller?: ReceiptSellerDetails
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -609,7 +612,14 @@ async function completePurchase(
   // every call is cheap and deterministic (invoiceForPayment memoizes per
   // payment), so the summary below can never disagree between a fresh
   // purchase and a retried/duplicate one.
-  const invoice = invoiceForPayment(payment, productId, { receivingAddress, chainId: config.chainId })
+  // #4856: the HTTP layer built this payment's invoice first, with the
+  // Stripe context, so this call replays it; the seller is passed so the two
+  // can never disagree on it.
+  const invoice = invoiceForPayment(payment, productId, {
+    receivingAddress,
+    chainId: config.chainId,
+    seller: config.receiptSeller,
+  })
   // #4723: advisory, AFTER settlement, cached per payment. Never a condition
   // of the purchase — the goods are already owed by the time this runs.
   const passport = await passportSummaryFor(payment, {

@@ -1,4 +1,5 @@
 import { DEFAULT_LEDGER_CURRENCY, type LedgerCurrency } from '../../domain/ledger-currency.js'
+import { NO_PRODUCT_SOURCES, type ProductSources } from './product-sources.js'
 import type { AccountingEntry } from './entry.js'
 import type { TransactionKind } from './transaction-kind.js'
 
@@ -77,6 +78,13 @@ export interface FeedTransaction {
   fundingTxHash: string | null
   /** The merchant's own receipt when captured (#956) — attached as a second file. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
+  /**
+   * #4877: Haven's catalog name, the merchant's quote description and the
+   * agent's delivery reference — the product sources below the receipt lines
+   * (`product-sources.ts`). Absent on a transaction built by a test or an
+   * older caller: read as none.
+   */
+  productSources?: ProductSources
   /**
    * #4532: what KIND of transaction this is — `purchase` | `api_fee` |
    * `transfer` | `refund` | `unknown`, derived server-side from the payment
@@ -234,6 +242,8 @@ export function toFeedTransaction(
     // #4577: `parentReceiptRef` is the parent purchase's `receiptRef`.
     purchaseGroupId: entry.purchaseGroupId,
     parentReceiptRef: entry.parentReceiptRef,
+    // #4877: the product sources, for the document and the Fortnox comment.
+    productSources: entry.productSources ?? NO_PRODUCT_SOURCES,
     suggestedAccount: entry.account ?? opts.connectionSuggestedAccount ?? null,
   }
 }

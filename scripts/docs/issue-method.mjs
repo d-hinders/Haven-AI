@@ -10,8 +10,9 @@
 // small fixed grammar, so a drifted count or line number is found by a command
 // instead of by a reader.
 //
-// It is the runner only. Nothing in `new-task` or `review-issue` calls it yet;
-// adoption is a later slice, filed once the hit rate on real issues is known.
+// `new-task` runs it on a draft body before the issue is created, and
+// `review-issue` runs it as the first step of the spec review (#4799). It
+// gates no CI job: a line that does not reproduce is fixed in the issue body.
 //
 // ## The invariant
 //

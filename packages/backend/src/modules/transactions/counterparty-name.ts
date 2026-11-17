@@ -10,8 +10,10 @@
  *      reads it), from the merchant's most recent payment IN THE WINDOW;
  *   2. one of the user's own accounts → that account's name;
  *   3. a contact → the contact name;
- *   4. the receipt's `merchant_name` (`RECEIPT_MERCHANT_NAMES_SQL`) — the
- *      analytics-only EXTENSION: `/transactions` rows have no receipt step;
+ *   4. the receipt's seller name (top-level `saljare.name`, with
+ *      the flat `merchant_name` as fallback — `RECEIPT_MERCHANT_NAMES_SQL`,
+ *      #4881) — the analytics-only EXTENSION: `/transactions` rows have no
+ *      receipt step;
  *   5. otherwise `null` — the client renders "Unknown recipient" (#4333),
  *      where `/transactions` says "New recipient".
  *
@@ -40,7 +42,7 @@ export interface CounterpartyNameInputs {
   ownAccountName: string | null
   /** The contact name at this address, if any. */
   contactName: string | null
-  /** The receipt's `merchant_name` for this address, if any. */
+  /** The receipt's seller name for this address, if any. */
   receiptName: string | null
 }
 

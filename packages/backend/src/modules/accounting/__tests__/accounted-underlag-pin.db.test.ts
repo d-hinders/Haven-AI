@@ -1,17 +1,18 @@
 /**
  * #4824 on the REAL database: a retry of the same payment, after a lost
  * answer, ends `pushed` with ONE underlag at the provider — whichever of the
- * four mutable render sources was written in between.
+ * mutable render sources was written in between.
  *
  * The measured shape: the first upload succeeds, its answer is lost, something
  * the underlag is rendered from changes, and the retry is refused by the
- * provider as a reuse of the idempotency key with different bytes. The four
+ * provider as a reuse of the idempotency key with different bytes. The
  * sources that can move after a payment's first render are:
  *
  *   1. the merchant receipt — the seller block AND the transaction kind;
  *   2. the delivery reference;
  *   3. the purchase group and parent receipt;
- *   4. the catalog country.
+ *   4. the catalog country;
+ *   5. (#4877) the product sources — catalog name, quote description, delivery reference.
  *
  * The remedy (owner decision 2026-11-12) pins the INPUTS at the payment's
  * first render, in `payment_intents.machine_metadata`, and renders every retry
@@ -41,6 +42,7 @@ import { clearConnectors, registerConnector } from '../connector.js'
 import { feedSettledPayment } from '../feed-orchestrator.js'
 import { ACCOUNTED } from '../registry.js'
 import { accountedRouter, ACCOUNTED_DOCUMENT_ID, ACCOUNTED_MERCHANT_DOCUMENT_ID } from './accounted-test-router.js'
+import se25 from './fixtures/merchant-receipts/demo-merchant-se25.json' with { type: 'json' }
 
 const KEY = randomBytes(32).toString('base64')
 const DOC_REF = `accounted:document:${ACCOUNTED_DOCUMENT_ID}`
@@ -82,7 +84,7 @@ interface Seeded {
  * one transaction, so the #3767 grace deferral never applies and the push is
  * immediate.
  */
-async function seedSettled(userId: string, agentId: string): Promise<Seeded> {
+async function seedSettled(userId: string, agentId: string, settledSecondsAgo = 300): Promise<Seeded> {
   const intentId = randomUUID()
   const txHash = `0x${String(++seq).padStart(64, 'a')}`.slice(0, 66)
   await db.query(
@@ -94,15 +96,16 @@ async function seedSettled(userId: string, agentId: string): Promise<Seeded> {
         x402_merchant_address, delegation_hash, created_at)
      VALUES ($1, $2, $3, $4, ${CHAIN}, 'USDC', $5, $6,
              '1000', '0.001', '0x00000000000000000000000000000000000000d1', 0, $7,
-             'confirmed', $8, NOW() - interval '5 minutes',
+             'confirmed', $8, NOW() - ($11 * interval '1 second'),
              NOW() + interval '10 minutes', 'x402', 'x402', 'erc7710',
              '{"settlement_scheme":"erc7710"}'::jsonb, $9, $9, $6, $6, $10,
-             NOW() - interval '5 minutes')`,
+             NOW() - ($11 * interval '1 second'))`,
     [
       intentId, agentId, userId, PAYER, TOKEN, MERCHANT,
       `0x${String(++seq).padStart(64, 'b')}`.slice(0, 66),
       txHash, RESOURCE_URL,
       `0x${String(++seq).padStart(64, 'c')}`.slice(0, 66),
+      settledSecondsAgo,
     ],
   )
   const evidence = await db.query<{ id: string }>(
@@ -112,9 +115,9 @@ async function seedSettled(userId: string, agentId: string): Promise<Seeded> {
         amount_raw, amount_human, confirmed_at, amount_sek, fx_rates)
      VALUES ($1, $2, $3, 'x402', 'payment_confirmed', $4, ${CHAIN},
              $5, $6, $7, 'USDC', $8, '1000', '0.001',
-             NOW() - interval '5 minutes', '10.42', '{"SEK":10.42}'::jsonb)
+             NOW() - ($9 * interval '1 second'), '10.42', '{"SEK":10.42}'::jsonb)
      RETURNING id`,
-    [intentId, agentId, userId, txHash, RESOURCE_URL, PAYER, MERCHANT, TOKEN],
+    [intentId, agentId, userId, txHash, RESOURCE_URL, PAYER, MERCHANT, TOKEN, settledSecondsAgo],
   )
   return { intentId, evidenceId: evidence.rows[0].id }
 }
@@ -379,5 +382,214 @@ describeDb('Accounted underlag-input pin (#4824)', () => {
     // The receipt also decides the kind (rung 3): an invoice-shaped document
     // is a purchase.
     expect(pdf).toContain('Transaction    purchase')
+  })
+
+  // ── #4876: the receipt lines on the underlag, under the same pin ─────────
+
+  it('#4876 — a receipt with lines captured before the first render puts the lines on the underlag, and the pin carries the marker', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await captureReceipt(seeded.evidenceId, se25)
+
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).toContain("MERCHANT RECEIPT LINES \\(On the merchant's receipt, as reported by the agent\\)")
+    expect(pdf).toContain('Receipt VAT    25% 0.0001 USDC')
+    expect((await pinOf(seeded.intentId))?.receiptLines).toBe(true)
+  })
+
+  it('#4876 — a receipt with lines captured between attempts: the retry replays "VAT not stated", byte for byte', async () => {
+    const { state, paymentId } = await lostAnswerThenRetry(async (seeded) => {
+      await captureReceipt(seeded.evidenceId, se25)
+    })
+    const attempts = underlagAttempts(state, paymentId)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1].sha256).toBe(attempts[0].sha256)
+    const first = attempts[0].bytes.toString('latin1')
+    expect(first).toContain('VAT            not stated by the merchant')
+    expect(first).not.toContain('MERCHANT RECEIPT LINES')
+  })
+
+  it('#4876 — a pin written before #4876 (no marker) renders no receipt block, so a retry straddling the deploy keeps its bytes', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await captureReceipt(seeded.evidenceId, se25)
+    // The pre-#4876 pin shape: the receipt pinned, no `receiptLines` marker.
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata || jsonb_build_object(
+         'accounting_underlag_inputs', $2::jsonb) WHERE id = $1`,
+      [
+        seeded.intentId,
+        JSON.stringify({
+          merchantReceipt: { url: null, inlineJson: se25 },
+          transactionKind: 'purchase',
+          description: 'merchant.example - vpn (purchase)',
+          purchaseGroupId: null,
+          parentReceiptRef: null,
+          merchantCountry: null,
+        }),
+      ],
+    )
+
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).toContain('Haven Demo AB')
+    expect(pdf).not.toContain('MERCHANT RECEIPT LINES')
+    expect(pdf).not.toContain('not stated by the merchant')
+  })
+
+  it('#4876 — the receipt wait end to end: held inside the window with no sync row, then pushed with "VAT not stated" once it passes', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId, 30)
+
+    // Inside the window, no receipt: held. No sync row, no upload, no attempt.
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'not_fed' })
+    expect(await getSyncState(userId, 'accounted', seeded.intentId)).toBeNull()
+    expect(underlagAttempts(state, seeded.intentId)).toHaveLength(0)
+
+    // The window passes with no receipt: pushed once, saying so.
+    await db.query(
+      `UPDATE machine_payment_evidence SET confirmed_at = NOW() - interval '3 minutes' WHERE id = $1`,
+      [seeded.evidenceId],
+    )
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const attempts = underlagAttempts(state, seeded.intentId)
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].bytes.toString('latin1')).toContain('VAT            not stated by the merchant')
+  })
+
+  it('#4876 — a receipt captured inside the window releases the hold, and the lines are on the one push', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId, 30)
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'not_fed' })
+    await captureReceipt(seeded.evidenceId, se25)
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const attempts = underlagAttempts(state, seeded.intentId)
+    expect(attempts).toHaveLength(1)
+    expect(attempts[0].bytes.toString('latin1')).toContain('Receipt VAT    25% 0.0001 USDC')
+  })
+
+  // ── #4877: the product sources on the underlag, under the same pin ───────
+
+  /** All three sources: Haven's catalog name, the quote description, the agent's words. */
+  async function writeAllSources(seeded: Seeded): Promise<void> {
+    await seedCatalogCountry('SE')
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata || '{"description":"A VPN month, 5 devices"}'::jsonb
+       WHERE id = $1`,
+      [seeded.intentId],
+    )
+    await db.query(`UPDATE machine_payment_evidence SET delivery_reference = $2 WHERE id = $1`, [
+      seeded.evidenceId,
+      'VPN for the research agent',
+    ])
+  }
+
+  it('#4877 — every source written before the first render is on the underlag, each under its own label, and pinned', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await writeAllSources(seeded)
+
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).toContain('Product        NordShield VPN')
+    expect(pdf).toContain('\\(Haven catalog\\)')
+    expect(pdf).toContain('Also stated    A VPN month, 5 devices')
+    expect(pdf).toContain("\\(In the merchant's price quote, as reported by the agent\\)")
+    expect(pdf).toContain('Also stated    VPN for the research agent')
+    expect(pdf).toContain('\\(Stated by the agent\\)')
+    expect((await pinOf(seeded.intentId))?.productSources).toEqual({
+      catalogName: 'NordShield VPN',
+      quoteDescription: 'A VPN month, 5 devices',
+      deliveryReference: 'VPN for the research agent',
+    })
+  })
+
+  it('#4877 — sources written between attempts: the retry replays the first bytes, with none of them', async () => {
+    const { state, paymentId } = await lostAnswerThenRetry(writeAllSources)
+    const attempts = underlagAttempts(state, paymentId)
+    expect(attempts).toHaveLength(2)
+    expect(attempts[1].sha256).toBe(attempts[0].sha256)
+    expect(attempts[0].bytes.toString('latin1')).not.toContain('NordShield VPN')
+    expect((await pinOf(paymentId))?.productSources).toEqual({
+      catalogName: null,
+      quoteDescription: null,
+      deliveryReference: null,
+    })
+  })
+
+  it('#4877 — a pin written before #4877 (no productSources) renders none, so a retry straddling the deploy keeps its bytes', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await writeAllSources(seeded)
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata || jsonb_build_object(
+         'accounting_underlag_inputs', $2::jsonb) WHERE id = $1`,
+      [
+        seeded.intentId,
+        JSON.stringify({
+          merchantReceipt: null,
+          receiptLines: true,
+          transactionKind: 'unknown',
+          description: 'merchant.example - vpn',
+          purchaseGroupId: null,
+          parentReceiptRef: null,
+          merchantCountry: null,
+        }),
+      ],
+    )
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('NordShield VPN')
+    expect(pdf).not.toContain('Also stated')
+  })
+
+  it('#4877 — a catalog name on the wire never becomes the "Haven catalog" line: only merchant_catalog is', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await db.query(
+      `UPDATE payment_intents SET machine_metadata = machine_metadata
+         || '{"catalogName":"Forged Catalog","catalog_name":"Forged Catalog"}'::jsonb WHERE id = $1`,
+      [seeded.intentId],
+    )
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('Forged Catalog')
+    expect(pdf).not.toContain('Haven catalog')
+  })
+
+  /** A further catalog row on the same resource URL — one MCP endpoint, another product. */
+  async function seedCatalogRow(name: string, over: { toolName?: string; source?: string } = {}): Promise<void> {
+    const merchant = await db.query<{ id: string }>(
+      `INSERT INTO merchants (slug, name) VALUES ($1, $2) RETURNING id`,
+      [`catalog-row-${++seq}`, name],
+    )
+    await db.query(
+      `INSERT INTO merchant_catalog (name, description, category, resource_url, rail, protocol, tool_name, source, merchant_id)
+       VALUES ($1, 'another product', 'software', $2, 'x402', 'mcp', $3, $4, $5)`,
+      [name, RESOURCE_URL, over.toolName ?? `tool-${++seq}`, over.source ?? 'operator', merchant.rows[0].id],
+    )
+  }
+
+  it('#4877 — two live catalog rows on one resource URL: no "Haven catalog" line, the next source is the product', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await writeAllSources(seeded)
+    await seedCatalogRow('CloudNest 1 TB')
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('Haven catalog')
+    expect(pdf).not.toContain('CloudNest 1 TB')
+    expect(pdf).toContain('Product        A VPN month, 5 devices')
+  })
+
+  it('#4877 — a bazaar (seller-listed) catalog row is never presented as the Haven catalog', async () => {
+    const { userId, agentId, state } = await connectedUser()
+    const seeded = await seedSettled(userId, agentId)
+    await seedCatalogRow('Seller Words VPN', { source: 'bazaar' })
+    expect(await feedSettledPayment(userId, seeded.intentId)).toEqual({ outcome: 'pushed' })
+    const pdf = underlagAttempts(state, seeded.intentId)[0].bytes.toString('latin1')
+    expect(pdf).not.toContain('Seller Words VPN')
+    expect(pdf).not.toContain('Haven catalog')
   })
 })

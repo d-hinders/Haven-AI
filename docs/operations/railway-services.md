@@ -6,7 +6,7 @@ covers:
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
   - packages/backend/src/config.ts
-last-verified: "2026-11-06"
+last-verified: "2026-11-17"
 ---
 
 # Railway Services
@@ -58,10 +58,11 @@ service variables, and Demo-merchant reads no files from disk.
 The Demo-merchant build command stays `npm ci && npm run build -w
 packages/demo-merchant-mcp` — **do not change it in Railway.** Since #4723 the
 package imports `@haven_ai/sdk` at runtime (the merchant-side passport
-verifier), and its own `build`, `test` and `typecheck` scripts now build
-`packages/core` and `packages/sdk` first, the same way the backend's scripts
-do. So the Railway command is unchanged and the SDK is always built before the
-merchant that consumes it.
+verifier), and since #4890 `@haven_ai/merchant-payments` (the shared receipt
+and payment core). Its own `build`, `test` and `typecheck` scripts build
+`packages/core`, `packages/sdk` and `packages/merchant-payments` first, the
+same way the backend's scripts do. So the Railway command is unchanged and both
+are always built before the merchant that consumes them.
 
 `ci.yml`'s `demo_merchant_checks` job runs `npm run smoke:start -w
 packages/demo-merchant-mcp` after the build: it spawns the built
@@ -154,7 +155,11 @@ A sleeping service (Railway "serverless") stops after about 10 minutes without
 outbound traffic and cold-starts on the next request. It is on for both
 Demo-merchants and the dev hosted MCP. Dev Demo-merchant joined them on
 2026-10-05. It sees QA traffic and the dev backend's hourly catalog probe,
-which wakes it once an hour. Since #4281 that probe runs under the SSRF
+which wakes it once an hour. With Stripe recording on (#4856; dev only, since
+Stripe is dev and sandbox only), the merchant
+also reads a USDC→SEK rate from CoinGecko at startup and every 30 minutes;
+that interval is above the idle threshold, so it does not keep the service
+awake. Since #4281 that probe runs under the SSRF
 guard with a 15 s total deadline (`CATALOG_REFRESH_PROBE_TIMEOUT_MS`). That
 covers the cold start (3.8–5.0 s, measured 2026-10-22), so a cold start
 alone does not fail the probe, and an entry is only marked degraded after

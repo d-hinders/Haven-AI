@@ -166,8 +166,13 @@ Two Accounted specifics worth knowing:
 
 A settled payment is delivered as **one document**: Haven renders the verifiable
 receipt underlag (payment id, settled time, book value, merchant, resource,
-chain, transaction hash, and since #4532 the transaction kind and its
-description) and uploads it to your Accounted company. The upload
+chain, transaction hash, since #4532 the transaction kind and its
+description, and since #4876 the product lines and VAT the merchant's receipt
+states, labelled "On the merchant's receipt, as reported by the agent"; since
+#4877, when the receipt states no lines, the Haven catalog name, the
+merchant's price-quote text and the agent's own note, each labelled with who
+supplied it) and
+uploads it to your Accounted company. The upload
 is append-only — Accounted stores a document once and it cannot be edited
 afterwards — so a retry of the same payment never creates a second document.
 Haven only marks the payment delivered when Accounted confirms it stored
@@ -217,7 +222,9 @@ recorded and verified on-chain, otherwise the **funding transaction**,
 explicitly labelled as funding. This is the same hash the payment history in
 the Haven UI headlines. For EIP-3009 payments Haven waits a short window
 (the same one the payment status uses) for the merchant's settlement to be
-reported before feeding, and once a hash is booked it never changes — a
+reported before feeding. Every x402 payment also waits up to two minutes for
+the merchant's receipt (#4876), so its product lines and VAT reach the
+document. And once a hash is booked it never changes — a
 settlement reported later cannot rewrite what your accounting system
 already received.
 

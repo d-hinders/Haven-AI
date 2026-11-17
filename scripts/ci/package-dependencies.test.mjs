@@ -40,10 +40,11 @@ const RAW_DEPENDENCY_MANIFEST = JSON.parse(readFileSync(PACKAGE_DEPENDENCY_TABLE
 /** @type {Record<string, string>} workspace directory -> reason it has no CI job */
 const NO_OWN_JOB = RAW_DEPENDENCY_MANIFEST.noOwnJob ?? {}
 
-/** Job flag -> workspace directory. mcp_server, demo_merchant and qa_agent differ. */
+/** Job flag -> workspace directory. mcp_server, demo_merchant, merchant_payments and qa_agent differ. */
 const dirFor = (flag) => {
   if (flag === 'mcp_server') return 'mcp-server'
   if (flag === 'demo_merchant') return 'demo-merchant-mcp'
+  if (flag === 'merchant_payments') return 'merchant-payments'
   if (flag === 'qa_agent') return 'qa-agent'
   return flag
 }
@@ -52,6 +53,7 @@ const dirFor = (flag) => {
 const flagFor = (dir) => {
   if (dir === 'mcp-server') return 'mcp_server'
   if (dir === 'demo-merchant-mcp') return 'demo_merchant'
+  if (dir === 'merchant-payments') return 'merchant_payments'
   if (dir === 'qa-agent') return 'qa_agent'
   return dir
 }
@@ -198,17 +200,18 @@ describe('the fan-out the issue specifies', () => {
     const full = PROPAGATION_RULES.find((r) => r.when.includes('full'))
     assert.deepEqual(
       [...full.then].sort(),
-      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'ops', 'packages', 'qa_agent', 'sdk', 'signer', 'ui'],
+      ['backend', 'cli', 'connect', 'core', 'demo_merchant', 'frontend', 'mcp', 'mcp_server', 'merchant_payments', 'ops', 'packages', 'qa_agent', 'sdk', 'signer', 'ui'],
     )
   })
 
-  test('sdk fans out to backend, connect, demo_merchant, mcp, mcp_server, signer and qa_agent', () => {
+  test('sdk fans out to backend, connect, demo_merchant, mcp, mcp_server, merchant_payments, signer and qa_agent', () => {
     // qa_agent joined in #3005 — the QA harness's tests import the SDK and its
     // job runs those tests, exactly the shape that put mcp_server here in
     // #2348. demo_merchant joined in #4723: the demo merchant imports the SDK's
     // merchant-side passport verifier at runtime, and demo_merchant_checks runs
-    // its suite.
-    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'demo_merchant', 'mcp', 'mcp_server', 'qa_agent', 'signer'])
+    // its suite. merchant_payments joined in #4890: the shared receipt core
+    // imports the SDK's edge entry for the declaration signature check.
+    assert.deepEqual(thenFor('sdk'), ['backend', 'connect', 'demo_merchant', 'mcp', 'mcp_server', 'merchant_payments', 'qa_agent', 'signer'])
   })
 
   test('mcp fans out to connect AND mcp_server', () => {

@@ -33,6 +33,7 @@ jobs:
       signer: ${{ steps.filter.outputs.signer }}
       cli: ${{ steps.filter.outputs.cli }}
       demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
+      merchant_payments: ${{ steps.filter.outputs.merchant_payments }}
       core: ${{ steps.filter.outputs.core }}
       qa_agent: ${{ steps.filter.outputs.qa_agent }}
       packages: ${{ steps.filter.outputs.packages }}
@@ -281,6 +282,35 @@ jobs:
       # which is printed inside `server.listen`'s callback.
       - name: Smoke-test the built service
         run: npm run smoke:start -w packages/demo-merchant-mcp
+
+  merchant_payments_checks:
+    name: Merchant payments checks
+    needs: changes
+    if: needs.changes.outputs.merchant_payments == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # #4890: the shared merchant payment core. Its scripts build the SDK
+      # first (the declaration check imports @haven_ai/sdk/edge).
+      - name: Type-check merchant payments
+        run: npm run typecheck -w packages/merchant-payments
+
+      - name: Run merchant payments unit tests
+        run: npm run test -w packages/merchant-payments
+
+      - name: Build merchant payments
+        run: npm run build -w packages/merchant-payments
 
   core_checks:
     name: Core checks
@@ -643,14 +673,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Runtime import cycles across the eleven packages (#4763)
+      - name: Runtime import cycles across the packages dep-lint does not scan (#4763)
         # Blocking and unwaivable, like `no-circular` everywhere else. Rule 7 of
         # docs/architecture/10-module-boundaries.md was checked on backend and
-        # core only; this pass covers the other eleven packages under the
+        # core only; this pass covers every other package under the
         # owner's RUNTIME definition (type-only imports are not edges). It runs
         # here, not in backend_checks, because a PR touching only frontend, ui,
-        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp or
-        # qa-agent never triggers that job — which is how the SDK's runtime
+        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp,
+        # merchant-payments or qa-agent never triggers that job — which is how the SDK's runtime
         # cycle survived. Self-tested for the same reason as lint:deps above:
         # a gate that cannot fire is worse than no gate.
         run: |
@@ -1248,7 +1278,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, packages_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, merchant_payments_checks, core_checks, qa_agent_checks, backend_checks, packages_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1332,6 +1362,11 @@ jobs:
 
           if [ "${{ needs.changes.outputs.demo_merchant }}" = "true" ] && [ "${{ needs.demo_merchant_checks.result }}" != "success" ]; then
             echo "Demo merchant checks result: ${{ needs.demo_merchant_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.merchant_payments }}" = "true" ] && [ "${{ needs.merchant_payments_checks.result }}" != "success" ]; then
+            echo "Merchant payments checks result: ${{ needs.merchant_payments_checks.result }}"
             exit 1
           fi
 

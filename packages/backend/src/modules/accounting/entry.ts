@@ -4,6 +4,8 @@ import { isSupportedLedgerCurrency, type LedgerCurrency } from '../../domain/led
 import { vatTreatmentForCountry } from '../../domain/vat.js'
 // dep-lint-exempt: the transactions barrel re-exports transactions/accounting.ts, which imports the accounting barrel, so importing toCanonicalAddress through it closes an accounting ↔ transactions cycle; normalize.ts is a zero-import leaf (#4379)
 import { toCanonicalAddress } from '../transactions/normalize.js'
+import { checkedReceiptStatement, type CheckedReceiptStatement } from './receipt-statement.js'
+import { productSourcesFrom, type ProductSources } from './product-sources.js'
 import {
   deriveTransactionKind,
   transactionDescription,
@@ -146,6 +148,20 @@ export interface AccountingEntry {
   parentReceiptRef: string | null
   /** The merchant's OWN receipt when the agent captured one (#956); absent/null = none. */
   merchantReceipt?: { url: string | null; inlineJson: unknown | null } | null
+  /**
+   * #4875: the product lines and VAT figures the merchant's receipt states
+   * (`receipt-statement.ts`), with how its total compares with what Haven
+   * settled. Null when the receipt states none that can be read, or there is
+   * no receipt. Reported, not verified: the receipt is relayed by the agent.
+   * The amount booked stays `amountAtomic` / `amountHuman` either way.
+   */
+  receiptStatement?: CheckedReceiptStatement | null
+  /**
+   * #4877: Haven's catalog name, the merchant's quote description and the
+   * agent's delivery reference (`product-sources.ts`), cleaned and bounded —
+   * the sources below the receipt lines, each shown under its own label.
+   */
+  productSources?: ProductSources
 }
 
 /** Shape selected from `machine_payment_evidence` for one settled payment. */
@@ -190,6 +206,10 @@ export interface AccountingEntrySourceRow {
    * one of the transaction-kind signals.
    */
   delivery_reference?: string | null
+  /** #4877: `merchant_catalog.name` for the payment's resource URL — Haven's own data. */
+  catalog_name?: string | null
+  /** #4877: `machine_metadata.description` (#3610) — the merchant's quote text, caller-relayed. */
+  quote_description?: string | null
   /**
    * #4532: the MCP tool the payment called
    * (`payment_intents.machine_metadata->'mcp_call_context'->>'toolName'`,
@@ -408,7 +428,25 @@ export function toAccountingEntry(row: AccountingEntrySourceRow): AccountingEntr
       row.merchant_receipt_url != null || row.merchant_receipt_json != null
         ? { url: row.merchant_receipt_url ?? null, inlineJson: row.merchant_receipt_json ?? null }
         : null,
+    receiptStatement: receiptStatementForEntry(row),
+    productSources: productSourcesFrom({
+      catalogName: row.catalog_name,
+      quoteDescription: row.quote_description,
+      deliveryReference: row.delivery_reference,
+    }),
   }
+}
+
+/**
+ * #4875: the receipt's stated lines and VAT, plus the total check against the
+ * settled token amount (`checkedReceiptStatement`, shared with the document).
+ */
+function receiptStatementForEntry(row: AccountingEntrySourceRow): CheckedReceiptStatement | null {
+  return checkedReceiptStatement(row.merchant_receipt_json ?? null, {
+    token: row.token_symbol,
+    amountAtomic: row.amount_raw,
+    chainId: row.chain_id,
+  })
 }
 
 /**
@@ -452,6 +490,10 @@ const ENTRY_SOURCE_SQL = `
     pi.machine_metadata->'mcp_call_context'->>'toolName' AS mcp_tool_name,
     mc.category AS category,
     mc.country AS country,
+    -- #4877: the catalog's own name (Haven's data) and the quote description
+    -- the authorize stored (#3610) — two of the product sources.
+    mcn.name AS catalog_name,
+    pi.machine_metadata->>'description' AS quote_description,
     mao.bas_account AS override_account,
     pf.fee_sek AS fee_sek,
     mr.url AS merchant_receipt_url,
@@ -469,6 +511,15 @@ const ENTRY_SOURCE_SQL = `
     WHERE resource_url = mpe.resource_url AND status != 'delisted'
     LIMIT 1
   ) mc ON TRUE
+  -- #4877: the "Haven catalog" product name, only when it is unambiguous and
+  -- Haven's own. One MCP endpoint can carry many products (one row per tool
+  -- and arguments), and a bazaar row holds a seller's words, not Haven's: the
+  -- name is read only when exactly one live operator row has this resource
+  -- URL, otherwise the ladder falls to the next source.
+  LEFT JOIN LATERAL (
+    SELECT CASE WHEN count(*) = 1 THEN min(name) END AS name FROM merchant_catalog
+    WHERE resource_url = mpe.resource_url AND status != 'delisted' AND source = 'operator'
+  ) mcn ON TRUE
   LEFT JOIN merchant_account_overrides mao
     ON mao.user_id = mpe.user_id AND mao.resource_url = mpe.resource_url
   LEFT JOIN payment_fees pf
@@ -513,6 +564,9 @@ const ENTRY_SOURCE_SQL = `
     pi.machine_metadata->'mcp_call_context'->>'toolName' AS mcp_tool_name,
     NULL::TEXT AS category,
     NULL::TEXT AS country,
+    -- #4877: a direct payment has no catalog entry and no x402 quote.
+    NULL::TEXT AS catalog_name,
+    NULL::TEXT AS quote_description,
     NULL::TEXT AS override_account,
     pf.fee_sek AS fee_sek,
     NULL::TEXT AS merchant_receipt_url,

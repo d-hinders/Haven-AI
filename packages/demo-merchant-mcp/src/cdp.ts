@@ -21,6 +21,7 @@ import {
 } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
 import type { PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse } from '@x402/core/types'
+import { DEFAULT_LOG_SPAN_BLOCKS, LogWindows } from './log-range.js'
 import { CHAIN_ID, USDC_ADDRESS } from './products.js'
 
 /** The two facilitator calls the merchant makes. `HTTPFacilitatorClient` from
@@ -156,8 +157,13 @@ const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
 const BASE_BLOCK_TIME_SECONDS = 2n
 /** Blocks searched either side of the estimate, for clock skew and the estimate's error. */
 const BLOCK_MARGIN = 150n
-/** Many RPC plans refuse a wider `eth_getLogs` range; search in chunks of this size. */
-const LOG_CHUNK_BLOCKS = 500n
+/**
+ * Many RPC plans refuse a wider `eth_getLogs` range; search in windows of at
+ * most this size. #4866: narrowed by `ETH_GETLOGS_MAX_BLOCK_RANGE` and by the
+ * provider's own refusal (the public Base Sepolia RPC serves 200), see
+ * `log-range.ts`.
+ */
+const LOG_CHUNK_BLOCKS = DEFAULT_LOG_SPAN_BLOCKS
 /** Never search more than this many blocks, whatever the window says (about 12 h). */
 const MAX_SEARCH_BLOCKS = 21_600n
 
@@ -181,7 +187,12 @@ export function createViemChainReadClient(rpcUrl: string): ChainReadClient {
   return createPublicClient({ chain, transport: http(rpcUrl) }) as ChainReadClient
 }
 
-export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
+export function createCdpChainReader(
+  client: ChainReadClient,
+  // #4866: one window state per RPC client, so a limit learned from this
+  // provider's refusal narrows every later search on it.
+  logWindows: LogWindows = new LogWindows({ defaultSpan: LOG_CHUNK_BLOCKS }),
+): CdpChainReader {
   return {
     authorizationUsed(authorizer, nonce) {
       return client.readContract({
@@ -223,26 +234,35 @@ export function createCdpChainReader(client: ChainReadClient): CdpChainReader {
         complete = false
       }
 
-      for (let start = fromBlock; start <= toBlock; start += LOG_CHUNK_BLOCKS) {
-        const end = start + LOG_CHUNK_BLOCKS - 1n < toBlock ? start + LOG_CHUNK_BLOCKS - 1n : toBlock
-        // Review of #4851: ONE event per query. Given `events: [...]`, viem
-        // drops `args` from the topics and filters client-side, so the RPC
-        // would return every such event in the range. With `event:` the
-        // authorizer and nonce are encoded as topics and the node filters.
-        const logs = await client.getLogs({
-          address: USDC_ADDRESS,
-          event: AUTHORIZATION_USED_EVENT,
-          args: { authorizer: getAddress(params.authorizer), nonce },
-          fromBlock: start,
-          toBlock: end,
-        })
-        const used = logs.find((log) => log.transactionHash)
-        if (used?.transactionHash) {
-          const receipt = await client.getTransactionReceipt({ hash: used.transactionHash })
-          return paidMerchant(receipt, params)
-            ? { kind: 'settled', txHash: used.transactionHash }
-            : { kind: 'used_elsewhere', txHash: used.transactionHash }
-        }
+      // #4866: contiguous windows the provider will serve. A refusal that
+      // names a narrower range is learned and the window asked again; any
+      // other failure throws, and the caller serves the buyer without a
+      // reference, exactly as before.
+      const found = await logWindows.scan(
+        fromBlock,
+        toBlock,
+        async (start, end) => {
+          // Review of #4851: ONE event per query. Given `events: [...]`, viem
+          // drops `args` from the topics and filters client-side, so the RPC
+          // would return every such event in the range. With `event:` the
+          // authorizer and nonce are encoded as topics and the node filters.
+          const logs = await client.getLogs({
+            address: USDC_ADDRESS,
+            event: AUTHORIZATION_USED_EVENT,
+            args: { authorizer: getAddress(params.authorizer), nonce },
+            fromBlock: start,
+            toBlock: end,
+          })
+          return logs.find((log) => log.transactionHash)?.transactionHash ?? null
+        },
+        (txHash) => txHash !== null,
+      )
+      const usedTxHash = found.find((txHash): txHash is Hex => txHash !== null)
+      if (usedTxHash) {
+        const receipt = await client.getTransactionReceipt({ hash: usedTxHash })
+        return paidMerchant(receipt, params)
+          ? { kind: 'settled', txHash: usedTxHash }
+          : { kind: 'used_elsewhere', txHash: usedTxHash }
       }
       if (complete) return { kind: 'not_in_window' }
       return null

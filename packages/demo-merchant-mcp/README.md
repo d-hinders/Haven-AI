@@ -293,7 +293,9 @@ Endpoints:
   `ok: null` + `error` instead of taking health down. A `cdp` block appears
   only when CDP is configured (#4851), and a `stripe` block only when Stripe
   recording is on (#4853): `deposit_address`, `api_version`, `network`,
-  `recorded` and `record_failures`. Neither block ever carries a credential.
+  `recorded`, `pending`, `declined` and `record_failures` (#4866: `recorded`
+  counts only PaymentIntents Stripe accepted). Neither block ever carries a
+  credential.
 
 ### Sessions: unknown-session 404, idle TTL, and what a redeploy does (#1578, #3171)
 
@@ -459,6 +461,13 @@ warning and does not offer the product; it still starts. `/healthz` carries a
   blocks cannot hide a payment that just landed. When the search fails, the
   window is too long to search in full, or it closed too recently, the buyer is
   served with the reference marked unavailable — never refused.
+  The search reads in `eth_getLogs` windows the RPC serves (#4866): 500
+  blocks by default, narrowed by `ETH_GETLOGS_MAX_BLOCK_RANGE` and by the
+  provider's refusal. Before #4866 a node that serves fewer blocks (the
+  public Base Sepolia RPC serves 200) refused every window wider than that,
+  so on the dev merchant a final refusal was unreachable and the buyer was
+  always served. It is reachable there now, as on mainnet. At 200-block
+  windows the 21,600-block cap is up to 108 sequential calls.
 - **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
   (final: CDP refused at verification — including its sanctions and risk
   screening — and the chain shows the authorization unused, or the
@@ -507,6 +516,47 @@ merchant), `2026-05-27.preview` on Base. The network name is `base` on both — 
 sandbox deposit address is a Base Sepolia address, but the parameter does not
 change.
 
+**What the record carries (#4880).** Enough for an accountant to work from the
+Stripe export alone, without the receipt the merchant returned in its API
+response. The receipt is built first and the PaymentIntent is recorded after
+it, still without waiting for Stripe: both steps before it are synchronous.
+
+| Field | Value | When |
+|---|---|---|
+| `description` | product name and receipt number, e.g. `Haven Joke — FAK-0123456789012345` | always |
+| `metadata.receipt_number` | the receipt's `fakturanummer` | always |
+| `metadata.product_id`, `metadata.transaction_hash` | as before | always |
+| `metadata.vat_treatment` | `SE_25` or `REVERSE_CHARGE`, the receipt's `momsbehandling` | merchant only |
+| `metadata.vat_amount` | the receipt's VAT in atomic USDC with the unit, e.g. `2000 (USDC atomic)`: the joke's VAT is a fifth of a cent and cannot be stated in cents | merchant only |
+| `metadata.buyer_vat_nr`, `metadata.buyer_country` | the buyer's declared VAT number and country | only when the paid request carried an accepted declaration (#4855) and each has the shape of one (two letters; a two-letter prefix and 2–13 letters or digits); absent otherwise, never empty |
+| `metadata.recorded_by` | `reconciliation` | reconciliation only |
+
+These fields apply to PaymentIntents recorded from this change on: one
+recorded earlier keeps its metadata, and reconciliation answers
+`already_recorded` for it without updating anything. Values are cut to
+Stripe's 500-character limit. The buyer's company name,
+organisation number and the time its VAT number was checked are not in the
+declaration Haven sends, so they are not recorded. A Stripe refusal caused by
+any of these fields is an ordinary recording failure: logged, counted, and the
+goods delivered. Because the idempotency key is the hash while the parameters
+differ between the merchant and reconciliation, a repeat inside Stripe's ~24 h
+key window can be refused with `idempotency_error`; the recorder then searches
+again and reports the PaymentIntent it finds, and fails only if there is none.
+
+**The receipt number is derived from the transaction (#4880).** A payment
+settled on-chain is numbered `FAK-` and the transaction hash modulo 10^16 as
+sixteen zero-padded digits, so the same transaction always gets the same
+number — after a restart, and in the reconciliation script, which has the hash
+and nothing else. No date is part of it: the merchant knows the hash when it
+answers but not the block's timestamp, and its clock and the block's can fall
+on either side of midnight. The OCR reference built from it stays 17 digits. A
+payment served without a transaction hash keeps the clock-seeded counter
+(`FAK-<year>-<n>`), and that number is never in Stripe: reconciliation later
+records the number derived from the transaction it finds, which differs from
+the one on that buyer's receipt. That receipt carries no transaction reference
+either (`blockkedje_referens` is null), so it cannot be matched to a
+PaymentIntent from the receipt alone.
+
 **"Already recorded" is a read, not the idempotency key.** Stripe prunes
 idempotency keys after about 24 hours, so a key cannot answer "did this
 transaction get recorded?" a day later. The recorder first searches
@@ -519,15 +569,41 @@ transactions" is not enough.
 **Recording never blocks delivery.** The payment has settled before Stripe is
 called, so the call is fire-and-forget: a refusal, a timeout (10 s per call) or
 a network error is logged and counted, and the goods are delivered regardless.
-The durable signal is the log line
+The durable signals are the log lines
 
 ```
 [stripe] record_failed tx=<hash> reason=<stripe type/code | StripeTimeoutError>
+[stripe] record_declined tx=<hash> payment_intent=<pi_…> code=<Stripe's decline code>
+[stripe] record_pending tx=<hash> payment_intent=<pi_…>
+[stripe] not_recorded tx=<hash> reason=paid_other_address
 ```
 
-and `/healthz` carries a `stripe` block with `recorded` and `record_failures`.
-Those counters are process-local — the merchant sleeps after about 10 minutes —
-so the log line is what an operator greps for. No Stripe secret is ever logged:
+and `/healthz` carries a `stripe` block with `recorded`, `pending`, `declined`
+and `record_failures`. Those counters are process-local — the merchant sleeps
+after about 10 minutes — so the log lines are what an operator greps for.
+
+**Stripe's verdict, not the create call's (#4866).** Stripe verifies a
+`transaction_verification` PaymentIntent after create returns: create answers
+`processing`, and Stripe later moves it to `succeeded` or declines it
+(`requires_payment_method` with `last_payment_error.code`; `canceled` counts as
+declined too). The recorder logs `[stripe] submitted …` on create, then reads
+the PaymentIntent every 3 s, for up to 60 s of waiting plus the reads (each
+read is bounded at 10 s) — well under the merchant's sleep — and only a
+`succeeded` one is `recorded`. A failed read ends the wait as `pending`. One still undecided at the bound is
+`record_pending`, and the reconciliation script reads it again later. A decline
+is permanent: Stripe allows one PaymentIntent per transaction, so the
+transaction cannot be recorded again — say so to Stripe, not to this script.
+When create is refused with `resource_already_exists` (a PaymentIntent tracks
+the transaction but the metadata search missed it — no metadata, or Stripe's
+search has not indexed it yet), the recorder reads the PaymentIntent Stripe
+names instead of failing; only that `pi_…` ID is taken from the error, never
+the message.
+
+**Only payments to the current deposit address are sent (#4866).** A payment
+recovered after an address change paid the previous address (served through
+`recoverCdpPaymentAfterQuoteChange`, see the operator note below). Stripe
+declines a transaction that did not pay the deposit address, so it is not
+sent: it is logged as `[stripe] not_recorded … reason=paid_other_address`. No Stripe secret is ever logged:
 a failure names the hash and Stripe's own error `type`/`code`, never the
 response body or the request.
 
@@ -544,9 +620,12 @@ npm run reconcile:stripe -w packages/demo-merchant-mcp -- \
 ```
 
 It lists the settled payments to the deposit address that have no
-PaymentIntent, and records them. The range is read in one `eth_getLogs` call, so it must
-fit the RPC's own limit — 200 blocks on the public Base Sepolia RPC (see
-[what we learned from Stripe sandbox](#what-we-learned-from-stripe-sandbox-4854)). There is no database to remember a block range,
+PaymentIntent, and records them. The range is read in `eth_getLogs` windows the
+RPC serves (#4866): 500 blocks by default, narrowed by
+`ETH_GETLOGS_MAX_BLOCK_RANGE` when set, and by the provider's own refusal — the
+public Base Sepolia RPC serves 200 and says so, and the script learns it from
+that refusal and asks again narrower. The same windows serve #4851's recovery
+search. There is no database to remember a block range,
 so the range is an argument.
 
 - Only an **EIP-3009 transfer of the joke's exact price** is recorded. An
@@ -559,10 +638,23 @@ so the range is an argument.
   listed as `amount_mismatch` and left alone too.
 - It is idempotent: "already recorded" is the same Stripe read, so a second run
   over the same range creates nothing.
+- It records the description, `product_id` and the receipt number the merchant
+  gives that transaction, plus `recorded_by=reconciliation`, and leaves out
+  `vat_treatment`, `vat_amount` and the buyer keys (#4880): it has no paid
+  request and no declaration, so a reverse-charge sale is never recorded as a
+  25% sale.
 
-The report is JSON: `recorded`, `already_recorded`, `not_recorded` and `failed`
-arrays of transaction hashes and PaymentIntent IDs. Exit code 0 means recorded
-or nothing to do, 1 a usage or configuration error, 2 a payment Stripe refused.
+The report is JSON on stdout (the recorder's log lines go to stderr):
+`recorded`, `already_recorded`, `pending`, `declined`, `not_recorded` and
+`failed` arrays of transaction hashes and PaymentIntent IDs. `recorded` and
+`already_recorded` hold only PaymentIntents Stripe accepted (#4866).
+
+| Exit | Meaning |
+|---|---|
+| 0 | nothing declined or failed — `pending` entries are listed, not an error; run again later |
+| 1 | usage or configuration |
+| 2 | a payment is listed under `failed` or `declined` — a Stripe refusal, decline, timeout or API error on that payment (Stripe errors never stop the run) |
+| 3 | an RPC error stopped the run, printed as one line naming the error class — never a stack trace, never the message (a viem error message carries the RPC URL, which can hold an API key). Payments before the error may already be recorded; run the same range again, it is idempotent |
 
 **Where it runs.** Inside the merchant service's environment, as a one-off
 command using that service's variables. The key is never exported to a local
@@ -638,6 +730,8 @@ reading balance transactions.
 | `metadata` | Accepted; shown on the PaymentIntent (`product_id`, `transaction_hash`). |
 | `receipt_email` | Accepted at create and returned on the object. |
 | `customer` | The parameter is recognised: an unknown ID is refused with `resource_missing` on `customer`, not `parameter_unknown`. Not tested with a real Customer — the key has no Customers permission and this merchant keeps no customers. |
+| `description` | Accepted (#4880 probe, 2026-11-17). Stripe validates parameters before it checks the transaction: a create for an already-tracked hash with an unknown parameter is refused `parameter_unknown`, one with `description` of the wrong type is refused on `description`, and one with a plain `description` (alone, or with the #4880 metadata keys) gets as far as `resource_already_exists`. |
+| `receipt_url` | Stripe creates a receipt for these payments: the charge (`py_…`, `latest_charge`) carries a `receipt_url` on `pay.stripe.com`, with `receipt_number` null (#4880 probe). It is created after the merchant answers — recording is not awaited — so it is not on the merchant's receipt; find it on the payment in the Dashboard or through `latest_charge.receipt_url`. |
 
 **How Stripe matches the hash.** For both new hashes tried, create answered 200
 with status `processing`, and Stripe checked the transaction afterwards. A hash
@@ -660,19 +754,13 @@ succeeded PaymentIntent and for the declined one. So Stripe itself keeps a
 transaction from being recorded twice after its idempotency keys are pruned —
 and a hash whose PaymentIntent was declined cannot be recorded again.
 
-**Not yet handled here.** The recorder logs `recorded` and counts it when the
-create call returns, while the PaymentIntent is still `processing`; it never
-reads the final status. The reconciliation script likewise treats any
-PaymentIntent found for a hash, a declined one included, as
-`already_recorded`. A declined recording is therefore silent: the Stripe
-Dashboard shows it, but nothing in the merchant (its log, `/healthz` or the
-reconciliation report) does. A decline can happen in normal operation: a
-payment that settled to the address named in `STRIPE_PREVIOUS_DEPOSIT_ADDRESS`
-(`MERCHANT_ADDRESS`, when the operator names it there on turning Stripe on) is
-served through
-`recoverCdpPaymentAfterQuoteChange` as `settled_onchain`, and
-`recordStripePayment` records it without checking which address it paid —
-the same shape as the declined probe. Tracked in #4866.
+**Handled since #4866.** At the time of this run the recorder counted
+`recorded` when the create call returned, while the PaymentIntent was still
+`processing`, and the reconciliation script treated a declined PaymentIntent as
+`already_recorded`, so a decline was silent. A payment recovered to the address
+named in `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` was also sent to Stripe, the same
+shape as the declined probe. Both are fixed: see [Stripe's verdict, not the
+create call's](#stripe-recording-4853) above.
 
 **The SEK amount and the rate.** The balance transaction for the one-cent
 payment: `amount` 10 (öre), `currency` `sek`, `exchange_rate` 10.0742, `fee` 0,
@@ -728,8 +816,8 @@ node scripts/reconcile-stripe.mjs --from-block 59580400 --to-block 59580599
 The public Base Sepolia RPC (`https://sepolia.base.org`) answers `eth_getLogs`
 for at most 200 blocks, and the script asks for the whole range in one call: a
 1,001-block range failed with RPC error -32614 ("eth_getLogs is limited to a 200
-range") and a stack trace. On that RPC, run ranges of at most 200 blocks. #4866 tracks reading in
-windows, and the same limit in the CDP recovery search.
+range") and a stack trace. Since #4866 the script reads in windows that RPC
+serves and an error ends in one line with exit 3; see § *Reconciliation*.
 
 ## Agent Passport check (advisory, #4723)
 

@@ -22,6 +22,7 @@ import {
   type SettlementClient,
 } from './x402.js'
 import type { AuthorizationOutcome, CdpChainReader, CdpFacilitator } from './cdp.js'
+import { receiptNumberForTransaction } from './invoice.js'
 import { reconcileStripe } from './stripe-reconcile.js'
 import {
   STRIPE_API_VERSION_SANDBOX,
@@ -84,7 +85,7 @@ const IDEMPOTENCY_KEY_RETENTION_MS = 24 * 60 * 60 * 1000
  * forgotten, so the same key would create a new one. `advanceClock` moves the
  * fake's clock, as a day passing would.
  */
-function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
+function fakeStripe(opts: { failCreate?: boolean; hang?: boolean; refuseField?: string } = {}) {
   const intents = new Map<string, { id: string; form: Record<string, string> }>()
   const byTx = new Map<string, string>()
   const requests: StripeHttpRequest[] = []
@@ -99,10 +100,14 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
         const query = new URLSearchParams(request.path.split('?')[1] ?? '').get('query') ?? ''
         const tx = /transaction_hash'\]\s*:\s*'([^']+)'/.exec(query)?.[1]
         const id = tx ? byTx.get(tx) : undefined
-        return { status: 200, body: { data: id ? [{ id }] : [] } }
+        return { status: 200, body: { data: id ? [{ id, status: 'succeeded' }] : [] } }
       }
       if (opts.failCreate) {
         return { status: 402, body: { error: { type: 'card_error', code: 'crypto_declined' } } }
+      }
+      // #4880: Stripe refusing one of the fields this issue adds.
+      if (opts.refuseField && request.form?.[opts.refuseField] !== undefined) {
+        return { status: 400, body: { error: { type: 'invalid_request_error', code: 'parameter_unknown', param: opts.refuseField } } }
       }
       const tx = request.form?.['metadata[transaction_hash]']
       if (!tx) return { status: 400, body: { error: { type: 'invalid_request_error' } } }
@@ -110,7 +115,7 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
       if (key) {
         const held = idempotencyKeys.get(key)
         if (held && now - held.at < IDEMPOTENCY_KEY_RETENTION_MS) {
-          return { status: 200, body: { id: held.id } }
+          return { status: 200, body: { id: held.id, status: 'succeeded' } }
         }
         // Stripe prunes the key after ~24h: it no longer answers for the create.
         if (held) idempotencyKeys.delete(key)
@@ -119,7 +124,7 @@ function fakeStripe(opts: { failCreate?: boolean; hang?: boolean } = {}) {
       intents.set(id, { id, form: request.form ?? {} })
       byTx.set(tx, id)
       if (key) idempotencyKeys.set(key, { id, at: now })
-      return { status: 200, body: { id } }
+      return { status: 200, body: { id, status: 'succeeded' } }
     },
   }
   return {
@@ -141,6 +146,10 @@ async function startServer(
     stripe?: boolean
     stripeFail?: boolean
     stripeHang?: boolean
+    /** #4880: Stripe refuses a create carrying this form field. */
+    stripeRefuseField?: string
+    /** #4866: a recording built by the test, used instead of the default one. */
+    recording?: StripeRecording
     cdp?: boolean
     fakes?: Fakes
     previousReceivingAddresses?: readonly `0x${string}`[]
@@ -153,9 +162,9 @@ async function startServer(
     waitForReceipt: fakes.waitForReceipt,
   }
   const settlementMethods = ['eip3009', 'erc7710'] as const
-  const stripe = fakeStripe({ failCreate: opts.stripeFail, hang: opts.stripeHang })
-  const recording: StripeRecording | undefined =
-    opts.stripe === false
+  const stripe = fakeStripe({ failCreate: opts.stripeFail, hang: opts.stripeHang, refuseField: opts.stripeRefuseField })
+  const recording: StripeRecording | undefined = opts.recording ??
+    (opts.stripe === false
       ? undefined
       : createStripeRecording(
           {
@@ -165,7 +174,7 @@ async function startServer(
             network: 'base',
           },
           { http: stripe.client, log: (line) => logs.push(line), timeoutMs: 50 },
-        )
+        ))
   const server = createDemoMerchantServer({
     merchantAddress: MERCHANT,
     baseUrl: 'http://127.0.0.1:0',
@@ -307,9 +316,53 @@ describe('the deposit address in the 402 (#4853)', () => {
       api_version: STRIPE_API_VERSION_SANDBOX,
       network: 'base',
       recorded: 0,
+      pending: 0,
+      declined: 0,
       record_failures: 0,
     })
     expect(JSON.stringify(health)).not.toContain(FAKE_KEY)
+  })
+
+  it('#4866: /healthz counts recorded, pending, declined and failures apart', async () => {
+    // One PaymentIntent Stripe declines after create, two it never decides —
+    // different counts, so swapping the two keys cannot pass.
+    const statusFor = new Map([
+      ['pi_3Declined0001', 'requires_payment_method'],
+      ['pi_3Pending00001', 'processing'],
+      ['pi_3Pending00002', 'processing'],
+    ])
+    let next = 0
+    const ids = ['pi_3Declined0001', 'pi_3Pending00001', 'pi_3Pending00002']
+    const http: StripeHttpClient = {
+      async request(request) {
+        if (request.path.startsWith('/v1/payment_intents/search')) return { status: 200, body: { data: [] } }
+        if (request.method === 'GET') {
+          const id = request.path.split('/').pop()!
+          return { status: 200, body: { id, status: statusFor.get(id) } }
+        }
+        return { status: 200, body: { id: ids[next++], status: 'processing' } }
+      },
+    }
+    const recording = createStripeRecording(
+      { depositAddress: DEPOSIT, secretKey: FAKE_KEY, apiVersion: STRIPE_API_VERSION_SANDBOX, network: 'base' },
+      { http, log: () => {}, sleep: async () => {}, verdictPollMs: 1_000, verdictTimeoutMs: 2_000 },
+    )
+    await recording.record({ txHash: `0x${'d1'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+    await recording.record({ txHash: `0x${'d2'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+    await recording.record({ txHash: `0x${'d3'.repeat(32)}`, amountAtomic: 10_000n, productId: 'joke' })
+
+    const { origin } = await startServer({ recording })
+    const health = (await (await fetch(`${origin}/healthz`)).json()) as Record<string, unknown>
+    expect(health.stripe).toEqual({
+      configured: true,
+      deposit_address: DEPOSIT,
+      api_version: STRIPE_API_VERSION_SANDBOX,
+      network: 'base',
+      recorded: 0,
+      pending: 2,
+      declined: 1,
+      record_failures: 0,
+    })
   })
 
   it('/healthz has no stripe block when Stripe is off', async () => {
@@ -367,7 +420,7 @@ describe('recording a settled payment (#4853)', () => {
       'payment_method_options[crypto][transaction_verification_options][network]': 'base',
       'payment_method_options[crypto][transaction_verification_options][transaction_hash]': CDP_TX,
     })
-    expect(recording!.stats()).toEqual({ attempted: 1, recorded: 1, alreadyRecorded: 0, failed: 0 })
+    expect(recording!.stats()).toEqual({ attempted: 1, recorded: 1, alreadyRecorded: 0, pending: 0, declined: 0, failed: 0 })
   })
 
   it('creates no second PaymentIntent when the same header is retried', async () => {
@@ -382,7 +435,7 @@ describe('recording a settled payment (#4853)', () => {
     await recording!.flush()
 
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(1)
-    expect(recording!.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, failed: 0 })
+    expect(recording!.stats()).toEqual({ attempted: 2, recorded: 1, alreadyRecorded: 1, pending: 0, declined: 0, failed: 0 })
   })
 
   it('creates no PaymentIntent at request time for a recovery without a transaction hash', async () => {
@@ -399,7 +452,7 @@ describe('recording a settled payment (#4853)', () => {
     await recording!.flush()
 
     expect(stripe.requests.filter((request) => request.method === 'POST')).toHaveLength(0)
-    expect(recording!.stats()).toEqual({ attempted: 0, recorded: 0, alreadyRecorded: 0, failed: 0 })
+    expect(recording!.stats()).toEqual({ attempted: 0, recorded: 0, alreadyRecorded: 0, pending: 0, declined: 0, failed: 0 })
 
     // ...and the reconciliation script picks it up from the chain.
     const report = await reconcileStripe({
@@ -500,6 +553,27 @@ describe('a redeploy that moves the deposit address (#4853, review S7)', () => {
     expect(fakes.settle).not.toHaveBeenCalled()
   })
 
+  it('#4866: sends the recovered payment to Stripe only if it paid the CURRENT deposit address — this one paid the old one', async () => {
+    // Stripe declines a transaction that did not pay the deposit address
+    // (#4854), and the decline is permanent for that transaction. Before
+    // #4866 this recovered payment was sent to Stripe all the same.
+    const fakes = makeFakes()
+    fakes.authorizationUsed.mockResolvedValue(true)
+    fakes.findAuthorizationOutcome.mockResolvedValue({ kind: 'settled', txHash: CDP_TX } satisfies AuthorizationOutcome)
+
+    const before = await startServer({ depositAddress: OLD_DEPOSIT, fakes })
+    const header = await signedHeader(await challenge(before.url))
+    const after = await startServer({ depositAddress: DEPOSIT, fakes, previousReceivingAddresses: [OLD_DEPOSIT] })
+    logs.length = 0
+    const { response } = await pay(after.url, header)
+    await after.recording!.flush()
+
+    expect(response.status).toBe(200)
+    expect(after.stripe.requests).toHaveLength(0)
+    expect(logs).toContain(`[stripe] not_recorded tx=${CDP_TX} reason=paid_other_address`)
+    expect(after.recording!.stats().attempted).toBe(0)
+  })
+
   it('refuses the same retry when the chain says the authorization is unused', async () => {
     const fakes = makeFakes()
     fakes.authorizationUsed.mockResolvedValue(false)
@@ -535,5 +609,79 @@ describe('a redeploy that moves the deposit address (#4853, review S7)', () => {
 
     expect(response.status).toBe(402)
     expect(fakes.settle).not.toHaveBeenCalled()
+  })
+})
+
+/** The receipt the merchant returned, from its `x-receipt-json` header. */
+function receiptOf(response: Response): { fakturanummer: string; momsbehandling: string } {
+  return JSON.parse(Buffer.from(response.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
+}
+
+describe('the Stripe record carries the receipt (#4880)', () => {
+  it('the number on the PaymentIntent is the number on the receipt, and the description names product and number', async () => {
+    const { url, stripe, recording } = await startServer()
+    const { response } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    await recording!.flush()
+
+    const receipt = receiptOf(response)
+    expect(receipt.fakturanummer).toBe(receiptNumberForTransaction(CDP_TX))
+    const form = stripe.requests.find((request) => request.method === 'POST')!.form!
+    expect(form['metadata[receipt_number]']).toBe(receipt.fakturanummer)
+    expect(form.description).toBe(`Haven Joke — ${receipt.fakturanummer}`)
+    expect(form['metadata[vat_treatment]']).toBe(receipt.momsbehandling)
+    expect(form['metadata[vat_amount]']).toBe('2000 (USDC atomic)')
+    // No declaration on this request: the buyer keys are absent, not empty.
+    expect(Object.keys(form).filter((key) => /buyer|recorded_by/.test(key))).toEqual([])
+  })
+
+  it('is the same after a restart, and the reconciliation script produces it for that transaction', async () => {
+    const first = await startServer()
+    const one = await pay(first.url, await signedHeader(await challenge(first.url)))
+    // A second process: a restart that serves the same transaction again.
+    const second = await startServer()
+    const two = await pay(second.url, await signedHeader(await challenge(second.url)))
+    expect(receiptOf(two.response).fakturanummer).toBe(receiptOf(one.response).fakturanummer)
+
+    const stripe = fakeStripe()
+    const recording = createStripeRecording(
+      { depositAddress: DEPOSIT, secretKey: FAKE_KEY, apiVersion: STRIPE_API_VERSION_SANDBOX, network: 'base' },
+      { http: stripe.client, log: () => {} },
+    )
+    await reconcileStripe({
+      chain: {
+        async findTransfersTo() {
+          return [{ txHash: CDP_TX, from: PAYER, value: 10_000n }]
+        },
+        async isEip3009Transfer() {
+          return true
+        },
+      },
+      recording,
+      depositAddress: DEPOSIT,
+      priceAtomic: 10_000n,
+      productId: 'joke',
+      fromBlock: 1n,
+      toBlock: 2n,
+    })
+    const form = stripe.requests.find((request) => request.method === 'POST')!.form!
+    expect(form['metadata[receipt_number]']).toBe(receiptOf(one.response).fakturanummer)
+    expect(form.description).toBe(`Haven Joke — ${receiptOf(one.response).fakturanummer}`)
+    expect(form['metadata[recorded_by]']).toBe('reconciliation')
+    expect(Object.keys(form).filter((key) => /vat|buyer/.test(key))).toEqual([])
+  })
+
+  it('a Stripe refusal caused by a new field still delivers the goods, and is logged and counted', async () => {
+    logs.length = 0
+    const { url, origin, recording } = await startServer({ stripeRefuseField: 'description' })
+    const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    expect(raw).toContain('Haven Joke')
+    expect(response.headers.get('x-receipt-json')).toBeTruthy()
+    await recording!.flush()
+
+    expect(logs).toContain(`[stripe] record_failed tx=${CDP_TX} reason=invalid_request_error/parameter_unknown`)
+    const health = (await (await fetch(`${origin}/healthz`)).json()) as { stripe: { record_failures: number } }
+    expect(health.stripe.record_failures).toBe(1)
   })
 })

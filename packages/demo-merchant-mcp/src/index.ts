@@ -26,6 +26,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { type Address } from 'viem'
+import { LogWindows, parseMaxBlockRange } from './log-range.js'
 import { createStripeRecording, resolveStripeConfig } from './stripe.js'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
@@ -190,7 +191,12 @@ if (CDP_CREDENTIALS) {
   try {
     CDP_CONFIG = {
       facilitator: await createCdpFacilitator(CDP_CREDENTIALS),
-      chain: createCdpChainReader(createViemChainReadClient(BASE_RPC_URL)),
+      // #4866: the recovery search reads in windows the RPC serves — narrowed
+      // by ETH_GETLOGS_MAX_BLOCK_RANGE and by the provider's own refusal.
+      chain: createCdpChainReader(
+        createViemChainReadClient(BASE_RPC_URL),
+        new LogWindows({ maxSpan: parseMaxBlockRange(process.env.ETH_GETLOGS_MAX_BLOCK_RANGE) }),
+      ),
     }
   } catch (err) {
     // The class only: an SDK error message is not ours to print next to a key.

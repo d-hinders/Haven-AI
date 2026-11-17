@@ -100,9 +100,14 @@
     },
     "demo_merchant": {
       "dependsOn": [
+        "merchant_payments",
         "sdk"
       ],
-      "note": "packages/demo-merchant-mcp (#2996). Consumes @haven_ai/sdk since #4723 (the merchant-side passport verifier), so an SDK change fans out to this job. Its build/test/typecheck scripts build core and the SDK first, the same way backend/package.json does, so the Railway build command does not change."
+      "note": "packages/demo-merchant-mcp (#2996). Consumes @haven_ai/sdk since #4723 (the merchant-side passport verifier), so an SDK change fans out to this job. Consumes @haven_ai/merchant-payments since #4890 (the shared receipt and payment core). Its build/test/typecheck scripts build core, the SDK and merchant-payments first, the same way backend/package.json does, so the Railway build command does not change."
+    },
+    "merchant_payments": {
+      "dependsOn": ["sdk"],
+      "note": "packages/merchant-payments (#4890). The shared merchant payment core (the receipt builder and the tax-declaration check first; the Coinbase payment core follows) consumed by the demo merchant and, later, the paywall proxy (#4893). Imports @haven_ai/sdk's edge entry for the declaration signature check, so an SDK change fans out here. Workspace-private; its build/test/typecheck scripts build the SDK first."
     },
     "qa_agent": {
       "dependsOn": ["sdk", "signer"],

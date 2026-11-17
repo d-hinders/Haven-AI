@@ -5,6 +5,7 @@ import { DEFAULT_LEDGER_CURRENCY, type LedgerCurrency, ledgerCurrencyOrDefault }
 import { flagConnectionStatus } from './ops-signals.js'
 import { accountingFeedAvailable } from '../agents/index.js'
 import { merchantReportGraceElapsed, merchantReportGraceMin } from '../../domain/merchant-report-grace.js'
+import { merchantReceiptWaitElapsed } from '../../domain/merchant-receipt-wait.js'
 import { buildAccountingEntryForPayment } from './entry.js'
 import { toFeedTransaction } from './feed-transaction.js'
 import { getConnector, listConnectors, type AccountingConnector, type DegradedConnectionStatus } from './connector.js'
@@ -195,6 +196,25 @@ export async function feedSettledPayment(userId: string, paymentId: string, opts
     entry.verifiedSettlementTxHash == null &&
     entry.pinnedBookedTxHash == null &&
     !merchantReportGraceElapsed(entry.settledAt)
+  ) {
+    return notFed
+  }
+
+  // #4876 (owner decision 1 of 2026-11-17 on #4874): wait for the merchant
+  // receipt. An x402 payment's receipt — the product lines and VAT the
+  // document shows — arrives seconds after settlement, and a pushed voucher is
+  // never edited, so an x402 payment with no receipt yet is held for the
+  // receipt window and then sent ONCE. The receipt's own capture triggers the
+  // feed (`modules/mpp/merchant-receipt.ts`); the retry sweep feeds the payment
+  // whose receipt never arrives once the window has passed. Direct, MPP and
+  // retired-rail payments never carry a receipt and are not held. A payment
+  // with a booked-hash pin was already claimed once — the wait was that
+  // claim's to decide. MUTATION TARGET (receipt-wait.db.test.ts).
+  if (
+    (entry.settlementScheme === 'eip3009' || entry.settlementScheme === 'erc7710') &&
+    entry.merchantReceipt == null &&
+    entry.pinnedBookedTxHash == null &&
+    !merchantReceiptWaitElapsed(entry.settledAt)
   ) {
     return notFed
   }

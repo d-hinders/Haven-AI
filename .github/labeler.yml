@@ -102,6 +102,7 @@
           - "packages/core/src/machine-payment-lifecycle.ts"
           - "packages/demo-merchant-mcp/src/**"
           - "packages/mcp-server/src/**"
+          - "packages/merchant-payments/src/**"
           - "packages/frontend/src/hooks/useAgentRekey.ts"
           - "packages/frontend/src/lib/signer.ts"
           - "packages/sdk/src/credential-file.ts"

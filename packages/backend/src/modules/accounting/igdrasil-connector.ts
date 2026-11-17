@@ -298,9 +298,9 @@ function preCreateRefusal(err: unknown): PushResult | null {
 
 /**
  * Late attach for Igdrasil (#4521, the Accounted #3918 and Fortnox #956
- * precedent): the x402 feed pushes at funding confirmation, but the merchant
- * hands its invoice to the agent at the settle retry seconds later — so the
- * underlag is usually ALREADY pushed when the receipt arrives, and pushed
+ * precedent): the feed normally waits for an x402 payment's merchant receipt
+ * (#4876), but a receipt that arrives after that wait ran out — or after a
+ * push made before #4876 — finds the underlag ALREADY pushed, and pushed
  * rows are never re-claimed. The capture route calls this fire-and-forget:
  * when THIS provider's underlag row for the payment is pushed, upload the
  * just-captured invoice as the second document and record its own

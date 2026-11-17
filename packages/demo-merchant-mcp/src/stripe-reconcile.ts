@@ -17,10 +17,18 @@
  * Idempotent by construction: "already recorded" is a read of Stripe (the
  * PaymentIntent carrying the transaction hash in metadata), so a second run
  * over the same range creates nothing.
+ *
+ * #4866: the report carries Stripe's verdict, not the create call's. Only a
+ * `succeeded` PaymentIntent is `recorded` / `already_recorded`; one Stripe is
+ * still verifying is `pending`, and one it declined is `declined` — permanent
+ * for that transaction, since Stripe allows one PaymentIntent per
+ * transaction. And the chain is read in windows the RPC provider serves
+ * (`log-range.ts`): the public Base Sepolia RPC refuses more than 200 blocks.
  */
 import { getAddress, parseAbiItem, parseEventLogs, type Address, type Hex, type PublicClient } from 'viem'
-import { USDC_ADDRESS, type ProductId } from './products.js'
-import type { StripeRecording } from './stripe.js'
+import { LogWindows } from './log-range.js'
+import { PRODUCTS, USDC_ADDRESS, type ProductId } from './products.js'
+import { stripeDetailsForReconciliation, type StripeRecording } from './stripe.js'
 
 /** One USDC `Transfer` to the deposit address. */
 export interface DepositTransfer {
@@ -47,10 +55,17 @@ export interface ReconcileReport {
   to_block: string
   /** Every USDC transfer to the deposit address in the range. */
   transfers: number
-  /** Payments this run recorded. */
+  /** Payments this run recorded, and Stripe accepted (`succeeded`). */
   recorded: Array<{ tx_hash: string; payment_intent: string }>
-  /** Payments Stripe already had a PaymentIntent for. */
+  /** Payments Stripe already had a succeeded PaymentIntent for. */
   already_recorded: Array<{ tx_hash: string; payment_intent: string }>
+  /** #4866: PaymentIntents Stripe had not decided yet. Run again later. */
+  pending: Array<{ tx_hash: string; payment_intent: string }>
+  /**
+   * #4866: PaymentIntents Stripe declined. Permanent for that transaction —
+   * Stripe will not take a second one. Exit code 2.
+   */
+  declined: Array<{ tx_hash: string; payment_intent: string; code?: string }>
   /** Transfers left alone, with the reason. */
   not_recorded: Array<{ tx_hash: string; reason: NotRecordedReason }>
   /** Payments that should have been recorded but Stripe refused. */
@@ -60,18 +75,25 @@ export interface ReconcileReport {
 const TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)')
 const AUTHORIZATION_USED_EVENT = parseAbiItem('event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)')
 
-export function createViemReconcileChainReader(client: PublicClient): ReconcileChainReader {
+export function createViemReconcileChainReader(
+  client: PublicClient,
+  // #4866: the operator's range is read in windows the provider serves,
+  // narrowed by `ETH_GETLOGS_MAX_BLOCK_RANGE` and by the provider's refusal.
+  logWindows: LogWindows = new LogWindows(),
+): ReconcileChainReader {
   return {
     async findTransfersTo({ to, fromBlock, toBlock }) {
-      const logs = await client.getLogs({
-        address: USDC_ADDRESS,
-        event: TRANSFER_EVENT,
-        args: { to: getAddress(to) },
-        fromBlock,
-        toBlock,
-      })
+      const windows = await logWindows.scan(fromBlock, toBlock, (start, end) =>
+        client.getLogs({
+          address: USDC_ADDRESS,
+          event: TRANSFER_EVENT,
+          args: { to: getAddress(to) },
+          fromBlock: start,
+          toBlock: end,
+        }),
+      )
       const transfers: DepositTransfer[] = []
-      for (const log of logs) {
+      for (const log of windows.flat()) {
         if (!log.transactionHash || !log.args.from || log.args.value === undefined) continue
         transfers.push({
           txHash: log.transactionHash,
@@ -122,6 +144,8 @@ export async function reconcileStripe(params: {
     transfers: 0,
     recorded: [],
     already_recorded: [],
+    pending: [],
+    declined: [],
     not_recorded: [],
     failed: [],
   }
@@ -146,11 +170,23 @@ export async function reconcileStripe(params: {
       txHash: transfer.txHash,
       amountAtomic: transfer.value,
       productId: params.productId,
+      // #4880: the description and the receipt number the merchant gave this
+      // transaction, and `recorded_by=reconciliation`. No VAT and no buyer:
+      // the script has no request, so it cannot know the treatment.
+      details: stripeDetailsForReconciliation(PRODUCTS[params.productId], transfer.txHash),
     })
     if (result.status === 'recorded') {
       report.recorded.push({ tx_hash: transfer.txHash, payment_intent: result.paymentIntentId })
     } else if (result.status === 'already_recorded') {
       report.already_recorded.push({ tx_hash: transfer.txHash, payment_intent: result.paymentIntentId })
+    } else if (result.status === 'pending') {
+      report.pending.push({ tx_hash: transfer.txHash, payment_intent: result.paymentIntentId })
+    } else if (result.status === 'declined') {
+      report.declined.push({
+        tx_hash: transfer.txHash,
+        payment_intent: result.paymentIntentId,
+        ...(result.declineCode ? { code: result.declineCode } : {}),
+      })
     } else {
       report.failed.push({ tx_hash: transfer.txHash, reason: result.reason })
     }

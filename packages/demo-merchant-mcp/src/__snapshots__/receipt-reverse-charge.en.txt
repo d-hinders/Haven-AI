@@ -1,0 +1,52 @@
+════════════════════════════════════════════════════════════
+                         INVOICE
+════════════════════════════════════════════════════════════
+
+SELLER
+  Haven Demo AB
+  Birger Jarlsgatan 57, 113 56 Stockholm
+  Org. no:      559412-3456
+  VAT reg. no:  SE559412345601
+
+PAYER
+  Blockchain address: 0x2222222222222222222222222222222222222222
+  Role: agent delegate account (erc7710 delegator) — paid on behalf of an owner treasury account not visible to this merchant
+  Country: DE
+  VAT reg. no: DE123456789
+  Status: TAXABLE_PERSON
+  Declaration valid until: 2027-06-30
+
+────────────────────────────────────────────────────────────
+  Invoice number:  FAK-2026-00099
+  Invoice date:    2026-11-17
+  Due date:        2026-12-17
+  OCR number:      2026000998
+────────────────────────────────────────────────────────────
+
+SERVICES
+
+  CloudNest 50 GB — Säker krypterad molnlagring. 50 GB. Fildelning och automatisk synk ingår. (1 månad)
+  Quantity: 1  Unit price excl. VAT: 0.0005 USDC
+
+────────────────────────────────────────────────────────────
+  Amount excl. VAT:    0.0005 USDC
+  VAT 0%:             0 USDC
+  TOTAL incl. VAT:     0.0005 USDC
+  Reverse charge — the buyer accounts for the VAT.
+  Seller VAT reg. no: SE559412345601
+  Buyer VAT reg. no: DE123456789
+────────────────────────────────────────────────────────────
+
+  Currency:          USDC
+  Payment method:    Cryptocurrency (USDC on Base)
+  Recipient address: 0x1111111111111111111111111111111111111111
+
+BLOCKCHAIN REFERENCE
+  Tx: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
+
+  Status: Paid
+
+════════════════════════════════════════════════════════════
+  Thank you for purchasing CloudNest 50 GB!
+  Questions: support@haven.xyz
+════════════════════════════════════════════════════════════

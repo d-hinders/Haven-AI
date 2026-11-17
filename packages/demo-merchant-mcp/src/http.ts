@@ -35,7 +35,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from './tax-declaration.js'
+import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from '@haven_ai/merchant-payments'
 import { recordStripePayment, type StripeRecording } from './stripe.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'
@@ -271,6 +271,10 @@ async function handle(
       // the issue asks for; it is process-local (the merchant sleeps after
       // ~10 minutes), so the durable signal is the `[stripe] record_failed
       // tx=<hash>` log line the reconciliation runbook greps for.
+      // #4866: `recorded` counts only PaymentIntents Stripe accepted
+      // (`succeeded`); `pending` and `declined` count the ones it had not
+      // decided by the bound and the ones it declined (`[stripe]
+      // record_declined`, permanent for that transaction).
       ...(options.stripe
         ? {
             stripe: {
@@ -279,6 +283,8 @@ async function handle(
               api_version: options.stripe.apiVersion,
               network: options.stripe.network,
               recorded: options.stripe.stats().recorded,
+              pending: options.stripe.stats().pending,
+              declined: options.stripe.stats().declined,
               record_failures: options.stripe.stats().failed,
             },
           }
@@ -346,13 +352,6 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
-    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
-    // has already moved, so a Stripe refusal, timeout or network error must
-    // never delay or refuse the goods. A failure is logged as
-    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
-    // /healthz. A payment served through recovery without a transaction hash
-    // (#4851) records nothing here — the reconciliation script picks it up.
-    recordStripePayment(options.stripe, paymentToolInfo.product, settled)
     // #4855: the buyer's signed tax declaration, if this paid request carried
     // one. Verified against the payer the merchant just settled from — the
     // same key that signed the payment — and treated as absent on ANY failure,
@@ -374,6 +373,18 @@ async function handle(
       taxDeclaration,
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
+    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
+    // has already moved, so a Stripe refusal, timeout or network error must
+    // never delay or refuse the goods. A failure is logged as
+    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
+    // /healthz. A payment served through recovery without a transaction hash
+    // (#4851) records nothing here — the reconciliation script picks it up.
+    // #4866: and only a payment to the CURRENT deposit address — one recovered
+    // to the previous address is logged as `not_recorded`, never sent.
+    // #4880: after the receipt, so the record carries its number, VAT and
+    // buyer keys. Reading the declaration and building the receipt are
+    // synchronous, so this delays nothing.
+    recordStripePayment(options.stripe, paymentToolInfo.product, settled, receiptInvoice.json)
   }
 
   try {

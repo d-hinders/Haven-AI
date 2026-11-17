@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { HAVEN_FALLBACK_NAME } from '@haven_ai/core'
 import {
   formatAnalyticsAmount,
   formatAnalyticsAmountCompact,
@@ -182,9 +183,9 @@ function BudgetCell({ agent }: { agent: AnalyticsAgentRow }) {
  */
 function MerchantCell({ agent }: { agent: AnalyticsAgentRow }) {
   if (agent.top_merchant === null) {
-    return <span className="text-sm text-[var(--v2-ink-3)]">None in this range</span>
+    return <span className="text-sm text-[var(--v2-ink-3)]">{HAVEN_FALLBACK_NAME.noneInRange}</span>
   }
-  const name = agent.top_merchant.label ?? 'Unknown recipient'
+  const name = agent.top_merchant.label ?? HAVEN_FALLBACK_NAME.unknownRecipient
   const known = agent.top_merchant.label !== null
   return (
     <Tooltip label={agent.top_merchant.address} mono={!known}>
@@ -385,7 +386,7 @@ function MobileAgentRow({
           <DisclosureLine term="Spend" value={formatAnalyticsAmount(agent.spent, currency)} />
           <DisclosureLine
             term="Top merchant"
-            value={agent.top_merchant?.label ?? (agent.top_merchant ? 'Unknown recipient' : 'None in this range')}
+            value={agent.top_merchant?.label ?? (agent.top_merchant ? HAVEN_FALLBACK_NAME.unknownRecipient : HAVEN_FALLBACK_NAME.noneInRange)}
           />
           <DisclosureLine
             term="Last payment"

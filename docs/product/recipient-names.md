@@ -55,6 +55,24 @@ The first source that has a name wins:
    used only at their own recorded addresses, so an honest seller keeps its
    receipt name on its own payments. If that check cannot be read, no
    receipt name is used at all.
+
+   A receipt name is also **refused when it names nobody** (#4932), and a
+   refused name counts as no name at all — the order falls through to the
+   next step, exactly as for an empty one:
+
+   - **an address**, written in full (`0x…`, 40 hex characters, either `0x`
+     or `0X`) or in Haven's own short form (`0xA873…DD35`, `0xa873...dd35`,
+     `0xA873 … DD35`);
+   - **one of Haven's own fallback words** — "New recipient", "Unknown
+     recipient", "Deposit", "Agent payment", "Machine payment", "Moved
+     between your accounts", "None in this range" — matched exactly after
+     case folding and whitespace collapsing, or any name starting with
+     "From " or "Returned from ", the frontend's templated fallbacks.
+
+   The rule applies to **receipt names only**. Your contacts and your own
+   account names are your own words, so they are never refused. The
+   accounting underlag is out of scope too: it quotes the invoice's seller as
+   written (see [`merchant-receipt-shape.md`](../operations/merchant-receipt-shape.md)).
 5. **The paid API's host**, for example `api.example.com`.
 6. **Nothing.** The screen shows its own fallback: "Unknown recipient" or
    "New recipient".

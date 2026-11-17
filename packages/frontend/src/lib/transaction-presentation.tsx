@@ -1,6 +1,12 @@
 import { TransactionMovement } from '@/components/haven'
 import type { AmountCurrency } from '@/components/haven/Amount'
-import { isAddress, shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
+import {
+  HAVEN_FALLBACK_NAME,
+  HAVEN_FALLBACK_NAME_PREFIX,
+  isAddress,
+  shouldMarkApprox,
+  type ApproxMarkKind,
+} from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
@@ -170,14 +176,14 @@ export function counterpartyLabel(
     // Sweeps are agent-attributed inbound rows; the sweep check precedes the
     // direction check for the same reason `transactionInitiator`'s does.
     if (isDelegateSweep(tx)) {
-      return `Returned from ${tx.agentName ?? 'agent'}`
+      return `${HAVEN_FALLBACK_NAME_PREFIX.returnedFrom}${tx.agentName ?? 'agent'}`
     }
     if (isMachinePaymentSource(tx.source)) {
       return (
         serverName(tx, options) ??
         parseX402Hostname(tx.x402ResourceUrl) ??
         paymentSourceTitle(tx.source) ??
-        'Agent payment'
+        HAVEN_FALLBACK_NAME.agentPayment
       )
     }
     // #4099 (owner decision, 2026-10-20): a server-resolved sender name — only
@@ -189,7 +195,7 @@ export function counterpartyLabel(
     // "Deposit".
     if (tx.direction === 'in') {
       const sender = ownAccountSenderName(tx, accountNamesByAddress, options.resolvedName)
-      return sender ? `From ${sender}` : 'Deposit'
+      return sender ? `${HAVEN_FALLBACK_NAME_PREFIX.from}${sender}` : HAVEN_FALLBACK_NAME.deposit
     }
 
     const address = tx.to
@@ -201,7 +207,7 @@ export function counterpartyLabel(
       serverName(tx, options) ??
       accountName ??
       resolveAddress?.(address) ??
-      'New recipient'
+      HAVEN_FALLBACK_NAME.newRecipient
     )
   }
 

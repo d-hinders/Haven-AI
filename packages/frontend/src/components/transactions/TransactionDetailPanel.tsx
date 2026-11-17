@@ -2,6 +2,7 @@
 
 import { type ReactNode } from 'react'
 import { ChevronDown, ExternalLink } from 'lucide-react'
+import { HAVEN_FALLBACK_NAME } from '@haven_ai/core'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { Amount, DirectionMark, NoticeRow } from '@/components/haven'
 import { Button } from '@haven_ai/ui/Button'
@@ -288,7 +289,7 @@ export default function TransactionDetailPanel({
   // address; a folded move reads as the ledger row does.
   const title =
     kind === 'move'
-      ? 'Moved between your accounts'
+      ? HAVEN_FALLBACK_NAME.movedBetweenAccounts
       : counterpartyLabel(tx, resolveAddress, accountNamesByAddress, { noAddress: true })
   // No seconds, and the date renders whole (`whitespace-nowrap` below), so a
   // wrapping line never strands "AM" on its own.
@@ -300,7 +301,7 @@ export default function TransactionDetailPanel({
   // move between your own accounts and a send nothing names ("New recipient",
   // or an x402 row with no resource URL) have no counterparty to draw, so
   // they take the direction mark the ledger row shows.
-  const unnamed = title === 'New recipient' || title === paymentSourceTitle(tx.source)
+  const unnamed = title === HAVEN_FALLBACK_NAME.newRecipient || title === paymentSourceTitle(tx.source)
   const leading =
     kind === 'move' || kind === 'receive' || kind === 'sweep' || unnamed ? (
       <DirectionMark direction={kind === 'move' ? 'move' : tx.direction} />

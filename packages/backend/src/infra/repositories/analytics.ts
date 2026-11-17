@@ -50,7 +50,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
-import { getChainData } from '@haven_ai/core'
+import { ETH_ADDRESS_RE, getChainData, HAVEN_FALLBACK_NAMES, HAVEN_FALLBACK_NAME_PREFIXES } from '@haven_ai/core'
 import { spendableDelegationSql } from './delegation-budgets.js'
 import {
   readRemainingBudget,
@@ -708,12 +708,65 @@ const RECEIPT_NAME_STRIP_CLASS =
  */
 const RECEIPT_NAME_SPACE_CLASS = '[[:space:]\\u000b\\u000c\\u0085\\u00a0\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]+'
 
-/** One receipt name candidate, cleaned, bounded: NULL when not a usable name. */
+/**
+ * The full-address refusal pattern (#4932), BUILT from core's
+ * `ETH_ADDRESS_RE` so the two cannot drift: the only difference is the
+ * uppercase `0X` prefix a merchant may write. Anchored to the whole name.
+ */
+export const RECEIPT_NAME_FULL_ADDRESS_PATTERN = ETH_ADDRESS_RE.source.replace('^0x', '^0[xX]')
+
+/**
+ * The short form Haven itself displays (`truncate`,
+ * `frontend/src/lib/format.ts`): `0xA873…DD35`, with either the ellipsis
+ * character or three dots, and an optional space on either side. Anchored to
+ * the whole name. Written as Postgres regex escapes, like
+ * `RECEIPT_NAME_STRIP_CLASS`, so the result does not depend on the locale.
+ */
+export const RECEIPT_NAME_SHORT_ADDRESS_PATTERN =
+  '^0[xX][0-9a-fA-F]{2,40}[[:space:]]?(\\u2026|\\.\\.\\.)[[:space:]]?[0-9a-fA-F]{2,40}$'
+
+/**
+ * Haven's own fallback words as a SQL list (#4932), ASCII-folded to match the
+ * folded candidate. Every entry is ASCII, so `toLowerCase()` IS the ASCII fold
+ * the comparison applies — no locale-dependent `lower()` in the statement.
+ */
+const RECEIPT_NAME_FALLBACK_LIST_SQL = HAVEN_FALLBACK_NAMES.map(
+  (name) => `'${name.toLowerCase().replace(/'/g, "''")}'`,
+).join(', ')
+
+/**
+ * One receipt name candidate, cleaned, bounded and refused: NULL when not a
+ * usable name.
+ *
+ * #4932: a cleaned candidate is refused when it is address-shaped (full or
+ * Haven's short form) or when it is one of Haven's own fallback words — an
+ * exact match after ASCII case folding and whitespace collapse, or a name
+ * starting with one of the templated prefixes ("From ", "Returned from ").
+ * The check runs on the CLEANED value, so a zero-width character inside an
+ * address cannot slip it past. A refused name is "no usable name", exactly
+ * like an empty or oversized one: the `DISTINCT ON` falls back to an older
+ * usable receipt and the flat `merchant_name` fallback still applies.
+ *
+ * The cleaned value is computed once, in the inner subquery, so the rule reads
+ * as one predicate over one value rather than re-running the strip per test.
+ */
 function receiptNameCandidate(path: string): string {
   const cleaned = `NULLIF(btrim(regexp_replace(regexp_replace(mr.inline_json #>> '${path}', '${RECEIPT_NAME_STRIP_CLASS}', '', 'g'), '${RECEIPT_NAME_SPACE_CLASS}', ' ', 'g')), '')`
-  return `CASE WHEN jsonb_typeof(mr.inline_json #> '${path}') = 'string'
-                AND length(${cleaned}) <= ${RECEIPT_MERCHANT_NAME_MAX_LENGTH}
-               THEN ${cleaned} END`
+  // ASCII case folding, spelled out rather than `lower()`: `lower()` is
+  // locale-dependent for non-ASCII, and the rule is ASCII-only by design
+  // (#4932's accepted residual — a full-width look-alike passes through).
+  const folded = `translate(c.name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')`
+  const prefixClauses = HAVEN_FALLBACK_NAME_PREFIXES.map(
+    (prefix) => `AND ${folded} NOT LIKE '${prefix.toLowerCase().replace(/'/g, "''")}%'`,
+  ).join('\n                         ')
+  return `(SELECT CASE WHEN length(c.name) <= ${RECEIPT_MERCHANT_NAME_MAX_LENGTH}
+                         AND c.name !~ '${RECEIPT_NAME_FULL_ADDRESS_PATTERN}'
+                         AND c.name !~ '${RECEIPT_NAME_SHORT_ADDRESS_PATTERN}'
+                         AND ${folded} NOT IN (${RECEIPT_NAME_FALLBACK_LIST_SQL})
+                         ${prefixClauses}
+                       THEN c.name END
+             FROM (SELECT ${cleaned} AS name) c
+            WHERE jsonb_typeof(mr.inline_json #> '${path}') = 'string')`
 }
 
 /**
@@ -743,6 +796,29 @@ function receiptNameCandidate(path: string): string {
  * non-string or longer than `RECEIPT_MERCHANT_NAME_MAX_LENGTH` code points
  * yields no name (never truncated — a truncated seller name is a wrong seller
  * name).
+ *
+ * #4932: the display side additionally REFUSES two kinds of cleaned name, and
+ * a refused name counts as no usable name — the `DISTINCT ON` falls back to an
+ * older usable receipt and the flat `merchant_name` fallback still applies:
+ *
+ * - **address-shaped** — a full address (`^0[xX][0-9a-fA-F]{40}$`, core's
+ *   `ETH_ADDRESS_RE` plus an uppercase `0X`) or Haven's own short form
+ *   (`0xA873…DD35`, `0xa873...dd35`, `0xA873 … DD35`);
+ * - **Haven's own fallback words** — an exact match, ASCII case-folded and
+ *   whitespace-collapsed, against `HAVEN_FALLBACK_NAMES` (`@haven_ai/core`),
+ *   or a name starting with one of `HAVEN_FALLBACK_NAME_PREFIXES` ("From ",
+ *   "Returned from ").
+ *
+ * This is the ONE place the rule lives: the lookup has one caller
+ * (`loadRecipientNameIndex`), so it covers every surface the name reaches —
+ * the analytics tables, the dashboard summary and first-payment card, the
+ * transactions and agent-ledger wire fields and CSVs, and search.
+ *
+ * The accounting underlag is deliberately NOT covered: `sellerFromMerchantReceipt`
+ * (`modules/accounting/receipt-underlag.ts`) quotes the invoice's seller as
+ * written, and a pinned underlag must re-render byte-identically (#4824). The
+ * two sides read the same block; the display side additionally refuses these
+ * names.
  */
 export const RECEIPT_MERCHANT_NAMES_SQL = `SELECT DISTINCT ON (LOWER(mpe.merchant_address))
     LOWER(mpe.merchant_address) AS merchant_key,

@@ -84,7 +84,7 @@ covers:
   - packages/backend/src/middleware/ops-auth.ts
   - packages/ops/**
   - packages/frontend/scripts/check-kit-analytics-define.mjs
-last-verified: "2026-11-12"
+last-verified: "2026-11-17"
 ---
 
 # Delegation rail — security model & exit story (epic #821, gate G4)
@@ -436,6 +436,18 @@ The unlink guard also refuses while an agent re-key is in flight, so the
 account binding cannot disappear between re-key stages. This is a database
 serialization guard only: it grants nothing, signs nothing, and touches no
 chain.
+
+**The merchant account cannot be unlinked or made default (#4895).** Turning
+merchant services on creates a dedicated account and marks it
+(`smart_accounts.is_merchant_account`, one per user by a partial unique index —
+migration 126). Unlinking is a hard `DELETE` of the account row and its indexed
+payments go with it, so `DELETE /user/accounts/:accountId` refuses the merchant
+account with `409 MERCHANT_ACCOUNT_UNLINK_REFUSED`; turning merchant services
+off keeps the account and its history, which is the supported way to stop
+receiving. `PUT /user/accounts/:accountId/default` refuses it too, with
+`409 MERCHANT_ACCOUNT_DEFAULT_REFUSED`, because the receiving account must not
+also be the default spending account. Both refusals are database reads on the
+marker — they grant nothing, sign nothing, and touch no chain.
 
 **Credential revocation closes new grant lifecycle steps (#2025).** An agent
 already revoked at request entry cannot build or activate a fresh delegation:

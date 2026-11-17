@@ -333,6 +333,13 @@ describe('owner_cli route census (#2526)', () => {
       { method: 'POST', path: '/contacts' },
       { method: 'PUT', path: '/contacts/{id}' },
       { method: 'DELETE', path: '/contacts/{id}' },
+      // #4895: turning merchant services on creates a spend-capable account
+      // and decides which account merchant payments land in; turning them off
+      // changes that decision. Neither is a reading or an arrangement, so a
+      // device-code session must not reach either. `GET /merchant-services`
+      // is a read and is not on the allow-list either — nothing needs it.
+      { method: 'POST', path: '/merchant-services' },
+      { method: 'DELETE', path: '/merchant-services' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)

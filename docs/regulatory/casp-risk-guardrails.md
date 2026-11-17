@@ -73,6 +73,9 @@ covers:
   - packages/backend/src/routes/safe-deploy.ts
   - packages/backend/src/routes/user-accounts.ts
   - packages/backend/src/routes/hybrid-accounts.ts
+  - packages/backend/src/routes/merchant-services.ts
+  - packages/backend/src/modules/accounts/create-additional.ts
+  - packages/backend/src/domain/merchant-services.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/modules/agents/rekey-*.ts

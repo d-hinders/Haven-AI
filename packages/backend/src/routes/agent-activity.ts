@@ -384,7 +384,7 @@ function refusalTarget(r: AgentRefusalRow): RecipientTarget {
 /** One read of each name source over a page's recipients (fail-soft by source). */
 // The ledger names own accounts on every rail (a retired Safe included), as it did before #4882.
 const ledgerNames = async (sub: string, targets: RecipientTarget[]) =>
-  loadRecipientNameIndex(sub, targets.map((t) => t.address), { accounts: await listBasicAccountsForUser(sub) })
+  loadRecipientNameIndex(sub, targets.map((t) => t.address), { accounts: await listBasicAccountsForUser(sub).catch(() => []) })
 
 function isoDate(value: string | Date): string {
   return new Date(value).toISOString()

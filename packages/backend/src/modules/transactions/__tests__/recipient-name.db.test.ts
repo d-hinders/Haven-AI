@@ -161,8 +161,9 @@ describeDb('the catalog step of the recipient-naming order (#4882)', () => {
     const bazaar = await seedMerchant('NordShield-VPN')
     await seedOffer(bazaar, addr(13), { source: 'bazaar' })
     const rows = await listCatalogMerchantNameAddresses(['nordshieldvpn'])
-    // The bazaar row's address is not an allowed one: only curated rows vouch.
-    expect(rows.map((r) => r.pay_to).filter(Boolean)).toEqual([addr(12)])
+    expect(rows.map((r) => `${r.source}:${r.pay_to}`).sort()).toEqual(
+      [`operator:${addr(12)}`, 'operator:null', `bazaar:${addr(13)}`].sort(),
+    )
     expect(rows.every((r) => r.name_key === 'nordshieldvpn')).toBe(true)
   })
 
@@ -218,6 +219,18 @@ describeDb('loadRecipientNameIndex end to end (#4882)', () => {
       label: null,
       kind: 'unknown',
     })
+  })
+
+  it('a name only seller-listed merchants hold: the seller keeps its own receipt name at its own address, not elsewhere', async () => {
+    const userId = await seedUser()
+    const seller = await seedMerchant('Klara Data')
+    await seedOffer(seller, addr(27), { source: 'bazaar' })
+    await seedReceipt(userId, addr(27), 'Klara Data')
+    await seedReceipt(userId, addr(28), 'Klara Data')
+    const index = await loadRecipientNameIndex(userId, [addr(27), addr(28)], { accounts: [], contacts: [] })
+    const at = (a: string) => resolveRecipientName(index, { address: a, chainId: 8453, x402ResourceUrl: null })
+    expect(at(addr(27))).toEqual({ label: 'Klara Data', kind: 'receipt' })
+    expect(at(addr(28)).label).toBeNull()
   })
 
   it('a look-alike spelling (zero-width, punctuation, accents) still counts as borrowing', async () => {

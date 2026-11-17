@@ -595,24 +595,27 @@ export async function listCatalogRecipientNames(
  */
 const NAME_KEY_SQL = (column: string) => `regexp_replace(lower(normalize(${column}, NFKD)), '[^a-z0-9]', '', 'g')`
 
-/** A catalog merchant's name key, and one address a CURATED row records for it (null otherwise). */
+/** A catalog merchant's name key, one address a live row of it records (null when none), and that row's source. */
 export interface CatalogMerchantNameAddressRow {
   name_key: string
   pay_to: string | null
+  source: string
 }
 
 /**
  * For the receipt-borrowing rule (#4882): every catalog merchant — ANY source,
- * any live row — whose name key is among `$1`, with each receiving address its
- * CURATED (`operator`) rows record. Any catalog merchant's name, a bazaar
- * listing's included, is protected; but only a curated row can vouch for an
- * address, so a seller-listed row that copies a curated merchant's name
- * cannot make its own address an allowed one. A receipt seller name whose key
- * matches, at an address not among the allowed ones, is not used.
+ * any live row — whose name key is among `$1`, with each receiving address
+ * its rows record and the row's source. The caller decides per name key
+ * (`recipient-name-index.ts`): when any curated (`operator`) row holds the
+ * name, only curated rows' addresses are allowed, so a seller-listed copy of
+ * a curated name cannot vouch for its own address; when only seller-listed
+ * rows hold it, their own addresses are allowed, so an honest seller's
+ * receipt still names its own payments.
  */
 export const CATALOG_MERCHANT_NAME_ADDRESSES_SQL = `
   SELECT DISTINCT ${NAME_KEY_SQL('m.name')} AS name_key,
-         CASE WHEN mc.source = 'operator' THEN mc.pay_to END AS pay_to
+         mc.pay_to,
+         mc.source
   FROM merchants m
   JOIN merchant_catalog mc ON mc.merchant_id = m.id
   WHERE mc.status <> 'delisted'

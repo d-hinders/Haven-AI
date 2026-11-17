@@ -48,12 +48,24 @@ export async function loadRecipientNameIndex(
   const receiptNameKeys = [...new Set([...receipts.values()].map(recipientNameKey))].filter((k) => k !== '')
   // Fail-CLOSED for the borrowing rule: without it a receipt could borrow a
   // catalog name, so when the read fails no receipt name is used at all.
-  const nameRows = await listCatalogMerchantNameAddresses(receiptNameKeys).catch(() => null)
+  const nameRows = await listCatalogMerchantNameAddresses(receiptNameKeys).catch((err: unknown) => {
+    // Visible, not swallowed: this read failing hides every receipt name.
+    console.warn(
+      `[recipient-names] catalog name lookup failed; receipt names withheld: ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return null
+  })
   const usableReceipts = nameRows === null ? new Map<string, string>() : receipts
+  // Per name key: if any curated row holds the name, only curated addresses
+  // are allowed (a seller-listed copy cannot vouch); if only seller-listed
+  // rows hold it, their own addresses are allowed (an honest seller keeps its
+  // own receipt name).
+  const curatedKeys = new Set((nameRows ?? []).filter((r) => r.source === 'operator').map((r) => r.name_key))
   const catalogNameAddresses = new Map<string, Set<string>>()
   for (const row of nameRows ?? []) {
     const set = catalogNameAddresses.get(row.name_key) ?? new Set<string>()
-    if (row.pay_to) set.add(row.pay_to.toLowerCase())
+    const vouches = !curatedKeys.has(row.name_key) || row.source === 'operator'
+    if (row.pay_to && vouches) set.add(row.pay_to.toLowerCase())
     catalogNameAddresses.set(row.name_key, set)
   }
 

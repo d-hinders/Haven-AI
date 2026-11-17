@@ -45,10 +45,12 @@ The first source that has a name wins:
 4. **The seller name on the merchant's receipt.** The receipt's top-level
    `saljare.name`, else its flat `merchant_name`. A receipt cannot borrow a
    catalog merchant's name: names are compared after folding case, spacing,
-   punctuation, invisible characters and accents away, and if the seller
-   name matches any catalog merchant's (a seller-listed one included) while
-   the payment did not go to an address a CURATED entry records for that
-   name, the receipt name is not used. If that check cannot be read, no
+   punctuation, invisible characters and accents away. If the seller name
+   matches a Haven-curated merchant's, it is used only at an address a
+   curated entry records for that name, so a seller-listed copy of the name
+   cannot vouch for itself. If it matches only seller-listed merchants, it is
+   used only at their own recorded addresses, so an honest seller keeps its
+   receipt name on its own payments. If that check cannot be read, no
    receipt name is used at all.
 5. **The paid API's host**, for example `api.example.com`.
 6. **Nothing.** The screen shows its own fallback: "Unknown recipient" or

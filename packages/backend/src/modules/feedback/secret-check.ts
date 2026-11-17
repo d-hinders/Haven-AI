@@ -36,6 +36,10 @@ import { english, privateKeyToAddress } from 'viem/accounts'
  */
 export function detectLabelledSecret(text: string): string | null {
   if (/sk_agent_[A-Za-z0-9]/.test(text)) return 'agent_api_key'
+  // #4896: the receive-only merchant key. Its own prefix, its own reason —
+  // a merchant key pasted into feedback is still a live credential until the
+  // owner revokes it.
+  if (/sk_merchant_[A-Za-z0-9]/.test(text)) return 'merchant_api_key'
   if (/hv_setup_[A-Za-z0-9]/.test(text)) return 'setup_token'
   // A session JWT: three dot-separated base64url parts, each non-empty.
   // `\beyJ` (not the looser `\bey`), which is the base64url encoding of `{"`

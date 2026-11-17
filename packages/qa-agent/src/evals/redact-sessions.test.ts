@@ -95,6 +95,7 @@ const CANARIES: Record<RedactionClass, Canary> = {
   },
   'rpc-key': { needles: [RPC_KEY], obj: { error: `HTTP request failed. URL: ${RPC} status 429` } },
   'agent-key': { needles: ['sk_agent_'], obj: { note: 'a foreign key sk_agent_FOREIGNsynthetic9876543210zyxw appeared' } },
+  'merchant-key': { needles: ['sk_merchant_'], obj: { note: 'a merchant key sk_merchant_FOREIGNsynthetic9876543210zyxw appeared' } },
   'anthropic-key': { needles: ['sk-ant-'], obj: { note: 'a foreign token sk-ant-api03-FOREIGNsynthetic_0123456789-abc' } },
   'auth-header': {
     needles: ['hv_tok_synthetic_0123456789', 'hv_tok_synthetic_bearer_9876543210'],

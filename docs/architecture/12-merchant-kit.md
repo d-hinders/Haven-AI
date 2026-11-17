@@ -342,7 +342,10 @@ After each settled call the proxy sends one sale record to Haven. The record is
 JSON, `POST`ed to the URL in `HAVEN_SALES_URL` with
 `Authorization: Bearer $HAVEN_MERCHANT_KEY` and `Content-Type: application/json`.
 The route and the merchant key are Haven's (#4897); the proxy only needs the
-URL and the key.
+URL and the key. The key's limits — what it can and cannot do, the accepted
+residual, and how revocation works — are documented for merchants in
+[`docs/security/merchant-key-limits.md`](../security/merchant-key-limits.md);
+the kit README links there.
 
 ### Shape
 

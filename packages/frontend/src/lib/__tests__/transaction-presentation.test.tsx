@@ -419,6 +419,76 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
 })
 
 /**
+ * #4883 — the server's name wins. The backend names every counterparty in
+ * Haven's one order (#4882: own account, contact, catalog merchant, receipt
+ * seller, resource host): `recipientName` on `/transactions` rows,
+ * `resolvedName` on activity groups and the agent ledger. On an outgoing row
+ * it outranks every browser-side fallback, the resource host included; the
+ * browser's own chain only stands in when the server named nobody. An
+ * incoming row keeps its own-account rule.
+ */
+describe('counterpartyLabel uses the server-resolved name (#4883)', () => {
+  const PAID = { direction: 'out' as const, source: 'x402', x402ResourceUrl: 'https://api.nordshield.example/v1' }
+
+  it('a machine payment the server named shows that name, not the host', () => {
+    expect(counterpartyLabel(tx({ ...PAID, recipientName: 'NordShield VPN' }), undefined, undefined, { noAddress: true })).toBe(
+      'NordShield VPN',
+    )
+    // The activity groups and the ledger pass it as `resolvedName`.
+    expect(counterpartyLabel(tx(PAID), undefined, undefined, { noAddress: true, resolvedName: 'NordShield VPN' })).toBe(
+      'NordShield VPN',
+    )
+  })
+
+  it('with no server name a machine payment falls back to today’s label: host, then source title', () => {
+    expect(counterpartyLabel(tx({ ...PAID, recipientName: null }), undefined, undefined, { noAddress: true })).toBe(
+      'api.nordshield.example',
+    )
+    expect(
+      counterpartyLabel(tx({ ...PAID, x402ResourceUrl: undefined, recipientName: null }), undefined, undefined, { noAddress: true }),
+    ).toBe('Agent payment')
+  })
+
+  it('a direct send the server named shows that name before the browser’s contact lookup', () => {
+    const resolveAddress = () => 'Old contact name'
+    expect(
+      counterpartyLabel(tx({ direction: 'out', source: 'direct', recipientName: 'Klara Data AB' }), resolveAddress, undefined, {
+        noAddress: true,
+      }),
+    ).toBe('Klara Data AB')
+    expect(
+      counterpartyLabel(tx({ direction: 'out', source: 'direct', recipientName: null }), resolveAddress, undefined, { noAddress: true }),
+    ).toBe('Old contact name')
+  })
+
+  it('an incoming row keeps its own-account rule: a server name for the sender does not become the title', () => {
+    expect(
+      counterpartyLabel(tx({ direction: 'in', source: 'direct', recipientName: 'Some Sender AB' }), undefined, undefined, {
+        noAddress: true,
+      }),
+    ).toBe('Deposit')
+  })
+
+  it('an address-shaped server name is not a name: the row falls back and never shows the address', () => {
+    const address = '0xA87300000000000000000000000000000000DD35'
+    expect(counterpartyLabel(tx({ ...PAID, recipientName: address }), undefined, undefined, { noAddress: true })).toBe(
+      'api.nordshield.example',
+    )
+    expect(
+      counterpartyLabel(tx({ direction: 'out', source: 'direct', recipientName: address }), undefined, undefined, { noAddress: true }),
+    ).toBe('New recipient')
+  })
+
+  it('an empty server name counts as none and never surfaces a raw address', () => {
+    const label = counterpartyLabel(tx({ direction: 'out', source: 'direct', recipientName: '' }), undefined, undefined, {
+      noAddress: true,
+    })
+    expect(label).toBe('New recipient')
+    expect(label).not.toMatch(/0x/i)
+  })
+})
+
+/**
  * #3811 — the user's currency on the shared tables (#3805's currency mode,
  * #3824's amounts). The acceptance cases, verbatim from the issue as amended
  * by #3950: a sweep row and a direct row with no book-time fiat render the

@@ -57,8 +57,9 @@ const EMPTY_LIVE_KEYS: ReadonlySet<string> = new Set()
  *
  * Merchant first means the TITLE is the counterparty — read through
  * `counterpartyLabel`'s no-address mode, so a raw address can never surface
- * here: the merchant's site for x402, the receipt/contact name the backend
- * resolved (`merchantName`), "Deposit" for inbound — or "From <account>"
+ * here: the name the backend resolved in the one naming order
+ * (`merchantName`, #4882, #4883), else the merchant's site for x402,
+ * "Deposit" for inbound — or "From <account>"
  * when the money came from another of the user's own accounts (#4099) —
  * "New recipient" when
  * nothing resolves, "Agent payment" for an x402 row without a resource URL,

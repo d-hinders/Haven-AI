@@ -66,6 +66,8 @@ export interface PaymentActivityItem {
   source?: string
   x402_resource_url?: string | null
   x402_merchant_address?: string | null
+  /** #4883: the payee in the server's one naming order (#4882); absent on the legacy merged feed. */
+  counterparty_name?: string | null
   /**
    * #3824: the token amount at today's rate in `approx_currency` (the user's
    * `currency_preference`) — the activity rows' only fiat. Null when the

@@ -215,7 +215,7 @@ in the range called, else
 nothing — the row
 shows "Unknown recipient" where the transaction history says "New
 recipient", with the naming step as a KIND line under the name: "Your
-account" (own account), "Paid API" (x402 host), or the short address for an
+account" (own account), "Paid API" (x402 host or catalog merchant, #4883), or the short address for an
 unknown recipient (#4333). The Address COLUMN is gone — the address is
 metadata, carried in the unknown recipient's tooltip and the mobile row's
 disclosure, never as a label. Each row also carries `filter_address`, the

@@ -4013,8 +4013,12 @@ balance freshness line and the analytics "last payment" caption.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
-`noAddress` mode, so a raw address never titles a row there: the merchant's
-site for x402, the receipt/contact name the backend resolved, "Deposit" for
+`noAddress` mode, so a raw address never titles a row there: on an outgoing
+row the name the server resolved in Haven's one naming order (#4882, #4883:
+own account, contact, catalog merchant, receipt seller, resource host —
+`recipientName` on `/transactions` rows, the activity groups' `merchantName`,
+the agent ledger's `counterparty_name`), else the merchant's site for x402
+or the browser's own-account and contact lookups, "Deposit" for
 inbound — or "From <account>" for money that came from another of the user's
 own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The

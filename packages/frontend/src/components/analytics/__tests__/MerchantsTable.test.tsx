@@ -116,6 +116,12 @@ describe('MerchantsTable — the desktop table (#4333 columns)', () => {
       mount([{ ...CONTACT_ROW, label: 'api.example.com', kind: 'x402' as const }]).container,
     )[0].querySelectorAll('td')[0]
     expect(paidApi.textContent).toContain('Paid API')
+    // #4883: a catalog-named merchant is a paid API too.
+    const catalog = desktopRows(
+      mount([{ ...CONTACT_ROW, label: 'NordShield VPN', kind: 'catalog' as const }]).container,
+    )[0].querySelectorAll('td')[0]
+    expect(catalog.textContent).toContain('NordShield VPN')
+    expect(catalog.textContent).toContain('Paid API')
   })
 
   it('never renders a 0x… address AS the label, and keeps the full address in the tooltip', () => {

@@ -297,9 +297,9 @@
       "block": "6",
       "name": "docs boundary: Markdown files outside both docs-quality boundaries (pinned git ls-tree)",
       "kind": "count",
-      "command": "git ls-tree -r --name-only \"$SHA\" | grep -E '\\.md$' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | wc -l",
+      "command": "git ls-tree -r --name-only \"$SHA\" | grep -E '\\.md$' | grep -vE '^(docs/|packages/|README|CLAUDE|AGENTS|ABOUT_HAVEN)' | grep -vE '(^|/)fixtures/' | wc -l",
       "figures": [
-        52
+        45
       ],
       "sha": "9871885a9",
       "tolerance": 0,

@@ -155,7 +155,8 @@ A sleeping service (Railway "serverless") stops after about 10 minutes without
 outbound traffic and cold-starts on the next request. It is on for both
 Demo-merchants and the dev hosted MCP. Dev Demo-merchant joined them on
 2026-10-05. It sees QA traffic and the dev backend's hourly catalog probe,
-which wakes it once an hour. With Stripe recording on (#4856), the merchant
+which wakes it once an hour. With Stripe recording on (#4856; dev only, since Stripe is dev and sandbox
+only), the merchant
 also reads a USDC→SEK rate from CoinGecko at startup and every 30 minutes;
 that interval is above the idle threshold, so it does not keep the service
 awake. Since #4281 that probe runs under the SSRF

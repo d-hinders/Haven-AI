@@ -24,6 +24,12 @@ const MERCHANT_IDENTITY = {
  * The seller block. Its keys are a contract: Haven's accounting reads
  * `name`, `org_nr` and `moms_nr` off the receipt
  * (`packages/backend/src/modules/accounting/receipt-underlag.ts`).
+ * #4875: so are the line and total keys — `rader[]` (`beskrivning`, `antal`,
+ * `apris_exkl_moms`, `moms_procent`, `moms_belopp`, `totalt_inkl_moms`),
+ * `belopp_exkl_moms`, `moms_procent`, `moms_belopp`, `totalt_inkl_moms`,
+ * `momsbehandling` and `valuta`
+ * (`packages/backend/src/modules/accounting/receipt-statement.ts`,
+ * `docs/operations/merchant-receipt-shape.md`). `invoice.test.ts` pins them.
  */
 export type InvoiceSeller = typeof MERCHANT_IDENTITY & {
   /**

@@ -38,7 +38,7 @@ covers:
   - packages/frontend/src/components/accounting/ConnectionRow.tsx
   - packages/frontend/src/components/accounting/ConnectionSettings.tsx
   - packages/frontend/src/components/accounting/BackfillDialog.tsx
-last-verified: "2026-10-30"
+last-verified: "2026-11-17"
 ---
 
 # Accounting feed — operations runbook
@@ -447,6 +447,12 @@ line, the catalog's supplier `Country`, and the invoice's `VAT reg no` /
 The counterparty line is on every underlag (falling back to the address, then
 `unknown`); `Country`, `VAT reg no` and `Org no` render only when their value
 is known, so the document never states an empty-looking fact.
+
+The accounting entry also carries the receipt's stated product lines and VAT
+figures (#4875, `receiptStatement`), with a check of its stated total against
+the settled amount. They are not printed on the underlag or sent to a provider
+yet (#4876). The field-by-field shape, and how a malformed receipt reads, is
+[`merchant-receipt-shape.md`](merchant-receipt-shape.md).
 
 The counterparty line's LABEL follows the payment (#4533). A protocol payment
 (x402/mpp/spt) renders `Merchant <seller>` — the address on a second

@@ -3061,6 +3061,12 @@ sentence moves, so no row is refreshed (#4631).
 **Disposition: finding filed** (#4804, `pending-review` until its independent
 review-issue pass). The sizing row needs no decision.
 
+**Disposition upkeep (2026-11-17):** #4804 → `shipped` via PR #4923
+(`b6483143`), the same day its review-issue pass ran. That pass changed the
+remedy recorded above: #4815 had already re-pinned the row to `52` @
+`9871885a9`, so the row keeps that pin and records what the changed command
+prints there, `45`, in place of "keep `43` @ `e0617aa9f`".
+
 ## 2026-11-12 — whole repo, hunting defects across verticals (owner request 2026-11-12, "find bugs from several verticals")
 
 Full report: `docs/bug-reports/quality-scan-2026-11-12-whole-repo.md` (it

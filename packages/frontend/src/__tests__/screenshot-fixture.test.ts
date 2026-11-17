@@ -1755,3 +1755,23 @@ describe('half-revoked scenario fixture (#3542)', () => {
     expect((fx('/agents') as unknown as { agents: unknown[] }).agents).toEqual(FIXTURE_AGENTS)
   })
 })
+
+// #4908 round 2: the Sales per-specimen capture was pasted into
+// `account-backup-recovery` by an unscoped text replace, where it threw on
+// every run (that page has no `ds-sales-specimens`) and lost all three of the
+// scenario's states. Nothing above executes a scenario's `run()`, so these two
+// literal guards pin the shape: the Sales block lives in its own scenario
+// only, and the account scenario still shoots its section.
+describe('scenario capture blocks stay in their own scenario (#4908)', () => {
+  const scenarios = SCENARIOS as Record<string, { run?: unknown }>
+  const source = (name: string) => String(scenarios[name]?.run)
+
+  it('only design-system-sales-patterns reads the Sales specimen grid', () => {
+    const readers = Object.keys(scenarios).filter((name) => source(name).includes('ds-sales-specimens'))
+    expect(readers).toEqual(['design-system-sales-patterns'])
+  })
+
+  it("account-backup-recovery still shoots its healthy section", () => {
+    expect(source('account-backup-recovery')).toContain("shoot(section, 'section')")
+  })
+})

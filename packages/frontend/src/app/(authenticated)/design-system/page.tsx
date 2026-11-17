@@ -80,11 +80,11 @@ import { StatusBadge } from '@/components/ui/StatusBadge'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useToast } from '@/components/ui/Toast'
 import { THEME_TOKENS, contrastTable } from '@/lib/theme-tokens'
-import { AGENT_STATUS, type AgentStatus } from '@/lib/payment-status'
+import { AGENT_STATUS, SALES_STATUS, type AgentStatus } from '@/lib/payment-status'
 import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { budgetCaption, type BudgetCaptionRow } from '@/lib/budget-caption'
 import type { DashboardBudgetRemaining, DashboardOverview } from '@/lib/dashboard-attention'
-import { formatClockTime, truncate } from '@/lib/format'
+import { formatClockTime, timeAgo, truncate } from '@/lib/format'
 import type { DashboardAgentPreview } from '@/types/dashboard'
 import { AgentCard, type AgentCardDashboard } from '@/components/agent-panel/AgentCard'
 import type { Agent } from '@/hooks/useAgents'
@@ -391,6 +391,43 @@ const DS_CHART_TOTAL = DS_CHART_DAYS.reduce(
   0,
 )
 const DS_CHART_REFUSALS = DS_CHART_DAYS.reduce((sum, day) => sum + (day.refusals ?? 0), 0)
+// #4908: the revenue use of StackedBarChart — one series per PRODUCT, not per
+// agent, so the fill is `--v2-series-*` by index (`seriesIndex`), held stable.
+// Each product keeps its caller-assigned index; five take stops 1–5, anything past five folds into one "Other"
+// series (`DS_REVENUE_OTHER`), never a repeated stop. No refusal marker: a
+// refused payment is not a sale.
+const DS_REVENUE_PRODUCTS = [
+  { id: 'chat', name: 'Chat completion', seriesIndex: 0 },
+  { id: 'embed', name: 'Embeddings', seriesIndex: 1 },
+  { id: 'rerank', name: 'Rerank', seriesIndex: 2 },
+  { id: 'vision', name: 'Vision', seriesIndex: 3 },
+  { id: 'tts', name: 'Speech', seriesIndex: 4 },
+] as const
+// A showcase value, not a key: the prefix #4896 fixes, then filler.
+const DS_SAMPLE_SALES_KEY = 'sk_merchant_3f9a-showcase-sample-not-a-real-key'
+const DS_REVENUE_OTHER_COLOR = 'var(--v2-ink-3)'
+const DS_REVENUE_DAYS: StackedBarDay[] = [
+  [42, 18, 9, 6, 4, 3],
+  [55, 21, 12, 8, 5, 2],
+  [38, 16, 10, 0, 6, 4],
+  [61, 25, 14, 9, 7, 5],
+  [47, 19, 11, 7, 3, 2],
+].map((amounts, day) => ({
+  label: ['Mon 1', 'Tue 2', 'Wed 3', 'Thu 4', 'Fri 5'][day],
+  series: [
+    ...DS_REVENUE_PRODUCTS.map((product, i) => ({
+      id: product.id,
+      name: product.name,
+      seriesIndex: product.seriesIndex,
+      amount: amounts[i],
+    })),
+    { id: 'other', name: 'Other', color: DS_REVENUE_OTHER_COLOR, amount: amounts[5] },
+  ],
+}))
+const DS_REVENUE_SUMMARY = `Revenue over 5 days: ${dsMoney(
+  DS_REVENUE_DAYS.reduce((sum, day) => sum + day.series.reduce((s, x) => s + x.amount, 0), 0),
+)} USD across 5 products and Other`
+
 const DS_CHART_SUMMARY = `Spend over 7 days: ${dsMoney(DS_CHART_TOTAL)} USD across 2 agents, ${DS_CHART_REFUSALS} refusals`
 
 const DS_BALANCE_POINTS: AreaPoint[] = [
@@ -1654,6 +1691,10 @@ export default function DesignSystemPage() {
   // TransactionDetailPanel — the section names which row "opened".
   const [dsTab, setDsTab] = useState<'overview' | 'agents' | 'activity'>('agents')
   const [dsLedgerOpened, setDsLedgerOpened] = useState<string | null>(null)
+  const [dsKeyShown, setDsKeyShown] = useState(false)
+  const [dsSalesView, setDsSalesView] = useState<'spending' | 'revenue'>('revenue')
+  // #4908: the freshness line's sample instant — four minutes before mount.
+  const [dsReadAt] = useState(() => Date.now() - 4 * 60_000)
   const { toast } = useToast()
 
   return (
@@ -4247,6 +4288,151 @@ export default function DesignSystemPage() {
               ? `Opened "${dsLedgerOpened}" — the account page opens the shared TransactionDetailPanel from this row.`
               : 'Click a row (or press Enter) — the account page opens the shared TransactionDetailPanel from the row.'}
           </p>
+        </div>
+      </Section>
+
+      {/* #4908: the pieces the Sales mockup marked NEW (#4894, approved
+          2026-11-16), added before any page consumes them. No screen uses
+          them yet — #4900, #4901, #4904 and #4905 do. */}
+      <Section
+        title="Sales patterns"
+        testId="ds-sales-patterns"
+        description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. Off, the Settings Sales card says “Keys not accepted while off” as a Detail list row. The show-once credential block is the copy-a-string shape PaymentCredentialsModal and ReplaceSigningKeyModal already share; #4905 extracts it."
+      >
+        <div className="grid items-start gap-5 lg:grid-cols-2" data-testid="ds-sales-specimens">
+          <div data-testid="ds-sales-ledger">
+            <Card hover={false} className="overflow-hidden">
+              <TransactionActivityDayHeader label="Today" />
+              <TransactionActivityRow
+                direction="in"
+                title="Chat completion"
+                description={
+                  <>
+                    Wallet <Address value={sampleAddress} />
+                  </>
+                }
+                value="0.42"
+                asset="USDC"
+                timestamp="14:05"
+                density="compact"
+              />
+              <TransactionActivityRow
+                insetDivider
+                direction="in"
+                title="No product recorded"
+                mutedTitle
+                description="Acme Research"
+                value="1.00"
+                asset="USDC"
+                timestamp="13:48"
+                density="compact"
+              />
+            </Card>
+          </div>
+
+          <Card hover={false} className="p-5">
+            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">Sales status</h3>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              {Object.values(SALES_STATUS).map((presentation) => (
+                <StatusBadge key={presentation.label} tone={presentation.tone}>
+                  {presentation.label}
+                </StatusBadge>
+              ))}
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-[var(--v2-ink-2)]">
+              Read from <code className="rounded bg-[var(--v2-surface)] px-1">SALES_STATUS</code>,
+              the map the vocabulary test walks against the Sales table under § StatusBadge. Received is the
+              detail panel&rsquo;s status for a sale; a ledger row carries none.
+            </p>
+          </Card>
+
+          <div data-testid="ds-sales-freshness">
+            <Card hover={false} className="overflow-hidden">
+              <Card.Header
+                title="Products"
+                actions={
+                  <>
+                    <span className="text-xs text-[var(--v2-ink-3)]">
+                      Read from api.example.com · {timeAgo(dsReadAt)}
+                    </span>
+                    <Button size="sm" variant="ghost">
+                      Read now
+                    </Button>
+                  </>
+                }
+              />
+              <div className="px-5 py-4">
+                <p className="text-sm text-[var(--v2-ink-2)]">
+                  A routine timestamp, not a warning: a failed read is an InlineAlert below the
+                  header instead.
+                </p>
+              </div>
+            </Card>
+          </div>
+
+          <Card hover={false} className="p-5">
+            <Tabs
+              ariaLabel="Analytics"
+              value={dsSalesView}
+              onChange={setDsSalesView}
+              tabs={[
+                { value: 'spending', label: 'Spending' },
+                { value: 'revenue', label: 'Revenue' },
+              ]}
+            />
+            <p className="mt-2 text-xs text-[var(--v2-ink-3)]">
+              ?view={dsSalesView}&amp;period=30d —{' '}
+              {dsSalesView === 'revenue'
+                ? 'the page reads sales; the Agent facet is hidden.'
+                : 'the page reads spend; the Agent facet shows.'}
+            </p>
+          </Card>
+
+          <Card hover={false} className="p-5 lg:col-span-2">
+            <h3 className="mb-3 text-sm font-semibold text-[var(--v2-ink)]">Revenue by product</h3>
+            <StackedBarChart
+              days={DS_REVENUE_DAYS}
+              currency="USD"
+              ariaLabel={DS_REVENUE_SUMMARY}
+              formatValue={dsMoney}
+              formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
+            />
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <DetailList
+              items={[
+                {
+                  label: 'Sales keys',
+                  value: 'Keys not accepted while off',
+                  helper: 'The kit’s sales reports are refused until Sales is on again.',
+                },
+              ]}
+            />
+          </Card>
+
+          <Card hover={false} className="p-5">
+            <h4 className="text-sm font-medium text-[var(--v2-ink)]">Sales key</h4>
+            <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
+              Shown once. Copy it now; afterwards only its prefix is shown.
+            </p>
+            <div className="mt-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
+              <code className="block break-all font-mono text-xs text-[var(--v2-ink-2)]">
+                {dsKeyShown ? DS_SAMPLE_SALES_KEY : 'sk_merchant_3f9a••••••••••••'}
+              </code>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setDsKeyShown((shown) => !shown)}>
+                  {dsKeyShown ? 'Hide' : 'Show'}
+                </Button>
+                <CopyButton
+                  value={DS_SAMPLE_SALES_KEY}
+                  label="Sales key"
+                  text="Copy"
+                  onCopyFailed={() => toast.error('Could not copy Sales key')}
+                />
+              </div>
+            </div>
+          </Card>
         </div>
       </Section>
 

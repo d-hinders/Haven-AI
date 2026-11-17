@@ -13,7 +13,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { AGENT_STATUS, PAYMENT_STATUS } from '@/lib/payment-status'
+import { AGENT_STATUS, PAYMENT_STATUS, SALES_STATUS } from '@/lib/payment-status'
 import { MACHINE_PAYMENT_PRESENTATION } from '@/lib/machine-payment-lifecycle'
 import { accountingStatusPresentation } from '@/components/accounting/AccountingBadge'
 import { en } from '@/lib/i18n/messages/en'
@@ -114,6 +114,37 @@ describe('StatusBadge vocabulary — payments', () => {
   it('a settled machine payment carries no badge, as the table says', () => {
     expect(row(rows, 'paid').label).toBe('no badge')
     expect(MACHINE_PAYMENT_PRESENTATION.paid).toBeNull()
+  })
+})
+
+describe('StatusBadge vocabulary — sales (#4908)', () => {
+  const rows = tableRows('#### Sales')
+
+  it.each(Object.entries(SALES_STATUS))('%s matches its published row', (state, presentation) => {
+    const published = row(rows, state)
+    expect(presentation).toEqual({ label: published.label, tone: published.tone })
+  })
+
+  it('publishes a row for every sales state the map can render', () => {
+    for (const state of Object.keys(SALES_STATUS)) {
+      expect(rows.map((r) => r.state)).toContain(state)
+    }
+  })
+
+  // The other direction, which the payment and agent blocks do not walk: a
+  // row published in the table with no map entry is a label the code cannot
+  // render, so it goes red here rather than shipping as documentation only.
+  it('maps every state the table publishes', () => {
+    expect(rows.length).toBeGreaterThan(0)
+    for (const published of rows) {
+      expect(Object.keys(SALES_STATUS), `"${published.state}" has no SALES_STATUS entry`).toContain(
+        published.state,
+      )
+    }
+  })
+
+  it('a sale reads "Received", in success', () => {
+    expect(SALES_STATUS.received).toEqual({ label: 'Received', tone: 'success' })
   })
 })
 

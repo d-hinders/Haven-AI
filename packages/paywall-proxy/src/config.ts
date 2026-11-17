@@ -33,6 +33,12 @@ export interface ProxyConfig {
   basePath: string
   /** Absolute public origin used in the challenge's resource URL; absent: derived from the request's Host. */
   publicBaseUrl?: string
+  /**
+   * The request header the merchant's own front proxy sets to the client's
+   * address (lower-case), for the per-IP limits (§7). Absent: the socket's
+   * peer address, which behind a reverse proxy is the reverse proxy's own.
+   */
+  clientIpHeader?: string
   cdp: { apiKeyId: string; apiKeySecret: string }
   rpcUrl: string
   paymentsDb: string
@@ -126,6 +132,11 @@ export function loadConfig(env: Env): ProxyConfig {
   if (/[\r\n]/.test(authScheme)) problems.push('UPSTREAM_AUTH_SCHEME must be a single line')
   if (apiKey && /[\r\n]/.test(apiKey)) problems.push('UPSTREAM_API_KEY must not contain a line break')
 
+  const clientIpHeader = text('CLIENT_IP_HEADER')?.toLowerCase()
+  if (clientIpHeader !== undefined && !/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(clientIpHeader)) {
+    problems.push('CLIENT_IP_HEADER must be a valid HTTP header name')
+  }
+
   let basePath = text('BASE_PATH') ?? ''
   if (basePath) {
     if (!basePath.startsWith('/')) problems.push('BASE_PATH must start with "/"')
@@ -175,6 +186,7 @@ export function loadConfig(env: Env): ProxyConfig {
     upstream: { baseUrl, apiKey, authHeader, authScheme },
     basePath,
     ...(publicBaseUrl ? { publicBaseUrl } : {}),
+    ...(clientIpHeader ? { clientIpHeader } : {}),
     cdp: { apiKeyId, apiKeySecret },
     rpcUrl,
     paymentsDb,

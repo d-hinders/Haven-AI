@@ -14,6 +14,7 @@ import {
 } from '@haven_ai/merchant-payments'
 import { loadConfig, secretValues, type ProxyConfig } from './config.js'
 import { createProxyHandler } from './handler.js'
+import type { LimitSettings } from './limits.js'
 import { createLogger, installConsoleRedaction, type LogFn } from './log.js'
 import { loadProductsFile, type Product } from './products.js'
 import { openSqliteConsumedPaymentStore, type SqliteConsumedPaymentStore } from './sqlite-store.js'
@@ -36,6 +37,8 @@ export interface StartOverrides {
   settlePollMs?: number
   /** Tests only: a holder deadline shorter than the config allows. */
   reservationDeadlineMs?: number
+  /** Tests only: the deployed proxy uses the design's limits (§7). */
+  limits?: Partial<LimitSettings>
   now?: () => Date
 }
 
@@ -69,6 +72,7 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       ...(overrides.settleResolveMs !== undefined ? { settleResolveMs: overrides.settleResolveMs } : {}),
       ...(overrides.settlePollMs !== undefined ? { settlePollMs: overrides.settlePollMs } : {}),
       ...(overrides.reservationDeadlineMs !== undefined ? { reservationDeadlineMs: overrides.reservationDeadlineMs } : {}),
+      ...(overrides.limits ? { limits: overrides.limits } : {}),
       ...(overrides.now ? { now: overrides.now } : {}),
     })
     const server = createServer((req, res) => {

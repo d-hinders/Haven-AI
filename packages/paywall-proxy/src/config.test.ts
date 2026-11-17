@@ -81,6 +81,9 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(problems({ ...base, BASE_PATH: 'api' })[0]).toContain('BASE_PATH')
     expect(problems({ ...base, UPSTREAM_TIMEOUT_MS: '0' })[0]).toContain('UPSTREAM_TIMEOUT_MS')
     expect(problems({ ...base, DIRECTORY_LISTING: 'on' })[0]).toContain('DIRECTORY_LISTING=on')
+    expect(problems({ ...base, CLIENT_IP_HEADER: 'bad header' })[0]).toContain('CLIENT_IP_HEADER')
+    expect(loadConfig({ ...base, CLIENT_IP_HEADER: 'X-Forwarded-For' }).clientIpHeader).toBe('x-forwarded-for')
+    expect(loadConfig(base).clientIpHeader).toBeUndefined()
   })
 
   it('lists the secrets to keep out of output', () => {

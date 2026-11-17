@@ -929,7 +929,12 @@ it.
 ### Limiting unpaid requests
 
 Unpaid requests are limited per client IP: 60 requests a minute with a burst of
-10, and at most 10 concurrent unpaid requests per IP. Over the limit the proxy
+10, and at most 10 concurrent unpaid requests per IP. The client IP is the connection's peer
+address, or, when `CLIENT_IP_HEADER` names a header the merchant's own front
+proxy sets (`X-Forwarded-For`, `CF-Connecting-IP`), that header's value; for a
+list, its rightmost entry, the one the merchant's proxy appended. Behind a
+reverse proxy without that setting every request has the reverse proxy's
+address, and the limit is shared by every buyer. Over the limit the proxy
 answers 429 with `Retry-After` and no challenge. **A payment header that fails
 verification counts against the same limit**, and so does one that matches a
 known key but not its `authorizationDigest` (402 `payment_mismatch`): a header
@@ -1323,7 +1328,10 @@ What the merchant runs:
   client), `RPC_URL` (the chain reads that resolve a lost settle answer and a
   used authorization), `PAYMENTS_DB`, optionally `PUBLIC_BASE_URL` (the
   public origin the challenge's `resource.url` names; it must be `https` in
-  production, and without it the proxy derives `http://<Host>`), `PORT` and
+  production, and without it the proxy derives `http://<Host>`; Haven's
+  signer answers a retry challenge only for an `https` origin), optionally
+  `CLIENT_IP_HEADER` (the header a front proxy sets to the client's address,
+  for the per-IP limits, section 7), `PORT` and
   `HOST`, `UPSTREAM_TIMEOUT_MS` (at most 180 s) and `RESERVATION_DEADLINE_MS`
   (at least the holder's 110 s worst case), which the proxy refuses to start
   outside those bounds, an empty `UPSTREAM_AUTH_SCHEME` sending the key bare

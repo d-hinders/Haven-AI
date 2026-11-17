@@ -487,7 +487,7 @@ describe('upstream failure after settlement', () => {
     expect((await h.proxy.store.get(key))?.state).toBe('failed')
   })
 
-  it('a re-presented failed payment is answered 200 payment_retry_needs_proof: nothing forwarded, no forward used (proof check is the second PR)', async () => {
+  it('a re-presented failed payment without a valid proof is answered 200 payment_retry_needs_proof with a challenge: nothing forwarded, no forward used', async () => {
     h = await startHarness({ upstream: { status: 503 } })
     const buyer = newBuyer()
     const { paid } = await paidChat(buyer)
@@ -495,7 +495,9 @@ describe('upstream failure after settlement', () => {
     h.upstream.behaviour.status = 200
     const again = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header, 'sign-in-with-x': 'anything' }))
     expect(again.status).toBe(200)
-    expect(await again.json()).toMatchObject({ error: 'payment_retry_needs_proof', payment: { tx_hash: TX } })
+    const body = await again.json()
+    expect(body).toMatchObject({ error: 'payment_retry_needs_proof', payment: { tx_hash: TX }, retry: { proof: 'SIGN-IN-WITH-X', forwards_left: 2 } })
+    expect(body.sign_in_with_x.info.nonce).toMatch(/^[A-Za-z0-9]{8,}$/)
     expect(h.upstream.seen).toHaveLength(1)
     expect(h.facilitator.settleCalls).toBe(1)
   })

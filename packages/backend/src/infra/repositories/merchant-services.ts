@@ -61,10 +61,17 @@ export const FIND_MERCHANT_ACCOUNT_FOR_USER_SQL = `SELECT id, account_address, c
  * somebody else's account even if it somehow held the id. A second mark for
  * the same user raises `23505` on `smart_accounts_one_merchant_per_user` —
  * that is the database refusing a second merchant account, not a bug.
+ *
+ * `AND NOT is_default`: the merchant account is never the default account.
+ * The account the turn-on route creates never is, so this matches it. It
+ * exists for the one path where the route marks a row it did not just insert
+ * — the creation logic answering an account that already carries the derived
+ * idempotency key. Such a row can only predate the reserved namespace, and if
+ * it is a default account the mark matches nothing and the caller refuses.
  */
 export const MARK_MERCHANT_ACCOUNT_SQL = `UPDATE smart_accounts
        SET is_merchant_account = true, updated_at = NOW()
-       WHERE id = $1 AND user_id = $2`
+       WHERE id = $1 AND user_id = $2 AND NOT is_default`
 
 /**
  * Turn the setting on. `enabled_at` keeps the FIRST enable time — turning the
@@ -112,13 +119,17 @@ export async function findMerchantAccountForUser(
   return result.rows[0] ?? null
 }
 
-/** Mark `accountId` as the caller's merchant account. */
+/**
+ * Mark `accountId` as the caller's merchant account. False when no row was
+ * marked: the account is not the caller's, or it is their default account.
+ */
 export async function markMerchantAccount(
   userId: string,
   accountId: string,
   db: Executor = pool,
-): Promise<void> {
-  await db.query(MARK_MERCHANT_ACCOUNT_SQL, [accountId, userId])
+): Promise<boolean> {
+  const result = await db.query(MARK_MERCHANT_ACCOUNT_SQL, [accountId, userId])
+  return result.rowCount === 1
 }
 
 /** Turn the setting on and return the row. */

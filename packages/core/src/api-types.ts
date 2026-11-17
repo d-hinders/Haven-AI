@@ -24488,7 +24488,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED), or the derived address is already registered (error_code MERCHANT_ACCOUNT_ALREADY_REGISTERED). */
+            /** @description The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED), or the derived address is already registered, or the account already under the derived key is the caller's default account and cannot be marked (error_code MERCHANT_ACCOUNT_ALREADY_REGISTERED). */
             409: {
                 headers: {
                     [name: string]: unknown;

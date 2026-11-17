@@ -277,6 +277,21 @@ describeDb('merchant services on the real database (#4895)', () => {
     expect(defaults.rows).toEqual([{ id: ordinary.rows[0].id }])
   })
 
+  it('a default account that already carries the derived key is never marked', async () => {
+    // Only a row from before the namespace was reserved can carry this key.
+    const { userId, sourceId } = await seedUserWithSource([KEY_A])
+    await db.query(`UPDATE smart_accounts SET create_idempotency_key = 'merchant-service:84532' WHERE id = $1`, [
+      sourceId,
+    ])
+
+    const res = await call(userId, 'POST', { chain_id: 84532, source_account_id: sourceId, key_id: KEY_A })
+    expect(res.statusCode, res.body).toBe(409)
+    expect(res.json()).toMatchObject({ error_code: 'MERCHANT_ACCOUNT_ALREADY_REGISTERED' })
+
+    expect(await merchantRows(userId)).toEqual([])
+    expect(await settingRows(userId)).toEqual([])
+  })
+
   it('turning off records a turn-off time only when the setting was on', async () => {
     const { userId, sourceId } = await seedUserWithSource([KEY_A])
 

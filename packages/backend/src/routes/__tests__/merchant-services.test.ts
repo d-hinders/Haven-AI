@@ -139,7 +139,7 @@ function mockDb(opts: MockOpts = {}) {
     }
     if (/SET is_merchant_account = true/.test(s)) {
       marked = true
-      return Promise.resolve({ rows: [] })
+      return Promise.resolve({ rows: [], rowCount: 1 })
     }
     if (/WHERE user_id = \$1 AND is_merchant_account/.test(s)) {
       if (marked) return Promise.resolve({ rows: [CREATED_ACCOUNT] })
@@ -426,6 +426,33 @@ describe('merchant services routes (#4895)', () => {
       expect(res.json()).toMatchObject({ error_code: 'IDEMPOTENCY_KEY_REUSED' })
     })
 
+    it('an insert that loses on the derived key still marks and enables — the replay does not roll back', async () => {
+      // The setting-row lock makes this unreachable through the route today;
+      // this pins what `rollbackOnReplay: false` is for if it ever fires. The
+      // pre-check finds no row, the insert conflicts, the re-read finds the
+      // winner.
+      let keyReads = 0
+      const calls = mockDb({ insertConflicts: true })
+      const base = mockQuery.getMockImplementation()!
+      mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+        if (/create_idempotency_key = \$2/.test(String(sql)) && ++keyReads === 2) {
+          calls.push([String(sql), params ?? []])
+          return Promise.resolve({
+            rows: [{ id: ACCOUNT_ID, account_address: HYBRID, chain_id: 84532, created_at: '2026-11-17T00:00:00Z' }],
+          })
+        }
+        return base(sql, params)
+      })
+      const res = await call('POST', '/merchant-services', TURN_ON)
+
+      expect(res.statusCode, res.body).toBe(200)
+      expect(res.json()).toMatchObject({ enabled: true, created: false, merchant_account: { id: ACCOUNT_ID } })
+      expect(keyReads).toBe(2)
+      const mark = calls.find(([s]) => /SET is_merchant_account = true/.test(s))!
+      expect(mark[1]).toEqual([ACCOUNT_ID, 'user-1'])
+      expect(calls.some(([s]) => /SET enabled = true/.test(s))).toBe(true)
+    })
+
     it('a retried turn-on answers the account the first attempt created — 200, created false', async () => {
       mockDb({
         replay: {
@@ -491,6 +518,7 @@ describe('merchant services routes (#4895)', () => {
         disabled_at: null,
         merchant_account: null,
       })
+      expectMatchesSpec('GET', '/merchant-services', res.json(), '200')
     })
 
     it('scopes both reads to the caller', async () => {

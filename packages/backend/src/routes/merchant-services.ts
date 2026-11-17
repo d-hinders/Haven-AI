@@ -217,7 +217,15 @@ export default async function merchantServiceRoutes(app: FastifyInstance): Promi
           { rollbackOnReplay: false },
         )
 
-        await markMerchantAccount(sub, created.account.id, tx)
+        // False only for a replayed account that is the caller's default —
+        // never for the account this request just created. Thrown, so the
+        // setting row rolls back with everything else.
+        if (!(await markMerchantAccount(sub, created.account.id, tx))) {
+          throw new MerchantRefusal(409, {
+            error: 'The account already registered for merchant services cannot be used',
+            error_code: MERCHANT_ACCOUNT_ALREADY_REGISTERED,
+          })
+        }
         // Re-read so the reply carries the row's name and created_at, not the
         // creation result's narrower shape.
         const account = await findMerchantAccountForUser(sub, tx)
@@ -234,9 +242,16 @@ export default async function merchantServiceRoutes(app: FastifyInstance): Promi
         // address could not be derived (502) and the derived address is
         // already registered (409). The dialog branches on codes, so this
         // route names them; `POST /accounts/hybrid` answers them as it did.
+        // Matched on the status, so a future code-less refusal is not given
+        // one of these two names by default.
         const fallback =
-          err.status === 502 ? MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE : MERCHANT_ACCOUNT_ALREADY_REGISTERED
-        return reply.code(err.status).send({ ...err.body, error_code: err.body.error_code ?? fallback })
+          err.status === 502
+            ? MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE
+            : err.status === 409
+              ? MERCHANT_ACCOUNT_ALREADY_REGISTERED
+              : undefined
+        const error_code = err.body.error_code ?? fallback
+        return reply.code(err.status).send(error_code === undefined ? err.body : { ...err.body, error_code })
       }
       throw err
     }

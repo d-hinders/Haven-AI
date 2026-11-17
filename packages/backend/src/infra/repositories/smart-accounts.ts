@@ -285,7 +285,7 @@ export const SET_ACCOUNT_DEFAULT_SQL = `UPDATE smart_accounts SET is_default = t
 /**
  * Point the user's default at `accountId` and keep the legacy mirror in sync —
  * one transaction, exactly the route's BEGIN/COMMIT block. The route checks
- * ownership first (`findOwnedAccountAddress`), and every statement here is
+ * ownership first (`findOwnedAccountDefaultFlag`), and every statement here is
  * tenant-scoped as well (#3227): for an account `userId` does not own, the
  * clear and the set match no row and the mirror is left untouched — a silent
  * no-op, the same posture as `renameAccountForUser`.

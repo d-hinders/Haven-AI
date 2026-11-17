@@ -4700,6 +4700,41 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'disabled')
     },
   },
+  'design-system-sales-patterns': {
+    description:
+      'The Sales patterns section on /design-system — sale rows, the Sales badges, the freshness line, the Spending/Revenue tabs, the revenue chart, the keys-off row and the credential block (#4908)',
+    // An element capture, for the reason `design-system-buttons` gives: the
+    // page is far past Chromium's full-page surface cap. Static showcase
+    // markup, so no fixture overrides.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const section = page.getByTestId('ds-sales-patterns')
+      // Wait on the last specimen as well as the section, so the capture
+      // cannot race the grid's tail.
+      await section.getByText('Keys not accepted while off', { exact: true }).waitFor({ timeout: 20_000 })
+      await section.getByRole('tab', { name: 'Revenue' }).waitFor({ timeout: 20_000 })
+      // One capture per specimen, not the section: the section is taller than
+      // the viewport, and a whole-section element capture came back with its
+      // top and bottom blank (the #1726 failure in a smaller form).
+      // Below lg the floating tab bar is fixed over the viewport's bottom and
+      // paints across whichever specimen scrolled under it; hide it for these
+      // element captures — the bar is not under review here.
+      await page.addStyleTag({ content: '[data-mobile-tab-bar]{visibility:hidden!important}' })
+      const specimens = section.getByTestId('ds-sales-specimens').locator(':scope > *')
+      const count = await specimens.count()
+      if (count !== 7) throw new Error(`design-system-sales-patterns: expected 7 specimens, found ${count}`)
+      const names = ['ledger', 'badges', 'freshness', 'tabs', 'revenue-chart', 'keys-off', 'credential-block']
+      for (let i = 0; i < count; i += 1) {
+        const specimen = specimens.nth(i)
+        await specimen.scrollIntoViewIfNeeded()
+        await shoot(specimen, names[i])
+      }
+    },
+  },
   'design-system-buttons': {
     description:
       'The Buttons and badges card on /design-system — variants, the size scale, and the tap-target note',

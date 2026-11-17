@@ -348,6 +348,13 @@ export const dashboardTransaction = {
   source: 'x402',
   x402ResourceUrl: 'https://research.example/report',
   x402MerchantAddress: testRecipientAddress,
+  // #4931: the server-resolved counterparty name (#4883). Null here on
+  // purpose — this row keeps testing the resource-host fallback, which
+  // `transactions-detail.spec.ts` and `transactions-detail-polish.spec.ts`
+  // assert as `research.example`. The key exists because the screenshot
+  // dataset's matching row carries a name and `fixture-shape-parity.test.ts`
+  // requires this fixture to be a key superset of every screenshot row.
+  recipientName: null,
   // #2870: the payment-intent id the accounting badge is keyed on, and the
   // badge's own object. Carried on the row itself so the fixture-shape parity
   // test (`fixture-shape-parity.test.ts`) sees the same keys the screenshot
@@ -406,6 +413,12 @@ export const x402UnrecordedSettlementTransaction = {
   source: 'x402',
   x402ResourceUrl: 'https://api.example.dev/datasets',
   x402MerchantAddress: testRecipientAddress,
+  // #4931: the server names this row's counterparty (#4883), and the name
+  // differs from the resource host on purpose — the row title and the drawer
+  // heading must show the NAME, not `api.example.dev`. This is the row the
+  // visual gate photographs (`transaction-panel-needs-attention-mobile.png`)
+  // and the one `transactions-detail-polish.spec.ts` opens by name.
+  recipientName: 'Klara Data AB',
   paymentId: 'pay-research-2',
   confirmedAt: '2026-05-16T01:13:20.000Z',
   timestampSource: 'confirmed_at' as const,
@@ -2162,6 +2175,11 @@ export async function serveAgentDetailResponses(
           source: 'x402',
           x402_resource_url: 'https://research.example/report',
           x402_merchant_address: testRecipientAddress,
+          // #4931: the server names the merchant (#4883) — the agent ledger
+          // row's title is this name, ahead of the resource host. The name
+          // differs from the host on purpose, so the row title proves the
+          // rule rather than the fallback.
+          counterparty_name: 'NordShield VPN',
           chain_id: testSafe.chain_id,
           account_id: testSafe.id,
           account_address: testSafeAddress,
@@ -2258,6 +2276,9 @@ export async function serveAgentDetailResponses(
             source: 'x402',
             x402_resource_url: 'https://research.example/report',
             x402_merchant_address: testRecipientAddress,
+            // #4931: same name as the kinded read above — one row, both
+            // reads, so the legacy merged list cannot disagree with it.
+            counterparty_name: 'NordShield VPN',
             chain_id: testSafe.chain_id,
             account_id: testSafe.id,
             account_address: testSafeAddress,

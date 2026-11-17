@@ -76,7 +76,14 @@ export function SidePanel({
               the two-line case — `items-center` on the ROW would move it
               ~7px, which both committed baselines pin. */}
           <div className={subtitle ? 'min-w-0 flex-1' : 'min-w-0 flex-1 self-center'}>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{title}</h2>
+            {/* #4931: the title is the server's counterparty name since #4883,
+                and a receipt seller or catalog name can run to 120 characters
+                with no spaces. `break-words` (`overflow-wrap: break-word`)
+                wraps it inside the header row instead of spilling past the
+                close button and the panel's right edge — off-screen at 390px,
+                where the panel is full width. Not `break-all`: a normal
+                two-word title must not split mid-word. */}
+            <h2 className="break-words text-sm font-semibold text-[var(--v2-ink)]">{title}</h2>
             {subtitle ? (
               <p className="mt-0.5 text-xs text-[var(--v2-ink-3)]">{subtitle}</p>
             ) : null}

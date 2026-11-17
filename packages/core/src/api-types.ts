@@ -3828,6 +3828,50 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchant-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the merchant account's Sales keys by prefix.
+         * @description The caller's keys, newest first (#4896). Returns the display prefix only — never the secret, never the hash — plus who created each key and when, who revoked it and when, and when it was last used to make an accepted request. Revoked keys stay in the list with their revocation time.
+         */
+        get: operations["listMerchantKeys"];
+        put?: never;
+        /**
+         * Create a receive-only Sales key for the merchant account.
+         * @description Mints a merchant key (`sk_merchant_…`) bound to the caller's merchant account (#4896, epic #4885). The secret is returned by THIS call only: only its SHA-256 hash and its display prefix are stored, and no later read can produce it. The request carries no body — the account is the caller's merchant account, never one named by the caller, so a key cannot be minted for another account, including the same user's other accounts. With no merchant account yet the route refuses with `MERCHANT_ACCOUNT_REQUIRED` (409) rather than minting a credential that could never authenticate. The key authenticates only the merchant routes (sales ingest, #4897); it is refused at every agent, payment and dashboard route, and it cannot move funds, sign, or change signers, budgets or agents.
+         */
+        post: operations["createMerchantKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a Sales key.
+         * @description Records who revoked the key and when, and the key is refused on the next request (#4896). Idempotent: revoking an already-revoked key answers the row unchanged, so a retry cannot rewrite `revoked_by` / `revoked_at`. A key that is not the caller's answers 404 — never 403 — so the URL does not confirm another user's key exists.
+         */
+        delete: operations["revokeMerchantKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/merchants": {
         parameters: {
             query?: never;
@@ -4891,6 +4935,58 @@ export type components = {
                 /** Format: date-time */
                 created_at: string;
             } | null;
+        };
+        MerchantKey: {
+            /** Format: uuid */
+            id: string;
+            /** @description The display prefix: `sk_merchant_` plus the first twelve hex characters of the secret. Never enough to authenticate. */
+            key_prefix: string;
+            /**
+             * Format: uuid
+             * @description The user who created the key.
+             */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description The user who revoked the key, or null while it is live.
+             */
+            revoked_by: string | null;
+            /**
+             * Format: date-time
+             * @description When the key was revoked, or null while it is live.
+             */
+            revoked_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the key last made an ACCEPTED request, or null. Updated at most once a minute per key.
+             */
+            last_used_at: string | null;
+        };
+        MerchantKeyListResponse: {
+            keys: components["schemas"]["MerchantKey"][];
+        };
+        CreatedMerchantKey: {
+            /** Format: uuid */
+            id: string;
+            /** @description The display prefix the list returns. */
+            key_prefix: string;
+            /**
+             * Format: uuid
+             * @description The user who created the key.
+             */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            revoked_by: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** @description The secret. Returned by this call only; it is never stored and no later read can produce it. */
+            secret: string;
         };
         Label: {
             /** Format: uuid */
@@ -24607,6 +24703,147 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's Sales keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantKeyListResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createMerchantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The key was created. `secret` is returned here and never again. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedMerchantKey"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The caller has no merchant account yet: error_code MERCHANT_ACCOUNT_REQUIRED. Turn merchant services on first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    revokeMerchantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key, revoked (or already revoked). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantKey"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such key of the caller's: error_code MERCHANT_KEY_NOT_FOUND. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

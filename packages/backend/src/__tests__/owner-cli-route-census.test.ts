@@ -340,6 +340,13 @@ describe('owner_cli route census (#2526)', () => {
       // is a read and is not on the allow-list either — nothing needs it.
       { method: 'POST', path: '/merchant-services' },
       { method: 'DELETE', path: '/merchant-services' },
+      // #4896: creating a Sales key mints a live credential for the merchant
+      // account, and revoking one changes who may report sales into it.
+      // Neither is a reading or an arrangement, so a device-code session must
+      // not reach either. `GET /merchant-keys` is a read and is not on the
+      // allow-list either — nothing needs it.
+      { method: 'POST', path: '/merchant-keys' },
+      { method: 'DELETE', path: '/merchant-keys/{id}' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)

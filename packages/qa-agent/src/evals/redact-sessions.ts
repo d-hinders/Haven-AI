@@ -61,6 +61,9 @@ export const REDACTION_CLASSES = [
   'secret-exact',
   'rpc-key',
   'agent-key',
+  // #4896: the receive-only merchant key. Its own class, so a QA report can
+  // tell a leaked merchant credential from a leaked agent one.
+  'merchant-key',
   'anthropic-key',
   'auth-header',
   'payment-header',
@@ -225,7 +228,7 @@ function base64Forms(value: string): string[] {
   return [...new Set(forms)]
 }
 
-const PREFIXED_KEY = /^(?:sk_agent_|sk-ant-)(.+)$/
+const PREFIXED_KEY = /^(?:sk_agent_|sk_merchant_|sk-ant-)(.+)$/
 
 function exactNeedles(forms: string[]): Needle[] {
   return [...new Set(forms)]
@@ -368,6 +371,8 @@ const PATTERN_RULES: Array<{ cls: RedactionClass; re: RegExp }> = [
   { cls: 'auth-header', re: /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi },
   { cls: 'anthropic-key', re: /sk-ant-[A-Za-z0-9_-]*/g },
   { cls: 'agent-key', re: /sk_agent_[A-Za-z0-9_-]*/g },
+  // #4896: the receive-only merchant key.
+  { cls: 'merchant-key', re: /sk_merchant_[A-Za-z0-9_-]*/g },
   // A base64(url) blob of JSON (x402 headers, JWTs), with any `.`-joined
   // segments that follow it.
   { cls: 'b64-json', re: /eyJ[A-Za-z0-9+/_=-]{20,}(?:\.[A-Za-z0-9+/_=-]+){0,2}/g },
@@ -608,6 +613,8 @@ const detectKey = (cls: RedactionClass, key: string, extra = '') => ({
 })
 const DETECT_TEXT: Array<{ cls: RedactionClass; re: RegExp }> = [
   { cls: 'agent-key', re: /sk_agent_/g },
+  // #4896: the receive-only merchant key.
+  { cls: 'merchant-key', re: /sk_merchant_/g },
   { cls: 'anthropic-key', re: /sk-ant-/g },
   { cls: 'auth-header', re: /\bBearer\s+[A-Za-z0-9]/gi },
   detectKey('auth-header', '\\bauthorization', '(?![A-Za-z]{1,32}\\s+\\[REDACTED:)'),
@@ -670,7 +677,7 @@ function buildProbes(raw: RawSecret[]): Probe[] {
       }
       continue
     }
-    const stripped = v.replace(/^sk_agent_|^sk-ant-/, '')
+    const stripped = v.replace(/^sk_agent_|^sk_merchant_|^sk-ant-/, '')
     const values = stripped !== v && stripped.length >= 12 ? [v, stripped] : [v]
     probes.push({ cls: 'secret-exact', forms: values.flatMap(escapeLevels).map((t) => t.toLowerCase()), decoded: values.map((t) => t.toLowerCase()) })
   }

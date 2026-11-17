@@ -575,7 +575,9 @@ Isolation rules that are non-negotiable for a payments product:
   modules already enforced (`routes/user.ts`, `routes/dashboard.ts`), so the
   table gained two rows and no module entered shadow. #4895's three
   `/merchant-services` rows are a new module, `routes/merchant-services.ts`,
-  listed from its first commit. New modules are born ENFORCED with their own `enforcedModules`
+  listed from its first commit. #4896's three `/merchant-keys` rows are the
+  same shape: a new module, `routes/merchant-keys.ts`, listed from its first
+  commit. New modules are born ENFORCED with their own `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
   prefix) followed the #3167 precedent exactly, and #3329's two new modules
   did the same — the owner-auth `routes/agent-task-budgets.ts` (one GET under

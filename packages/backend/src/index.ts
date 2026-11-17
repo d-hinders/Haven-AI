@@ -97,6 +97,7 @@ import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
 import merchantServiceRoutes from './routes/merchant-services.js'
+import merchantKeyRoutes from './routes/merchant-keys.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
@@ -111,6 +112,7 @@ import type { QueryableLike } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerClientCompatHooks } from './middleware/client-compat.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
+import { registerMerchantLastUsedHook } from './middleware/merchantAuth.js'
 // dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and injects it into `startBackgroundJobs` at boot (catalog refresh needs it); it wires infrastructure rather than running tenant SQL
 import pool from './db.js'
 
@@ -306,6 +308,13 @@ installRequestValidation(app, {
     // is closed (`additionalProperties: false`) so a body naming an account to
     // mark is refused by the schema, not by a handler check.
     'routes/merchant-services.ts',
+    // #4896: the Sales key's dashboard routes — create, list by prefix, revoke.
+    // A BRAND NEW module, born ENFORCED on the same rule. It is money-path (it
+    // mints and revokes the credential the merchant routes accept), and its
+    // create body is closed (`additionalProperties: false`) so a body naming an
+    // account to bind the key to is refused by the schema, not by a handler
+    // check.
+    'routes/merchant-keys.ts',
   ],
 })
 
@@ -392,6 +401,12 @@ registerClientCompatHooks(app)
 // onResponse hook so it runs after route handlers, never interleaving with
 // their queries.
 registerAgentLastSeenHook(app)
+
+// Record merchant-key liveness (last_used_at) after each ACCEPTED merchant
+// request, at most once a minute per key (#4896). Root scope, so the merchant
+// routes (#4897) inherit it without remembering to register it; it only fires
+// when `merchantAuthMiddleware` set `request.merchant`.
+registerMerchantLastUsedHook(app)
 
 // --- Routes ---
 registerHealthRoutes(app, {
@@ -593,6 +608,10 @@ await app.register(merchantRoutes, { prefix: '/merchants' })
 // turn-on route creates a dedicated account through the create-additional
 // path and marks it as the merchant account, in one transaction.
 await app.register(merchantServiceRoutes, { prefix: '/merchant-services' })
+// #4896: the Sales key's dashboard routes — create (secret returned once),
+// list by prefix, revoke. The key itself authenticates only the merchant
+// routes (#4897), through `middleware/merchantAuth.ts`.
+await app.register(merchantKeyRoutes, { prefix: '/merchant-keys' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns

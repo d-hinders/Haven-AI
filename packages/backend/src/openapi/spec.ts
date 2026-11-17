@@ -9906,6 +9906,79 @@ export const openapiSpec = {
         },
       },
     },
+    '/merchant-keys': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'createMerchantKey',
+        summary: 'Create a receive-only Sales key for the merchant account.',
+        description:
+          'Mints a merchant key (`sk_merchant_…`) bound to the caller\'s merchant account (#4896, epic #4885). The secret is returned by THIS call only: only its SHA-256 hash and its display prefix are stored, and no later read can produce it. The request carries no body — the account is the caller\'s merchant account, never one named by the caller, so a key cannot be minted for another account, including the same user\'s other accounts. With no merchant account yet the route refuses with `MERCHANT_ACCOUNT_REQUIRED` (409) rather than minting a credential that could never authenticate. The key authenticates only the merchant routes (sales ingest, #4897); it is refused at every agent, payment and dashboard route, and it cannot move funds, sign, or change signers, budgets or agents.',
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {},
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'The key was created. `secret` is returned here and never again.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/CreatedMerchantKey' } } },
+          },
+          '401': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'The caller has no merchant account yet: error_code MERCHANT_ACCOUNT_REQUIRED. Turn merchant services on first.',
+          },
+        },
+      },
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listMerchantKeys',
+        summary: 'List the merchant account\'s Sales keys by prefix.',
+        description:
+          'The caller\'s keys, newest first (#4896). Returns the display prefix only — never the secret, never the hash — plus who created each key and when, who revoked it and when, and when it was last used to make an accepted request. Revoked keys stay in the list with their revocation time.',
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: 'The caller\'s Sales keys.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantKeyListResponse' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/merchant-keys/{id}': {
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'revokeMerchantKey',
+        summary: 'Revoke a Sales key.',
+        description:
+          'Records who revoked the key and when, and the key is refused on the next request (#4896). Idempotent: revoking an already-revoked key answers the row unchanged, so a retry cannot rewrite `revoked_by` / `revoked_at`. A key that is not the caller\'s answers 404 — never 403 — so the URL does not confirm another user\'s key exists.',
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': {
+            description: 'The key, revoked (or already revoked).',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantKey' } } },
+          },
+          '401': errorResponse,
+          '404': {
+            ...errorResponse,
+            description: 'No such key of the caller\'s: error_code MERCHANT_KEY_NOT_FOUND.',
+          },
+        },
+      },
+    },
     '/merchants': {
       get: {
         tags: ['Catalog'],
@@ -11684,6 +11757,91 @@ export const openapiSpec = {
             },
           },
         },
+      },
+      /**
+       * #4896: a receive-only Sales key. The wire shape NEVER carries the
+       * secret or its hash — only the display prefix and the who/when columns.
+       * `revoked_by` / `revoked_at` are both null or both set (the table's
+       * CHECK), and `last_used_at` is written at most once a minute per key.
+       */
+      MerchantKey: {
+        type: 'object',
+        required: ['id', 'key_prefix', 'created_by', 'created_at', 'revoked_by', 'revoked_at', 'last_used_at'],
+        properties: {
+          id: uuid,
+          key_prefix: {
+            type: 'string',
+            pattern: '^sk_merchant_[0-9a-f]{12}$',
+            description:
+              'The display prefix: `sk_merchant_` plus the first twelve hex characters of the secret. Never enough to authenticate.',
+          },
+          created_by: { ...uuid, description: 'The user who created the key.' },
+          created_at: isoDateTime,
+          revoked_by: {
+            type: ['string', 'null'],
+            format: 'uuid',
+            description: 'The user who revoked the key, or null while it is live.',
+          },
+          revoked_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'When the key was revoked, or null while it is live.',
+          },
+          last_used_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description:
+              'When the key last made an ACCEPTED request, or null. Updated at most once a minute per key.',
+          },
+        },
+        additionalProperties: false,
+      },
+      MerchantKeyListResponse: {
+        type: 'object',
+        required: ['keys'],
+        properties: {
+          keys: { type: 'array', items: { $ref: '#/components/schemas/MerchantKey' } },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * #4896: the create answer — the key row plus the secret, which is
+       * returned by this call only. A separate schema rather than an `allOf`
+       * because `MerchantKey` is closed (`additionalProperties: false`), and
+       * an `allOf` over a closed schema cannot add `secret`.
+       */
+      CreatedMerchantKey: {
+        type: 'object',
+        required: [
+          'id',
+          'key_prefix',
+          'created_by',
+          'created_at',
+          'revoked_by',
+          'revoked_at',
+          'last_used_at',
+          'secret',
+        ],
+        properties: {
+          id: uuid,
+          key_prefix: {
+            type: 'string',
+            pattern: '^sk_merchant_[0-9a-f]{12}$',
+            description: 'The display prefix the list returns.',
+          },
+          created_by: { ...uuid, description: 'The user who created the key.' },
+          created_at: isoDateTime,
+          revoked_by: { type: ['string', 'null'], format: 'uuid' },
+          revoked_at: { type: ['string', 'null'], format: 'date-time' },
+          last_used_at: { type: ['string', 'null'], format: 'date-time' },
+          secret: {
+            type: 'string',
+            pattern: '^sk_merchant_[0-9a-f]{48}$',
+            description:
+              'The secret. Returned by this call only; it is never stored and no later read can produce it.',
+          },
+        },
+        additionalProperties: false,
       },
       /**
        * Agent label (#3167). A tag in the user's own vocabulary, carried by

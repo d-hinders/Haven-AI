@@ -233,13 +233,15 @@ with different bytes (Accounted). A re-claim of a row with NO pin (a pre-deploy
 used — instead of letting a settlement recorded since re-book over it; a row
 that ever rendered under this build always carries its pin. `erc7710` payments
 are one transaction whose
-hash already is the settlement: they are never deferred and `txHashIsFunding`
+hash already is the settlement: they are never deferred by the #3767 grace (the
+#4876 merchant-receipt wait still holds them) and `txHashIsFunding`
 is always false. Retired rails carry `txHash: null` and render exactly as they
 did before this contract existed.
 
 The hash is only one of the render inputs that can move between attempts.
-#4824 pins the rest — the merchant receipt (the seller block AND the
-transaction kind), the delivery reference, the purchase group / parent receipt
+#4824 pins the rest — the merchant receipt (the seller block, the
+transaction kind, and since #4876 the receipt lines and VAT, with a
+`receiptLines` marker so a pre-#4876 pin renders no lines), the delivery reference, the purchase group / parent receipt
 and the catalog country — at the payment's FIRST render
 (`pinUnderlagInputs`, stored beside the booked-hash pin in
 `payment_intents.machine_metadata`), and `loadReceiptUnderlag` renders every

@@ -49,11 +49,13 @@ vi.mock('../../../infra/repositories/accounting-connections.js', async (importOr
 }))
 
 import { feedSettledPayment } from '../feed-orchestrator.js'
+import { MERCHANT_RECEIPT_WAIT_MIN } from '../../../domain/merchant-receipt-wait.js'
 import { registerConnector, clearConnectors, InMemoryConnector, type AccountingConnector } from '../connector.js'
 import { flagConnectionStatus, setOpsEventSink, REASON_PREFIX_MAX_LENGTH, type OpsEvent, type OpsEventLevel } from '../ops-signals.js'
 
 const USER = 'u1'
 const PID = 'pi1'
+const RECEIPT = { url: null, inlineJson: { fakturanummer: 'FAK-1' } }
 
 function entry(amountSek: string | null = '132.50') {
   return { paymentId: PID, settledAt: '2026-06-20', direction: 'out', counterparty: { address: '0xm', name: 'M' }, resourceUrl: 'r', token: 'USDC', amountAtomic: '1', amountSek, fxRate: '10', fxSource: 's', fxAt: 't', receiptRef: 'ev', account: null }
@@ -339,6 +341,8 @@ describe('#3767: wait, then push — the pre-claim deferral and the booked-hash 
         bookedTxHash: SETTLEMENT,
         bookedTxHashIsFunding: false,
         fundingTxHash: FUNDING,
+        // #4876: the receipt has arrived, so only #3767's rule is in play.
+        merchantReceipt: RECEIPT,
       }),
     )
     await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
@@ -360,10 +364,113 @@ describe('#3767: wait, then push — the pre-claim deferral and the booked-hash 
       bookedTxHashIsFunding: false,
       fundingTxHash: null,
       settledAt: new Date().toISOString(),
+      // #4876: the receipt has arrived, so only #3767's rule is in play.
+      merchantReceipt: RECEIPT,
     })
     await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
     expect(c.pushed).toHaveLength(1)
     expect(mocks.pinAccountingBookedTx).not.toHaveBeenCalled()
+  })
+
+  describe('#4876: wait for the merchant receipt (owner decision 1 of 2026-11-17)', () => {
+    const erc7710 = (over: Record<string, unknown> = {}) => ({
+      ...entry(),
+      settlementScheme: 'erc7710',
+      verifiedSettlementTxHash: null,
+      pinnedBookedTxHash: null,
+      pinnedBookedTxKind: null,
+      bookedTxHash: `0x${'77'.repeat(32)}`,
+      bookedTxHashIsFunding: false,
+      fundingTxHash: null,
+      settledAt: new Date().toISOString(),
+      merchantReceipt: null,
+      ...over,
+    })
+
+    it('holds a just-settled erc7710 payment with no receipt — no claim, nothing pushed', async () => {
+      const c = connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(erc7710())
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'not_fed' })
+      expect(c.pushed).toHaveLength(0)
+      expect(mocks.claimSync).not.toHaveBeenCalled()
+    })
+
+    it('holds a just-settled eip3009 payment whose settlement is recorded but whose receipt is not', async () => {
+      const c = connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(
+        eip3009Entry({
+          settledAt: new Date().toISOString(),
+          verifiedSettlementTxHash: SETTLEMENT,
+          bookedTxHash: SETTLEMENT,
+          bookedTxHashIsFunding: false,
+          fundingTxHash: FUNDING,
+          merchantReceipt: null,
+        }),
+      )
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'not_fed' })
+      expect(c.pushed).toHaveLength(0)
+    })
+
+    it('pushes once the receipt has arrived', async () => {
+      const c = connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(erc7710({ merchantReceipt: RECEIPT }))
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+      expect(c.pushed).toHaveLength(1)
+    })
+
+    it('pushes without a receipt once the window has passed', async () => {
+      const c = connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(
+        erc7710({ settledAt: new Date(Date.now() - (MERCHANT_RECEIPT_WAIT_MIN * 60_000 + 1_000)).toISOString() }),
+      )
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+      expect(c.pushed).toHaveLength(1)
+    })
+
+    it('waits just inside the window', async () => {
+      connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(
+        erc7710({ settledAt: new Date(Date.now() - (MERCHANT_RECEIPT_WAIT_MIN * 60_000 - 5_000)).toISOString() }),
+      )
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'not_fed' })
+    })
+
+    it('never holds a payment that carries no settlement scheme (direct, MPP, retired rails)', async () => {
+      const c = connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue({
+        ...entry(),
+        settlementScheme: null,
+        settledAt: new Date().toISOString(),
+        merchantReceipt: null,
+      })
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+      expect(c.pushed).toHaveLength(1)
+    })
+
+    it('does not hold a payment whose booked hash is already pinned — an earlier claim decided', async () => {
+      const c = connectInMemory()
+      mocks.claimSync.mockResolvedValue({ owned: true, status: 'pending', fresh: false })
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(
+        eip3009Entry({
+          settledAt: new Date().toISOString(),
+          verifiedSettlementTxHash: SETTLEMENT,
+          pinnedBookedTxHash: SETTLEMENT,
+          pinnedBookedTxKind: 'settlement',
+          bookedTxHash: SETTLEMENT,
+          bookedTxHashIsFunding: false,
+          merchantReceipt: null,
+        }),
+      )
+      await expect(feedSettledPayment(USER, PID)).resolves.toEqual({ outcome: 'pushed' })
+      expect(c.pushed).toHaveLength(1)
+    })
+
+    it('a manual Sync now waits too — a pushed voucher is never edited', async () => {
+      const c = connectInMemory()
+      mocks.buildAccountingEntryForPayment.mockResolvedValue(erc7710())
+      await expect(feedSettledPayment(USER, PID, { manual: true })).resolves.toEqual({ outcome: 'not_fed' })
+      expect(c.pushed).toHaveLength(0)
+    })
   })
 
   it('does not defer a PINNED payment — the deferral decision was the first claim\u2019s to make — and never re-pins', async () => {

@@ -10,6 +10,8 @@ covers:
   - packages/backend/src/middleware/accountingFeed.ts
   - packages/backend/src/infra/secrets.ts
   - packages/backend/src/infra/repositories/accounting-feed-syncs.ts
+  - packages/backend/src/domain/merchant-receipt-wait.ts
+  - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/backend/src/infra/repositories/direct-payment-accounting.ts
   - packages/backend/src/infra/repositories/accounting-connections.ts
   - packages/backend/src/infra/repositories/accounting-webhook-deliveries.ts
@@ -448,10 +450,43 @@ The counterparty line is on every underlag (falling back to the address, then
 `unknown`); `Country`, `VAT reg no` and `Org no` render only when their value
 is known, so the document never states an empty-looking fact.
 
-The accounting entry also carries the receipt's stated product lines and VAT
-figures (#4875, `receiptStatement`), with a check of its stated total against
-the settled amount. They are not printed on the underlag or sent to a provider
-yet (#4876). The field-by-field shape, and how a malformed receipt reads, is
+The underlag also carries the merchant receipt's stated product lines and
+VAT (#4876, read by #4875's `receipt-statement.ts`), under the heading
+`MERCHANT RECEIPT LINES (On the merchant's receipt, as reported by the agent)`:
+the receipt is relayed by the agent and unsigned by the merchant, so it is
+never labelled "stated by the merchant" (owner decision 3 of 2026-11-17,
+#4874).
+
+- **What is printed.** One line per product, at most
+  `UNDERLAG_MAX_RECEIPT_LINES` (6). The rest are counted and stay on the
+  merchant's own receipt PDF. Each description is cut at
+  `UNDERLAG_MAX_DESCRIPTION_ROWS` (2) printed rows, marked with `..`, so the
+  single page stays inside its `UNDERLAG_MAX_PAGE_LINES` (72) rows. Each line
+  shows its quantity, net, VAT rate, VAT amount and total. Then the receipt's totals, and the MERCHANT's VAT
+  treatment, labelled as the merchant's. Haven's own derived `vatTreatment`
+  is never printed (decision 2).
+- **Units.** Every figure carries the receipt's own currency (`valuta`) and
+  is never converted. `Book value` and `Haven SEK ref` above stay Haven's.
+- **Total check.** When the receipt's total in the settled token differs
+  from the amount Haven settled, a `Total check` line says so. The settled
+  amount is what is booked.
+- **No stated lines.** A protocol payment whose receipt states no lines, or
+  has no receipt, prints a `VAT` line reading `not stated by the merchant`. A direct payment
+  has no merchant and prints neither.
+- **Text.** Merchant text is folded to ASCII before it is printed: letters
+  keep their base form (`å` → `a`), dashes and quotes their ASCII twins.
+
+The Fortnox `Comments` field carries the same label, the stated VAT, the
+merchant's treatment and the product names. It is folded to the characters
+the field accepts, so "merchants receipt" and "25 pct". Only the product
+names are ever cut to fit the 512 characters. If even the label and the VAT
+do not fit, the `Resource` host gives up its room first. If they still do not
+fit, the receipt part is left out entirely: the label and the VAT are never
+partly cut. The booked hash and `Haven payment <id>` are never cut. A
+protocol payment with no stated lines gets `VAT not stated by the merchant.`
+in the comment, and a direct payment gets nothing.
+
+The field-by-field shape, and how a malformed receipt reads, is
 [`merchant-receipt-shape.md`](merchant-receipt-shape.md).
 
 The counterparty line's LABEL follows the payment (#4533). A protocol payment
@@ -583,7 +618,7 @@ pushed row (#498), or the `exhausted:` prefix once the sweep has given up.
 | `failed`, `error` starts `exhausted:` | the sweep gave up at attempt 8; the last reason follows the prefix; `accounting.sync.exhausted` was logged | fix the cause, then **Sync now** — the cap bounds the sweep, not the human; a manual sync re-claims the row |
 | `pending` | claimed and in flight, or a crashed in-flight push | wait; the sweep releases a `pending` older than 15 min to `failed` (attempts untouched) and re-feeds it. Do not edit the row |
 | `skipped` | a connector skip with the reason preserved (`not_connected`, `no_ledger_amount` — `no_sek_amount` on rows recorded before #2877, `not_outbound`), `connection needs_reauthorisation: …`, `scope refused before the invoice was created: …`, or `IDEMPOTENCY_KEY_REUSE — …` (a row whose first render predates the #4824 pin: the document is at the provider, Haven cannot name it, and every retry renders live bytes and is refused again) | fix the named cause (usually: the user reconnects); the sweep retries skipped rows like failed ones — but NOT while the connection is not `connected`. Sync now also re-claims them |
-| *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, the payment never produced an evidence row (settlement-side, above), or (#3767) an eip3009 payment is inside the merchant-report grace with no verified settlement recorded — the pre-claim deferral writes no row and burns no attempt | read `GET /accounting/feed/status`; the #3767 deferral self-recovers — the sweep's second selection feeds it once the window passes or the settlement is recorded; for the other causes, **Sync now** or the backfill feeds it once the cause is gone |
+| *(no row)* | the hook never ran (feed off, not entitled, no destination, `auto_feed = false`), the payment predates `feed_from`, FX was not ready, the payment never produced an evidence row (settlement-side, above), or (#3767) an eip3009 payment is inside the merchant-report grace with no verified settlement recorded, or (#4876) an x402 payment is inside the receipt wait with no merchant receipt — the pre-claim deferrals write no row and burn no attempt | read `GET /accounting/feed/status`; both deferrals self-recover — the #3767 one when the window passes or the settlement is recorded, the #4876 one when the receipt is captured or the receipt window passes (the sweep's second selection feeds both); Sync now waits too; for the other causes, **Sync now** or the backfill feeds it once the cause is gone |
 
 **On-call read, per user:**
 
@@ -715,8 +750,8 @@ transaction rather than an `IDEMPOTENCY_KEY_REUSE` refusal. A pin failure
 fails the push without attempting it, so the retry re-runs the whole claim.
 
 **The underlag-input pin (#4824).** The booked hash is only one of the render
-inputs that can move between attempts. The merchant receipt (the seller block
-**and** the transaction kind), the delivery reference, the purchase group /
+inputs that can move between attempts. The merchant receipt (the seller block,
+the transaction kind, and since #4876 the receipt lines and VAT), the delivery reference, the purchase group /
 parent receipt and the catalog country are all live reads too, and any of them
 written after a payment's first render changed the bytes a retry uploaded —
 which Accounted refused as `IDEMPOTENCY_KEY_REUSE`, leaving the row `skipped`
@@ -754,15 +789,61 @@ shows NO sync row on `/accounting` (no *Not fed* badge on Transactions, no
 attempt burned), and one sweep tick after the minute passes the sweep's second
 selection feeds it — under the settlement hash if recorded, else the funding
 hash labelled as funding. Dev pins the override at 0
-(`.env.dev.example`) so nothing defers there; production keeps the 15-minute
+(`.env.dev.example`), so the #3767 grace never defers there. The #4876
+receipt wait (2 minutes, no override) still applies, so an x402 payment with
+no merchant receipt is fed one sweep tick after it; production keeps the 15-minute
 default (leave the override unset outside the deterministic QA scenario —
 see `agent-qa.md` § `x402-delegation-3009-grace-resume`).
 
 **The sweep's second selection.** The due query gained a UNION arm for
 payments that have an evidence row but NO sync row yet (evidence recorded
 before the destination existed, or a previous feed that died before
-claiming): same connection/auto-feed/FX gates, eip3009 only, no recorded
-settlement, no pin, no sync row, and outside the same grace window.
+claiming): same connection/auto-feed/FX gates; eip3009 or erc7710 (#4876);
+no booked-hash pin; no sync row; past the receipt window (`$8`, #4876). An
+eip3009 payment must also have its settlement recorded or the #3767 grace
+passed. Before #4876 the arm took only eip3009 payments with no recorded
+settlement, past the grace, and that case still has no horizon. The rows
+#4876 added (erc7710, and eip3009 with its settlement recorded) are taken only
+inside `MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS` (7 days). A row the feed keeps
+declining for a reason the query does not mirror (an entitlement, a
+ledger-currency FX gap) therefore cannot occupy the sweep's batch for ever,
+and a deploy does not push old history into closed periods. An older payment
+is fed by Sync now or the backfill.
+
+## The merchant receipt: wait, then push (#4876)
+
+**Owner decision 1 of 2026-11-17, #4874.** An x402 payment's merchant receipt
+— the document whose product lines and VAT the underlag prints — reaches Haven
+seconds AFTER settlement. The SDK posts it right after the settlement evidence.
+A pushed voucher is never edited (#3767 decision 2), and the #4824 pin is not
+reopened, so the feed waits for the receipt instead.
+
+**The wait.** An eip3009 or erc7710 payment with no merchant receipt, and no
+booked-hash pin, is held before the claim for `MERCHANT_RECEIPT_WAIT_MIN` (2
+minutes, `domain/merchant-receipt-wait.ts`). It is held exactly like the
+#3767 deferral: no sync row, no attempt burned, and manual Sync now and the
+backfill wait too. Direct, MPP and retired-rail payments carry no settlement
+scheme, never receive a receipt, and are not held.
+
+**What releases it.**
+
+- **The receipt arrives.** Capturing it (`POST /machine-payments/:id/merchant-receipt`)
+  runs the three late attaches first and then feeds the payment. A payment
+  still held is pushed once, lines included. A payment already pushed gets the
+  merchant's PDF attached and the feed then no-ops.
+- **The receipt never arrives.** The sweep's second selection also takes an
+  eip3009 or erc7710 payment with no sync row once the receipt window has
+  passed. An eip3009 payment also needs its settlement recorded or the
+  #3767 grace passed. It is pushed with `VAT not stated by the
+  merchant`. A payment older than the sweep horizon (7 days) is left to Sync
+  now and the backfill.
+- **The receipt arrives after the first render.** Where the destination pins
+  (Accounted, Igdrasil), the pin keeps the first render's bytes, so the underlag still says `VAT not stated by the merchant`.
+  The merchant's PDF is late-attached as before.
+
+**Old pins.** A pin written before #4876 has no `receiptLines` marker. Its
+retries render no receipt block at all, so a retry straddling the deploy keeps
+its bytes. New pins carry `receiptLines: true`.
 
 ## Ops signals: log events, counters, alert thresholds
 
@@ -1069,8 +1150,8 @@ gated locally BEFORE any request.
 
 **The render inputs are pinned at the first render (#4824).** The underlag is
 rendered from live reads, and four of them can be written after a payment's
-first render: the merchant receipt (the seller block **and** the transaction
-kind), the delivery reference, the purchase group / parent receipt, and the
+first render: the merchant receipt (the seller block, the transaction kind,
+and since #4876 the receipt lines and VAT), the delivery reference, the purchase group / parent receipt, and the
 catalog country. Accounted's idempotency key derives from the payment id
 alone, so a retry that rendered different bytes was refused as
 `IDEMPOTENCY_KEY_REUSE` and the row ended `skipped` although the document was
@@ -1099,9 +1180,9 @@ merchant-invoice row is never claimed, rewritten or counted — it is written
 once, only after the sha256 proof, by `recordMerchantInvoiceSync`). The
 second upload is best-effort like the Fortnox attachment (#956): a failure is
 a NOTE on the pushed underlag row, never a failed row — re-pushing to reach
-the invoice would re-file the underlag. Because the x402 merchant receipt
-arrives at the settle retry — seconds AFTER the funding-confirmation push —
-the capture route also late-attaches (`lateAttachAccountedMerchantReceipt`,
+the invoice would re-file the underlag. The feed normally waits for the x402
+merchant receipt (#4876). A receipt that arrives after the receipt wait has run
+out, or after a push made before #4876, is late-attached by the capture route (`lateAttachAccountedMerchantReceipt`,
 the #956 Fortnox shape): pushed underlag + no recorded row yet → upload +
 record; anything else → no-op. Idempotent from three directions: the ledger
 key, the idempotency key, and the row check.
@@ -1390,8 +1471,8 @@ merchant invoice fetched by URL that is byte-identical across two payments (a
 static subscription PDF, say) answers 200 with the FIRST payment's document,
 so both payments' `merchantInvoiceRef` name one Igdrasil document. The
 underlag is per payment and never collides. A merchant receipt that arrives
-after the push — the normal x402 order, since the push fires at funding
-confirmation and the receipt at the settle retry — is late-attached
+after the push — one that came after the #4876 receipt wait ran out, or after
+a push made before #4876 — is late-attached
 (`lateAttachIgdrasilMerchantReceipt`, #4521, the Accounted shape): the capture
 route calls it fire-and-forget next to the Fortnox and Accounted ones. A pushed
 Igdrasil underlag row and no recorded merchant-invoice row → upload the

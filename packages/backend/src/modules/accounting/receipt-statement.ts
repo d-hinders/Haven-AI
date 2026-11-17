@@ -35,6 +35,8 @@
  * #4876's decision, and nothing here treats the figures as verified.
  */
 
+import { getChain } from '../../domain/chains.js'
+
 /** The most lines read off one receipt; more and the receipt is not stated. */
 export const RECEIPT_STATEMENT_MAX_LINES = 50
 /** The longest line description read, in characters, after trimming. */
@@ -209,4 +211,76 @@ export function compareStatedTotal(
   if (stated === null) return 'not_comparable'
   const settledFixed = BigInt(amountAtomic) * 10n ** BigInt(SCALE - decimals)
   return stated === settledFixed ? 'matches' : 'differs'
+}
+
+/**
+ * #4876: the settled token's decimals from the chain registry, or null when
+ * the chain or the token is unknown — which makes the total check
+ * `not_comparable` rather than a guess.
+ */
+export function tokenDecimalsFor(chainId: number | null, tokenSymbol: string | null): number | null {
+  if (chainId == null || tokenSymbol == null) return null
+  try {
+    const token = Object.values(getChain(chainId).tokens).find((t) => t.symbol === tokenSymbol)
+    return token ? token.decimals : null
+  } catch {
+    return null
+  }
+}
+
+/** The statement plus its total check, as both the entry and the document carry it. */
+export type CheckedReceiptStatement = ReceiptStatement & { totalCheck: ReceiptTotalCheck }
+
+/**
+ * #4876: the receipt's statement and how its total compares with what Haven
+ * settled — one function, so the accounting entry (#4875) and the rendered
+ * document (#4876) can never disagree about either.
+ */
+export function checkedReceiptStatement(
+  inlineJson: unknown,
+  settled: { token: string | null; amountAtomic: string | null; chainId: number | null },
+): CheckedReceiptStatement | null {
+  const statement = receiptStatementFrom(inlineJson)
+  if (statement === null) return null
+  return {
+    ...statement,
+    totalCheck: compareStatedTotal(statement, {
+      token: settled.token,
+      amountAtomic: settled.amountAtomic,
+      decimals: tokenDecimalsFor(settled.chainId, settled.token),
+    }),
+  }
+}
+
+/**
+ * #4876: the label every rendering of the statement carries (owner decision 3
+ * of 2026-11-17 on #4874). The receipt is relayed by the agent and is not
+ * signed by the merchant, so it is never "stated by the merchant".
+ */
+export const RECEIPT_STATEMENT_LABEL = "On the merchant's receipt, as reported by the agent"
+
+/** #4876: the line a protocol payment's document carries when no lines are stated. */
+export const VAT_NOT_STATED = 'VAT not stated by the merchant'
+
+/**
+ * #4876: fold merchant text to plain ASCII for the two filing outputs (the
+ * underlag PDF and the Fortnox comment), which accept nothing else. Latin
+ * letters keep their base form (`å` → `a`, `é` → `e`, `ß` → `ss`, `ł` → `l`,
+ * `Œ` → `OE`), compatibility forms their plain spelling (`ﬁ` → `fi`), and
+ * dashes and quotes their ASCII twins, so "Molnlagring — 1 månad, engångsköp" reads
+ * "Molnlagring - 1 manad, engangskop" rather than a row of `?`. What has no
+ * ASCII form still becomes `?`, as the renderer always did.
+ */
+export function asciiFold(text: string): string {
+  return text
+    .replace(/[‐-―−]/g, '-')
+    .replace(/[‘’‚′]/g, "'")
+    .replace(/[“”„″]/g, '"')
+    .replace(/ /g, ' ')
+    .replace(/ß/g, 'ss')
+    .replace(/[ÆæŒœ]/g, (c) => ({ Æ: 'AE', æ: 'ae', Œ: 'OE', œ: 'oe' })[c] ?? c)
+    .replace(/[ØøŁłĐđÞþðı]/g, (c) => ({ Ø: 'O', ø: 'o', Ł: 'L', ł: 'l', Đ: 'D', đ: 'd', Þ: 'Th', þ: 'th', ð: 'd', ı: 'i' })[c] ?? c)
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\x20-\x7e]/g, '?')
 }

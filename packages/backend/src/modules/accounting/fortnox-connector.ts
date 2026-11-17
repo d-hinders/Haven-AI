@@ -22,6 +22,7 @@ import type {
   VerifyOutcome,
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import { RECEIPT_STATEMENT_LABEL, VAT_NOT_STATED, asciiFold, receiptStatementFrom } from './receipt-statement.js'
 import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 
@@ -179,7 +180,7 @@ export function feedDescription(tx: FeedTransaction): string {
     if (!tx.txHash) return null
     return tx.txHashIsFunding ? `Tx ${tx.txHash} (funding leg).` : `Tx ${tx.txHash}.`
   })()
-  const parts = [
+  const head = [
     'Agent payment, already settled on-chain.',
     // #3917: scaled token amount first, the atomic figure as a labelled
     // annotation — same reasoning as the receipt underlag's Amount line.
@@ -191,11 +192,72 @@ export function feedDescription(tx: FeedTransaction): string {
     // before the booked hash for the same reason the hash is placed before
     // `Resource`: the 512-character slice cuts from the end.
     tx.description ? `${fortnoxSafeText(tx.description)}.` : null,
-    bookedTx,
-    resourceHost ? `Resource ${resourceHost}.` : null,
-    `Haven payment ${tx.paymentId}.`,
-  ].filter(Boolean)
-  return parts.join(' ').slice(0, 512)
+  ]
+  const resource = resourceHost ? `Resource ${resourceHost}.` : null
+  const reference = `Haven payment ${tx.paymentId}.`
+  // #4876: the receipt part (label, stated VAT, product names) goes after the
+  // kind line and BEFORE the booked hash, and it is the part cut to fit: its
+  // budget is what is left of 512 once everything else is placed, so the
+  // final slice never reaches the booked hash or `Haven payment <id>`. Only
+  // the product names are ever cut; when even the label and the VAT do not
+  // fit, the `Resource` host — which the attached document carries anyway —
+  // gives up its room first.
+  const receipt = fortnoxReceiptText(tx)
+  const build = (withResource: boolean): string | null => {
+    const tail = [bookedTx, withResource ? resource : null, reference]
+    const fixed = [...head, ...tail].filter(Boolean).join(' ')
+    const fitted = receipt == null ? null : fitReceiptText(receipt, 512 - fixed.length - 1)
+    if (receipt != null && fitted == null) return null
+    return [...head, fitted, ...tail].filter(Boolean).join(' ')
+  }
+  const comment = build(true) ?? build(false) ?? [...head, bookedTx, reference].filter(Boolean).join(' ')
+  return comment.slice(0, 512)
+}
+
+/**
+ * #4876: fit the receipt part into `budget` characters. The label and the VAT
+ * (everything before " Product") are kept whole or not at all; only the
+ * product names are cut, at a word, marked with "..". Null when even the
+ * label and the VAT do not fit.
+ */
+function fitReceiptText(text: string, budget: number): string | null {
+  if (text.length <= budget) return text
+  const productAt = text.indexOf(' Product ')
+  const keep = productAt === -1 ? text.length : productAt
+  if (budget < keep) return null
+  // At least one character of a product name must survive the cut, else the
+  // product part is left out rather than sent as a bare "Product..".
+  const firstName = keep + ' Product '.length
+  const cut = text.slice(0, budget - 2)
+  const atWord = cut.lastIndexOf(' ')
+  const trimmed = (atWord > firstName ? cut.slice(0, atWord) : cut).replace(/[ ,]+$/, '')
+  return trimmed.length > firstName ? `${trimmed}..` : text.slice(0, keep)
+}
+
+/**
+ * #4876: the merchant-receipt part of the comment — the product names and the
+ * stated VAT, under the statement's label (owner decision 3 of 2026-11-17 on
+ * #4874), folded to the characters the field accepts: the apostrophe and `%`
+ * cannot be sent, so "merchant's" reads "merchants" and the rate reads "pct".
+ * Only the MERCHANT's VAT treatment is named. A protocol payment whose receipt
+ * states no lines says "VAT not stated by the merchant"; a direct payment
+ * (no resource URL) says nothing — it is a transfer, not a purchase.
+ */
+function fortnoxReceiptText(tx: FeedTransaction): string | null {
+  if (!tx.resourceUrl) return null
+  const statement = receiptStatementFrom(tx.merchantReceipt?.inlineJson ?? null)
+  if (statement === null) return `${VAT_NOT_STATED}.`
+  const label = fortnoxSafeText(RECEIPT_STATEMENT_LABEL.replace("merchant's", 'merchants'))
+  const products = statement.lines
+    .map((l) => fortnoxSafeText(asciiFold(l.description)))
+    .filter((name) => name.length > 0)
+    .join(', ')
+  const cur = fortnoxSafeText(statement.currency)
+  const vat = `VAT ${statement.totals.vatPercent} pct ${statement.totals.vatAmount} ${cur}`
+  const treatment = statement.merchantVatTreatment
+    ? `, merchant VAT treatment ${fortnoxSafeText(statement.merchantVatTreatment.replace(/_/g, ' '))}`
+    : ''
+  return `${label}. ${vat}${treatment}.${products ? ` Product ${products}.` : ''}`
 }
 
 async function fortnoxGet<T>(accessToken: string, path: string, fetchImpl: typeof fetch): Promise<T> {

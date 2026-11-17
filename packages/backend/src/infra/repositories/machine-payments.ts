@@ -1359,6 +1359,12 @@ export interface AccountingUnderlagPin {
   parentReceiptRef: string | null
   /** The catalog country at the first render (#3918). */
   merchantCountry: string | null
+  /**
+   * #4876: true when the first render showed the merchant-receipt block (lines
+   * and VAT, or "VAT not stated by the merchant"). A pin written before #4876
+   * lacks it, and its retries render no block, so their bytes never move.
+   */
+  receiptLines?: boolean
 }
 
 export const PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL = `UPDATE payment_intents

@@ -171,11 +171,11 @@ function stripeSectionsText(inv: DemoInvoiceJson, locale: MerchantLocale): strin
     out +=
       locale === 'sv'
         ? `STRIPE-REFERENS\n` +
-          `  Väntar — betalningen registreras i Stripe efter köpet.\n` +
+          `  Väntar — betalningen skickas till Stripe efter köpet.\n` +
           `  Sök med fakturanummer: ${ref.sok_med.fakturanummer}\n` +
           `  eller transaktions-hash: ${ref.sok_med.transaktions_hash}\n\n`
         : `STRIPE REFERENCE\n` +
-          `  Pending — the payment is recorded in Stripe after the purchase.\n` +
+          `  Pending — the payment is sent to Stripe after the purchase.\n` +
           `  Find it by receipt number: ${ref.sok_med.fakturanummer}\n` +
           `  or transaction hash: ${ref.sok_med.transaktions_hash}\n\n`
   }

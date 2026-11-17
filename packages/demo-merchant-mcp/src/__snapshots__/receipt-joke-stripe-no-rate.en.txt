@@ -40,7 +40,7 @@ BLOCKCHAIN REFERENCE
   Status: Paid
 
 STRIPE REFERENCE
-  Pending — the payment is recorded in Stripe after the purchase.
+  Pending — the payment is sent to Stripe after the purchase.
   Find it by receipt number: FAK-2026-00099
   or transaction hash: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
 

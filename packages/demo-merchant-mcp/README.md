@@ -140,8 +140,11 @@ through `productSettlementKind`; #4850). There are two:
 | Readiness gate on the merchant's gas wallet | applies | exempt |
 | After a failure | EIP-3009: the pre-submit `authorizationState` read (#1519); ERC-7710: the pinned enforcer's `spentMap` check (#1515) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
 
-In both, the merchant is paid in one transfer from the payer straight to
-`MERCHANT_ADDRESS`; Haven is not a party to it. (For a Haven agent paying with
+In both, the merchant is paid in one transfer from the payer straight to the
+product's receiving address: `MERCHANT_ADDRESS`, or the Stripe deposit address
+for the joke when Stripe recording is on (#4853). Haven takes part only as the
+seller of its own demo products; no Haven wallet-platform account, delegation
+or backend key is in that transfer. (For a Haven agent paying with
 EIP-3009, the payer is its delegate wallet, which Haven's bridge funded from the
 agent's budget just before — that funding leg is Haven's, not the merchant's.) A product's receiving address can
 differ from `MERCHANT_ADDRESS` (#4850), and one does: the joke is paid to the
@@ -845,8 +848,11 @@ texts, before the closing thank-you box:
 
 The rate is CoinGecko's spot price for USD Coin in SEK, the source Haven's
 backend records its own SEK values from. `src/sek-rate.ts` reads it at startup
-and every 10 minutes in the background, only while Stripe recording is on; the
-purchase path only reads the cached value. A rate older than an hour, or a
+and every 30 minutes in the background, only while Stripe recording is on; the
+purchase path only reads the cached value. The interval is above Railway's
+idle threshold, so the refresh does not keep a sleeping merchant awake; a woken
+merchant restarts and reads the rate again, and a purchase in the first moments
+after a cold start may get "not available". A rate older than an hour, or a
 merchant that has not read one yet, gives "not available". A failed read keeps
 the previous rate until it ages out.
 
@@ -854,7 +860,7 @@ Every other receipt — every other product, the joke with Stripe off, and a
 payment that paid the previous deposit address — is unchanged: no new keys and
 the same text, byte for byte (`src/receipt-fixtures.test.ts`).
 
-### Seller details (#4856)
+## Seller details (#4856)
 
 The seller block comes from configuration. With no `MERCHANT_SELLER_*`
 variable set it is the demo seller (`Haven Demo AB`, with its demo bank
@@ -862,8 +868,9 @@ details), exactly as before. To carry a real seller, set all four of
 `MERCHANT_SELLER_NAME`, `MERCHANT_SELLER_ADDRESS`, `MERCHANT_SELLER_ORG_NR` and
 `MERCHANT_SELLER_MOMS_NR`, and optionally `MERCHANT_SELLER_IBAN` and
 `MERCHANT_SELLER_BIC`. A configured seller never inherits the demo's bank
-details. With some but not all four required ones set, the merchant warns,
-naming the missing variables, and keeps the demo seller. The keys stay `name`,
+details. With any `MERCHANT_SELLER_*` set but one of the four required ones
+missing (`IBAN` or `BIC` alone included), the merchant warns, naming the missing
+variables, and keeps the demo seller. The keys stay `name`,
 `org_nr` and `moms_nr`: Haven's accounting reads them off the receipt
 (`packages/backend/src/modules/accounting/receipt-underlag.ts`). The startup
 banner names the seller and whether it is the demo one.

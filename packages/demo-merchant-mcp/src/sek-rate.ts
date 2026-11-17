@@ -22,8 +22,12 @@ export const SEK_RATE_SOURCE = 'coingecko_spot' as const
 /** CoinGecko's public simple-price endpoint for USDC in SEK. */
 export const SEK_RATE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=sek'
 
-/** How often the cache is refreshed. */
-export const SEK_RATE_REFRESH_MS = 10 * 60_000
+/**
+ * How often the cache is refreshed. Well above Railway's ~10-minute idle
+ * threshold, so the refresh alone does not keep a sleeping service awake; a
+ * woken service restarts and reads a fresh rate at startup (`start()`).
+ */
+export const SEK_RATE_REFRESH_MS = 30 * 60_000
 
 /**
  * How old a cached rate may be and still be printed. Past this the receipt

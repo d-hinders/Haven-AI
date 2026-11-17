@@ -39,7 +39,7 @@ BLOCKKEDJEREFERENS
   Status: Betald
 
 STRIPE-REFERENS
-  Väntar — betalningen registreras i Stripe efter köpet.
+  Väntar — betalningen skickas till Stripe efter köpet.
   Sök med fakturanummer: FAK-2026-00099
   eller transaktions-hash: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
 

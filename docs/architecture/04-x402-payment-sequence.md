@@ -21,6 +21,7 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
+  - packages/demo-merchant-mcp/src/products.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-protocol.ts

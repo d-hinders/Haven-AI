@@ -21,6 +21,7 @@ covers:
   - packages/backend/src/modules/accounting/receipt-underlag.ts
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
+  - packages/signer/src/siwx.ts
 last-verified: "2026-11-17"
 ---
 
@@ -457,6 +458,12 @@ export interface ConsumedPaymentRecord {
   /** Generated once, at reservation; the sale record's `merchant_reference`. */
   merchantReference: string
   /**
+   * Random, generated at reservation and returned only to the request that
+   * reserved. It is what lets that request, and no other, make the first
+   * forward without a proof. Never sent to the buyer.
+   */
+  reservationToken: string
+  /**
    * SHA-256 of the full signed authorization as presented: from, to, value,
    * validAfter, validBefore, nonce and the signature.
    */
@@ -487,10 +494,22 @@ export interface ConsumedPaymentStore {
     merchantReference: string
     authorizationDigest: string
     now: string
-  }): Promise<{ reserved: true } | { reserved: false; record: ConsumedPaymentRecord }>
+  }): Promise<
+    { reserved: true; reservationToken: string } | { reserved: false; record: ConsumedPaymentRecord }
+  >
 
-  /** settling or settlement_unknown → settled, with the transaction hash. */
-  markSettled(key: string, input: { txHash: string; settledAt: string }): Promise<void>
+  /**
+   * Record the settlement. With the reserving request's `reservationToken`
+   * (matched in the same conditional update), settling or settlement_unknown
+   * moves straight to forwarding, forwardCount 1: the in-process first
+   * forward, which needs no proof. Without it (a later request resolved the
+   * settlement from the chain), the record becomes settled, and forwarding it
+   * needs a proof.
+   */
+  markSettled(
+    key: string,
+    input: { txHash: string; settledAt: string; reservationToken?: string },
+  ): Promise<'forward' | 'settled'>
 
   /** settling → settlement_unknown: the settle outcome was not learned. */
   markSettlementUnknown(key: string, now: string): Promise<void>
@@ -501,7 +520,11 @@ export interface ConsumedPaymentStore {
    */
   release(key: string): Promise<void>
 
-  /** Atomically move a settled or failed record to forwarding. */
+  /**
+   * Atomically move a settled, failed or stale forwarding record to
+   * forwarding. The core calls it only after it has verified a
+   * SIGN-IN-WITH-X proof from the record's payer; the store checks no proof.
+   */
   beginForwarding(key: string, now: string): Promise<'forward' | 'in_flight' | 'delivered' | 'exhausted'>
 
   markDelivered(key: string, input: { upstreamStatus: number; deliveredAt: string }): Promise<void>
@@ -555,29 +578,54 @@ whatever the body: an unsettled one (`settling`, `settlement_unknown`) with
 **The full authorization is public too.** The signed authorization is in the
 settlement transaction's calldata, so after settlement anyone can rebuild the
 exact header, and a digest match proves nothing about who presents it. What
-the header could still buy is a forward after the first: a retry of a
-`failed` call, or the takeover of a stale `forwarding` one. **Any forward after
-the first therefore requires a `SIGN-IN-WITH-X` header** (CAIP-122, the
-challenge carried in the `upstream_failed_after_settlement` answer) signed by
-the payer address. Without it the answer is 200 `payment_retry_needs_proof`,
-nothing is forwarded and no forward is used. The first forward needs no proof:
-it runs on the request that settled the payment, before the authorization was
-ever public. Haven's signer already signs this proof (`haven_sign_siwx`).
+the header could still buy is a forward: the retry of a `failed` call, the
+takeover of a stale `forwarding` one, or the first forward of a payment whose
+settlement a later request found on the chain. **Exactly one forward needs no
+proof: the one made in-process by the request that holds the reservation.**
+That request settles the payment and calls `markSettled` with its
+`reservationToken`, which moves the record from `settling` (or
+`settlement_unknown`, when it resolved its own lost settle answer within
+`SETTLE_RESOLVE_MS`) straight to `forwarding` in one conditional update. No
+other request ever holds the token, so no other request can make that forward,
+however exactly it rebuilds the header. **Every other forward requires a
+`SIGN-IN-WITH-X` header** (CAIP-122) signed by the record's payer address.
+Without a valid one the answer is 200 `payment_retry_needs_proof` with a
+challenge: nothing is forwarded and no forward is used. Haven's signer already
+signs this proof (`haven_sign_siwx`). A buyer whose client cannot sign it has
+no retry: after its first forward fails, its payment can only be refunded by
+hand from the merchant's log.
+
+**The challenge.** Every answer that can be followed by a retry
+(`upstream_failed_after_settlement`, `payment_retry_needs_proof`,
+`payment_in_flight`) carries a fresh challenge under `sign_in_with_x`, built to
+what Haven's signer accepts (`validateSiwxChallenge` in
+`packages/signer/src/siwx.ts`), or Haven's buyer cannot answer it: the proxy's
+URL is `https`; `domain` is the request URL's host and `uri` has its origin;
+`version` is `1`; `nonce` is alphanumeric, at least 8 characters; `issuedAt` is
+present; `expirationTime` is absolute and at most 300 s away (the signer allows
+30 s of clock skew on top); and `supportedChains` offers the payment's chain as
+`eip155:<chainId>` with type `eip191`. The proxy accepts a proof only for a
+nonce it issued for that payment's key, before the nonce expires, and only
+once: issued nonces are kept in the same SQLite file until they expire. A proof
+whose recovered address is not the record's `payer` is answered
+`payment_retry_needs_proof` with a new challenge.
 
 ### The states
 
 | State | Meaning | Next states |
 |---|---|---|
-| `settling` | Reserved; verify and settle are in progress. | `settled`, `settlement_unknown`, removed |
-| `settlement_unknown` | The settle call's outcome was not learned (a timeout, a lost answer) and chain recovery has not yet found a transaction. | `settled`, removed |
-| `settled` | Settlement is confirmed and the transaction hash is recorded. The call has not been forwarded. | `forwarding` |
+| `settling` | Reserved; verify and settle are in progress. | `forwarding` (settled by the reserving request), `settled`, `settlement_unknown`, removed |
+| `settlement_unknown` | The settle call's outcome was not learned (a timeout, a lost answer) and chain recovery has not yet found a transaction. | `forwarding` (resolved by the reserving request), `settled`, removed |
+| `settled` | Settlement was confirmed by a request that does not hold the reservation (chain resolution after a restart, or by a later request), and the transaction hash is recorded. The call has not been forwarded; forwarding it needs a proof. | `forwarding` |
 | `forwarding` | The upstream call is in flight. `forwardingStartedAt` bounds it. | `delivered`, `failed` |
 | `delivered` | The upstream gave a complete answer the proxy can pass on (below) and the proxy wrote it to the buyer. | none |
 | `failed` | The upstream call failed. The payment may be served again. | `forwarding`, `exhausted` |
 | `exhausted` | The payment was forwarded `MAX_FORWARDS_PER_PAYMENT` times (3) and failed each time. | none |
 
-`beginForwarding` is the atomic transition. It returns `forward` when the
-record was `settled`, or `failed` with `forwardCount` below the cap, or
+`markSettled` with the reservation token is the atomic transition for the
+reserving request's first forward. `beginForwarding` is the atomic transition
+for every other forward, and the core calls it only once a proof has verified.
+It returns `forward` when the record was `settled`, or `failed` with `forwardCount` below the cap, or
 `forwarding` and older than the **takeover threshold** (it first marks that
 record `failed`); it increments `forwardCount`. The takeover threshold is
 `UPSTREAM_TIMEOUT_MS` plus 30 s, strictly longer than any call can run, so a
@@ -627,17 +675,17 @@ paid: the record is released and the payment is refused as unsettled (402
 | Situation | Answer |
 |---|---|
 | Unknown key | Reserve, verify, settle. An unknown key is never served without a settlement. |
-| `settling` or `settlement_unknown` after a restart | Resolve from the chain as above: forward when the event is found; answer 503 `settlement_unknown` while the authorization is still valid and no event is found; 402 `settle_failed` after `validBefore`. |
-| `settled` after a restart | Forward. The settlement is recorded and the call was never made. |
-| `forwarding` after a restart, older than the takeover threshold | Mark `failed`, then forward (within the cap). The process that was forwarding is gone and no call runs past its deadline. |
+| `settling` or `settlement_unknown` after a restart | Resolve from the chain as above. When the event is found the record becomes `settled` (the reservation's holder is gone), and the request is forwarded only with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. Answer 503 `settlement_unknown` while the authorization is still valid and no event is found; 402 `settle_failed` after `validBefore`. |
+| `settled` after a restart | Forward with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. The settlement is recorded and the call was never made. |
+| `forwarding` after a restart, older than the takeover threshold | Mark `failed`, then forward (within the cap) with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. The process that was forwarding is gone and no call runs past its deadline. |
 | `forwarding` after a restart, younger than the takeover threshold | Answer `payment_in_flight` (200) with `retry_after_seconds` set to the remaining time. |
 | `delivered` after a restart | Answer `payment_already_delivered` (200): the payment already bought its one call. |
-| `failed` after a restart | Forward, within the cap. |
+| `failed` after a restart | Forward, within the cap, with a valid `SIGN-IN-WITH-X` proof, else 200 `payment_retry_needs_proof`. |
 | `exhausted` | Answer `payment_exhausted` (200). |
 
 **The at-least-once window.** A call that completed upstream just before a
 crash, before `markDelivered` ran, is recorded `forwarding` and is forwarded
-again after the takeover threshold. The merchant may pay its upstream twice for
+again after the takeover threshold, when the payer presents it with a proof. The merchant may pay its upstream twice for
 that payment. This is accepted: the alternative, never retrying a call whose
 outcome was lost, would leave a buyer who paid with nothing.
 
@@ -859,7 +907,7 @@ end of the table. The body's `error` field carries the outcome:
 | Same payment presented while a call is in flight | 200 | `payment_in_flight` |
 | Same payment presented after its call was delivered | 200 | `payment_already_delivered` |
 | The payment's three forwards all failed | 200 | `payment_exhausted` |
-| A forward after the first (a retry, or a stale takeover) without a valid `SIGN-IN-WITH-X` from the payer (section 6) | 200 | `payment_retry_needs_proof`, with the challenge; nothing forwarded, no forward used |
+| Any forward other than the reserving request's first (a retry, a stale takeover, a settlement found on the chain by a later request) without a valid `SIGN-IN-WITH-X` from the payer (section 6) | 200 | `payment_retry_needs_proof`, with the challenge; nothing forwarded, no forward used |
 | Header matches a known key but not its `authorizationDigest`, or the authorization was used in a transaction that did not pay this merchant | 402 | `payment_mismatch`: not this payment, so a refusal; the record is untouched |
 | Payment settled for a different product | 200 | `payment_used_for_other_product` |
 | A settled payment whose re-presented body fails the body checks | 200 | `bad_request_after_settlement`; not forwarded, no forward used |

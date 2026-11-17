@@ -101,12 +101,20 @@ vi.mock('../../infra/prices.js', () => ({
   getTokenPrice: vi.fn(async () => ({ usd: 1, eur: 0.9, sek: 10 })),
 }))
 // #992: aggregation/enrichment/caching moved to src/modules/transactions/.
-vi.mock('../../modules/transactions/index.js', () => ({
-  ...transactionMocks,
-  // #4709: the route reads the fixed "Since …" word from this barrel; the real
-  // function is spread in above so the word is the production word.
-  sinceTimeWord,
-}))
+vi.mock('../../modules/transactions/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/index.js')>()
+  return {
+    ...transactionMocks,
+    // #4709: the route reads the fixed "Since …" word from this barrel; the
+    // real function rides in so the word is the production word.
+    sinceTimeWord,
+    // #4882: the real naming module — its loader reads through the mocked
+    // `db.js` (each source fail-soft), so the names follow the fixtures.
+    loadRecipientNameIndex: actual.loadRecipientNameIndex,
+    recipientAddressOf: actual.recipientAddressOf,
+    recipientNameWithoutHost: actual.recipientNameWithoutHost,
+  }
+})
 
 import dashboardRoutes from '../dashboard.js'
 

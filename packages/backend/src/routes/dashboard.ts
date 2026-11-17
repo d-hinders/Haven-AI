@@ -21,7 +21,7 @@ import {
   type DashboardSpendGroupRow,
   type RefusalBucketRow,
 } from '../infra/repositories/dashboard.js'
-import { listBalanceByDayForUser, listReceiptMerchantNamesForUser } from '../infra/repositories/analytics.js'
+import { listBalanceByDayForUser } from '../infra/repositories/analytics.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
 import { getTokenPrice } from '../infra/prices.js'
 import { currentPeriodBounds } from '../infra/chain/delegation-budget-reader.js'
@@ -46,6 +46,9 @@ import {
   fetchAccountTransactions,
   mergeX402Transactions,
   resolveTransactionCurrency,
+  loadRecipientNameIndex,
+  recipientAddressOf,
+  recipientNameWithoutHost,
 } from '../modules/transactions/index.js'
 
 // ── #3803: the 7/30-day spend block ──────────────────────────────────────────
@@ -571,25 +574,15 @@ export default async function dashboardRoutes(
       0,
     )
 
-    // Counterparty names: contacts win, then merchant receipts (analytics'
-    // label order) — but only as `merchantName` beside the raw fields.
-    const merchantNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
-    const labelAddresses = [
-      ...new Set(
-        [merchants.top_merchant_address, ...lastPayments.map((r) => r.merchant_address)].filter(
-          (a): a is string => a != null,
-        ),
-      ),
-    ]
-    const receiptNames =
-      labelAddresses.length > 0
-        ? await listReceiptMerchantNamesForUser(sub, labelAddresses)
-        : new Map<string, string>()
-    const merchantNameFor = (address: string | null): string | null => {
-      if (!address) return null
-      const key = address.toLowerCase()
-      return merchantNames.get(key) ?? receiptNames.get(key) ?? null
-    }
+    // #4882: counterparty names in the ONE naming order
+    // (`counterparty-name.ts`: own account, contact, catalog, receipt), as
+    // `merchantName` beside the raw fields — the resource host rides beside
+    // it as `x402ResourceUrl`, so the name sources only. The top merchant is
+    // keyed across chains (`chainId: null`); a last payment has its chain.
+    const labelAddresses = [merchants.top_merchant_address, ...lastPayments.map((r) => r.merchant_address)]
+    const overviewNames = await loadRecipientNameIndex(sub, labelAddresses, { contacts })
+    const merchantNameFor = (address: string | null, chainId: number | null = null): string | null =>
+      address ? recipientNameWithoutHost(overviewNames, { address, chainId, x402ResourceUrl: null }) : null
 
     const topMerchant7d = merchants.top_merchant_key
       ? {
@@ -796,30 +789,25 @@ export default async function dashboardRoutes(
 
     // #3824: the grouped activity rows — server-side over the SAME feed the
     // preview slices, so the counts are not bounded by any client window.
-    // Merchant labels come from the same two lookups analytics resolves them
-    // from (address-book contacts, then receipt merchant names); one read of
-    // each per request, over the counterparty addresses the feed carries.
-    const merchantAddresses = Array.from(
-      new Set(
-        enrichedTransactions
-          .filter((tx) => tx.direction === 'out' && tx.to)
-          .map((tx) => tx.to.toLowerCase()),
-      ),
+    // #4882: each group's recipient is named in the ONE naming order, from
+    // one read of each source over the counterparty addresses the feed
+    // carries (`recipientAddressOf`, the shared lookup key). Fail-soft by
+    // source (`loadRecipientNameIndex`): the labels are display garnish, so a
+    // read outage serves the raw addresses rather than 500-ing the overview.
+    // The own-account step reads the dashboard's own account set.
+    const activityNames = await loadRecipientNameIndex(
+      sub,
+      enrichedTransactions.map((tx) => recipientAddressOf(tx)),
+      { accounts, contacts: await listContactsForUser(sub).catch(() => []) },
     )
-    // Fail-soft on purpose: the labels are display garnish on top of the
-    // grouped rows — a contacts or receipt-read outage must not 500 the
-    // overview, it just serves the raw addresses (the same degradation the
-    // CSV export has always had when a lookup came back empty). Named with
-    // the activity- prefix because #3803's route body already reads the same
-    // two repositories for ITS labels — different address sets, different
-    // failure posture, kept separate rather than merged.
-    const [activityContacts, activityReceiptNames] = await Promise.all([
-      listContactsForUser(sub).catch(() => []),
-      listReceiptMerchantNamesForUser(sub, merchantAddresses).catch(() => new Map<string, string>()),
-    ])
-    const contactNames = new Map(activityContacts.map((c) => [c.address.toLowerCase(), c.name]))
-    const resolveMerchantName = (address: string): string | null =>
-      contactNames.get(address.toLowerCase()) ?? activityReceiptNames.get(address.toLowerCase()) ?? null
+    const contactNames = activityNames.contacts
+    const resolveMerchantName = (address: string): string | null => contactNames.get(address.toLowerCase()) ?? null
+    const resolveRecipientName = (tx: EnrichedTransaction): string | null =>
+      recipientNameWithoutHost(activityNames, {
+        address: recipientAddressOf(tx),
+        chainId: tx.chainId,
+        x402ResourceUrl: null,
+      })
 
     // #3944: the feed builder returns the grouped rows BESIDE the two
     // empty-state facts — `hasOlderActivity` (any feed transaction outside
@@ -839,6 +827,7 @@ export default async function dashboardRoutes(
         // other account on both sides — instead of "New recipient" on the
         // send and "Deposit" on the receipt.
         resolveOwnAccountName: ownAccountNameResolver(accounts),
+        resolveRecipientName,
       })
 
     return {
@@ -963,7 +952,7 @@ export default async function dashboardRoutes(
                   source: lastPayment.source,
                   x402ResourceUrl: lastPayment.x402_resource_url,
                   to: lastPayment.to_address,
-                  merchantName: merchantNameFor(lastPayment.merchant_address),
+                  merchantName: merchantNameFor(lastPayment.merchant_address, lastPayment.chain_id),
                 }
               : null,
           },
@@ -1129,18 +1118,17 @@ export default async function dashboardRoutes(
     const row = await findFirstAgentPayment(sub)
     if (!row) return { payment: null }
 
-    // Counterparty naming, the same two sources the overview's merchant slot
-    // reads: contacts win, then merchant receipts. The raw address is a lookup
-    // key only — it never reaches the wire (#3810 rule 4).
+    // #4882: counterparty naming in the ONE naming order, the same as the
+    // overview's merchant slot. The raw address is a lookup key only — it
+    // never reaches the wire (#3810 rule 4).
     let merchantName: string | null = null
     if (row.merchant_address) {
-      const key = row.merchant_address.toLowerCase()
-      const contacts = await listContactsForUser(sub)
-      merchantName = contacts.find((c) => c.address.toLowerCase() === key)?.name ?? null
-      if (merchantName === null) {
-        const receiptNames = await listReceiptMerchantNamesForUser(sub, [row.merchant_address])
-        merchantName = receiptNames.get(key) ?? null
-      }
+      const names = await loadRecipientNameIndex(sub, [row.merchant_address])
+      merchantName = recipientNameWithoutHost(names, {
+        address: row.merchant_address,
+        chainId: row.chain_id ?? null,
+        x402ResourceUrl: null,
+      })
     }
 
     return {

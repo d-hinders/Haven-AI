@@ -586,9 +586,9 @@ export interface MerchantAggregateRow {
   filter_address: string
   /**
    * The x402 resource URL of the merchant's most recent payment in the
-   * window — step 1 of the naming order. `null` when that payment carries
-   * none (the naming module then falls through to own account / contact /
-   * receipt / none).
+   * window — the host step (step 5) of the one naming order (#4882, after
+   * own account, contact, catalog merchant and receipt seller). `null` when
+   * that payment carries none: nothing then follows but "no name".
    */
   resource_url: string | null
   spent_usd: string

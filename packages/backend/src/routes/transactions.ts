@@ -8,7 +8,6 @@ import {
   listBasicAccountsForUser,
 } from '../infra/repositories/transaction-history.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
-import { listReceiptMerchantNamesForUser } from '../infra/repositories/analytics.js'
 import { getChain, isKnownChain } from '../domain/chains.js'
 import {
   aggregateAccountTransactions,
@@ -24,18 +23,19 @@ import {
   serveTimeAmount,
   transactionsToCsv,
   counterpartyAddressesOf,
+  EMPTY_RECIPIENT_NAME_INDEX,
+  loadRecipientNameIndex,
+  recipientAddressOf,
+  resolveRecipientName,
+  type EnrichedTransaction,
   type ParsedTokenFilter,
+  type RecipientNameIndex,
   type SmartAccountRow,
   type TransactionSearchIndex,
 } from '../modules/transactions/index.js'
 import type { ListScope } from '../modules/transactions/index.js'
 import { refuseCsvExportOverCap, sendCsvExport } from '../domain/csv.js'
 import { ETH_ADDRESS_RE } from '@haven_ai/core'
-
-/** Own-account name lookup key — address is case-insensitive, chain is not. */
-function accountNameKey(address: string, chainId: number): string {
-  return `${address.toLowerCase()}:${chainId}`
-}
 
 /**
  * The bounds (`minimum`/`maximum`) and the defaults are the spec's, enforced
@@ -63,32 +63,32 @@ function parseFreshFlag(value: string | undefined): boolean {
 }
 
 /**
- * #4095: the name sources search matches against, resolved BEFORE filtering
- * — the whole point of the parameter. Contacts win, then receipt merchant
- * names (the dashboard's label order); the user's OWN account names ride the
- * FULL account list, not the filtered scope, so a search for another of the
- * user's accounts finds the internal transfer even when the feed is scoped
- * to one account. The receipt read is caught, not awaited bare: an outage
- * there must not 500 the feed — an unnamed merchant just stops matching by
- * receipt name (the dashboard's posture, verbatim).
+ * #4095/#4882: the recipient-name index search matches against and the rows
+ * are named from, resolved BEFORE filtering — the whole point of the search
+ * parameter. One read of each name source (`loadRecipientNameIndex`,
+ * fail-soft by source: an outage must not 500 the feed). The user's OWN
+ * account names ride the FULL account list, not the filtered scope, so a
+ * search for another of the user's accounts finds the internal transfer even
+ * when the feed is scoped to one account.
  */
-async function buildSearchIndex(
+async function buildRecipientNameIndex(
   sub: string,
   allAccounts: SmartAccountRow[],
-  enriched: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>>,
-): Promise<TransactionSearchIndex> {
-  const [contacts, receiptNames] = await Promise.all([
-    listContactsForUser(sub),
-    listReceiptMerchantNamesForUser(sub, counterpartyAddressesOf(enriched)).catch(
-      () => new Map<string, string>(),
-    ),
-  ])
+  rows: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>>,
+  contacts?: Awaited<ReturnType<typeof listContactsForUser>>,
+): Promise<RecipientNameIndex> {
+  return loadRecipientNameIndex(sub, counterpartyAddressesOf(rows), {
+    accounts: allAccounts,
+    ...(contacts ? { contacts } : {}),
+  })
+}
+
+/** The naming order's target for one transaction row. */
+function recipientTargetOf(tx: EnrichedTransaction) {
   return {
-    contactNames: new Map(contacts.map((c) => [c.address.toLowerCase(), c.name])),
-    receiptNames,
-    accountNames: new Map(
-      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
-    ),
+    address: recipientAddressOf(tx),
+    chainId: tx.chainId,
+    x402ResourceUrl: tx.x402ResourceUrl ?? null,
   }
 }
 
@@ -238,7 +238,8 @@ export default async function transactionRoutes(
     // #4095: names resolve BEFORE filtering, server-side — search matches
     // what the row shows, and the row's names live here now.
     const searchTerm = request.query.search?.trim() ?? ''
-    const searchIndex = searchTerm ? await buildSearchIndex(sub, allAccounts, folded) : undefined
+    const searchNames = searchTerm ? await buildRecipientNameIndex(sub, allAccounts, folded) : undefined
+    const searchIndex: TransactionSearchIndex | undefined = searchNames ? { names: searchNames } : undefined
     const filtered = filterEnrichedTransactions(folded, {
       agentId: request.query.agentId,
       tokenFilter,
@@ -252,6 +253,15 @@ export default async function transactionRoutes(
     // #2870: the accounting badge rides the PAGE, not the whole feed — one
     // ledger query per response, and none for an unentitled account.
     const enrichedPage = await enrichTransactionsWithAccounting(sub, paginated, request.log)
+    // #4882: every row carries its recipient name in the ONE naming order,
+    // and the step that produced it — new optional fields a client may
+    // ignore. The search index already covers the page when a term was sent;
+    // otherwise one read over the page's own addresses.
+    const pageNames = searchNames ?? (await buildRecipientNameIndex(sub, allAccounts, paginated))
+    const namedPage = enrichedPage.map((tx) => {
+      const named = resolveRecipientName(pageNames, recipientTargetOf(tx))
+      return { ...tx, recipientName: named.label, recipientNameSource: named.label === null ? null : named.kind }
+    })
     // #3824: rows WITHOUT book-time fiat gain a serve-time amount at today's
     // rate, in the user's preferred currency — priced AFTER the shared
     // enrichment helper, on the JSON route only (the CSV export above stays
@@ -261,7 +271,7 @@ export default async function transactionRoutes(
     // never 0. Only the PAGE is priced: the rows that leave are the rows
     // that carry the fields, and the response is a bounded window.
     const approxPage = await Promise.all(
-      enrichedPage.map(async (tx) => {
+      namedPage.map(async (tx) => {
         if (tx.convertedAmount != null) return tx
         const approxAmount = await serveTimeAmount(
           tx.tokenSymbol ?? tx.asset,
@@ -420,10 +430,7 @@ export default async function transactionRoutes(
     }
 
     const contacts = await listContactsForUser(sub)
-    const contactNames = new Map(contacts.map((c) => [c.address.toLowerCase(), c.name]))
-    const accountNames = new Map(
-      allAccounts.map((account) => [accountNameKey(account.account_address, account.chain_id), account.name]),
-    )
+    let exportNames: RecipientNameIndex = EMPTY_RECIPIENT_NAME_INDEX
 
     let filtered: Awaited<ReturnType<typeof mergeSortDedupeAndEnrich>> = []
     if (accounts.length > 0) {
@@ -441,22 +448,12 @@ export default async function transactionRoutes(
           ? foldOwnAccountTransfers(enriched, allAccounts)
           : enriched
 
-      // #4095: receipt merchant names resolve BEFORE the filter, so a search
-      // for a merchant's name finds its rows. Caught, not bare — an outage
-      // degrades to "no receipt names" instead of 500-ing the export.
+      // #4095/#4882: the names resolve BEFORE the filter, so a search for a
+      // merchant's name finds its rows — the same index names the file's
+      // `counterparty_name` column. Fail-soft by source.
       const searchTerm = request.query.search?.trim() ?? ''
-      let searchIndex: TransactionSearchIndex | undefined
-      if (searchTerm) {
-        const receiptNames = await listReceiptMerchantNamesForUser(
-          sub,
-          counterpartyAddressesOf(folded),
-        ).catch(() => new Map<string, string>())
-        searchIndex = {
-          contactNames,
-          receiptNames,
-          accountNames,
-        }
-      }
+      exportNames = await buildRecipientNameIndex(sub, allAccounts, folded, contacts)
+      const searchIndex: TransactionSearchIndex | undefined = searchTerm ? { names: exportNames } : undefined
 
       filtered = filterEnrichedTransactions(folded, {
         agentId: request.query.agentId,
@@ -478,19 +475,15 @@ export default async function transactionRoutes(
     })
     if (overCap) return overCap
 
-    // The address book is chain-agnostic (`contacts` has no chain_id), the
-    // user's own accounts are not — the same two-step resolution, in the same
-    // order, as the dashboard table. (#4095: read above the filter now; the
-    // CSV projection below is unchanged.)
+    // #4882: `counterparty_name` follows the ONE naming order — own account,
+    // contact, catalog merchant, receipt seller, resource host — the order
+    // every dashboard surface shows. (Before #4882 it was contact, then own
+    // account, and nothing else.)
 
     const csv = transactionsToCsv(
       filtered,
       {
-        resolveName: (address, addressChainId) => {
-          const contactName = contactNames.get(address.toLowerCase())
-          if (contactName) return contactName
-          return accountNames.get(accountNameKey(address, addressChainId)) ?? null
-        },
+        resolveName: (tx) => resolveRecipientName(exportNames, recipientTargetOf(tx)).label,
         // #3127: the accounting export stays a FIXED-currency file. Deliberate,
         // not the default everywhere: the feed was built (epic 026, #2871)
         // around one reporting currency, the accountants' importers are keyed

@@ -884,3 +884,132 @@ describe('#3824 — the CSV export stays byte-identical (serve-time fields never
     expect(withApprox).toBe(without)
   })
 })
+
+/**
+ * #4882: the ONE recipient-naming order reaches the dashboard activity feed,
+ * the transactions list (the new `recipientName` / `recipientNameSource`
+ * fields) and the CSV `counterparty_name` column — the catalog step names
+ * a payment to a curated catalog merchant's receiving address, a contact
+ * still wins over it, and the resource host names when nothing else does.
+ */
+describeDb('#4882 — one naming order on the activity feed, the transactions list and the CSV', () => {
+  let app: FastifyInstance
+  let token: string
+  let userId: string
+
+  beforeAll(async () => {
+    await initDbHarness()
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(dashboardRoutes, { prefix: '/dashboard' })
+    await app.register(transactionRoutes, { prefix: '/transactions' })
+  })
+
+  afterAll(async () => {
+    await app.close()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+    explorerMocks.fetchNormalTransactions.mockReset()
+    explorerMocks.fetchInternalTransactions.mockReset()
+    explorerMocks.fetchERC20Transfers.mockReset()
+    explorerMocks.fetchNormalTransactions.mockResolvedValue({ rows: [], hasMore: false })
+    explorerMocks.fetchInternalTransactions.mockResolvedValue({ rows: [], hasMore: false })
+    explorerMocks.fetchERC20Transfers.mockResolvedValue({ rows: [], hasMore: false })
+    priceMocks.getTokenPrice.mockReset()
+    priceMocks.getTokenPrice.mockResolvedValue({ usd: 1, eur: 0.9, sek: 10.76 })
+    userId = await seedUser()
+    token = app.jwt.sign({ sub: userId, email: 'a4882@test.example' })
+  })
+
+  async function seedCatalogMerchant(name: string, payTo: string): Promise<void> {
+    const merchant = await db.query<{ id: string }>(`INSERT INTO merchants (slug, name) VALUES ($1, $2) RETURNING id`, [
+      `m4882-${Math.random().toString(36).slice(2)}`,
+      name,
+    ])
+    await db.query(
+      `INSERT INTO merchant_catalog (name, description, category, resource_url, rail, protocol, network, status,
+         verified_at, merchant_id, pay_to, source)
+       VALUES ($1, 'x', 'api', $2, 'x402', 'http', $3, 'active', NOW(), $4, $5, 'operator')`,
+      [name, RESOURCE_URL, `eip155:${CHAIN}`, merchant.rows[0].id, payTo],
+    )
+  }
+
+  async function seedOnePayment(): Promise<void> {
+    const account = await seedAccount(userId)
+    const agentId = await seedAgent(userId, account.id)
+    await seedX402Payment({
+      userId,
+      agentId,
+      accountId: account.id,
+      accountAddress: account.address,
+      confirmedAt: new Date(tsInLocalDay(TZ, 0) * 1000).toISOString(),
+      proofStatus: 'protocol_receipt_attached',
+    })
+  }
+
+  const get = async (url: string) => {
+    const res = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } })
+    return res
+  }
+  const csvName = (csv: string) => {
+    const [header, first] = csv.trim().split('\n')
+    const idx = header.split(',').indexOf('counterparty_name')
+    return first.split(',')[idx].replace(/^"|"$/g, '')
+  }
+
+  it('the catalog merchant names the payment on all three surfaces', async () => {
+    await seedOnePayment()
+    await seedCatalogMerchant('NordShield VPN', MERCHANT)
+
+    const overview = (await get(`/dashboard/overview?tz=${encodeURIComponent(TZ)}`)).json() as {
+      activity: Array<Record<string, unknown>>
+      spend: { topMerchant7d: Record<string, unknown> | null }
+      agents: Array<{ stats: { lastCounterparty: Record<string, unknown> | null } }>
+    }
+    expect(overview.activity[0].merchantName).toBe('NordShield VPN')
+    // The overview's other two naming sites: the week's top merchant and the
+    // agent's last payment.
+    expect(overview.spend.topMerchant7d?.merchantName).toBe('NordShield VPN')
+    expect(overview.agents[0].stats.lastCounterparty?.merchantName).toBe('NordShield VPN')
+    // The first-agent-payment card.
+    const first = (await get('/dashboard/first-agent-payment')).json() as { payment: Record<string, unknown> | null }
+    expect(first.payment?.merchantName).toBe('NordShield VPN')
+
+    const list = (await get('/transactions')).json() as { transactions: Array<Record<string, unknown>> }
+    expect(list.transactions[0]).toMatchObject({ recipientName: 'NordShield VPN', recipientNameSource: 'catalog' })
+
+    const csv = (await get('/transactions/export.csv')).body
+    expect(csvName(csv)).toBe('NordShield VPN')
+  })
+
+  it('a contact wins over the catalog merchant on all three', async () => {
+    await seedOnePayment()
+    await seedCatalogMerchant('NordShield VPN', MERCHANT)
+    await db.query(`INSERT INTO contacts (user_id, name, address) VALUES ($1, 'My VPN', $2)`, [userId, MERCHANT])
+
+    const overview = (await get(`/dashboard/overview?tz=${encodeURIComponent(TZ)}`)).json() as { activity: Array<Record<string, unknown>> }
+    expect(overview.activity[0].merchantName).toBe('My VPN')
+    const list = (await get('/transactions')).json() as { transactions: Array<Record<string, unknown>> }
+    expect(list.transactions[0]).toMatchObject({ recipientName: 'My VPN', recipientNameSource: 'contact' })
+    expect(csvName((await get('/transactions/export.csv')).body)).toBe('My VPN')
+  })
+
+  it('with no name source the host names the list row and the CSV; the feed keeps merchantName null beside its URL', async () => {
+    await seedOnePayment()
+
+    const overview = (await get(`/dashboard/overview?tz=${encodeURIComponent(TZ)}`)).json() as { activity: Array<Record<string, unknown>> }
+    expect(overview.activity[0]).toMatchObject({ merchantName: null, x402ResourceUrl: RESOURCE_URL })
+    const list = (await get('/transactions')).json() as { transactions: Array<Record<string, unknown>> }
+    expect(list.transactions[0]).toMatchObject({ recipientName: 'merchant.example', recipientNameSource: 'x402' })
+    expect(csvName((await get('/transactions/export.csv')).body)).toBe('merchant.example')
+  })
+
+  it('a search finds the row by its catalog merchant name', async () => {
+    await seedOnePayment()
+    await seedCatalogMerchant('NordShield VPN', MERCHANT)
+    const list = (await get('/transactions?search=nordshield')).json() as { transactions: unknown[] }
+    expect(list.transactions).toHaveLength(1)
+  })
+})

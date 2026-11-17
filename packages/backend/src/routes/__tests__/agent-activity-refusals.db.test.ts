@@ -44,6 +44,9 @@ const REFUSAL_ENTRY_KEYS = [
   'chain_id',
   'merchant_to',
   'resource_url',
+  // #4882: the recipient name in the one naming order, and its step.
+  'counterparty_name',
+  'counterparty_name_source',
   'reason',
   'attempts',
   'approx_amount_usd',

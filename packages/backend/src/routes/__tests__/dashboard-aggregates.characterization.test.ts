@@ -80,7 +80,17 @@ vi.mock('../../modules/accounts/index.js', () => ({
   needsBackupSignerRecommendation,
 }))
 vi.mock('../../infra/fiat-values.js', () => fiatMocks)
-vi.mock('../../modules/transactions/index.js', () => transactionMocks)
+vi.mock('../../modules/transactions/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/index.js')>()
+  return {
+    ...transactionMocks,
+    // #4882: the real naming module — its loader reads through the mocked
+    // `db.js` (each source fail-soft), so the names follow the fixtures.
+    loadRecipientNameIndex: actual.loadRecipientNameIndex,
+    recipientAddressOf: actual.recipientAddressOf,
+    recipientNameWithoutHost: actual.recipientNameWithoutHost,
+  }
+})
 // #3803: the route reads today's spot rates for the budget captions. A mock
 // keeps the suite off CoinGecko — the price read itself is infra/prices.ts'
 // own concern.

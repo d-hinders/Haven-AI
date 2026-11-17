@@ -4,9 +4,9 @@
  * Moved from `packages/frontend/src/lib/transaction-labels.ts` (#4332): the
  * analytics naming module (`packages/backend/src/modules/transactions/counterparty-name.ts`)
  * needs the SAME parse the frontend's `counterpartyLabel` uses — the x402
- * resource host is step 1 of the settled naming order (x402 host → own
- * account → contact → receipt → none) — so backend and frontend share one
- * definition instead of drifting.
+ * resource host is the host step of the one naming order (#4882: own account
+ * → contact → catalog merchant → receipt seller → x402 host → none) — so
+ * backend and frontend share one definition instead of drifting.
  *
  * The behavior is the frontend's, verbatim: a truthy URL parses via `new
  * URL()` and yields its `hostname`; anything unparseable (or absent) is

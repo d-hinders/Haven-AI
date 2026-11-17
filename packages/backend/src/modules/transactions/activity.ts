@@ -351,6 +351,14 @@ export interface BuildActivityGroupsParams {
    * `merchantName` before "Deposit" (#4099 frontend half).
    */
   resolveOwnAccountName?: (address: string, chainId: number) => string | null
+  /**
+   * #4882: the row's recipient name in the ONE naming order
+   * (`counterparty-name.ts`: own account, contact, catalog, receipt), without
+   * the resource host, which rides beside it as `x402ResourceUrl`. When wired
+   * it names every outbound group and every inbound one from an own account;
+   * the two lookups above stay the fallback for callers that do not wire it.
+   */
+  resolveRecipientName?: (tx: EnrichedTransaction) => string | null
 }
 
 /**
@@ -398,6 +406,7 @@ export async function buildActivityGroups(
     now = Date.now(),
     resolveMerchantName,
     resolveOwnAccountName,
+    resolveRecipientName,
   } = params
 
   /**
@@ -409,7 +418,9 @@ export async function buildActivityGroups(
   const ownSenderName = (tx: EnrichedTransaction): string | null => {
     if (tx.direction !== 'in') return null
     const ownName = resolveOwnAccountName?.(tx.from, tx.chainId) ?? null
-    return ownName === null ? null : (resolveMerchantName?.(tx.from) ?? ownName)
+    if (ownName === null) return null
+    if (resolveRecipientName) return resolveRecipientName(tx) ?? ownName
+    return resolveMerchantName?.(tx.from) ?? ownName
   }
 
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
@@ -463,14 +474,15 @@ export async function buildActivityGroups(
         source: sample.source ?? null,
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
-        // Contacts and receipts first, then the user's own accounts (#4099)
-        // — the export's order. A deposit is named only when it came from
-        // another own account; its group holds that sender alone.
+        // #4882: the one naming order (`resolveRecipientName`, wired by the
+        // route); the contact-then-own-account lookups are only the fallback
+        // for a caller that does not wire it. A deposit is named only when it
+        // came from another own account; its group holds that sender alone.
         merchantName:
           sample.direction === 'out'
-            ? (resolveMerchantName?.(sample.to) ??
-              resolveOwnAccountName?.(sample.to, sample.chainId) ??
-              null)
+            ? resolveRecipientName
+              ? resolveRecipientName(sample)
+              : (resolveMerchantName?.(sample.to) ?? resolveOwnAccountName?.(sample.to, sample.chainId) ?? null)
             : ownSenderName(sample),
         activityType: sample.activityType ?? null,
         direction: sample.direction,

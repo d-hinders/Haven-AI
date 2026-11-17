@@ -111,13 +111,21 @@ export {
   type TransactionFilterTokenOption,
 } from './orchestration.js'
 
-// The counterparty-name module (#4332): the analytics route names merchants
-// through the module's public surface, per the module-boundary rule —
-// imports of `modules/` go through `index.ts`, never a private file.
+// The recipient-naming module (#4332, #4882): every route names the other
+// side of a payment through the module's public surface, per the
+// module-boundary rule — imports of `modules/` go through `index.ts`.
 export {
-  ownAccountNameForAddress,
-  resolveCounterpartyName,
+  EMPTY_RECIPIENT_NAME_INDEX,
+  allRecipientNames,
+  recipientNameKey,
+  recipientAddressOf,
+  recipientNameSnakeWire,
+  recipientNameWithoutHost,
+  resolveRecipientName,
   type CounterpartyKind,
   type CounterpartyName,
-  type CounterpartyNameInputs,
+  type RecipientNameIndex,
+  type RecipientNameSource,
+  type RecipientTarget,
 } from './counterparty-name.js'
+export { loadRecipientNameIndex, type LoadRecipientNameIndexOptions } from './recipient-name-index.js'

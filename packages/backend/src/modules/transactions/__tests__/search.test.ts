@@ -16,6 +16,7 @@ import {
   type TransactionSearchIndex,
 } from '../search.js'
 import type { EnrichedTransaction } from '../types.js'
+import { EMPTY_RECIPIENT_NAME_INDEX } from '../counterparty-name.js'
 
 const CONTACT = '0xAAAA0000000000000000000000000000000000A1'
 const MERCHANT = '0xBBBB0000000000000000000000000000000000B2'
@@ -45,14 +46,21 @@ function tx(overrides: Partial<EnrichedTransaction> & { hash: string }): Enriche
   }
 }
 
+const CATALOG = '0xFFFF0000000000000000000000000000000000F6'
+
+// #4882: the search index is the recipient-naming index.
 const index: TransactionSearchIndex = {
-  contactNames: new Map([[CONTACT.toLowerCase(), 'Café Brasil']]),
-  receiptNames: new Map([[MERCHANT.toLowerCase(), 'Kafé Veranda']]),
-  accountNames: new Map([
-    [`${OWN_ACCOUNT.toLowerCase()}:8453`, 'Savings'],
-    // Same address, different chain — resolution is keyed by address AND chain.
-    [`${OWN_ACCOUNT.toLowerCase()}:100`, 'Old Savings'],
-  ]),
+  names: {
+    ...EMPTY_RECIPIENT_NAME_INDEX,
+    contacts: new Map([[CONTACT.toLowerCase(), 'Café Brasil']]),
+    receipts: new Map([[MERCHANT.toLowerCase(), 'Kafé Veranda']]),
+    catalog: new Map([[CATALOG.toLowerCase(), [{ chainId: 8453, name: 'NordShield VPN' }]]]),
+    accounts: [
+      { account_address: OWN_ACCOUNT, chain_id: 8453, name: 'Savings' },
+      // Same address, different chain — the payment's chain wins.
+      { account_address: OWN_ACCOUNT, chain_id: 100, name: 'Old Savings' },
+    ],
+  },
 }
 
 const feed: EnrichedTransaction[] = [
@@ -118,6 +126,11 @@ describe('filterEnrichedTransactions search (#4095)', () => {
     const crossChain = [tx({ hash: '0x6', to: OWN_ACCOUNT, chainId: 100 })]
     expect(search('old savings', crossChain).map((t) => t.hash)).toEqual(['0x6'])
     expect(search('old savings', [tx({ hash: '0x7', to: OWN_ACCOUNT })])).toEqual([])
+  })
+
+  it('#4882 — finds a row by the catalog merchant name, on its chain only', () => {
+    const rows = [tx({ hash: '0x8', to: CATALOG }), tx({ hash: '0x9', to: CATALOG, chainId: 84532 })]
+    expect(search('nordshield', rows).map((t) => t.hash)).toEqual(['0x8'])
   })
 
   it('finds a row by agent name', () => {

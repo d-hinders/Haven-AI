@@ -89,6 +89,27 @@ describe('TransactionActivityRow same-day divider (#4165)', () => {
   })
 })
 
+describe('TransactionActivityRow muted title (#4908)', () => {
+  // The title element is the row's first <p>, the one holding the title text.
+  const titleClass = () => screen.getByText('No product recorded').className
+
+  it('paints the title in ink by default — every existing caller is unchanged', () => {
+    renderRow({ title: 'No product recorded' })
+    expect(titleClass()).toBe(
+      'min-w-0 flex-1 truncate text-sm font-medium text-[var(--v2-ink)] sm:flex-initial',
+    )
+  })
+
+  it('paints the title in ink-3 when mutedTitle is set, and nothing else moves', () => {
+    renderRow({ title: 'No product recorded', mutedTitle: true })
+    expect(titleClass()).toBe(
+      'min-w-0 flex-1 truncate text-sm font-medium text-[var(--v2-ink-3)] sm:flex-initial',
+    )
+    // The description keeps its own ink-2: only the title is muted.
+    expect(screen.getByText('Research assistant').className).toContain('text-[var(--v2-ink-2)]')
+  })
+})
+
 describe('TransactionActivityRow phone layout (#4572)', () => {
   it('places the amount on the title row and the timestamp on the description row', () => {
     const { container } = renderRow({ density: 'compact', timestamp: '14:05' })

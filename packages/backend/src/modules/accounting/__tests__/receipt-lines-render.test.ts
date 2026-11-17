@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import se25 from './fixtures/merchant-receipts/demo-merchant-se25.json' with { type: 'json' }
 import reverseCharge from './fixtures/merchant-receipts/demo-merchant-reverse-charge.json' with { type: 'json' }
-import { UNDERLAG_MAX_RECEIPT_LINES, underlagFromData, type ReceiptUnderlagData } from '../receipt-underlag.js'
+import { UNDERLAG_MAX_PAGE_LINES, UNDERLAG_MAX_RECEIPT_LINES, underlagFromData, type ReceiptUnderlagData } from '../receipt-underlag.js'
 import { feedDescription } from '../fortnox-connector.js'
 import { asciiFold, checkedReceiptStatement, type CheckedReceiptStatement } from '../receipt-statement.js'
 import { feedTransaction } from './connector-conformance.js'
@@ -96,6 +96,21 @@ describe('the underlag shows the receipt lines (#4876)', () => {
     expect(s).toContain(`Line ${UNDERLAG_MAX_RECEIPT_LINES} `)
     expect(s).not.toContain(`Line ${UNDERLAG_MAX_RECEIPT_LINES + 1} `)
     expect(s).toContain("...and 3 more lines on the merchant's receipt \\(attached\\)")
+  })
+
+  it('the worst case — every line at the cap with a maximal description — still fits the single page', () => {
+    const many = { ...se25, rader: Array.from({ length: 50 }, () => ({ ...se25.rader[0], beskrivning: 'y'.repeat(300) })) }
+    const s = render({
+      receiptStatement: statement(many, '1000'),
+      fundingTxHash: `0x${'ee'.repeat(32)}`,
+      ledgerCurrency: 'EUR',
+      purchaseGroupId: 'group-1',
+      parentReceiptRef: 'parent-1',
+    })
+    const rows = (s.match(/\) Tj T\*/g) ?? []).length
+    expect(rows).toBeLessThanOrEqual(UNDERLAG_MAX_PAGE_LINES)
+    // A description longer than its rows is cut, visibly.
+    expect(s).toContain('yy..')
   })
 
   it('a protocol payment whose receipt states no lines says "VAT not stated by the merchant"', () => {

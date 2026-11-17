@@ -179,18 +179,28 @@ export function receiptPdf(lines: string[]): Buffer {
  * #4876: wrap `text` under a 15-column label, continuation lines indented to
  * the same column, every line inside the renderer's 88 so it never re-wraps.
  */
-function indentedWrap(label: string, text: string, width = 88): string[] {
+function indentedWrap(label: string, text: string, maxRows: number, width = 88): string[] {
   const indent = ' '.repeat(15)
   const room = width - indent.length
+  const capacity = room * maxRows
+  const fitted = text.length > capacity ? `${text.slice(0, capacity - 2)}..` : text
   const out: string[] = []
-  for (let i = 0; i < text.length; i += room) {
-    out.push(`${i === 0 ? label : indent}${text.slice(i, i + room)}`)
+  for (let i = 0; i < fitted.length; i += room) {
+    out.push(`${i === 0 ? label : indent}${fitted.slice(i, i + room)}`)
   }
   return out.length > 0 ? out : [label]
 }
 
-/** The most receipt lines one single-page document lists; the rest are counted. */
-export const UNDERLAG_MAX_RECEIPT_LINES = 8
+/**
+ * The most receipt lines one single-page document lists; the rest are counted.
+ * With each description capped at `UNDERLAG_MAX_DESCRIPTION_ROWS` printed rows,
+ * the whole document stays inside the single page (`UNDERLAG_MAX_PAGE_LINES`).
+ */
+export const UNDERLAG_MAX_RECEIPT_LINES = 6
+/** Printed rows one product description may take; longer text is cut with "..". */
+export const UNDERLAG_MAX_DESCRIPTION_ROWS = 2
+/** Text rows the single 842pt page holds at the renderer's 11pt leading from y=800. */
+export const UNDERLAG_MAX_PAGE_LINES = 72
 
 /**
  * #4876: the document's merchant-receipt block. Only on a protocol payment
@@ -211,7 +221,7 @@ function receiptStatementLines(data: ReceiptUnderlagData): string[] {
   const out = ['', `MERCHANT RECEIPT LINES (${RECEIPT_STATEMENT_LABEL})`]
   shown.forEach((line, i) => {
     const label = `Line ${i + 1}`.padEnd(15, ' ')
-    out.push(...indentedWrap(label, asciiFold(line.description)))
+    out.push(...indentedWrap(label, asciiFold(line.description), UNDERLAG_MAX_DESCRIPTION_ROWS))
     out.push(
       `               qty ${line.quantity}, net ${line.unitPriceExclVat} ${cur} each, VAT ${line.vatPercent}% ${line.vatAmount} ${cur}, total ${line.totalInclVat} ${cur}`,
     )

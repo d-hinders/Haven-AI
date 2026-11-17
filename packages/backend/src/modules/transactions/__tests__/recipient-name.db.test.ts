@@ -181,6 +181,8 @@ describeDb('the catalog step of the recipient-naming order (#4882)', () => {
     const base = await seedMerchant('Base Merchant')
     await seedOffer(big, addr(17), { network: 'eip155:11297108109' })
     await seedOffer(base, addr(18))
+    // An int4 cast would make the whole read reject: it must resolve.
+    await expect(listCatalogRecipientNames([addr(17), addr(18)])).resolves.toHaveLength(2)
     expect(await names([addr(17), addr(18)])).toEqual([`11297108109:${addr(17)}:Big Chain`, `8453:${addr(18)}:Base Merchant`].sort())
   })
 })

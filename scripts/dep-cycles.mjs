@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Runtime import-cycle lint across the eleven packages `dep-lint` does not
-// scan (#4763).
+// Runtime import-cycle lint across the packages `dep-lint` does not scan
+// (#4763): eleven then, twelve since #4890 added packages/merchant-payments.
 //
 // Rule 7 of docs/architecture/10-module-boundaries.md — "the graph is
 // acyclic", the one unwaivable rule — was checked on two of the thirteen
@@ -129,7 +129,7 @@ export async function discoverPackages(root = REPO_ROOT) {
   return found.sort()
 }
 
-/** The eleven packages, resolved once at import time. */
+/** The packages, resolved once at import time. */
 export const CYCLE_SCAN_PACKAGES = Object.freeze(await discoverPackages())
 
 /**

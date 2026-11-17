@@ -79,7 +79,7 @@
       "runsVia": [
         "lint:deps"
       ],
-      "reason": "The dependency-boundary gate itself. It scans packages/backend and packages/core under the STRICT definition of rule 7 (type-only imports counted) and is only ever run by backend_checks; the other eleven packages are policed by scripts/dep-cycles.mjs, which has its own entry below."
+      "reason": "The dependency-boundary gate itself. It scans packages/backend and packages/core under the STRICT definition of rule 7 (type-only imports counted) and is only ever run by backend_checks; every other package is policed by scripts/dep-cycles.mjs, which has its own entry below."
     },
     {
       "path": "scripts/dep-lint.test.mjs",
@@ -99,7 +99,7 @@
       "runsVia": [
         "lint:dep-cycles"
       ],
-      "reason": "The runtime import-cycle pass over the eleven packages dep-lint does not scan (#4763). It lives outside every tree it polices and is only ever run by packages_checks, so weakening it must route that job."
+      "reason": "The runtime import-cycle pass over the packages dep-lint does not scan (#4763). It lives outside every tree it polices and is only ever run by packages_checks, so weakening it must route that job."
     },
     {
       "path": "scripts/dep-cycles.test.mjs",
@@ -109,7 +109,7 @@
       "runsVia": [
         "lint:dep-cycles:test"
       ],
-      "reason": "The cycle pass's own self-test, for the same reason as dep-lint's: it is what proves the scan reaches all eleven packages and that a planted value cycle is reported while a type-only one is not."
+      "reason": "The cycle pass's own self-test, for the same reason as dep-lint's: it is what proves the scan reaches every package it polices and that a planted value cycle is reported while a type-only one is not."
     },
     {
       "path": "scripts/db-mock-ratchet.mjs",

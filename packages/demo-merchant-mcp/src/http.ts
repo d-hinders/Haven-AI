@@ -35,7 +35,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from './tax-declaration.js'
+import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration } from '@haven_ai/merchant-payments'
 import { recordStripePayment, type StripeRecording } from './stripe.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'

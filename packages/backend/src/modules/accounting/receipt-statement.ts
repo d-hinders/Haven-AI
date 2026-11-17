@@ -3,7 +3,7 @@
  * (#4875, epic #4874) — read, never derived.
  *
  * The shape is the one the demo merchant sends in its `x-receipt-json`
- * header (`packages/demo-merchant-mcp/src/invoice.ts`, `InvoiceJson`), a
+ * header (`InvoiceJson`, built in `packages/merchant-payments/src/receipt.ts`), a
  * Swedish bookkeeping document: `rader[]`, the four totals, `momsbehandling`
  * and `valuta`. `docs/operations/merchant-receipt-shape.md` documents it field
  * by field as the shape Haven reads.

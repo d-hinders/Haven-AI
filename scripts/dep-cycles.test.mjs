@@ -4,7 +4,7 @@
 // Three things are pinned here, and each is a way the pass could be green
 // while covering nothing:
 //
-//   1. COVERAGE — the scan actually reaches every one of the eleven packages,
+//   1. COVERAGE — the scan actually reaches every one of the twelve packages,
 //      reads `.tsx`, and resolves the frontend's `@/` alias. A pass that
 //      silently scanned nothing would report zero cycles forever, which is the
 //      failure shape #982's chain-SDK lesson is about.
@@ -25,7 +25,7 @@ import { runGuard } from './test-support/guard-cli.mjs'
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** The eleven packages `npm run lint:deps` does not scan, in name order. */
+/** The twelve packages `npm run lint:deps` does not scan, in name order. */
 const EXPECTED_PACKAGES = [
   'cli',
   'connect',
@@ -33,6 +33,7 @@ const EXPECTED_PACKAGES = [
   'frontend',
   'mcp',
   'mcp-server',
+  'merchant-payments',
   'ops',
   'qa-agent',
   'sdk',
@@ -42,7 +43,7 @@ const EXPECTED_PACKAGES = [
 
 // ── Coverage ────────────────────────────────────────────────────────────────
 
-test('the pass polices exactly the eleven packages the strict gate does not scan', () => {
+test('the pass polices exactly the twelve packages the strict gate does not scan', () => {
   assert.deepEqual([...CYCLE_SCAN_PACKAGES], EXPECTED_PACKAGES)
   // backend and core keep the STRICT definition through `npm run lint:deps`;
   // scanning them here too would give rule 7 two answers for one tree.
@@ -51,7 +52,7 @@ test('the pass polices exactly the eleven packages the strict gate does not scan
   }
 })
 
-test('the scan reaches every one of the eleven packages, reads .tsx, and resolves @/ aliases', async () => {
+test('the scan reaches every one of the twelve packages, reads .tsx, and resolves @/ aliases', async () => {
   const results = await scanAll()
   assert.equal(results.length, EXPECTED_PACKAGES.length)
 
@@ -103,7 +104,7 @@ test('the exclude pattern keeps tests and declarations out of the graph', () => 
 
 // ── The checked-in tree ─────────────────────────────────────────────────────
 
-test('the checked-in tree has zero runtime cycles across the eleven packages', async () => {
+test('the checked-in tree has zero runtime cycles across the twelve packages', async () => {
   const results = await scanAll()
   assert.deepEqual(
     results.flatMap((r) => r.cycles.map((c) => `${c.from} → ${c.to}`)),

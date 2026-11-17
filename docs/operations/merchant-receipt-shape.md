@@ -9,6 +9,7 @@ covers:
   - packages/backend/src/modules/accounting/transaction-kind.ts
   - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/demo-merchant-mcp/src/invoice.ts
+  - packages/merchant-payments/src/receipt.ts
   - packages/sdk/src/merchant-completion.ts
 last-verified: "2026-11-17"
 ---
@@ -21,8 +22,9 @@ JSON in the `x-receipt-json` header. The agent's SDK relays it to Haven
 `merchant_receipts`, first write wins. This page lists the fields Haven reads
 from that receipt, and what it does with each.
 
-The shape is the demo merchant's (`InvoiceJson` in
-`packages/demo-merchant-mcp/src/invoice.ts`): a Swedish bookkeeping document
+The shape is the demo merchant's (`InvoiceJson`, built by `buildReceipt` in
+the shared core `packages/merchant-payments/src/receipt.ts`, which the demo
+merchant calls from `packages/demo-merchant-mcp/src/invoice.ts`): a Swedish bookkeeping document
 with Swedish keys. A merchant that wants its lines and VAT on its customers'
 accounting entries sends the same keys.
 

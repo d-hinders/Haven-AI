@@ -16,7 +16,8 @@ covers:
   - .github/workflows/publish.yml
   - packages/backend/src/routes/machine-payments.ts
   - packages/demo-merchant-mcp/src/invoice.ts
-  - packages/demo-merchant-mcp/src/tax-declaration.ts
+  - packages/merchant-payments/src/receipt.ts
+  - packages/merchant-payments/src/tax-declaration.ts
   - packages/backend/src/modules/accounting/receipt-statement.ts
   - packages/backend/src/modules/accounting/receipt-underlag.ts
   - packages/backend/src/modules/mpp/merchant-receipt.ts
@@ -66,7 +67,7 @@ on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and 
 
 | Package | Directory | What it holds |
 |---|---|---|
-| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, and the consumed-payment store interface in section 6. |
+| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11; the first #4890 PR), and, with the second, the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, and the consumed-payment store interface in section 6. |
 | `@haven_ai/paywall-proxy` | `packages/paywall-proxy/` | The proxy from #4893: the products file reader, the challenge, the settlement call into the core, the persistent consumed-payment store, the upstream forwarder and the sales reporter. |
 
 Both are `private: true` and pin internal dependencies as `"*"`, as
@@ -1186,8 +1187,9 @@ one.
 
 ## 11. The receipt
 
-The kit returns the same receipt the demo merchant returns today
-(`packages/demo-merchant-mcp/src/invoice.ts`), so Haven's buyer-side
+The kit returns the same receipt the demo merchant returns today, built by
+the shared core's `buildReceipt` (`packages/merchant-payments/src/receipt.ts`,
+which the demo merchant calls from `packages/demo-merchant-mcp/src/invoice.ts`), so Haven's buyer-side
 accounting reads a kit receipt with no change: its reader
 (`packages/backend/src/modules/accounting/receipt-statement.ts`, documented
 field by field in `docs/operations/merchant-receipt-shape.md`) is the

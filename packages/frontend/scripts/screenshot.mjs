@@ -4717,8 +4717,22 @@ export const SCENARIOS = {
       // cannot race the grid's tail.
       await section.getByText('Keys not accepted while off', { exact: true }).waitFor({ timeout: 20_000 })
       await section.getByRole('tab', { name: 'Revenue' }).waitFor({ timeout: 20_000 })
-      await section.scrollIntoViewIfNeeded()
-      await shoot(section, 'section')
+      // One capture per specimen, not the section: the section is taller than
+      // the viewport, and a whole-section element capture came back with its
+      // top and bottom blank (the #1726 failure in a smaller form).
+      // Below lg the floating tab bar is fixed over the viewport's bottom and
+      // paints across whichever specimen scrolled under it; hide it for these
+      // element captures — the bar is not under review here.
+      await page.addStyleTag({ content: '[data-mobile-tab-bar]{visibility:hidden!important}' })
+      const specimens = section.getByTestId('ds-sales-specimens').locator(':scope > *')
+      const count = await specimens.count()
+      if (count !== 7) throw new Error(`design-system-sales-patterns: expected 7 specimens, found ${count}`)
+      const names = ['ledger', 'badges', 'freshness', 'tabs', 'revenue-chart', 'keys-off', 'credential-block']
+      for (let i = 0; i < count; i += 1) {
+        const specimen = specimens.nth(i)
+        await specimen.scrollIntoViewIfNeeded()
+        await shoot(specimen, names[i])
+      }
     },
   },
   'design-system-buttons': {
@@ -5129,8 +5143,18 @@ export const SCENARIOS = {
       // alongside a healthy signer set, every wait above would still pass.
       await refuseIfPresent(oneWayBanner, 'account-backup-recovery · healthy · one-way banner')
       await refuseIfPresent(loadErrorCopy, 'account-backup-recovery · healthy · load-error copy')
-      await section.scrollIntoViewIfNeeded()
-      await shoot(section, 'section')
+      // One capture per specimen, not the section: the section is taller than
+      // the viewport, and a whole-section element capture came back with its
+      // top and bottom blank (the #1726 failure in a smaller form).
+      const specimens = section.getByTestId('ds-sales-specimens').locator(':scope > *')
+      const count = await specimens.count()
+      if (count !== 7) throw new Error(`design-system-sales-patterns: expected 7 specimens, found ${count}`)
+      const names = ['ledger', 'badges', 'freshness', 'tabs', 'revenue-chart', 'keys-off', 'credential-block']
+      for (let i = 0; i < count; i += 1) {
+        const specimen = specimens.nth(i)
+        await specimen.scrollIntoViewIfNeeded()
+        await shoot(specimen, names[i])
+      }
 
       // ── one way to approve ────────────────────────────────────────────────
       await openStage('one-way')

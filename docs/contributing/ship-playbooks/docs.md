@@ -4,7 +4,7 @@ status: current
 covers:
   - scripts/docs/**
   - .github/workflows/docs-audit.yml
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Docs playbook

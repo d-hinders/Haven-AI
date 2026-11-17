@@ -9,7 +9,7 @@ covers:
   - packages/backend/src/routes/agent-connection-setups.ts
   - packages/backend/src/routes/discovery.ts
   - packages/sdk/src/x402-funding-leg.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Deploy — Hosted MCP server (`@haven_ai/mcp-server`)

@@ -10,7 +10,7 @@ covers:
   - packages/backend/src/routes/discovery.ts
   - packages/connect/src/api.ts
   - packages/backend/src/middleware/agentAuth.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Migration - Local MCP To Hosted MCP

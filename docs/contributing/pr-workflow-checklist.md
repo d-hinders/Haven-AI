@@ -11,7 +11,7 @@ covers:
   - .agents/skills/haven-agent-workflow/references/reviewer.md
   - .agents/skills/haven-agent-workflow/references/design-reviewer.md
   - packages/frontend/package.json
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # PR Workflow Checklist
@@ -175,9 +175,9 @@ the list you quote in the PR body. An unknown flag exits 2; pass flags after `--
 The table below is the **smallest reliable set for fast iteration** — what to
 re-run in a tight loop while you are still changing code. It is deliberately
 shorter than the battery and maintained by hand, so treat it as a convenience
-and not as coverage: a backend diff selects **39** gates and this table names
-**11** of them, measured with the snippet below at `b79b112ec` (2026-10-24).
-The 39 grows as the workflows gain gates; the 11 moves only when this table
+and not as coverage: a backend diff selects **41** gates and this table names
+**11** of them, measured with the snippet below at `6165f1376` (2026-11-17).
+The 41 grows as the workflows gain gates; the 11 moves only when this table
 is edited.
 
 The most consequential omission is `npm run check:route-modules` (#3135), one of

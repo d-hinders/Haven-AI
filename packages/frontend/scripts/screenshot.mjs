@@ -4715,7 +4715,7 @@ export const SCENARIOS = {
       const section = page.getByTestId('ds-sales-patterns')
       // Wait on the last specimen as well as the section, so the capture
       // cannot race the grid's tail.
-      await section.getByText('Keys not accepted while off').waitFor({ timeout: 20_000 })
+      await section.getByText('Keys not accepted while off', { exact: true }).waitFor({ timeout: 20_000 })
       await section.getByRole('tab', { name: 'Revenue' }).waitFor({ timeout: 20_000 })
       await section.scrollIntoViewIfNeeded()
       await shoot(section, 'section')

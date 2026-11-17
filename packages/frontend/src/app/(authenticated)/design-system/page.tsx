@@ -393,7 +393,7 @@ const DS_CHART_TOTAL = DS_CHART_DAYS.reduce(
 const DS_CHART_REFUSALS = DS_CHART_DAYS.reduce((sum, day) => sum + (day.refusals ?? 0), 0)
 // #4908: the revenue use of StackedBarChart — one series per PRODUCT, not per
 // agent, so the fill is `--v2-series-*` by index (`seriesIndex`), held stable.
-// Five products take stops 1–5; anything past five folds into one "Other"
+// Each product keeps its caller-assigned index; five take stops 1–5, anything past five folds into one "Other"
 // series (`DS_REVENUE_OTHER`), never a repeated stop. No refusal marker: a
 // refused payment is not a sale.
 const DS_REVENUE_PRODUCTS = [
@@ -403,6 +403,8 @@ const DS_REVENUE_PRODUCTS = [
   { id: 'vision', name: 'Vision', seriesIndex: 3 },
   { id: 'tts', name: 'Speech', seriesIndex: 4 },
 ] as const
+// A showcase value, not a key: the prefix #4896 fixes, then filler.
+const DS_SAMPLE_SALES_KEY = 'sk_merchant_3f9a-showcase-sample-not-a-real-key'
 const DS_REVENUE_OTHER_COLOR = 'var(--v2-ink-3)'
 const DS_REVENUE_DAYS: StackedBarDay[] = [
   [42, 18, 9, 6, 4, 3],
@@ -1689,6 +1691,7 @@ export default function DesignSystemPage() {
   // TransactionDetailPanel — the section names which row "opened".
   const [dsTab, setDsTab] = useState<'overview' | 'agents' | 'activity'>('agents')
   const [dsLedgerOpened, setDsLedgerOpened] = useState<string | null>(null)
+  const [dsKeyShown, setDsKeyShown] = useState(false)
   const [dsSalesView, setDsSalesView] = useState<'spending' | 'revenue'>('revenue')
   // #4908: the freshness line's sample instant — four minutes before mount.
   const [dsReadAt] = useState(() => Date.now() - 4 * 60_000)
@@ -4303,7 +4306,11 @@ export default function DesignSystemPage() {
               <TransactionActivityRow
                 direction="in"
                 title="Chat completion"
-                description="research-bot.example"
+                description={
+                  <>
+                    Wallet <Address value={sampleAddress} />
+                  </>
+                }
                 value="0.42"
                 asset="USDC"
                 timestamp="14:05"
@@ -4410,10 +4417,13 @@ export default function DesignSystemPage() {
             </p>
             <div className="mt-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
               <code className="block break-all font-mono text-xs text-[var(--v2-ink-2)]">
-                sales_3f9a••••••••••••
+                {dsKeyShown ? DS_SAMPLE_SALES_KEY : 'sk_merchant_3f9a••••••••••••'}
               </code>
               <div className="mt-3 flex flex-wrap gap-2">
-                <CopyButton value="sales_3f9a-sample-not-a-key" label="Sales key" text="Copy" />
+                <Button size="sm" variant="ghost" onClick={() => setDsKeyShown((shown) => !shown)}>
+                  {dsKeyShown ? 'Hide' : 'Show'}
+                </Button>
+                <CopyButton value={DS_SAMPLE_SALES_KEY} label="Sales key" text="Copy" />
               </div>
             </div>
           </Card>

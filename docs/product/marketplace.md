@@ -34,7 +34,7 @@ covers:
   - packages/frontend/src/lib/merchantBudgetRefusal.ts
   - packages/frontend/src/hooks/useCatalog.ts
   - packages/frontend/src/components/CatalogSubmitModal.tsx
-last-verified: "2026-10-25"
+last-verified: "2026-11-17"
 ---
 
 # Marketplace

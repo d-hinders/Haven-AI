@@ -10,7 +10,7 @@ covers:
   - packages/frontend/src/components/DelegationBudgetCard.tsx
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
   - packages/frontend/src/lib/budget-caption.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Loop Harness Index

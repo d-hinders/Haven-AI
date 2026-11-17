@@ -495,6 +495,18 @@ warning and does not offer the product; it still starts. `/healthz` carries a
 
 ## Stripe recording (#4853)
 
+**Dev and Stripe sandbox only** (owner decision, 2026-11-17, epic #4849). The
+dev merchant records the joke in a Stripe sandbox, against Base Sepolia. The
+production merchant sets no `STRIPE_*` variable, so once its CDP key is set
+(epic #4849 operator step) its joke is paid to `MERCHANT_ADDRESS` through CDP,
+and nothing is sent to a live Stripe account. A
+sandbox cannot stand in for production: its deposit address is a Base Sepolia
+address (see *What we learned from Stripe sandbox* below), so a Base mainnet
+transaction cannot be recorded against it, and real USDC sent to that address
+on mainnet could be unrecoverable. The code still supports a live key
+(`STRIPE_API_VERSION_LIVE` on Base mainnet); turning it on is a new decision
+(#4858, closed as not planned).
+
 With `STRIPE_DEPOSIT_ADDRESS` and `STRIPE_SECRET_KEY` both set, the joke's
 receiving address is the Stripe deposit address, and every settled joke payment
 is recorded in Stripe as a PaymentIntent in `transaction_verification` mode,
@@ -672,13 +684,12 @@ The report is JSON on stdout (the recorder's log lines go to stderr):
 
 **Where it runs.** Inside the merchant service's environment, as a one-off
 command using that service's variables. The key is never exported to a local
-shell or written to a file, and the report recorded on #4854/#4858 carries
+shell or written to a file, and the report recorded on #4854 carries
 hashes and PaymentIntent IDs only. The logic lives in `src/stripe-reconcile.ts`
-and `src/reconcile-cli.ts` — under the money-path list, because it creates live
+and `src/reconcile-cli.ts` — under the money-path list, because it creates
 PaymentIntents — and `scripts/reconcile-stripe.mjs` is the thin wrapper.
 
-**Who runs it.** The merchant's operator, after each live batch (#4858) and at
-each promotion. The merchant itself cannot: it has no database and sleeps.
+**Who runs it.** The merchant's operator, on dev, after a test batch. The merchant itself cannot: it has no database and sleeps.
 
 ### Operator note: changing the Stripe variables changes the quoted address
 
@@ -801,7 +812,8 @@ bookkeeping only, and the run cannot say where a live refund is sent.
 The Dashboard names no destination, and the only address Stripe shows for the
 payment is the sender — for a Haven agent its delegate address, not the owner's
 account. If a live refund goes there, it lands on the delegate and has to be
-swept back. Check that with the first live refund (#4858) before relying on it.
+swept back. No live refund is planned, since Stripe is dev and sandbox only
+(#4858 is closed as not planned), so this stays unknown.
 
 **The reconciliation run.** Inside the dev service (`railway ssh`), over the
 200 blocks around the purchase:

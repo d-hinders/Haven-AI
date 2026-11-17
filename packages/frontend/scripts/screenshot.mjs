@@ -854,6 +854,10 @@ export const FIXTURE_TXS = [
   // photographs THIS row's drawer.
   tx(7, {
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/datasets',
+    // #4931: the server names this row's counterparty (#4883), and the name
+    // differs from the resource host — the evidence capture shows the row
+    // title and the drawer heading reading the NAME, not `api.example.dev`.
+    recipientName: 'Klara Data AB',
     settlementScheme: 'eip3009',
     fundingTxHash: `0x${String(7).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
     value: '1000000', valueFormatted: '1.00',

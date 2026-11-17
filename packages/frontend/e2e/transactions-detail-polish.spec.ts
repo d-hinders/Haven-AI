@@ -27,6 +27,7 @@ import {
   measureDialogOverflow,
   mockHavenApi,
   seedAuthenticatedSession,
+  serveAgentDetailResponses,
   serveTransactions,
   sweepTransaction,
   unknownChainTransaction,
@@ -150,13 +151,67 @@ test.describe('detail panel polish — the title wraps a long unbroken name (G)'
   }
 })
 
+test.describe('detail panel polish — the server names the row and the drawer (H)', () => {
+  // #4931: #4883 made an outgoing row's title the server's counterparty name,
+  // ahead of the x402 resource host. No fixture carried a name, so the pixel
+  // gate could not see the rule. These assertions exercise the RENDERED path:
+  // moving `serverName()` below the host branch in `counterpartyLabel` turns
+  // them red (the unit tests in `transaction-presentation.test.tsx` cover the
+  // function itself).
+  test('the named x402 row titles the row and the drawer with the server name', async ({ page }) => {
+    await mockHavenApi(page)
+    await seedAuthenticatedSession(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/transactions')
+    const ledger = page.getByTestId('transactions-ledger')
+    await expect(ledger).toBeVisible({ timeout: 15_000 })
+
+    const namedRow = ledger
+      .locator('[role="button"][aria-haspopup="dialog"]')
+      .filter({ hasText: 'Klara Data AB' })
+    await expect(namedRow).toHaveCount(1)
+    // The row title is the server's name, and the resource host is nowhere in
+    // the row — the fallback would have titled it `api.example.dev`.
+    await expect(namedRow.locator('p').first()).toHaveText('Klara Data AB')
+    await expect(namedRow).not.toContainText('api.example.dev')
+
+    await namedRow.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: 'Klara Data AB' })).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'api.example.dev' })).toHaveCount(0)
+  })
+
+  test('the agent ledger row titles with the server name', async ({ page }) => {
+    // No spec opens the drawer from the agent Activity tab, so only the row
+    // title is asserted here.
+    await mockHavenApi(page)
+    await serveAgentDetailResponses(page, 'agent-research')
+    await seedAuthenticatedSession(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto('/agents/agent-research')
+    await expect(page.getByRole('heading', { name: 'Research agent', exact: true })).toBeVisible({
+      timeout: 60_000,
+    })
+
+    const row = page
+      .locator('[role="button"][aria-haspopup="dialog"]')
+      .filter({ hasText: 'NordShield VPN' })
+    await expect(row).toHaveCount(1)
+    await expect(row.locator('p').first()).toHaveText('NordShield VPN')
+    await expect(row).not.toContainText('research.example')
+  })
+})
+
 test.describe('detail panel polish — the when-line separator (B)', () => {
   test.beforeEach(async ({ page }) => {
     await mockHavenApi(page)
     await seedAuthenticatedSession(page)
   })
 
-  const ROWS = ['research.example', 'api.example.dev'] as const
+  // #4931: the second row is named by the server (`recipientName`), so its
+  // title is the name, not the resource host. The first row keeps the host
+  // fallback (`recipientName: null`).
+  const ROWS = ['research.example', 'Klara Data AB'] as const
 
   for (const width of VIEWPORTS) {
     for (const row of ROWS) {
@@ -235,7 +290,7 @@ test.describe('detail panel polish — settlement note alignment (C)', () => {
 
   for (const width of VIEWPORTS) {
     test(`the note's right edge equals the value text's (${width})`, async ({ page }) => {
-      const dialog = await openPanel(page, width, 'api.example.dev')
+      const dialog = await openPanel(page, width, 'Klara Data AB')
       const edges = await dialog.evaluate((root) => {
         const dd = Array.from(root.querySelectorAll('dd')).find((el) =>
           (el.textContent ?? '').includes('This payment left your account'),

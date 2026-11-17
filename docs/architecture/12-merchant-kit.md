@@ -615,11 +615,16 @@ lose its `markSettled` to another request, and its buyer never needs a proof
 for its own first forward.
 
 **The holder has a deadline.** The token hash is trusted for
-`RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`. The upstream slot is
-taken before `reserve`, so a request waiting for one holds no reservation.
-From `reservedAt` the holder's worst case is the core's chain read before
-verify (the "chain first" check in `packages/demo-merchant-mcp/src/x402.ts`,
-bounded at 10 s as below), verify and settle at 30 s each, and `SETTLE_RESOLVE_MS` (30 s): 100 s.
+`RESERVATION_DEADLINE_MS` (120 s) from `reservedAt`. From `reservedAt` the
+holder's worst case is the core's chain read before verify (the "chain first"
+check in `packages/demo-merchant-mcp/src/x402.ts`, bounded at 10 s as below),
+verify at 30 s, the upstream slot wait at 10 s (taken after verify, section
+7), settle at 30 s, and `SETTLE_RESOLVE_MS` (30 s): 110 s.
+When the chain-first read finds the authorization already used, the recovery
+that finds its transaction (`recoverUsedAuthorization` and its log-window scan
+in today's core) replaces verify and settle and is bounded in total at
+`SETTLE_RESOLVE_MS` (30 s), whatever `validAfter` the buyer chose; not found in
+time, the holder answers 503 `settlement_unknown` as for a lost settle answer.
 The check that a found event paid this merchant (below) runs inside the
 `SETTLE_RESOLVE_MS` bound, not after it.
 **Every chain read is bounded at 10 s in total.** Today's core sets no read
@@ -629,7 +634,7 @@ take about 41 s. The shared core (#4890) therefore wraps each chain read in its
 own 10 s race, as `withCdpTimeout` does for verify and settle, or builds the
 transport with `retryCount: 0`. The resolve poll starts no read
 that could end after `SETTLE_RESOLVE_MS` and cuts off one still running at
-that bound, so the 100 s holds and leaves 20 s of margin. The deadline is measured on the process's monotonic clock
+that bound, so the 110 s holds and leaves 10 s of margin. The deadline is measured on the process's monotonic clock
 (the deadline only matters within one process, since a restart clears every
 token hash), with `reservedAt` recorded for the log. A later request that finds a `settling` record older than that treats
 it as tokenless: it clears the hash in one conditional update (state still
@@ -689,8 +694,13 @@ them in its own table in the `PAYMENTS_DB` file, outside the
 again unchanged while at least 60 s of it remain and replaced by a fresh one
 after that, so a stranger replaying a public header cannot grow the table.
 Expired rows are pruned on the same write. A proof is accepted only for that
-key's live nonce, before it expires, and only once; accepting it retires the
-nonce, and the next answer issues a new one. A proof whose recovered address is
+key's live nonce, before it expires, and only once. **Retiring the nonce is
+the acceptance point**, one conditional update (still this key's live nonce,
+unexpired, not yet retired) made after the upstream slot is taken (section 7),
+so of two concurrent requests with the same proof only one forwards; the other,
+like a proof whose nonce or `expirationTime` lapsed while it waited, is
+answered `payment_retry_needs_proof` with the key's live challenge. The next
+answer after an accepted proof issues a new nonce. A proof whose recovered address is
 not the record's `payer` is answered `payment_retry_needs_proof` with the same
 challenge. **Answers to a known key whose digest matches, and that forward
 nothing, are not rate-limited** (section 7). For a settled payment, the only
@@ -698,9 +708,11 @@ kind whose header is public, each costs one store read and at most one nonce
 write per key per nonce lifetime, and no upstream call, so a replayed public
 header buys a stranger nothing and costs the merchant almost nothing. The
 states that read the chain (`settlement_unknown`, `settling` without a token)
-are almost always left before the header is public; when a settle lands after
-a 503, the first request after it resolves the record to `settled`, so a burst
-of replays costs at most a few bounded chain reads.
+are almost always left before the header is public. When a settle lands after
+a 503 they are not, so **chain resolution is single-flight per key** within the
+process: a request that finds a resolve of its key already running answers 503
+`settlement_unknown` with `Retry-After` and reads nothing, and a burst of
+replays costs one bounded resolve until it writes `settled`.
 A 429 there would also be a non-2xx answer to a settled payment, which Haven
 would read as a rejection after funding (section 8). The demo merchant needs neither: it serves a cached
 result again and makes no second upstream call, so it asks for no proof.
@@ -905,17 +917,46 @@ honest payments would throttle all of them together. A 429 comes before
 settlement, so a Haven buyer recovers through verify-then-sweep (section 8). **A request whose
 header matches a known key's digest is never answered 429**, so a payer whose
 payment settled can always retry from behind a busy shared address (section 6).
-A payment that verified is its own limit. A global cap of 32
-concurrent upstream calls bounds the merchant's own spend: a paid request waits
-up to 10 s for a slot before settlement, and if no slot is free it is refused
-with 503 before any verify or settle call, so nothing is settled for a call
-that will not be served. **A forward for a known key** (a proof-backed retry,
-the first forward of a `settled` record, a stale takeover) takes a slot too,
-waiting up to 10 s, after its proof is checked and before the proof's nonce is
-retired or `beginForwarding` runs. If none is free it is answered 200
-`at_capacity_after_settlement` with `retry_after_seconds` and the challenge:
-no forward is used, the nonce stays live, and the answer to a settled payment
-stays 2xx (section 8).
+A payment that verified is its own limit.
+
+**Two global caps bound the merchant's own cost, whatever address requests
+come from.** Concurrent verify calls are capped at 16: a request with an
+unknown key over that cap is answered 503 `at_capacity` before it is
+reserved, so concurrent junk headers cost at most 16 verify calls in flight,
+however they are timed. Requests with a payment header do not count toward the
+10 concurrent unpaid requests per IP; the verify cap bounds them instead, so
+Haven's shared address is not limited to 10 payments in flight. Concurrent
+upstream calls are capped at 32, and **a request takes its upstream slot after
+verify and before settle**, so a header that has not verified never holds one.
+It waits up to 10 s; if no slot is free the reservation is released (the settle
+call was never sent) and the request is answered 503 `at_capacity`, so nothing
+is settled for a call that will not be served.
+
+**A forward for a known key** (a proof-backed retry, the first forward of a
+`settled` record, a stale takeover) takes a slot too, waiting up to 10 s, after
+its proof is checked and before the nonce is retired or `beginForwarding`
+runs. If none is free it is answered 200 `at_capacity_after_settlement` with
+`retry_after_seconds: 10` and the challenge: no forward is used, the nonce is
+not retired (the challenge carries the key's live nonce, the same one or a
+fresh one under the 60 s rule), and the answer to a settled payment stays 2xx
+(section 8). **Every request that takes a slot and does not forward gives it
+back before it answers**: a failed nonce retire, a `beginForwarding` answer of
+`in_flight`, `delivered` or `exhausted`, or a settle that fails.
+
+**A residual this design does not solve: a per-IP limit cannot tell hosted
+Haven buyers apart.** Every hosted Haven buyer reaches the merchant from
+Haven's own servers, and that one address also sends their unpaid traffic:
+Haven fetches each challenge itself on quote and pay, and a listed MCP merchant
+gets an unpaid `initialize` too. Enough of that traffic, or about ten failing
+headers in a burst from one broken or hostile Haven agent (a Haven agent holds
+its own delegate key, so it can spend or cancel its authorization's nonce, or
+move the delegate's funds, before Haven relays it), puts Haven's address over
+the limit at that merchant. Every hosted Haven buyer's next payment with an
+unknown key is then answered 429 for up to a minute, after Haven funded its
+delegate. Nothing is lost, since each recovers through verify-then-sweep, but
+the throttle is shared. Haven can limit failed relays per agent on its side;
+whether the kit should exempt or separately limit a known Haven address is an
+open owner question (section 13).
 
 ### Streamed responses
 
@@ -984,10 +1025,9 @@ The order of checks on a paid request is: the body checks (JSON, `model`, the
 cap, the size); then derive the key and look it up in the store, where a known
 key is answered by the table *For a known key* below (a body-check failure on
 a settled key is 200 `bad_request_after_settlement`); then, for an unknown
-key, the payment checks below; then the per-IP rate limit, then the upstream
-slot wait (section 7); then reserve, verify and settle. A request whose
-`reserve` finds a known record (a concurrent duplicate) gives its slot back
-before it answers by the record's state.
+key, the payment checks below; then the per-IP rate limit and the verify
+cap (section 7); then reserve, the chain read, verify, the upstream slot wait,
+and settle.
 
 ### Before settlement (unknown key)
 
@@ -1002,7 +1042,7 @@ before it answers by the record's state.
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Rate limit: an unpaid request, or an unknown-key payment header from an IP over the limit (section 7) | 429 | `rate_limited` | No | No payment yet; rejected after funding if a Haven agent funded its delegate | Retry after `Retry-After`; verify, then sweep the delegate if funded |
-| No upstream slot | 503 | `at_capacity` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| No verify capacity (before reserve), or no upstream slot within 10 s after verify (the reservation is released; nothing settled) | 503 | `at_capacity` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 
 Every refusal body is JSON with `error`, a human `message`, and, where it
@@ -1023,7 +1063,7 @@ end of the table. The body's `error` field carries the outcome:
 | Upstream call failed (section 6) | 200 | `upstream_failed_after_settlement` |
 | Same payment presented while a call is in flight | 200 | `payment_in_flight`, with the challenge |
 | Same payment presented after its call was delivered | 200 | `payment_already_delivered` |
-| A forward for a known key (with a valid proof) and no upstream slot free within 10 s | 200 | `at_capacity_after_settlement`, with `retry_after_seconds` and the challenge; no forward used, the proof's nonce stays live |
+| A forward for a known key (with a valid proof) and no upstream slot free within 10 s | 200 | `at_capacity_after_settlement`, with `retry_after_seconds: 10` and the challenge; no forward used, the nonce not retired |
 | The payment's three forwards all failed | 200 | `payment_exhausted` |
 | Any forward other than the reserving request's first (a retry, a stale takeover, a settlement found on the chain by a later request) without a valid `SIGN-IN-WITH-X` from the payer (section 6) | 200 | `payment_retry_needs_proof`, with the challenge; nothing forwarded, no forward used |
 | Header matches a known key but not its `authorizationDigest`, or the authorization was used in a transaction that did not pay this merchant | 402 | `payment_mismatch`: not this payment, so a refusal; the record is untouched |
@@ -1294,6 +1334,7 @@ merchant key takes effect on the next sales report.
 - The sales ingest route's path and the merchant key's format are #4897's.
 - The licence and the distribution decision come after the pilot (owner decision on [#4884](https://github.com/d-hinders/Haven-AI/issues/4884)).
 - Listing a deployment in Coinbase's directory, and any other directory, is outside the kit epic (#4884) and parked in #4887; section 4 names the fields and keeps them off by default.
+- **Open question (owner):** per-IP limits cannot tell hosted Haven buyers apart, because they all reach a merchant from Haven's servers (section 7). Does the pilot accept the shared throttle, with Haven limiting failed relays per agent, or does the kit exempt or separately limit a known Haven address?
 - **Open question (owner):** a Haven buyer has paid for nothing, until a Haven-side retry path exists, whenever its payment needs any forward other than the reserving request's first, because that forward needs a `SIGN-IN-WITH-X` proof the SDK does not send yet (section 6). The cases: its call fails after settlement (section 8); its settle outcome is unknown, the proxy answers 503 `settlement_unknown`, and the settle lands later; the proxy restarts mid-settle, or the holder passes `RESERVATION_DEADLINE_MS`, and the settle had landed; the proxy crashes mid-forward; and Haven's own 300 s deadline passes first when every step runs to its limit (all section 6). Does the pilot accept that, with the merchant refunding by hand from its log, or is a Haven-side retry (which would present the payment again with a `SIGN-IN-WITH-X` proof) built before the first live payment? Asked on #4884.
 - A periodic statement that sums a buyer's per-call receipts is later work (section 11).
 - ERC-7710 support, and advertising it when a facilitator supports it, is

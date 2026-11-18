@@ -434,6 +434,13 @@ describe('the display currency (#4963)', () => {
     // tallest bar past the top tick, as it always has).
     const top = Math.max(...ticks.map((t) => Number(t.replace(/[^\d,]/g, '').replace(',', '.'))))
     expect(top).toBeGreaterThanOrEqual(5)
+    // ...and drawn at the summary's 10, not the page's 99 (ticks near 100 kr).
+    expect(top).toBeLessThanOrEqual(20)
+    // The values on the same chart: 1.14 USDC at 10 = 11,40 kr, converted once.
+    const fmt = (v: number) => new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK' }).format(v)
+    const table = screen.getAllByTestId('chart-data-table')[0].textContent ?? ''
+    expect(table).toContain(fmt(11.4))
+    expect(table).not.toContain(fmt(114))
   })
 
   it('reads in EUR from the eur rate', async () => {

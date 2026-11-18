@@ -13,9 +13,8 @@
  */
 
 import { shouldMarkApprox, tokenPeg, type ApiSchema } from '@haven_ai/core'
-import { formatAnalyticsDay, unknownRecipientShortAddress } from '@/lib/analytics-format'
+import { formatAnalyticsDay, formatAnalyticsTick, unknownRecipientShortAddress } from '@/lib/analytics-format'
 import { formatFiatDisplay } from '@/lib/format'
-import { formatAnalyticsTick } from '@/lib/analytics-format'
 import type { PeriodValue } from '@/components/ui/list-url-codec'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 

@@ -46,6 +46,7 @@ import {
   listAgentNamesByDelegate,
   listPaymentLegs,
   listPayments,
+  type PaymentLegRow,
   readSalesSummary,
   type PaymentKind,
   type PaymentRow,
@@ -243,6 +244,7 @@ export function emptySummary(): SummaryResult {
     by_payer_other: { payers: 0, payments: 0, amount_raw: ZERO },
     unattributed: { payments: 0, amount_raw: ZERO },
     by_day: [],
+    received_in_stripe: { count: 0, amount_raw: ZERO },
   }
 }
 
@@ -258,6 +260,8 @@ export interface SummaryResult {
   by_payer_other: { payers: number; payments: number; amount_raw: string }
   unattributed: { payments: number; amount_raw: string }
   by_day: Array<{ day: string; payments: number; sales: number; revenue_raw: string }>
+  /** #4952: sales received at a registered Stripe deposit address, apart from every figure above. */
+  received_in_stripe: { count: number; amount_raw: string }
 }
 
 export async function readSalesSummaryForOwner(
@@ -315,6 +319,10 @@ export async function readSalesSummaryForOwner(
       sales: Number(d.sales),
       revenue_raw: d.revenue_raw,
     })),
+    received_in_stripe: {
+      count: Number(raw.received_in_stripe.count),
+      amount_raw: raw.received_in_stripe.amount_raw,
+    },
   }
 }
 
@@ -330,6 +338,8 @@ export interface PaymentView {
   receipt_number: string | null
   vat_treatment: 'SE_25' | 'REVERSE_CHARGE' | null
   held_by: 'account' | 'stripe'
+  /** The registered deposit address a Stripe-held sale was received at; null for an account payment. */
+  receiving_address: string | null
 }
 
 function paymentView(row: PaymentRow, resolve: PayerResolver, labels: Map<string, string>): PaymentView {
@@ -345,6 +355,7 @@ function paymentView(row: PaymentRow, resolve: PayerResolver, labels: Map<string
     receipt_number: row.receipt_number,
     vat_treatment: row.vat_treatment,
     held_by: row.held_by,
+    receiving_address: row.receiving_address,
   }
 }
 
@@ -380,6 +391,11 @@ export interface PaymentDetailView extends PaymentView {
   legs: Array<{ log_index: number | null; payer: PayerView; amount_raw: string }>
 }
 
+function stripeSaleLegs(row: PaymentRow): PaymentLegRow[] {
+  if (row.payer === null || row.several_payers) return []
+  return [{ log_index: null, payer_address: row.payer, amount_raw: row.amount_raw, token_address: '' }]
+}
+
 /** One payment with its transfer legs, or null when the account has no such payment. */
 export async function readPaymentDetail(
   scope: SalesScope,
@@ -387,8 +403,12 @@ export async function readPaymentDetail(
 ): Promise<PaymentDetailView | null> {
   const row = await findPayment(scope, txHash)
   if (row === null) return null
+  // A Stripe-held sale has no indexed transfers: its chain facts are the sale
+  // row's (#4952), shown as the one leg the sale was read from.
   const [legs, resolve] = await Promise.all([
-    listPaymentLegs(scope, txHash),
+    row.held_by === 'stripe'
+      ? Promise.resolve(stripeSaleLegs(row))
+      : listPaymentLegs(scope, txHash),
     buildPayerResolver(scope.userId, scope.chainId),
   ])
   const labels = await labelProducts(

@@ -15,6 +15,20 @@
  * a match kind and never touches `match_kind`, `balance_consumed` or the
  * receive balance.
  *
+ * ## Stripe-held sales (#4952, dev and Stripe sandbox only)
+ *
+ * When a confirmed transaction pays the key's Sales account nothing, the legs
+ * to the account's REGISTERED deposit addresses are read instead (the registry
+ * is the owner's own word, never the record's). A leg counts only when its
+ * address is registered to this account and was active at the leg's block time.
+ * The sale is stored with `held_by = 'stripe'` and `receiving_address` from the
+ * registry, and NO `inbound_transfers` row is written, so it is in no balance.
+ * A transaction that pays the account AND a registered address is an account
+ * sale counting only the legs into the account. Legs to another account's
+ * address, an unregistered one, or one outside its window all get the same 422
+ * `no_payment_to_account` as a hash that paid nobody. The sale record itself is
+ * unchanged.
+ *
  * ## The answers
  *
  * - new sale 201; identical resend 200 (nothing written); a different record for
@@ -38,6 +52,7 @@ import {
   type MerchantSaleVatTreatment,
 } from '../../infra/repositories/merchant-sales.js'
 import { listOwnAccountAddresses } from '../../infra/repositories/inbound-transfers.js'
+import { listAccountDepositWindows } from '../../infra/repositories/merchant-deposit-addresses.js'
 import {
   readInboundTransactionByTxHash,
   type ChainInboundLeg,
@@ -170,6 +185,25 @@ export function saleFactsFromLegs(
   }
 }
 
+/**
+ * Whether `address` was registered to the account at `at`: registered at or
+ * before it, and not retired by it. A re-registration after a retirement is a
+ * second window; any one containing `at` counts.
+ */
+export function registrationActiveAt(
+  windows: ReadonlyArray<{ address: string; registered_at: Date; retired_at: Date | null }>,
+  address: string,
+  at: Date,
+): boolean {
+  const t = at.getTime()
+  return windows.some(
+    (w) =>
+      w.address === address.toLowerCase() &&
+      new Date(w.registered_at).getTime() <= t &&
+      (w.retired_at === null || new Date(w.retired_at).getTime() > t),
+  )
+}
+
 export async function ingestMerchantSale(input: {
   merchant: SaleMerchant
   record: SaleRecordInput
@@ -202,10 +236,15 @@ export async function ingestMerchantSale(input: {
   const existing = await findMerchantSale(merchant.account_id, merchant.chain_id, txHash)
   if (existing) return answerFor(existing, record)
 
+  // #4952: the account's registered Stripe deposit addresses, every window
+  // (active or retired). Only THIS account's rows: nothing here can reveal
+  // another account's registrations.
+  const windows = await listAccountDepositWindows(merchant.account_id, merchant.chain_id)
   const read = await readInboundTransactionByTxHash(
     merchant.chain_id,
     merchant.account_address,
     txHash,
+    windows.map((w) => w.address),
   )
   if (!read.ok) {
     return fail(503, 'chain_unavailable', 'The chain could not be read; nothing was stored. Try again.')
@@ -219,12 +258,27 @@ export async function ingestMerchantSale(input: {
   if (!read.receiptFound) return notVisible
   if (read.latestBlock - read.blockNumber + 1 < SALE_CONFIRMATIONS) return notVisible
 
+  const noPayment = () =>
+    fail(422, 'no_payment_to_account', 'That transaction has no USDC transfer into this key\'s account.')
+
+  // A transaction that pays the Sales account is an account sale, counting only
+  // the legs into the account, whatever else it also paid (#4952).
+  let saleLegs: ChainInboundLeg[] = read.legs
+  let heldBy: 'account' | 'stripe' = 'account'
+  let receivingAddress: string | null = null
   if (read.legs.length === 0) {
-    return fail(
-      422,
-      'no_payment_to_account',
-      'That transaction has no USDC transfer into this key\'s account.',
-    )
+    // It paid the account nothing: the legs to a registered address count only
+    // while that registration was active at the leg's block time. Every other
+    // case (another account's address, an unregistered one, registered after
+    // the block or retired before it) is the same answer as a hash that paid
+    // nobody.
+    const counted = (read.otherLegs ?? [])
+      .filter((o) => registrationActiveAt(windows, o.toAddress, o.leg.blockTime))
+      .sort((x, y) => x.leg.logIndex - y.leg.logIndex)
+    if (counted.length === 0) return noPayment()
+    saleLegs = counted.map((o) => o.leg)
+    heldBy = 'stripe'
+    receivingAddress = counted[0].toAddress
   }
 
   const account = {
@@ -233,10 +287,12 @@ export async function ingestMerchantSale(input: {
     accountAddress: merchant.account_address,
     chainId: merchant.chain_id,
   }
-  await ingestInboundTransfers(account, read.legs, input.log)
+  // A Stripe-held sale writes NO inbound_transfers row: it would count as
+  // received into Haven.
+  if (heldBy === 'account') await ingestInboundTransfers(account, read.legs, input.log)
 
   const own = new Set(await listOwnAccountAddresses(merchant.user_id))
-  const facts = saleFactsFromLegs(read.legs, own)
+  const facts = saleFactsFromLegs(saleLegs, own)
   const fields = recordFields(record)
 
   const inserted = await insertMerchantSale({
@@ -247,12 +303,14 @@ export async function ingestMerchantSale(input: {
     recordVersion: SALE_RECORD_VERSION,
     ...fields,
     amountRaw: facts.amountRaw,
-    tokenAddress: read.legs[0].tokenAddress.toLowerCase(),
+    tokenAddress: saleLegs[0].tokenAddress.toLowerCase(),
     payerAddress: facts.payerAddress,
     severalPayers: facts.severalPayers,
     senderIsOwnAddress: facts.senderIsOwnAddress,
     blockNumber: read.blockNumber,
-    blockTime: read.legs[0].blockTime,
+    blockTime: saleLegs[0].blockTime,
+    heldBy,
+    receivingAddress,
   })
   if (inserted) return { ok: true, created: true, sale: inserted }
 
@@ -287,6 +345,8 @@ export function serializeSale(row: MerchantSaleRow): Record<string, unknown> {
     payer_address: row.payer_address,
     several_payers: row.several_payers,
     sender_is_own_address: row.sender_is_own_address,
+    held_by: row.held_by,
+    receiving_address: row.receiving_address,
     block_number: Number(row.block_number),
     block_time: new Date(row.block_time).toISOString(),
     created_at: new Date(row.created_at).toISOString(),

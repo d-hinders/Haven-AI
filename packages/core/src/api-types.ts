@@ -3961,7 +3961,7 @@ export type paths = {
         };
         /**
          * The merchant account's sales for one period: totals and breakdowns.
-         * @description The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list; an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is the sales' amount divided by `sales` (rounded down). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Breakdowns name the top 100 by amount and fold the rest into `*_other`. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.
+         * @description The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list; an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is the sales' amount divided by `sales` (rounded down). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Every figure above counts account-held payments only; sales received at a registered Stripe deposit address (#4952) are never in them and are reported apart in `received_in_stripe` (a count and an amount, own moves left out). Breakdowns name the top 100 by amount and fold the rest into `*_other`. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.
          */
         get: operations["getMerchantSalesSummary"];
         put?: never;
@@ -3981,7 +3981,7 @@ export type paths = {
         };
         /**
          * The merchant account's payments, newest first, one row per transaction.
-         * @description The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` today. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. With merchant services off or no merchant account the list is empty. Read-only.
+         * @description The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` for a payment into the account and `stripe` for a sale received at a registered Stripe deposit address (#4952), which carries `receiving_address`, has no transfers of its own, and is in no summary figure. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. With merchant services off or no merchant account the list is empty. Read-only.
          */
         get: operations["listMerchantSalesPayments"];
         put?: never;
@@ -4001,7 +4001,7 @@ export type paths = {
         };
         /**
          * One payment: its sale record fields and its transfer legs.
-         * @description One payment into the merchant account (#4897, epic #4885): the list row's fields, the merchant's reference, and the indexed transfers of the transaction (`log_index`, payer, amount; zero-value transfers are not listed). 404 PAYMENT_NOT_FOUND when the account has no such payment, the same answer for a transaction that paid another account. Read-only.
+         * @description One payment into the merchant account (#4897, epic #4885): the list row's fields, the merchant's reference, and the indexed transfers of the transaction (`log_index`, payer, amount; zero-value transfers are not listed). A Stripe-held sale has no indexed transfers: its chain facts come from the sale row, as one leg with a null `log_index`. 404 PAYMENT_NOT_FOUND when the account has no such payment, the same answer for a transaction that paid another account. Read-only.
          */
         get: operations["getMerchantSalesPayment"];
         put?: never;
@@ -4027,6 +4027,50 @@ export type paths = {
          * @description The owner clears a wrong sale record (#4897, epic #4885). The merchant's record is deleted; the payment stays, shown with no product, and a new record for the transaction is then accepted by `POST /merchant/sales`. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
          */
         delete: operations["clearMerchantSaleRecord"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-deposit-addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Sales account's registered Stripe deposit addresses, active and retired.
+         * @description The owner's registry of Stripe deposit addresses (#4952, epic #4886; dev and Stripe sandbox only). Every registration, active and retired, newest first. Each carries `verified: false` and a `verification` note: the screens render it as "registered by you, not verified by Haven", because the address is Stripe-controlled and Haven cannot check it is the owner's. A sale paid to an active registered address is stored as a Stripe-held sale and never counts in a Haven balance. With merchant services off or no merchant account the list is empty. Owner session only: a Sales key cannot call it. Read-only.
+         */
+        get: operations["listMerchantDepositAddresses"];
+        put?: never;
+        /**
+         * Register a Stripe deposit address for the Sales account.
+         * @description The owner registers the address a payment processor receives on their behalf (#4952, epic #4886; dev and Stripe sandbox only). The chain is the Sales account's own. The registration is the owner's word: it is labelled "registered by you, not verified by Haven" (`verified: false`), and a proof of address ownership is required before any production use. Refused: `INVALID_DEPOSIT_ADDRESS` (400, not a 0x-prefixed 20-byte hex address); `DEPOSIT_ADDRESS_IS_OWN` (409, one of the owner's own smart accounts on any network, or a current or past delegate address of one of their agents); `DEPOSIT_ADDRESS_ALREADY_REGISTERED` (409, an active registration on any account on this chain); `MERCHANT_ACCOUNT_REQUIRED` (409, merchant services are off or there is no merchant account). A retired address can be registered again. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
+         */
+        post: operations["registerMerchantDepositAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-deposit-addresses/{id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire a registered Stripe deposit address.
+         * @description The owner retires a registration (#4952, epic #4886). `retired_at` is set and nothing is deleted: new sales stop being attributed to the address, and the sales already attributed stay. The address can be registered again afterwards, by this account or another. Owner session only, on the device-login must-refuse list, rate limited as a money-path write.
+         */
+        post: operations["retireMerchantDepositAddress"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5162,11 +5206,43 @@ export type components = {
             several_payers: boolean;
             /** @description Every transfer in the transaction came from one of the owner's own addresses. */
             sender_is_own_address: boolean;
+            /**
+             * @description `stripe` when the transaction paid a deposit address registered to the account and not the account itself (#4952); taken from the registry, never from the record.
+             * @enum {string}
+             */
+            held_by: "account" | "stripe";
+            /** @description The registered deposit address a Stripe-held sale was received at; null for a sale into the account. */
+            receiving_address: string | null;
             block_number: number;
             /** Format: date-time */
             block_time: string;
             /** Format: date-time */
             created_at: string;
+        };
+        MerchantDepositAddress: {
+            /** Format: uuid */
+            id: string;
+            /** @description Lower-case. */
+            address: string;
+            /** @description CAIP-2: the Sales account's network. */
+            chain: string;
+            /** Format: date-time */
+            registered_at: string;
+            /** Format: date-time */
+            retired_at: string | null;
+            active: boolean;
+            /**
+             * @description Always false: Haven cannot verify a Stripe-controlled address is the owner's.
+             * @enum {boolean}
+             */
+            verified: false;
+            /** @description The label the screens render: "Registered by you, not verified by Haven." */
+            verification: string;
+        };
+        MerchantDepositAddressList: {
+            /** @description The same label, once for the list. */
+            verification: string;
+            addresses: components["schemas"]["MerchantDepositAddress"][];
         };
         MerchantSalesPayer: {
             /**
@@ -5216,6 +5292,8 @@ export type components = {
                 payments: number;
                 amount_raw: string;
             };
+            /** @description Sales received at a registered Stripe deposit address (#4952), apart from every figure above: they are in no Haven balance and no revenue figure here. Own moves are left out. Counts transactions. */
+            received_in_stripe: components["schemas"]["MerchantSalesAmount"];
             by_day: {
                 /** @description UTC calendar day, YYYY-MM-DD. */
                 day: string;
@@ -5240,8 +5318,13 @@ export type components = {
             receipt_number: string | null;
             /** @enum {string|null} */
             vat_treatment: "SE_25" | "REVERSE_CHARGE" | null;
-            /** @enum {string} */
+            /**
+             * @description `account` for a payment into the Sales account; `stripe` for a sale received at a registered Stripe deposit address (#4952): shown apart, never in a balance.
+             * @enum {string}
+             */
             held_by: "account" | "stripe";
+            /** @description The registered deposit address of a Stripe-held sale; null for an account payment. */
+            receiving_address: string | null;
         };
         MerchantSalesPaymentsPage: {
             payments: components["schemas"]["MerchantSalesPayment"][];
@@ -25477,7 +25560,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Refused, not retryable. error `chain_mismatch`: `chain` is not the key account's network. error `no_payment_to_account`: the transaction is confirmed and has no USDC transfer into the key's account (the same answer whether it paid another Haven account or nobody). */
+            /** @description Refused, not retryable. error `chain_mismatch`: `chain` is not the key account's network. error `no_payment_to_account`: the transaction is confirmed and has no USDC transfer into the key's account or into a deposit address registered to it and active at the transfer's block time (the same answer whether it paid another Haven account, an address registered to another account, an unregistered address, or nobody). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -25759,6 +25842,211 @@ export interface operations {
                 };
             };
             /** @description Merchant services are off or there is no merchant account: error_code MERCHANT_ACCOUNT_REQUIRED. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantDepositAddresses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The registrations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantDepositAddressList"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    registerMerchantDepositAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The deposit address: a 0x-prefixed 20-byte hex EVM address. Checked by the handler so a bad one answers INVALID_DEPOSIT_ADDRESS. */
+                    address: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The address is registered. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantDepositAddress"];
+                };
+            };
+            /** @description error_code INVALID_DEPOSIT_ADDRESS: not a valid EVM address. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESS_IS_OWN, DEPOSIT_ADDRESS_ALREADY_REGISTERED, or MERCHANT_ACCOUNT_REQUIRED (merchant services off). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    retireMerchantDepositAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The registration id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The registration, now retired. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantDepositAddress"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such registration on the account: error_code DEPOSIT_ADDRESS_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESS_RETIRED (already retired) or MERCHANT_ACCOUNT_REQUIRED (merchant services off). */
             409: {
                 headers: {
                     [name: string]: unknown;

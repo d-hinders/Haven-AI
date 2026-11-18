@@ -99,6 +99,7 @@ import merchantRoutes from './routes/merchants.js'
 import merchantServiceRoutes from './routes/merchant-services.js'
 import merchantKeyRoutes from './routes/merchant-keys.js'
 import merchantCatalogueRoutes from './routes/merchant-catalogue.js'
+import merchantSalesRoutes from './routes/merchant-sales.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
@@ -323,6 +324,10 @@ installRequestValidation(app, {
     // is closed (`additionalProperties: false`) so a body carrying anything
     // but the address is refused by the schema, not by a handler check.
     'routes/merchant-catalogue.ts',
+    // #4897: the sales ingest — the merchant key's one write. BRAND NEW, born
+    // ENFORCED on the same rule, with a closed body (`additionalProperties:
+    // false`) so a record is exactly the section 5 shape.
+    'routes/merchant-sales.ts',
   ],
 })
 
@@ -624,6 +629,9 @@ await app.register(merchantKeyRoutes, { prefix: '/merchant-keys' })
 // list read from its discovery document, and the refresh. The list lives in
 // its own table, never `merchant_catalog`; the read only labels.
 await app.register(merchantCatalogueRoutes, { prefix: '/merchant-catalogue' })
+// #4897: the sales ingest — the merchant key's one write. Authenticated by the
+// Sales key alone (`merchantAuthMiddleware`); the account is the key's.
+await app.register(merchantSalesRoutes, { prefix: '/merchant' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns

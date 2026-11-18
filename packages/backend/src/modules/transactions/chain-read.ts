@@ -145,6 +145,68 @@ function legFromLog(
 }
 
 /**
+ * One transaction, read from the chain, with what `readInboundTransfersByTxHash`
+ * folds away (#4897): whether the receipt exists at all, and where it sits.
+ * A sale needs the difference, because "no receipt yet" is a retry and "a
+ * receipt with no leg to the account" is a refusal.
+ */
+export type ChainTransactionRead =
+  | { ok: false; reason: 'rpc_unavailable' }
+  | { ok: true; receiptFound: false; legs: [] }
+  | {
+      ok: true
+      receiptFound: true
+      /** The block the receipt was mined in. */
+      blockNumber: number
+      /** The chain's head when the receipt was read, from the same provider. */
+      latestBlock: number
+      legs: ChainInboundLeg[]
+    }
+
+/**
+ * The transaction behind `txHash`: its receipt's USDC legs into
+ * `accountAddress`, the receipt's block and the chain head (#4897). Nothing is
+ * taken from a caller; `ok: false` is an unreadable chain, never "none".
+ */
+export async function readInboundTransactionByTxHash(
+  chainId: number,
+  accountAddress: string,
+  txHash: string,
+): Promise<ChainTransactionRead> {
+  const tokenAddress = settlementTokenAddress(chainId)
+  const account = accountAddress.toLowerCase()
+  const provider = getProvider(chainId)
+
+  let receipt: ethers.TransactionReceipt | null
+  try {
+    receipt = await provider.getTransactionReceipt(txHash)
+  } catch {
+    return { ok: false, reason: 'rpc_unavailable' }
+  }
+  if (!receipt) return { ok: true, receiptFound: false, legs: [] }
+
+  let latestBlock: number
+  let blockTime: Date
+  try {
+    latestBlock = await provider.getBlockNumber()
+    const seconds = await blockTimeSec(chainId, receipt.blockNumber)
+    if (seconds === null) return { ok: false, reason: 'rpc_unavailable' }
+    blockTime = new Date(seconds * 1000)
+  } catch {
+    return { ok: false, reason: 'rpc_unavailable' }
+  }
+
+  const legs: ChainInboundLeg[] = []
+  if (tokenAddress) {
+    for (const log of receipt.logs) {
+      const leg = legFromLog(log, tokenAddress, account, blockTime)
+      if (leg) legs.push(leg)
+    }
+  }
+  return { ok: true, receiptFound: true, blockNumber: receipt.blockNumber, latestBlock, legs }
+}
+
+/**
  * The USDC transfers INTO `accountAddress` carried by one transaction, read
  * from the chain. `ok: true` with an empty list means the chain says there is
  * none (unknown hash, unmined, reverted, or no settlement-token leg to the

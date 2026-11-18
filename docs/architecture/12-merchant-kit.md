@@ -19,6 +19,7 @@ covers:
   - scripts/release-bump.mjs
   - .github/workflows/publish.yml
   - packages/backend/src/routes/machine-payments.ts
+  - packages/backend/src/routes/merchant-sales.ts
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/merchant-payments/src/receipt.ts
   - packages/merchant-payments/src/tax-declaration.ts
@@ -341,8 +342,8 @@ it does not know, because it cannot know what the fields mean.
 After each settled call the proxy sends one sale record to Haven. The record is
 JSON, `POST`ed to the URL in `HAVEN_SALES_URL` with
 `Authorization: Bearer $HAVEN_MERCHANT_KEY` and `Content-Type: application/json`.
-The route and the merchant key are Haven's (#4897); the proxy only needs the
-URL and the key. The key's limits — what it can and cannot do, the accepted
+The route is `POST /merchant/sales` and the merchant key is Haven's (#4897);
+the proxy only needs the URL and the key. The key's limits — what it can and cannot do, the accepted
 residual, and how revocation works — are documented for merchants in
 [`docs/security/merchant-key-limits.md`](../security/merchant-key-limits.md);
 the kit README links there.
@@ -413,6 +414,34 @@ USDC transfer into the merchant key's account (#4897). The split is:
 A record whose hash paid a different Haven account gets the same answer as a
 hash that paid nobody, so a merchant key cannot be used to test whether a hash
 paid another account (#4897).
+
+### The route and its answers
+
+`POST /merchant/sales`, authenticated by the merchant key alone (the account is
+the key's, never the record's), limited to 120 requests a minute per key, whichever header carries it. The
+body is the record above, with no other field. Every answer below is documented
+in Haven's OpenAPI spec, and a refusal carries `error` and `error_code` with the
+same machine-readable code, and `message` in words.
+
+| Situation | Answer |
+|---|---|
+| A new sale was stored | 201, the sale |
+| An identical resend: the same transaction and the same `product_id`, `product_name`, `merchant_reference`, `receipt_number` and `vat_treatment` | 200, the same sale; nothing is written |
+| A different record for a transaction that already has a sale on the account | 409 `sale_record_conflict`; the first record stands |
+| The receipt is not found yet, or has fewer than 3 confirmations | 425 `transaction_not_visible`, with `Retry-After: 10` and `retry_after_seconds: 10`. The only 4xx answer the proxy retries |
+| The transaction is confirmed but has no USDC transfer into the key's account | 422 `no_payment_to_account`. The same answer whether it paid another Haven account or nobody |
+| `chain` is not `eip155:<the key account's chain id>` | 422 `chain_mismatch` |
+| `version` is anything but 1 | 400 `unsupported_record_version`; version 1 is the only one |
+| The chain could not be read | 503 `chain_unavailable`; nothing is stored. Retry |
+
+The sale carries the amount, payer, token and time Haven read from the chain.
+When one transaction carries several USDC transfers into the account, the sale
+attaches to the transaction: its amount is the sum of the transfers that do not
+come from the owner's own addresses, and its payer is the single sender when
+every revenue transfer shares one, otherwise "several payers" (an own leg beside
+one customer leg is the customer's sale). A sale is its own record,
+not a match kind: it cannot block a receipt or an x402 match and it does not
+change the receive balance.
 
 ### Delivery
 
@@ -1393,7 +1422,7 @@ merchant key takes effect on the next sales report.
 
 ## 13. What this document does not decide
 
-- The sales ingest route's path and the merchant key's format are #4897's.
+- The sales ingest route's path (`POST /merchant/sales`) is settled by #4897 (section 5); the merchant key's format is #4896's.
 - The licence and the distribution decision come after the pilot (owner decision on [#4884](https://github.com/d-hinders/Haven-AI/issues/4884)).
 - Listing a deployment in Coinbase's directory, and any other directory, is outside the kit epic (#4884) and parked in #4887; section 4 names the fields and keeps them off by default.
 - **Open question (owner):** per-IP limits cannot tell hosted Haven buyers apart, because they all reach a merchant from Haven's servers (section 7). Does the pilot accept the shared throttle, with Haven limiting failed relays per agent, or does the kit exempt or separately limit a known Haven address?

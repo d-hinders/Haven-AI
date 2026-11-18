@@ -347,6 +347,10 @@ describe('owner_cli route census (#2526)', () => {
       // allow-list either — nothing needs it.
       { method: 'POST', path: '/merchant-keys' },
       { method: 'DELETE', path: '/merchant-keys/{id}' },
+      // #4897: the sales ingest is the merchant key's own write; it is
+      // authenticated by a Sales key, never a session, so a device-code session
+      // has no business at it (and it can never be a way to plant a sale).
+      { method: 'POST', path: '/merchant/sales' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)

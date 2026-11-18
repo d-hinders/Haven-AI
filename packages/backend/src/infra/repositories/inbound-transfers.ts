@@ -323,16 +323,37 @@ export async function upsertInboundIndexCursor(
 
 /**
  * The owner's own addresses — the set `sender_is_own_address` is decided
- * against at index time (#4903). Today it is every `smart_accounts` row the
- * user owns; #4897 defines the set for merchant sales and may widen it, which
- * is why the flag is recorded per row rather than derived at read time.
+ * against at index time (#4903), and the set a merchant sale's own-sender
+ * accounting uses (#4897), so the two can never disagree.
+ *
+ * Widened by #4897 (owner decision, 2026-11-16) from smart accounts alone to:
+ * every `smart_accounts.account_address` of the user on any network, every
+ * `agents.delegate_address` of the user's agents (revoked agents included —
+ * the status is deliberately not filtered), and every
+ * `agent_rekeys.old_delegate_address` of those agents (a key replaced by
+ * rotation is no longer on the agent row but is still the owner's). All
+ * lower-case, one query, de-duplicated. It intentionally changes the flag for
+ * newly indexed rows of every account; rows already indexed keep what they
+ * recorded, so a later account or rotation never rewrites past revenue.
  */
 export async function listOwnAccountAddresses(
   userId: string,
   db: Executor = pool,
 ): Promise<string[]> {
   const result = await db.query<{ address: string }>(
-    'SELECT LOWER(account_address) AS address FROM smart_accounts WHERE user_id = $1',
+    `SELECT LOWER(account_address) AS address
+       FROM smart_accounts
+      WHERE user_id = $1
+     UNION
+     SELECT LOWER(delegate_address)
+       FROM agents
+      WHERE user_id = $1
+        AND delegate_address IS NOT NULL
+     UNION
+     SELECT LOWER(r.old_delegate_address)
+       FROM agent_rekeys r
+       JOIN agents a ON a.id = r.agent_id
+      WHERE a.user_id = $1`,
     [userId],
   )
   return result.rows.map((row) => row.address)

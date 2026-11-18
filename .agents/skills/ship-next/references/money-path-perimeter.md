@@ -532,3 +532,25 @@ migration are already on the runtime list through `infra/repositories/**` and
 - `packages/backend/src/background-jobs.ts`
 - `packages/backend/src/modules/transactions/chain-read.ts`
 - `packages/backend/src/modules/transactions/merchant-index.ts`
+
+### The sales ingest
+
+#4897. `POST /merchant/sales` is the merchant key's one write. A sale record is
+accepted only against a USDC transfer Haven read from the chain into the key's
+account, through the by-hash read #4903 added: amount, payer, token and time are
+copied from that read, never from the record and never from an existing
+`inbound_transfers` row. `modules/transactions/merchant-sales.ts` is the whole
+ingest — the answers, the confirmation count, the sum of the legs that count as
+revenue — and `routes/merchant-sales.ts` is the auth door, the per-key rate
+limit and the status mapping. The sale is its own table, not a match kind, so it
+cannot block a receipt or x402 match and cannot move the receive balance.
+
+Control, not runtime (the same rule as the Sales key and the inbound index): no
+QA scenario posts a sale yet, so a green run says nothing about these two files.
+They move to the runtime list when a QA leg drives the route. The repository
+(`infra/repositories/merchant-sales.ts`) and migration `131_merchant_sales.ts`
+are already on the runtime list through `infra/repositories/**` and
+`db/migrations/**`.
+
+- `packages/backend/src/modules/transactions/merchant-sales.ts`
+- `packages/backend/src/routes/merchant-sales.ts`

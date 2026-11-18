@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { privateKeyToAccount } from 'viem/accounts'
+import type { InvoiceJson } from '@haven_ai/merchant-payments'
 import {
   buildSignedTaxDeclaration,
   encodeTaxDeclarationHeader,
@@ -7,6 +8,7 @@ import {
 import { PROXY_CHAINS } from './chains.js'
 import type { Product } from './products.js'
 import {
+  MAX_RECEIPT_HEADER_CHARS,
   MAX_RECEIPT_JSON_BYTES,
   buildReceiptForPayment,
   encodeReceiptHeader,
@@ -203,17 +205,42 @@ describe('buildReceiptForPayment (#4913)', () => {
 })
 
 describe('encodeReceiptHeader (#4913)', () => {
-  it('base64-encodes the document so the header stays ASCII-safe, under the 64 KiB limit', () => {
+  /** A receipt document whose JSON is exactly `bytes` bytes (the padding is ASCII). */
+  function documentOfBytes(bytes: number): InvoiceJson {
+    const base = buildReceiptForPayment(PARAMS)
+    const empty = { ...base, saljare: { ...base.saljare, name: '' } }
+    const pad = bytes - Buffer.byteLength(JSON.stringify(empty), 'utf8')
+    const json = { ...base, saljare: { ...base.saljare, name: 'x'.repeat(pad) } }
+    expect(Buffer.byteLength(JSON.stringify(json), 'utf8')).toBe(bytes)
+    return json
+  }
+
+  it('base64-encodes the document so the header stays ASCII-safe, under the SDK’s encoded limit', () => {
     const json = buildReceiptForPayment(PARAMS)
     const header = encodeReceiptHeader(json)
     expect(header).toMatch(/^[A-Za-z0-9+/]+=*$/)
     expect(JSON.parse(Buffer.from(header, 'base64').toString('utf8'))).toEqual(json)
+    expect(header.length).toBeLessThanOrEqual(MAX_RECEIPT_HEADER_CHARS)
     expect(Buffer.from(header, 'base64').length).toBeLessThanOrEqual(MAX_RECEIPT_JSON_BYTES)
   })
 
   it('refuses a document over the limit the SDK drops and the backend refuses', () => {
     const json = buildReceiptForPayment(PARAMS)
     const oversized = { ...json, saljare: { ...json.saljare, name: 'x'.repeat(MAX_RECEIPT_JSON_BYTES) } }
-    expect(() => encodeReceiptHeader(oversized)).toThrow(/the limit is 65536/)
+    expect(() => encodeReceiptHeader(oversized)).toThrow(/the limit is 87382/)
+  })
+
+  it('refuses a document of exactly 64 KiB decoded: its base64 is 87384 characters, over the SDK’s 87382', () => {
+    const json = documentOfBytes(MAX_RECEIPT_JSON_BYTES)
+    expect(Buffer.from(JSON.stringify(json), 'utf8').toString('base64').length).toBe(87384)
+    expect(() => encodeReceiptHeader(json)).toThrow(/the limit is 87382/)
+  })
+
+  it('accepts the largest document the SDK keeps: 65535 decoded bytes encode to 87380 characters', () => {
+    const json = documentOfBytes(MAX_RECEIPT_JSON_BYTES - 1)
+    const header = encodeReceiptHeader(json)
+    expect(header.length).toBe(87380)
+    expect(header.length).toBeLessThanOrEqual(MAX_RECEIPT_HEADER_CHARS)
+    expect(Buffer.from(header, 'base64').length).toBe(MAX_RECEIPT_JSON_BYTES - 1)
   })
 })

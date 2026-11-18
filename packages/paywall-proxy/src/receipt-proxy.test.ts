@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { receiptNumberForTransaction } from '@haven_ai/merchant-payments'
+import { MAX_RECEIPT_HEADER_CHARS } from './receipt.js'
 import {
   CHAT_BODY,
   CHAT_PATH,
@@ -115,7 +116,7 @@ describe('the receipt on a paid call (#4913)', () => {
     )
     expect(receipt.kopare).not.toHaveProperty('deklaration')
     // The encoded header stays under the limit the SDK drops and the backend refuses.
-    expect(Buffer.from(res.headers.get('x-receipt-json')!, 'base64').length).toBeLessThanOrEqual(64 * 1024)
+    expect(res.headers.get('x-receipt-json')!.length).toBeLessThanOrEqual(MAX_RECEIPT_HEADER_CHARS)
     expect(h.logs.find((l) => l.event === 'started')).toMatchObject({ receipt: 'on' })
   })
 

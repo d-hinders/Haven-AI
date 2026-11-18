@@ -27,11 +27,21 @@ import type { ProxyChain } from './chains.js'
 import type { Product } from './products.js'
 
 /**
- * The most the receipt may be, decoded. The SDK drops a header longer than
- * `ceil(64 KiB * 4 / 3)` and the backend refuses a receipt over 64 KiB decoded
- * (`packages/sdk/src/merchant-completion.ts`), so the proxy never sends one.
+ * The most the receipt may be, decoded: the backend refuses a receipt over
+ * 64 KiB decoded. The SDK is the tighter of the two — it drops a header longer
+ * than `ceil(64 KiB * 4 / 3)` characters, on the ENCODED length
+ * (`packages/sdk/src/merchant-completion.ts`) — so the guard below checks the
+ * encoded header against that expression, not this decoded size.
  */
 export const MAX_RECEIPT_JSON_BYTES = 64 * 1024
+
+/**
+ * The SDK's own limit, in base64 characters: `ceil(64 KiB * 4 / 3)` = 87382.
+ * Base64 of exactly 65536 decoded bytes is 87384 characters, so a document of
+ * exactly 64 KiB is already over it; the largest document the proxy sends is
+ * 65535 bytes, which encodes to 87380 characters.
+ */
+export const MAX_RECEIPT_HEADER_CHARS = Math.ceil((MAX_RECEIPT_JSON_BYTES * 4) / 3)
 
 /**
  * The deployment's receipt settings, present only when a VAT rule is
@@ -42,9 +52,10 @@ export interface ReceiptSettings {
   vatRule: VatRule
   seller: ReceiptSellerDetails
   /**
-   * The merchant's own support contact. The proxy sends the JSON only, which
-   * carries no support line; a reader that renders the text from the header
-   * prints this, never Haven's.
+   * The merchant's own support contact. The proxy sends the JSON only, and the
+   * receipt shape carries no support line, so this value has no effect on the
+   * receipt the proxy emits; it is kept for a deployment that renders the text
+   * itself. Never Haven's.
    */
   supportContact: string
 }
@@ -111,14 +122,15 @@ export function buildReceiptForPayment(params: ReceiptParams): InvoiceJson {
 
 /**
  * The `x-receipt-json` header value: the receipt's JSON, base64-encoded so the
- * header stays ASCII-safe. Throws when the document is over the limit the SDK
- * and the backend enforce; the caller leaves the header out and logs it.
+ * header stays ASCII-safe. Throws when the encoded header is longer than the
+ * SDK keeps; the caller leaves the header out and logs it.
  */
 export function encodeReceiptHeader(json: InvoiceJson): string {
-  const text = JSON.stringify(json)
-  const bytes = Buffer.byteLength(text, 'utf8')
-  if (bytes > MAX_RECEIPT_JSON_BYTES) {
-    throw new Error(`the receipt is ${bytes} bytes; the limit is ${MAX_RECEIPT_JSON_BYTES}`)
+  const header = Buffer.from(JSON.stringify(json), 'utf8').toString('base64')
+  if (header.length > MAX_RECEIPT_HEADER_CHARS) {
+    throw new Error(
+      `the receipt encodes to ${header.length} characters; the limit is ${MAX_RECEIPT_HEADER_CHARS}`,
+    )
   }
-  return Buffer.from(text, 'utf8').toString('base64')
+  return header
 }

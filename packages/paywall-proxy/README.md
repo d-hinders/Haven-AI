@@ -177,7 +177,7 @@ seller detail:
 | `SELLER_VAT_NR` | Your VAT registration number. Required with `VAT_RULE`. |
 | `SELLER_ADDRESS` | Your address, on the seller block. Optional. |
 | `SELLER_IBAN`, `SELLER_BIC` | Your bank details, on the seller block. Optional. |
-| `SELLER_SUPPORT_CONTACT` | Your own support contact, for a reader that renders the receipt's text. Optional, and never Haven's. |
+| `SELLER_SUPPORT_CONTACT` | Your own support contact. Optional, and never Haven's. The proxy sends the receipt as JSON only, and that shape carries no support line, so this value has no effect on the receipt the proxy emits. |
 
 On Base mainnet the proxy refuses to start with `VAT_RULE` set and any of
 `SELLER_NAME`, `SELLER_ORG_NR` or `SELLER_VAT_NR` missing. On a test network it

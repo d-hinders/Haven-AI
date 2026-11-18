@@ -192,6 +192,7 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
           <SalesOverviewTab
             range={range}
             currency={currency}
+            chainId={account.chain_id}
             merchantName={account.name}
             onOpenPayment={setOpenPayment}
             refreshKey={refreshKey}

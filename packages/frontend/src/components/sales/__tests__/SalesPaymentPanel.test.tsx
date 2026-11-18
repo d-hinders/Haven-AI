@@ -114,13 +114,48 @@ describe('the panel, by variant', () => {
     expect(screen.getByTestId('sales-payment-details').textContent).toContain('One of your contacts')
   })
 
-  it('reads in USDC, not dollars, in a currency the reads cannot strike', async () => {
+  it('reads in USDC, not a converted figure, when the currency has no rate or the read has no usdc_rates', async () => {
     mockCurrency.mockReturnValue('SEK')
-    serve(base)
+    serve({ ...base, usdc_rates: { usd: 0.9998, eur: 0.92, sek: null } })
     await open()
     const header = screen.getByTestId('sales-payment-header')
     expect(within(header).getByText('+0.42 USDC')).toBeTruthy()
     expect(header.textContent).not.toContain('$')
+    expect(header.textContent).not.toContain('\u2248')
+  })
+
+  it('reads in USDC for an older backend with no usdc_rates field', async () => {
+    mockCurrency.mockReturnValue('EUR')
+    serve(base)
+    await open()
+    expect(within(screen.getByTestId('sales-payment-header')).getByText('+0.42 USDC')).toBeTruthy()
+  })
+
+  it('converts SEK with the detail read\'s rate, marks it approximate, and keeps the USDC figure beside it', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    serve({ ...base, usdc_rates: { usd: 0.9998, eur: 0.92, sek: 10 } })
+    await open()
+    const header = screen.getByTestId('sales-payment-header')
+    expect(header.textContent).toContain('\u2248')
+    expect(header.textContent).toContain('+4,20')
+    expect(within(header).getByText('0.42 USDC')).toBeTruthy()
+  })
+
+  it('converts EUR the same way', async () => {
+    mockCurrency.mockReturnValue('EUR')
+    serve({ ...base, usdc_rates: { usd: 0.9998, eur: 0.5, sek: 10 } })
+    await open()
+    const header = screen.getByTestId('sales-payment-header')
+    expect(header.textContent).toContain('\u2248')
+    expect(header.textContent).toContain('0,21')
+  })
+
+  it('keeps USD exact and unmarked, ignoring rates.usd', async () => {
+    serve({ ...base, usdc_rates: { usd: 0.5, eur: 0.92, sek: 10 } })
+    await open()
+    const header = screen.getByTestId('sales-payment-header')
+    expect(within(header).getByText('+$0.42')).toBeTruthy()
+    expect(header.textContent).not.toContain('\u2248')
   })
 
   it('keeps every address and hash inside Technical details, shortened, and links the explorer', async () => {

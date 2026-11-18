@@ -26,15 +26,17 @@ import {
   revenueChangePercent,
   salesAmountText,
   salesChartDays,
+  salesInFiat,
   salesNumberText,
   salesRangeDays,
+  salesTotalText,
+  type SalesCurrency,
   type SalesDayRange,
+  type SalesMoney,
   type SalesSummary,
 } from '@/lib/sales'
 import { SalesBreakdownCard, type BreakdownLine } from './SalesBreakdownCard'
 import { SalesPaymentsList } from './SalesPaymentsList'
-
-type DisplayCurrency = 'USD' | 'EUR' | 'SEK'
 
 /** "N payment(s) of $X": the words the own-moves notice and the tiles share. */
 function plural(count: number, noun: string): string {
@@ -42,12 +44,12 @@ function plural(count: number, noun: string): string {
 }
 
 /** The By product lines: every product, the products folded into "Other", then payments with no product. */
-export function productLines(summary: SalesSummary, currency: DisplayCurrency): BreakdownLine[] {
+export function productLines(summary: SalesSummary, money: SalesMoney): BreakdownLine[] {
   const lines: BreakdownLine[] = summary.by_product.map((product) => ({
     key: `product:${product.product_id}`,
     name: product.label,
     detail: product.product_id !== product.label ? product.product_id : undefined,
-    revenue: salesAmountText(product.amount_raw, currency),
+    revenue: salesAmountText(product.amount_raw, money),
     count: product.sales,
   }))
   const other = summary.by_product_other
@@ -56,7 +58,7 @@ export function productLines(summary: SalesSummary, currency: DisplayCurrency): 
       key: 'product:other',
       name: 'Other',
       detail: plural(other.products, 'product'),
-      revenue: salesAmountText(other.amount_raw, currency),
+      revenue: salesAmountText(other.amount_raw, money),
       count: other.sales,
     })
   }
@@ -65,7 +67,7 @@ export function productLines(summary: SalesSummary, currency: DisplayCurrency): 
       key: 'product:none',
       name: 'No product',
       detail: 'Paid, but your kit sent no sale record',
-      revenue: salesAmountText(summary.without_product.amount_raw, currency),
+      revenue: salesAmountText(summary.without_product.amount_raw, money),
       count: summary.without_product.count,
       muted: true,
       countNoun: 'payment',
@@ -80,12 +82,12 @@ export function productLines(summary: SalesSummary, currency: DisplayCurrency): 
  * the payments from several payers at once. The page never says a payer uses
  * Haven.
  */
-export function payerLines(summary: SalesSummary, currency: DisplayCurrency): BreakdownLine[] {
+export function payerLines(summary: SalesSummary, money: SalesMoney): BreakdownLine[] {
   const lines: BreakdownLine[] = summary.by_payer.map((entry) => ({
     key: payerKey(entry.payer),
     name: payerName(entry.payer),
     detail: payerKindLine(entry.payer),
-    revenue: salesAmountText(entry.amount_raw, currency),
+    revenue: salesAmountText(entry.amount_raw, money),
     count: entry.payments,
   }))
   const other = summary.by_payer_other
@@ -94,7 +96,7 @@ export function payerLines(summary: SalesSummary, currency: DisplayCurrency): Br
       key: 'payer:other',
       name: 'Other payers',
       detail: plural(other.payers, 'payer'),
-      revenue: salesAmountText(other.amount_raw, currency),
+      revenue: salesAmountText(other.amount_raw, money),
       count: other.payments,
     })
   }
@@ -103,7 +105,7 @@ export function payerLines(summary: SalesSummary, currency: DisplayCurrency): Br
       key: 'payer:several',
       name: 'Several payers',
       detail: 'Paid by more than one wallet at once',
-      revenue: salesAmountText(summary.unattributed.amount_raw, currency),
+      revenue: salesAmountText(summary.unattributed.amount_raw, money),
       count: summary.unattributed.payments,
     })
   }
@@ -143,12 +145,15 @@ const WITHOUT_PRODUCT_HINT =
 export function SalesOverviewTab({
   range,
   currency,
+  chainId,
   merchantName,
   onOpenPayment,
   refreshKey = 0,
 }: {
   range: SalesDayRange
-  currency: DisplayCurrency
+  currency: SalesCurrency
+  /** The Sales account's chain: it decides whether USDC is the display currency itself. */
+  chainId: number | null
   merchantName: string
   onOpenPayment: (txHash: string) => void
   /** Changes when something the figures describe changed (a sale record cleared): read both again. */
@@ -191,6 +196,9 @@ export function SalesOverviewTab({
   }
 
   const data = summary.data
+  // ONE rate for the whole Overview: the summary's. The payments pages carry
+  // their own and are deliberately not mixed in, so every figure agrees.
+  const money: SalesMoney = { currency, chainId, rates: data.usdc_rates ?? undefined }
 
   if (isEmptyPeriod(data)) {
     return (
@@ -214,21 +222,23 @@ export function SalesOverviewTab({
   const averageRaw = revenuePayments > 0 ? String(BigInt(data.revenue_raw || '0') / BigInt(revenuePayments)) : '0'
   const chartDays = salesChartDays(data, range)
   const total = ledgerCount(data)
-  const productRows = productLines(data, currency)
-  const payerRows = payerLines(data, currency)
+  const productRows = productLines(data, money)
+  const payerRows = payerLines(data, money)
   const own = data.own_moves
 
-  const formatValue = (value: number) => salesNumberText(value, currency)
+  const formatValue = (value: number) => salesNumberText(value, money)
+  // Ticks read in the display currency whenever the figures are struck in it;
+  // in token mode (no rate) they read in USDC like the values.
   const formatTick = (value: number, step: number) =>
-    currency === 'USD' ? formatAnalyticsTick(value, step, 'USD') : salesNumberText(value, currency)
-  const chartLabel = `Revenue over ${days} days: ${salesAmountText(data.revenue_raw, currency)} from ${plural(revenuePayments, 'payment')}.`
+    salesInFiat(money) ? formatAnalyticsTick(value, step, currency) : salesNumberText(value, money)
+  const chartLabel = `Revenue over ${days} days: ${salesAmountText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
 
   return (
     <div className="mt-6 space-y-4" data-testid="sales-overview">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-tiles">
         <StatTile
           label="Revenue"
-          value={salesAmountText(data.revenue_raw, currency)}
+          value={salesTotalText(data.revenue_raw, money)}
           {...(change !== null
             ? { delta: change, polarity: 'neutral' as const, deltaCaption: revenueCaption }
             : previousRevenueIsZero
@@ -240,7 +250,7 @@ export function SalesOverviewTab({
           value={String(revenueCount(data))}
           {...(payersExact ? { footnote: `from ${plural(payers, 'payer')}` } : {})}
         />
-        <StatTile label="Average sale" value={salesAmountText(averageRaw, currency)} footnote="per payment" />
+        <StatTile label="Average sale" value={salesTotalText(averageRaw, money)} footnote="per payment" />
         <StatTile
           label="Without a product"
           value={String(data.without_product.count)}
@@ -263,7 +273,7 @@ export function SalesOverviewTab({
       {own.count > 0 ? (
         <NoticeRow>
           <strong className="font-semibold text-[var(--v2-ink)]">Not counted:</strong>{' '}
-          {plural(own.count, 'payment')} of {salesAmountText(own.amount_raw, currency)} from your own accounts or
+          {plural(own.count, 'payment')} of {salesAmountText(own.amount_raw, money)} from your own accounts or
           agents. Moves between your accounts are never revenue.
         </NoticeRow>
       ) : null}
@@ -324,8 +334,8 @@ export function SalesOverviewTab({
         <SalesPaymentsList
           list={list}
           total={total}
-          revenueText={salesAmountText(data.revenue_raw, currency)}
-          currency={currency}
+          revenueText={salesAmountText(data.revenue_raw, money)}
+          money={money}
           merchantName={merchantName}
           onOpenPayment={onOpenPayment}
         />

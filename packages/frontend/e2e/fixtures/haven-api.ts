@@ -1242,7 +1242,21 @@ const salesContact = { kind: 'contact', name: 'Lumen Research', address: '0x41b2
 const salesOwn = { kind: 'own', name: 'Atlas', address: '0x9e10aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4c2a' }
 const salesWallet = { kind: 'wallet', name: null as string | null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' }
 
+/**
+ * Today's USDC price in each display currency as the Sales reads carry it
+ * (#4963): the fixture's rate story, in the wire's `usdc_rates` shape. USD is
+ * the real feed's ~0.9998 on purpose — the page never reads it (the registry
+ * peg makes USD exact), so a USD baseline cannot move with it.
+ */
+export const salesUsdcRates = {
+  usd: 0.9998,
+  eur: FIXTURE_USDC_RATES.EUR,
+  sek: FIXTURE_USDC_RATES.SEK,
+}
+
+/** The empty answer (Sales off, or an unpaid account): no rate is read, so the field is null. */
 export const salesEmptySummary = {
+  usdc_rates: null as typeof salesUsdcRates | null,
   revenue_raw: '0',
   sales: 0,
   average_sale_raw: '0',
@@ -1257,6 +1271,7 @@ export const salesEmptySummary = {
 }
 
 export const salesSummary = {
+  usdc_rates: salesUsdcRates as typeof salesUsdcRates | null,
   revenue_raw: '2140000',
   sales: 3,
   average_sale_raw: '380000',
@@ -1395,13 +1410,13 @@ export async function serveSales(page: Page, scenario: SalesScenario) {
     if (path === '/merchant-sales/payments') {
       // Whole history with `limit=1` is the page's "has it ever been paid" probe.
       const rows = !paid ? [] : url.searchParams.has('from') ? salesPayments : salesPayments.slice(0, 1)
-      return fulfillJson(route, { payments: rows, next_cursor: null })
+      return fulfillJson(route, { usdc_rates: paid ? salesUsdcRates : null, payments: rows, next_cursor: null })
     }
     const detail = /^\/merchant-sales\/payments\/(0x[0-9a-f]+)$/.exec(path)
     if (detail) {
       const row = salesPayments.find((p) => p.tx_hash === detail[1])
       if (!row) return fulfillJson(route, { error: 'No such payment on this account.', error_code: 'PAYMENT_NOT_FOUND' }, 404)
-      return fulfillJson(route, { ...row, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
+      return fulfillJson(route, { ...row, usdc_rates: salesUsdcRates, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
     }
     await route.fallback()
   })
@@ -2007,7 +2022,7 @@ export async function mockHavenApi(page: Page) {
       return
     }
     if (method === 'GET' && path === '/merchant-sales/payments') {
-      await fulfillJson(route, { payments: [], next_cursor: null })
+      await fulfillJson(route, { usdc_rates: null, payments: [], next_cursor: null })
       return
     }
     if (method === 'GET' && path === '/merchant-catalogue') {

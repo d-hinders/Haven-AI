@@ -7,9 +7,12 @@
  * breakdowns and the rows agree: the period's UTC day range, the previous
  * period for the Revenue comparison, the payer's name, the amount's words and
  * the figures the page derives from the summary.
+ *
+ * Every money figure is struck by ONE helper (`salesRate`, #4963): USDC atomic
+ * to the display currency, from the one rate the answer it came from carries.
  */
 
-import type { ApiSchema } from '@haven_ai/core'
+import { shouldMarkApprox, tokenPeg, type ApiSchema } from '@haven_ai/core'
 import { formatAnalyticsDay, unknownRecipientShortAddress } from '@/lib/analytics-format'
 import { formatFiatDisplay } from '@/lib/format'
 import type { PeriodValue } from '@/components/ui/list-url-codec'
@@ -76,15 +79,60 @@ export function usdcOf(raw: string): number {
   return Number(BigInt(raw || '0')) / 10 ** USDC_DECIMALS
 }
 
+/** The display currencies the page can show. */
+export type SalesCurrency = 'USD' | 'EUR' | 'SEK'
+
+/** Today's USDC price in each display currency, as the reads carry it (#4963). */
+export type SalesUsdcRates = ApiSchema<'MerchantSalesUsdcRates'>
+
 /**
- * The display currency modes the reads can serve today. The reads carry atomic
- * USDC and no rate, so only USD (1 USDC = 1 USD, exact, never "≈") can be
- * struck in fiat. EUR and SEK read in USDC until a rate is on the wire; that is
- * the existing "an unknown rate falls back to token mode" rule
- * (`lib/budget-caption.ts`), not a second convention.
+ * How one view strikes its figures: the display currency, the Sales account's
+ * chain (it decides whether USDC IS the display currency), and the ONE rate
+ * the view's answer carries. `rates` is undefined for an older backend and
+ * null when the read failed; both read as "no rate".
  */
-export function salesInFiat(currency: 'USD' | 'EUR' | 'SEK'): boolean {
-  return currency === 'USD'
+export interface SalesMoney {
+  currency: SalesCurrency
+  chainId: number | null | undefined
+  rates: SalesUsdcRates | undefined
+}
+
+/**
+ * The multiplier from USDC to the display currency, or null for token mode.
+ *
+ * - The registry pegs USDC to the display currency (USD on Base): exactly 1,
+ *   and `rates.usd` is never read — the feed says about 0.9998.
+ * - Otherwise today's rate for that currency (EUR, SEK).
+ * - No usable rate, or no `usdc_rates` at all: null, and the figure reads in
+ *   USDC — the existing "an unknown rate falls back to token mode" rule
+ *   (`lib/budget-caption.ts`).
+ */
+export function salesRate(money: SalesMoney): number | null {
+  if (tokenPeg(money.chainId, 'USDC') === money.currency) return 1
+  const rate = money.rates?.[money.currency.toLowerCase() as 'usd' | 'eur' | 'sek']
+  return typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : null
+}
+
+/** True when the figures strike in the display currency (the rate is known). */
+export function salesInFiat(money: SalesMoney): boolean {
+  return salesRate(money) !== null
+}
+
+/**
+ * Whether a figure of this kind carries "≈": the one rule (`shouldMarkApprox`),
+ * asked only where the figure was actually converted. Rows never mark.
+ */
+export function salesApprox(money: SalesMoney, kind: 'total' | 'detail' | 'row'): boolean {
+  return (
+    salesInFiat(money) &&
+    shouldMarkApprox({
+      repriced: true,
+      chainId: money.chainId,
+      tokenSymbol: 'USDC',
+      displayCurrency: money.currency,
+      kind,
+    })
+  )
 }
 
 /** USDC in words: two decimals, four under a cent (the same sub-cent rule as fiat). */
@@ -103,15 +151,29 @@ export function tokenText(human: number): string {
   return `${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(human)} USDC`
 }
 
-/** A figure in dollars (or USDC) as text, in the display currency's mode. */
-export function salesNumberText(human: number, currency: 'USD' | 'EUR' | 'SEK'): string {
-  if (salesInFiat(currency)) return formatFiatDisplay(human, 'USD')
-  return tokenText(human)
+/** A figure in USDC, converted to the display currency when there is a rate. */
+export function salesFiatAmount(human: number, money: SalesMoney): number | null {
+  const rate = salesRate(money)
+  return rate === null ? null : human * rate
 }
 
-/** One amount as text, in the display currency's mode. */
-export function salesAmountText(raw: string, currency: 'USD' | 'EUR' | 'SEK'): string {
-  return salesNumberText(usdcOf(raw), currency)
+/** A figure in USDC as text, in the display currency's mode. */
+export function salesNumberText(human: number, money: SalesMoney): string {
+  const fiat = salesFiatAmount(human, money)
+  return fiat === null ? tokenText(human) : formatFiatDisplay(fiat, money.currency)
+}
+
+/** One atomic amount as text, in the display currency's mode. */
+export function salesAmountText(raw: string, money: SalesMoney): string {
+  return salesNumberText(usdcOf(raw), money)
+}
+
+/**
+ * A total or detail figure as text: "≈" prefixed where the conversion changes
+ * the number, as the budget caption prints it (`lib/budget-caption.ts`).
+ */
+export function salesTotalText(raw: string, money: SalesMoney, kind: 'total' | 'detail' = 'total'): string {
+  return `${salesApprox(money, kind) ? '≈' : ''}${salesAmountText(raw, money)}`
 }
 
 // ── Payers ──────────────────────────────────────────────────────────────────

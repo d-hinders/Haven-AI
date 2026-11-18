@@ -209,7 +209,7 @@ test.describe('settings sales card and dialog (#4904)', () => {
       const section = card.getByTestId('sales-deposit-addresses')
       await expect(section).toHaveCount(1)
       await expect(section.getByTestId('sales-deposit-address')).toHaveCount(2)
-      await expect(section.getByText('Not verified by Haven')).toHaveCount(2)
+      await expect(section.getByText('Not verified by Haven', { exact: true })).toHaveCount(2)
       await expect(section.getByText('Retired', { exact: true })).toHaveCount(1)
       await expect(section.getByRole('button', { name: /^Retire / })).toHaveCount(1)
       await scrollCardToTop(card)
@@ -231,7 +231,7 @@ test.describe('settings sales card and dialog (#4904)', () => {
       const panel = page.getByTestId('register-deposit-address-dialog')
       await expect(panel).toHaveCount(1)
       await expect(panel.getByLabel('Deposit address')).toHaveCount(1)
-      await expect(panel.getByText('Registered by you, not verified by Haven.')).toHaveCount(1)
+      await expect(panel.getByText('Registered by you, not verified by Haven.', { exact: true })).toHaveCount(1)
       await expect(panel).toHaveScreenshot(
         `settings-sales-dialog-register-address-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,

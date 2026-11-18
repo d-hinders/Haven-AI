@@ -63,6 +63,7 @@ import {
   findBlockAtOrBefore,
   latestBlockNumber,
   readInboundTransfersInBlockRange,
+  settledBlockNumber,
   type ChainReadResult,
 } from './chain-read.js'
 import {
@@ -89,6 +90,8 @@ export interface MerchantIndexDeps {
     lastIndexedBlock: number
   }) => Promise<void>
   latestBlock: (chainId: number) => Promise<number>
+  /** The newest block a reorg cannot take back, or null when there is none. */
+  settledBlock: (chainId: number) => Promise<number | null>
   blockAtOrBefore: (chainId: number, unixSec: number) => Promise<number | null>
   readRange: (
     chainId: number,
@@ -110,6 +113,7 @@ export function productionMerchantIndexDeps(): MerchantIndexDeps {
     findCursor: (accountId) => findInboundIndexCursor(accountId),
     saveCursor: (input) => upsertInboundIndexCursor(input),
     latestBlock: (chainId) => latestBlockNumber(chainId),
+    settledBlock: (chainId) => settledBlockNumber(chainId),
     blockAtOrBefore: (chainId, unixSec) => findBlockAtOrBefore(chainId, unixSec),
     readRange: (chainId, accountAddress, fromBlock, toBlock) =>
       readInboundTransfersInBlockRange(chainId, accountAddress, fromBlock, toBlock),
@@ -214,10 +218,20 @@ export async function runMerchantInboundIndexTick(
 
       // The cursor moves only after the range was read AND written: a failed
       // write leaves it where it was, so the next tick re-reads the range.
+      //
+      // And never past the settled block (#4940 review S1): the pass reads up
+      // to `latest` so a payment is indexed within a tick, but a block above
+      // the settled one can still be replaced by a reorg. Keeping the cursor
+      // at or below it means the unsettled tail is read again on every pass,
+      // so a payment that lands in a replacement block at a height already
+      // walked is still found. Re-reading is cheap: the row identity dedupes.
+      // With no settled block known, the cursor does not move at all.
+      const settled = await deps.settledBlock(account.chainId)
+      const lastIndexedBlock = Math.min(toBlock, settled ?? fromBlock - 1)
       await deps.saveCursor({
         accountId: account.accountId,
         chainId: account.chainId,
-        lastIndexedBlock: toBlock,
+        lastIndexedBlock,
       })
     } catch (err) {
       result.failed += 1

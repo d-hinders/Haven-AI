@@ -251,6 +251,17 @@ export async function latestBlockNumber(chainId: number): Promise<number> {
 }
 
 /**
+ * A block whose contents will not be reorganised away (`finalized`, else
+ * `SETTLED_CHAIN_READ_DEPTH_BLOCKS` below the head), or null when the chain
+ * offers none. The merchant index never moves its cursor past it, so the
+ * unsettled tail is read again on every pass (#4940 review S1).
+ */
+export async function settledBlockNumber(chainId: number): Promise<number | null> {
+  const { settledReadBlock } = await import('../../infra/chain/settled-read-block.js')
+  return settledReadBlock(getProvider(chainId))
+}
+
+/**
  * The highest block whose timestamp is at or before `unixSec` — the seed for a
  * merchant account's first pass, so the pass starts at the account's creation
  * rather than at genesis (a full-history scan is not affordable) or at

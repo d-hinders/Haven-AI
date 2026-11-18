@@ -109,6 +109,8 @@ function leg(over: Partial<ChainInboundLeg> = {}): ChainInboundLeg {
 function deps(opts: {
   legs?: ChainInboundLeg[]
   latest?: number
+  /** The settled block; defaults to `latest`, i.e. a chain with no unsettled tail. */
+  settled?: number | null
   seedBlock?: number
   readOk?: boolean
   ranges?: Array<[number, number]>
@@ -118,6 +120,7 @@ function deps(opts: {
     findCursor: (accountId) => findInboundIndexCursor(accountId),
     saveCursor: (input) => upsertInboundIndexCursor(input),
     latestBlock: async () => opts.latest ?? 5_000_000,
+    settledBlock: async () => (opts.settled !== undefined ? opts.settled : (opts.latest ?? 5_000_000)),
     blockAtOrBefore: async () => opts.seedBlock ?? 4_000_000,
     readRange: async (_chainId, _address, fromBlock, toBlock): Promise<ChainReadResult> => {
       opts.ranges?.push([fromBlock, toBlock])
@@ -197,6 +200,38 @@ describeDb('merchant inbound index (#4903)', () => {
 
     const cursor = await findInboundIndexCursor(seeded.accountId)
     expect(cursor?.lastIndexedBlock).toBe(4_000_600)
+  })
+
+  /**
+   * #4940 review S1: the pass reads to `latest`, but the cursor stops at the
+   * settled block, so the unsettled tail is read again next pass — a payment a
+   * reorg moved into a replacement block at an already-walked height is found.
+   */
+  it('reads to latest but keeps the cursor at the settled block, re-reading the unsettled tail', async () => {
+    const seeded = await seedAccount()
+    const ranges: Array<[number, number]> = []
+
+    await runMerchantInboundIndexTick(log, deps({ legs: [], latest: 4_000_500, settled: 4_000_200, ranges }))
+    expect(ranges).toEqual([[4_000_000, 4_000_500]])
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_000_200)
+
+    // The replacement block at 4_000_400 now carries a payment the first read
+    // did not see. The next pass starts after the settled block and finds it.
+    const late = leg({ blockNumber: 4_000_400 })
+    await runMerchantInboundIndexTick(log, deps({ legs: [late], latest: 4_000_600, settled: 4_000_450, ranges }))
+    expect(ranges[1]).toEqual([4_000_201, 4_000_600])
+    expect(await countRows(seeded.accountId)).toBe(1)
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_000_450)
+  })
+
+  it('does not move the cursor when no settled block is known', async () => {
+    const seeded = await seedAccount()
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_100 })
+    const ranges: Array<[number, number]> = []
+
+    await runMerchantInboundIndexTick(log, deps({ legs: [], latest: 4_000_500, settled: null, ranges }))
+    expect(ranges).toEqual([[4_000_101, 4_000_500]])
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_000_100)
   })
 
   it('bounds one tick to MAX_BLOCKS_PER_PASS and continues from the cursor next tick', async () => {
@@ -286,6 +321,35 @@ describeDb('merchant inbound index (#4903)', () => {
     const byAmount = new Map(rows.rows.map((row) => [row.amount_raw, row.sender_is_own_address]))
     expect(byAmount.get('1000000')).toBe(true)
     expect(byAmount.get('2000000')).toBe(false)
+  })
+
+  /**
+   * #4940 review S2: two byte-identical legs — same transaction, payer and
+   * amount, different log index — are two payments and two rows. Without
+   * `AND log_index IS NULL` in ADOPT_UNKNOWN_LEG_SQL the second leg "adopts"
+   * the first leg's row and rewrites its log index, collapsing them into one.
+   */
+  it('indexes two byte-identical legs of one transaction as two rows', async () => {
+    const seeded = await seedAccount()
+    const sharedHash = `0x${'8'.repeat(64)}`
+    const payer = `0x${'c'.repeat(40)}`
+
+    const tick = await runMerchantInboundIndexTick(
+      log,
+      deps({
+        legs: [
+          leg({ txHash: sharedHash, logIndex: 2, payerAddress: payer, amountRaw: '1000000' }),
+          leg({ txHash: sharedHash, logIndex: 5, payerAddress: payer, amountRaw: '1000000' }),
+        ],
+      }),
+    )
+
+    expect(tick.indexed).toBe(2)
+    const rows = await db.query<{ log_index: number | null }>(
+      `SELECT log_index FROM inbound_transfers WHERE account_id = $1 ORDER BY log_index`,
+      [seeded.accountId],
+    )
+    expect(rows.rows.map((r) => r.log_index)).toEqual([2, 5])
   })
 
   it('replays a two-transfer transaction over an existing collapsed row without changing the balance', async () => {

@@ -37,7 +37,7 @@ from Haven. Do not redistribute it.
 | Products file | One JSON file mapping a route or model to a fixed price, with an optional output-token cap and a description. | Yes | Yes |
 | Discovery document | A public, machine-readable list of your products, served by the proxy at `/.well-known/x402`. | Yes | Yes |
 | Receipt | Your own receipt for a paid call, returned as the `x-receipt-json` response header. | When you configure a VAT rule | Yes |
-| Sales reporter | After each settled call, a small record sent to Haven. | Required for the pilot | Not in this release (#4898) |
+| Sales reporter | After each settled call, a small record sent to Haven. | Required for the pilot | Yes |
 
 ## Requirements: what you run and monitor
 
@@ -52,6 +52,9 @@ You run:
   process before starting the new one, and never run two replicas on one store.
   Back the file up like a ledger: losing it loses the one-call rule for payments
   already delivered.
+- Persistent disk for the sales outbox (`SALES_OUTBOX`), when you report sales.
+  It holds the records Haven has not accepted yet, so it belongs on the same
+  disk as `PAYMENTS_DB` and is backed up with it.
 - A Haven account that receives the money.
 - Your own Coinbase developer (CDP) secret API key.
 - An RPC URL for the network.
@@ -66,11 +69,15 @@ You monitor:
 - **Retry proofs.** The rate of `payment_retry_needs_proof` answers.
 - **Overage.** `overage` log lines, when an upstream answer runs past the
   product's output-token cap.
+- **Sales reporting.** The outbox depth (`/healthz` and the `sales_outbox_*`
+  lines) and `sales_report_refused` lines. A growing outbox means Haven is not
+  receiving the sales; a refused record means its shape or your key is wrong.
 - **Cost.** Coinbase facilitator usage against the 1,000 free transactions a
   month, and your upstream provider's spend.
 - **Money.** The receiving account's balance in Haven against the settled calls
   in the proxy's log.
-- **Disk.** The size of `PAYMENTS_DB`.
+- **Disk.** The size of `PAYMENTS_DB` and `SALES_OUTBOX`, and the outbox's
+  10,000-record bound.
 
 ## Before you start
 
@@ -183,12 +190,24 @@ On Base mainnet the proxy refuses to start with `VAT_RULE` set and any of
 `SELLER_NAME`, `SELLER_ORG_NR` or `SELLER_VAT_NR` missing. On a test network it
 starts with a warning and sends no receipt.
 
+Sales reporting (optional). With no `HAVEN_MERCHANT_KEY` the proxy reports
+nothing and starts exactly as without it. With the key set, reporting is on and
+all three settings are required: a key that is not a Sales key, a missing or
+unusable Haven origin, or no outbox file refuses startup and names the variable.
+
+| Variable | Meaning |
+|---|---|
+| `HAVEN_MERCHANT_KEY` | Your Haven Sales key (`sk_merchant_…`), from your Haven account's Sales settings. It is receive-only: it authenticates the sales routes and nothing else. The proxy never logs it and never returns it. |
+| `HAVEN_SALES_URL` | Haven's API origin, for example `https://api.haven.example`. The proxy appends `/merchant/sales` itself, so give the origin and no path. |
+| `SALES_OUTBOX` | The file the proxy keeps records Haven has not accepted yet in. One proxy process per file, on persistent disk. |
+
 What you should see: the proxy starts and logs one JSON line per event. The
 first is `started`, with `port`, `network`, `network_label`, `pay_to`,
-`operator`, `products`, `base_path`, `sales_reporting: "off"` and `receipt`
-(`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A missing
-or invalid setting refuses startup and names every problem at once, never a
-secret's value.
+`operator`, `products`, `base_path`, `sales_reporting` (`"on"` or
+`"off (no HAVEN_MERCHANT_KEY)"`), `sales_outbox_depth` when reporting is on, and
+`receipt` (`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A
+missing or invalid setting refuses startup and names every problem at once,
+never a secret's value.
 
 ## Step 5: run it on Base Sepolia
 
@@ -347,6 +366,80 @@ settled call: the header is left out and the failure is logged.
 The shape is the one Haven's accounting reads, documented field by field in
 [`docs/operations/merchant-receipt-shape.md`](../../docs/operations/merchant-receipt-shape.md).
 
+## Sales reporting
+
+With `HAVEN_MERCHANT_KEY` set, the proxy sends Haven one sale record for each
+settled call, so the sale appears on your Haven account's Sales page. The record
+is the one in section 5 of the design: the settlement's transaction hash, the
+chain, the product's `id` and name from the products file, the amount, the payer
+address, the `merchantReference` the proxy reserved for the payment, and — when
+the deployment issues a receipt — the receipt number and the VAT treatment the
+buyer's receipt carries. With no VAT rule the record states neither.
+
+**The buyer never waits on Haven.** The record is sent after settlement and
+before the call is forwarded, and the proxy does not wait for the answer: the
+buyer's response is the same, and as fast, whether Haven accepts the record,
+refuses it, is slow, or is unreachable.
+
+**Delivery, and the resend limit.** The proxy resends a record Haven answers
+with a 5xx, a timeout, a network failure, or the route's one retry answer (425
+`transaction_not_visible`, which is normal straight after settlement: Haven
+accepts a record once the transaction has three confirmations) after 1 s, 4 s
+and 16 s. A record still undelivered after those three resends goes to the
+outbox (`SALES_OUTBOX`), which replays it every 60 s. **The outbox replays one
+record at most 5 times, then logs `sales_outbox_gave_up` and drops it** — so a
+record is attempted at most 4 + 5 times in total. Any other 4xx is a refusal:
+the record's shape or your key is wrong, resending it changes nothing, and the
+proxy logs `sales_report_refused` once with the answer's status and error code.
+A 429 (Haven's 120-a-minute limit per key) is not a refusal: the record goes to
+the outbox like a 5xx.
+
+The outbox holds at most 10,000 records. When it is full the proxy keeps what it
+has and logs `sales_outbox_full` for each record it cannot add; clear the cause
+(Haven unreachable, or a key that is being refused) and the outbox drains. The
+file is JSON Lines, rewritten whole on every change, and it is the record: a
+restart picks it up where it left off. Haven's ingest is idempotent on an
+identical record, so a resend is harmless.
+
+**Reporting a past sale again.** A sale whose record was cleared on Haven, or
+that was never recorded, can be sent again from the payment the proxy kept:
+
+```bash
+# Stop the proxy first: the command opens PAYMENTS_DB, and one process per store.
+node packages/paywall-proxy/dist/index.js report-sale 0x<transaction-hash>
+# {"outcome":"accepted","status":201,"code":null,"attempts":1,"tx_hash":"0x…","merchant_reference":"sale_…"}
+```
+
+The command rebuilds the record from the store's payment — the same product,
+payer, amount and `merchantReference` — and posts it with the same retry policy.
+It exits 0 only when Haven accepted the record. Two options:
+
+- `--new-reference` sends the record with a fresh `sale_<ULID>` instead of the
+  reference the store reserved, for a sale Haven still holds under the old one.
+- `--vat-treatment SE_25|REVERSE_CHARGE` states the VAT treatment the buyer's
+  receipt carried. The buyer's tax declaration is not stored, so a re-reported
+  sale otherwise states the rule's default treatment.
+
+Run it with the proxy's environment (the same variables), and with the proxy
+stopped: `PAYMENTS_DB` is locked by the running proxy, and the command refuses
+to open it.
+
+**What the key can and cannot do.** The Sales key is receive-only: it
+authenticates the sales routes and nothing else, cannot move funds, sign, or
+change signers, budgets or agents. Haven stores a sale only against a USDC
+transfer it reads from the chain into the key's own account, taking the amount,
+payer, token and time from the chain and never from the record, so a wrong or
+malicious record cannot create revenue or reach another account. The limits, and
+how revocation works, are in
+[`docs/security/merchant-key-limits.md`](../../docs/security/merchant-key-limits.md).
+
+**What you should see.** After a paid call, one `sales_report_accepted` line
+with the transaction hash and the merchant reference, and the sale on your
+Haven account's Sales page. A refused record logs `sales_report_refused` with
+the status and error code; a record that could not be delivered logs
+`sales_outbox_queued` and then, on a later replay, `sales_outbox_accepted`. No
+line, and no response, ever carries the key.
+
 ## Haven's own demo on Base Sepolia (#4892)
 
 Haven runs one deployment of this proxy itself: an internal technical demo in
@@ -393,8 +486,6 @@ key to other parties before you take a real payment.
 
 ## Not in this release
 
-- Sales reporting to Haven (#4898). The proxy logs `sales_reporting: "off"` at
-  startup and sends nothing.
 - Coinbase directory listing (#4887). `DIRECTORY_LISTING=on` is refused at
   startup.
 - Base mainnet. This release runs on Base Sepolia only. The step for switching
@@ -405,5 +496,4 @@ key to other parties before you take a real payment.
 - [`docs/architecture/12-merchant-kit.md`](../../docs/architecture/12-merchant-kit.md):
   the design this package is built to.
 - [`docs/security/merchant-key-limits.md`](../../docs/security/merchant-key-limits.md):
-  what a Haven Sales key can and cannot do, for the sales reporter when it
-  lands.
+  what a Haven Sales key can and cannot do, for the sales reporter.

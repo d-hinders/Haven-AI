@@ -11,13 +11,18 @@ import {
   createCdpChainReader,
   createCdpFacilitator,
   createViemChainReadClient,
+  reportSale,
   type CdpSettlementConfig,
+  type SaleRecord,
+  type SaleReportOutcome,
 } from '@haven_ai/merchant-payments'
 import { loadConfig, secretValues, type ProxyConfig } from './config.js'
 import { createProxyHandler } from './handler.js'
 import type { LimitSettings } from './limits.js'
 import { createLogger, installConsoleRedaction, type LogFn } from './log.js'
 import { loadProductsFile, type Product } from './products.js'
+import { createSalesReporter, type SalesReporter } from './sales.js'
+import { openSalesOutbox, type SalesOutbox } from './sales-outbox.js'
 import { openSqliteConsumedPaymentStore, type SqliteConsumedPaymentStore } from './sqlite-store.js'
 
 export interface RunningProxy {
@@ -25,6 +30,8 @@ export interface RunningProxy {
   config: ProxyConfig
   products: readonly Product[]
   store: SqliteConsumedPaymentStore
+  /** The sales reporter, present only when reporting is on (§5). */
+  sales?: SalesReporter
   port: number
   close(): Promise<void>
 }
@@ -41,6 +48,12 @@ export interface StartOverrides {
   /** Tests only: the deployed proxy uses the design's limits (§7). */
   limits?: Partial<LimitSettings>
   now?: () => Date
+  /** Tests only: the reporter's resend waits (§5's 1 s, 4 s and 16 s in the deployment). */
+  salesRetryDelaysMs?: readonly number[]
+  /** Tests only: one attempt's limit before it counts as a timeout. */
+  salesAttemptTimeoutMs?: number
+  /** Tests only: the outbox's replay interval (§5's 60 s in the deployment). */
+  salesOutboxReplayMs?: number
 }
 
 export async function startProxy(env: Readonly<Record<string, string | undefined>>, overrides: StartOverrides = {}): Promise<RunningProxy> {
@@ -57,12 +70,52 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
     restoreConsole()
     throw err
   }
+  let outbox: SalesOutbox | undefined
   try {
     const cdp: CdpSettlementConfig = overrides.cdp ?? {
       facilitator: await createCdpFacilitator(config.cdp),
       chain: createCdpChainReader(createViemChainReadClient(config.rpcUrl, config.chain.chainId), {
         usdcAddress: config.chain.usdcAddress,
       }),
+    }
+    // §5, §12: the sales reporter and its outbox, only when a merchant key is
+    // configured. The outbox's own attempt is the core reporter with no inline
+    // resends, so the outbox's 60 s cadence is the retry.
+    let sales: SalesReporter | undefined
+    if (config.sales !== undefined) {
+      const settings = config.sales
+      outbox = openSalesOutbox({
+        path: settings.outboxPath,
+        log,
+        ...(overrides.salesOutboxReplayMs !== undefined ? { replayIntervalMs: overrides.salesOutboxReplayMs } : {}),
+        send: async (record: SaleRecord, key: string): Promise<SaleReportOutcome> => {
+          const outcome = await reportSale({
+            havenBaseUrl: settings.havenBaseUrl,
+            salesKey: settings.merchantKey,
+            record,
+            retryDelaysMs: [],
+            ...(overrides.salesAttemptTimeoutMs !== undefined
+              ? { attemptTimeoutMs: overrides.salesAttemptTimeoutMs }
+              : {}),
+            log: (event, fields) => log(event, fields),
+          })
+          // §5: the store's flag records that the sale reached Haven, however it got there.
+          if (outcome.outcome === 'accepted') await store.markSaleReported(key)
+          return outcome
+        },
+      })
+      sales = createSalesReporter({
+        settings,
+        chainId: config.chain.chainId,
+        store,
+        outbox,
+        log,
+        ...(overrides.salesRetryDelaysMs !== undefined ? { retryDelaysMs: overrides.salesRetryDelaysMs } : {}),
+        ...(overrides.salesAttemptTimeoutMs !== undefined
+          ? { attemptTimeoutMs: overrides.salesAttemptTimeoutMs }
+          : {}),
+      })
+      outbox.start()
     }
     const handler = createProxyHandler({
       config,
@@ -71,6 +124,7 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       store,
       cdp,
       log,
+      ...(sales !== undefined ? { sales } : {}),
       ...(overrides.fetchImpl ? { fetchImpl: overrides.fetchImpl } : {}),
       ...(overrides.settleResolveMs !== undefined ? { settleResolveMs: overrides.settleResolveMs } : {}),
       ...(overrides.settlePollMs !== undefined ? { settlePollMs: overrides.settlePollMs } : {}),
@@ -101,8 +155,8 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       operator: config.operatorName,
       products: products.map((p) => p.id),
       base_path: config.basePath,
-      // Sales reporting (#4898) is not built yet.
-      sales_reporting: 'off',
+      sales_reporting: config.salesStatus,
+      ...(sales !== undefined ? { sales_outbox_depth: sales.outboxDepth() } : {}),
       receipt: config.receiptStatus,
     })
     return {
@@ -110,10 +164,12 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       config,
       products,
       store,
+      ...(sales !== undefined ? { sales } : {}),
       port,
       close: () =>
         new Promise<void>((resolve) => {
           const finish = (): void => {
+            outbox?.stop()
             store.close()
             restoreConsole()
             resolve()
@@ -124,6 +180,7 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
         }),
     }
   } catch (err) {
+    outbox?.stop()
     store.close()
     restoreConsole()
     throw err

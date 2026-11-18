@@ -17,7 +17,7 @@ import {
   ingestMerchantSale,
   serializeSale,
   type SaleRecordInput,
-} from '../modules/transactions/merchant-sales.js'
+} from '../modules/transactions/index.js'
 
 export default async function merchantSalesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', merchantAuthMiddleware)

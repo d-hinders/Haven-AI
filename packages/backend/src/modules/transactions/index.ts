@@ -101,6 +101,8 @@ export {
   type MerchantIndexDeps,
   type MerchantIndexTickResult,
 } from './merchant-index.js'
+// #4897: the sales ingest, consumed by routes/merchant-sales.ts.
+export { ingestMerchantSale, serializeSale, type SaleRecordInput } from './merchant-sales.js'
 export {
   findOffRampDestination,
   setOffRampDestination,

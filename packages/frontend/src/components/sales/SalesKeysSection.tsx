@@ -91,7 +91,7 @@ export function SalesKeysSection() {
   return (
     <div id="sales-keys" data-testid="sales-keys-section">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-[1_1_16rem]">
           <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Sales keys</h2>
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
             Your kit uses a Sales key to report what each payment was for. A key can’t move money, sign, or see

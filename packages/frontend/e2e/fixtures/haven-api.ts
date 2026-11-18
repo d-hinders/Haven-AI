@@ -1369,6 +1369,35 @@ export const salesKeys = [
   { id: 'key-1', key_prefix: 'sk_merchant_4f2a9c7e1b05', created_by: testUser.id, created_at: '2026-11-12T09:00:00.000Z', revoked_by: null as string | null, revoked_at: null as string | null, last_used_at: '2026-11-17T11:58:00.000Z' as string | null },
 ]
 
+/**
+ * The Setup tab's Sales keys (#4905): one live key used a moment ago, one never
+ * used, one revoked. `created_by` / `revoked_by` are the signed-in test user, so
+ * the list reads "Created by you". The secret is a FAKE, obviously sample value
+ * that no route accepts; it exists so the create dialog can be photographed.
+ */
+export const salesKeysSetup = [
+  ...salesKeys,
+  { id: 'key-2', key_prefix: 'sk_merchant_b81c4d90e2a7', created_by: testUser.id, created_at: '2026-11-03T09:00:00.000Z', revoked_by: null as string | null, revoked_at: null as string | null, last_used_at: null as string | null },
+  { id: 'key-3', key_prefix: 'sk_merchant_07de5a13c8f2', created_by: testUser.id, created_at: '2026-10-28T09:00:00.000Z', revoked_by: testUser.id as string | null, revoked_at: '2026-11-03T10:00:00.000Z' as string | null, last_used_at: '2026-11-02T08:00:00.000Z' as string | null },
+]
+
+export const SALES_KEY_FAKE_SECRET = 'sk_merchant_0000sample0000not0000a0000real0000key0000000000000000'
+
+/**
+ * Serve the Setup tab's keys (and the create route) on top of `serveSales`.
+ * Registered AFTER it, so it answers first.
+ */
+export async function serveSalesKeys(page: Page) {
+  await page.route(/\/api\/merchant-keys/, async (route) => {
+    const request = route.request()
+    if (request.method() === 'POST') {
+      return fulfillJson(route, { ...salesKeys[0], id: 'key-new', key_prefix: SALES_KEY_FAKE_SECRET.slice(0, 24), secret: SALES_KEY_FAKE_SECRET }, 201)
+    }
+    if (request.method() === 'GET') return fulfillJson(route, { keys: salesKeysSetup })
+    await route.fallback()
+  })
+}
+
 export type SalesScenario =
   | 'overview'
   | 'first-run'

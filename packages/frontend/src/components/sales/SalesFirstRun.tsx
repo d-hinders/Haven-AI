@@ -15,8 +15,9 @@ import { StepChecklist, type StepChecklistRow } from '@/components/ui/StepCheckl
  * Payments count as soon as they arrive, with or without these steps — the
  * chain is the truth — so the checklist is guidance, not a gate. Step 1 is
  * the clear next action (the address exists the moment Sales is on, and the
- * kit needs it). Step 2, the keys, is #4905 and not shipped, so it is honest
- * text with no button; step 3 is the Setup tab's kit address.
+ * kit needs it). Step 2 links to the Sales keys on the Setup tab (#4905) as a
+ * ghost action, so the one primary action stays step 1; step 3 is the Setup
+ * tab's kit address.
  */
 export function SalesFirstRun({
   onShowAddress,
@@ -41,10 +42,15 @@ export function SalesFirstRun({
     {
       id: 'sales-key',
       state: 'pending',
+      actionable: true,
       number: 2,
       title: 'Create a Sales key',
-      description:
-        'Your kit uses it to tell Haven what each payment was for. It can’t move money. Creating Sales keys on this page is coming.',
+      description: 'Your kit uses it to tell Haven what each payment was for. It can’t move money.',
+      action: (
+        <Button href={`${setupHref}#sales-keys`} variant="ghost" size="sm" className="w-full sm:w-auto">
+          Create Sales key
+        </Button>
+      ),
     },
     {
       id: 'kit-address',

@@ -237,11 +237,10 @@ describe('first run', () => {
     expect(within(steps).getByText('Put your receiving address in your kit')).toBeTruthy()
     expect(within(steps).getByText('Create a Sales key')).toBeTruthy()
     expect(within(steps).getByText('Tell Haven where your kit runs')).toBeTruthy()
-    // Step 2 (#4905 is not shipped) is honest text, with no button or link;
+    // Step 2 (#4905) links to the keys on the Setup tab as a ghost action;
     // step 1's address is the one primary action; step 3 goes to the Setup tab.
-    expect(within(steps).queryByRole('link', { name: 'Create Sales key' })).toBeNull()
-    expect(within(steps).queryByRole('button', { name: 'Create Sales key' })).toBeNull()
-    expect(within(steps).getByText(/Creating Sales keys on this page is coming/)).toBeTruthy()
+    expect(within(steps).getByRole('link', { name: 'Create Sales key' }).getAttribute('href')).toBe('/sales?tab=setup#sales-keys')
+    expect(within(steps).queryByText(/is coming/)).toBeNull()
     expect(within(steps).getByRole('link', { name: 'Add kit address' }).getAttribute('href')).toBe('/sales?tab=setup#kit-address')
     // No figures, no period control, no summary read: a first run is not a quiet period.
     expect(screen.queryByTestId('sales-tiles')).toBeNull()

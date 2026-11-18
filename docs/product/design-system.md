@@ -2414,52 +2414,51 @@ revenue use.
 Shown on `/design-system` → *StackedBarChart* (spend) and *Sales patterns*
 (revenue).
 
-### Show-once credential block ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908))
+### Show-once credential block ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), extracted in [#4905](https://github.com/d-hinders/Haven-AI/issues/4905))
 
-The block that hands over a secret Haven shows exactly once, documented here
-(approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)) because the Sales key screens (#4905) need it and it already
-has two copies:
+The block that hands over a secret Haven shows exactly once, approved on
+[#4894](https://github.com/d-hinders/Haven-AI/issues/4894). It is **one
+component**, `components/ui/ShowOnceCredentialBlock.tsx`, consumed by:
 
-- `components/PaymentCredentialsModal.tsx` — the agent's Haven credential
-  (one caller, `AgentDetailClient`);
-- `components/agent-panel/ReplaceSigningKeyModal.tsx` — "Mirrors
-  PaymentCredentialsModal's credential block"; and
-  `components/accounting/ApiKeyConnectModal.tsx` cites its lifecycle rules.
+- `PaymentCredentialsModal` — the agent's Haven credential (`revealable`, with
+  the rotate path as `fallback`);
+- `ReplaceSigningKeyModal` — the new credential after a re-key;
+- the Sales key dialog (`CreateSalesKeyDialog`), whose close guard is the
+  connect flow's `CloseGuardPanel`.
 
-**Anatomy.** A heading naming the secret, one line saying it is shown once,
-then a `rounded-[10px]` bordered `--v2-surface` box holding the value in
-`font-mono text-xs`, `break-all`, and under it the actions — **Copy**
-(`CopyButton`, whose success is its own inline "Copied"). **Lifecycle:** the
-full value exists only in the response that created it; once that view closes,
-the same box shows the masked form (the prefix then `•`×12) and the action
-becomes the rotate or replace path.
+**Anatomy.** The caller owns the heading and one line saying the value is shown
+once. The block owns a `rounded-[10px]` bordered `--v2-surface` box holding the
+value in `font-mono text-xs`, `break-all`, and **under it, outside the tint**, the
+actions: **Copy** (`CopyButton`, whose success is its own inline "Copied") and,
+when `revealable`, **Show / Hide**. The value is a prop and is never copied into
+the block's own state.
 
-**The two copies are not one shape today**, and #4905's extraction decides
-each difference rather than inheriting one:
+**Decisions the extraction settled** (the two earlier copies differed):
 
-- `PaymentCredentialsModal` opens **masked** with a **Show / Hide** toggle
-  beside Copy, toasts on a failed copy, and masks after the creating view.
-- `ReplaceSigningKeyModal` shows the **full** value with no toggle, keeps a
-  failed copy silent on purpose (its #4573 note), and has no masked-after
-  state.
+- **Actions sit below the box, not inside it.** The tint is the code-block
+  surface; sibling controls on it are what the UI Surface Hierarchy rules out,
+  and inside a Card (the Sales Setup tab) they would stand on a tint the card
+  does not own. Neither earlier copy kept them below, so both move.
+- **A failed copy is a toast** (`Could not copy <label>`), always. A one-time
+  value that fails to copy and says nothing is a lost credential (#4573);
+  `ReplaceSigningKeyModal`'s earlier silent failure is gone.
+- **The creating view opens on the value.** A masked default there reads like
+  the after-state. `revealable` (opens masked, Show / Hide) stays for a view
+  reached later, such as `PaymentCredentialsModal`.
+- **After the creating view closes** the caller passes `value={null}`: the box
+  shows the masked form (the prefix then `•`×12) and `fallback` carries the
+  rotate or replace path. The Sales key dialog never shows a masked-after
+  state: it unmounts on close and the list shows the prefix.
 
-The `/design-system` specimen follows `PaymentCredentialsModal`, the copy the
-Sales key screens are closest to, with the `sk_merchant_` prefix #4896 fixes
-(owner decision on #4894).
-
-One more question the extraction owns: both copies put Show and Copy **inside**
-the tinted value box. In a modal that box is the code-block surface; inside a
-Card (the Sales Setup tab) it groups sibling controls on a tint, which `CLAUDE.md` §
-UI Surface Hierarchy reserves for code blocks. #4905 decides whether the actions move
-below the box.
+**Close guard.** Closing a creating view before Copy lands asks first through
+`CloseGuardPanel` (an inline panel, not a nested dialog); its `title` and `body`
+props word the question per secret, defaulting to the connect flow's.
 
 **How it differs from `CredentialHandoffCard`** (§ StatusBadge → *What the
 table does not cover*): that card is the download-a-file shape — a credential
 file the user saves, with `Saved` / `Action required` — while this block is
-copy-a-string. #4905 **extracts** this block into one component and uses it,
-rather than writing a third copy, and considers moving
-`ReplaceSigningKeyModal` onto the extraction in the same slice. Shown on
-`/design-system` → *Sales patterns*.
+copy-a-string. Shown on `/design-system` → *Sales patterns*, with the
+`sk_merchant_` prefix #4896 fixes (owner decision on #4894).
 
 ### Agent row — shared `AgentRow` / `AgentBudget` ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
 

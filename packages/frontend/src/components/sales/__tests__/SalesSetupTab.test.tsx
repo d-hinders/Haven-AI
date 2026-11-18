@@ -62,7 +62,7 @@ const ACCOUNT = { name: 'Sales', chain_id: 8453 }
 /** Renders the tab and lets the keys read settle, so no state update lands outside the test. */
 async function renderTab(value: UseMerchantCatalogueResult, onShowAddress = vi.fn()) {
   render(<SalesSetupTab account={ACCOUNT} catalogue={value} onShowAddress={onShowAddress} />)
-  await waitFor(() => expect(screen.getByTestId('sales-keys-count').textContent).not.toBe(''))
+  await screen.findByText('sk_merchant_aaa…')
   return { onShowAddress }
 }
 
@@ -154,29 +154,12 @@ describe('the kit address', () => {
   })
 })
 
-describe('the Sales keys slot', () => {
-  it('counts the active keys, says managing them is coming, and offers no button for it', async () => {
+describe('the Sales keys section', () => {
+  it('lists the keys by prefix and offers Create Sales key (the screens are covered in SalesKeys.test)', async () => {
     await renderTab(catalogue())
     const section = screen.getByTestId('sales-keys-section')
-    await waitFor(() => expect(screen.getByTestId('sales-keys-count').textContent).toBe('2 active keys'))
     expect(mockGet).toHaveBeenCalledWith('/merchant-keys')
-    expect(section.textContent).toContain('Creating and revoking Sales keys is coming to this page.')
-    expect(section.querySelectorAll('button').length).toBe(0)
-  })
-
-  it('reads "No active Sales keys" when every key is revoked or none exist, and says when it could not load', async () => {
-    mockGet.mockResolvedValue({ keys: [key('ccc', true)] })
-    const { unmount } = render(<SalesSetupTab account={ACCOUNT} catalogue={catalogue()} onShowAddress={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('sales-keys-count').textContent).toBe('No active Sales keys'))
-    unmount()
-    mockGet.mockRejectedValue(new Error('boom'))
-    render(<SalesSetupTab account={ACCOUNT} catalogue={catalogue()} onShowAddress={vi.fn()} />)
-    expect(await screen.findByText('Your Sales keys could not load. Your payments are unchanged.')).toBeTruthy()
-  })
-
-  it('says "1 active key" in the singular', async () => {
-    mockGet.mockResolvedValue({ keys: [key('aaa', false)] })
-    await renderTab(catalogue())
-    await waitFor(() => expect(screen.getByTestId('sales-keys-count').textContent).toBe('1 active key'))
+    expect(section.textContent).toContain('sk_merchant_bbb…')
+    expect(screen.getByRole('button', { name: 'Create Sales key' })).toBeTruthy()
   })
 })

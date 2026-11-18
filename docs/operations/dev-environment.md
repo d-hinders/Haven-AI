@@ -900,7 +900,9 @@ service.
    the product; every other product is unchanged either way.
 3. **Check** `/healthz`: a `sales` block with the Sales address appears (see
    the README's `/healthz` description), and the startup log says
-   `Sales: field_notes … paid into <address>`, not `Sales: not configured`. After a purchase, `reported` counts the
+   `Sales: reporting … field_notes … paid into <address> to <base URL>`, not
+   `Sales: not reporting …`. The full demo, step by step, is
+   [merchant-services-demo.md](merchant-services-demo.md). After a purchase, `reported` counts the
    sales Haven accepted; a refusal or give-up shows in the `[sales]` log lines.
 4. **Buy from a different Haven user.** A sale bought by an agent of the Sales
    account's own owner is a move between the owner's accounts and shows no

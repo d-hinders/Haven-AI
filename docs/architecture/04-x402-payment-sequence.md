@@ -61,13 +61,14 @@ covers:
   - packages/backend/src/modules/payments/__tests__/x402-funded-unsettled-status.test.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
   - packages/demo-merchant-mcp/src/invoice.ts
+  - packages/paywall-proxy/src/receipt.ts
   - packages/backend/src/openapi/request-validation.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-11-07"
+last-verified: "2026-11-18"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -1480,7 +1481,8 @@ also closed the one place the demo merchant's OWN invoice document (as
 opposed to the confirmation text quoted above) still called this address "the
 buyer" without qualification —
 its `kopare.roll` (built by the shared receipt core the demo merchant calls
-since #4890) now carries the same distinction the confirmation text already made.
+since #4890, and the merchant kit's paywall proxy since #4913) now carries the
+same distinction the confirmation text already made.
 
 **#4873 adds the buyer's checkout details to that block.** A merchant can ask
 for a receipt email and a billing or shipping address in its challenge

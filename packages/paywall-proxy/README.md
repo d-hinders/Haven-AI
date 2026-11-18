@@ -358,6 +358,9 @@ into a Haven dev account until Opper has its own, and then into Opper's.
   on Opper's one chat-completions route (`POST /v3/compat/chat/completions`),
   each with its own output-token cap. Products on one route are told apart by
   `model`, so one model cannot be sold at two caps on the same route.
+  `azure/gpt-5-mini` is a reasoning model, and its reasoning tokens count
+  against the cap, so a 1,000-token answer can come back short. Check it on the
+  first paid call and raise the cap and price if it does.
 - Where it runs and what it is set to:
   [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
   § *Paywall-proxy (the #4892 demo)*. The secrets are listed in
@@ -372,14 +375,16 @@ into a Haven dev account until Opper has its own, and then into Opper's.
 
 ### Running the same thing yourself
 
-To run this demo as your own merchant endpoint, change these, and nothing else:
+To run this demo as your own merchant endpoint, change these:
 
 | What | Variable | Change it to |
 |---|---|---|
 | Your upstream key | `UPSTREAM_API_KEY` | Your own Opper key (or your own provider's, with its `UPSTREAM_BASE_URL`). |
 | Your receiving account | `PAY_TO` | Your own Haven account's address. |
 | Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account (Step 2). |
-| Who you are | `OPERATOR_NAME`, `OPERATOR_CONTACT`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION` | Your own name and description, without the "internal technical demo" wording. |
+| Who you are | `OPERATOR_NAME`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`, and optionally `OPERATOR_CONTACT` | Your own name and description, without the "internal technical demo" wording. |
+| Your chain access | `RPC_URL` | Your own Base Sepolia RPC URL. Haven's deployment references its own backend's provider URL, which you cannot use. |
+| Where you run it | `PUBLIC_BASE_URL`, `CLIENT_IP_HEADER`, `PAYMENTS_DB` | Your own `https` origin, the client-address header your own host's edge sets (or unset), and a path on your own persistent disk. |
 | Your receipt | `VAT_RULE`, `SELLER_*` | Your own legal details, or unset `VAT_RULE` for no receipt. |
 | Your products | `PRODUCTS_FILE` | Your own copy of the demo file, with your prices and descriptions. |
 

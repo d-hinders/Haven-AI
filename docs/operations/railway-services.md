@@ -163,9 +163,9 @@ only**: it is created in the dev environment and never in production.
 
 | Setting | Value |
 |---|---|
-| Build | root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first) |
+| Build | root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first); watch `/packages/paywall-proxy/**`, `/packages/merchant-payments/**`, `/packages/sdk/**`, so an unrelated push to `dev` does not restart it |
 | Start command | `node packages/paywall-proxy/dist/index.js` |
-| Volume | one volume, mounted at `/data`, for `PAYMENTS_DB` |
+| Volume | one volume, mounted at `/data`, for `PAYMENTS_DB`. Not backed up: it holds test-money payments only, and losing it loses only the one-call rule for those (design §12 asks a real merchant to back it up) |
 | Replicas | one. The proxy locks `PAYMENTS_DB` and a second process refuses to start, so a deploy must stop the old container before starting the new one. Check this on the first redeploy |
 | Sleep | on |
 | Healthcheck | `/healthz` |
@@ -179,7 +179,7 @@ Variables, named, with values only for those that are not secret:
 | `OPERATOR_NAME` | `Haven (internal technical demo)` |
 | `ENDPOINT_NAME` | `Haven inference demo (Opper)` |
 | `ENDPOINT_DESCRIPTION` | `Internal technical demo run by Haven on Base Sepolia. Test money only. Not a Haven product and not listed in any directory.` |
-| `PRODUCTS_FILE` | `packages/paywall-proxy/demo/opper-products.json` |
+| `PRODUCTS_FILE` | `packages/paywall-proxy/demo/opper-products.json`, relative to the repository root, which is the process's working directory because the service root is `/`. This is the one service that depends on its working directory |
 | `PAYMENTS_DB` | `/data/payments.sqlite` |
 | `UPSTREAM_BASE_URL` | `https://api.opper.ai` (Opper's key goes in `Authorization: Bearer`, the proxy's default) |
 | `UPSTREAM_API_KEY` | secret: Haven's Opper key, pasted in by the owner ([secret-rotation.md](secret-rotation.md)) |

@@ -114,9 +114,9 @@ describe('the Haven-run Opper demo products file (#4892)', () => {
 
   it('loads, sells two models on the one upstream route, each with its own cap, and says on every product that it is an internal demo run by Haven', () => {
     const products = loadProductsFile(demo)
-    expect(products.map((p) => [p.id, p.model, p.outputTokenCap])).toEqual([
-      ['gpt-5-mini-1k', 'azure/gpt-5-mini', 1000],
-      ['ministral-3b-2k', 'aws/ministral-3b', 2000],
+    expect(products.map((p) => [p.id, p.model, p.outputTokenCap, p.price])).toEqual([
+      ['gpt-5-mini-1k', 'azure/gpt-5-mini', 1000, 10_000n],
+      ['ministral-3b-2k', 'aws/ministral-3b', 2000, 5_000n],
     ])
     for (const product of products) {
       expect(product.route).toBe('POST /v3/compat/chat/completions')

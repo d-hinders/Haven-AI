@@ -30,6 +30,7 @@ import { LogWindows, parseMaxBlockRange } from '@haven_ai/merchant-payments'
 import { createStripeRecording, resolveStripeConfig } from './stripe.js'
 import { DEMO_SELLER, resolveReceiptSeller } from './invoice.js'
 import { createSekRateFeed, SEK_RATE_SOURCE } from './sek-rate.js'
+import { createSalesReporting, resolveSalesConfig } from './sales.js'
 
 const PORT = parseInt(process.env.PORT ?? '3456', 10)
 const MERCHANT_ENVIRONMENT = merchantEnvironmentForChain(CHAIN_ID)
@@ -231,6 +232,20 @@ const STRIPE_CONFIG = resolveStripeConfig({
 })
 const STRIPE_RECORDING = STRIPE_CONFIG ? createStripeRecording(STRIPE_CONFIG) : undefined
 
+// #4950: the Haven Sales account and its sale reporter, for the Sales product
+// (`field_notes`) only. Off unless BOTH MERCHANT_SALES_ADDRESS and
+// MERCHANT_SALES_KEY are set and usable, and MERCHANT_HAVEN_BASE_URL is set; a
+// half-set or unusable configuration warns and stays off (never a refusal to
+// start). The key goes to the core reporter and nowhere else.
+const SALES_CONFIG = resolveSalesConfig({
+  addressRaw: process.env.MERCHANT_SALES_ADDRESS,
+  keyRaw: process.env.MERCHANT_SALES_KEY,
+  havenBaseUrlRaw: process.env.MERCHANT_HAVEN_BASE_URL,
+  merchantAddress: MERCHANT_ADDRESS,
+  stripeDepositAddresses: [process.env.STRIPE_DEPOSIT_ADDRESS, process.env.STRIPE_PREVIOUS_DEPOSIT_ADDRESS],
+})
+const SALES_REPORTING = SALES_CONFIG ? createSalesReporting(SALES_CONFIG, { chainId: CHAIN_ID }) : undefined
+
 // #4856: the seller on every receipt. With no MERCHANT_SELLER_* set, the demo
 // seller, so the receipt is unchanged.
 const RECEIPT_SELLER = resolveReceiptSeller(process.env)
@@ -266,6 +281,7 @@ const server = createDemoMerchantServer({
   passport: PASSPORT_CONFIG,
   cdpConfigured: Boolean(CDP_CONFIG),
   stripe: STRIPE_RECORDING,
+  sales: SALES_REPORTING,
   receiptSeller: RECEIPT_SELLER,
   sekRate: SEK_RATE_FEED,
 })
@@ -303,6 +319,14 @@ server.listen(PORT, () => {
             ? `; still honouring settled payments to ${STRIPE_RECORDING.previousDepositAddress}`
             : '')
       : '  Stripe:    not configured — the joke is paid to MERCHANT_ADDRESS',
+  )
+  // #4950: names the Sales account (public on-chain) and where sales are
+  // reported, never the key.
+  console.log(
+    SALES_REPORTING && SALES_CONFIG
+      ? `  Sales:     field_notes $${formatUsdc(PRODUCTS.field_notes.price_usdc)} paid into ${SALES_REPORTING.address}; ` +
+          `each sale reported to ${SALES_CONFIG.havenBaseUrl}`
+      : '  Sales:     not configured (MERCHANT_SALES_ADDRESS / MERCHANT_SALES_KEY unset) — field_notes not offered',
   )
   // #4856: the seller every receipt carries, and where the joke receipt's
   // SEK rate comes from. Names no credential.

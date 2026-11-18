@@ -12,7 +12,6 @@
  * submits a transaction: it asks Coinbase's facilitator through the shared
  * core, and reads the chain to learn what happened when the answer is lost.
  */
-import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getAddress, isAddress, type Address, type Hex } from 'viem'
 import { SettleError, VerifyError, type PaymentPayload, type PaymentRequired, type SettleResponse } from '@x402/core/types'
@@ -29,6 +28,7 @@ import {
   authorizationDigest,
   decodePayment,
   describeError,
+  newMerchantReference,
   paymentStoreKey,
   parseExactEvmPayload,
   recoverUsedAuthorization,
@@ -1167,24 +1167,4 @@ function within<T>(ms: number, label: string, call: Promise<T>): Promise<T> {
       timer = setTimeout(() => reject(new Error(`${label} did not answer within ${ms} ms`)), ms)
     }),
   ]).finally(() => clearTimeout(timer))
-}
-
-const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-
-/**
- * §5: the sale record's `merchant_reference`, `sale_<ulid>`, generated once at
- * reservation. A ULID: 48 bits of millisecond time and 80 random bits, in
- * Crockford base32 (26 characters), so references sort by creation time.
- */
-export function newMerchantReference(nowMs: number = Date.now()): string {
-  let time = ''
-  let t = nowMs
-  for (let i = 0; i < 10; i++) {
-    time = CROCKFORD[t % 32] + time
-    t = Math.floor(t / 32)
-  }
-  const bytes = randomBytes(16)
-  let random = ''
-  for (let i = 0; i < 16; i++) random += CROCKFORD[bytes[i] % 32]
-  return `sale_${time}${random}`
 }

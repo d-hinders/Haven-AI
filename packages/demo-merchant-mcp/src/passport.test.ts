@@ -56,6 +56,7 @@ function fakeSettledPayment(overrides: Partial<SettledPayment> = {}): SettledPay
     paymentResponseHeader: 'irrelevant',
     settlement: 'settled_onchain',
     passportReference: { attestation_uid: UID, chain_id: CHAIN_ID },
+    merchantReference: 'sale_TEST',
     ...overrides,
   }
 }

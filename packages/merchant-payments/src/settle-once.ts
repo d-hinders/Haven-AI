@@ -13,12 +13,12 @@
  * `payments` map that re-serves a settled payment as the SAME object (callers
  * cache per-payment work by object identity). The store is the record.
  */
-import { randomUUID } from 'node:crypto'
 import type { Address, Hex } from 'viem'
 import { encodePaymentResponseHeader } from '@x402/core/http'
 import type { SettleResponse } from '@x402/core/types'
 import type { PassportReference } from '@haven_ai/sdk'
 import { paymentStoreKey, type ConsumedPaymentStore } from './consumed-payment-store.js'
+import { newMerchantReference } from './merchant-reference.js'
 import {
   AuthorizationAlreadyUsedError,
   PaymentError,
@@ -85,6 +85,13 @@ export interface SettledPayment<P extends string = string, M extends string = st
    * than silently treating it as absent.
    */
   passportReference: PassportReference | null
+  /**
+   * #4950: the sale record's `merchant_reference` (§5), reserved once for this
+   * payment by `createSettleOnce`. Every report of the payment, and every
+   * resend, carries this same value: Haven refuses a second record for one
+   * transaction that differs from the first.
+   */
+  merchantReference: string
 }
 
 /** Rail-agnostic description of one verified payment, ready to settle exactly once. */
@@ -113,6 +120,8 @@ export function buildSettledPayment<P extends string, M extends string>(
     productId: P
     verified: Pick<VerifiedPayment<M>, 'payer' | 'payTo' | 'nonce' | 'settlementMethod' | 'passportReference'>
     expectedAmount: bigint
+    /** #4950: the reference reserved for this payment. */
+    merchantReference: string
   },
   txHash: Hex,
   settlement: SettlementState,
@@ -137,6 +146,7 @@ export function buildSettledPayment<P extends string, M extends string>(
     settlement,
     // #4723: display-only, never on the wire.
     passportReference: params.verified.passportReference,
+    merchantReference: params.merchantReference,
     paymentResponse: response,
     paymentResponseHeader: encodePaymentResponseHeader(response),
   }
@@ -160,7 +170,13 @@ interface SettlementAttempt {
   productId: string
   txHash?: Hex
   reservationToken?: string
+  /** #4950: reserved with the payment; a re-confirmation of the same hash reuses it. */
+  merchantReference?: string
   promise?: Promise<SettledPayment<string, string>>
+}
+
+function missingReference(): never {
+  throw new Error('settle-once: a submitted attempt has no reserved merchant reference')
 }
 
 export function createSettleOnce<P extends string = string, M extends string = string>(
@@ -193,7 +209,16 @@ export function createSettleOnce<P extends string = string, M extends string = s
         return (await attempt.promise) as SettledPayment<P, M>
       }
       if (attempt.txHash) {
-        const retry = confirmSubmittedPayment(params, key, attempt.txHash, attempt.reservationToken)
+        const retry = confirmSubmittedPayment(
+          params,
+          key,
+          attempt.txHash,
+          attempt.reservationToken,
+          // Set with the hash (both come after the reservation). A fresh one
+          // here would make a resend differ from the first record, so its
+          // absence is a bug, not a case to paper over.
+          attempt.merchantReference ?? missingReference(),
+        )
         attempt.promise = retry
         try {
           return await retry
@@ -208,7 +233,9 @@ export function createSettleOnce<P extends string = string, M extends string = s
     const promise = (async (): Promise<SettledPayment<P, M>> => {
       // Reserved just before the settlement is sent, after every check the
       // rail makes: the store holds a payment from here until it is settled
-      // or released.
+      // or released. #4950: the reference is the sale record's (§5), kept on
+      // the settled payment so every report of it carries the same one.
+      const merchantReference = newMerchantReference()
       const reservation = await store.reserve({
         key,
         productId: params.productId,
@@ -216,7 +243,7 @@ export function createSettleOnce<P extends string = string, M extends string = s
         payer: verified.payer,
         amount: params.expectedAmount.toString(),
         validBefore: verified.validBefore,
-        merchantReference: randomUUID(),
+        merchantReference,
         authorizationDigest: verified.authorizationDigest,
         now: new Date().toISOString(),
       })
@@ -232,6 +259,7 @@ export function createSettleOnce<P extends string = string, M extends string = s
         )
       }
       nextAttempt.reservationToken = reservation.reservationToken
+      nextAttempt.merchantReference = merchantReference
 
       let txHash: Hex
       try {
@@ -246,8 +274,8 @@ export function createSettleOnce<P extends string = string, M extends string = s
           // #4851: the CDP path may recover the transaction that moved it
           // from USDC's own events; then the receipt carries that reference.
           const payment = err.txHash
-            ? buildSettledPayment({ ...params, network }, err.txHash, 'settled_onchain')
-            : buildSettledPayment({ ...params, network }, ZERO_TX_HASH, 'already_settled_earlier')
+            ? buildSettledPayment({ ...params, network, merchantReference }, err.txHash, 'settled_onchain')
+            : buildSettledPayment({ ...params, network, merchantReference }, ZERO_TX_HASH, 'already_settled_earlier')
           payments.set(key, payment)
           await recordSettled(key, payment.txHash, reservation.reservationToken)
           return payment
@@ -263,7 +291,7 @@ export function createSettleOnce<P extends string = string, M extends string = s
         throw err
       }
       nextAttempt.txHash = txHash
-      return confirmSubmittedPayment(params, key, txHash, reservation.reservationToken)
+      return confirmSubmittedPayment(params, key, txHash, reservation.reservationToken, merchantReference)
     })()
 
     nextAttempt.promise = promise
@@ -317,6 +345,7 @@ export function createSettleOnce<P extends string = string, M extends string = s
     key: string,
     txHash: Hex,
     reservationToken: string | undefined,
+    merchantReference: string,
   ): Promise<SettledPayment<P, M>> {
     try {
       await options.waitForReceipt(txHash)
@@ -335,7 +364,7 @@ export function createSettleOnce<P extends string = string, M extends string = s
       }
       throw err
     }
-    const payment = buildSettledPayment({ ...params, network }, txHash, 'settled_onchain')
+    const payment = buildSettledPayment({ ...params, network, merchantReference }, txHash, 'settled_onchain')
     payments.set(key, payment)
     await recordSettled(key, txHash, reservationToken)
     return payment

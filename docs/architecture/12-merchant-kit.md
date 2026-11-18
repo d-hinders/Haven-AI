@@ -10,6 +10,9 @@ covers:
   - packages/merchant-payments/src/cdp-settlement.ts
   - packages/merchant-payments/src/consumed-payment-store.ts
   - packages/merchant-payments/src/settle-once.ts
+  - packages/merchant-payments/src/sale-report.ts
+  - packages/merchant-payments/src/merchant-reference.ts
+  - packages/demo-merchant-mcp/src/sales.ts
   - packages/sdk/src/merchant-discovery.ts
   - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
@@ -54,7 +57,7 @@ holds the merchant's upstream API key.
 | Paywall proxy | A standalone reverse proxy. It answers an unpaid call with an x402 challenge, has the payment verified and settled by a facilitator, then forwards the call upstream with the merchant's API key. | Yes | #4893 |
 | Products file | One file mapping a route or model to a fixed price (x402 `exact`), with an optional output-token cap and a description. | Yes | #4893 |
 | Discovery document | A public, machine-readable list of the products, served by the proxy, which agents, directories and Haven read. | Yes | #4891 |
-| Sales reporter | After each settled call the proxy sends a small record to Haven. | Yes for the pilot; optional for a merchant that only wants to accept payments | #4898 |
+| Sales reporter | After each settled call the proxy sends a small record to Haven. The reporter itself is the shared core's (`sale-report`, #4950); #4898 wires it into the proxy. | Yes for the pilot; optional for a merchant that only wants to accept payments | #4950 (core), #4898 (proxy) |
 
 Three parts are required to accept a payment: the proxy, the products file and
 the discovery document. The sales reporter is required for the pilot, because
@@ -74,8 +77,8 @@ on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and 
 
 | Package | Directory | What it holds |
 |---|---|---|
-| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11), the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, the settle-exactly-once coordinator, and the consumed-payment store interface in section 6 with an in-memory implementation (the demo merchant's). |
-| `@haven_ai/paywall-proxy` | `packages/paywall-proxy/` | The proxy from #4893: the products file reader, the challenge, the settlement call into the core, the persistent consumed-payment store, the upstream forwarder and the sales reporter. |
+| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11), the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, the settle-exactly-once coordinator, the consumed-payment store interface in section 6 with an in-memory implementation (the demo merchant's), and the sale reporter and the `merchant_reference` generator of section 5 (#4950). |
+| `@haven_ai/paywall-proxy` | `packages/paywall-proxy/` | The proxy from #4893: the products file reader, the challenge, the settlement call into the core, the persistent consumed-payment store, the upstream forwarder, and the sales outbox that wires in the core's reporter (#4898). |
 
 Both are `private: true` and pin internal dependencies as `"*"`, as
 `lint:workspace-pins` requires. The core is the code that lived in
@@ -339,11 +342,30 @@ it does not know, because it cannot know what the fields mean.
 
 ## 5. The sale record
 
-After each settled call the proxy sends one sale record to Haven. The record is
-JSON, `POST`ed to the URL in `HAVEN_SALES_URL` with
-`Authorization: Bearer $HAVEN_MERCHANT_KEY` and `Content-Type: application/json`.
-The route is `POST /merchant/sales` and the merchant key is Haven's (#4897);
-the proxy only needs the URL and the key. The key's limits — what it can and cannot do, the accepted
+After each settled call the merchant sends one sale record to Haven. The record
+is JSON, `POST`ed to `POST /merchant/sales` with
+`Authorization: Bearer <merchant key>` and `Content-Type: application/json`.
+
+**One reporter, two consumers (#4950).** The record is built and sent by the
+shared core, `packages/merchant-payments/src/sale-report.ts`:
+`buildSaleRecord` makes the record below and `reportSale` posts it with the
+retry policy under *Delivery*. It takes the Haven base URL and the key as
+arguments and reads no environment variable. `newMerchantReference`
+(`merchant-reference.ts`) is the one `sale_<ULID>` generator; the settle-once
+coordinator, the proxy and the demo merchant's skip-settle QA hook call it, and no other package defines one.
+
+- **The demo merchant** (#4950) reports the sales of its one Sales product,
+  `field_notes`, paid into its Haven Sales account. Its settings are
+  `MERCHANT_SALES_ADDRESS`, `MERCHANT_SALES_KEY` and the existing
+  `MERCHANT_HAVEN_BASE_URL`; the demo merchant README says how it holds what
+  is in flight.
+- **The paywall proxy** (#4898) will report every settled call with
+  `HAVEN_MERCHANT_KEY`. The reporter takes Haven's API **origin** and appends
+  `/merchant/sales` itself (`saleReportUrl`), so #4898 passes the origin, not
+  the full route URL, whatever its setting is named.
+
+The route and the merchant key (the Sales key) are Haven's (#4897); a
+consumer only needs the URL and the key. The key's limits — what it can and cannot do, the accepted
 residual, and how revocation works — are documented for merchants in
 [`docs/security/merchant-key-limits.md`](../security/merchant-key-limits.md);
 the kit README links there.
@@ -374,7 +396,7 @@ the kit README links there.
 | `product_name` | No | The product's `name` when the products file has one; otherwise the proxy sends the `id`. |
 | `amount` | Yes | The settled amount in whole atomic USDC units, as a decimal string. It must equal the product's `price`. |
 | `payer` | Yes | The address that paid. For an EIP-3009 payment from a Haven agent this is the agent's delegate address, not the Haven account (see below). |
-| `merchant_reference` | Yes | The merchant's own reference for the sale. The proxy generates a ULID once per payment (`sale_<ulid>`) when it reserves the payment, keeps it in the consumed-payment store (section 6), sends it, and logs it. A payment has one reference however often its call is retried. Haven stores it and does not interpret it. |
+| `merchant_reference` | Yes | The merchant's own reference for the sale. A ULID generated once per payment (`sale_<ulid>`, `newMerchantReference` in the core) when the payment is reserved, kept in the consumed-payment store (section 6) and, on the demo merchant, on the settled payment (`SettledPayment.merchantReference`), sent, and logged. A payment has one reference however often its call is retried or its record resent. Haven stores it and does not interpret it. |
 | `receipt_number` | When a VAT rule is configured | The number the payment's receipt carries (section 11), derived from `tx_hash`, so it is known at settlement whether or not the call later delivers. It lets the merchant find the sale on Haven from the receipt and the other way round. Absent when the deployment has no VAT rule and so issues no receipts. |
 | `vat_treatment` | When a VAT rule is configured | The VAT treatment for this payment, `SE_25` or `REVERSE_CHARGE`, decided at settlement from the rule and the request's declaration (section 11). Absent with `receipt_number`. |
 
@@ -451,18 +473,30 @@ happens to the upstream call: the payment settled either way.
 retried call never sends a second, different record (#4897 refuses a second
 record for the same transaction that differs from the first).
 
-Delivery is at-least-once. The proxy retries a 5xx, a timeout, and the answer
-#4897 defines for "the transaction is not visible on the chain yet, retry"
-(Haven accepts a record only after a stated number of confirmations, so a
-record sent straight after settlement usually gets that answer first), with
-exponential backoff (1 s, 4 s, 16 s), and then moves the record to a bounded
+Delivery is at-least-once. The core reporter retries a 5xx, a timeout (no
+answer in 10 s) or a network failure, and the answer #4897 defines for "the
+transaction is not visible on the chain yet, retry" — 425
+`transaction_not_visible` (Haven accepts a record only after 3 confirmations,
+so a record sent straight after settlement usually gets that answer first) —
+with exponential backoff (1 s, 4 s, 16 s), each wait raised to the answer's
+`Retry-After` (capped at 60 s). After the last retry the reporter returns the
+outcome to its caller. The proxy then moves the record to a bounded
 on-disk outbox (`SALES_OUTBOX`, JSON Lines, 10,000 records) that a background
 task replays every 60 s. Any other 4xx is not retried: the record was refused,
-and the proxy logs `sales_report_refused` with the answer. When the outbox is
+and the reporter logs `sales_report_refused` with the answer's status and code.
+That includes 429 (the 120-a-minute limit): the reporter does not resend it, so
+a consumer without an outbox (the demo merchant) loses that record, and #4898
+decides on purpose whether the proxy's outbox takes it. When the outbox is
 full the proxy keeps the records it has, logs `sales_outbox_full` for each
 record it cannot add, and the merchant must clear the cause (section 12).
 Haven's ingest is idempotent on chain, transaction hash and account, so a
 resent identical record is harmless.
+
+The demo merchant has no outbox (#4950). It reports only a payment
+`settled_onchain`, once per transaction (an in-memory dedupe, so a replayed
+payment header sends nothing more), without making the buyer wait, and after
+the last retry it logs `sales_report_gave_up` and keeps nothing. A restart
+forgets what was in flight, as it forgets the rest of its state.
 
 ## 6. The consumed-payment store
 
@@ -825,7 +859,11 @@ paid: the record is released and the payment is refused as unsettled (402
   returns the existing record; the merchant serves the cached result again,
   which is its current behaviour. `beginForwarding` returns `delivered` for a
   delivered record, and the merchant serves the cached result. Nothing is
-  persisted, so a restart forgets settled payments, exactly as today.
+  persisted, so a restart forgets settled payments, exactly as today. The
+  reservation's `merchantReference` (from `newMerchantReference`, #4950) is
+  also carried on the settled payment, which is what the demo merchant's sale
+  report sends; it keeps no `saleReported` flag, only an in-memory
+  per-transaction dedupe (section 5, *Delivery*).
 - **Proxy.** A SQLite file at `PAYMENTS_DB`, using the built-in `node:sqlite`
   module (the repository runs Node 24, so no new dependency). A payments
   table keyed on `key`, with the fields above plus the token hash, and the

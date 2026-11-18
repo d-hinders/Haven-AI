@@ -141,15 +141,18 @@ describe('register', () => {
     expect(mockPost).not.toHaveBeenCalled()
   })
 
+  // The last column: whether the list is read again (the outcome may already
+  // be on it — unknown, or another tab's registration), or not (the request
+  // was refused before anything could change).
   it.each([
-    [refusal(400, 'INVALID_DEPOSIT_ADDRESS'), /This is not an address/],
-    [refusal(409, 'DEPOSIT_ADDRESS_IS_OWN'), /one of your own accounts or agents/],
-    [refusal(409, 'DEPOSIT_ADDRESS_ALREADY_REGISTERED'), /already registered to a Sales account/],
-    [refusal(409, 'MERCHANT_ACCOUNT_REQUIRED'), /Turn Sales on/],
-    [refusal(429), /Too many changes/],
-    [refusal(422, undefined, 'A sentence the route sent.'), /A sentence the route sent\./],
-    [refusal(502), /Haven did not answer/],
-  ])('shows the route reason for a refused registration inside the dialog (%#)', async (err, words) => {
+    [refusal(400, 'INVALID_DEPOSIT_ADDRESS'), /This is not an address/, false],
+    [refusal(409, 'DEPOSIT_ADDRESS_IS_OWN'), /one of your own accounts or agents/, false],
+    [refusal(409, 'DEPOSIT_ADDRESS_ALREADY_REGISTERED'), /already registered to a Sales account/, true],
+    [refusal(409, 'MERCHANT_ACCOUNT_REQUIRED'), /Turn Sales on/, true],
+    [refusal(429), /Too many changes/, false],
+    [refusal(422, undefined, 'A sentence the route sent.'), /A sentence the route sent\./, true],
+    [refusal(502), /Haven did not answer/, true],
+  ])('shows the route reason for a refused registration inside the dialog (%#)', async (err, words, rereads) => {
     serveList([])
     mockPost.mockRejectedValue(err)
     renderSection()
@@ -161,6 +164,35 @@ describe('register', () => {
     expect(await within(dialog).findByText(words)).toBeTruthy()
     // The raw code is never shown.
     expect(dialog.textContent).not.toMatch(/[A-Z]{3,}_[A-Z_]+/)
+    // The error is the input's description, and the helper is not painted red beside it.
+    const input = within(dialog).getByLabelText('Deposit address')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input.getAttribute('aria-describedby')).toBe('stripe-deposit-address-error')
+    expect(within(dialog).queryByText('Registered by you, not verified by Haven.')).toBeNull()
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(rereads ? 2 : 1))
+  })
+
+  it('keys each address by its registration, so a reordered list keeps each row its own label and action', async () => {
+    serveList([ACTIVE, RETIRED])
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { rerender } = renderSection()
+    await screen.findAllByTestId('sales-deposit-address')
+    // The retired one comes first after a re-read (a newer registration of the old address).
+    serveList([RETIRED, ACTIVE])
+    rerender(
+      <LocaleProvider>
+        <ToastProvider>
+          <StripeDepositAddressesSection chainId={84532} key="reread" />
+        </ToastProvider>
+      </LocaleProvider>,
+    )
+    const rows = await screen.findAllByTestId('sales-deposit-address')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('Retired')
+    expect(rows[1].textContent).not.toContain('Retired')
+    expect(screen.getAllByRole('button', { name: /^Retire / })).toHaveLength(1)
+    expect(errors.mock.calls.some((call) => String(call[0]).includes('same key'))).toBe(false)
+    errors.mockRestore()
   })
 })
 

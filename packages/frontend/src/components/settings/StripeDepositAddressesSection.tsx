@@ -96,6 +96,7 @@ export default function StripeDepositAddressesSection({ chainId }: { chainId: nu
     const shown = displayDepositAddress(entry.address)
     const registered = formatLongDate(entry.registered_at)
     return {
+      id: entry.id,
       label: copy.addressLabel,
       value: (
         <span className="block space-y-1.5" data-testid="sales-deposit-address">
@@ -293,10 +294,17 @@ function RegisterDepositAddressDialog({
             spellCheck={false}
             className="font-mono"
             invalid={error !== null}
-            helperText={copy.helper}
+            // On a refusal the alert below replaces the helper, so the one red
+            // line is the error — never the "not verified" label.
+            helperText={error ? undefined : copy.helper}
+            aria-describedby={error ? 'stripe-deposit-address-error' : undefined}
             disabled={busy}
           />
-          {error ? <InlineAlert>{error}</InlineAlert> : null}
+          {error ? (
+            <div id="stripe-deposit-address-error">
+              <InlineAlert>{error}</InlineAlert>
+            </div>
+          ) : null}
         </form>
       )}
     </Modal>

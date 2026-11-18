@@ -590,7 +590,7 @@ export const en = {
           sales_off: 'Turn Sales on before changing your Stripe deposit addresses.',
           rate_limited: 'Too many changes in a short time. Wait a minute, then try again.',
           refused: 'Haven refused this change. Nothing changed.',
-          unknown_outcome: 'Haven did not answer. The list below shows what is registered now. Check it, then try again.',
+          unknown_outcome: 'Haven did not answer. Close this dialog to see what is registered now, then try again if it is not listed.',
         },
       },
 

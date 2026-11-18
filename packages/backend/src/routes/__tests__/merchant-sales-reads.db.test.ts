@@ -574,12 +574,18 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
   })
 
   describe('the own-flag backfill (migration 133)', () => {
-    it('turns a row stamped false from the owner\'s agent delegate into an own move, and leaves other users\' rows alone', async () => {
+    it('turns rows stamped false from the owner\'s own account, agent delegate and rotated-out delegate into own moves, and another user\'s delegate stays a wallet', async () => {
       const m = await seedMerchant()
       const other = await seedUser()
       const delegate = addr()
       const rotated = addr()
       const strangers = addr()
+      const secondAccount = addr()
+      await db.query(
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default)
+         VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true)`,
+        [m.userId, secondAccount, CHAIN],
+      )
       const agent = await db.query<{ id: string }>(
         `INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Research agent', $2, 'active') RETURNING id`,
         [m.userId, delegate],
@@ -592,10 +598,11 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       await seedLeg(m, { tx: hash(0xb1), payer: delegate, amount: '700', own: false, time: '2026-11-10T10:00:00Z' })
       await seedLeg(m, { tx: hash(0xb2), payer: rotated, amount: '300', own: false, time: '2026-11-10T11:00:00Z' })
       await seedLeg(m, { tx: hash(0xb3), payer: strangers, amount: '50', own: false, time: '2026-11-10T12:00:00Z' })
+      await seedLeg(m, { tx: hash(0xb4), payer: secondAccount, amount: '2000', own: false, time: '2026-11-10T13:00:00Z' })
 
-      // before: all three count as revenue, though two payers read `own`
+      // before: all four count as revenue, though three payers read `own`
       let summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
-      expect(summary.revenue_raw).toBe('1050')
+      expect(summary.revenue_raw).toBe('3050')
 
       const client = await db.connect()
       try {
@@ -606,7 +613,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
 
       summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
       expect(summary.revenue_raw).toBe('50')
-      expect(summary.own_moves).toEqual({ count: 2, amount_raw: '1000' })
+      expect(summary.own_moves).toEqual({ count: 3, amount_raw: '3000' })
       const rows = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments as Array<{
         tx_hash: string
         kind: string
@@ -616,6 +623,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(byTx(0xb1)).toMatchObject({ kind: 'own_move', payer: { kind: 'own', name: 'Research agent' } })
       expect(byTx(0xb2)).toMatchObject({ kind: 'own_move', payer: { kind: 'own' } })
       expect(byTx(0xb3)).toMatchObject({ kind: 'no_product', payer: { kind: 'wallet' } })
+      expect(byTx(0xb4)).toMatchObject({ kind: 'own_move', payer: { kind: 'own' } })
     })
   })
 

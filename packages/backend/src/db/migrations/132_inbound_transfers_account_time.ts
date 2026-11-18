@@ -1,13 +1,6 @@
 import type { PoolClient } from 'pg'
-import { createIndexConcurrently, dropIndexConcurrently } from '../concurrent-index.js'
 
 export const version = '132_inbound_transfers_account_time'
-
-// A plain CREATE INDEX takes a SHARE lock on inbound_transfers for the whole
-// build, which blocks the receive index's writes; the concurrent build does not.
-export const transactional = false
-export const nonTransactionalReason =
-  'CREATE INDEX CONCURRENTLY cannot run inside a transaction block (25001); a plain build would block inbound_transfers writes'
 
 /**
  * 132 — the owner's sales reads need one account's transfers by time (#4897,
@@ -25,14 +18,22 @@ export const nonTransactionalReason =
  * aggregate, and the period is a range on `block_time`. 131 is left as shipped
  * (it is in an open PR); this is its own migration. The index is an access
  * path only; no row, column or constraint changes.
+ *
+ * A plain, transactional CREATE INDEX (review of #4897). It takes a SHARE lock
+ * on inbound_transfers for the build, which blocks the receive index's writes
+ * meanwhile. The table is days old (#4903, migration 128) and holds one row per
+ * inbound USDC transfer into a Haven account: thousands of rows in production,
+ * not millions, so the build is sub-second and the lock is accepted, as 072
+ * records for its own index. The CONCURRENTLY lane (#2150) was considered and
+ * not used: no production migration has run on it yet, and a container killed
+ * mid-build there leaves a 'running' row that refuses the next boot.
  */
 export async function up(client: PoolClient): Promise<void> {
-  await createIndexConcurrently(client, {
-    name: 'idx_inbound_transfers_account_time',
-    definition: 'ON inbound_transfers (account_id, block_time DESC)',
-  })
+  await client.query(
+    'CREATE INDEX IF NOT EXISTS idx_inbound_transfers_account_time ON inbound_transfers (account_id, block_time DESC)',
+  )
 }
 
 export async function down(client: PoolClient): Promise<void> {
-  await dropIndexConcurrently(client, 'idx_inbound_transfers_account_time')
+  await client.query('DROP INDEX IF EXISTS idx_inbound_transfers_account_time')
 }

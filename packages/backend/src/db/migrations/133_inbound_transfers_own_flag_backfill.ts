@@ -20,7 +20,10 @@ export const version = '133_inbound_transfers_own_flag_backfill'
  * account or rotation still never rewrites past revenue.
  *
  * Residual: an ingest whose own-address lookup fails stamps false
- * (`modules/transactions/receive.ts`) and nothing repairs that row.
+ * (`modules/transactions/receive.ts`) and nothing repairs that row. So does a
+ * row an old replica indexes during the release, after this migration commits
+ * but before the new code (with the widened set) replaces it: a short window,
+ * the same class of residual.
  *
  * `down()` is a no-op: the previous value of the flag is not recorded, and
  * reverting would only reintroduce the miscount this fixes.

@@ -324,6 +324,10 @@ describe('index.ts readers', () => {
       // born ENFORCED (its create body is closed, so a body naming an account
       // to bind the key to is refused by the schema).
       'routes/merchant-keys.ts',
+      // #4899: the merchant catalogue — brand-new money-path module, born
+      // ENFORCED (its save body is closed, so a body carrying anything but the
+      // deployment address is refused by the schema).
+      'routes/merchant-catalogue.ts',
     ])
   })
 })

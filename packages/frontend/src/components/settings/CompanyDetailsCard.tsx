@@ -219,7 +219,7 @@ function draftFrom(details: CompanyDetailsRow | null, signupEmail: string): Draf
     // a cleared email from one never set (migration 129 has no backfill), and
     // prefilling a cleared one would store the sign-up email again on the
     // owner's next, unrelated save.
-    receiptEmail: details === null ? signupEmail : (details.receipt_email ?? ''),
+    receiptEmail: details == null ? signupEmail : (details.receipt_email ?? ''),
     billing: addressDraftFrom(details?.billing_address),
     shipping: addressDraftFrom(details?.shipping_address),
     shippingSameAsBilling: addressesEqual(details?.shipping_address, details?.billing_address),

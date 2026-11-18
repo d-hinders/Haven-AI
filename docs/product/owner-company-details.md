@@ -180,7 +180,7 @@ exactly the six fields it had before this slice, and a test pins that key set
 exactly (`toEqual`) on the output of `buyerPartyFromJoin`, which both
 consumers — payment evidence and the settled-payment receipt — map through,
 and a separate test pins the join fragment's selected columns, so the three
-fields can reach neither the mapper nor the raw row (#4946). They are stored for the merchant-facing answer #4871
+fields cannot reach the buyer block through the join fragment (#4946). They are stored for the merchant-facing answer #4871
 builds; this slice sends nothing to any merchant. When a merchant does receive
 them, a merchant receipt showing the owner's email or address is kept twice:
 by the merchant, and by Haven as the owner's own bookkeeping record — stored

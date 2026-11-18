@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import { createSIWxPayload, encodeSIWxHeader, type CompleteSIWxInfo } from '@x402/extensions/sign-in-with-x'
+import { buildSignedTaxDeclaration, encodeTaxDeclarationHeader } from '@haven_ai/sdk/edge'
 import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse, VerifyResponse } from '@x402/core/types'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import type { Address, Hex } from 'viem'
@@ -271,6 +272,11 @@ export interface Buyer {
    * for byte.
    */
   signIn(challenge: SiwxChallenge, url: string): Promise<string>
+  /**
+   * #4913: a buyer's signed tax declaration, base64url in the
+   * `X-Tax-Declaration` header, signed by the same key that signs the payment.
+   */
+  signTaxDeclaration(content: { jurisdiction: string; taxId: string; taxableStatus?: string; validUntil?: number }): string
 }
 
 export async function signInAs(account: ReturnType<typeof privateKeyToAccount>, challenge: SiwxChallenge, url: string): Promise<string> {
@@ -279,10 +285,25 @@ export async function signInAs(account: ReturnType<typeof privateKeyToAccount>, 
 }
 
 export function newBuyer(): Buyer {
-  const account = privateKeyToAccount(generatePrivateKey())
+  const privateKey = generatePrivateKey()
+  const account = privateKeyToAccount(privateKey)
   return {
     address: account.address,
     signIn: (challenge, url) => signInAs(account, challenge, url),
+    signTaxDeclaration: (content) =>
+      encodeTaxDeclarationHeader(
+        buildSignedTaxDeclaration({
+          content: {
+            version: 'x402-tax-1',
+            jurisdiction: content.jurisdiction,
+            taxableStatus: content.taxableStatus ?? 'TAXABLE_PERSON',
+            taxId: content.taxId,
+            validUntil: content.validUntil ?? Date.now() + 30 * 24 * 60 * 60 * 1000,
+          },
+          network: 'eip155:84532',
+          delegateKey: privateKey,
+        }),
+      ),
     async pay(h, path, init) {
       const { amountOverride, validBeforeOffset, resourceUrl, omitResource, ...fetchInit } = init
       const unpaid = await fetch(`${h.base}${path}`, fetchInit)

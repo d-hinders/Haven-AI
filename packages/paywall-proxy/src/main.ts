@@ -90,6 +90,9 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
     })
     const address = server.address()
     const port = typeof address === 'object' && address ? address.port : config.port
+    // §11: a test network with a VAT rule and no seller details starts and
+    // sends no receipt; the warning says so, and names no secret.
+    for (const warning of config.warnings) log('warning', { message: warning })
     log('started', {
       port,
       network: config.chain.network,
@@ -98,9 +101,9 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       operator: config.operatorName,
       products: products.map((p) => p.id),
       base_path: config.basePath,
-      // Sales reporting (#4898) and receipts (#4913) are not built yet.
+      // Sales reporting (#4898) is not built yet.
       sales_reporting: 'off',
-      receipt: 'off',
+      receipt: config.receiptStatus,
     })
     return {
       server,

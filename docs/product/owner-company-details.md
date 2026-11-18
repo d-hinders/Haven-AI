@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/db/migrations/098_owner_company_details.ts
+  - packages/backend/src/db/migrations/129_owner_company_details_checkout_fields.ts
   - packages/backend/src/infra/repositories/owner-company-details.ts
   - packages/backend/src/modules/owner-profile/service.ts
   - packages/backend/src/modules/owner-profile/vies-client.ts
@@ -26,7 +27,7 @@ covers:
   - packages/mcp/src/server.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-10-26"
+last-verified: "2026-11-17"
 ---
 
 # Owner company details
@@ -62,6 +63,16 @@ One row per owner, keyed on `user_id` (migration `098_owner_company_details`):
 | `vat_number` | Optional. Normalised on write: uppercase, no spaces (`SE556677889901`, not `se 556677889901`). Its own 2-letter prefix may legitimately differ from `country` (an EU group can register for VAT in a member state that is not its seat of incorporation) — VIES is always asked using the VAT NUMBER's own prefix, never `country` (Greece is the one case: a `GR…` prefix asks VIES as `EL`; see below). A prefix that is not itself a VIES member country code is still accepted and stored, but starts no VIES call at all — see *The VIES states* below. |
 | `vies_status` | `null` (no VAT number submitted), `pending`, `valid`, `invalid`, or `not_verifiable`. |
 | `vies_checked_at` | When the last VIES check COMPLETED — never set while `vies_status` is `pending` (a check in flight has no completion time yet), and cleared to `null` whenever the VAT number itself is cleared, alongside `vies_status`. |
+| `receipt_email` | Optional (#4870). Where a merchant should send the receipt: one address, at most 254 characters (RFC 5321 §4.5.3.1.3's forward-path limit, less the angle brackets), no display name and no CR or LF. The form SUGGESTS the sign-up email as a prefill; nothing is stored until the owner saves, and the sign-up email is never used as a receipt email anywhere else (owner decision 2026-11-17, #4868). |
+| `billing_address` | Optional (#4870). A structured address, stored as one JSONB value in the shape `docs/architecture/13-checkout-details.md` § *The address shape* decides: `line1` (required, ≤70), `line2` (≤70), `line3` (≤70), `city` (required, ≤50), `postCode` (≤16), `subdivision` (≤6, ISO 3166-2) and `country` (required, two uppercase letters). An absent optional member is omitted from the JSON, never stored as `null` or as an empty string. |
+| `shipping_address` | Optional (#4870). The same shape as `billing_address`. "Shipping address is the same as billing" is a form convenience only — there is no stored flag; ticking it saves the billing address as the shipping address. |
+
+The three #4870 fields are saved by the same form and the same `PUT` call as
+the rest of the row, so an owner with no company row cannot store an email or
+an address: `legal_name`, `country` and `org_number` are required, and the
+form says so. They are deliberately **not** part of `parties.buyer` (see
+*Where it surfaces* below) — this slice stores them and sends nothing to any
+merchant.
 
 There is no organisation entity above the user (migration 080's own recorded
 decision) and this is **not** the `agent_organizations` folder tree (migration
@@ -118,7 +129,7 @@ just the settings screen built on top of it; `DELETE` is the one exception
 | Route | Notes |
 |---|---|
 | `GET /user/company-details` | 404 when the flag is off, and only then. 200 with `null` if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
-| `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
+| `PUT /user/company-details` | 404 when the flag is off. Full replacement of the row, with one exception: the three #4870 fields follow **omitted keeps, `null` clears** — a field the request omits keeps its stored value (so a dashboard tab built before #4870 cannot wipe it), and an explicit `null` clears it. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
 | `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
 
@@ -163,6 +174,16 @@ editing or deleting details changes what past receipts show going forward
 does remove the owner's data from every future read of every past receipt,
 not just new ones; a receipt states current details, never those the payment
 had at settlement time).
+
+The three #4870 fields are **not** in `parties.buyer`: the buyer block keeps
+exactly the six fields it had before this slice, and a test pins that key set
+exactly (`toEqual`) on both consumers — payment evidence and the
+settled-payment receipt. They are stored for the merchant-facing answer #4871
+builds; this slice sends nothing to any merchant. When a merchant does receive
+them, the receipt the MERCHANT writes is the merchant's own record: a merchant
+receipt showing the owner's email or address is kept as a bookkeeping record,
+and `DELETE /user/company-details` does not reach it. What the delete removes
+is Haven's copy — the one every future Haven read of the owner's details uses.
 
 The SDK mirrors this through its MAPPED, camelCase surfaces —
 `HavenClient.listReceipts()`/`listReceiptsPage()` produce `PaymentParties.buyer`
@@ -353,14 +374,21 @@ the form no longer repeats that detail.
 
 - **Basis**: consent — the owner opts in by calling `PUT
   /user/company-details` or filling in the Company details form on Settings →
-  Business; nothing here is required for an agent or a payment to work.
+  Business; nothing here is required for an agent or a payment to work. The
+  receipt email and the two addresses (#4870) are part of the same consent:
+  they are optional, saved by the same form and the same call, and the
+  sign-up email is only ever a prefill — it is not stored as a receipt email
+  until the owner saves.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, (asynchronously) validating the VAT number against
   VIES, and, for an agent the owner opts in, stating the country and VAT
   number in the buyer-side tax declaration that a key-holding client — the opt-in local MCP server,
   `@haven_ai/mcp`, or a developer's own SDK client — sends on its EIP-3009
   payments; an agent on the connector's default hosted install sends none (see
-  *A second reader* above).
+  *A second reader* above). The receipt email and the billing and shipping
+  addresses (#4870) are stored so they can be passed to a merchant that asks
+  for them — the merchant-facing answer #4871 builds. This slice sends
+  nothing to any merchant.
 - **Retention**: kept until the owner deletes it. `DELETE
   /user/company-details` works regardless of the feature flag, and with the
   flag ON the owner calls it themselves from the Company details card on
@@ -369,7 +397,12 @@ the form no longer repeats that detail.
   still call the ungated `DELETE` with their own session, but in practice
   they ask Haven support, who removes the row directly in the database: the
   route only ever erases the CALLER's own row, so support cannot call it on
-  the owner's behalf. Deleting the Haven account WOULD also
+  the owner's behalf. The three #4870 fields are removed with the row by that
+  same `DELETE` — they live on it, so there is no second erasure path to
+  forget. A merchant receipt that already shows the owner's email or address
+  is the MERCHANT's own bookkeeping record and is not reached by that delete;
+  what Haven erases is its own copy, the one every future Haven read uses.
+  Deleting the Haven account WOULD also
   remove these details (`user_id` is `ON DELETE CASCADE`), but account
   deletion is an operator action today — there is no self-serve
   delete-my-account route — so that cascade is not itself something an owner

@@ -14,6 +14,12 @@ export interface ProxyChain extends PaymentAsset {
   /** Display name, for the startup log. */
   label: string
   testnet: boolean
+  /**
+   * The network's name on a receipt, in both render languages (§11). The
+   * receipt is a Swedish document, so `sv` is what `betalningssatt` carries;
+   * `en` is what a reader that renders the text in English prints.
+   */
+  receiptNetwork: { sv: string; en: string }
 }
 
 export const PROXY_CHAINS: Readonly<Record<string, ProxyChain>> = {
@@ -22,6 +28,7 @@ export const PROXY_CHAINS: Readonly<Record<string, ProxyChain>> = {
     network: 'eip155:8453',
     label: 'Base mainnet',
     testnet: false,
+    receiptNetwork: { sv: 'Base', en: 'Base' },
     usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as Address,
     usdcDomainName: 'USD Coin',
     usdcDomainVersion: '2',
@@ -31,6 +38,7 @@ export const PROXY_CHAINS: Readonly<Record<string, ProxyChain>> = {
     network: 'eip155:84532',
     label: 'Base Sepolia testnet',
     testnet: true,
+    receiptNetwork: { sv: 'Base Sepolia testnät', en: 'Base Sepolia testnet' },
     usdcAddress: '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address,
     usdcDomainName: 'USDC',
     usdcDomainVersion: '2',

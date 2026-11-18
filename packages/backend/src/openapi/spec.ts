@@ -12165,7 +12165,19 @@ export const openapiSpec = {
        */
       CompanyDetails: {
         type: 'object',
-        required: ['legal_name', 'country', 'org_number', 'vat_number', 'vies_status', 'vies_checked_at', 'created_at', 'updated_at'],
+        required: [
+          'legal_name',
+          'country',
+          'org_number',
+          'vat_number',
+          'vies_status',
+          'vies_checked_at',
+          'receipt_email',
+          'billing_address',
+          'shipping_address',
+          'created_at',
+          'updated_at',
+        ],
         properties: {
           legal_name: { type: 'string', minLength: 1, maxLength: 200 },
           country: { type: 'string', pattern: '^[A-Z]{2}$', description: 'ISO 3166-1 alpha-2.' },
@@ -12181,8 +12193,48 @@ export const openapiSpec = {
             enum: ['pending', 'valid', 'invalid', 'not_verifiable', null],
           },
           vies_checked_at: { type: ['string', 'null'], format: 'date-time' },
+          /**
+           * #4870. Always present, `null` when the owner has not saved one.
+           * The sign-up email is never substituted here: the form suggests it
+           * as a prefill, and nothing is stored until the owner saves.
+           */
+          receipt_email: {
+            type: ['string', 'null'],
+            maxLength: 254,
+            description: 'Where a merchant should send the receipt. Null when not saved.',
+          },
+          billing_address: {
+            anyOf: [{ $ref: '#/components/schemas/OwnerAddress' }, { type: 'null' }],
+            description: 'Structured billing address. Null when not saved.',
+          },
+          shipping_address: {
+            anyOf: [{ $ref: '#/components/schemas/OwnerAddress' }, { type: 'null' }],
+            description: 'Structured shipping address. Null when not saved.',
+          },
           created_at: isoDateTime,
           updated_at: isoDateTime,
+        },
+        additionalProperties: false,
+      },
+      /**
+       * The structured address shape (#4870), owned by
+       * `docs/architecture/13-checkout-details.md` § *The address shape* and
+       * shared with the merchant-facing answer #4871 builds. `line1`, `city`
+       * and `country` are required; an absent optional member is omitted from
+       * the JSON, never sent as `null` or as an empty string. The lengths are
+       * Haven's own bounds, not a validation that the address exists.
+       */
+      OwnerAddress: {
+        type: 'object',
+        required: ['line1', 'city', 'country'],
+        properties: {
+          line1: { type: 'string', minLength: 1, maxLength: 70 },
+          line2: { type: 'string', maxLength: 70 },
+          line3: { type: 'string', maxLength: 70 },
+          city: { type: 'string', minLength: 1, maxLength: 50 },
+          postCode: { type: 'string', maxLength: 16 },
+          subdivision: { type: 'string', maxLength: 6, description: 'ISO 3166-2 subdivision code, e.g. "SE-AB".' },
+          country: { type: 'string', minLength: 2, maxLength: 2, description: 'ISO 3166-1 alpha-2, uppercase.' },
         },
         additionalProperties: false,
       },
@@ -12195,6 +12247,26 @@ export const openapiSpec = {
           org_number: { type: 'string', minLength: 1, maxLength: 32 },
           /** Omit or null clears it. Setting or changing it re-runs the VIES check asynchronously. */
           vat_number: { type: ['string', 'null'], maxLength: 32 },
+          /**
+           * #4870. OMITTED keeps the stored value; `null` clears it. The
+           * email SHAPE is checked in the route's own validation (so a bad
+           * address answers the route's `400 { error }`), while the length
+           * bound lives here and is enforced by the request-validation
+           * plugin — one schema, no hand-written second copy.
+           */
+          receipt_email: { type: ['string', 'null'], maxLength: 254 },
+          /**
+           * #4870. OMITTED keeps the stored value; `null` clears it. The
+           * address's required members and lengths are the spec's; the
+           * semantic checks (a two-letter country, control characters) are
+           * the route's, so they answer its `400 { error }` shape.
+           */
+          billing_address: {
+            anyOf: [{ $ref: '#/components/schemas/OwnerAddress' }, { type: 'null' }],
+          },
+          shipping_address: {
+            anyOf: [{ $ref: '#/components/schemas/OwnerAddress' }, { type: 'null' }],
+          },
         },
         additionalProperties: false,
       },

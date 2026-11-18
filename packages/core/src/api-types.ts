@@ -5160,16 +5160,36 @@ export type components = {
             vies_status: "pending" | "valid" | "invalid" | "not_verifiable" | null;
             /** Format: date-time */
             vies_checked_at: string | null;
+            /** @description Where a merchant should send the receipt. Null when not saved. */
+            receipt_email: string | null;
+            /** @description Structured billing address. Null when not saved. */
+            billing_address: components["schemas"]["OwnerAddress"] | null;
+            /** @description Structured shipping address. Null when not saved. */
+            shipping_address: components["schemas"]["OwnerAddress"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        OwnerAddress: {
+            line1: string;
+            line2?: string;
+            line3?: string;
+            city: string;
+            postCode?: string;
+            /** @description ISO 3166-2 subdivision code, e.g. "SE-AB". */
+            subdivision?: string;
+            /** @description ISO 3166-1 alpha-2, uppercase. */
+            country: string;
         };
         UpsertCompanyDetailsRequest: {
             legal_name: string;
             country: string;
             org_number: string;
             vat_number?: string | null;
+            receipt_email?: string | null;
+            billing_address?: components["schemas"]["OwnerAddress"] | null;
+            shipping_address?: components["schemas"]["OwnerAddress"] | null;
         };
         DeleteCompanyDetailsResponse: {
             ok: boolean;

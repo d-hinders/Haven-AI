@@ -1222,7 +1222,10 @@ accounting reads a kit receipt with no change: its reader
 (`packages/backend/src/modules/accounting/receipt-statement.ts`, documented
 field by field in `docs/operations/merchant-receipt-shape.md`) is the
 contract, and the shape is not changed. The code moves into the shared core
-with #4890; the kit's use of it is built in #4913.
+with #4890; the kit's use of it is built in #4913, in
+`packages/paywall-proxy/src/receipt.ts`, which assembles the core's parameters
+and defines no VAT computation, no receipt-number derivation and no declaration
+verification of its own.
 
 The proxy sends the receipt as the `x-receipt-json` response header only:
 the receipt's JSON, base64-encoded so the header stays ASCII-safe, on the

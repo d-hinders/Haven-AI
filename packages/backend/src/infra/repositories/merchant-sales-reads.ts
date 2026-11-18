@@ -119,7 +119,7 @@ const PAYMENTS_CTE = `
     -- marked held_by = 'stripe', and every summary figure below reads pay_acct.
     SELECT LOWER(ms.tx_hash),
            ms.block_time,
-           CASE WHEN ms.sender_is_own_address THEN 'own_move' ELSE 'sale' END,
+           'sale',
            ms.amount_raw,
            ms.amount_raw,
            ms.several_payers,
@@ -137,6 +137,9 @@ const PAYMENTS_CTE = `
        AND ms.user_id = $2
        AND ms.chain_id = $3
        AND ms.held_by = 'stripe'
+       -- A Stripe-held sale from the owner's own address is never revenue and its
+       -- row holds no "what moved" amount: it is left out of the list.
+       AND NOT ms.sender_is_own_address
        AND ms.block_time >= $4::timestamptz
        AND ms.block_time < $5::timestamptz
        AND ($6::text IS NULL OR LOWER(ms.tx_hash) = $6::text)

@@ -134,7 +134,9 @@ it "registered by you, not verified by Haven". The record does not change: it
 gains no field and no version. When the transaction pays the key's account
 nothing, Haven reads its USDC legs to the account's registered addresses, and
 accepts the sale only when a leg went to an address registered to the account
-and active at the leg's block time. The sale is stored with `held_by: stripe`
+and active at the leg's block time (when legs go to several registered
+addresses, only those to the first one by log index count, so the row's address
+and amount agree). The sale is stored with `held_by: stripe`
 and the address from the registry, never from the record; it writes no
 `inbound_transfers` row, counts in no Haven balance, and the reads show it
 apart ("Received in Stripe"). Every other case, including an address registered

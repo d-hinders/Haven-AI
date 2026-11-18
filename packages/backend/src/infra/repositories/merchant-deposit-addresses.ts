@@ -93,21 +93,50 @@ export async function retireDepositAddress(
 }
 
 /**
- * Every registration of this account on this chain, active or retired: the
- * ingest filters each leg by the window (`registered_at <= block time` and not
- * retired by it). Scoped to the key's account, so it says nothing about any
- * other account's addresses.
+ * The distinct addresses this account has ever registered on this chain,
+ * active or retired: the ingest names them to the chain read, then decides
+ * each leg by `depositAddressActiveAt`. Scoped to the key's account, so it says
+ * nothing about any other account's addresses.
  */
-export async function listAccountDepositWindows(
+export async function listAccountDepositAddresses(
   accountId: string,
   chainId: number,
   db: Executor = pool,
-): Promise<Array<{ address: string; registered_at: Date; retired_at: Date | null }>> {
-  const result = await db.query<{ address: string; registered_at: Date; retired_at: Date | null }>(
-    `SELECT address, registered_at, retired_at
+): Promise<string[]> {
+  const result = await db.query<{ address: string }>(
+    `SELECT DISTINCT address
        FROM merchant_deposit_addresses
       WHERE account_id = $1 AND chain_id = $2`,
     [accountId, chainId],
   )
-  return result.rows
+  return result.rows.map((r) => r.address)
+}
+
+/**
+ * Whether `address` was registered to the account at `at`: registered at or
+ * before it (`registered_at <= at`) and not retired by it (`retired_at` null or
+ * `> at`). Decided in SQL on the full timestamps, so a registration a fraction
+ * of a second after a whole-second block time does not count. A
+ * re-registration after a retirement is a second window; any one holding `at`
+ * counts.
+ */
+export async function depositAddressActiveAt(
+  accountId: string,
+  chainId: number,
+  address: string,
+  at: Date,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT 1
+       FROM merchant_deposit_addresses
+      WHERE account_id = $1
+        AND chain_id = $2
+        AND address = LOWER($3)
+        AND registered_at <= $4::timestamptz
+        AND (retired_at IS NULL OR retired_at > $4::timestamptz)
+      LIMIT 1`,
+    [accountId, chainId, address, at],
+  )
+  return (result.rowCount ?? 0) > 0
 }

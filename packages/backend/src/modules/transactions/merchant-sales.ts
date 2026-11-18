@@ -23,6 +23,8 @@
  * address is registered to this account and was active at the leg's block time.
  * The sale is stored with `held_by = 'stripe'` and `receiving_address` from the
  * registry, and NO `inbound_transfers` row is written, so it is in no balance.
+ * When legs go to several registered addresses, only those to the first one by
+ * log index count, so the row's address and amount agree.
  * A transaction that pays the account AND a registered address is an account
  * sale counting only the legs into the account. Legs to another account's
  * address, an unregistered one, or one outside its window all get the same 422
@@ -52,7 +54,10 @@ import {
   type MerchantSaleVatTreatment,
 } from '../../infra/repositories/merchant-sales.js'
 import { listOwnAccountAddresses } from '../../infra/repositories/inbound-transfers.js'
-import { listAccountDepositWindows } from '../../infra/repositories/merchant-deposit-addresses.js'
+import {
+  depositAddressActiveAt,
+  listAccountDepositAddresses,
+} from '../../infra/repositories/merchant-deposit-addresses.js'
 import {
   readInboundTransactionByTxHash,
   type ChainInboundLeg,
@@ -185,25 +190,6 @@ export function saleFactsFromLegs(
   }
 }
 
-/**
- * Whether `address` was registered to the account at `at`: registered at or
- * before it, and not retired by it. A re-registration after a retirement is a
- * second window; any one containing `at` counts.
- */
-export function registrationActiveAt(
-  windows: ReadonlyArray<{ address: string; registered_at: Date; retired_at: Date | null }>,
-  address: string,
-  at: Date,
-): boolean {
-  const t = at.getTime()
-  return windows.some(
-    (w) =>
-      w.address === address.toLowerCase() &&
-      new Date(w.registered_at).getTime() <= t &&
-      (w.retired_at === null || new Date(w.retired_at).getTime() > t),
-  )
-}
-
 export async function ingestMerchantSale(input: {
   merchant: SaleMerchant
   record: SaleRecordInput
@@ -239,12 +225,12 @@ export async function ingestMerchantSale(input: {
   // #4952: the account's registered Stripe deposit addresses, every window
   // (active or retired). Only THIS account's rows: nothing here can reveal
   // another account's registrations.
-  const windows = await listAccountDepositWindows(merchant.account_id, merchant.chain_id)
+  const registered = await listAccountDepositAddresses(merchant.account_id, merchant.chain_id)
   const read = await readInboundTransactionByTxHash(
     merchant.chain_id,
     merchant.account_address,
     txHash,
-    windows.map((w) => w.address),
+    registered,
   )
   if (!read.ok) {
     return fail(503, 'chain_unavailable', 'The chain could not be read; nothing was stored. Try again.')
@@ -272,13 +258,22 @@ export async function ingestMerchantSale(input: {
     // case (another account's address, an unregistered one, registered after
     // the block or retired before it) is the same answer as a hash that paid
     // nobody.
-    const counted = (read.otherLegs ?? [])
-      .filter((o) => registrationActiveAt(windows, o.toAddress, o.leg.blockTime))
-      .sort((x, y) => x.leg.logIndex - y.leg.logIndex)
+    const counted = []
+    for (const o of read.otherLegs ?? []) {
+      if (
+        await depositAddressActiveAt(merchant.account_id, merchant.chain_id, o.toAddress, o.leg.blockTime)
+      ) {
+        counted.push(o)
+      }
+    }
+    counted.sort((x, y) => x.leg.logIndex - y.leg.logIndex)
     if (counted.length === 0) return noPayment()
-    saleLegs = counted.map((o) => o.leg)
+    // One sale, one address: only the legs to the FIRST registered address (by
+    // log index) count, so the row's address and its amount agree.
+    const first = counted[0].toAddress
+    saleLegs = counted.filter((o) => o.toAddress === first).map((o) => o.leg)
     heldBy = 'stripe'
-    receivingAddress = counted[0].toAddress
+    receivingAddress = first
   }
 
   const account = {

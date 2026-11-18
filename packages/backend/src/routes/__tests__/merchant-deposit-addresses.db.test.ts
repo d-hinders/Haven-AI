@@ -373,6 +373,15 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       expect((await retire(b.userId, created.json().id)).statusCode).toBe(404)
     })
 
+    it('rate limits retire at the money-path ceiling', async () => {
+      const m = await seedMerchant()
+      const headers = auth(m.userId, { jti: 'deposit-retire-rate-limit' })
+      const call = () =>
+        app.inject({ method: 'POST', url: `/merchant-deposit-addresses/${randomUUID()}/retire`, headers })
+      for (let i = 0; i < 60; i += 1) expect((await call()).statusCode).toBe(404)
+      expect((await call()).statusCode).toBe(429)
+    })
+
     it('rate limits register at the money-path ceiling', async () => {
       const m = await seedMerchant()
       const headers = auth(m.userId, { jti: 'deposit-rate-limit' })
@@ -462,6 +471,21 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       expect((await inboundFor(m.accountId)).rowCount).toBe(1)
     })
 
+    it('legs to several registered addresses: only the first address by log index counts, so the row\'s address and amount agree', async () => {
+      const m = await seedMerchant()
+      const a = addr()
+      const b = addr()
+      await registerAt(m, a, BEFORE_BLOCK)
+      await registerAt(m, b, BEFORE_BLOCK)
+      chainShows([], [
+        { to: b, leg: leg(PAYER, '2000000', 7) },
+        { to: a, leg: leg(PAYER, '1000000', 3) },
+      ])
+      const res = await post(m.secret, record())
+      expect(res.statusCode, res.body).toBe(201)
+      expect(res.json()).toMatchObject({ receiving_address: a, amount_raw: '1000000' })
+    })
+
     it('the own-sender fold: a sale from the owner\'s own agent delegate is an own move, amount 0, in no revenue', async () => {
       const m = await seedMerchant()
       const deposit = addr()
@@ -483,6 +507,8 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       const summary = (await get(m.userId, '/merchant-sales/summary')).json()
       expect(summary.received_in_stripe).toEqual({ count: 0, amount_raw: '0' })
       expect(summary.own_moves).toEqual({ count: 0, amount_raw: '0' })
+      // Never revenue, and its row holds no "what moved" amount: not in the list.
+      expect((await get(m.userId, '/merchant-sales/payments')).json().payments).toEqual([])
     })
   })
 
@@ -513,6 +539,36 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       const accepted = await post(m.secret, record())
       expect(accepted.statusCode, accepted.body).toBe(201)
       expect(accepted.json().receiving_address).toBe(retiredAfter)
+    })
+
+    it('counts a leg whose block time equals the registration time exactly', async () => {
+      const m = await seedMerchant()
+      const deposit = addr()
+      await registerAt(m, deposit, BLOCK_TIME.toISOString())
+      chainShows([], [{ to: deposit, leg: leg(PAYER, '1000000', 4) }])
+      const res = await post(m.secret, record())
+      expect(res.statusCode, res.body).toBe(201)
+    })
+
+    it('refuses, with the no-payment answer, a leg whose block time equals the retirement time exactly', async () => {
+      const m = await seedMerchant()
+      const deposit = addr()
+      await registerAt(m, deposit, '2026-11-16T00:00:00Z', BLOCK_TIME.toISOString())
+      chainShows([], [{ to: deposit, leg: leg(PAYER, '1000000', 4) }])
+      const res = await post(m.secret, record())
+      expect(res.statusCode).toBe(422)
+      chainShows([], [])
+      const nobody = await post(m.secret, record({ tx_hash: '0x' + '2b'.repeat(32) }))
+      expect(res.json()).toEqual(nobody.json())
+      expect((await salesFor(m.accountId)).rows).toHaveLength(0)
+    })
+
+    it('does not count a registration a fraction of a second after the whole-second block time', async () => {
+      const m = await seedMerchant()
+      const deposit = addr()
+      await registerAt(m, deposit, '2026-11-17T10:00:00.400Z')
+      chainShows([], [{ to: deposit, leg: leg(PAYER, '1000000', 4) }])
+      expect((await post(m.secret, record())).statusCode).toBe(422)
     })
 
     it('a re-registration after a retirement is a second window that counts for later legs', async () => {
@@ -585,13 +641,19 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       )
     }
 
-    async function seedStripeSale(m: Merchant, tx: string, amount: string, deposit: string, over: { own?: boolean } = {}) {
+    async function seedStripeSale(
+      m: Merchant,
+      tx: string,
+      amount: string,
+      deposit: string,
+      over: { own?: boolean; several?: boolean } = {},
+    ) {
       await db.query(
         `INSERT INTO merchant_sales (account_id, user_id, chain_id, tx_hash, product_id, merchant_reference,
            amount_raw, token_address, payer_address, block_number, block_time, held_by, receiving_address,
-           sender_is_own_address)
-         VALUES ($1, $2, $3, $4, 'P2', 'r2', $5, $6, $7, 100, '2026-11-11T10:00:00Z', 'stripe', $8, $9)`,
-        [m.accountId, m.userId, CHAIN, tx, amount, USDC, PAYER, deposit, over.own ?? false],
+           sender_is_own_address, several_payers)
+         VALUES ($1, $2, $3, $4, 'P2', 'r2', $5, $6, $7, 100, '2026-11-11T10:00:00Z', 'stripe', $8, $9, $10)`,
+        [m.accountId, m.userId, CHAIN, tx, amount, USDC, over.several ? null : PAYER, deposit, over.own ?? false, over.several ?? false],
       )
     }
 
@@ -604,6 +666,7 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       await seedAccountSale(m, H1, '1000000')
       await seedStripeSale(m, H2, '5000000', addr())
       await seedStripeSale(m, H3, '0', addr(), { own: true })
+      await seedStripeSale(m, '0x' + '04'.repeat(32), '7000000', addr(), { several: true })
 
       const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
       expect(summary).toMatchObject({
@@ -613,7 +676,7 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
         without_product: { count: 0, amount_raw: '0' },
         own_moves: { count: 0, amount_raw: '0' },
         unattributed: { payments: 0, amount_raw: '0' },
-        received_in_stripe: { count: 1, amount_raw: '5000000' },
+        received_in_stripe: { count: 2, amount_raw: '12000000' },
       })
       expect(summary.by_product).toEqual([expect.objectContaining({ product_id: 'P1', sales: 1, amount_raw: '1000000' })])
       expect(summary.by_payer).toHaveLength(1)
@@ -648,6 +711,22 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       expect(sum(account)).toBe(summary.revenue_raw)
       expect(sum(stripe)).toBe(summary.received_in_stripe.amount_raw)
       expect(stripe.length).toBe(summary.received_in_stripe.count)
+    })
+
+    it('a Stripe-held sale row never attaches to the account\'s own legs of the same transaction', async () => {
+      const m = await seedMerchant()
+      // Not reachable through the ingest (it stores one or the other); seeded directly.
+      await db.query(
+        `INSERT INTO inbound_transfers
+           (account_id, user_id, chain_id, tx_hash, log_index, payer_address, token_address,
+            amount_raw, block_number, block_time, sender_is_own_address)
+         VALUES ($1, $2, $3, $4, 0, $5, $6, 300000, 100, '2026-11-10T10:00:00Z', false)`,
+        [m.accountId, m.userId, CHAIN, H1, PAYER, USDC],
+      )
+      await seedStripeSale(m, H1, '5000000', addr())
+      const payments = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments
+      const account = payments.find((p: { held_by: string }) => p.held_by === 'account')
+      expect(account).toMatchObject({ kind: 'no_product', amount_raw: '300000', product_id: null })
     })
 
     it('the detail read returns a Stripe-held sale\'s chain facts from the sale row', async () => {

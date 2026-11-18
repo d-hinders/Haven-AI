@@ -707,14 +707,17 @@ any of Stripe, the key or the base URL unset the joke reports nothing and
 behaves as before.
 
 **Before a demo, register the Stripe deposit address in Haven**, under the Sales
-account the Sales key belongs to: Sales settings on the dashboard, or
-`POST /merchant-deposit-addresses` from the owner's session. Register it **before the first demo payment**: Haven accepts a sale only
+account the Sales key belongs to, with `POST /merchant-deposit-addresses` from
+the owner's session (the screen for it is #4954).
+The full demo, step by step, is
+[`docs/operations/merchant-services-demo.md`](../../docs/operations/merchant-services-demo.md). Register it **before the first demo payment**: Haven accepts a sale only
 if the address was registered at or before the payment's block time, and the
 merchant never resends a refused report, so a joke paid before registration
 never appears on the Sales page. The address
 is the owner's own statement and is shown as "registered by you, not verified by
 Haven". **The buyer must be a Haven user other than the Sales account's owner:**
-payments from the owner's own agents are internal moves and are refused. A
+a Field Notes payment from the owner's own agent is a move between the owner's
+accounts ("Not counted", outside Revenue), and a joke from one is refused. A
 Stripe-held sale never counts in a Haven balance; it is shown apart as
 "Received in Stripe". When the deposit address changes, register the new one and
 retire the old one only after the last payment to it has settled (see

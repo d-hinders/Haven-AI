@@ -3,6 +3,9 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/demo-merchant-mcp/src/sales.ts
+  - packages/demo-merchant-mcp/src/index.ts
+  - packages/demo-merchant-mcp/src/http.ts
+  - packages/backend/src/routes/merchant-keys.ts
   - packages/backend/src/routes/merchant-sales.ts
   - packages/backend/src/routes/merchant-sales-reads.ts
   - packages/backend/src/routes/merchant-deposit-addresses.ts
@@ -19,7 +22,7 @@ agent. Each sale then appears on the merchant's **Sales** page in Haven:
 | Product | Where the money lands | What the audience sees |
 |---|---|---|
 | **Haven Field Notes** (`field_notes`, 0.0025 USDC) | The merchant's Haven **Sales account** | A sale on the Sales page, in Revenue |
-| **The joke** (`joke`, 0.01 USDC) | The merchant's **Stripe sandbox** deposit address | A payment in Stripe's dashboard, and a sale on the Sales page marked as received in Stripe |
+| **Haven Joke** (`joke`, 0.01 USDC) | The merchant's **Stripe sandbox** deposit address | A payment in Stripe's dashboard, and a sale on the Sales page marked as received in Stripe |
 
 Scope is the owner's decision (2026-11-18): one Haven product plus the Stripe
 joke. The demo merchant's other products are not sales: they keep paying
@@ -28,7 +31,7 @@ joke. The demo merchant's other products are not sales: they keep paying
 > **Not yet verified.** Nothing here has been run end to end on dev. Every step
 > is marked *not yet verified* until it has been. When you run a step, record
 > the date next to it and remove the mark. The code each step relies on is
-> merged to `dev` except where a step names an open pull request.
+> merged to `dev`.
 
 Placeholders appear in angle brackets, for example `<DEV_API>`. This file
 holds no email address, no key, and no address that is not already public.
@@ -37,7 +40,9 @@ holds no email address, no key, and no address that is not already public.
 
 The demo needs **two different Haven users**. Haven counts a payment from the
 merchant's own accounts and own agents as a move between their accounts, not a
-sale (#4897). If the merchant's own agent buys, the Sales page shows no sale.
+sale (#4897). If the merchant's own agent buys Field Notes, the Sales page shows
+a row marked "Moved between your accounts" / "Not counted", outside Revenue.
+If it buys the joke, Haven refuses the report and nothing appears.
 
 - **The merchant.** A dedicated test user on dev, created by the owner for this
   demo and signed in with a passkey. This user owns the Sales account, the
@@ -60,8 +65,10 @@ the owner's.
 
 1. As the merchant, open **Settings → Business → Sales** and turn Sales on
    (#4904). Pick **Base Sepolia**.
-2. A new account named **Sales** appears. Copy its address from the Sales card
-   or the Accounts screen. This is `<SALES_ACCOUNT_ADDRESS>`.
+2. A new account named **Sales** appears. Copy its address from the Accounts
+   screen or the Sales page's Receive dialog, in its **checksummed** (mixed-case)
+   form: the demo merchant refuses an address that is not checksummed. This is
+   `<SALES_ACCOUNT_ADDRESS>`.
 
 ### 1.3 Create a Sales key *(not yet verified)*
 
@@ -78,8 +85,8 @@ with the merchant's dashboard session.
      -H "Authorization: Bearer <MERCHANT_SESSION_TOKEN>"
    ```
 
-   The answer carries the secret **once**: `sk_merchant_…`. This is
-   `<SALES_KEY>`. A key is shown only at creation. If you lose it, revoke it
+   The answer's `secret` field carries the key **once**: `sk_merchant_…`. This
+   is `<SALES_KEY>`. A key is shown only at creation. If you lose it, revoke it
    (step 4.3) and create a new one.
 
 ### 1.4 Configure the dev demo merchant *(not yet verified)*
@@ -94,12 +101,10 @@ owner pastes secrets into Railway directly, never through chat.
 | `MERCHANT_HAVEN_BASE_URL` | `<DEV_API>` | Both products' reports |
 | `MERCHANT_SALES_ADDRESS` | `<SALES_ACCOUNT_ADDRESS>` | Field Notes only (offered only when set) |
 | `STRIPE_SECRET_KEY`, `STRIPE_DEPOSIT_ADDRESS` | already set on dev (#4854) | The joke |
+| `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | already set on dev (#4852) | The joke (it settles through Coinbase's facilitator) |
 
 Leave `MERCHANT_ADDRESS` as it is. The other products, and every QA target,
 keep paying it.
-
-The joke's reporting is PR #4964 (#4953). Until that merges, the joke still
-settles to Stripe but sends no report, so it never appears on the Sales page.
 
 Redeploy the service.
 
@@ -145,16 +150,20 @@ The Stripe sandbox dashboard is optional, for the joke.
 
 ### 2.1 A sale received in Haven *(not yet verified)*
 
-1. **Say:** "A merchant sells to AI agents. Here is its Sales page in Haven. It
-   is empty." **Show:** the Sales page, Overview tab.
+1. **Say:** "A merchant sells to AI agents. Here is its Sales page in Haven."
+   **Show:** the Sales page, Overview tab. Note the Revenue and Sales figures:
+   after a rehearsal they are not zero (see 3.2).
 2. **Say:** "An agent buys a field note, paying in USDC." In the agent client,
-   ask the agent to buy **Haven Field Notes** from the demo merchant. **Show:**
-   the agent's answer, which is the note itself.
+   ask the agent to buy **Haven Field Notes** from the demo merchant's MCP
+   endpoint (`<DEV_DEMO_MERCHANT>/mcp`): it is not in Haven's catalog, so the
+   agent quotes it with `haven_quote_mcp_tool`. **Show:** the agent's answer,
+   which is the note itself.
 3. **Say:** "The money went straight into the merchant's Haven Sales account,
-   and the merchant reported the sale." Reload the Sales page. A report can
-   take a few seconds: Haven waits for three confirmations.
+   and the merchant reported the sale." Reload the Sales page. Expect 10 to 30
+   seconds: Haven waits for three confirmations, and the first report usually
+   gets a "retry in 10 seconds" answer.
 4. **Show:**
-   - **Revenue** now 0.0025 USDC, and **Sales** 1;
+   - **Revenue** up by 0.0025 USDC, and **Sales** up by 1;
    - the row for Haven Field Notes, with the buyer shown as **Wallet**. Haven
      never tells the merchant that the buyer is a Haven user;
    - opening the row: the on-chain payment, with its transaction hash.
@@ -162,7 +171,7 @@ The Stripe sandbox dashboard is optional, for the joke.
 ### 2.2 A sale received in Stripe *(not yet verified)*
 
 1. **Say:** "The same merchant can choose to receive into Stripe instead." In the
-   agent client, ask the agent to buy **the joke**. **Show:** the joke.
+   agent client, ask the agent to buy **Haven Joke**. **Show:** the joke.
 2. **Show Stripe:** in the Stripe sandbox dashboard, under **Payments**, a new
    crypto payment for the joke's price, whose metadata carries the
    transaction hash (#4854).
@@ -200,27 +209,35 @@ The service's startup log has a `Sales:` line:
 
 ### 3.2 One test purchase of each product *(not yet verified)*
 
-Run the whole click path (section 2) once. Then clear both sales (step 4.1)
-so the page starts empty.
+Run the whole click path (section 2) once. The page does not return to empty
+afterwards: clearing a Field Notes sale record (step 4.1) keeps the payment as
+"No product recorded", still in Revenue. To show an empty page, rehearse with a
+second merchant user, or present the figures as changes from what is already
+there.
 
 ### 3.3 What a failure looks like *(not yet verified)*
 
-- **The sale appears only after a few seconds.** Haven answers
+- **The sale appears only after 10 to 30 seconds.** Haven answers
   `425 transaction_not_visible` until the payment has three confirmations, and
-  the reporter retries. That is normal.
+  the reporter retries after 10 seconds. That is normal.
 - **The sale never appears, and `sales.refused` went up.** Haven refused the
   report. Usually one of these:
   - for the joke, the deposit address was not registered before the payment
     (step 1.5);
+  - for the joke, the buyer is the merchant's own agent or account: a transfer
+    to the Stripe address from the merchant's own addresses is not a sale;
   - the Sales key was revoked;
   - Sales is off.
 
-  The service log shows the refusal's `error` code.
-- **The sale never appears, and nothing was refused.** The buyer is the
+  The service log's `[sales]` line shows the refusal's `code=`.
+- **Field Notes shows as "Moved between your accounts".** The buyer is the
   merchant's own agent or account. Haven counts that as a move between the
-  merchant's accounts. Use an agent of a different user ("Who is who").
-- **`sales.gave_up` went up.** Haven was unreachable for every retry. Check
-  that `MERCHANT_HAVEN_BASE_URL` points at the dev API.
+  merchant's accounts, outside Revenue. Use an agent of a different user ("Who
+  is who").
+- **`sales.gave_up` went up.** Every retry failed: Haven was unreachable,
+  answered a 5xx such as `503 chain_unavailable`, or the payment stayed
+  `425 transaction_not_visible` longer than the retries last. Check that
+  `MERCHANT_HAVEN_BASE_URL` points at the dev API, then buy again.
 
 ## 4. Reset and rotation
 
@@ -269,7 +286,6 @@ A report sent with a revoked key is refused, and is not resent.
 
 | Not yet | Issue |
 |---|---|
-| The joke's report to Haven (in review) | #4953, PR #4964 |
 | The "Received in Stripe" mark and figure, and registering the address on screen | #4954 |
 | The Sales key screens (create, show once, list, revoke) | #4905 |
 | Revenue in Analytics | #4901 |

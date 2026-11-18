@@ -18,10 +18,6 @@ import rateLimit from '@fastify/rate-limit'
 
 const AGENTS = new Map<string, string>() // sha256(key) → agent id
 
-vi.mock('../../db.js', () => ({
-  default: { query: vi.fn(async () => ({ rows: [] })), connect: vi.fn() },
-}))
-
 vi.mock('../../infra/repositories/agents.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../infra/repositories/agents.js')>()
   return {

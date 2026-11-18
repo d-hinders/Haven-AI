@@ -189,6 +189,11 @@ export async function runMerchantInboundIndexTick(
       if (latest < fromBlock) continue
 
       const toBlock = Math.min(latest, fromBlock + MAX_BLOCKS_PER_PASS - 1)
+      // Read BEFORE the range (#4940 review round 2): every block at or below
+      // the cursor saved below must already have been settled when it was
+      // read. Taken after the read, a block replaced by a reorg and finalized
+      // during this pass could be passed over with its pre-reorg contents.
+      const settled = await deps.settledBlock(account.chainId)
       const read = await deps.readRange(
         account.chainId,
         account.accountAddress,
@@ -226,7 +231,6 @@ export async function runMerchantInboundIndexTick(
       // so a payment that lands in a replacement block at a height already
       // walked is still found. Re-reading is cheap: the row identity dedupes.
       // With no settled block known, the cursor does not move at all.
-      const settled = await deps.settledBlock(account.chainId)
       const lastIndexedBlock = Math.min(toBlock, settled ?? fromBlock - 1)
       await deps.saveCursor({
         accountId: account.accountId,

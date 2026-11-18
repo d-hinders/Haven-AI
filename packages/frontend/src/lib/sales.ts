@@ -14,14 +14,16 @@
 
 import { shouldMarkApprox, tokenPeg, type ApiSchema } from '@haven_ai/core'
 import { formatAnalyticsDay, formatAnalyticsTick, unknownRecipientShortAddress } from '@/lib/analytics-format'
-import { formatFiatDisplay } from '@/lib/format'
-import type { PeriodValue } from '@/components/ui/list-url-codec'
+import { formatClockTime, formatFiatDisplay } from '@/lib/format'
+import type { ListState, PeriodValue } from '@/components/ui/list-url-codec'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 
 export type SalesSummary = ApiSchema<'MerchantSalesSummary'>
 export type SalesPayment = ApiSchema<'MerchantSalesPayment'>
 export type SalesPaymentsPage = ApiSchema<'MerchantSalesPaymentsPage'>
 export type SalesPayer = ApiSchema<'MerchantSalesPayer'>
+export type SalesFacets = ApiSchema<'MerchantSalesFacets'>
+export type SalesKind = SalesPayment['kind']
 
 /** The page size the ledger asks for and "Show N more" names. */
 export const SALES_PAGE_SIZE = 50
@@ -324,6 +326,92 @@ export function salesChartDays(
       series: amount > 0 ? [{ ...REVENUE_SERIES, amount, seriesIndex: 0 }] : [],
     }
   })
+}
+
+// ── Filters and search (#4960; the reads are #4959) ─────────────────────────
+
+/**
+ * The URL keys of the payments list's controls, beside the period. Product and
+ * payer options load with the facets read, so they list no `values` (a value
+ * read before the options arrive must survive); Recorded's three are fixed.
+ */
+export const SALES_FACET_KEYS = { product: 'product', payer: 'payer', kind: 'recorded' } as const
+
+/** The Recorded facet's values (the reads' `kind`) and the words each one renders as; the raw kind never renders. */
+export const SALES_KIND_LABELS: Readonly<Record<SalesKind, string>> = {
+  sale: 'Sale',
+  no_product: 'No product recorded',
+  own_move: 'Moved between your accounts',
+}
+export const SALES_KINDS = Object.keys(SALES_KIND_LABELS) as SalesKind[]
+
+/** What every Overview read sends for one control state. Empty lists and an empty search are "no filter". */
+export interface SalesFilters {
+  q: string
+  products: string[]
+  payers: string[]
+  kinds: SalesKind[]
+}
+
+export const NO_SALES_FILTERS: SalesFilters = { q: '', products: [], payers: [], kinds: [] }
+
+/** The reads refuse a search under 2 characters or over 100 (#4959): a shorter term is not sent at all. */
+const SEARCH_MIN = 2
+const SEARCH_MAX = 100
+
+/** The search the reads are sent: trimmed, and only once it is long enough to be one. */
+export function salesSearchTerm(q: string): string {
+  const term = q.trim().slice(0, SEARCH_MAX).trim()
+  return term.length >= SEARCH_MIN ? term : ''
+}
+
+/** The control state as the reads' filters. */
+export function salesFiltersFromList(state: ListState): SalesFilters {
+  const kinds = (state.facets[SALES_FACET_KEYS.kind] ?? []).filter((k): k is SalesKind => SALES_KINDS.includes(k as SalesKind))
+  return {
+    q: salesSearchTerm(state.q),
+    products: state.facets[SALES_FACET_KEYS.product] ?? [],
+    payers: state.facets[SALES_FACET_KEYS.payer] ?? [],
+    kinds,
+  }
+}
+
+/** True when any filter narrows the reads. */
+export function hasSalesFilters(filters: SalesFilters): boolean {
+  return filters.q !== '' || filters.products.length > 0 || filters.payers.length > 0 || filters.kinds.length > 0
+}
+
+/**
+ * The filters as query parameters, in one fixed order so the same filters are
+ * the same string (the hooks key their reads on it). Each list value repeats
+ * its key, as the reads take it.
+ */
+export function salesFilterQuery(filters: SalesFilters): string {
+  const params = new URLSearchParams()
+  for (const kind of [...filters.kinds].sort()) params.append('kind', kind)
+  for (const product of [...filters.products].sort()) params.append('product_id', product)
+  for (const payer of [...filters.payers].map((p) => p.toLowerCase()).sort()) params.append('payer', payer)
+  if (filters.q !== '') params.set('q', filters.q)
+  return params.toString()
+}
+
+/**
+ * "Today, 14:17" or "12 Nov, 09:10": when a payer last paid, in the VIEWER's
+ * local time (the periods and `by_day` stay UTC days). The year is added only
+ * when it is not this year.
+ */
+export function lastPaidText(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso)
+  const time = formatClockTime(at)
+  const sameDay =
+    at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate()
+  if (sameDay) return `Today, ${time}`
+  const day = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    ...(at.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+  }).format(at)
+  return `${day}, ${time}`
 }
 
 // ── The payment's detail ────────────────────────────────────────────────────

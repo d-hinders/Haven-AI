@@ -5,7 +5,10 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { ListShowMore } from '@/components/ui/ListToolbar'
+import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
+import type { ListFacet } from '@/components/ui/FacetMenu'
+import type { ListNoun } from '@/components/ui/list-controls-copy'
+import type { ListState } from '@/components/ui/list-url-codec'
 import {
   TransactionActivityDayHeader,
   TransactionActivityRow,
@@ -111,46 +114,101 @@ export function SalesLedgerRow({
   )
 }
 
+export const SALES_PAYMENT_NOUN: ListNoun = { one: 'payment', other: 'payments' }
+
+/** The list controls the page owns (#4960): the URL state and its clear generation. */
+export interface SalesListControls {
+  state: ListState
+  onChange: (next: ListState) => void
+  searchEpoch: number
+  bumpSearchEpoch: () => void
+}
+
 /**
- * The payments list under the breakdowns: a summary line, the day-grouped
- * ledger inside one Card, "Show N more" paging that asks for exactly the next
- * cursor, and the sentence that points to Transactions. No search and no
- * facets: the reads cannot filter, so a control would be dead.
+ * The payments list under the breakdowns: the list controls (#4960: search,
+ * and the Product, Payer and Recorded facets, in the shared `ListToolbar`),
+ * the day-grouped ledger inside one Card, "Show N more" paging that asks for
+ * exactly the next cursor, and the sentence that points to Transactions.
+ *
+ * The count is the read's own `total` for the filter set, beside the period's
+ * unfiltered total while a filter is on ("12 of 60 payments"); the summary
+ * line's Revenue reads the filtered summary, so line, rows and figures above
+ * describe one set. With a filter on and nothing matching, the standard
+ * no-match state stands in for the rows, under the toolbar that set it.
  */
 export function SalesPaymentsList({
   list,
-  total,
+  periodTotal,
   revenueText,
   stripeText = null,
   money,
   merchantName,
   onOpenPayment,
+  controls,
+  facets,
+  filtered,
+  onClearFilters,
 }: {
   list: UseSalesPaymentsResult
-  /** Every payment the period has, from the summary — never the loaded count. */
-  total: number
-  revenueText: string
+  /** The period's payments with no filter; null while unread. Only asked for while `filtered`. */
+  periodTotal: number | null
+  /** The filtered summary's Revenue, as text; null while it loads. */
+  revenueText: string | null
   /** The period's sales received in Stripe, as text; null when it has none (#4954). */
   stripeText?: string | null
   money: SalesMoney
   merchantName: string
   onOpenPayment: (txHash: string) => void
+  controls: SalesListControls
+  facets: ListFacet[]
+  /** True when a filter or a search reaches the reads. */
+  filtered: boolean
+  onClearFilters: () => void
 }) {
   const { payments, loading, loadingMore, failed, hasMore, loadMore, refetch } = list
+  const total = list.total ?? 0
+  const count =
+    list.total === null
+      ? null
+      : filtered
+        ? periodTotal === null
+          ? null
+          : { shown: list.total, total: periodTotal }
+        : { shown: list.total, total: list.total }
+  const showNoMatch = filtered && !loading && !failed && list.total === 0
+  // The period lives in the page header, not in this toolbar: a change the
+  // toolbar makes (its own Clear filters included) never moves it.
+  const onChange = (next: ListState) => controls.onChange({ ...next, period: controls.state.period })
 
   return (
     <section aria-labelledby="sales-payments-heading" data-testid="sales-payments">
-      <h2 id="sales-payments-heading" className="text-base font-semibold text-[var(--v2-ink)]">
+      <h2 id="sales-payments-heading" className="mb-3 text-base font-semibold text-[var(--v2-ink)]">
         Payments
       </h2>
-      <p className="v2-tabular mt-2 flex flex-wrap gap-x-4 text-sm text-[var(--v2-ink-2)]" data-testid="sales-payments-summary">
-        <span>
-          {total} {total === 1 ? 'payment' : 'payments'}
-        </span>
-        <span>Revenue {revenueText}</span>
-        {stripeText !== null ? <span>Received in Stripe {stripeText}</span> : null}
-      </p>
+      <ListToolbar
+        noun={SALES_PAYMENT_NOUN}
+        state={controls.state}
+        onChange={onChange}
+        filtering="server"
+        facets={facets}
+        searchDescription="by product, payer or receipt number"
+        searchEpoch={controls.searchEpoch}
+        count={count}
+        summary={
+          revenueText !== null ? (
+            <span className="v2-tabular" data-testid="sales-payments-summary">
+              Revenue {revenueText}
+              {stripeText !== null ? <> · Received in Stripe {stripeText}</> : null}
+            </span>
+          ) : undefined
+        }
+      />
 
+      {showNoMatch ? (
+        <div className="mt-3" data-testid="sales-no-match">
+          <ListNoMatch noun={SALES_PAYMENT_NOUN} onClear={onClearFilters} />
+        </div>
+      ) : (
       <Card hover={false} className="mt-3 overflow-hidden">
         {loading ? (
           <div
@@ -212,6 +270,7 @@ export function SalesPaymentsList({
           />
         )}
       </Card>
+      )}
 
       <p className="mt-3 px-0.5 text-xs text-[var(--v2-ink-3)]">
         The same payments, with every other account&apos;s, are in{' '}

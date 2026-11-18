@@ -57,7 +57,7 @@ vi.mock('@/components/ReceiveDialog', () => ({
 }))
 
 import SalesClient from '../SalesClient'
-import { previousSalesRange, salesDayRange, SALES_PAGE_SIZE } from '@/lib/sales'
+import { lastPaidText, previousSalesRange, salesDayRange, SALES_PAGE_SIZE } from '@/lib/sales'
 
 const SALES_ACCOUNT = {
   id: 'acct-sales',
@@ -105,9 +105,9 @@ const SUMMARY = {
   ],
   by_product_other: { products: 0, sales: 0, amount_raw: '0' },
   by_payer: [
-    { payer: CONTACT, payments: 2, amount_raw: '1140000' },
-    { payer: WALLET, payments: 1, amount_raw: '700000' },
-    { payer: OTHER_USERS_AGENT, payments: 1, amount_raw: '300000' },
+    { payer: CONTACT, payments: 2, amount_raw: '1140000', last_paid_at: '2026-11-17T14:05:00.000Z' },
+    { payer: WALLET, payments: 1, amount_raw: '700000', last_paid_at: '2026-11-17T13:48:00.000Z' },
+    { payer: OTHER_USERS_AGENT, payments: 1, amount_raw: '300000', last_paid_at: '2026-11-16T09:00:00.000Z' },
   ],
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
@@ -163,19 +163,35 @@ interface Scenario {
   everPaid?: boolean
   summary?: unknown
   previous?: unknown
-  pages?: Array<{ payments: unknown[]; next_cursor: string | null }>
+  pages?: Array<{ payments: unknown[]; next_cursor: string | null; total?: number }>
+  /** The answer to a FILTERED read (#4960): any read carrying a filter parameter gets it. */
+  filtered?: { summary: unknown; payments: unknown[] }
 }
 
+/** #4960: the period's facets — every product and payer, unfiltered. */
+const FACETS = {
+  products: [
+    { product_id: 'chat', label: 'Chat completion' },
+    { product_id: 'embed', label: 'Embeddings' },
+  ],
+  payers: [CONTACT, WALLET, OTHER_USERS_AGENT, OWN],
+}
+
+const FILTER_KEYS = ['kind', 'product_id', 'payer', 'q']
+const isFiltered = (url: URL) => FILTER_KEYS.some((k) => url.searchParams.has(k))
+
 /** Serve the reads: the whole-history probe, the two summaries and the pages. */
-function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY, pages, catalogue = NO_KIT }: Scenario = {}) {
+function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY, pages, catalogue = NO_KIT, filtered }: Scenario = {}) {
   const today = salesDayRange({ preset: '30d' })
   const prior = previousSalesRange(today)
   const queue = pages ?? [{ payments: PAYMENTS, next_cursor: null }]
   mockGet.mockImplementation(async (path: string) => {
     const url = new URL(path, 'http://x')
     if (url.pathname === '/merchant-sales/summary') {
+      if (filtered && isFiltered(url)) return filtered.summary
       return url.searchParams.get('to') === prior.to ? previous : summary
     }
+    if (url.pathname === '/merchant-sales/facets') return FACETS
     if (url.pathname === '/merchant-catalogue') return catalogue
     if (url.pathname === '/merchant-keys') return { keys: [] }
     const detailMatch = /^\/merchant-sales\/payments\/(0x[^/]+)$/.exec(url.pathname)
@@ -185,11 +201,15 @@ function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY
     }
     if (url.pathname === '/merchant-sales/payments') {
       if (!url.searchParams.has('from')) {
-        return { payments: everPaid ? [PAYMENTS[0]] : [], next_cursor: null }
+        return { payments: everPaid ? [PAYMENTS[0]] : [], next_cursor: null, total: everPaid ? 1 : 0 }
+      }
+      if (filtered && isFiltered(url)) {
+        return { payments: filtered.payments, next_cursor: null, total: filtered.payments.length }
       }
       const cursor = url.searchParams.get('cursor')
       const index = cursor === null ? 0 : Number(cursor.replace('c', ''))
-      return queue[index]
+      const total = queue.reduce((n, page) => n + page.payments.length, 0)
+      return { total, ...queue[index] }
     }
     throw new Error(`unexpected read ${path}`)
   })
@@ -336,7 +356,7 @@ describe('the Overview, from one fixture', () => {
     // The list: its summary line is the SAME count and revenue as the tiles
     // (3 sales + 1 no product + 1 own move listed; revenue never includes the move).
     const summaryLine = await screen.findByTestId('sales-payments-summary')
-    expect(summaryLine.textContent).toContain('5 payments')
+    expect((await screen.findByTestId('list-toolbar-count')).textContent).toContain('5 payments')
     expect(summaryLine.textContent).toContain('Revenue $2.14')
     expect(screen.getAllByTestId('sales-ledger')[0].textContent).toContain('Chat completion')
   })
@@ -375,13 +395,21 @@ describe('the Overview, from one fixture', () => {
     expect(within(table[0]).getByRole('columnheader', { name: 'Revenue' })).toBeTruthy()
   })
 
-  it('has no search box, no facets and no Last paid column', async () => {
+  it('has the search, the Product, Payer and Recorded facets, and a Last paid column (#4960)', async () => {
     serve()
     await renderPage()
     await screen.findByTestId('sales-tiles')
-    expect(screen.queryByRole('searchbox')).toBeNull()
-    expect(screen.queryByPlaceholderText(/search/i)).toBeNull()
-    expect(screen.queryByText('Last paid')).toBeNull()
+    const payments = screen.getByTestId('sales-payments')
+    expect(within(payments).getByPlaceholderText('Search payments')).toBeTruthy()
+    const facets = within(payments).getByTestId('list-toolbar-facets')
+    for (const label of ['Product', 'Payer', 'Recorded']) {
+      expect(within(facets).getByRole('button', { name: new RegExp(label) })).toBeTruthy()
+    }
+    // By payer's Last paid, in the viewer's local time, from `last_paid_at`.
+    const byPayer = screen.getByTestId('sales-by-payer')
+    expect(within(byPayer).getAllByText('Last paid').length).toBeGreaterThan(0)
+    const cells = within(byPayer).getAllByTestId('breakdown-last-paid-cell').map((c) => c.textContent)
+    expect(cells).toEqual(SUMMARY.by_payer.map((p) => lastPaidText(p.last_paid_at)))
     expect(screen.queryByText('Price')).toBeNull()
   })
 
@@ -714,7 +742,7 @@ describe('sales received in Stripe (#4954)', () => {
     await renderPage()
     const line = await screen.findByTestId('sales-payments-summary')
     // 5 account payments + 2 Stripe sales, and the two figures apart.
-    expect(line.textContent).toContain('7 payments')
+    expect((await screen.findByTestId('list-toolbar-count')).textContent).toContain('7 payments')
     expect(line.textContent).toContain('Revenue $2.14')
     expect(line.textContent).toContain('Received in Stripe $0.03')
     expect(screen.getByTestId('sales-payments').textContent).toContain('not in Transactions')

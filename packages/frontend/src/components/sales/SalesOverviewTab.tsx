@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -12,11 +12,19 @@ import { StatTile } from '@/components/ui/StatTile'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { NoticeRow } from '@/components/haven/NoticeRow'
 import { currencyLocale } from '@/lib/format'
-import { useSalesPayments } from '@/hooks/useSalesPayments'
+import { useSalesFacets } from '@/hooks/useSalesFacets'
+import { useSalesPayments, useSalesPeriodTotal } from '@/hooks/useSalesPayments'
 import { useSalesSummary } from '@/hooks/useSalesSummary'
+import type { ListFacet } from '@/components/ui/FacetMenu'
 import {
+  SALES_FACET_KEYS,
+  SALES_KINDS,
+  SALES_KIND_LABELS,
+  hasSalesFilters,
   isEmptyPeriod,
-  ledgerCount,
+  lastPaidText,
+  payerSubline,
+  salesFiltersFromList,
   payerCount,
   revenueCount,
   payerKey,
@@ -33,11 +41,13 @@ import {
   stripeSalesRaw,
   type SalesCurrency,
   type SalesDayRange,
+  type SalesFacets,
   type SalesMoney,
   type SalesSummary,
+  type SalesUsdcRates,
 } from '@/lib/sales'
 import { SalesBreakdownCard, type BreakdownLine } from './SalesBreakdownCard'
-import { SalesPaymentsList } from './SalesPaymentsList'
+import { SalesPaymentsList, type SalesListControls } from './SalesPaymentsList'
 
 /** "N payment(s) of $X": the words the own-moves notice and the tiles share. */
 function plural(count: number, noun: string): string {
@@ -83,13 +93,15 @@ export function productLines(summary: SalesSummary, money: SalesMoney): Breakdow
  * the payments from several payers at once. The page never says a payer uses
  * Haven.
  */
-export function payerLines(summary: SalesSummary, money: SalesMoney): BreakdownLine[] {
+export function payerLines(summary: SalesSummary, money: SalesMoney, now: Date = new Date()): BreakdownLine[] {
   const lines: BreakdownLine[] = summary.by_payer.map((entry) => ({
     key: payerKey(entry.payer),
     name: payerName(entry.payer),
     detail: payerKindLine(entry.payer),
     revenue: salesAmountText(entry.amount_raw, money),
     count: entry.payments,
+    // An older backend sends no `last_paid_at`: the cell stays empty, never "Invalid Date".
+    lastPaid: entry.last_paid_at ? lastPaidText(entry.last_paid_at, now) : undefined,
   }))
   const other = summary.by_payer_other
   if (other.payers > 0 || other.payments > 0) {
@@ -111,6 +123,34 @@ export function payerLines(summary: SalesSummary, money: SalesMoney): BreakdownL
     })
   }
   return lines
+}
+
+/**
+ * The Product, Payer and Recorded facets (#4960). The options come from the
+ * period's UNFILTERED facets read, so they never shrink to the value just
+ * chosen; a payer is named as everywhere on the page ("Wallet" with a short
+ * address unless it is a contact or the owner's own), and Recorded's values
+ * render as words, never as the raw kind.
+ */
+export function salesFacets(facets: SalesFacets | null): ListFacet[] {
+  return [
+    {
+      id: SALES_FACET_KEYS.product,
+      label: 'Product',
+      options: (facets?.products ?? []).map((p) => ({ value: p.product_id, label: p.label })),
+    },
+    {
+      id: SALES_FACET_KEYS.payer,
+      label: 'Payer',
+      options: (facets?.payers ?? []).map((payer) => ({ value: payer.address.toLowerCase(), label: payerSubline(payer, false) })),
+    },
+    {
+      id: SALES_FACET_KEYS.kind,
+      label: 'Recorded',
+      values: SALES_KINDS,
+      options: SALES_KINDS.map((kind) => ({ value: kind, label: SALES_KIND_LABELS[kind] })),
+    },
+  ]
 }
 
 function OverviewSkeleton() {
@@ -159,6 +199,7 @@ export function SalesOverviewTab({
   merchantName,
   onOpenPayment,
   refreshKey = 0,
+  controls,
 }: {
   range: SalesDayRange
   currency: SalesCurrency
@@ -168,11 +209,23 @@ export function SalesOverviewTab({
   onOpenPayment: (txHash: string) => void
   /** Changes when something the figures describe changed (a sale record cleared): read both again. */
   refreshKey?: number
+  /** The payments list's controls, owned by the page's URL state (#4960). */
+  controls: SalesListControls
 }) {
-  const summary = useSalesSummary(range)
+  // #4960: ONE filter set for every read on the tab — the summary (tiles,
+  // chart, both breakdowns), the previous period it is compared with, and the
+  // list — so for any filter the figures and the rows describe the same
+  // payments. The facet options are the one unfiltered read.
+  const filterState = controls.state
+  const filters = useMemo(() => salesFiltersFromList(filterState), [filterState])
+  const filtered = hasSalesFilters(filters)
+  const summary = useSalesSummary(range, filters)
   const previousRange = previousSalesRange(range)
-  const previous = useSalesSummary(previousRange)
-  const list = useSalesPayments(range)
+  const previous = useSalesSummary(previousRange, filters)
+  const list = useSalesPayments(range, { filters })
+  const facetData = useSalesFacets(range)
+  const periodTotal = useSalesPeriodTotal(range, filtered)
+  const facets = useMemo(() => salesFacets(facetData), [facetData])
 
   const refetchAll = useRef(() => {})
   refetchAll.current = () => {
@@ -185,13 +238,94 @@ export function SalesOverviewTab({
     lastKey.current = refreshKey
     refetchAll.current()
   }, [refreshKey])
+
+  // The display rate is today's, the same for every filter: the last summary's
+  // is kept so the rows keep their currency while a new filter's summary loads.
+  const lastRates = useRef<SalesUsdcRates | null>(null)
+  if (summary.data?.usdc_rates) lastRates.current = summary.data.usdc_rates
+  const money: SalesMoney = { currency, chainId, rates: lastRates.current ?? undefined }
+
+  const clearFilters = () => {
+    controls.bumpSearchEpoch()
+    controls.onChange({
+      ...controls.state,
+      q: '',
+      facets: { [SALES_FACET_KEYS.product]: [], [SALES_FACET_KEYS.payer]: [], [SALES_FACET_KEYS.kind]: [] },
+    })
+  }
+
+  const data = summary.loading || summary.failed ? null : summary.data
+  const emptyUnfiltered = data !== null && !filtered && isEmptyPeriod(data)
+  // The list (and its toolbar) stays mounted while a filter's figures reload,
+  // so the search field keeps its focus and its draft. Without a filter it
+  // waits for the first summary, as before, and an empty period has none.
+  const showList = filtered || (data !== null && !emptyUnfiltered)
+  const revenueText = data !== null ? salesTotalText(data.revenue_raw, money) : null
+  const stripeCount = data !== null ? stripeSalesCount(data) : 0
+  const stripeText = data !== null && stripeCount > 0 ? salesTotalText(stripeSalesRaw(data), money) : null
+
+  return (
+    <div className="mt-6 space-y-4" data-testid="sales-overview">
+      <div className="space-y-4">
+        <OverviewFigures
+          summary={summary}
+          previous={previous.data}
+          range={range}
+          currency={currency}
+          money={money}
+          filtered={filtered}
+        />
+      </div>
+      {showList ? (
+        <div className="pt-2">
+          <SalesPaymentsList
+            list={list}
+            periodTotal={periodTotal}
+            revenueText={revenueText}
+            stripeText={stripeText}
+            money={money}
+            merchantName={merchantName}
+            onOpenPayment={onOpenPayment}
+            controls={controls}
+            facets={facets}
+            filtered={filtered}
+            onClearFilters={clearFilters}
+          />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Everything above the list: the tiles, the Stripe tile, the own-moves notice,
+ * the by-day chart and both breakdowns, all from the ONE (filtered) summary.
+ * While it loads, a skeleton; on a failed read, the retry; a period with no
+ * payments says so — unless a filter emptied it, when the list's no-match
+ * state under its toolbar says it instead, where the filter can be cleared.
+ */
+function OverviewFigures({
+  summary,
+  previous,
+  range,
+  currency,
+  money,
+  filtered,
+}: {
+  summary: ReturnType<typeof useSalesSummary>
+  previous: SalesSummary | null
+  range: SalesDayRange
+  currency: SalesCurrency
+  money: SalesMoney
+  filtered: boolean
+}) {
   const days = salesRangeDays(range)
 
-  if (summary.loading) return <div className="mt-6"><OverviewSkeleton /></div>
+  if (summary.loading) return <OverviewSkeleton />
 
   if (summary.failed || summary.data === null) {
     return (
-      <div className="mt-6" data-testid="sales-error">
+      <div data-testid="sales-error">
         <EmptyState
           title="Sales could not load"
           body="Your payments are unchanged."
@@ -206,13 +340,11 @@ export function SalesOverviewTab({
   }
 
   const data = summary.data
-  // ONE rate for the whole Overview: the summary's. The payments pages carry
-  // their own and are deliberately not mixed in, so every figure agrees.
-  const money: SalesMoney = { currency, chainId, rates: data.usdc_rates ?? undefined }
 
   if (isEmptyPeriod(data)) {
+    if (filtered) return null
     return (
-      <div className="mt-6" data-testid="sales-empty-period">
+      <div data-testid="sales-empty-period">
         <EmptyState
           title="No payments in this period"
           body="Nothing reached your Sales account in these days. A longer period may reach further back."
@@ -220,9 +352,8 @@ export function SalesOverviewTab({
       </div>
     )
   }
-
-  const change = revenueChangePercent(data, previous.data)
-  const previousRevenueIsZero = previous.data !== null && previous.data.revenue_raw === '0'
+  const change = revenueChangePercent(data, previous)
+  const previousRevenueIsZero = previous !== null && previous.revenue_raw === '0'
   const revenueCaption = `vs the ${days} days before`
   const payers = payerCount(data)
   // The payer count is exact only when every payment has a payer on the
@@ -232,7 +363,6 @@ export function SalesOverviewTab({
   const averageRaw = revenuePayments > 0 ? String(BigInt(data.revenue_raw || '0') / BigInt(revenuePayments)) : '0'
   const chart = salesChartFormat(money)
   const chartDays = salesChartDays(data, range, chart.rate)
-  const total = ledgerCount(data)
   const productRows = productLines(data, money)
   const payerRows = payerLines(data, money)
   const own = data.own_moves
@@ -245,7 +375,7 @@ export function SalesOverviewTab({
   const chartLabel = `Revenue over ${days} days: ${salesTotalText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
 
   return (
-    <div className="mt-6 space-y-4" data-testid="sales-overview">
+    <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-tiles">
         <StatTile
           label="Revenue"
@@ -372,21 +502,10 @@ export function SalesOverviewTab({
           countHeader="Payments"
           countNoun="payment"
           lines={payerRows}
+          lastPaidHeader="Last paid"
         />
       ) : null}
-
-      <div className="pt-2">
-        <SalesPaymentsList
-          list={list}
-          total={total}
-          revenueText={salesTotalText(data.revenue_raw, money)}
-          stripeText={stripeText}
-          money={money}
-          merchantName={merchantName}
-          onOpenPayment={onOpenPayment}
-        />
-      </div>
-    </div>
+    </>
   )
 }
 

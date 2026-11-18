@@ -11,11 +11,15 @@
  * The state keys on the range, so changing the period shows loading, not the
  * previous period's figures under the new period's label; a superseded answer
  * never writes.
+ *
+ * #4960: `filters` narrow the summary as they narrow the list (#4959 reads the
+ * same filtered relation for both), so the tiles, the chart, the breakdowns
+ * and the rows agree for one filter set. The state keys on them too.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import type { SalesDayRange, SalesSummary } from '@/lib/sales'
+import { NO_SALES_FILTERS, salesFilterQuery, type SalesDayRange, type SalesFilters, type SalesSummary } from '@/lib/sales'
 
 export interface UseSalesSummaryResult {
   data: SalesSummary | null
@@ -24,13 +28,17 @@ export interface UseSalesSummaryResult {
   refetch: () => void
 }
 
-export function useSalesSummary(range: SalesDayRange | null): UseSalesSummaryResult {
+export function useSalesSummary(
+  range: SalesDayRange | null,
+  filters: SalesFilters = NO_SALES_FILTERS,
+): UseSalesSummaryResult {
   const [data, setData] = useState<SalesSummary | null>(null)
   const [loading, setLoading] = useState(range !== null)
   const [failed, setFailed] = useState(false)
   const requestIdRef = useRef(0)
   const from = range?.from ?? null
   const to = range?.to ?? null
+  const filterQuery = salesFilterQuery(filters)
 
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current
@@ -44,7 +52,9 @@ export function useSalesSummary(range: SalesDayRange | null): UseSalesSummaryRes
     setFailed(false)
     setData(null)
     try {
-      const response = await api.get<SalesSummary>(`/merchant-sales/summary?from=${from}&to=${to}`)
+      const response = await api.get<SalesSummary>(
+        `/merchant-sales/summary?from=${from}&to=${to}${filterQuery ? `&${filterQuery}` : ''}`,
+      )
       if (requestIdRef.current !== requestId) return
       setData(response)
     } catch {
@@ -53,7 +63,7 @@ export function useSalesSummary(range: SalesDayRange | null): UseSalesSummaryRes
     } finally {
       if (requestIdRef.current === requestId) setLoading(false)
     }
-  }, [from, to])
+  }, [from, to, filterQuery])
 
   useEffect(() => {
     void load()

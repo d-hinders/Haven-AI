@@ -325,6 +325,7 @@ describe('a product carries its own receiving address and settlement kind (#4850
       paymentResponseHeader: 'unused',
       settlement: 'settled_onchain',
       passportReference: null,
+      merchantReference: 'sale_TEST',
     }
     const result = await runWithSettledPayment(payment, () =>
       client.callTool({ name: 'buy_vpn', arguments: { plan: 'ultra' } }),

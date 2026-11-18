@@ -69,6 +69,13 @@ export interface MerchantConfig {
    * `merchantAddress`.
    */
   stripeDepositAddress?: Address
+  /**
+   * #4950: the Haven Sales account, when the Sales settings are set. Only then
+   * is the Sales product (`field_notes`) offered: listed, its
+   * `buy_field_notes` tool registered, and its in-band quote naming this
+   * address. Absent, the server is exactly what it was before the product.
+   */
+  salesAddress?: Address
   /** #4856: the seller every receipt carries; absent, the demo seller. */
   receiptSeller?: ReceiptSellerDetails
   /**
@@ -101,6 +108,12 @@ interface MerchantStrings {
   jokeFooter: string
   /** #4851: label for the delivered joke in the confirmation. */
   jokeLabel: string
+  /** #4950: what one `buy_field_notes` buys. */
+  oneFieldNote: string
+  /** #4950: appended to the list footer only when the Sales product is offered. */
+  fieldNotesFooter: string
+  /** #4950: label for the delivered note in the confirmation. */
+  fieldNoteLabel: string
   availableProductsHeading: string
   priceLabel: string
   perMonth: string
@@ -148,6 +161,9 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
       " Use buy_joke for a joke (EIP-3009 only; verified and settled by Coinbase's hosted facilitator, so it " +
       'needs a budget that is not pinned to one recipient).',
     jokeLabel: 'Your joke',
+    oneFieldNote: 'one field note',
+    fieldNotesFooter: ' Use buy_field_notes for one field note on running agent payments (paid into a Haven Sales account).',
+    fieldNoteLabel: 'Your field note',
     availableProductsHeading: 'Available products:',
     priceLabel: 'Price',
     perMonth: '/month',
@@ -185,6 +201,10 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
       ' Använd buy_joke för ett skämt (endast EIP-3009; verifieras och avräknas av Coinbases facilitator, så ' +
       'det kräver en budget som inte är låst till en mottagare).',
     jokeLabel: 'Ditt skämt',
+    oneFieldNote: 'en fältanteckning',
+    fieldNotesFooter:
+      ' Använd buy_field_notes för en fältanteckning om agentbetalningar (betalas till ett Haven-försäljningskonto).',
+    fieldNoteLabel: 'Din fältanteckning',
     availableProductsHeading: 'Tillgängliga produkter:',
     priceLabel: 'Pris',
     perMonth: '/månad',
@@ -418,7 +438,10 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       // #1274: one builder shared per product so metadata and its display text
       // can never drift from each other or from the erc7710 gate resolved upstream.
       // #4851: only what this merchant offers — the joke only with CDP configured.
-      const offered = offeredProducts({ cdpConfigured: Boolean(config.cdpConfigured) })
+      const offered = offeredProducts({
+        cdpConfigured: Boolean(config.cdpConfigured),
+        salesConfigured: Boolean(config.salesAddress),
+      })
       const metadata = offered.map((p) =>
         buildProductMetadata(p, {
           enabledSettlementMethods: settlementMethods,
@@ -448,7 +471,8 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
             type: 'text',
             text:
               `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod, config.chainId)}` +
-              (config.cdpConfigured ? t.jokeFooter : ''),
+              (config.cdpConfigured ? t.jokeFooter : '') +
+              (config.salesAddress ? t.fieldNotesFooter : ''),
           },
         ],
         structuredContent: {
@@ -538,7 +562,55 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
     )
   }
 
+  // ── buy_field_notes (#4950) ────────────────────────────────────────────────
+  // Registered only when the Sales settings are set, so a merchant without
+  // them lists exactly the tools it always did.
+  if (config.salesAddress) {
+    server.tool(
+      'buy_field_notes',
+      `Buy one field note on running agent payments for $${formatUsdc(PRODUCTS.field_notes.price_usdc)} USDC on ` +
+        `${networkDisplayName(config.chainId, 'en')}, paid into the merchant's Haven Sales account. ` +
+        'Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ' +
+        'On success, report the purchase from the structured `summary` object; the note is in the text. ' +
+        "Text output is English by default (locale: 'sv' for Swedish); pass result_detail: 'summary' to omit the rendered invoice + bookkeeping JSON from the text.",
+      {
+        locale: LOCALE_PARAM,
+        result_detail: RESULT_DETAIL_PARAM,
+      },
+      async ({ locale, result_detail }) => {
+        const resolvedLocale = locale ?? DEFAULT_MERCHANT_LOCALE
+        return completePurchase(config, 'field_notes', {
+          description: `${PRODUCTS.field_notes.name} — ${STRINGS[resolvedLocale].oneFieldNote}`,
+          locale: resolvedLocale,
+          detail: result_detail ?? 'full',
+        })
+      },
+    )
+  }
+
   return server
+}
+
+/**
+ * #4950: the Sales product's goods. Chosen from the payment's nonce, like the
+ * joke, so a retried call for one payment delivers the same note.
+ */
+const FIELD_NOTES: Record<MerchantLocale, readonly string[]> = {
+  en: [
+    'Give each agent its own budget. One shared budget makes every agent as risky as the most careless one.',
+    'Pin a budget to one recipient when the agent only ever pays one merchant: anything else then reverts on-chain.',
+    'Keep a backup signer on any account you fund. A single passkey has no recovery.',
+  ],
+  sv: [
+    'Ge varje agent en egen budget. En delad budget gör varje agent lika riskabel som den mest vårdslösa.',
+    'Lås en budget till en mottagare när agenten bara betalar en handlare: allt annat återförs då på kedjan.',
+    'Ha en reservsignerare på varje konto du sätter in pengar på. En enda passkey går inte att återställa.',
+  ],
+}
+
+export function fieldNoteFor(payment: SettledPayment, locale: MerchantLocale): string {
+  const notes = FIELD_NOTES[locale]
+  return notes[Number(BigInt(payment.nonce) % BigInt(notes.length))]
 }
 
 /**
@@ -580,6 +652,7 @@ async function completePurchase(
   // #4853: the Stripe-recorded product is paid to the deposit address when on.
   const receivingAddress = productReceivingAddress(product, config.merchantAddress, {
     stripeDepositAddress: config.stripeDepositAddress,
+    salesAddress: config.salesAddress,
   })
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()
@@ -680,7 +753,9 @@ async function completePurchase(
     // claim; "verified" is reserved for L2, which is not issuable.
     (passportLine ? `${passportLine}\n` : '') +
     // #4851: the joke is the goods — delivered in the text, on every variant.
-    (productId === 'joke' ? `\n${t.jokeLabel}: ${jokeFor(payment, locale)}\n` : '')
+    (productId === 'joke' ? `\n${t.jokeLabel}: ${jokeFor(payment, locale)}\n` : '') +
+    // #4950: the field note is the Sales product's goods, on every variant.
+    (productId === 'field_notes' ? `\n${t.fieldNoteLabel}: ${fieldNoteFor(payment, locale)}\n` : '')
 
   const text =
     detail === 'summary'

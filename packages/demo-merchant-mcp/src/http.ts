@@ -34,6 +34,7 @@ import {
   requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
   type ProductId,
+  type ProductOfferOptions,
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
@@ -47,6 +48,7 @@ import {
   type ReceiptSellerDetails,
 } from '@haven_ai/merchant-payments'
 import { recordStripePayment, stripeRecordingDecision, type StripeRecording } from './stripe.js'
+import type { SalesReporting } from './sales.js'
 import type { SekRateFeed } from './sek-rate.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
 import type { DecisionReasonCode, SettlementClient } from './x402.js'
@@ -78,6 +80,13 @@ export interface DemoMerchantServerOptions {
    * the product keeps `MERCHANT_ADDRESS` and `/healthz` has no `stripe` block.
    */
   stripe?: StripeRecording
+  /**
+   * #4950: the Haven Sales account and its sale reporter, present only when
+   * the Sales settings are set. Only then is the Sales product offered, paid
+   * into `sales.address`, and each of its settled sales reported to Haven.
+   * Absent, the merchant and `/healthz` are exactly what they were.
+   */
+  sales?: SalesReporting
   /**
    * #4856: the seller every receipt carries (`resolveReceiptSeller`).
    * Absent, the demo seller.
@@ -328,6 +337,20 @@ async function handle(
             },
           }
         : {}),
+      // #4950: present only when the Sales product is offered. Names the Sales
+      // account (public on-chain) and process-local counts, never the key.
+      ...(options.sales
+        ? {
+            sales: {
+              configured: true,
+              address: options.sales.address,
+              reported: options.sales.stats().reported,
+              pending: options.sales.stats().pending,
+              refused: options.sales.stats().refused,
+              gave_up: options.sales.stats().gaveUp,
+            },
+          }
+        : {}),
     })
     return
   }
@@ -382,7 +405,10 @@ async function handle(
     return
   }
 
-  const paymentToolInfo = extractPaymentToolInfo(body, { cdpConfigured: Boolean(options.cdpConfigured) })
+  const paymentToolInfo = extractPaymentToolInfo(body, {
+    cdpConfigured: Boolean(options.cdpConfigured),
+    salesConfigured: Boolean(options.sales),
+  })
   const session = await getSession(req, body, options, sessions)
 
   let settled: SettledPayment | undefined
@@ -428,6 +454,7 @@ async function handle(
     const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
       receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
         stripeDepositAddress: options.stripe?.depositAddress,
+        salesAddress: options.sales?.address,
       }),
       taxDeclaration,
       checkoutDetails,
@@ -447,6 +474,14 @@ async function handle(
     // buyer keys. Reading the declaration and building the receipt are
     // synchronous, so this delays nothing.
     recordStripePayment(options.stripe, paymentToolInfo.product, settled, receiptInvoice.json)
+    // #4950: report a sale of the Sales product to Haven. The one point every
+    // paid call passes — both settlement methods, MCP tool calls and plain
+    // HTTP x402 alike — after the receipt, whose number and VAT treatment the
+    // record carries. Fire-and-forget, like Stripe: the money has moved, so
+    // Haven accepting, refusing, answering slowly or not at all changes
+    // nothing for the buyer. Only an on-chain settlement is reported, once per
+    // transaction, so a replayed payment header sends nothing more.
+    options.sales?.report(paymentToolInfo.product, settled, receiptInvoice.json)
   }
 
   try {
@@ -473,6 +508,7 @@ async function handlePaymentGate(
   // product's address is the deposit address when Stripe is on.
   const receivingAddress = productReceivingAddress(product, options.merchantAddress, {
     stripeDepositAddress: options.stripe?.depositAddress,
+    salesAddress: options.sales?.address,
   })
 
   // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
@@ -661,6 +697,9 @@ async function getSession(
     // #4853: the in-band quote must name the same receiving address the HTTP
     // 402 does, so the deposit address travels with the session's config.
     stripeDepositAddress: options.stripe?.depositAddress,
+    // #4950: the Sales account, so the in-band quote names the Sales product's
+    // own receiving address, as the HTTP 402 does.
+    salesAddress: options.sales?.address,
     receiptSeller: options.receiptSeller,
     // #4873: the in-band quote advertises the same checkout-details request
     // the HTTP 402 does.
@@ -784,7 +823,10 @@ function buildDiscovery(
     default_settlement_method: settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
       ? DEFAULT_SETTLEMENT_METHOD
       : settlementMethods[0],
-    products: offeredProducts({ cdpConfigured: Boolean(options.cdpConfigured) }).map((product) => ({
+    products: offeredProducts({
+      cdpConfigured: Boolean(options.cdpConfigured),
+      salesConfigured: Boolean(options.sales),
+    }).map((product) => ({
       id: product.id,
       name: product.name,
       category: product.category,
@@ -801,7 +843,7 @@ function buildDiscovery(
   }
 }
 
-function extractPaymentToolInfo(body: unknown, opts: { cdpConfigured: boolean }): PaymentToolInfo | null {
+function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): PaymentToolInfo | null {
   if (!body || typeof body !== 'object') return null
   const rpc = body as Record<string, unknown>
   if (rpc.method !== 'tools/call') return null
@@ -833,6 +875,9 @@ function extractPaymentToolInfo(body: unknown, opts: { cdpConfigured: boolean })
   } else if (toolName === 'buy_joke') {
     productId = 'joke'
     descriptionSuffix = 'one joke'
+  } else if (toolName === 'buy_field_notes') {
+    productId = 'field_notes'
+    descriptionSuffix = 'one field note'
   }
 
   if (!productId) return null

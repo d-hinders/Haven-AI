@@ -42,6 +42,7 @@ import {
   assertResourceMatches,
   assertSettlementConsistent,
   buildSettledPayment as buildCoreSettledPayment,
+  newMerchantReference,
   checkoutDetailsExtensionEntry,
   clampReason,
   createInMemoryConsumedPaymentStore,
@@ -719,7 +720,13 @@ export function createX402PaymentProcessor(
     txHash: Hex,
     settlement: SettlementState,
   ): SettledPayment {
-    return buildCoreSettledPayment({ ...params, network: NETWORK }, txHash, settlement)
+    // Only the skip-settle QA hook builds here, outside settle-once: it
+    // reserves nothing, so its reference is fresh (it is never reported).
+    return buildCoreSettledPayment(
+      { ...params, network: NETWORK, merchantReference: newMerchantReference() },
+      txHash,
+      settlement,
+    )
   }
 
   async function verifyEip3009Payment(params: {

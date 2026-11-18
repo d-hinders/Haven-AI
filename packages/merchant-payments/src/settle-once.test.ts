@@ -58,6 +58,26 @@ describe('settleOnce (#4890)', () => {
     })
   })
 
+  it('#4950: the settled payment carries the reference the store reserved, sale_<ulid>, on every serve', async () => {
+    let calls = 0
+    // The first receipt wait fails transiently, so the retry re-confirms the same hash.
+    const { settleOnce, store } = harness(async () => {
+      calls += 1
+      if (calls === 1) throw new Error('rpc blip')
+    })
+    const submit = vi.fn(async () => TX)
+    await expect(
+      settleOnce({ productId: 'joke', verified: verified(submit), expectedAmount: 10_000n }),
+    ).rejects.toThrow('rpc blip')
+    const reserved = (await store.get(KEY))?.merchantReference
+    expect(reserved).toMatch(/^sale_[0-9A-HJKMNP-TV-Z]{26}$/)
+    const first = await settleOnce({ productId: 'joke', verified: verified(submit), expectedAmount: 10_000n })
+    const again = await settleOnce({ productId: 'joke', verified: verified(submit), expectedAmount: 10_000n })
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(first.merchantReference).toBe(reserved)
+    expect(again.merchantReference).toBe(reserved)
+  })
+
   it('refuses a different product on a settled authorization', async () => {
     const { settleOnce } = harness()
     await settleOnce({ productId: 'joke', verified: verified(async () => TX), expectedAmount: 10_000n })

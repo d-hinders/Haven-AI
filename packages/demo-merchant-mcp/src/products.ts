@@ -129,6 +129,7 @@ export type ProductId =
   | 'storage_200gb'
   | 'storage_1tb'
   | 'joke'
+  | 'field_notes'
 
 export interface Product {
   id: ProductId
@@ -143,7 +144,7 @@ export interface Product {
   description_sv: string
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
   price_usdc: bigint
-  category: 'vpn' | 'storage' | 'joke'
+  category: 'vpn' | 'storage' | 'joke' | 'field_notes'
   /**
    * #4851: what one purchase buys. Absent, `monthly` — every subscription
    * product. Read through `productBillingPeriod`.
@@ -181,6 +182,14 @@ export interface Product {
    * off this field, so the dev-only required-field hook lives in one place.
    */
   checkoutDetails?: CheckoutDetailsRequest
+  /**
+   * #4950: this product is paid into the merchant's Haven Sales account
+   * (`MERCHANT_SALES_ADDRESS`) and each settled sale is reported to Haven with
+   * the Sales key. Read the address through `productReceivingAddress`, never
+   * off this field. The product is offered only when the Sales settings are
+   * set (`isProductOffered`).
+   */
+  salesAccount?: boolean
 }
 
 /**
@@ -208,9 +217,12 @@ export const DEFAULT_SETTLEMENT_KIND: SettlementKind = 'self'
 export function productReceivingAddress(
   product: Product,
   merchantDefault: Address,
-  opts?: { stripeDepositAddress?: Address },
+  opts?: { stripeDepositAddress?: Address; salesAddress?: Address },
 ): Address {
   if (product.stripeRecording && opts?.stripeDepositAddress) return opts.stripeDepositAddress
+  // #4950: the Sales product is paid into the Sales account. It is offered only
+  // when that address is configured, so the fallback below is never quoted.
+  if (product.salesAccount && opts?.salesAddress) return opts.salesAddress
   return product.receivingAddress ?? merchantDefault
 }
 
@@ -298,13 +310,22 @@ export function requiredCheckoutFieldFromEnv(
  * credentials; without them it is absent from every surface — `list_products`,
  * the discovery document, the tool list and the payment gate — so a merchant
  * without the key is byte-identical to one built before the product existed.
+ *
+ * #4950: the Sales product needs the Sales settings (`salesConfigured`), on
+ * the same terms: absent, it is on no surface.
  */
-export function isProductOffered(product: Product, opts: { cdpConfigured: boolean }): boolean {
+export interface ProductOfferOptions {
+  cdpConfigured: boolean
+  salesConfigured?: boolean
+}
+
+export function isProductOffered(product: Product, opts: ProductOfferOptions): boolean {
+  if (product.salesAccount && !opts.salesConfigured) return false
   return productSettlementKind(product) !== 'cdp' || opts.cdpConfigured
 }
 
 /** #4851: the offered products, in catalogue order. */
-export function offeredProducts(opts: { cdpConfigured: boolean }): Product[] {
+export function offeredProducts(opts: ProductOfferOptions): Product[] {
   return Object.values(PRODUCTS).filter((product) => isProductOffered(product, opts))
 }
 
@@ -437,6 +458,36 @@ export const PRODUCTS: Record<ProductId, Product> = {
     stripeRecording: true,
     x402: { settlementMethods: ['eip3009'], defaultSettlementMethod: 'eip3009' },
   },
+  /**
+   * #4950: the merchant-services demo product. It is paid into the merchant's
+   * Haven Sales account, not `MERCHANT_ADDRESS`, and each settled sale is
+   * reported to Haven, so it shows on the Sales page.
+   *
+   * Offered only with `MERCHANT_SALES_ADDRESS`, `MERCHANT_SALES_KEY` and
+   * `MERCHANT_HAVEN_BASE_URL` set. Its own category and one-product tool
+   * (`buy_field_notes`), like the joke: a new plan or tier on an existing tool
+   * would change every existing product's argument schema.
+   *
+   * Self-settled with both methods, like the VPN and storage products. Not in
+   * Haven's catalog: the demo store's catalog rows share one `pay_to`, so an
+   * agent buys it at this merchant's endpoint (`haven_quote_mcp_tool`).
+   *
+   * 2,500 atomic USDC = 0.0025 USDC, a one-time purchase. A price no other
+   * erc7710 product has: the already-redeemed bind identifies a purchase by
+   * its exact-amount cap (the price-uniqueness guard in erc7710.test.ts).
+   */
+  field_notes: {
+    id: 'field_notes',
+    name: 'Haven Field Notes',
+    description: 'One field note on running agent payments, delivered at once. Paid into a Haven Sales account.',
+    description_sv:
+      'En fältanteckning om agentbetalningar, levererad direkt. Betalas till ett Haven-försäljningskonto.',
+    price_usdc: 2_500n,
+    category: 'field_notes',
+    billing: 'one_time',
+    salesAccount: true,
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+  },
 }
 
 export function isSettlementMethod(value: unknown): value is SettlementMethod {
@@ -470,8 +521,8 @@ const VPN_PLAN_VALUES = ['basic', 'legacy', 'pro', 'ultra'] as const
 const STORAGE_TIER_VALUES = ['50gb', '200gb', '1tb'] as const
 
 interface ProductToolArgs {
-  toolName: 'buy_vpn' | 'buy_cloud_storage' | 'buy_joke'
-  /** #4851: absent for a tool that sells exactly one product (`buy_joke`). */
+  toolName: 'buy_vpn' | 'buy_cloud_storage' | 'buy_joke' | 'buy_field_notes'
+  /** #4851: absent for a tool that sells exactly one product (`buy_joke`, `buy_field_notes`). */
   argumentName?: 'plan' | 'tier'
   argumentValue?: string
   argumentEnum?: readonly string[]
@@ -480,6 +531,7 @@ interface ProductToolArgs {
 /** Derives the exact buy-tool call (tool name + fixed argument) for a product. */
 export function productToolArgs(product: Product): ProductToolArgs {
   if (product.category === 'joke') return { toolName: 'buy_joke' }
+  if (product.category === 'field_notes') return { toolName: 'buy_field_notes' }
   if (product.category === 'vpn') {
     return {
       toolName: 'buy_vpn',

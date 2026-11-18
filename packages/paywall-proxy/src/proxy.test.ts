@@ -842,13 +842,3 @@ describe('no self-settlement', () => {
     }
   })
 })
-
-describe('the merchant reference (§5)', () => {
-  it('is sale_<ulid>: 26 Crockford base32 characters that sort by creation time', async () => {
-    const { newMerchantReference } = await import('./handler.js')
-    const a = newMerchantReference(1_800_000_000_000)
-    const b = newMerchantReference(1_800_000_000_001)
-    expect(a).toMatch(/^sale_[0-9A-HJKMNP-TV-Z]{26}$/)
-    expect(a.slice(0, 15) < b.slice(0, 15)).toBe(true)
-  })
-})

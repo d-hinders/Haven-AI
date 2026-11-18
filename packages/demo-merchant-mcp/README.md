@@ -57,6 +57,7 @@ other product is settled by the merchant's own key.
 | CloudNest 200 GB | `buy_cloud_storage` | 0.0015 USDC |
 | CloudNest 1 TB | `buy_cloud_storage` | 0.004 USDC |
 | Haven Joke (only with CDP configured) | `buy_joke` | 0.01 USDC, EIP-3009 only, one-time |
+| Haven Field Notes (only with the Sales settings) | `buy_field_notes` | 0.0025 USDC, one-time, paid into a Haven Sales account ([below](#haven-sales-account-the-merchant-services-demo-product-4950)) |
 
 `vpn_legacy` (`plan: "legacy"`) is the one self-settled EIP-3009-only product
 (#1441): the QA harness's hosted funding-leg scenario needs a merchant offer the
@@ -879,6 +880,83 @@ the previous rate until it ages out.
 Every other receipt — every other product, the joke with Stripe off, and a
 payment that paid the previous deposit address — is unchanged: no new keys and
 the same text, byte for byte (`src/receipt-fixtures.test.ts`).
+
+## Haven Sales account: the merchant-services demo product (#4950)
+
+`buy_field_notes` sells **Haven Field Notes**, one short note on running agent
+payments, for 0.0025 USDC (2,500 atomic units), one-time. It is the
+merchant-services demo (epic #4885): the payment goes into the merchant's
+**Haven Sales account**, and each settled sale is reported to Haven, so it
+shows on that account's Sales page.
+
+Two settings, and **both** must be set, together with `MERCHANT_HAVEN_BASE_URL`
+(the Haven API origin, shared with the passport check):
+
+| Variable | Value |
+|---|---|
+| `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Sales on Haven), checksummed |
+| `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only) |
+
+With either unset, the product is offered nowhere — not in `list_products`, the
+discovery document, the tool list or the payment gate, and `/healthz` has no
+`sales` block — and the merchant is byte-identical to one without it. A
+half-set or unusable configuration logs a warning naming the variable (never
+its value) and stays off; it never refuses to start:
+
+| Configuration | Result |
+|---|---|
+| only one of the two variables is set | warning; the product is not offered |
+| `MERCHANT_SALES_ADDRESS` is not a checksummed EVM address | warning; not offered |
+| `MERCHANT_SALES_ADDRESS` is `MERCHANT_ADDRESS`, `STRIPE_DEPOSIT_ADDRESS` or `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` | warning; not offered |
+| `MERCHANT_SALES_KEY` does not start with `sk_merchant_` | warning; not offered |
+| `MERCHANT_HAVEN_BASE_URL` is unset or not an http(s) URL | warning; not offered |
+
+**Nothing else moves.** The product has its own id (`field_notes`), its own
+category and a one-product tool, like the joke, so no existing product's
+argument schema changes. Its receiving address is resolved by
+`productReceivingAddress`; every other product keeps its address, id, price and
+settlement. It is self-settled (`SETTLEMENT_PRIVATE_KEY` pays the gas) with
+both EIP-3009 and ERC-7710. It is not in Haven's catalog (the demo store's
+catalog rows share one `pay_to`), so an agent buys it at this endpoint with
+`haven_quote_mcp_tool` and `haven_pay_mcp_tool`.
+
+**The report.** After a paid call settles, the merchant sends one sale record
+(`docs/architecture/12-merchant-kit.md` §5) to `POST /merchant/sales` on
+`MERCHANT_HAVEN_BASE_URL`, with `Authorization: Bearer <MERCHANT_SALES_KEY>`.
+The record is built and sent by the shared core (`buildSaleRecord`,
+`reportSale` in `@haven_ai/merchant-payments`), the same reporter the paywall
+proxy uses:
+
+- `tx_hash` is the settlement transaction, `amount` the product's price, `payer`
+  the authorization's payer (for EIP-3009 the agent's delegate address),
+  `merchant_reference` the payment's `sale_<ULID>` (reserved once per payment,
+  so every resend carries the same one), and `receipt_number` and
+  `vat_treatment` the receipt's `fakturanummer` and `momsbehandling`.
+- It is sent only for this product, only for a payment `settled_onchain`
+  (never one recovered as `already_settled_earlier`, which has no hash), and
+  once per transaction: replaying the same payment header sends nothing more.
+- It is fire-and-forget. The buyer's answer, its status and its timing are the
+  same whether Haven accepts, refuses, answers slowly or cannot be reached.
+
+**Retries, and their limit.** A record Haven cannot accept *yet* is resent: the
+answer 425 `transaction_not_visible` (Haven waits for 3 confirmations, so the
+first send usually gets it), a 5xx, or no answer within 10 s. The waits are 1 s,
+4 s and 16 s, each raised to the answer's `Retry-After` (10 s for the 425), so
+**at most four sends over about 40 seconds**. After the fourth the merchant
+logs `[sales] sales_report_gave_up` and keeps nothing. Any other 4xx (a refused
+key, a record conflict, no payment to the account) is logged as
+`[sales] sales_report_refused` and never resent. Pending reports and the
+per-transaction dedupe are held in memory only, like the rest of this
+merchant's state: a restart forgets them. `/healthz` counts `reported`,
+`pending`, `refused` and `gave_up` for the running process. No log line,
+`/healthz` field or error names the Sales key.
+
+**The buyer must be another Haven user.** Haven counts a transfer from the
+owner's own addresses — every delegate address of the owner's agents included
+— as a move between the owner's accounts, not a sale. On EIP-3009 the payer is
+the buying agent's delegate, so a sale bought by the Sales account owner's own
+agent is stored as an internal move and shows no revenue. The demo's buying
+agent belongs to a different Haven user from the Sales account's owner.
 
 ## Seller details (#4856)
 

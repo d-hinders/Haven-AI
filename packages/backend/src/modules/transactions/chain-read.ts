@@ -233,7 +233,6 @@ export async function readInboundTransactionByTxHash(
   const otherLegs: ChainRecipientLeg[] = []
   if (tokenAddress) {
     const others = new Set(alsoToAddresses.map((a) => a.toLowerCase()))
-    others.delete(account)
     for (const log of receipt.logs) {
       const leg = legFromLog(log, tokenAddress, account, blockTime)
       if (leg) legs.push(leg)

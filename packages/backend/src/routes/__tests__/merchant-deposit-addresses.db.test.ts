@@ -609,6 +609,24 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       expect((await salesFor(other.accountId)).rows).toHaveLength(0)
     })
 
+    it('refuses a leg to another account\'s address even if the chain read returned it', async () => {
+      const m = await seedMerchant()
+      const other = await seedMerchant()
+      const theirs = addr()
+      await registerAt(other, theirs, BEFORE_BLOCK)
+      mocks.read.mockResolvedValue({
+        ok: true,
+        receiptFound: true,
+        blockNumber: 100,
+        latestBlock: 102,
+        legs: [],
+        otherLegs: [{ leg: leg(PAYER, '1000000', 1), toAddress: theirs }],
+      })
+      const res = await post(m.secret, record())
+      expect(res.statusCode).toBe(422)
+      expect((await salesFor(m.accountId)).rows).toHaveLength(0)
+    })
+
     it('does not name another account\'s registered addresses to the chain read', async () => {
       const m = await seedMerchant()
       const other = await seedMerchant()

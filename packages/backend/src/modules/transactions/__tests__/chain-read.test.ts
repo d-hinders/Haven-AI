@@ -301,7 +301,7 @@ describe('readInboundTransactionByTxHash (#4897)', () => {
       expect(read.ok && read.receiptFound && read.legs.map((l) => l.logIndex)).toEqual([1])
     })
 
-    it('removes the account from the named addresses, so an account leg is never an other leg', async () => {
+    it('an account named among the addresses is still only an account leg, never an other leg', async () => {
       mocks.getProvider.mockReturnValue(providerWith({ receipt: { hash: TX, blockNumber: 100, logs: logs() } }))
       const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX, [ACCOUNT, REGISTERED])
       expect(read.ok && read.receiptFound && read.otherLegs?.map((o) => o.leg.logIndex)).toEqual([2])

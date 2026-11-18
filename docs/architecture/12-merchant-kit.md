@@ -57,7 +57,7 @@ holds the merchant's upstream API key.
 | Paywall proxy | A standalone reverse proxy. It answers an unpaid call with an x402 challenge, has the payment verified and settled by a facilitator, then forwards the call upstream with the merchant's API key. | Yes | #4893 |
 | Products file | One file mapping a route or model to a fixed price (x402 `exact`), with an optional output-token cap and a description. | Yes | #4893 |
 | Discovery document | A public, machine-readable list of the products, served by the proxy, which agents, directories and Haven read. | Yes | #4891 |
-| Sales reporter | After each settled call the proxy sends a small record to Haven. The reporter itself is the shared core's (`sale-report`, #4950); the proxy wires it in. | Yes for the pilot; optional for a merchant that only wants to accept payments | #4950 (core), #4898 (proxy) |
+| Sales reporter | After each settled call the proxy sends a small record to Haven. The reporter itself is the shared core's (`sale-report`, #4950); #4898 wires it into the proxy. | Yes for the pilot; optional for a merchant that only wants to accept payments | #4950 (core), #4898 (proxy) |
 
 Three parts are required to accept a payment: the proxy, the products file and
 the discovery document. The sales reporter is required for the pilot, because
@@ -77,8 +77,8 @@ on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and 
 
 | Package | Directory | What it holds |
 |---|---|---|
-| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11), the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, the settle-exactly-once coordinator, and the consumed-payment store interface in section 6 with an in-memory implementation (the demo merchant's). |
-| `@haven_ai/paywall-proxy` | `packages/paywall-proxy/` | The proxy from #4893: the products file reader, the challenge, the settlement call into the core, the persistent consumed-payment store, the upstream forwarder and the sales reporter. |
+| `@haven_ai/merchant-payments` | `packages/merchant-payments/` | The shared payment core from #4890: the receipt builder and the buyer's tax-declaration check (section 11), the Coinbase facilitator client and its timeout and credentials handling, the checks made before a payment is sent for verification, the chain recovery that reads the chain when the facilitator's answer is lost, the settle-exactly-once coordinator, the consumed-payment store interface in section 6 with an in-memory implementation (the demo merchant's), and the sale reporter and the `merchant_reference` generator of section 5 (#4950). |
+| `@haven_ai/paywall-proxy` | `packages/paywall-proxy/` | The proxy from #4893: the products file reader, the challenge, the settlement call into the core, the persistent consumed-payment store, the upstream forwarder, and the sales outbox that wires in the core's reporter (#4898). |
 
 Both are `private: true` and pin internal dependencies as `"*"`, as
 `lint:workspace-pins` requires. The core is the code that lived in
@@ -352,15 +352,17 @@ shared core, `packages/merchant-payments/src/sale-report.ts`:
 retry policy under *Delivery*. It takes the Haven base URL and the key as
 arguments and reads no environment variable. `newMerchantReference`
 (`merchant-reference.ts`) is the one `sale_<ULID>` generator; the settle-once
-coordinator and the proxy both call it, and no other package defines one.
+coordinator, the proxy and the demo merchant's skip-settle QA hook call it, and no other package defines one.
 
 - **The demo merchant** (#4950) reports the sales of its one Sales product,
   `field_notes`, paid into its Haven Sales account. Its settings are
   `MERCHANT_SALES_ADDRESS`, `MERCHANT_SALES_KEY` and the existing
   `MERCHANT_HAVEN_BASE_URL`; the demo merchant README says how it holds what
   is in flight.
-- **The paywall proxy** (#4898) reports every settled call, to the URL in
-  `HAVEN_SALES_URL` with `HAVEN_MERCHANT_KEY`.
+- **The paywall proxy** (#4898) will report every settled call with
+  `HAVEN_MERCHANT_KEY`. The reporter takes Haven's API **origin** and appends
+  `/merchant/sales` itself (`saleReportUrl`), so #4898 passes the origin, not
+  the full route URL, whatever its setting is named.
 
 The route and the merchant key (the Sales key) are Haven's (#4897); a
 consumer only needs the URL and the key. The key's limits — what it can and cannot do, the accepted
@@ -481,7 +483,10 @@ with exponential backoff (1 s, 4 s, 16 s), each wait raised to the answer's
 outcome to its caller. The proxy then moves the record to a bounded
 on-disk outbox (`SALES_OUTBOX`, JSON Lines, 10,000 records) that a background
 task replays every 60 s. Any other 4xx is not retried: the record was refused,
-and the reporter logs `sales_report_refused` with the answer's status and code. When the outbox is
+and the reporter logs `sales_report_refused` with the answer's status and code.
+That includes 429 (the 120-a-minute limit): the reporter does not resend it, so
+a consumer without an outbox (the demo merchant) loses that record, and #4898
+decides on purpose whether the proxy's outbox takes it. When the outbox is
 full the proxy keeps the records it has, logs `sales_outbox_full` for each
 record it cannot add, and the merchant must clear the cause (section 12).
 Haven's ingest is idempotent on chain, transaction hash and account, so a

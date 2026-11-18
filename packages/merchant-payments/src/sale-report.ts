@@ -3,7 +3,7 @@
  * implementation that builds a sale record and posts it to Haven's
  * `POST /merchant/sales` (#4897) with the merchant's Sales key.
  *
- * Two consumers: the demo merchant (#4950) and the paywall proxy (#4898). Like
+ * Two consumers: the demo merchant (#4950) and, with #4898, the paywall proxy. Like
  * the rest of this package it reads no environment variable: the Haven base
  * URL and the Sales key are arguments.
  *
@@ -12,8 +12,8 @@
  * `transaction_not_visible` (the transaction has fewer than the confirmations
  * Haven needs) — are resent after 1 s, 4 s and 16 s, never sooner than the
  * answer's `Retry-After`. Any other 4xx is a refusal: logged once, never
- * resent. What happens after the last retry is the caller's (the proxy has an
- * outbox, the demo merchant forgets).
+ * resent. What happens after the last retry is the caller's (#4898 gives the
+ * proxy an outbox; the demo merchant forgets).
  *
  * The Sales key is sent in the `Authorization` header and nowhere else: no log
  * line, no outcome and no error this module produces carries it.
@@ -88,7 +88,7 @@ export const SALE_REPORT_MAX_RETRY_AFTER_MS = 60_000
 export const SALE_NOT_VISIBLE_STATUS = 425
 export const SALE_NOT_VISIBLE_CODE = 'transaction_not_visible'
 
-/** What became of one report. Carries no key and no response body text. */
+/** What became of one report. Carries no key; of the answer, only its status and error code. */
 export type SaleReportOutcome =
   | { outcome: 'accepted'; status: number; attempts: number }
   | { outcome: 'refused'; status: number; code: string | null; attempts: number }
@@ -148,8 +148,9 @@ async function attemptOnce(opts: ReportSaleOptions, doFetch: typeof fetch, timeo
     if (response.status >= 400) {
       try {
         const body = (await response.json()) as Record<string, unknown>
-        if (typeof body.error_code === 'string') code = body.error_code
-        else if (typeof body.error === 'string') code = body.error
+        const raw = typeof body.error_code === 'string' ? body.error_code : typeof body.error === 'string' ? body.error : null
+        // Haven's codes are short identifiers; anything else is not logged as one.
+        if (raw !== null && /^[A-Za-z0-9_.-]{1,64}$/.test(raw)) code = raw
         if (typeof body.retry_after_seconds === 'number') retryAfterSeconds = body.retry_after_seconds
       } catch {
         // A body that is not JSON leaves the code unknown; the status decides.

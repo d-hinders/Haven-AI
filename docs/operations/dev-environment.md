@@ -853,8 +853,9 @@ documents variables rather than applying them.
    `MERCHANT_PASSPORT_ISSUER` is updated; treat rotation as a breaking change
    ([secret-rotation.md](secret-rotation.md)).
 
-To turn it back **off**, unset either variable. The merchant advertises only
-`haven-demo` again, and a payment that still carries a reference reports
+To turn it back **off**, unset `MERCHANT_PASSPORT_ISSUER` (`MERCHANT_HAVEN_BASE_URL`
+is shared with the Haven Sales product below, which needs it). The merchant
+advertises only `haven-demo` again, and a payment that still carries a reference reports
 `passport: null` rather than a stale answer.
 
 Reference: `packages/demo-merchant-mcp/README.md` § *Agent Passport check*.
@@ -889,8 +890,9 @@ service.
    not checksummed, or equals `MERCHANT_ADDRESS` or a Stripe deposit address; a
    key without the `sk_merchant_` prefix) the merchant warns and does not offer
    the product; every other product is unchanged either way.
-3. **Check** `/healthz`: a `sales` block with the Sales address appears, and
-   the startup log has a `Sales:` line. After a purchase, `reported` counts the
+3. **Check** `/healthz`: a `sales` block with the Sales address appears (see
+   the README's `/healthz` description), and the startup log says
+   `Sales: field_notes … paid into <address>`, not `Sales: not configured`. After a purchase, `reported` counts the
    sales Haven accepted; a refusal or give-up shows in the `[sales]` log lines.
 4. **Buy from a different Haven user.** A sale bought by an agent of the Sales
    account's own owner is a move between the owner's accounts and shows no

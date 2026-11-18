@@ -103,7 +103,7 @@ the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled
 payment (never re-derived from the quoted catalog price).
 
-Purchase tools (all but `buy_joke`, which offers one method) accept an optional
+Purchase tools (all but the one-product tools `buy_joke`, which offers one method, and `buy_field_notes`) accept an optional
 `settlement_method` argument. It decides
 which option comes FIRST in the 402's `accepts`; every other method the product
 and the merchant support is still offered after it:
@@ -132,12 +132,12 @@ through `productSettlementKind`; #4850). There are two:
 
 | | Own key (`self`) | Coinbase facilitator (`cdp`) |
 |---|---|---|
-| Products | the seven VPN and storage products, `vpn_legacy` included | the joke (`buy_joke`, 0.01 USDC) |
+| Products | the seven VPN and storage products, `vpn_legacy` included, and Haven Field Notes when the Sales settings are set (#4950) | the joke (`buy_joke`, 0.01 USDC) |
 | Offered | always | only with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` both set |
 | Methods | EIP-3009, plus ERC-7710 when enabled (`vpn_legacy`: EIP-3009 only) | EIP-3009 only |
 | Verifies | this merchant: signature, amount, recipient, window, or a simulated `redeemDelegations` | this merchant's own checks first, then CDP's `verify` (including its sanctions and risk screening) |
 | Submits and pays gas | `SETTLEMENT_PRIVATE_KEY` | CDP |
-| Receives the USDC | `MERCHANT_ADDRESS` | the Stripe deposit address when Stripe is on (#4853), else `MERCHANT_ADDRESS` |
+| Receives the USDC | `MERCHANT_ADDRESS`; for Haven Field Notes, the Sales account (`MERCHANT_SALES_ADDRESS`) | the Stripe deposit address when Stripe is on (#4853), else `MERCHANT_ADDRESS` |
 | Readiness gate on the merchant's gas wallet | applies | exempt |
 | After a failure | EIP-3009: the pre-submit `authorizationState` read (#1519); ERC-7710: the pinned enforcer's `spentMap` check (#1515) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
 
@@ -304,8 +304,9 @@ Endpoints:
   only when CDP is configured (#4851), and a `stripe` block only when Stripe
   recording is on (#4853): `deposit_address`, `api_version`, `network`,
   `recorded`, `pending`, `declined` and `record_failures` (#4866: `recorded`
-  counts only PaymentIntents Stripe accepted). Neither block ever carries a
-  credential.
+  counts only PaymentIntents Stripe accepted), and a `sales` block only when
+  the Sales settings are set (#4950): `address`, `reported`, `pending`,
+  `refused` and `gave_up`. No block ever carries a credential.
 
 ### Sessions: unknown-session 404, idle TTL, and what a redeploy does (#1578, #3171)
 
@@ -899,7 +900,8 @@ Two settings, and **both** must be set, together with `MERCHANT_HAVEN_BASE_URL`
 
 With either unset, the product is offered nowhere — not in `list_products`, the
 discovery document, the tool list or the payment gate, and `/healthz` has no
-`sales` block — and the merchant is byte-identical to one without it. A
+`sales` block — and every surface is byte-identical to a merchant without it
+(the startup banner only says `Sales: not configured`). A
 half-set or unusable configuration logs a warning naming the variable (never
 its value) and stays off; it never refuses to start:
 
@@ -916,7 +918,7 @@ category and a one-product tool, like the joke, so no existing product's
 argument schema changes. Its receiving address is resolved by
 `productReceivingAddress`; every other product keeps its address, id, price and
 settlement. It is self-settled (`SETTLEMENT_PRIVATE_KEY` pays the gas) with
-both EIP-3009 and ERC-7710. It is not in Haven's catalog (the demo store's
+EIP-3009, plus ERC-7710 when enabled. It is not in Haven's catalog (the demo store's
 catalog rows share one `pay_to`), so an agent buys it at this endpoint with
 `haven_quote_mcp_tool` and `haven_pay_mcp_tool`.
 
@@ -924,8 +926,8 @@ catalog rows share one `pay_to`), so an agent buys it at this endpoint with
 (`docs/architecture/12-merchant-kit.md` §5) to `POST /merchant/sales` on
 `MERCHANT_HAVEN_BASE_URL`, with `Authorization: Bearer <MERCHANT_SALES_KEY>`.
 The record is built and sent by the shared core (`buildSaleRecord`,
-`reportSale` in `@haven_ai/merchant-payments`), the same reporter the paywall
-proxy uses:
+`reportSale` in `@haven_ai/merchant-payments`), the reporter the paywall
+proxy will use (#4898):
 
 - `tx_hash` is the settlement transaction, `amount` the product's price, `payer`
   the authorization's payer (for EIP-3009 the agent's delegate address),
@@ -940,9 +942,11 @@ proxy uses:
 
 **Retries, and their limit.** A record Haven cannot accept *yet* is resent: the
 answer 425 `transaction_not_visible` (Haven waits for 3 confirmations, so the
-first send usually gets it), a 5xx, or no answer within 10 s. The waits are 1 s,
-4 s and 16 s, each raised to the answer's `Retry-After` (10 s for the 425), so
-**at most four sends over about 40 seconds**. After the fourth the merchant
+first send usually gets it), a 5xx, a network failure, or no answer within
+10 s. The waits are 1 s, 4 s and 16 s (`SALE_REPORT_RETRY_DELAYS_MS`), each
+raised to the answer's `Retry-After` (10 s for the 425, capped at 60 s), so
+**at most four sends**: against Haven's own answers the waits total 36 s at
+most, and each send may take up to 10 s. After the fourth the merchant
 logs `[sales] sales_report_gave_up` and keeps nothing. Any other 4xx (a refused
 key, a record conflict, no payment to the account) is logged as
 `[sales] sales_report_refused` and never resent. Pending reports and the
@@ -986,7 +990,7 @@ Two env values, and **both** must be set:
 
 | Variable | Value |
 |---|---|
-| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against |
+| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against (shared with the [Sales product](#haven-sales-account-the-merchant-services-demo-product-4950)) |
 | `MERCHANT_PASSPORT_ISSUER` | the issuer address from `GET /passport/issuer` on that deployment |
 
 With either missing, the merchant advertises only `haven-demo` and reports

@@ -79,7 +79,7 @@ in the startup output or `/healthz`.
 
 | Variable | Value |
 |---|---|
-| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against (e.g. the dev backend's public URL) |
+| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against and, with the Sales settings, to report Sales to (#4950) (e.g. the dev backend's public URL) |
 | `MERCHANT_PASSPORT_ISSUER` | the issuer address from `GET /passport/issuer` on that deployment |
 
 With either missing it advertises only `haven-demo`, exactly as before. Set

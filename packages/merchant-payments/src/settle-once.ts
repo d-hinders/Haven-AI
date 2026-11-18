@@ -175,6 +175,10 @@ interface SettlementAttempt {
   promise?: Promise<SettledPayment<string, string>>
 }
 
+function missingReference(): never {
+  throw new Error('settle-once: a submitted attempt has no reserved merchant reference')
+}
+
 export function createSettleOnce<P extends string = string, M extends string = string>(
   options: SettleOnceOptions,
 ): (params: SettleOnceParams<P, M>) => Promise<SettledPayment<P, M>> {
@@ -210,8 +214,10 @@ export function createSettleOnce<P extends string = string, M extends string = s
           key,
           attempt.txHash,
           attempt.reservationToken,
-          // Always set with the hash (both come after the reservation).
-          attempt.merchantReference ?? newMerchantReference(),
+          // Set with the hash (both come after the reservation). A fresh one
+          // here would make a resend differ from the first record, so its
+          // absence is a bug, not a case to paper over.
+          attempt.merchantReference ?? missingReference(),
         )
         attempt.promise = retry
         try {

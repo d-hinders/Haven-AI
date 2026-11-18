@@ -1,8 +1,9 @@
 /**
  * The sale record's `merchant_reference` (docs/architecture/12-merchant-kit.md
  * §5), generated once per payment when the settle-once coordinator or the
- * paywall proxy reserves it. One implementation, here (#4950): the proxy and
- * the coordinator both import it, and no other package defines one.
+ * paywall proxy reserves it. One implementation, here (#4950): the proxy, the
+ * coordinator and the demo merchant's skip-settle hook import it, and no other
+ * package defines one.
  */
 import { randomBytes } from 'node:crypto'
 

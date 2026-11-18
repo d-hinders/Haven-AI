@@ -260,6 +260,23 @@ describe('the Sales product (#4950)', () => {
     expect(healthz.sales).toBeUndefined()
     const unpaid = await postMcp(url, buyCall('field_notes'))
     expect(unpaid.status).not.toBe(402)
+    const list = await (
+      await postMcp(url, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_products', arguments: {} } })
+    ).text()
+    expect(list).not.toContain('field_notes')
+    expect(list).not.toContain('Field Notes')
+    const tools = await (await postMcp(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).text()
+    expect(tools).not.toContain('buy_field_notes')
+  })
+
+  it('is listed, with its tool, on a merchant with the Sales settings', async () => {
+    const { url } = await startServer()
+    const list = await (
+      await postMcp(url, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_products', arguments: {} } })
+    ).text()
+    expect(list).toContain('field_notes')
+    const tools = await (await postMcp(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).text()
+    expect(tools).toContain('buy_field_notes')
   })
 
   it("quotes the Sales account as payTo, and every existing product's 402 still pays MERCHANT_ADDRESS", async () => {

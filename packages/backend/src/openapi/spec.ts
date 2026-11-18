@@ -9327,11 +9327,16 @@ export const openapiSpec = {
       post: {
         tags: ['Transactions'],
         operationId: 'ingestInboundTransfer',
-        summary: 'Record one inbound USDC transfer in the account receive index.',
+        summary: 'Index the USDC transfers one transaction actually carried to this account.',
         description:
-          'Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer ' +
-          'feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns ' +
-          '`ingested: false` rather than double-counting.',
+          'Owner-scoped ingestion hook (tests and the eventual indexer tick; the scheduled merchant ' +
+          'pass feeds the same repository). Since #4903 the route VERIFIES AGAINST THE CHAIN: it takes ' +
+          'only `tx_hash`, reads the transaction receipt, and indexes the settlement-token transfers ' +
+          'whose `to` is this account. A caller-supplied payer, amount, token or block time is refused ' +
+          'with 400, so a row for a hash that did not pay the account cannot be created through any ' +
+          'route. Idempotent per (chain, tx hash, log index): a re-ingest returns `ingested: false` ' +
+          'rather than double-counting. 404 means the chain says the transaction carried no USDC ' +
+          'transfer to this account; 503 means the chain could not be read and nothing was written.',
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'accountAddress', in: 'path', required: true, schema: address },
@@ -9347,12 +9352,14 @@ export const openapiSpec = {
         },
         responses: {
           '200': {
-            description: 'Recorded (`ingested: false` when the hash was already indexed).',
+            description: 'Recorded (`ingested: false` when every leg was already indexed).',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/InboundIngestResponse' } } },
           },
           '400': errorResponse,
           '401': errorResponse,
           '403': errorResponse,
+          '404': errorResponse,
+          '503': errorResponse,
         },
       },
     },
@@ -15621,9 +15628,14 @@ export const openapiSpec = {
       },
       ReceiveLedgerTransfer: {
         type: 'object',
-        required: ['tx_hash', 'payer_address', 'amount_raw', 'amount_formatted', 'block_time', 'match_kind', 'matched_payment_intent_id', 'matched_receipt_id', 'balance_consumed', 'earned'],
+        required: ['tx_hash', 'log_index', 'payer_address', 'amount_raw', 'amount_formatted', 'block_time', 'match_kind', 'matched_payment_intent_id', 'matched_receipt_id', 'balance_consumed', 'sender_is_own_address', 'earned'],
         properties: {
           tx_hash: { type: 'string' },
+          log_index: {
+            type: ['integer', 'null'],
+            description:
+              'The transfer log index in its transaction — the on-chain half of the row identity (#4903). Null when the source that wrote the row reported none.',
+          },
           payer_address: { type: 'string' },
           amount_raw: { type: 'string', description: 'Atomic units, numeric string.' },
           amount_formatted: { type: 'string', description: 'USDC human decimals (6).' },
@@ -15635,6 +15647,11 @@ export const openapiSpec = {
           matched_payment_intent_id: { type: ['string', 'null'], description: 'The x402 settlement intent id, present only for x402_payto. Stored for audit; never a grant.' },
           matched_receipt_id: { type: ['string', 'null'], description: 'The linked receipt document id, present only for the receipt kind.' },
           balance_consumed: { type: 'boolean', description: 'True once the row counts in balance_atomic.' },
+          sender_is_own_address: {
+            type: 'boolean',
+            description:
+              'Whether the payer is one of the owner own addresses, decided at INDEX time (#4903). Recorded, not derived at read time, so a later change to the account set cannot rewrite history.',
+          },
           earned: { type: 'boolean', description: 'match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row.' },
         },
         additionalProperties: false,
@@ -15720,23 +15737,26 @@ export const openapiSpec = {
       },
       InboundIngestInput: {
         type: 'object',
-        required: ['tx_hash', 'payer_address', 'amount_raw'],
+        required: ['tx_hash'],
         properties: {
           tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
-          payer_address: { ...address },
-          amount_raw: { type: 'string', pattern: '^[0-9]+$', description: 'Atomic units.' },
-          token_address: { ...address, description: 'Optional; defaults to the chain registry USDC — the receive index tracks USDC only.' },
-          block_time: { type: 'string', format: 'date-time', description: 'Defaults to now.' },
-          block_number: { type: 'string', pattern: '^[0-9]+$' },
         },
         additionalProperties: false,
       },
       InboundIngestResponse: {
         type: 'object',
-        required: ['ingested', 'id'],
+        required: ['ingested', 'legs_indexed', 'tx_hash'],
         properties: {
-          ingested: { type: 'boolean', description: 'false when the (chain, tx hash) was already indexed — idempotent re-ingest.' },
-          id: { type: ['string', 'null'], format: 'uuid', description: 'The row id, or null when it already existed.' },
+          ingested: {
+            type: 'boolean',
+            description:
+              'false when every leg of the transaction was already indexed — idempotent re-ingest.',
+          },
+          legs_indexed: {
+            type: 'integer',
+            description: 'How many USDC legs to this account were newly indexed.',
+          },
+          tx_hash: { type: 'string' },
         },
         additionalProperties: false,
       },

@@ -561,10 +561,12 @@ describeDb('payment-intents repository (#1223)', () => {
 
   /**
    * #4870: the receipt email and the two addresses are stored on the SAME row
-   * the buyer join reads, so the only thing keeping them out of
-   * `parties.buyer` is `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` not naming them.
-   * This pins the buyer block's key set EXACTLY (`toEqual`, not
-   * `toMatchObject`): adding a column to the join fragment turns it red.
+   * the buyer join reads. This pins the buyer block's key set EXACTLY (`toEqual`,
+   * not `toMatchObject`) — i.e. it pins `buyerPartyFromJoin`'s output. It does
+   * NOT catch a column added to `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` (the
+   * mapper builds a fixed six-key object, so an extra joined column never
+   * reaches it); the fragment itself is pinned by
+   * `owner-company-details-join-columns.test.ts` (#4946).
    */
   it('#4870: a stored receipt email and both addresses never reach the buyer block', async () => {
     const owner = await seedAgent()

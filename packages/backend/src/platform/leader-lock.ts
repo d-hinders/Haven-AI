@@ -106,6 +106,15 @@ export const LEADER_LOCK_KEYS = {
    */
   feedbackSweep: 811012,
   /**
+   * The scheduled merchant inbound index (#4903, epic #4885) — walks every
+   * account marked as a merchant account and reads every USDC transfer into it
+   * since the last indexed block, straight from the chain. Leader-gated
+   * because every replica would otherwise run the same `eth_getLogs` scan and
+   * the RPC cost is the expensive part; correctness does not depend on it (the
+   * row identity is idempotent and the cursor only moves forward).
+   */
+  merchantInboundIndex: 811013,
+  /**
    * Merchant catalogue refresh (#4899, epic #4885) — reads every configured
    * kit deployment's discovery document and keeps its product list. Leader-gated
    * because the tick is otherwise replicated: two replicas would read the same
@@ -113,7 +122,7 @@ export const LEADER_LOCK_KEYS = {
    * not depend on it (the writes are upserts in one transaction), but the
    * merchant's access log would show Haven reading twice for no reason.
    */
-  merchantCatalogueRefresh: 811013,
+  merchantCatalogueRefresh: 811014,
 } as const
 
 /**

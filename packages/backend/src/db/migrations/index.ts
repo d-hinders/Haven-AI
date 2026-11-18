@@ -126,6 +126,7 @@ import * as userVisits from './124_user_visits.js'
 import * as anchorCalldataCallSemantics from './125_anchor_calldata_call_semantics.js'
 import * as merchantServices from './126_merchant_services.js'
 import * as merchantKeys from './127_merchant_keys.js'
+import * as inboundTransferIdentity from './128_inbound_transfer_identity.js'
 import * as ownerCompanyDetailsCheckoutFields from './129_owner_company_details_checkout_fields.js'
 import * as merchantCatalogue from './130_merchant_catalogue.js'
 
@@ -313,6 +314,7 @@ export const migrations: Migration[] = [
   anchorCalldataCallSemantics,
   merchantServices,
   merchantKeys,
+  inboundTransferIdentity,
   ownerCompanyDetailsCheckoutFields,
   // #4899: 129 landed from #4870 and 128 is still in flight on #4903, so this
   // slice takes the next free number AFTER both. Inserted in sorted order, so

@@ -18,10 +18,13 @@ import {
   inboundReceiveBalanceAtomic,
   listInboundTransfers,
   findAccountIdByAddressAndChain,
-  insertInboundTransfer,
   insertInboundReceiptDrop,
 } from '../infra/repositories/inbound-transfers.js'
-import { matchInboundTransferForAccount } from '../modules/transactions/index.js'
+import {
+  ingestInboundTransferByTxHash,
+  matchInboundTransferForAccount,
+  TX_HASH_PATTERN,
+} from '../modules/transactions/index.js'
 import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.js'
 
 /**
@@ -42,8 +45,9 @@ import { recoverReceiptDropSigner } from '../infra/chain/receipt-drop-signature.
  *   pinned server-side at submit; neither token nor recipient comes from
  *   the request body.
  * - `POST /:accountAddress/ingest` — the ingestion hook for tests and the
- *   eventual indexer tick. Owner-scoped: an owner indexes rows into their
- *   OWN ledger only.
+ *   eventual indexer tick. Owner-scoped. Since #4903 it takes only `tx_hash`
+ *   and reads the transaction from the CHAIN; a caller-supplied payer, amount,
+ *   token or block time is refused, so no planted row can become a sale.
  *
  * UNAUTHENTICATED-BUT-SIGNED (the #3333 receipt drop):
  *
@@ -85,7 +89,6 @@ function asString(value: unknown): string | null {
 }
 
 const ETH_ADDRESS_RE_STRICT = /^0x[0-9a-fA-F]{40}$/
-const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/
 
 /**
  * The payer-signed receipt drop: recover the signer from the EIP-191 personal
@@ -100,7 +103,7 @@ function receiptDropSigner(body: ReceiptDropBody): string | null {
   const payerAddress = asString(body.payer_address)
   const signature = asString(body.signature)
   if (!txHash || !amountRaw || !payerAddress || !signature) return null
-  if (!TX_HASH_RE.test(txHash)) return null
+  if (!TX_HASH_PATTERN.test(txHash)) return null
   if (!ETH_ADDRESS_RE_STRICT.test(payerAddress)) return null
   if (!/^0x[0-9a-fA-F]+$/.test(signature)) return null
   if (!Number.isInteger(Number(amountRaw)) || BigInt(amountRaw) <= 0n) return null
@@ -271,6 +274,7 @@ export default async function receiveRoutes(
           off_ramp_destination: destination ? destinationBody(destination) : null,
           transfers: rows.map((row) => ({
             tx_hash: row.tx_hash,
+            log_index: row.log_index,
             payer_address: row.payer_address,
             amount_raw: row.amount_raw,
             amount_formatted: formatUsdc(row.amount_raw, decimals),
@@ -279,6 +283,8 @@ export default async function receiveRoutes(
             matched_payment_intent_id: row.matched_payment_intent_id,
             matched_receipt_id: row.matched_receipt_id,
             balance_consumed: row.balance_consumed,
+            // #4903: decided at index time, not derived at read time.
+            sender_is_own_address: row.sender_is_own_address,
             // Unmatched = unearned (#3333): the flag the UI renders as
             // "Unmatched", and the state nothing is delivered on.
             earned: row.match_kind !== null,
@@ -429,11 +435,14 @@ export default async function receiveRoutes(
       },
     )
 
-    // Ingestion hook for tests and the eventual indexer tick: records one
-    // inbound USDC transfer against the account. Owner-scoped like the rest
-    // of the plugin (the production indexer runs server-side with the
-    // account's own ownership already resolved).
-    ownerApp.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: { tx_hash?: unknown; payer_address?: unknown; token_address?: unknown; amount_raw?: unknown; block_time?: unknown; block_number?: unknown } }>(
+    // Ingestion hook for tests and the eventual indexer tick. #4903 decision:
+    // this route VERIFIES AGAINST THE CHAIN — it takes only `tx_hash`, reads
+    // the receipt, and indexes the settlement-token transfers whose `to` is
+    // this account. A caller-supplied payer, amount, token or block time is
+    // refused, so no row for a hash that did not pay the account can be
+    // created through any route. The work lives in the module; this handler is
+    // the ownership check and the status mapping.
+    ownerApp.post<{ Params: { accountAddress: string }; Querystring: { chain_id?: string }; Body: Record<string, unknown> }>(
       '/:accountAddress/ingest',
       async (request, reply) => {
         const { sub } = request.user as { sub: string }
@@ -445,40 +454,26 @@ export default async function receiveRoutes(
         if (!isValidAddress(accountAddress)) {
           return reply.code(400).send({ error: 'Invalid address' })
         }
-        const txHash = asString(request.body?.tx_hash)
-        const payerAddress = asString(request.body?.payer_address)
-        const amountRaw = asString(request.body?.amount_raw)
-        if (!txHash || !TX_HASH_RE.test(txHash) || !payerAddress || !ETH_ADDRESS_RE_STRICT.test(payerAddress) || !amountRaw) {
-          return reply.code(400).send({ error: 'tx_hash, payer_address and amount_raw are required' })
-        }
-        const blockTimeRaw = asString(request.body?.block_time)
-        const blockTime = blockTimeRaw ? new Date(blockTimeRaw) : new Date()
-        if (Number.isNaN(blockTime.getTime())) {
-          return reply.code(400).send({ error: 'block_time must be an ISO timestamp' })
-        }
 
         const ownershipRows = await findAccountOwnership(sub, accountAddress, chain.chainId)
         if (ownershipRows.length === 0) {
           return reply.code(403).send({ error: 'Not your account' })
         }
-        const accountId = ownershipRows[0].id
-        const tokenAddress = usdcAddressForChain(chain.chainId)
-        if (!tokenAddress) {
-          return reply.code(400).send({ error: `No USDC token configured on chain ${chain.chainId}` })
-        }
 
-        const id = await insertInboundTransfer({
-          accountId,
-          userId: sub,
-          chainId: chain.chainId,
-          txHash,
-          payerAddress,
-          tokenAddress,
-          amountRaw,
-          blockNumber: asString(request.body?.block_number) ? Number(request.body?.block_number) : null,
-          blockTime,
+        const result = await ingestInboundTransferByTxHash({
+          account: {
+            id: ownershipRows[0].id,
+            userId: sub,
+            accountAddress,
+            chainId: chain.chainId,
+          },
+          body: (request.body ?? {}) as Record<string, unknown>,
+          log: request.log,
         })
-        return { ingested: id !== null, id }
+        if (!result.ok) {
+          return reply.code(result.failure.status).send({ error: result.failure.error })
+        }
+        return result.value
       },
     )
   })

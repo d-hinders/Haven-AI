@@ -61,6 +61,13 @@ export interface RawERC20Transfer {
   tokenName: string
   tokenSymbol: string
   tokenDecimal: string
+  /**
+   * The transfer's log index, when the provider reports one (#4903). Blockscout
+   * v2 does (`log_index`); Alchemy's transfers API and Etherscan's `tokentx` do
+   * not, and the field is absent there — the receive index then dedupes on the
+   * leg's payer+amount instead (migration 128).
+   */
+  logIndex?: number | null
 }
 
 // ── Shared request plumbing ──────────────────────────────────────
@@ -201,6 +208,8 @@ interface V2TokenTransfer {
   transaction_hash: string
   block_number: number
   timestamp: string
+  /** The transfer's log index in its transaction (#4903). */
+  log_index?: number | null
   from: V2AddressRef | null
   to: V2AddressRef | null
   total: { decimals: string; value: string }
@@ -672,6 +681,9 @@ export async function fetchERC20Transfers(
       tokenName: t.token.name ?? '',
       tokenSymbol: t.token.symbol ?? '',
       tokenDecimal: t.token.decimals ?? t.total?.decimals ?? '18',
+      // #4903: Blockscout v2 reports the log index, so the receive index can
+      // key the row on the on-chain identity instead of the transaction alone.
+      logIndex: typeof t.log_index === 'number' ? t.log_index : null,
     }))
     return { rows, hasMore: hasNextPage }
   }

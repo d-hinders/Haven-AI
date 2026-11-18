@@ -753,7 +753,7 @@ export const en = {
         action: 'Remove company details',
         confirmTitle: 'Remove your company details?',
         confirmBody:
-          'This deletes your legal name, country, organisation number, VAT number, receipt email and addresses from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
+          'This deletes your saved legal name, country, organisation number, VAT number, receipt email and addresses. Receipts your agents hand to merchants after this will no longer state a buyer. Receipts Haven already keeps for your bookkeeping, and the copies attached in your accounting connections, keep what they show. You can add your details again at any time.',
         confirm: 'Remove',
         cancel: 'Keep details',
         // #4570: the confirm button's own verb while the delete is in flight,

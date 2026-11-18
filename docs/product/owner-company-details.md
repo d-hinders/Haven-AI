@@ -63,7 +63,7 @@ One row per owner, keyed on `user_id` (migration `098_owner_company_details`):
 | `vat_number` | Optional. Normalised on write: uppercase, no spaces (`SE556677889901`, not `se 556677889901`). Its own 2-letter prefix may legitimately differ from `country` (an EU group can register for VAT in a member state that is not its seat of incorporation) — VIES is always asked using the VAT NUMBER's own prefix, never `country` (Greece is the one case: a `GR…` prefix asks VIES as `EL`; see below). A prefix that is not itself a VIES member country code is still accepted and stored, but starts no VIES call at all — see *The VIES states* below. |
 | `vies_status` | `null` (no VAT number submitted), `pending`, `valid`, `invalid`, or `not_verifiable`. |
 | `vies_checked_at` | When the last VIES check COMPLETED — never set while `vies_status` is `pending` (a check in flight has no completion time yet), and cleared to `null` whenever the VAT number itself is cleared, alongside `vies_status`. |
-| `receipt_email` | Optional (#4870). Where a merchant should send the receipt: one address, at most 254 characters (RFC 5321 §4.5.3.1.3's forward-path limit, less the angle brackets), no display name and no CR or LF. The form SUGGESTS the sign-up email as a prefill; nothing is stored until the owner saves, and the sign-up email is never used as a receipt email anywhere else (owner decision 2026-11-17, #4868). |
+| `receipt_email` | Optional (#4870). Where a merchant should send the receipt: one address, at most 254 characters (RFC 5321 §4.5.3.1.3's forward-path limit, less the angle brackets), no display name and no CR or LF. The form SUGGESTS the sign-up email as a prefill only while the owner has no company details saved (#4946: a saved row with no receipt email — cleared, or saved before #4870 — shows the field empty, because the two cannot be told apart); nothing is stored until the owner saves, and the sign-up email is never used as a receipt email anywhere else (owner decision 2026-11-17, #4868). |
 | `billing_address` | Optional (#4870). A structured address, stored as one JSONB value in the shape `docs/architecture/13-checkout-details.md` § *The address shape* decides: `line1` (required, ≤70), `line2` (≤70), `line3` (≤70), `city` (required, ≤50), `postCode` (≤16), `subdivision` (≤6, ISO 3166-2) and `country` (required, two uppercase letters). An absent optional member is omitted from the JSON, never stored as `null` or as an empty string. |
 | `shipping_address` | Optional (#4870). The same shape as `billing_address`. "Shipping address is the same as billing" is a form convenience only — there is no stored flag; ticking it saves the billing address as the shipping address. |
 
@@ -177,13 +177,19 @@ had at settlement time).
 
 The three #4870 fields are **not** in `parties.buyer`: the buyer block keeps
 exactly the six fields it had before this slice, and a test pins that key set
-exactly (`toEqual`) on both consumers — payment evidence and the
-settled-payment receipt. They are stored for the merchant-facing answer #4871
+exactly (`toEqual`) on the output of `buyerPartyFromJoin`, which both
+consumers — payment evidence and the settled-payment receipt — map through,
+and a separate test pins the join fragment's selected columns, so the three
+fields cannot reach the buyer block through the join fragment (#4946). They are stored for the merchant-facing answer #4871
 builds; this slice sends nothing to any merchant. When a merchant does receive
-them, the receipt the MERCHANT writes is the merchant's own record: a merchant
-receipt showing the owner's email or address is kept as a bookkeeping record,
-and `DELETE /user/company-details` does not reach it. What the delete removes
-is Haven's copy — the one every future Haven read of the owner's details uses.
+them, a merchant receipt showing the owner's email or address is kept twice:
+by the merchant, and by Haven as the owner's own bookkeeping record — stored
+immutably in `merchant_receipts` and attached as a PDF in every accounting
+connection the owner has (Fortnox, Accounted, Igdrasil), retained under
+bokföringslagen 7 kap. 2 § (GDPR Art. 17(3)(b));
+`docs/architecture/13-checkout-details.md` § *The receipt flow*.
+`DELETE /user/company-details` reaches neither. What the delete removes is the
+details row — the one every future Haven read of the owner's details uses.
 
 The SDK mirrors this through its MAPPED, camelCase surfaces —
 `HavenClient.listReceipts()`/`listReceiptsPage()` produce `PaymentParties.buyer`
@@ -377,8 +383,8 @@ the form no longer repeats that detail.
   Business; nothing here is required for an agent or a payment to work. The
   receipt email and the two addresses (#4870) are part of the same consent:
   they are optional, saved by the same form and the same call, and the
-  sign-up email is only ever a prefill — it is not stored as a receipt email
-  until the owner saves.
+  sign-up email is only ever a prefill, shown only while no company details are
+  saved (#4946) — it is not stored as a receipt email until the owner saves.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, (asynchronously) validating the VAT number against
   VIES, and, for an agent the owner opts in, stating the country and VAT
@@ -400,8 +406,11 @@ the form no longer repeats that detail.
   the owner's behalf. The three #4870 fields are removed with the row by that
   same `DELETE` — they live on it, so there is no second erasure path to
   forget. A merchant receipt that already shows the owner's email or address
-  is the MERCHANT's own bookkeeping record and is not reached by that delete;
-  what Haven erases is its own copy, the one every future Haven read uses.
+  is kept by the merchant, and by Haven as the owner's bookkeeping record
+  (`merchant_receipts` and the accounting attachments, retained under
+  bokföringslagen 7 kap. 2 § / GDPR Art. 17(3)(b)); that delete reaches
+  neither. What it erases is the details row, the one every future Haven read
+  uses.
   Deleting the Haven account WOULD also
   remove these details (`user_id` is `ON DELETE CASCADE`), but account
   deletion is an operator action today — there is no self-serve

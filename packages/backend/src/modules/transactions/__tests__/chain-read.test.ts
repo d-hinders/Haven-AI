@@ -1,0 +1,227 @@
+/**
+ * The chain reads behind the merchant inbound index (#4903).
+ *
+ * What is pinned here and nowhere else: the by-hash read returns the USDC
+ * transfers the CHAIN says reached the account — never a caller's description
+ * of one — and it distinguishes "there is none" from "the chain could not be
+ * read". The range read returns every leg in the range with its exact log
+ * index, which is what makes a multi-leg transaction countable in full.
+ *
+ * The provider is mocked at the `getProvider` seam; the settlement token is the
+ * registry's own Base Sepolia USDC, so the token filter is exercised for real.
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ethers } from 'ethers'
+
+const mocks = vi.hoisted(() => ({ getProvider: vi.fn() }))
+
+vi.mock('../../../infra/chain/relayer-reads.js', () => ({ getProvider: mocks.getProvider }))
+
+import {
+  readInboundTransfersByTxHash,
+  readInboundTransfersInBlockRange,
+  resetBlockTimeCache,
+} from '../chain-read.js'
+
+const CHAIN = 84532
+/** Circle's canonical Base Sepolia USDC — the registry's settlement asset. */
+const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+const ACCOUNT = '0x' + 'aa'.repeat(20)
+const PAYER = '0x' + 'bb'.repeat(20)
+const OTHER = '0x' + 'cc'.repeat(20)
+const TX = '0x' + '11'.repeat(32)
+
+const IFACE = new ethers.Interface([
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+])
+
+function transferLog(opts: {
+  from?: string
+  to?: string
+  value?: bigint
+  index?: number
+  blockNumber?: number
+  token?: string
+  txHash?: string
+}) {
+  const encoded = IFACE.encodeEventLog(IFACE.getEvent('Transfer')!, [
+    opts.from ?? PAYER,
+    opts.to ?? ACCOUNT,
+    opts.value ?? 1_000_000n,
+  ])
+  return {
+    address: opts.token ?? USDC,
+    topics: encoded.topics,
+    data: encoded.data,
+    index: opts.index ?? 0,
+    blockNumber: opts.blockNumber ?? 100,
+    transactionHash: opts.txHash ?? TX,
+  }
+}
+
+function providerWith(opts: {
+  receipt?: unknown
+  logs?: unknown[]
+  blockTimestamp?: number
+  getReceiptError?: Error
+  getLogsError?: Error
+}) {
+  return {
+    getTransactionReceipt: vi.fn(async () => {
+      if (opts.getReceiptError) throw opts.getReceiptError
+      return opts.receipt ?? null
+    }),
+    getLogs: vi.fn(async () => {
+      if (opts.getLogsError) throw opts.getLogsError
+      return opts.logs ?? []
+    }),
+    getBlock: vi.fn(async () => ({ timestamp: opts.blockTimestamp ?? 1_790_000_000 })),
+    getBlockNumber: vi.fn(async () => 1_000),
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  resetBlockTimeCache()
+})
+
+describe('readInboundTransfersByTxHash (#4903)', () => {
+  it('returns the USDC legs the chain says reached the account, with their log indices', async () => {
+    const provider = providerWith({
+      receipt: {
+        hash: TX,
+        blockNumber: 100,
+        logs: [
+          transferLog({ index: 3, value: 1_000_000n }),
+          transferLog({ index: 7, value: 2_500_000n }),
+        ],
+      },
+    })
+    mocks.getProvider.mockReturnValue(provider)
+
+    const read = await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)
+
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.legs).toHaveLength(2)
+    expect(read.legs.map((leg) => leg.logIndex)).toEqual([3, 7])
+    expect(read.legs.map((leg) => leg.amountRaw)).toEqual(['1000000', '2500000'])
+    expect(read.legs.every((leg) => leg.payerAddress === PAYER.toLowerCase())).toBe(true)
+    expect(read.legs.every((leg) => leg.tokenAddress === USDC.toLowerCase())).toBe(true)
+    expect(read.legs[0]!.blockTime.toISOString()).toBe(
+      new Date(1_790_000_000 * 1000).toISOString(),
+    )
+  })
+
+  it('says there is none when the transaction did not pay the account', async () => {
+    const provider = providerWith({
+      receipt: {
+        hash: TX,
+        blockNumber: 100,
+        logs: [
+          // To someone else.
+          transferLog({ to: OTHER }),
+          // The right recipient, but a different token contract.
+          transferLog({ token: OTHER }),
+          // The right recipient and token, but zero value.
+          transferLog({ value: 0n }),
+        ],
+      },
+    })
+    mocks.getProvider.mockReturnValue(provider)
+
+    const read = await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)
+
+    expect(read).toEqual({ ok: true, legs: [] })
+  })
+
+  it('says there is none for an unknown or unmined hash', async () => {
+    mocks.getProvider.mockReturnValue(providerWith({ receipt: null }))
+    expect(await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)).toEqual({
+      ok: true,
+      legs: [],
+    })
+  })
+
+  it('reports an unreadable chain as NOT "none"', async () => {
+    mocks.getProvider.mockReturnValue(
+      providerWith({ getReceiptError: new Error('rpc down') }),
+    )
+    expect(await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+    })
+  })
+
+  it('never returns a caller-supplied value: the receipt is the only source', async () => {
+    // The caller names a payer and an amount; the chain says something else.
+    const provider = providerWith({
+      receipt: {
+        hash: TX,
+        blockNumber: 100,
+        logs: [transferLog({ from: OTHER, value: 42n, index: 1 })],
+      },
+    })
+    mocks.getProvider.mockReturnValue(provider)
+
+    const read = await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)
+
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.legs).toHaveLength(1)
+    expect(read.legs[0]!.payerAddress).toBe(OTHER.toLowerCase())
+    expect(read.legs[0]!.amountRaw).toBe('42')
+  })
+})
+
+describe('readInboundTransfersInBlockRange (#4903)', () => {
+  it('returns every leg in the range, each with its own log index', async () => {
+    const provider = providerWith({
+      logs: [
+        transferLog({ index: 0, blockNumber: 100, value: 1_000_000n }),
+        transferLog({ index: 4, blockNumber: 100, value: 2_000_000n }),
+        transferLog({ index: 9, blockNumber: 101, value: 3_000_000n }),
+      ],
+    })
+    mocks.getProvider.mockReturnValue(provider)
+
+    const read = await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 100, 101)
+
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.legs.map((leg) => leg.logIndex)).toEqual([0, 4, 9])
+    expect(read.legs.map((leg) => leg.amountRaw)).toEqual(['1000000', '2000000', '3000000'])
+    // One getLogs for the whole range (500-block default span), one getBlock
+    // per DISTINCT block.
+    expect(provider.getLogs).toHaveBeenCalledTimes(1)
+    expect(provider.getBlock).toHaveBeenCalledTimes(2)
+  })
+
+  it('chunks a range wider than the provider span', async () => {
+    const provider = providerWith({ logs: [] })
+    mocks.getProvider.mockReturnValue(provider)
+
+    await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 1_200)
+
+    // 500-block default span: [1..500], [501..1000], [1001..1200].
+    expect(provider.getLogs).toHaveBeenCalledTimes(3)
+  })
+
+  it('reports an unreadable chain as NOT an empty range', async () => {
+    mocks.getProvider.mockReturnValue(providerWith({ getLogsError: new Error('rpc down') }))
+    expect(await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 10)).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+    })
+  })
+
+  it('is empty when the range is empty', async () => {
+    const provider = providerWith({ logs: [] })
+    mocks.getProvider.mockReturnValue(provider)
+    expect(await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 10, 9)).toEqual({
+      ok: true,
+      legs: [],
+    })
+    expect(provider.getLogs).not.toHaveBeenCalled()
+  })
+})

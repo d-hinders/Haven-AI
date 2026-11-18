@@ -76,7 +76,7 @@ beforeEach(() => {
 })
 
 describe('the background-job table', () => {
-  it('is exactly these eleven jobs — a removed or added row fails', () => {
+  it('is exactly these twelve jobs — a removed or added row fails', () => {
     const rows = createBackgroundJobs({ log, pool })
     expect(rows.map((r) => r.name).sort()).toEqual([
       'catalog ingest',
@@ -84,6 +84,7 @@ describe('the background-job table', () => {
       'delegate balance monitor',
       'feedback sweep',
       'merchant catalogue refresh',
+      'merchant inbound index',
       'outbound bump',
       'passport sweep',
       'rate-limit sweep',
@@ -100,6 +101,7 @@ describe('the background-job table', () => {
       'catalog ingest': 300_000,
       'rate-limit sweep': 300_000,
       'feedback sweep': 300_000,
+      'merchant inbound index': 300_000,
       'delegate balance monitor': 3_600_000,
       'relayer balance monitor': 3_600_000,
       'outbound bump': 60_000,
@@ -119,6 +121,7 @@ describe('the background-job table', () => {
       'catalog ingest': LEADER_LOCK_KEYS.catalogIngest,
       'rate-limit sweep': LEADER_LOCK_KEYS.rateLimitSweep,
       'feedback sweep': LEADER_LOCK_KEYS.feedbackSweep,
+      'merchant inbound index': LEADER_LOCK_KEYS.merchantInboundIndex,
       'delegate balance monitor': LEADER_LOCK_KEYS.delegateBalanceMonitor,
       'relayer balance monitor': undefined,
       'outbound bump': LEADER_LOCK_KEYS.outboundBump,
@@ -140,8 +143,8 @@ describe('the background-job table', () => {
     expect(rows.some((r) => r.lockKey === LEADER_LOCK_KEYS.relayerBalanceMonitor)).toBe(false)
 
     const keys = rows.filter((r) => r.lockKey !== undefined).map((r) => r.lockKey)
-    expect(keys).toHaveLength(10)
-    expect(new Set(keys).size).toBe(10)
+    expect(keys).toHaveLength(11)
+    expect(new Set(keys).size).toBe(11)
   })
 
   it('builds the catalog-ingest monitor ONCE and holds it across ticks (#4407)', async () => {
@@ -161,15 +164,15 @@ describe('the background-job table', () => {
 })
 
 describe('startBackgroundJobs', () => {
-  it('starts all eleven rows and calls startRetrySweep exactly once', () => {
+  it('starts all twelve rows and calls startRetrySweep exactly once', () => {
     startBackgroundJobs({ log, pool })
 
     expect(mocks.startJobs).toHaveBeenCalledTimes(1)
     const [rows, deps] = mocks.startJobs.mock.calls[0]!
-    expect(rows).toHaveLength(11)
+    expect(rows).toHaveLength(12)
     expect(deps.log).toBe(log)
 
-    // The eleventh job is NOT a row: it self-registers inside
+    // The twelfth job is NOT a row: it self-registers inside
     // `modules/accounting/retry-sweep.ts` and is called from the entry point.
     expect(mocks.startRetrySweep).toHaveBeenCalledTimes(1)
     expect(mocks.startRetrySweep).toHaveBeenCalledWith({ log })

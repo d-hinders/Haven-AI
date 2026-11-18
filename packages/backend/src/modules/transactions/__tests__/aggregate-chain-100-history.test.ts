@@ -17,7 +17,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockIngest, mockErc20 } = vi.hoisted(() => ({ mockIngest: vi.fn(), mockErc20: vi.fn() }))
 
-vi.mock('../receive.js', () => ({ ingestInboundTransfers: (...a: unknown[]) => mockIngest(...a) }))
+vi.mock('../receive.js', () => ({
+  ingestInboundTransfers: (...a: unknown[]) => mockIngest(...a),
+  // #4903: the aggregate maps explorer rows to legs before ingesting. The
+  // mapping is pure and not under test here, so the mock passes rows through.
+  explorerRowsToLegs: (_account: unknown, rows: unknown[]) => rows,
+}))
 vi.mock('../../../infra/repositories/inbound-transfers.js', () => ({
   findOwnerUserIdForAccount: async () => 'user-1',
 }))

@@ -1,18 +1,28 @@
 /**
  * The receive side (#3333, epic #3328): ingest + match for the persisted
- * inbound-transfer index.
+ * inbound-transfer index. Widened by #4903 (epic #4885) to index a merchant
+ * account without anyone looking, and to read one transaction by hash.
  *
- * Two entry points, both keyed on the transaction hash:
+ * Three entry points:
  *
- * 1. `ingestInboundTransfers` — the explorer-derived ERC-20 legs that came
- *    back INBOUND to the account's address (from `aggregate.ts`'s fetchers,
- *    read verbatim — no second explorer call) are upserted into
- *    `inbound_transfers`. USDC only: the slice's asset is the settlement
- *    token, and the ledger is a USDC receive balance, not a general token
- *    inventory. Idempotent per (chain, hash, account).
+ * 1. `ingestInboundTransfers` — the legs that came back INBOUND to the
+ *    account's address are upserted into `inbound_transfers`. Two sources feed
+ *    it, and both are the chain's own answer: the explorer read the dashboard
+ *    already performs (`aggregate.ts`, no second explorer call) and the
+ *    scheduled merchant pass's `eth_getLogs` read (`merchant-index.ts`). USDC
+ *    only: the slice's asset is the settlement token, and the ledger is a USDC
+ *    receive balance, not a general token inventory. Idempotent per
+ *    (chain, hash, account, log index) — and per (chain, hash, account, payer,
+ *    amount) when the source reports no log index (migration 128).
  *
- * 2. `matchInboundTransferForAccount` — one row is linked to its evidence,
- *    by one of exactly two match kinds the issue names:
+ * 2. `readInboundTransferByTxHash` — one transaction by hash, read from the
+ *    CHAIN: the USDC transfers to the account, or none. This is the primitive
+ *    #4897 uses to check a sale record at once, and the one the owner ingest
+ *    route uses instead of trusting a caller's description of a transfer. It
+ *    never returns a caller-supplied value.
+ *
+ * 3. `matchInboundTransferForAccount` — one row is linked to its evidence, by
+ *    one of exactly two match kinds the issue names:
  *
  *    - `x402_payto`: an x402 settlement the account was `payTo` FOR —
  *      resolved by the settlement's own tx hash (the #3333 key), scoped to
@@ -42,10 +52,15 @@ import {
   matchInboundTransfer,
   markInboundTransferBalanceConsumed,
   findX402PaytoSettlementIntent,
+  listOwnAccountAddresses,
 } from '../../infra/repositories/inbound-transfers.js'
 import type { InboundMatchKind } from '../../infra/repositories/inbound-transfers.js'
 import type { RawERC20Transfer } from '../../infra/explorer-api.js'
-import type { FastifyBaseLogger } from 'fastify'
+import {
+  readInboundTransfersByTxHash,
+  type ChainInboundLeg,
+  type ChainReadResult,
+} from './chain-read.js'
 import type { Executor } from '../../infra/transaction.js'
 
 export interface IngestInboundTransferAccount {
@@ -53,6 +68,31 @@ export interface IngestInboundTransferAccount {
   userId: string
   accountAddress: string
   chainId: number
+}
+
+/**
+ * The logger shape the ingest needs. Structural, so both the request logger
+ * (`FastifyBaseLogger`) and the background-job logger (`JobLogger`) satisfy it
+ * without either being widened.
+ */
+export interface InboundIngestLogger {
+  warn: (obj: unknown, msg?: string) => void
+}
+
+/**
+ * One inbound USDC leg, in the shape the index writes. Both sources produce
+ * it: the explorer read (`explorerRowsToLegs`) and the chain read
+ * (`chain-read.ts`). `logIndex` is null only when the source does not report
+ * one.
+ */
+export interface InboundTransferLeg {
+  txHash: string
+  logIndex: number | null
+  payerAddress: string
+  tokenAddress: string
+  amountRaw: string
+  blockNumber: number | null
+  blockTime: Date
 }
 
 /**
@@ -69,51 +109,96 @@ function isSettlementToken(chainId: number, contractAddress: string): boolean {
 }
 
 /**
- * Ingest the inbound ERC-20 legs one explorer read produced. `rows` is the
- * RAW transfer list exactly as `aggregate.ts` received it (the caller passes
- * its own fetched leg through) — no second explorer call, no changed read.
- * Returns how many rows were newly indexed.
+ * A zero-value transfer is not a payment (#4903). It is left out for EVERY
+ * account, not only merchant accounts: the ingest and the row identity are
+ * shared, so a filter that applied to one kind of account would make the same
+ * transaction index differently depending on who owns the account.
  */
-export async function ingestInboundTransfers(
+function isZeroAmountRaw(value: string): boolean {
+  return /^0+$/.test(value)
+}
+
+/**
+ * The explorer rows one read produced, filtered to the legs this index tracks:
+ * inbound to the account, the settlement token by registry address, and a
+ * non-zero amount. `logIndex` rides through when the provider reports it
+ * (Blockscout v2 does; Alchemy's transfers API does not).
+ */
+export function explorerRowsToLegs(
   account: IngestInboundTransferAccount,
   rows: RawERC20Transfer[],
-  log: FastifyBaseLogger,
-): Promise<number> {
+): InboundTransferLeg[] {
   const addrLower = account.accountAddress.toLowerCase()
-  if (!account.userId || !addrLower) return 0
-  let inserted = 0
-
+  const legs: InboundTransferLeg[] = []
   for (const tx of rows) {
-    const toLower = tx.to.toLowerCase()
-    if (toLower !== addrLower) continue
-
-    // The settlement asset by registry ADDRESS, not by symbol: on Gnosis the
-    // asset is 'USDC.e' and only its registry address identifies it (F-1). A
-    // contract that merely names itself USDC is not the settlement asset.
+    if (tx.to.toLowerCase() !== addrLower) continue
     if (!isSettlementToken(account.chainId, tx.contractAddress)) continue
+    if (isZeroAmountRaw(tx.value)) continue
 
     // Explorer timestamps are unix seconds; the column is TIMESTAMPTZ.
     const seconds = Number.parseInt(tx.timeStamp, 10)
-    const blockTime = Number.isFinite(seconds) ? new Date(seconds * 1000) : new Date()
+    legs.push({
+      txHash: tx.hash,
+      logIndex: typeof tx.logIndex === 'number' ? tx.logIndex : null,
+      payerAddress: tx.from,
+      tokenAddress: tx.contractAddress,
+      amountRaw: tx.value,
+      blockNumber: Number.parseInt(tx.blockNumber, 10) || null,
+      blockTime: Number.isFinite(seconds) ? new Date(seconds * 1000) : new Date(),
+    })
+  }
+  return legs
+}
 
+/**
+ * Ingest the inbound legs one read produced. Returns how many rows were newly
+ * indexed (an adopted pre-migration row counts as already indexed).
+ *
+ * `sender_is_own_address` is decided HERE, at index time (#4903): the owner's
+ * own addresses are resolved once per pass and each leg is stamped with
+ * whether its payer is one of them. Recording it now means a later change to
+ * the owner's account set cannot rewrite history.
+ */
+export async function ingestInboundTransfers(
+  account: IngestInboundTransferAccount,
+  legs: InboundTransferLeg[],
+  log: InboundIngestLogger,
+): Promise<number> {
+  if (!account.userId || !account.accountAddress) return 0
+  if (legs.length === 0) return 0
+
+  let ownAddresses: Set<string>
+  try {
+    ownAddresses = new Set(await listOwnAccountAddresses(account.userId))
+  } catch (err) {
+    // The flag is a recorded fact, not a gate: a failed lookup leaves it false
+    // rather than dropping the payment from the index.
+    log.warn({ err, accountId: account.id }, 'Own-address lookup failed for inbound ingest')
+    ownAddresses = new Set()
+  }
+
+  let inserted = 0
+  for (const leg of legs) {
     try {
       const id = await insertInboundTransfer({
         accountId: account.id,
         userId: account.userId,
         chainId: account.chainId,
-        txHash: tx.hash,
-        payerAddress: tx.from,
-        tokenAddress: tx.contractAddress,
-        amountRaw: tx.value,
-        blockNumber: Number.parseInt(tx.blockNumber, 10) || null,
-        blockTime,
+        txHash: leg.txHash,
+        logIndex: leg.logIndex,
+        payerAddress: leg.payerAddress,
+        tokenAddress: leg.tokenAddress,
+        amountRaw: leg.amountRaw,
+        blockNumber: leg.blockNumber,
+        blockTime: leg.blockTime,
+        senderIsOwnAddress: ownAddresses.has(leg.payerAddress.toLowerCase()),
       })
       if (id) inserted += 1
     } catch (err) {
       // Ingestion is best-effort bookkeeping beside the live read: a failed
       // row is logged and skipped, never a failed transaction feed.
       log.warn(
-        { err, accountId: account.id, chainId: account.chainId, txHash: tx.hash },
+        { err, accountId: account.id, chainId: account.chainId, txHash: leg.txHash },
         'Inbound transfer ingest failed',
       )
     }
@@ -121,6 +206,98 @@ export async function ingestInboundTransfers(
 
   return inserted
 }
+
+/**
+ * One transaction by hash, read from the chain (#4903): the USDC transfers to
+ * the account, or none. `ok: false` means the chain could not be read — never
+ * "there is none". Nothing here comes from a caller.
+ */
+export async function readInboundTransferByTxHash(input: {
+  chainId: number
+  accountAddress: string
+  txHash: string
+}): Promise<ChainReadResult> {
+  return readInboundTransfersByTxHash(input.chainId, input.accountAddress, input.txHash)
+}
+
+/** A transaction hash: 32 bytes, no checksummed form. */
+export const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/
+
+/**
+ * The body fields the ingest route refuses. The chain is the only source of a
+ * transfer's facts, so a caller naming any of them is refused rather than
+ * silently ignored — otherwise it could believe it planted a row.
+ */
+const INGEST_CALLER_SUPPLIED_FIELDS = [
+  'payer_address',
+  'amount_raw',
+  'token_address',
+  'block_time',
+  'block_number',
+] as const
+
+export type IngestByTxHashResult =
+  | { ok: true; value: { ingested: boolean; legs_indexed: number; tx_hash: string } }
+  | { ok: false; failure: { status: 400 | 404 | 503; error: string } }
+
+/**
+ * The whole chain-verified ingest (#4903), so the route stays a thin shell:
+ * refuse a caller's description of the transfer, read the transaction from the
+ * chain, index the settlement-token legs to the account. The failure statuses
+ * are decided HERE, where the cause is known — never re-derived from message
+ * text at the route.
+ */
+export async function ingestInboundTransferByTxHash(input: {
+  account: IngestInboundTransferAccount
+  body: Record<string, unknown>
+  log: InboundIngestLogger
+}): Promise<IngestByTxHashResult> {
+  const supplied = INGEST_CALLER_SUPPLIED_FIELDS.filter(
+    (field) => input.body[field] !== undefined,
+  )
+  if (supplied.length > 0) {
+    return {
+      ok: false,
+      failure: {
+        status: 400,
+        error: `The ingest route reads the chain: it takes only tx_hash. ${supplied.join(', ')} not accepted.`,
+      },
+    }
+  }
+
+  const rawHash = input.body.tx_hash
+  const txHash =
+    typeof rawHash === 'string' && TX_HASH_PATTERN.test(rawHash) ? rawHash : null
+  if (!txHash) {
+    return { ok: false, failure: { status: 400, error: 'tx_hash is required' } }
+  }
+
+  const read = await readInboundTransfersByTxHash(
+    input.account.chainId,
+    input.account.accountAddress,
+    txHash,
+  )
+  if (!read.ok) {
+    // An RPC outage is "not known yet", never "this transaction did not pay
+    // you": nothing is written and the caller may retry.
+    return {
+      ok: false,
+      failure: { status: 503, error: 'The chain could not be read; nothing was indexed' },
+    }
+  }
+  if (read.legs.length === 0) {
+    return {
+      ok: false,
+      failure: { status: 404, error: 'No USDC transfer to this account in that transaction' },
+    }
+  }
+
+  const indexed = await ingestInboundTransfers(input.account, read.legs, input.log)
+  return { ok: true, value: { ingested: indexed > 0, legs_indexed: indexed, tx_hash: txHash } }
+}
+
+/** Re-exported so callers of the module do not reach into `chain-read.ts`. */
+export type { ChainInboundLeg, ChainReadResult }
 
 export interface ReceiptDrop {
   /** The on-chain transaction the receipt is for — the match key. */

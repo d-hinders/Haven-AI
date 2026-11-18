@@ -510,3 +510,25 @@ scenario drives the proxy yet, so a green run says nothing about it. It moves to
 the runtime list once #4892 deploys it with a harness address.
 
 - `packages/paywall-proxy/src/**`
+
+### The merchant inbound index
+
+#4903. This slice makes the chain the truth for merchant sales.
+`modules/transactions/chain-read.ts` reads one transaction by hash — the
+primitive #4897 uses to check a sale record at once — and a block range for the
+scheduled pass; both ask the chain, never a caller.
+`modules/transactions/merchant-index.ts` is the scheduled pass over every
+account marked as a merchant account, and `background-jobs.ts` carries the job
+row that starts it.
+
+Control, not runtime (the same rule as the lane cancel, the paywall proxy and
+merchant services): no QA scenario drives the scheduled pass or the by-hash read
+yet — #4897's route does not exist — so a green run says nothing about them.
+They move to the runtime list when a QA leg drives the by-hash read. The
+repository they write (`infra/repositories/inbound-transfers.ts`) and the
+migration are already on the runtime list through `infra/repositories/**` and
+`db/migrations/**`.
+
+- `packages/backend/src/background-jobs.ts`
+- `packages/backend/src/modules/transactions/chain-read.ts`
+- `packages/backend/src/modules/transactions/merchant-index.ts`

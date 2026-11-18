@@ -474,6 +474,29 @@ a QA leg drives the routes.
 - `packages/backend/src/domain/merchant-keys.ts`
 - `packages/backend/src/routes/merchant-keys.ts`
 
+### The merchant catalogue
+
+#4899. `modules/catalog/merchant-products.ts` reads the merchant's kit discovery
+document through the shared SSRF guard (`sameHostOnly`, so a redirect off the
+host is refused) and keeps the product list in `merchant_products` — its own
+table, never `merchant_catalog`, whose `pay_to` fills the recipient of a
+merchant-locked budget. `routes/merchant-catalogue.ts` is where the owner saves
+the deployment address and asks for a refresh; `domain/merchant-catalogue.ts`
+holds the two refusal codes. The document's `pay_to` is COMPARED against the
+account's own address and stored as a label; it is never used as a payment
+destination, and nothing here charges a price, creates a sale or names a
+recipient.
+
+Control, not runtime, on the same rule as #4895/#4896/#4893: no QA scenario
+calls `/merchant-catalogue`, so a green run says nothing about these three
+files. They move to the runtime list when a QA leg drives the routes. The
+migration is already covered by `db/migrations/**`, and the two sibling catalog
+files are already control globs.
+
+- `packages/backend/src/domain/merchant-catalogue.ts`
+- `packages/backend/src/modules/catalog/merchant-products.ts`
+- `packages/backend/src/routes/merchant-catalogue.ts`
+
 ### The merchant kit's paywall proxy
 
 #4893. The proxy decides when a payment counts as made and releases a paid

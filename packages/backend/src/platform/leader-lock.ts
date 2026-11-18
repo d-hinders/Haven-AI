@@ -105,6 +105,15 @@ export const LEADER_LOCK_KEYS = {
    * the ops console's #3602) filters `expires_at > NOW()` itself.
    */
   feedbackSweep: 811012,
+  /**
+   * Merchant catalogue refresh (#4899, epic #4885) — reads every configured
+   * kit deployment's discovery document and keeps its product list. Leader-gated
+   * because the tick is otherwise replicated: two replicas would read the same
+   * merchant's deployment at once and race the product upserts. Correctness does
+   * not depend on it (the writes are upserts in one transaction), but the
+   * merchant's access log would show Haven reading twice for no reason.
+   */
+  merchantCatalogueRefresh: 811013,
 } as const
 
 /**

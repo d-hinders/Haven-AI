@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   deliverCatalogAlerts: vi.fn(),
   ingestDiscoveredCatalog: vi.fn(),
   refreshCatalog: vi.fn(),
+  refreshAllMerchantCatalogues: vi.fn(),
   startJobs: vi.fn(),
   startRetrySweep: vi.fn(),
 }))
@@ -29,6 +30,11 @@ vi.mock('../modules/catalog/index.js', () => ({
   deliverCatalogAlerts: mocks.deliverCatalogAlerts,
   ingestDiscoveredCatalog: mocks.ingestDiscoveredCatalog,
   refreshCatalog: mocks.refreshCatalog,
+  // #4899: the merchant catalogue refresh row. The interval is a literal in
+  // the table (asserted as a number below), so the mock only has to supply the
+  // export the table imports.
+  MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS: 900_000,
+  refreshAllMerchantCatalogues: mocks.refreshAllMerchantCatalogues,
 }))
 
 vi.mock('../modules/accounting/index.js', () => ({
@@ -70,13 +76,14 @@ beforeEach(() => {
 })
 
 describe('the background-job table', () => {
-  it('is exactly these ten jobs — a removed or added row fails', () => {
+  it('is exactly these eleven jobs — a removed or added row fails', () => {
     const rows = createBackgroundJobs({ log, pool })
     expect(rows.map((r) => r.name).sort()).toEqual([
       'catalog ingest',
       'catalog refresh',
       'delegate balance monitor',
       'feedback sweep',
+      'merchant catalogue refresh',
       'outbound bump',
       'passport sweep',
       'rate-limit sweep',
@@ -99,6 +106,9 @@ describe('the background-job table', () => {
       'settlement sweep': 120_000,
       'submission reconcile': 60_000,
       'passport sweep': 300_000,
+      // #4899: the mockup's 15 minutes for an unreachable kit, and the
+      // schedule for a reachable one.
+      'merchant catalogue refresh': 900_000,
     })
   })
 
@@ -115,6 +125,7 @@ describe('the background-job table', () => {
       'settlement sweep': LEADER_LOCK_KEYS.settlementSweep,
       'submission reconcile': LEADER_LOCK_KEYS.submissionReconcile,
       'passport sweep': LEADER_LOCK_KEYS.passportSweep,
+      'merchant catalogue refresh': LEADER_LOCK_KEYS.merchantCatalogueRefresh,
     })
   })
 
@@ -129,8 +140,8 @@ describe('the background-job table', () => {
     expect(rows.some((r) => r.lockKey === LEADER_LOCK_KEYS.relayerBalanceMonitor)).toBe(false)
 
     const keys = rows.filter((r) => r.lockKey !== undefined).map((r) => r.lockKey)
-    expect(keys).toHaveLength(9)
-    expect(new Set(keys).size).toBe(9)
+    expect(keys).toHaveLength(10)
+    expect(new Set(keys).size).toBe(10)
   })
 
   it('builds the catalog-ingest monitor ONCE and holds it across ticks (#4407)', async () => {
@@ -150,12 +161,12 @@ describe('the background-job table', () => {
 })
 
 describe('startBackgroundJobs', () => {
-  it('starts all ten rows and calls startRetrySweep exactly once', () => {
+  it('starts all eleven rows and calls startRetrySweep exactly once', () => {
     startBackgroundJobs({ log, pool })
 
     expect(mocks.startJobs).toHaveBeenCalledTimes(1)
     const [rows, deps] = mocks.startJobs.mock.calls[0]!
-    expect(rows).toHaveLength(10)
+    expect(rows).toHaveLength(11)
     expect(deps.log).toBe(log)
 
     // The eleventh job is NOT a row: it self-registers inside

@@ -126,6 +126,7 @@ import * as userVisits from './124_user_visits.js'
 import * as anchorCalldataCallSemantics from './125_anchor_calldata_call_semantics.js'
 import * as merchantServices from './126_merchant_services.js'
 import * as merchantKeys from './127_merchant_keys.js'
+import * as merchantCatalogue from './130_merchant_catalogue.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -311,4 +312,8 @@ export const migrations: Migration[] = [
   anchorCalldataCallSemantics,
   merchantServices,
   merchantKeys,
+  // #4899: 128 and 129 are reserved by in-flight #4903 and #4870, so this
+  // slice takes the next free number AFTER them. Inserted in sorted order, so
+  // a later merge of 128/129 does not collide with it.
+  merchantCatalogue,
 ]

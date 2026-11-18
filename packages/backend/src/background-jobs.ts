@@ -23,6 +23,9 @@
  * config, it has an in-process overlap guard, and its leader function is
  * injectable, so it stays self-registering in
  * `modules/accounting/retry-sweep.ts` and `startBackgroundJobs` calls it.
+ *
+ * #4899 added the eleventh ROW (the merchant catalogue refresh), so the table
+ * is eleven rows and the retry sweep is the twelfth job.
  */
 import { config } from './config.js'
 import { deployableChainIds } from './domain/chains.js'
@@ -37,6 +40,8 @@ import {
   createCatalogIngestMonitor,
   deliverCatalogAlerts,
   ingestDiscoveredCatalog,
+  MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS,
+  refreshAllMerchantCatalogues,
   refreshCatalog,
   type CatalogIngestMonitor,
   type QueryableLike,
@@ -203,6 +208,23 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
         // log-only mode — the warn above is the whole alert and the
         // episode counts as handled.
         await deliverCatalogAlerts(report.alerts, (text) => sendCatalogOpsAlert(log, text))
+      },
+    },
+    {
+      name: 'merchant catalogue refresh',
+      intervalMs: MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS,
+      lockKey: LEADER_LOCK_KEYS.merchantCatalogueRefresh,
+      failureMessage: 'Merchant catalogue refresh failed',
+      // #4899: read every configured kit deployment's discovery document and
+      // keep its product list. The approved mockup (#4894) pins 15 minutes for
+      // an unreachable kit; the same tick is the schedule for a reachable one,
+      // so a recovered kit is picked up on the tick that retries a broken one.
+      // Leader-locked: two replicas would read the same merchant's deployment
+      // at once. One source's failure never stops the pass — each read is
+      // caught and counted, and the next tick retries it.
+      run: async () => {
+        const report = await refreshAllMerchantCatalogues()
+        if (report.read > 0) log.info(report, 'Merchant catalogues refreshed')
       },
     },
     {
@@ -467,7 +489,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the ten table rows, then the
+ * The one entry point `index.ts` calls: start the eleven table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

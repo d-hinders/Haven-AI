@@ -46,6 +46,7 @@ export type SsrfRefusalReason =
   | 'dns_failure'
   | 'redirect_budget'
   | 'redirect_missing_location'
+  | 'redirect_off_host'
   | 'response_too_large'
   | 'timeout'
   | 'transport_error'
@@ -397,6 +398,18 @@ export interface SafeFetchOptions {
   resolver?: AddressResolver
   transport?: PinnedTransport
   /**
+   * #4899: refuse a redirect whose host is not the host of the ORIGINAL
+   * request. The default policy re-validates every hop and follows up to
+   * `maxRedirects` of them ACROSS hosts, which is right for a probe whose
+   * target is a merchant's own endpoint and wrong for a document a merchant
+   * names as its catalogue: a redirect to another host would let the merchant
+   * point Haven's read at a document it does not serve, and the owner would
+   * see products that are not their deployment's. Same-host redirects are
+   * still followed (and still re-validated from scratch), so a deployment that
+   * canonicalises `www.` or a trailing slash keeps working.
+   */
+  sameHostOnly?: boolean
+  /**
    * Extra request headers, `safePostJson` only. Restricted to
    * `ALLOWED_CALLER_HEADERS` — a caller may carry an MCP session id, and may
    * NOT set `host`, `content-type`, `authorization`, or anything else that
@@ -472,6 +485,16 @@ async function safeFetch(
 
   const deadline = Date.now() + timeoutMs
   let current = raw
+  // #4899: the host the caller asked for, compared against every redirect hop
+  // when `sameHostOnly` is set. Parsed once, from the ORIGINAL url — a hop that
+  // redirects back to the original host is still the original host.
+  const originHost = (() => {
+    try {
+      return new URL(raw).hostname.toLowerCase()
+    } catch {
+      return null
+    }
+  })()
 
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     const remaining = deadline - Date.now()
@@ -535,7 +558,17 @@ async function safeFetch(
       }
       // Resolve relative Locations against the hop we are on, then loop —
       // the next iteration re-validates it completely.
-      current = new URL(res.location, checked.url).toString()
+      const next = new URL(res.location, checked.url)
+      // #4899: a caller that named ONE host does not follow a hop to another.
+      // Checked before the loop continues, so the off-host URL is never
+      // resolved, never connected to, and never read.
+      if (options.sameHostOnly === true && originHost !== null && next.hostname.toLowerCase() !== originHost) {
+        return refuse(
+          'redirect_off_host',
+          `HTTP ${res.status} redirects to ${next.hostname}, not the requested host ${originHost}`,
+        )
+      }
+      current = next.toString()
       continue
     }
 

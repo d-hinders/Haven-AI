@@ -9972,6 +9972,99 @@ export const openapiSpec = {
         },
       },
     },
+    '/merchant-catalogue': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getMerchantCatalogue',
+        summary: "Read the merchant account's catalogue and the last read.",
+        description:
+          "The catalogue as the owner's screens read it (#4899, epic #4885): the deployment address, the outcome of the last read, a mismatch if the document is not this account's deployment, and the product list. Scoped to the caller's merchant account, so another user's catalogue is never returned. A user with no merchant account, or one who has not saved an address, gets `deployment_url: null`, `last_read_status: 'never'` and an empty list. Read-only: nothing here charges a price, creates a sale or names a recipient.",
+        security: [{ DashboardJwt: [] }],
+        responses: {
+          '200': {
+            description: "The caller's merchant catalogue.",
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantCatalogueState' } } },
+          },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/merchant-catalogue/deployment': {
+      put: {
+        tags: ['Dashboard'],
+        operationId: 'saveMerchantCatalogueDeployment',
+        summary: "Save the kit deployment's address and read its discovery document.",
+        description:
+          "Stores the public address of the owner's kit deployment for the merchant account and reads `/.well-known/x402` from it immediately, so the answer to the save is the catalogue the document produced (#4899, epic #4885). The address is checked by the outbound guard's own policy before it is stored — https only, default port, no embedded credentials, no IP literal, no locally-bound name — and refused with `MERCHANT_CATALOGUE_URL_REFUSED` and the guard's `reason`; the read itself refuses a host that resolves into private or local space and a redirect that leaves the host. A read that fails does not fail the save: the address is stored, the outcome is recorded in `last_read_status`, and the last good product list stays in place. A CHANGED address retires the list the old one produced (its products are marked no longer offered, not deleted, so past sales keep their names). The product list is stored in its own table, never `merchant_catalog`.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['deployment_url'],
+                additionalProperties: false,
+                properties: {
+                  deployment_url: {
+                    type: 'string',
+                    format: 'uri',
+                    description:
+                      'The public address of the kit deployment, e.g. `https://api.example.com`. https only, default port, no credentials.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The address is saved and the catalogue is the result of reading it.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantCatalogueState' } } },
+          },
+          '400': {
+            ...errorResponse,
+            description:
+              'The address is not one Haven reads: error_code MERCHANT_CATALOGUE_URL_REFUSED, with the guard\'s `reason` (invalid_url, scheme_not_https, embedded_credentials, non_default_port, host_not_public).',
+          },
+          '401': errorResponse,
+          '409': {
+            ...errorResponse,
+            description: 'The caller has no merchant account yet: error_code MERCHANT_ACCOUNT_REQUIRED. Turn merchant services on first.',
+          },
+        },
+      },
+    },
+    '/merchant-catalogue/refresh': {
+      post: {
+        tags: ['Dashboard'],
+        operationId: 'refreshMerchantCatalogue',
+        summary: 'Read the deployment again, on request.',
+        description:
+          "Reads the saved deployment's discovery document again and answers the catalogue (#4899, epic #4885). The scheduled refresh reads every configured deployment every 15 minutes (`background-jobs.ts`), so this is the owner's \"read it now\". A failed read records its outcome and leaves the last good list in place; a document whose receiving address or network is not this account's is recorded as a mismatch and its products are not used. The request carries no body.",
+        security: [{ DashboardJwt: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: { type: 'object', additionalProperties: false, properties: {} },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The catalogue after the read.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantCatalogueState' } } },
+          },
+          '401': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'No merchant account (error_code MERCHANT_ACCOUNT_REQUIRED), or no deployment address saved yet (error_code MERCHANT_CATALOGUE_NOT_CONFIGURED).',
+          },
+        },
+      },
+    },
     '/merchants': {
       get: {
         tags: ['Catalog'],
@@ -11832,6 +11925,122 @@ export const openapiSpec = {
             pattern: '^sk_merchant_[0-9a-f]{48}$',
             description:
               'The secret. Returned by this call only; it is never stored and no later read can produce it.',
+          },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * #4899: one product in the merchant's catalogue, as the kit's discovery
+       * document lists it. `price_atomic` is the merchant's own atomic USDC
+       * amount as a decimal string — a LABEL here, never charged by this slice.
+       * `offered` is false for a product the document no longer lists; the row
+       * stays so a past sale keeps its name.
+       */
+      MerchantCatalogueProduct: {
+        type: 'object',
+        required: [
+          'product_id',
+          'name',
+          'description',
+          'route',
+          'model',
+          'price_atomic',
+          'network',
+          'output_token_cap',
+          'offered',
+          'removed_at',
+        ],
+        properties: {
+          product_id: {
+            type: 'string',
+            description: "The kit's stable product id (the products file's `id`), which a sale record also carries.",
+          },
+          name: { type: ['string', 'null'], description: 'The human name, or null when the document has none.' },
+          description: { type: ['string', 'null'] },
+          route: { type: ['string', 'null'], description: '`METHOD /path`, as the document spells it.' },
+          model: { type: ['string', 'null'] },
+          price_atomic: {
+            type: 'string',
+            pattern: '^[0-9]{1,78}$',
+            description:
+              'The price in whole atomic USDC units, as a decimal string. Display only: this slice never charges it.',
+          },
+          network: { type: 'string', description: "CAIP-2 identifier of the document's network." },
+          output_token_cap: { type: ['integer', 'null'], minimum: 0 },
+          offered: {
+            type: 'boolean',
+            description: 'False when the document no longer lists the product. The row is kept so a past sale keeps its name.',
+          },
+          removed_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'When the product stopped being offered, or null while it is offered.',
+          },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * #4899: the merchant catalogue — the deployment address, the outcome of
+       * the last read, and the product list. `last_read_status` is the outcome
+       * of the last ATTEMPT, so an unreachable kit shows `unreachable` with the
+       * last good list still in `products`. `mismatch` is true when the
+       * document's receiving address or network is not this account's; its
+       * products are not in the list.
+       */
+      MerchantCatalogueState: {
+        type: 'object',
+        required: [
+          'deployment_url',
+          'last_read_at',
+          'last_read_status',
+          'last_read_detail',
+          'mismatch',
+          'mismatch_reason',
+          'document_name',
+          'document_operator_name',
+          'document_network',
+          'document_pay_to',
+          'document_updated',
+          'products',
+        ],
+        properties: {
+          deployment_url: {
+            type: ['string', 'null'],
+            description: 'The public address of the kit deployment the owner saved, or null when none is saved.',
+          },
+          last_read_at: {
+            type: ['string', 'null'],
+            format: 'date-time',
+            description: 'When Haven last TRIED to read the document, or null when it never has.',
+          },
+          last_read_status: {
+            type: 'string',
+            enum: ['never', 'ok', 'unreachable', 'malformed', 'mismatch', 'refused'],
+            description:
+              'The outcome of the last read: `ok` (the list matches the document), `unreachable` (no answer), `malformed` (not a kit document), `mismatch` (not this account\'s deployment), `refused` (the address is not one Haven reads), `never` (no read yet).',
+          },
+          last_read_detail: {
+            type: ['string', 'null'],
+            description: 'The machine reason and detail of the last read, for the owner and for support.',
+          },
+          mismatch: {
+            type: 'boolean',
+            description: "True when the document's receiving address or network is not the merchant account's.",
+          },
+          mismatch_reason: { type: ['string', 'null'] },
+          document_name: { type: ['string', 'null'], description: 'What the last GOOD document called the endpoint.' },
+          document_operator_name: { type: ['string', 'null'] },
+          document_network: { type: ['string', 'null'], description: 'The CAIP-2 network the last good document named.' },
+          document_pay_to: {
+            type: ['string', 'null'],
+            description:
+              'The receiving address the last good document named. A LABEL: it is compared against the account\'s own address and never used as a payment destination.',
+          },
+          document_updated: { type: ['string', 'null'] },
+          products: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/MerchantCatalogueProduct' },
+            description: 'The product list, offered products first.',
           },
         },
         additionalProperties: false,

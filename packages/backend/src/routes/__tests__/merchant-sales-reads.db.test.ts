@@ -650,11 +650,18 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
                 ($1, 'catalogue-no-name', NULL, '1', 'eip155:84532')`,
         [m.accountId],
       )
+      // #4959: a product no longer offered keeps its catalogue name on past sales.
+      await db.query(
+        `INSERT INTO merchant_products (merchant_account_id, product_id, name, price_atomic, network, offered)
+         VALUES ($1, 'retired', 'Retired name', '1', 'eip155:84532', false)`,
+        [m.accountId],
+      )
       const sales: Array<[string, string, string | null, string]> = [
         [hash(0x91), 'in-catalogue', 'Record name', '2026-11-10T10:00:00Z'],
         [hash(0x92), 'only-in-record', 'Record name', '2026-11-10T11:00:00Z'],
         [hash(0x93), 'nowhere', null, '2026-11-10T12:00:00Z'],
         [hash(0x94), 'catalogue-no-name', 'Record name', '2026-11-10T13:00:00Z'],
+        [hash(0x95), 'retired', 'Old record name', '2026-11-10T14:00:00Z'],
       ]
       for (const [tx, productId, name, time] of sales) {
         await seedLeg(m, { tx, payer: addr(), amount: '100', time })
@@ -669,6 +676,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(labelOf('only-in-record')).toBe('Record name')
       expect(labelOf('nowhere')).toBe('nowhere')
       expect(labelOf('catalogue-no-name')).toBe('Record name')
+      expect(labelOf('retired')).toBe('Retired name')
 
       const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
       const byLabel = Object.fromEntries(

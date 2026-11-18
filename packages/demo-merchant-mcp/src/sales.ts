@@ -6,7 +6,8 @@
  * `reportSale` in `@haven_ai/merchant-payments`); this module decides only
  * what the demo merchant reports and holds what is in flight:
  *
- * - only the Sales product, only a payment `settled_onchain` (never the zero
+ * - only the Sales product and (#4953) the Stripe-recorded joke when the
+ *   recorder sends it to Stripe, only a payment `settled_onchain` (never the zero
  *   hash of `already_settled_earlier`), and once per transaction — a replayed
  *   payment header re-serves the same payment, and the dedupe drops it;
  * - fire-and-forget: `report` returns at once and never throws, so the buyer's
@@ -27,6 +28,7 @@ import {
 } from '@haven_ai/merchant-payments'
 import type { InvoiceJson } from './invoice.js'
 import type { Product } from './products.js'
+import { stripeRecordingDecision, type StripeRecording } from './stripe.js'
 import type { SettledPayment } from './x402.js'
 
 export const MERCHANT_SALES_ADDRESS_ENV = 'MERCHANT_SALES_ADDRESS'
@@ -35,8 +37,13 @@ export const MERCHANT_SALES_KEY_ENV = 'MERCHANT_SALES_KEY'
 export const SALES_KEY_PREFIX = 'sk_merchant_'
 
 export interface SalesConfig {
-  /** The Haven Sales account the Sales product is paid into. */
-  address: Address
+  /**
+   * The Haven Sales account the Sales product (`field_notes`) is paid into.
+   * Absent when `MERCHANT_SALES_ADDRESS` is unset or unusable: the Sales
+   * product is then not offered, and the joke's Stripe-settled sales (#4953)
+   * are still reported.
+   */
+  address?: Address
   /** The Sales key. Handed to the core reporter only. */
   salesKey: string
   /** Haven's API origin (`MERCHANT_HAVEN_BASE_URL`), no trailing slash. */
@@ -54,22 +61,60 @@ export interface ResolveSalesConfigInput {
 }
 
 const OFF = 'The Haven Sales product is not offered; every other product is unaffected.'
+const REPORTING_OFF = 'No sale is reported to Haven.'
 
 /**
- * Reads the Sales settings. With either setting unset, or any of them unusable,
- * the Sales product is off — with a warning naming the variable, never its
- * value — and the merchant otherwise starts exactly as without them.
+ * Reads the Sales settings. Two things hang off them (#4953):
+ *
+ * - reporting (the Sales key and the Haven base URL): with either unset or
+ *   unusable, nothing is reported — a warning names the variable, never its
+ *   value — and the merchant otherwise starts exactly as without them;
+ * - the Sales product's address (`MERCHANT_SALES_ADDRESS`): usable, it makes
+ *   `field_notes` offered; unset or unusable (with a warning), it is not
+ *   offered and the joke still reports. The address is checked as before:
+ *   checksummed, not `MERCHANT_ADDRESS`, not a Stripe deposit address.
  */
 export function resolveSalesConfig(input: ResolveSalesConfigInput): SalesConfig | undefined {
   const warn = input.warn ?? console.warn
   const addressRaw = input.addressRaw?.trim()
   const salesKey = input.keyRaw?.trim()
-  if (!addressRaw || !salesKey) {
-    if (addressRaw || salesKey) {
-      warn(`Set BOTH ${MERCHANT_SALES_ADDRESS_ENV} and ${MERCHANT_SALES_KEY_ENV}. ${OFF}`)
+  if (!salesKey) {
+    if (addressRaw) {
+      warn(`${MERCHANT_SALES_ADDRESS_ENV} needs ${MERCHANT_SALES_KEY_ENV}, which is unset. ${OFF} ${REPORTING_OFF}`)
     }
     return undefined
   }
+  if (!salesKey.startsWith(SALES_KEY_PREFIX)) {
+    warn(`${MERCHANT_SALES_KEY_ENV} is not a Sales key (it must start with ${SALES_KEY_PREFIX}). ${OFF} ${REPORTING_OFF}`)
+    return undefined
+  }
+  const baseRaw = input.havenBaseUrlRaw?.trim()
+  if (!baseRaw) {
+    warn(`Sales reporting needs MERCHANT_HAVEN_BASE_URL, which is unset. ${OFF} ${REPORTING_OFF}`)
+    return undefined
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(baseRaw)
+  } catch {
+    warn(`MERCHANT_HAVEN_BASE_URL is not a valid URL. ${OFF} ${REPORTING_OFF}`)
+    return undefined
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    warn(`MERCHANT_HAVEN_BASE_URL must be http(s). ${OFF} ${REPORTING_OFF}`)
+    return undefined
+  }
+  const havenBaseUrl = baseRaw.replace(/\/+$/, '')
+  const address = addressRaw ? usableSalesAddress(addressRaw, input, warn) : undefined
+  return { ...(address ? { address } : {}), salesKey, havenBaseUrl }
+}
+
+/** The Sales address if it passes #4950's checks; otherwise a warning and `undefined`. */
+function usableSalesAddress(
+  addressRaw: string,
+  input: ResolveSalesConfigInput,
+  warn: (message: string) => void,
+): Address | undefined {
   if (!isAddress(addressRaw, { strict: false }) || getAddress(addressRaw) !== addressRaw) {
     warn(`${MERCHANT_SALES_ADDRESS_ENV} is not a checksummed EVM address. ${OFF}`)
     return undefined
@@ -84,27 +129,7 @@ export function resolveSalesConfig(input: ResolveSalesConfigInput): SalesConfig 
     warn(`${MERCHANT_SALES_ADDRESS_ENV} must not be a Stripe deposit address. ${OFF}`)
     return undefined
   }
-  if (!salesKey.startsWith(SALES_KEY_PREFIX)) {
-    warn(`${MERCHANT_SALES_KEY_ENV} is not a Sales key (it must start with ${SALES_KEY_PREFIX}). ${OFF}`)
-    return undefined
-  }
-  const baseRaw = input.havenBaseUrlRaw?.trim()
-  if (!baseRaw) {
-    warn(`The Haven Sales product reports each sale to MERCHANT_HAVEN_BASE_URL, which is unset. ${OFF}`)
-    return undefined
-  }
-  let parsed: URL
-  try {
-    parsed = new URL(baseRaw)
-  } catch {
-    warn(`MERCHANT_HAVEN_BASE_URL is not a valid URL. ${OFF}`)
-    return undefined
-  }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    warn(`MERCHANT_HAVEN_BASE_URL must be http(s). ${OFF}`)
-    return undefined
-  }
-  return { address, salesKey, havenBaseUrl: baseRaw.replace(/\/+$/, '') }
+  return address
 }
 
 /**
@@ -143,13 +168,15 @@ export interface SalesReportingStats {
 }
 
 export interface SalesReporting {
-  /** The Sales account, the Sales product's receiving address. */
-  address: Address
+  /** The Sales account, the Sales product's receiving address; absent without `MERCHANT_SALES_ADDRESS`. */
+  address: Address | undefined
   /**
-   * Reports a settled payment if it is a new on-chain sale of the Sales
-   * product. Returns at once and never throws.
+   * Reports a settled payment if it is a new on-chain sale of a product that
+   * reports: the Sales product, or (#4953) a Stripe-recorded product whose
+   * payment `stripe` decided to send to Stripe. Returns at once and never
+   * throws.
    */
-  report(product: Product, payment: SettledPayment, receipt: InvoiceJson): void
+  report(product: Product, payment: SettledPayment, receipt: InvoiceJson, stripe?: StripeRecording): void
   stats(): SalesReportingStats
   /** Resolves when every report in flight has ended (tests and shutdown). */
   idle(): Promise<void>
@@ -188,9 +215,16 @@ export function createSalesReporting(config: SalesConfig, deps: SalesReportingDe
     else counts.gaveUp += 1
   }
 
-  function report(product: Product, payment: SettledPayment, receipt: InvoiceJson): void {
+  function report(product: Product, payment: SettledPayment, receipt: InvoiceJson, stripe?: StripeRecording): void {
     try {
-      if (!product.salesAccount || product.id !== payment.productId) return
+      if (product.id !== payment.productId) return
+      // The Sales product, when its account is set; or a Stripe-recorded
+      // product (the joke, #4953) exactly when the recorder sends it to
+      // Stripe: not `paid_other_address`, not anything but `settled_onchain`.
+      const reports =
+        (product.salesAccount === true && config.address !== undefined) ||
+        (product.stripeRecording === true && stripeRecordingDecision(stripe, product, payment) === 'record')
+      if (!reports) return
       if (payment.settlement !== 'settled_onchain') return
       const key = payment.txHash.toLowerCase()
       if (seen.has(key)) return

@@ -407,7 +407,7 @@ async function handle(
 
   const paymentToolInfo = extractPaymentToolInfo(body, {
     cdpConfigured: Boolean(options.cdpConfigured),
-    salesConfigured: Boolean(options.sales),
+    salesConfigured: Boolean(options.sales?.address),
   })
   const session = await getSession(req, body, options, sessions)
 
@@ -481,7 +481,8 @@ async function handle(
     // Haven accepting, refusing, answering slowly or not at all changes
     // nothing for the buyer. Only an on-chain settlement is reported, once per
     // transaction, so a replayed payment header sends nothing more.
-    options.sales?.report(paymentToolInfo.product, settled, receiptInvoice.json)
+    // #4953: and the Stripe-settled joke, after the Stripe record is made.
+    options.sales?.report(paymentToolInfo.product, settled, receiptInvoice.json, options.stripe)
   }
 
   try {
@@ -825,7 +826,7 @@ function buildDiscovery(
       : settlementMethods[0],
     products: offeredProducts({
       cdpConfigured: Boolean(options.cdpConfigured),
-      salesConfigured: Boolean(options.sales),
+      salesConfigured: Boolean(options.sales?.address),
     }).map((product) => ({
       id: product.id,
       name: product.name,

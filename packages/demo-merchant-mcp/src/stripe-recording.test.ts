@@ -12,18 +12,20 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired, SettleResponse, VerifyResponse } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
-import { TRUSTED_DELEGATION_MANAGER } from './products.js'
+import { PRODUCTS, TRUSTED_DELEGATION_MANAGER } from './products.js'
 import {
   PAYMENT_RESPONSE_HEADER,
   PAYMENT_SIGNATURE_HEADER,
   USDC_ADDRESS,
   createX402PaymentProcessor,
   type Eip3009Authorization,
+  type SettledPayment,
   type SettlementClient,
 } from './x402.js'
 import type { AuthorizationOutcome, CdpChainReader, CdpFacilitator } from './cdp.js'
 import { receiptNumberForTransaction } from './invoice.js'
 import { reconcileStripe } from './stripe-reconcile.js'
+import { createSalesReporting, type SalesConfig, type SalesReporting } from './sales.js'
 import type { SekRate } from './sek-rate.js'
 import type { ReceiptSellerDetails } from '@haven_ai/merchant-payments'
 import {
@@ -159,6 +161,8 @@ async function startServer(
     sekRate?: { current(): SekRate | undefined }
     /** #4856: the configured seller. */
     receiptSeller?: ReceiptSellerDetails
+    /** #4953: the Sales reporter (the joke's Stripe-settled sales). */
+    sales?: SalesReporting
   } = {},
 ) {
   const fakes = opts.fakes ?? makeFakes()
@@ -205,6 +209,7 @@ async function startServer(
     stripe: recording,
     ...(opts.sekRate ? { sekRate: opts.sekRate } : {}),
     ...(opts.receiptSeller ? { receiptSeller: opts.receiptSeller } : {}),
+    ...(opts.sales ? { sales: opts.sales } : {}),
   })
   servers.push(server)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
@@ -806,5 +811,195 @@ describe('the seller on the receipt comes from configuration (#4856)', () => {
     expect(fullReceiptOf(response).saljare).toEqual({ ...receiptSeller, crypto_address: DEPOSIT })
     expect(raw).toContain('Example Seller AB')
     expect(raw).not.toContain('Haven Demo AB')
+  })
+})
+
+// ── #4953: the joke's Stripe-settled sales reported to Haven ─────────────────
+const SALES_KEY = 'sk_merchant_test_do_not_log_0123456789'
+const HAVEN = 'https://haven.example'
+/** No `address`: the joke reports without MERCHANT_SALES_ADDRESS. */
+const JOKE_SALES_CONFIG: SalesConfig = { salesKey: SALES_KEY, havenBaseUrl: HAVEN }
+
+function mockHaven(mode: 'accept' | 'refuse' | 'unreachable' = 'accept') {
+  const posts: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = []
+  const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    posts.push({
+      url: String(url),
+      headers: init?.headers as Record<string, string>,
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+    })
+    if (mode === 'unreachable') throw new TypeError('fetch failed')
+    if (mode === 'refuse') {
+      return new Response(JSON.stringify({ error_code: 'no_payment_to_account', message: 'no' }), { status: 422 })
+    }
+    return new Response(JSON.stringify({ id: 'sale-1' }), { status: 201 })
+  }) as unknown as typeof fetch
+  return { posts, fetch: fetchMock }
+}
+
+function jokeSales(haven: ReturnType<typeof mockHaven>, lines: string[] = []) {
+  return createSalesReporting(JOKE_SALES_CONFIG, {
+    chainId: 8453,
+    fetch: haven.fetch,
+    sleep: async () => {},
+    retryDelaysMs: [1],
+    attemptTimeoutMs: 50,
+    log: (line) => lines.push(line),
+  })
+}
+
+describe('the joke reports its Stripe-settled sales to Haven (#4953)', () => {
+  it('reports one sale with the settled_onchain hash, without MERCHANT_SALES_ADDRESS, and not again on a replay', async () => {
+    const haven = mockHaven()
+    const sales = jokeSales(haven)
+    const { url, recording } = await startServer({ sales })
+    const header = await signedHeader(await challenge(url))
+    const { response } = await pay(url, header)
+    expect(response.status).toBe(200)
+    await recording!.flush()
+    await sales.idle()
+
+    expect(haven.posts).toHaveLength(1)
+    const receipt = receiptOf(response)
+    expect(haven.posts[0].url).toBe(`${HAVEN}/merchant/sales`)
+    expect(haven.posts[0].headers.Authorization).toBe(`Bearer ${SALES_KEY}`)
+    expect(haven.posts[0].body).toMatchObject({
+      version: 1,
+      tx_hash: CDP_TX,
+      product_id: 'joke',
+      payer: PAYER,
+      receipt_number: receipt.fakturanummer,
+      vat_treatment: receipt.momsbehandling,
+    })
+    expect(Object.keys(haven.posts[0].body)).not.toContain('receiving_address')
+
+    // The same payment header again re-serves the payment and reports nothing new.
+    const replay = await pay(url, header, 5)
+    expect(replay.response.status).toBe(200)
+    await sales.idle()
+    expect(haven.posts).toHaveLength(1)
+    expect(sales.stats().reported).toBe(1)
+  })
+
+  it('offers no Sales product without MERCHANT_SALES_ADDRESS, and with all three settings both products report', async () => {
+    const haven = mockHaven()
+    const sales = jokeSales(haven)
+    const noAddress = await startServer({ sales })
+    const discovery = (await (await fetch(`${noAddress.origin}/`)).json()) as { products: Array<{ id: string }> }
+    expect(discovery.products.map((p) => p.id)).not.toContain('field_notes')
+    expect(discovery.products.map((p) => p.id)).toContain('joke')
+
+    const withAddress = createSalesReporting(
+      { ...JOKE_SALES_CONFIG, address: '0xabcdef0123456789abcdef0123456789abcdef01' },
+      { chainId: 8453, fetch: haven.fetch, sleep: async () => {}, retryDelaysMs: [1], attemptTimeoutMs: 50, log: () => {} },
+    )
+    const all = await startServer({ sales: withAddress })
+    const listed = (await (await fetch(`${all.origin}/`)).json()) as { products: Array<{ id: string }> }
+    expect(listed.products.map((p) => p.id)).toEqual(expect.arrayContaining(['joke', 'field_notes']))
+    const { response } = await pay(all.url, await signedHeader(await challenge(all.url)))
+    expect(response.status).toBe(200)
+    await all.recording!.flush()
+    await withAddress.idle()
+    expect(haven.posts).toHaveLength(1)
+    expect(haven.posts[0].body.product_id).toBe('joke')
+  })
+
+  it('reports nothing for a payment the recorder skipped as paid_other_address', async () => {
+    const fakes = makeFakes()
+    fakes.authorizationUsed.mockResolvedValue(true)
+    fakes.findAuthorizationOutcome.mockResolvedValue({ kind: 'settled', txHash: CDP_TX } satisfies AuthorizationOutcome)
+    const before = await startServer({ depositAddress: OLD_DEPOSIT, fakes })
+    const header = await signedHeader(await challenge(before.url))
+
+    const haven = mockHaven()
+    const sales = jokeSales(haven)
+    const after = await startServer({
+      depositAddress: DEPOSIT,
+      fakes,
+      previousReceivingAddresses: [OLD_DEPOSIT],
+      sales,
+    })
+    const { response } = await pay(after.url, header)
+    await after.recording!.flush()
+    await sales.idle()
+
+    expect(response.status).toBe(200)
+    expect(after.stripe.requests).toHaveLength(0)
+    expect(haven.posts).toHaveLength(0)
+  })
+
+  it('reports nothing when Stripe is not configured (the joke is paid to MERCHANT_ADDRESS)', async () => {
+    const haven = mockHaven()
+    const sales = jokeSales(haven)
+    const { url } = await startServer({ stripe: false, sales })
+    const { response } = await pay(url, await signedHeader(await challenge(url)))
+    expect(response.status).toBe(200)
+    await sales.idle()
+    expect(haven.posts).toHaveLength(0)
+  })
+
+  it('reports nothing for a payment that was not settled_onchain', () => {
+    const haven = mockHaven()
+    const sales = jokeSales(haven)
+    const recording = { depositAddress: DEPOSIT } as unknown as StripeRecording
+    const payment = {
+      productId: 'joke',
+      settlementMethod: 'eip3009',
+      from: PAYER,
+      to: DEPOSIT,
+      value: 1n,
+      nonce: `0x${'12'.repeat(32)}`,
+      txHash: `0x${'00'.repeat(32)}`,
+      paymentResponse: { success: true, transaction: CDP_TX, network: 'eip155:8453' },
+      paymentResponseHeader: 'unused',
+      settlement: 'already_settled_earlier',
+      passportReference: null,
+      merchantReference: 'sale_TEST',
+    } as unknown as SettledPayment
+    sales.report(PRODUCTS.joke, payment, { fakturanummer: 'F', momsbehandling: 'SE_25' } as never, recording)
+    expect(sales.stats()).toEqual({ pending: 0, reported: 0, refused: 0, gaveUp: 0 })
+    expect(haven.posts).toHaveLength(0)
+  })
+
+  it('gives the buyer the same answer whatever Haven answers', async () => {
+    const answers: Array<{ status: number; paymentResponse: string | null; body: string }> = []
+    for (const mode of ['accept', 'refuse', 'unreachable'] as const) {
+      const sales = jokeSales(mockHaven(mode))
+      const { url, recording } = await startServer({ sales })
+      const header = await signedHeader(await challenge(url))
+      const { response, raw } = await pay(url, header)
+      await recording!.flush()
+      await sales.idle()
+      answers.push({ status: response.status, paymentResponse: response.headers.get(PAYMENT_RESPONSE_HEADER), body: raw })
+    }
+    for (const a of answers) {
+      expect(a.status).toBe(200)
+      expect(a.paymentResponse).toBe(answers[0].paymentResponse)
+    }
+    // A joke is chosen from the nonce, so the body may differ; the delivery must not.
+    for (const a of answers) expect(a.body).toContain('Haven Joke')
+  })
+
+  it('writes neither the Stripe key nor the Sales key to any log or response', async () => {
+    const written: string[] = []
+    const capture = (...args: unknown[]) => written.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '))
+    vi.spyOn(console, 'log').mockImplementation(capture)
+    vi.spyOn(console, 'warn').mockImplementation(capture)
+    vi.spyOn(console, 'error').mockImplementation(capture)
+    logs.length = 0
+    for (const mode of ['accept', 'refuse', 'unreachable'] as const) {
+      const sales = jokeSales(mockHaven(mode), written)
+      const { url, origin, recording } = await startServer({ sales })
+      const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
+      await recording!.flush()
+      await sales.idle()
+      written.push(raw, JSON.stringify([...response.headers]), await (await fetch(`${origin}/healthz`)).text())
+    }
+    written.push(...logs)
+    expect(written.some((line) => line.includes('[sales] sales_report_'))).toBe(true)
+    const all = written.join('\n')
+    expect(all).not.toContain(FAKE_KEY)
+    expect(all).not.toContain(SALES_KEY)
+    expect(all).not.toContain('sk_merchant_')
   })
 })

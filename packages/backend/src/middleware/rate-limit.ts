@@ -34,6 +34,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { MERCHANT_KEY_PREFIX } from '../domain/merchant-keys.js'
 
 /**
  * Bucket key for a request: a hash of the presented credential when there is
@@ -70,17 +71,46 @@ export const moneyPathRateLimit = {
 } as const
 
 /**
- * `POST /merchant/sales` (#4897): the merchant key's sale ingest. Keyed per
- * merchant key (`rateLimitKeyFor` buckets by credential). Higher than the
- * money-path tier because a busy merchant reports one record per settled
- * payment and a 425 retry resends the same record; 120/min is a request-storm
- * ceiling, not a throttle on real use. The route reads the chain per record,
- * so the ceiling is also what bounds the RPC cost one key can cause.
+ * The bucket key for the merchant routes (#4897): the `sk_merchant_` credential
+ * `merchantAuthMiddleware` would accept, from `Authorization: Bearer` first,
+ * else `X-API-Key`, hashed; the client IP when neither carries one. It is NOT
+ * `rateLimitKeyFor`, which hashes whatever `Authorization` holds: a caller
+ * sending `Authorization: Bearer junk-<i>` beside a valid key in `X-API-Key`
+ * would land in a new bucket on every request, and the same key sent through
+ * the two headers would get two buckets. Keying on the accepted credential
+ * makes the limit per key whichever header carries it.
+ */
+export function merchantRateLimitKeyFor(request: {
+  headers: Record<string, string | string[] | undefined>
+  ip: string
+}): string {
+  const auth = request.headers.authorization
+  const apiKey = request.headers['x-api-key']
+  let credential: string | null = null
+  if (typeof auth === 'string' && auth.startsWith(`Bearer ${MERCHANT_KEY_PREFIX}`)) {
+    credential = auth.slice(7)
+  } else if (typeof apiKey === 'string' && apiKey.startsWith(MERCHANT_KEY_PREFIX)) {
+    credential = apiKey
+  }
+  if (credential) {
+    return `merchant:${createHash('sha256').update(credential).digest('hex').slice(0, 32)}`
+  }
+  return `ip:${request.ip}`
+}
+
+/**
+ * `POST /merchant/sales` (#4897): the merchant key's sale ingest, 120/min per
+ * merchant key (`merchantRateLimitKeyFor`, so the same key shares one bucket
+ * through either header). Higher than the money-path tier because a busy
+ * merchant reports one record per settled payment and a 425 retry resends the
+ * same record. It is a request-storm ceiling, not a throttle on real use, and
+ * it bounds the RPC reads one key can cause.
  */
 export const merchantSalesRateLimit = {
   rateLimit: {
     max: 120,
     timeWindow: '1 minute',
+    keyGenerator: merchantRateLimitKeyFor,
   },
 } as const
 

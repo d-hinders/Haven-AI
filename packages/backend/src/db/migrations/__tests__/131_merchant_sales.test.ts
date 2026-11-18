@@ -102,6 +102,18 @@ describeDb('migration 131 — merchant sales (#4897)', () => {
     await expect(insertSale(b, '0x' + 'ab'.repeat(32))).resolves.toBeDefined()
   })
 
+  it('pins the unique index to exactly (chain_id, lower(tx_hash), account_id)', async () => {
+    const idx = await db.query<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes
+        WHERE schemaname = current_schema() AND tablename = 'merchant_sales'
+          AND indexname = 'idx_merchant_sales_chain_hash_account'`,
+    )
+    expect(idx.rows).toHaveLength(1)
+    const columns = idx.rows[0].indexdef.replace(/\s+/g, ' ')
+    expect(columns).toMatch(/^CREATE UNIQUE INDEX /)
+    expect(columns).toMatch(/\(chain_id, lower\(\(tx_hash\)::text\), account_id\)$/)
+  })
+
   it('closes held_by and vat_treatment, and defaults held_by to account', async () => {
     const a = await seedAccount()
     await expect(insertSale(a, '0x' + '01'.repeat(32), { heldBy: 'bank' })).rejects.toThrow()

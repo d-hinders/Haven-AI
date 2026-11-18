@@ -418,7 +418,7 @@ paid another account (#4897).
 ### The route and its answers
 
 `POST /merchant/sales`, authenticated by the merchant key alone (the account is
-the key's, never the record's), limited to 120 requests a minute per key. The
+the key's, never the record's), limited to 120 requests a minute per key, whichever header carries it. The
 body is the record above, with no other field. Every answer below is documented
 in Haven's OpenAPI spec, and a refusal carries `error` and `error_code` with the
 same machine-readable code, and `message` in words.
@@ -438,7 +438,8 @@ The sale carries the amount, payer, token and time Haven read from the chain.
 When one transaction carries several USDC transfers into the account, the sale
 attaches to the transaction: its amount is the sum of the transfers that do not
 come from the owner's own addresses, and its payer is the single sender when
-every transfer shares one, otherwise "several payers". A sale is its own record,
+every revenue transfer shares one, otherwise "several payers" (an own leg beside
+one customer leg is the customer's sale). A sale is its own record,
 not a match kind: it cannot block a receipt or an x402 match and it does not
 change the receive balance.
 

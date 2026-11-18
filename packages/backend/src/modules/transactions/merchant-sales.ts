@@ -148,21 +148,25 @@ export function saleFactsFromLegs(
   senderIsOwnAddress: boolean
 } {
   let revenue = 0n
-  let allOwn = true
-  const payers = new Set<string>()
+  const revenuePayers = new Set<string>()
+  const allPayers = new Set<string>()
   for (const leg of legs) {
     const payer = leg.payerAddress.toLowerCase()
-    payers.add(payer)
+    allPayers.add(payer)
     if (ownAddresses.has(payer)) continue
-    allOwn = false
+    revenuePayers.add(payer)
     revenue += BigInt(leg.amountRaw)
   }
+  // The payer is attributed over the legs that count as revenue, so one own leg
+  // beside one customer leg is the customer's sale, not "several payers". With
+  // no revenue leg (an own-only transaction) it is read over all legs.
+  const payers = revenuePayers.size > 0 ? revenuePayers : allPayers
   const single = payers.size === 1 ? [...payers][0] : null
   return {
     amountRaw: revenue.toString(),
     payerAddress: single,
     severalPayers: payers.size > 1,
-    senderIsOwnAddress: allOwn,
+    senderIsOwnAddress: revenuePayers.size === 0,
   }
 }
 
@@ -255,7 +259,13 @@ export async function ingestMerchantSale(input: {
   // Lost a race on the unique index: the winner's row is the answer.
   const winner = await findMerchantSale(merchant.account_id, merchant.chain_id, txHash)
   if (!winner) {
-    return fail(503, 'chain_unavailable', 'The sale could not be stored; nothing was changed. Try again.')
+    // The row that beat this insert is gone again (cleared between the two
+    // statements): the record changed while it was being written.
+    return fail(
+      409,
+      'sale_record_conflict',
+      'The sale record for this transaction changed while it was being written. Read it again and resend if it is still wanted.',
+    )
   }
   return answerFor(winner, record)
 }

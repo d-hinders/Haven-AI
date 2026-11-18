@@ -10106,7 +10106,7 @@ export const openapiSpec = {
           '403': { ...errorResponse, description: 'Merchant services are turned off for the key\'s account: error_code MERCHANT_SERVICES_OFF.' },
           '409': {
             ...errorResponse,
-            description: 'error `sale_record_conflict`: this transaction already has a different sale record on the account. The first stands.',
+            description: 'error `sale_record_conflict`: this transaction already has a different sale record on the account, and the first stands. Also answered, with a message saying so, when the account\'s record for the transaction changed while this one was being written.',
           },
           '422': {
             ...errorResponse,

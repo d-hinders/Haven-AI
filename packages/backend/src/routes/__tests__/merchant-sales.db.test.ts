@@ -27,13 +27,23 @@ import rateLimit from '@fastify/rate-limit'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 
-const mocks = vi.hoisted(() => ({ read: vi.fn() }))
+const mocks = vi.hoisted(() => ({ read: vi.fn(), hideWinner: { on: false } }))
 
 vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../modules/transactions/chain-read.js')>()
   return {
     ...actual,
     readInboundTransactionByTxHash: (...a: unknown[]) => mocks.read(...a),
+  }
+})
+
+vi.mock('../../infra/repositories/merchant-sales.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../infra/repositories/merchant-sales.js')>()
+  return {
+    ...actual,
+    // Stages "the winner's row is gone again" for the lost-race fallback.
+    findMerchantSale: (...a: Parameters<typeof actual.findMerchantSale>) =>
+      mocks.hideWinner.on ? Promise.resolve(null) : actual.findMerchantSale(...a),
   }
 })
 
@@ -155,6 +165,7 @@ describeDb('POST /merchant/sales on the real database (#4897)', () => {
   beforeEach(async () => {
     await resetDb()
     vi.clearAllMocks()
+    mocks.hideWinner.on = false
   })
 
   function post(secret: string, body: Record<string, unknown>) {
@@ -413,12 +424,43 @@ describeDb('POST /merchant/sales on the real database (#4897)', () => {
       expect(res.statusCode).toBe(201)
       expect(res.json()).toMatchObject({
         amount_raw: '1000000',
-        several_payers: true,
+        // The payer is read over the legs that count as revenue: the customer's.
+        payer_address: PAYER,
+        several_payers: false,
         sender_is_own_address: false,
       })
       // The index flags the own legs by the same set.
       const flags = (await inboundFor(m.accountId)).rows.map((r) => [r.log_index, r.sender_is_own_address])
       expect(flags).toEqual([[1, false], [2, true], [3, true], [4, true]])
+    })
+
+    it('attributes a transaction with one own leg and one customer leg to the customer, not "several payers"', async () => {
+      const m = await seedMerchant()
+      const delegate = addr()
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address) VALUES ($1, 'a', $2)`, [m.userId, delegate])
+      chainShows([leg(delegate, '4000000', 1), leg(PAYER, '1000000', 2)])
+      const res = await post(m.secret, record())
+      expect(res.json()).toMatchObject({
+        amount_raw: '1000000',
+        payer_address: PAYER,
+        several_payers: false,
+        sender_is_own_address: false,
+      })
+    })
+
+    it('reads an own-only transaction over all its legs: two own senders are "several payers"', async () => {
+      const m = await seedMerchant()
+      const d1 = addr()
+      const d2 = addr()
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address) VALUES ($1, 'a', $2), ($1, 'b', $3)`, [m.userId, d1, d2])
+      chainShows([leg(d1, '4000000', 1), leg(d2, '5000000', 2)])
+      const res = await post(m.secret, record())
+      expect(res.json()).toMatchObject({
+        amount_raw: '0',
+        payer_address: null,
+        several_payers: true,
+        sender_is_own_address: true,
+      })
     })
 
     it('records a transaction paid only from own addresses with no revenue, flagged', async () => {
@@ -502,6 +544,59 @@ describeDb('POST /merchant/sales on the real database (#4897)', () => {
     })
   })
 
+  describe('two records racing for one transaction', () => {
+    /** Both requests reach the chain read before either writes, so both try to insert. */
+    function holdUntilBoth(legs: ReturnType<typeof leg>[]) {
+      let arrived = 0
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      mocks.read.mockImplementation(async () => {
+        arrived += 1
+        if (arrived >= 2) release()
+        await gate
+        return { ok: true, receiptFound: true, blockNumber: 100, latestBlock: 102, legs }
+      })
+    }
+
+    it('two different records: one is stored (201), the other is refused (409), and one row remains', async () => {
+      const m = await seedMerchant()
+      holdUntilBoth([leg(PAYER, '1000000', 4)])
+      const [a, b] = await Promise.all([
+        post(m.secret, record({ merchant_reference: 'sale_A' })),
+        post(m.secret, record({ merchant_reference: 'sale_B' })),
+      ])
+      expect([a.statusCode, b.statusCode].sort()).toEqual([201, 409])
+      const loser = a.statusCode === 409 ? a : b
+      expect(loser.json().error).toBe('sale_record_conflict')
+      const rows = (await salesFor(m.accountId)).rows
+      expect(rows).toHaveLength(1)
+      const winnerRef = (a.statusCode === 201 ? a : b).json().merchant_reference
+      expect(rows[0].merchant_reference).toBe(winnerRef)
+    })
+
+    it('two identical records: 201 and 200, and one row remains', async () => {
+      const m = await seedMerchant()
+      holdUntilBoth([leg(PAYER, '1000000', 4)])
+      const [a, b] = await Promise.all([post(m.secret, record()), post(m.secret, record())])
+      expect([a.statusCode, b.statusCode].sort()).toEqual([200, 201])
+      expect(a.json().id).toBe(b.json().id)
+      expect((await salesFor(m.accountId)).rows).toHaveLength(1)
+    })
+
+    it('answers 409 saying the record changed when the winner\'s row is gone again', async () => {
+      const m = await seedMerchant()
+      holdUntilBoth([leg(PAYER, '1000000', 4)])
+      mocks.hideWinner.on = true
+      const [a, b] = await Promise.all([post(m.secret, record()), post(m.secret, record())])
+      expect([a.statusCode, b.statusCode].sort()).toEqual([201, 409])
+      const loser = a.statusCode === 409 ? a : b
+      expect(loser.json()).toMatchObject({ error: 'sale_record_conflict' })
+      expect(loser.json().message).toMatch(/changed while it was being written/)
+    })
+  })
+
   describe('the record\'s own checks', () => {
     it('refuses an unknown version (400) and says version 1 is the only one; version 1 and no version pass', async () => {
       const m = await seedMerchant()
@@ -557,6 +652,36 @@ describeDb('POST /merchant/sales on the real database (#4897)', () => {
       }
       expect(last).toBe(429)
       expect((await post(other.secret, noop)).statusCode).toBe(400)
+    }, 60_000)
+
+    it('does not let a junk Authorization header open a new bucket beside a valid X-API-Key', async () => {
+      const m = await seedMerchant()
+      const noop = record({ version: 2 })
+      let last = 0
+      for (let i = 0; i < 121; i += 1) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/merchant/sales',
+          headers: { authorization: `Bearer junk-${i}`, 'x-api-key': m.secret },
+          payload: noop,
+        })
+        last = res.statusCode
+        if (i < 120) expect(last).toBe(400)
+      }
+      expect(last).toBe(429)
+    }, 60_000)
+
+    it('shares one bucket when the same key arrives through both headers', async () => {
+      const m = await seedMerchant()
+      const noop = record({ version: 2 })
+      let last = 0
+      for (let i = 0; i < 121; i += 1) {
+        const headers: Record<string, string> =
+          i % 2 === 0 ? { authorization: `Bearer ${m.secret}` } : { 'x-api-key': m.secret }
+        last = (await app.inject({ method: 'POST', url: '/merchant/sales', headers, payload: noop })).statusCode
+        if (i < 120) expect(last).toBe(400)
+      }
+      expect(last).toBe(429)
     }, 60_000)
   })
 

@@ -24,10 +24,11 @@ import { formatDateTime, truncate } from '@/lib/format'
 import { SALES_STATUS } from '@/lib/payment-status'
 import {
   isOnChainHash,
-  salesAmountText,
-  salesInFiat,
+  salesApprox,
+  salesFiatAmount,
   tokenText,
   usdcOf,
+  type SalesMoney,
   type SalesPayer,
   type SalesPaymentDetail,
 } from '@/lib/sales'
@@ -188,6 +189,9 @@ function OpenPanel({
   )
 
   const human = usdcOf(detail.amount_raw)
+  // The panel strikes its figure with the DETAIL read's own rate.
+  const money: SalesMoney = { currency, chainId, rates: detail.usdc_rates ?? undefined }
+  const fiatAmount = salesFiatAmount(human, money)
   const tokenFigure = tokenText(human).replace(/ USDC$/, '')
   const direction = own ? undefined : ('in' as const)
   const payerRow = payerDetail(detail)
@@ -307,9 +311,15 @@ function OpenPanel({
         <div data-testid="sales-payment-header" className="mb-5">
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-              {salesInFiat(currency) ? (
+              {fiatAmount !== null ? (
                 <>
-                  <Amount amount={human} currency="USD" direction={direction} size="lg" />
+                  <Amount
+                    amount={fiatAmount}
+                    currency={currency}
+                    approx={salesApprox(money, 'detail')}
+                    direction={direction}
+                    size="lg"
+                  />
                   <Amount value={tokenFigure} symbol="USDC" />
                 </>
               ) : (

@@ -12228,13 +12228,33 @@ export const openapiSpec = {
         properties: { count: { type: 'integer' }, amount_raw: { type: 'string' } },
         additionalProperties: false,
       },
+      /**
+       * #4963: today's USDC rate in each display currency, so the Sales page
+       * converts its USDC figures on the client with one rate per answer.
+       * A single currency is null alone (a zero quote); the whole field is
+       * null when the price read failed, and in the Sales-off empty answers.
+       */
+      MerchantSalesUsdcRates: {
+        type: 'object',
+        nullable: true,
+        required: ['usd', 'eur', 'sek'],
+        properties: {
+          usd: { type: 'number', nullable: true },
+          eur: { type: 'number', nullable: true },
+          sek: { type: 'number', nullable: true },
+        },
+        additionalProperties: false,
+        description: "Today's USDC price in each display currency (a display rate, not the rate at the time of sale). A currency is null when it has no usable quote; the whole field is null when the read failed or Sales is off.",
+      },
       MerchantSalesSummary: {
         type: 'object',
         required: [
           'revenue_raw', 'sales', 'average_sale_raw', 'without_product', 'own_moves', 'by_product',
           'by_product_other', 'by_payer', 'by_payer_other', 'unattributed', 'by_day', 'received_in_stripe',
+          'usdc_rates',
         ],
         properties: {
+          usdc_rates: { $ref: '#/components/schemas/MerchantSalesUsdcRates' },
           revenue_raw: { type: 'string', description: 'Atomic USDC units: sales plus payments without a product. Own moves are not in it.' },
           sales: { type: 'integer' },
           average_sale_raw: { type: 'string', description: "The sales' amount divided by `sales`, rounded down; 0 with no sales." },
@@ -12331,8 +12351,9 @@ export const openapiSpec = {
       },
       MerchantSalesPaymentsPage: {
         type: 'object',
-        required: ['payments', 'next_cursor'],
+        required: ['payments', 'next_cursor', 'usdc_rates'],
         properties: {
+          usdc_rates: { $ref: '#/components/schemas/MerchantSalesUsdcRates' },
           payments: { type: 'array', items: { $ref: '#/components/schemas/MerchantSalesPayment' } },
           next_cursor: { type: 'string', nullable: true, description: 'Pass as `cursor` for the next page; null on the last page.' },
         },
@@ -12343,8 +12364,9 @@ export const openapiSpec = {
           { $ref: '#/components/schemas/MerchantSalesPayment' },
           {
             type: 'object',
-            required: ['merchant_reference', 'legs'],
+            required: ['merchant_reference', 'legs', 'usdc_rates'],
             properties: {
+              usdc_rates: { $ref: '#/components/schemas/MerchantSalesUsdcRates' },
               merchant_reference: { type: 'string', nullable: true },
               legs: {
                 type: 'array',

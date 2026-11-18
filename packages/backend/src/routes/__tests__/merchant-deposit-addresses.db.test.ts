@@ -31,6 +31,12 @@ import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helper
 
 const mocks = vi.hoisted(() => ({ read: vi.fn() }))
 
+// #4963: the sales reads carry today's USDC rate; a fixed quote keeps these
+// tests off the network (#4217) and the figures they pin unaffected by it.
+vi.mock('../../infra/prices.js', () => ({
+  getTokenPrice: async () => ({ usd: 1, eur: 0.92, sek: 10.76 }),
+}))
+
 vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../modules/transactions/chain-read.js')>()
   return {

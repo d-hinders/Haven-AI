@@ -18,18 +18,19 @@ import {
   SALES_PAGE_SIZE,
   payerSubline,
   salesAmountText,
-  salesInFiat,
+  salesFiatAmount,
   usdcOf,
+  type SalesMoney,
   type SalesPayment,
 } from '@/lib/sales'
 import type { UseSalesPaymentsResult } from '@/hooks/useSalesPayments'
 
-type DisplayCurrency = 'USD' | 'EUR' | 'SEK'
-
 /** The amount props a ledger row takes, in the display currency's mode. */
-function rowAmount(raw: string, currency: DisplayCurrency) {
-  if (salesInFiat(currency)) return { value: '', fiat: { amount: usdcOf(raw), currency: 'USD' as const } }
-  return { value: salesAmountText(raw, currency).replace(/ USDC$/, ''), asset: 'USDC' }
+function rowAmount(raw: string, money: SalesMoney) {
+  const fiat = salesFiatAmount(usdcOf(raw), money)
+  // A row is never marked "≈" (the kinds table, #4963).
+  if (fiat !== null) return { value: '', fiat: { amount: fiat, currency: money.currency } }
+  return { value: salesAmountText(raw, money).replace(/ USDC$/, ''), asset: 'USDC' }
 }
 
 /**
@@ -49,19 +50,19 @@ function rowAmount(raw: string, currency: DisplayCurrency) {
  */
 export function SalesLedgerRow({
   payment,
-  currency,
+  money,
   merchantName,
   insetDivider,
   onOpen,
 }: {
   payment: SalesPayment
-  currency: DisplayCurrency
+  money: SalesMoney
   merchantName: string
   insetDivider: boolean
   onOpen: () => void
 }) {
   const shared = {
-    ...rowAmount(payment.amount_raw, currency),
+    ...rowAmount(payment.amount_raw, money),
     timestamp: formatClockTime(payment.block_time),
     density: 'compact' as const,
     insetDivider,
@@ -114,7 +115,7 @@ export function SalesPaymentsList({
   list,
   total,
   revenueText,
-  currency,
+  money,
   merchantName,
   onOpenPayment,
 }: {
@@ -122,7 +123,7 @@ export function SalesPaymentsList({
   /** Every payment the period has, from the summary — never the loaded count. */
   total: number
   revenueText: string
-  currency: DisplayCurrency
+  money: SalesMoney
   merchantName: string
   onOpenPayment: (txHash: string) => void
 }) {
@@ -175,7 +176,7 @@ export function SalesPaymentsList({
                   <SalesLedgerRow
                     key={payment.tx_hash}
                     payment={payment}
-                    currency={currency}
+                    money={money}
                     merchantName={merchantName}
                     insetDivider={index > 0}
                     onOpen={() => onOpenPayment(payment.tx_hash)}

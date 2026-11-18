@@ -35,6 +35,8 @@
  * merchant's statement, never a transfer.
  */
 import { labelSaleProduct } from '../catalog/index.js'
+import { settlementTokenForChain } from '../../domain/chains.js'
+import { type FiatValues, loadTokenRates } from '../../infra/fiat-values.js'
 import {
   findMerchantAccountForUser,
   readMerchantSetting,
@@ -69,6 +71,26 @@ export async function resolveSalesScope(userId: string): Promise<SalesScope | nu
   ])
   if (!setting?.enabled || account === null) return null
   return { accountId: account.id, userId, chainId: Number(account.chain_id) }
+}
+
+/**
+ * #4963: today's USDC rate in each display currency, for the page to convert
+ * its USDC figures on the client. The symbol is the chain registry's settlement
+ * token for the account's chain (never a literal), and every row of every read
+ * is that token, so one triple serves a whole answer. `null` when the read
+ * failed or the chain has no settlement token; one currency can be `null` alone
+ * (a zero quote). A DISPLAY rate at today's price: it books nothing and gates
+ * nothing, and a failed read costs the page its conversion, never its figures.
+ */
+export async function readUsdcRates(chainId: number): Promise<FiatValues | null> {
+  let symbol: string | undefined
+  try {
+    symbol = settlementTokenForChain(chainId)?.symbol
+  } catch {
+    return null
+  }
+  if (symbol === undefined) return null
+  return (await loadTokenRates([symbol])).get(symbol) ?? null
 }
 
 // --- period ---------------------------------------------------------------
@@ -245,6 +267,7 @@ export function emptySummary(): SummaryResult {
     unattributed: { payments: 0, amount_raw: ZERO },
     by_day: [],
     received_in_stripe: { count: 0, amount_raw: ZERO },
+    usdc_rates: null,
   }
 }
 
@@ -262,15 +285,18 @@ export interface SummaryResult {
   by_day: Array<{ day: string; payments: number; sales: number; revenue_raw: string }>
   /** #4952: sales received at a registered Stripe deposit address, apart from every figure above. */
   received_in_stripe: { count: number; amount_raw: string }
+  /** #4963: today's USDC rate per display currency; null when unread (and in the Sales-off answer). */
+  usdc_rates: FiatValues | null
 }
 
 export async function readSalesSummaryForOwner(
   scope: SalesScope,
   period: PeriodBounds,
 ): Promise<SummaryResult> {
-  const [raw, resolve] = await Promise.all([
+  const [raw, resolve, usdcRates] = await Promise.all([
     readSalesSummary(scope, period),
     buildPayerResolver(scope.userId, scope.chainId),
+    readUsdcRates(scope.chainId),
   ])
   const labels = await labelProducts(
     scope.accountId,
@@ -323,6 +349,7 @@ export async function readSalesSummaryForOwner(
       count: Number(raw.received_in_stripe.count),
       amount_raw: raw.received_in_stripe.amount_raw,
     },
+    usdc_rates: usdcRates,
   }
 }
 
@@ -362,6 +389,8 @@ function paymentView(row: PaymentRow, resolve: PayerResolver, labels: Map<string
 export interface PaymentsPage {
   payments: PaymentView[]
   next_cursor: string | null
+  /** #4963: today's USDC rate per display currency; null when unread (and in the Sales-off answer). */
+  usdc_rates: FiatValues | null
 }
 
 export async function readPaymentsPage(
@@ -369,9 +398,10 @@ export async function readPaymentsPage(
   period: PeriodBounds,
   options: { limit: number; cursor: PaymentsCursor | null },
 ): Promise<PaymentsPage> {
-  const [fetched, resolve] = await Promise.all([
+  const [fetched, resolve, usdcRates] = await Promise.all([
     listPayments(scope, period, options),
     buildPayerResolver(scope.userId, scope.chainId),
+    readUsdcRates(scope.chainId),
   ])
   const hasMore = fetched.length > options.limit
   const rows = hasMore ? fetched.slice(0, options.limit) : fetched
@@ -383,12 +413,15 @@ export async function readPaymentsPage(
   return {
     payments: rows.map((r) => paymentView(r, resolve, labels)),
     next_cursor: hasMore && last ? encodePaymentsCursor(last) : null,
+    usdc_rates: usdcRates,
   }
 }
 
 export interface PaymentDetailView extends PaymentView {
   merchant_reference: string | null
   legs: Array<{ log_index: number | null; payer: PayerView; amount_raw: string }>
+  /** #4963: today's USDC rate per display currency; null when unread. */
+  usdc_rates: FiatValues | null
 }
 
 function stripeSaleLegs(row: PaymentRow): PaymentLegRow[] {
@@ -405,11 +438,12 @@ export async function readPaymentDetail(
   if (row === null) return null
   // A Stripe-held sale has no indexed transfers: its chain facts are the sale
   // row's (#4952), shown as the one leg the sale was read from.
-  const [legs, resolve] = await Promise.all([
+  const [legs, resolve, usdcRates] = await Promise.all([
     row.held_by === 'stripe'
       ? Promise.resolve(stripeSaleLegs(row))
       : listPaymentLegs(scope, txHash),
     buildPayerResolver(scope.userId, scope.chainId),
+    readUsdcRates(scope.chainId),
   ])
   const labels = await labelProducts(
     scope.accountId,
@@ -423,6 +457,7 @@ export async function readPaymentDetail(
       payer: payerView(resolve, l.payer_address) as PayerView,
       amount_raw: l.amount_raw,
     })),
+    usdc_rates: usdcRates,
   }
 }
 

@@ -8,13 +8,15 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Three scenarios × two viewports (× the two schemes the projects run) =
+ * Four scenarios × two viewports (× the two schemes the projects run) =
  * `sales-<scenario>-<viewport>[-dark].png` under
  * `e2e/__screenshots__/sales.visual.spec.ts/`:
  *
  *   - `overview` — tiles, the not-counted notice, the by-day chart, By product,
  *     By payer and the day-grouped ledger, from one fixture whose figures agree
  *     (`salesSummary` and `salesPayments`, `fixtures/haven-api.ts`).
+ *   - `overview-sek` — the same fixture for a SEK user (#4963): converted at
+ *     today's rate, "≈" on the two totals.
  *   - `first-run` — the account has never been paid: "No sales yet" and the
  *     three setup steps.
  *   - `products` — the catalogue read OK: the table with exact USDC prices, the
@@ -53,6 +55,7 @@ import {
   SALES_FROZEN_NOW,
   seedAuthenticatedSession,
   serveSales,
+  serveSekUser,
   type SalesScenario,
 } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -70,8 +73,10 @@ const PIXEL_THRESHOLD = 0.02
 const ANCHOR_TIMEOUT_MS = 60_000
 
 interface Scenario {
-  name: 'overview' | 'first-run' | 'products'
+  name: 'overview' | 'overview-sek' | 'first-run' | 'products'
   serve: SalesScenario
+  /** Serve the SEK user (the converted Overview, #4963). */
+  sek?: boolean
   path: string
   assert: (page: Page, vp: { name: string }) => Promise<void>
 }
@@ -95,6 +100,22 @@ const SCENARIOS: Scenario[] = [
       await expect(byProduct.getByText('Chat completion').filter({ visible: true })).toHaveCount(1)
       await expect(page.getByTestId('sales-ledger').getByText('No product recorded')).toHaveCount(1)
       void vp
+    },
+  },
+  {
+    // #4963: the same fixture as `overview` for a SEK user — every figure is
+    // converted at the fixture's SEK rate, the two totals carry "≈", rows and
+    // breakdown lines do not.
+    name: 'overview-sek',
+    serve: 'overview',
+    sek: true,
+    path: '/sales',
+    async assert(page) {
+      await expect(page.getByTestId('sales-tiles')).toHaveCount(1)
+      await expect(page.getByTestId('sales-ledger')).toHaveCount(1)
+      await expect(page.getByTestId('stat-tile-revenue')).toContainText('\u2248')
+      await expect(page.getByTestId('stat-tile-revenue')).not.toContainText('USDC')
+      await expect(page.getByTestId('sales-ledger')).not.toContainText('\u2248')
     },
   },
   {
@@ -156,6 +177,7 @@ test.describe('sales visual regression (#4900)', () => {
         // BEFORE `goto`: the page reads `Date.now()` for its period on first render.
         await page.clock.setFixedTime(SALES_FROZEN_NOW)
         await serveSales(page, scenario.serve)
+        if (scenario.sek) await serveSekUser(page)
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
         await page.goto(scenario.path)

@@ -27,7 +27,7 @@
     "lines": 437
   },
   "packages/backend/src/routes/dashboard.ts": {
-    "lines": 1151
+    "lines": 1120
   },
   "packages/backend/src/routes/hybrid-accounts.ts": {
     "lines": 660

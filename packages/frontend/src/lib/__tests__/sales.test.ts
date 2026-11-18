@@ -12,6 +12,10 @@ import {
   previousSalesRange,
   revenueChangePercent,
   salesAmountText,
+  salesApprox,
+  salesRate,
+  salesTotalText,
+  type SalesMoney,
   salesChartDays,
   salesDayRange,
   salesRangeDays,
@@ -85,15 +89,47 @@ describe('amounts', () => {
     expect(usdcText('0')).toBe('0.00 USDC')
   })
 
+  const BASE = 8453
+  const RATES = { usd: 0.9998, eur: 0.92, sek: 10.5 }
+  const usd: SalesMoney = { currency: 'USD', chainId: BASE, rates: RATES }
+  const sek: SalesMoney = { currency: 'SEK', chainId: BASE, rates: RATES }
+  const eur: SalesMoney = { currency: 'EUR', chainId: BASE, rates: RATES }
+  const nbsp = '\u00a0'
+
   it('follows the sub-cent rule in USD', () => {
-    expect(salesAmountText('18000', 'USD')).toBe('$0.02')
-    expect(salesAmountText('4500', 'USD')).toBe('$0.0045')
-    expect(salesAmountText('2140000', 'USD')).toBe('$2.14')
+    expect(salesAmountText('18000', usd)).toBe('$0.02')
+    expect(salesAmountText('4500', usd)).toBe('$0.0045')
+    expect(salesAmountText('2140000', usd)).toBe('$2.14')
   })
 
-  it('reads in USDC, not a converted figure, where no rate is on the wire', () => {
-    expect(salesAmountText('2140000', 'SEK')).toBe('2.14 USDC')
-    expect(salesAmountText('4500', 'EUR')).toBe('0.0045 USDC')
+  it('strikes USD 1:1 from the registry peg, never reading rates.usd, and never marks it', () => {
+    expect(salesRate(usd)).toBe(1)
+    expect(salesAmountText('2140000', usd)).toBe('$2.14')
+    expect(salesAmountText('2140000', { ...usd, rates: undefined })).toBe('$2.14')
+    expect(salesApprox(usd, 'total')).toBe(false)
+    expect(salesTotalText('2140000', usd)).toBe('$2.14')
+  })
+
+  it('converts SEK and EUR by the rate and marks totals and details, never rows', () => {
+    expect(salesAmountText('2140000', sek)).toBe(`22,47${nbsp}kr`)
+    expect(salesAmountText('2140000', eur)).toBe(`1,97${nbsp}\u20ac`)
+    expect(salesApprox(sek, 'total')).toBe(true)
+    expect(salesApprox(eur, 'detail')).toBe(true)
+    expect(salesApprox(sek, 'row')).toBe(false)
+    expect(salesTotalText('2140000', sek)).toBe(`\u224822,47${nbsp}kr`)
+  })
+
+  it('reads in USDC, not a converted figure, where that currency has no rate or no rates are on the wire', () => {
+    expect(salesAmountText('2140000', { ...sek, rates: { ...RATES, sek: null } })).toBe('2.14 USDC')
+    expect(salesAmountText('4500', { ...eur, rates: null as never })).toBe('0.0045 USDC')
+    expect(salesAmountText('2140000', { ...sek, rates: undefined })).toBe('2.14 USDC')
+    expect(salesApprox({ ...sek, rates: undefined }, 'total')).toBe(false)
+    expect(salesTotalText('2140000', { ...sek, rates: undefined })).toBe('2.14 USDC')
+  })
+
+  it('does not treat an unknown chain as pegged: USD then needs its rate', () => {
+    expect(salesRate({ currency: 'USD', chainId: null, rates: undefined })).toBeNull()
+    expect(salesRate({ currency: 'USD', chainId: null, rates: RATES })).toBe(0.9998)
   })
 })
 

@@ -31,8 +31,9 @@ vi.mock('@/context/MerchantServicesContext', () => ({
   useMerchantServicesContext: () => mockMerchantServices(),
 }))
 
+const mockCurrency = vi.fn<() => 'USD' | 'EUR' | 'SEK'>(() => 'USD')
 vi.mock('@/hooks/usePreferences', () => ({
-  usePreferences: () => ({ currency: 'USD', setCurrency: vi.fn(), saving: false }),
+  usePreferences: () => ({ currency: mockCurrency(), setCurrency: vi.fn(), saving: false }),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -181,6 +182,11 @@ function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY
 
 const callsTo = (fragment: string) => mockGet.mock.calls.map((c) => String(c[0])).filter((p) => p.includes(fragment))
 
+/** The page's own rate and a different one on the payments pages: the Overview must use the summary's. */
+// usd is far from 1 on purpose: a USD figure that read it would show (#4963 review).
+const SUMMARY_RATES = { usd: 0.5, eur: 0.92, sek: 10 }
+const PAGE_RATES = { usd: 0.5, eur: 0.5, sek: 99 }
+
 async function renderPage() {
   render(<SalesClient />)
   await screen.findByTestId('sales-page')
@@ -191,6 +197,7 @@ beforeEach(() => {
   mockDelete.mockReset()
   mockReplace.mockReset()
   mockNotFound.mockClear()
+  mockCurrency.mockReturnValue('USD')
   mockMerchantServices.mockReset().mockReturnValue(setting('ready', true))
   window.history.replaceState(null, '', '/sales')
 })
@@ -380,6 +387,100 @@ describe('the Overview, from one fixture', () => {
     expect(within(byPayer).getAllByText('Other payers').length).toBeGreaterThan(0)
     expect(within(byPayer).getAllByText('Several payers').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: 'Transactions' }).getAttribute('href')).toBe('/transactions')
+  })
+})
+
+describe('the display currency (#4963)', () => {
+  const withRates = (usdc_rates: unknown) => ({ ...SUMMARY, usdc_rates })
+
+  it('reads every Overview figure in SEK from the summary rate, with "≈" on the two totals only', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    serve({
+      summary: withRates(SUMMARY_RATES),
+      // A different rate on the payments page: the rows must still use the summary's.
+      pages: [{ payments: PAYMENTS, next_cursor: null, usdc_rates: PAGE_RATES } as never],
+    })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    const fmt = (v: number) => new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK' }).format(v)
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain(`≈${fmt(21.4)}`)
+    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain(`≈${fmt(5.35)}`)
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).not.toContain('USDC')
+
+    const byProduct = screen.getByTestId('sales-by-product')
+    expect(byProduct.textContent).toContain(fmt(8.4))
+    expect(byProduct.textContent).not.toContain('≈')
+    expect(screen.getByTestId('sales-by-payer').textContent).not.toContain('≈')
+
+    // Rows: 0.42 USDC * 10 (the summary's rate), not * 99 (the page's).
+    const ledger = screen.getAllByTestId('sales-ledger')[0]
+    expect(ledger.textContent).toContain(fmt(4.2))
+    expect(ledger.textContent).not.toContain(fmt(41.58))
+    expect(ledger.textContent).not.toContain('≈')
+    // The list's summary line is a total: it carries "≈" like the Revenue tile (design review).
+    expect(screen.getByTestId('sales-payments-summary').textContent).toContain(`Revenue ≈${fmt(21.4)}`)
+    // The delta chip uses the figure's decimal comma, not "+100.0%".
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('+100,0')
+  })
+
+  it('strikes the chart axis in SEK at the summary rate, matching its values (#4963 review)', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    serve({ summary: withRates(SUMMARY_RATES) })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    const ticks = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent ?? '')
+    expect(ticks.length).toBeGreaterThan(0)
+    for (const tick of ticks) expect(tick).not.toContain('USDC')
+    // The largest day is 1.14 USDC = 11,40 kr. Unconverted ticks topped out near
+    // 1 kr; converted ones are on the kronor scale (the chart may draw its
+    // tallest bar past the top tick, as it always has).
+    const top = Math.max(...ticks.map((t) => Number(t.replace(/[^\d,]/g, '').replace(',', '.'))))
+    expect(top).toBeGreaterThanOrEqual(5)
+    // ...and drawn at the summary's 10, not the page's 99 (ticks near 100 kr).
+    expect(top).toBeLessThanOrEqual(20)
+    // The values on the same chart: 1.14 USDC at 10 = 11,40 kr, converted once.
+    const fmt = (v: number) => new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK' }).format(v)
+    const table = screen.getAllByTestId('chart-data-table')[0].textContent ?? ''
+    expect(table).toContain(fmt(11.4))
+    expect(table).not.toContain(fmt(114))
+  })
+
+  it('reads in EUR from the eur rate', async () => {
+    mockCurrency.mockReturnValue('EUR')
+    serve({ summary: withRates(SUMMARY_RATES) })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    const eur = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(2.14 * 0.92)
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain(`≈${eur}`)
+  })
+
+  it('keeps USD exact and unmarked, never reading the usd rate', async () => {
+    serve({ summary: withRates(SUMMARY_RATES) })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('$2.14')
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).not.toContain('≈')
+    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).not.toContain('≈')
+  })
+
+  it('reads in USDC when the currency has no rate', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    serve({ summary: withRates({ usd: 0.9998, eur: 0.92, sek: null }) })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('2.14 USDC')
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).not.toContain('≈')
+  })
+
+  it('reads in USDC when the whole rate read failed (null) or the field is missing (older backend)', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    for (const summary of [withRates(null), SUMMARY]) {
+      serve({ summary })
+      const view = render(<SalesClient />)
+      const tiles = await screen.findByTestId('sales-tiles')
+      expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('2.14 USDC')
+      view.unmount()
+    }
   })
 })
 

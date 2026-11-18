@@ -9,7 +9,14 @@
  *   merchant services are on (off, or no account, reads as the empty state);
  * - the period: whole UTC days, `from` inclusive, `to` inclusive;
  * - the keyset cursor over `(block_time, tx_hash)`;
- * - the payer KIND of every address, and the product LABEL of every sale.
+ * - the payer KIND of every address, and the product LABEL of every sale;
+ * - the filters and the search (#4959): the search term is matched HERE, in JS,
+ *   against the same names and labels the reads show (the caller's own
+ *   contacts, accounts and agents through `buildPayerDirectory`, and
+ *   `labelProducts` over the period's products), and handed to the repository
+ *   as addresses and product ids. The SQL never resolves a name, so it cannot
+ *   disagree with what the page shows, and another Haven user's name is never
+ *   matchable: it is in no index this file reads.
  *
  * ## Payer kinds, and what a read never says
  *
@@ -44,12 +51,16 @@ import {
 import { deleteMerchantSale } from '../../infra/repositories/merchant-sales.js'
 import { listOwnAccountAddresses } from '../../infra/repositories/inbound-transfers.js'
 import {
+  countPayments,
   findPayment,
   listAgentNamesByDelegate,
   listPaymentLegs,
   listPayments,
+  NO_FILTERS,
   type PaymentLegRow,
+  readPeriodFacets,
   readSalesSummary,
+  type SalesFilters,
   type PaymentKind,
   type PaymentRow,
   type PaymentsCursor,
@@ -189,6 +200,16 @@ export interface PayerView {
 
 export type PayerResolver = (address: string | null) => PayerView | null
 
+export interface PayerDirectory {
+  resolve: PayerResolver
+  /**
+   * #4959: every address of the caller's own data that resolves to a NAME (a
+   * contact, a named account, an agent's delegate current or replaced), as the
+   * resolver shows it. The search matches names against this list only.
+   */
+  named: PayerView[]
+}
+
 /**
  * The classifier for one user's reads, built from the caller's own data only.
  * Own beats contact (the recipient-naming order, #4882); anything else is a
@@ -198,13 +219,17 @@ export type PayerResolver = (address: string | null) => PayerView | null
  * names by delegate address, which no existing loader covers.
  */
 export async function buildPayerResolver(userId: string, chainId: number): Promise<PayerResolver> {
+  return (await buildPayerDirectory(userId, chainId)).resolve
+}
+
+export async function buildPayerDirectory(userId: string, chainId: number): Promise<PayerDirectory> {
   const [own, index, agentNames] = await Promise.all([
     listOwnAccountAddresses(userId),
     loadRecipientNameIndex(userId, []),
     listAgentNamesByDelegate(userId),
   ])
   const ownSet = new Set(own)
-  return (address) => {
+  const resolve: PayerResolver = (address) => {
     if (address === null) return null
     const key = address.toLowerCase()
     const named = resolveRecipientName(index, { address: key, chainId, x402ResourceUrl: null })
@@ -214,6 +239,18 @@ export async function buildPayerResolver(userId: string, chainId: number): Promi
     if (named.kind === 'contact') return { kind: 'contact', name: named.label, address: key }
     return { kind: 'wallet', name: null, address: key }
   }
+  const candidates = new Set<string>([
+    ...ownSet,
+    ...index.contacts.keys(),
+    ...index.accounts.map((a) => a.account_address.toLowerCase()),
+    ...agentNames.keys(),
+  ])
+  const namedViews: PayerView[] = []
+  for (const address of candidates) {
+    const view = resolve(address)
+    if (view !== null && view.name !== null) namedViews.push(view)
+  }
+  return { resolve, named: namedViews }
 }
 
 // --- labels ---------------------------------------------------------------
@@ -244,6 +281,91 @@ export async function labelProducts(
   return labels
 }
 
+// --- filters and search (#4959) ------------------------------------------
+
+/** The filters as the route hands them over, already validated by the spec. */
+export interface SalesFilterInput {
+  kind?: PaymentKind[]
+  product_id?: string[]
+  payer?: string[]
+  q?: string
+}
+
+/** A partial address: `0x` and at least four hex digits (6 characters). */
+const ADDRESS_PREFIX = /^0x[0-9a-f]{4,40}$/
+
+function foldCase(text: string): string {
+  return text.normalize('NFKC').toLowerCase()
+}
+
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
+/** True when the filter input filters nothing. */
+function noFilter(input: SalesFilterInput): boolean {
+  return input.kind === undefined && input.product_id === undefined && input.payer === undefined && input.q === undefined
+}
+
+/**
+ * The filters a read hands the repository. The search term is resolved here
+ * against the caller's own names and the period's product labels, so it
+ * matches what the page shows and nothing else.
+ */
+export async function resolveSalesFilters(
+  scope: SalesScope,
+  period: PeriodBounds,
+  input: SalesFilterInput,
+): Promise<SalesFilters> {
+  if (noFilter(input)) return NO_FILTERS
+  const filters: SalesFilters = {
+    kinds: input.kind ?? null,
+    productIds: input.product_id ?? null,
+    payers: input.payer?.map((a) => a.toLowerCase()) ?? null,
+    search: null,
+  }
+  if (input.q === undefined) return filters
+  const term = foldCase(input.q.trim())
+  const [directory, facets] = await Promise.all([
+    buildPayerDirectory(scope.userId, scope.chainId),
+    readPeriodFacets(scope, period),
+  ])
+  const labels = await labelProducts(
+    scope.accountId,
+    facets.products.map((p) => ({ productId: p.product_id, recordName: p.record_name })),
+  )
+  filters.search = {
+    receiptPattern: `%${escapeLike(term)}%`,
+    payers: directory.named.filter((v) => foldCase(v.name as string).includes(term)).map((v) => v.address),
+    productIds: facets.products
+      .map((p) => p.product_id)
+      .filter((id) => foldCase(id).includes(term) || foldCase(labels.get(id) ?? id).includes(term)),
+    addressPrefix: ADDRESS_PREFIX.test(term) ? `${term}%` : null,
+  }
+  return filters
+}
+
+export interface SalesFacets {
+  products: Array<{ product_id: string; label: string }>
+  payers: PayerView[]
+}
+
+/** #4959: every product and payer of the period, unfiltered and uncapped, for the filter menus. */
+export async function readSalesFacets(scope: SalesScope, period: PeriodBounds): Promise<SalesFacets> {
+  const [raw, resolve] = await Promise.all([
+    readPeriodFacets(scope, period),
+    buildPayerResolver(scope.userId, scope.chainId),
+  ])
+  const labels = await labelProducts(
+    scope.accountId,
+    raw.products.map((p) => ({ productId: p.product_id, recordName: p.record_name })),
+  )
+  return {
+    products: raw.products.map((p) => ({ product_id: p.product_id, label: labels.get(p.product_id) ?? p.product_id })),
+    payers: raw.payers.map((a) => resolve(a) as PayerView),
+  }
+}
+
 // --- reads ----------------------------------------------------------------
 
 const ZERO = '0'
@@ -271,6 +393,18 @@ export function emptySummary(): SummaryResult {
   }
 }
 
+export interface SummaryByDay {
+  day: string
+  payments: number
+  sales: number
+  revenue_raw: string
+  without_product_raw: string
+  /** #4959: the day's sales by product, for the products `by_product` names. */
+  by_product: Array<{ product_id: string; amount_raw: string }>
+  /** The day's sales of the products folded into `by_product_other`. */
+  other_products_raw: string
+}
+
 export interface SummaryResult {
   revenue_raw: string
   sales: number
@@ -279,10 +413,10 @@ export interface SummaryResult {
   own_moves: { count: number; amount_raw: string }
   by_product: Array<{ product_id: string; label: string; sales: number; amount_raw: string }>
   by_product_other: { products: number; sales: number; amount_raw: string }
-  by_payer: Array<{ payer: PayerView; payments: number; amount_raw: string }>
+  by_payer: Array<{ payer: PayerView; payments: number; amount_raw: string; last_paid_at: string }>
   by_payer_other: { payers: number; payments: number; amount_raw: string }
   unattributed: { payments: number; amount_raw: string }
-  by_day: Array<{ day: string; payments: number; sales: number; revenue_raw: string }>
+  by_day: SummaryByDay[]
   /** #4952: sales received at a registered Stripe deposit address, apart from every figure above. */
   received_in_stripe: { count: number; amount_raw: string }
   /** #4963: today's USDC rate per display currency; null when unread (and in the Sales-off answer). */
@@ -292,9 +426,11 @@ export interface SummaryResult {
 export async function readSalesSummaryForOwner(
   scope: SalesScope,
   period: PeriodBounds,
+  filterInput: SalesFilterInput = {},
 ): Promise<SummaryResult> {
+  const filters = await resolveSalesFilters(scope, period, filterInput)
   const [raw, resolve, usdcRates] = await Promise.all([
-    readSalesSummary(scope, period),
+    readSalesSummary(scope, period, filters),
     buildPayerResolver(scope.userId, scope.chainId),
     readUsdcRates(scope.chainId),
   ])
@@ -329,6 +465,7 @@ export async function readSalesSummaryForOwner(
       payer: payerView(resolve, p.payer) as PayerView,
       payments: Number(p.payments),
       amount_raw: p.amount_raw,
+      last_paid_at: new Date(p.last_paid_at).toISOString(),
     })),
     by_payer_other: {
       payers: Number(raw.by_payer_other.payers),
@@ -344,6 +481,9 @@ export async function readSalesSummaryForOwner(
       payments: Number(d.payments),
       sales: Number(d.sales),
       revenue_raw: d.revenue_raw,
+      without_product_raw: d.without_product_raw,
+      by_product: d.by_product,
+      other_products_raw: d.other_products_raw,
     })),
     received_in_stripe: {
       count: Number(raw.received_in_stripe.count),
@@ -389,6 +529,8 @@ function paymentView(row: PaymentRow, resolve: PayerResolver, labels: Map<string
 export interface PaymentsPage {
   payments: PaymentView[]
   next_cursor: string | null
+  /** #4959: how many payments the filter set has in the period, every page included. */
+  total: number
   /** #4963: today's USDC rate per display currency; null when unread (and in the Sales-off answer). */
   usdc_rates: FiatValues | null
 }
@@ -397,9 +539,12 @@ export async function readPaymentsPage(
   scope: SalesScope,
   period: PeriodBounds,
   options: { limit: number; cursor: PaymentsCursor | null },
+  filterInput: SalesFilterInput = {},
 ): Promise<PaymentsPage> {
-  const [fetched, resolve, usdcRates] = await Promise.all([
-    listPayments(scope, period, options),
+  const filters = await resolveSalesFilters(scope, period, filterInput)
+  const [fetched, total, resolve, usdcRates] = await Promise.all([
+    listPayments(scope, period, options, filters),
+    countPayments(scope, period, filters),
     buildPayerResolver(scope.userId, scope.chainId),
     readUsdcRates(scope.chainId),
   ])
@@ -413,6 +558,7 @@ export async function readPaymentsPage(
   return {
     payments: rows.map((r) => paymentView(r, resolve, labels)),
     next_cursor: hasMore && last ? encodePaymentsCursor(last) : null,
+    total,
     usdc_rates: usdcRates,
   }
 }

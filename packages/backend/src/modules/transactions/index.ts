@@ -157,8 +157,10 @@ export {
   parsePeriod,
   readPaymentDetail,
   readPaymentsPage,
+  readSalesFacets,
   readSalesSummaryForOwner,
   resolveSalesScope,
+  type SalesFilterInput,
 } from './merchant-sales-reads.js'
 // #4952: the Stripe deposit-address registry, consumed by
 // routes/merchant-deposit-addresses.ts.

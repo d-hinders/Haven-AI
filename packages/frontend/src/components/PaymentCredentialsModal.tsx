@@ -45,10 +45,10 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
   const [rotating, setRotating] = useState(false)
   const { toast } = useToast()
 
-  // Reset toggles + copy state every time the modal opens so we don't
-  // leak "Show" state from a previous open into a fresh view.
-  // Also reset `rotating` so a mid-flight rotation that was closed doesn't
-  // leave the button stuck in spinner state on reopen.
+  // Reset `rotating` every time the modal opens, so a mid-flight rotation that
+  // was closed doesn't leave the button stuck in spinner state on reopen. The
+  // credential's Show state lives in ShowOnceCredentialBlock, which `Modal`
+  // unmounts on close, so every open starts masked (pinned by the reopen test).
   useEffect(() => {
     if (open) {
       setRotating(false)

@@ -195,4 +195,16 @@ describe('revoke', () => {
     expect(await screen.findByText(/could not revoke the key/)).toBeTruthy()
     expect(toastSuccess).not.toHaveBeenCalled()
   })
+
+  it('does not carry a failed revoke\'s error into the next confirm (#4905 review)', async () => {
+    mockDelete.mockRejectedValue(new Error('down'))
+    await renderSection()
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke key' }))
+    expect(await screen.findByText(/could not revoke the key/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+    expect(screen.getByRole('dialog', { name: `Revoke ${PREFIX}…?` })).toBeTruthy()
+    expect(screen.queryByText(/could not revoke the key/)).toBeNull()
+  })
 })

@@ -41,7 +41,9 @@ export function SalesKeysSection() {
   const [revokeBusy, setRevokeBusy] = useState(false)
   const [revokeError, setRevokeError] = useState<string | null>(null)
 
-  const by = (id: string | null) => (id !== null && id === userId ? 'you' : 'someone else')
+  // The list is the caller's own keys (the route lists by the session's user), so an
+  // unknown user id (auth not read yet) reads as "you", never "someone else".
+  const by = (id: string | null) => (userId === null || id === null || id === userId ? 'you' : 'someone else')
 
   const confirmRevoke = async () => {
     if (revoking === null) return
@@ -76,7 +78,10 @@ export function SalesKeysSection() {
           ? `Last used ${timeAgo(key.last_used_at)}`
           : 'Never used',
       actions: revoked ? undefined : (
-        <Button variant="ghost" size="sm" onClick={() => setRevoking(key)}>
+        <Button variant="ghost" size="sm" onClick={() => {
+            setRevokeError(null)
+            setRevoking(key)
+          }}>
           Revoke
         </Button>
       ),
@@ -124,7 +129,11 @@ export function SalesKeysSection() {
 
       <ConfirmDialog
         open={revoking !== null}
-        onCancel={() => (revokeBusy ? undefined : setRevoking(null))}
+        onCancel={() => {
+          if (revokeBusy) return
+          setRevokeError(null)
+          setRevoking(null)
+        }}
         onConfirm={confirmRevoke}
         title={`Revoke ${revoking?.key_prefix ?? ''}…?`}
         body="Your kit stops being able to report sales with this key straight away. Payments still arrive and count; they show with no product until your kit has a new key."

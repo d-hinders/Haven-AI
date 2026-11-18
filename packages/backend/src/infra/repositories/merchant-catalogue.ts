@@ -341,6 +341,27 @@ export async function findCatalogueProductName(
   return result.rows[0]?.name ?? null
 }
 
+/**
+ * #4959: the catalogue names of many products in one read (the batched form of
+ * `findCatalogueProductName`). Products the catalogue does not know, or knows
+ * with no name, are absent from the map.
+ */
+export async function findCatalogueProductNames(
+  merchantAccountId: string,
+  productIds: readonly string[],
+  db: Executor = pool,
+): Promise<Map<string, string>> {
+  const names = new Map<string, string>()
+  if (productIds.length === 0) return names
+  const result = await db.query<{ product_id: string; name: string | null }>(
+    `SELECT product_id, name FROM merchant_products
+      WHERE merchant_account_id = $1 AND product_id = ANY($2::text[])`,
+    [merchantAccountId, [...productIds]],
+  )
+  for (const row of result.rows) if (row.name !== null) names.set(row.product_id, row.name)
+  return names
+}
+
 /** Every configured source, with the account address and chain the read needs. */
 export async function listCatalogueSources(
   db: Executor = pool,

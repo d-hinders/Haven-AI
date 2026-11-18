@@ -529,6 +529,11 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(txs((await agree(m.userId, '&q=main')).rows)).toEqual([hash(0xf)])
       // the merchant's reference is not searched
       expect((await agree(m.userId, '&q=ref-stripe')).rows).toEqual([])
+      // LIKE wildcards in the term are literal: `__` and `%%` match no receipt
+      // ("R-1", "STR-77"), where unescaped they would match every one.
+      expect((await agree(m.userId, '&q=__')).rows).toEqual([])
+      expect((await agree(m.userId, '&q=%25%25')).rows).toEqual([])
+      expect(txs((await agree(m.userId, '&q=r-_')).rows)).toEqual([])
       // search and a filter combined
       expect(txs((await agree(m.userId, '&q=alice&kind=no_product')).rows)).toEqual([hash(0xc)])
     })
@@ -548,23 +553,35 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       }
       // the search by an address prefix matches a leg too
       expect(txs((await agree(m.userId, `&q=${wallet6.slice(0, 12)}`)).rows)).toEqual([hash(0xe)])
+      // the shortest prefix is `0x` and four hex digits; three are not an address
+      expect(txs((await agree(m.userId, `&q=${wallet6.slice(0, 6)}`)).rows)).toContain(hash(0xe))
+      expect((await agree(m.userId, `&q=${wallet6.slice(0, 5)}`)).rows).toEqual([])
     })
 
     it("never matches another Haven user's account or agent by name; that wallet is found by its address only", async () => {
       const m = await seedMerchant()
       const other = await seedUser()
       const strangersAgent = addr()
+      const strangersAccount = addr()
       await db.query(`INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Zebra agent', $2, 'active')`, [other, strangersAgent])
       await db.query(
         `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, name)
          VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true, 'Zebra account')`,
-        [other, addr(), CHAIN],
+        [other, strangersAccount, CHAIN],
       )
+      // both of the other user's wallets pay this merchant
       await seedLeg(m, { tx: hash(0x8b), payer: strangersAgent, amount: '100', time: '2026-11-10T10:00:00Z' })
-      expect((await agree(m.userId, '&q=zebra')).rows).toEqual([])
-      expect((await agree(m.userId, '&q=zebra%20agent')).summary.revenue_raw).toBe('0')
-      expect(txs((await agree(m.userId, `&q=${strangersAgent.slice(0, 10)}`)).rows)).toEqual([hash(0x8b)])
-      expect(txs((await agree(m.userId, `&payer=${strangersAgent}`)).rows)).toEqual([hash(0x8b)])
+      await seedLeg(m, { tx: hash(0x8c), payer: strangersAccount, amount: '200', time: '2026-11-10T11:00:00Z' })
+      expect(txs((await agree(m.userId, '')).rows)).toEqual([hash(0x8b), hash(0x8c)].sort())
+      for (const term of ['zebra', 'zebra%20agent', 'zebra%20account']) {
+        const { summary, rows } = await agree(m.userId, `&q=${term}`)
+        expect(rows, term).toEqual([])
+        expect(summary.revenue_raw, term).toBe('0')
+      }
+      for (const [wallet, tx] of [[strangersAgent, hash(0x8b)], [strangersAccount, hash(0x8c)]] as const) {
+        expect(txs((await agree(m.userId, `&q=${wallet.slice(0, 10)}`)).rows)).toEqual([tx])
+        expect(txs((await agree(m.userId, `&payer=${wallet}`)).rows)).toEqual([tx])
+      }
     })
 
     it('a malformed filter is the plugin\'s 400 invalid_request; an unknown parameter is ignored', async () => {

@@ -47,10 +47,14 @@ const SUMMARY_MONTH_BUDGET_MS = 1000
 /**
  * #4959: the whole history filtered by one product and searched by a payer
  * address prefix (the summary), and the first page of one payer's payments
- * with its `total` (the list). Measured on the author's laptop: see the PR.
+ * with its `total` (the list). Measured on the #4959 author's machine while it
+ * was loaded (the same runs put the UNFILTERED whole-history summary at about
+ * 5 s on `dev` itself, against its own 3 s budget above): about 3.1 to 4.1 s and
+ * 3.0 to 4.5 s. Each budget is about 2.5 times the slowest of those, the rule
+ * this file states.
  */
-const FILTERED_SUMMARY_BUDGET_MS = 3000
-const FILTERED_LIST_BUDGET_MS = 3000
+const FILTERED_SUMMARY_BUDGET_MS = 10000
+const FILTERED_LIST_BUDGET_MS = 11000
 
 const volume = process.env.HAVEN_VOLUME_TESTS === '1'
 const suite = volume ? describeDb : describeDb.skip

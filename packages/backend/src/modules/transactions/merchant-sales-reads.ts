@@ -41,7 +41,7 @@
  * funds. The one write is the owner clearing a sale record: it deletes the
  * merchant's statement, never a transfer.
  */
-import { labelSaleProduct } from '../catalog/index.js'
+import { labelSaleProducts } from '../catalog/index.js'
 import { settlementTokenForChain } from '../../domain/chains.js'
 import { type FiatValues, loadTokenRates } from '../../infra/fiat-values.js'
 import {
@@ -256,29 +256,19 @@ export async function buildPayerDirectory(userId: string, chainId: number): Prom
 
 // --- labels ---------------------------------------------------------------
 
-const LABEL_CONCURRENCY = 8
-
 /**
  * The label of each distinct product: the catalogue's name when the id is known
- * there, else the record's name, else the product id (`labelSaleProduct` is the
- * first two steps; the id is the last).
+ * there, else the record's name, else the product id (`labelSaleProducts` is
+ * the first two steps, in one catalogue read for every product (#4959); the id
+ * is the last).
  */
 export async function labelProducts(
   accountId: string,
   products: ReadonlyArray<{ productId: string; recordName: string | null }>,
 ): Promise<Map<string, string>> {
-  const distinct = new Map<string, string | null>()
-  for (const p of products) if (!distinct.has(p.productId)) distinct.set(p.productId, p.recordName)
-  const entries = [...distinct.entries()]
+  const named = await labelSaleProducts({ merchantAccountId: accountId, products })
   const labels = new Map<string, string>()
-  for (let i = 0; i < entries.length; i += LABEL_CONCURRENCY) {
-    await Promise.all(
-      entries.slice(i, i + LABEL_CONCURRENCY).map(async ([productId, recordName]) => {
-        const label = await labelSaleProduct({ merchantAccountId: accountId, productId, recordName })
-        labels.set(productId, label ?? productId)
-      }),
-    )
-  }
+  for (const [productId, label] of named) labels.set(productId, label ?? productId)
   return labels
 }
 

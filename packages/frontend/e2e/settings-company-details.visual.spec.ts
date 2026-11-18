@@ -52,6 +52,29 @@ const SNAPSHOT_OPTIONS = {
 const MOBILE_CAPTURE_HEIGHT = 3600
 
 /**
+ * The desktop clip's own height (#4870 review round 3). Same reason as the
+ * mobile one above, one breakpoint over: #4870 added the receipt email and two
+ * structured address blocks, which grew the card to 1210px (empty) / 1262px
+ * (filled) — taller than the committed 800px desktop viewport. Playwright's
+ * element screenshot only paints the part of the element that is inside the
+ * viewport, so at 800px the whole **Shipping address (optional)** block and the
+ * Save / Remove actions came out as blank background in all four desktop
+ * baselines: the pixel gate then compared blank-to-blank over the new UI and a
+ * desktop regression there would have passed silently.
+ *
+ * 1400 clears the tallest card (1262) with room for the card's own bottom
+ * padding, so the whole card fits inside one viewport with nothing left to
+ * scroll to. The WIDTH still comes from `VIEWPORTS` (1280) — only the height
+ * changes, so the layout is the one CI renders. Height is not part of the clip
+ * filenames' identity, only the width class (`-desktop`) is.
+ */
+const DESKTOP_CAPTURE_HEIGHT = 1400
+
+/** The viewport height a capture of `vp` needs — see the two constants above. */
+const captureHeight = (vp: { name: 'desktop' | 'mobile'; height: number }): number =>
+  vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : DESKTOP_CAPTURE_HEIGHT
+
+/**
  * #3332 review round 2, design 1: scrolls `card` to the TOP of its scroll
  * area (`#main-content`, `AuthenticatedShell`'s `overflow-y-auto` region) —
  * not merely "into view", which `scrollIntoViewIfNeeded` already does and
@@ -138,7 +161,7 @@ test.describe('settings company details', () => {
     test(`empty — purpose text, blank fields behind Add company details (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
-      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
+      await page.setViewportSize({ width: vp.width, height: captureHeight(vp) })
       await serveCompanyDetails(page, EMPTY_DETAILS, 200)
       // #4359: the blank form is behind **Add company details** — click
       // through, then capture the form as before.
@@ -160,7 +183,7 @@ test.describe('settings company details', () => {
     test(`filled — the VIES badge says "Checked against VIES", never "verified" (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
-      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
+      await page.setViewportSize({ width: vp.width, height: captureHeight(vp) })
       await serveCompanyDetails(page, FILLED_DETAILS)
       const card = await openSettings(page)
       await expect(card.getByLabel('Legal name')).toHaveValue('Ada Lovelace AB')

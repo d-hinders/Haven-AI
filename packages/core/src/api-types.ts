@@ -3932,6 +3932,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchant/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report a sale: one record, accepted only against a transfer Haven read from the chain.
+         * @description The merchant key's one write (#4897, epic #4885). The body is the sale record of `docs/architecture/12-merchant-kit.md` section 5. Haven reads the transaction itself and stores the sale only when it finds a USDC transfer into the key's account; the account comes from the key and nowhere else. `amount` and `payer` are validated and stored nowhere: the sale's amount, payer, token and time are copied from the chain read, so a record that states a different amount changes nothing. When one transaction carries several USDC transfers into the account the record attaches to the transaction as a whole: its amount is the sum of the transfers that do not come from the owner's own addresses, and its payer is the single sender when all transfers share one, else "several payers". One record per transaction per account: an identical resend answers 200 with the stored sale and writes nothing, a different record for the same transaction answers 409 and the first stands. The retry answer (425 `transaction_not_visible`) is distinct from every refusal: the receipt is not found yet or has fewer than 3 confirmations, so the same record may be sent again after `Retry-After` seconds. A transaction that paid another Haven account and one that paid nobody get the same 422, so a key cannot test whether a hash paid another account. Every refusal carries `error` and `error_code` with the same machine-readable code, and `message` in words.
+         */
+        post: operations["ingestMerchantSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/merchants": {
         parameters: {
             query?: never;
@@ -5023,6 +5043,50 @@ export type components = {
              * @description When the key last made an ACCEPTED request, or null. Updated at most once a minute per key.
              */
             last_used_at: string | null;
+        };
+        MerchantSaleRecord: {
+            /** @description The sale-record schema version. 1 is the only version; absent means 1. */
+            version?: number;
+            /** @description The settlement transaction hash. */
+            tx_hash: string;
+            /** @description CAIP-2 identifier. Must be `eip155:<the key account's chain id>`. */
+            chain: string;
+            product_id: string;
+            product_name?: string;
+            /** @description Validated and stored nowhere: the sale's amount is read from the chain. */
+            amount: string;
+            /** @description Validated and stored nowhere: the sale's payer is read from the chain. */
+            payer: string;
+            merchant_reference: string;
+            receipt_number?: string;
+            /** @enum {string} */
+            vat_treatment?: "SE_25" | "REVERSE_CHARGE";
+        };
+        MerchantSale: {
+            /** Format: uuid */
+            id: string;
+            tx_hash: string;
+            chain: string;
+            record_version: number;
+            product_id: string;
+            product_name: string | null;
+            merchant_reference: string;
+            receipt_number: string | null;
+            /** @enum {string|null} */
+            vat_treatment: "SE_25" | "REVERSE_CHARGE" | null;
+            /** @description Atomic USDC units: the sum of the chain transfers that count as revenue (not from the owner's own addresses). Read from the chain, never from the record. */
+            amount_raw: string;
+            token_address: string;
+            /** @description The single sender when every transfer shares one; null otherwise. */
+            payer_address: string | null;
+            several_payers: boolean;
+            /** @description Every transfer in the transaction came from one of the owner's own addresses. */
+            sender_is_own_address: boolean;
+            block_number: number;
+            /** Format: date-time */
+            block_time: string;
+            /** Format: date-time */
+            created_at: string;
         };
         MerchantKeyListResponse: {
             keys: components["schemas"]["MerchantKey"][];
@@ -25139,6 +25203,162 @@ export interface operations {
             };
             /** @description No merchant account (error_code MERCHANT_ACCOUNT_REQUIRED), or no deployment address saved yet (error_code MERCHANT_CATALOGUE_NOT_CONFIGURED). */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ingestMerchantSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MerchantSaleRecord"];
+            };
+        };
+        responses: {
+            /** @description An identical resend: the sale already stored for this transaction. Nothing was written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSale"];
+                };
+            };
+            /** @description A new sale was stored. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSale"];
+                };
+            };
+            /** @description The record is malformed, or `version` is not 1: error `unsupported_record_version` (version 1 is the only version). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Missing, invalid or revoked merchant key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Merchant services are turned off for the key's account: error_code MERCHANT_SERVICES_OFF. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error `sale_record_conflict`: this transaction already has a different sale record on the account, and the first stands. Also answered, with a message saying so, when the account's record for the transaction changed while this one was being written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused, not retryable. error `chain_mismatch`: `chain` is not the key account's network. error `no_payment_to_account`: the transaction is confirmed and has no USDC transfer into the key's account (the same answer whether it paid another Haven account or nobody). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error `transaction_not_visible`: the retry answer. The receipt is not found yet, or has fewer than 3 confirmations. Send the same record again after `Retry-After` seconds. It is the only 4xx answer a reporter retries. */
+            425: {
+                headers: {
+                    /** @description Seconds to wait before sending the record again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        error: "transaction_not_visible";
+                        /** @enum {string} */
+                        error_code: "transaction_not_visible";
+                        message: string;
+                        retry_after_seconds: number;
+                    };
+                };
+            };
+            /** @description Rate limited: 120/min per merchant key. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error `chain_unavailable`: the chain could not be read; nothing was stored. Retry. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

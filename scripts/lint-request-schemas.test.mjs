@@ -328,6 +328,9 @@ describe('index.ts readers', () => {
       // ENFORCED (its save body is closed, so a body carrying anything but the
       // deployment address is refused by the schema).
       'routes/merchant-catalogue.ts',
+      // #4897: the sales ingest — the merchant key's one write, born ENFORCED
+      // (its body is closed: a record is exactly the section 5 shape).
+      'routes/merchant-sales.ts',
     ])
   })
 })

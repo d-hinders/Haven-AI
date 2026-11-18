@@ -8,6 +8,7 @@ import {
   accountingProviders,
   accountingConnection,
   accountingFeedStatus,
+  merchantServicesOff,
 } from './haven-api'
 
 /**
@@ -119,6 +120,9 @@ type ListConnectionsResponse =
   ApiOperations['listAccountingConnections']['responses']['200']['content']['application/json']
 type FeedStatusResponse =
   ApiOperations['getAccountingFeedStatus']['responses']['200']['content']['application/json']
+// #4904: the merchant-services setting the shell reads once.
+type MerchantServicesState =
+  ApiOperations['getMerchantServices']['responses']['200']['content']['application/json']
 type AccountingConnectionRow = ListConnectionsResponse['connections'][number]
 type AccountingProviderRow = ListProvidersResponse['providers'][number]
 
@@ -188,6 +192,11 @@ const ACCOUNTING_FEED_STATUS_DEFAULT = {
   ),
 } satisfies FeedStatusResponse
 
+// #4904: OFF with no account — the state every user starts in.
+const MERCHANT_SERVICES_DEFAULT = {
+  ...merchantServicesOff,
+} satisfies MerchantServicesState
+
 /**
  * The typed route table: every `@/lib/api` route this builder answers, keyed
  * by PATHNAME (no query string), mapped to the generated wire type its
@@ -204,6 +213,7 @@ export type ApiRoutes = {
   '/accounting/providers': ListProvidersResponse
   '/accounting/connections': ListConnectionsResponse
   '/accounting/feed/status': FeedStatusResponse
+  '/merchant-services': MerchantServicesState
   '/auth/me': unknown
 }
 
@@ -214,6 +224,7 @@ export const API_MOCK_DEFAULTS: ApiRoutes = {
   '/accounting/providers': ACCOUNTING_PROVIDERS_DEFAULT,
   '/accounting/connections': ACCOUNTING_CONNECTIONS_DEFAULT,
   '/accounting/feed/status': ACCOUNTING_FEED_STATUS_DEFAULT,
+  '/merchant-services': MERCHANT_SERVICES_DEFAULT,
   '/auth/me': testUser,
 }
 

@@ -1043,6 +1043,20 @@ its own: the backup prompt follows funding, per account. Settings → Signers
 (#3825) lists each signer once with every account it approves, which is
 where a user can see that a backup covers one account and not another.
 
+**The same step secures the Sales account (#4904).** Turning merchant services
+on creates the dedicated Sales account through the SAME create-additional path,
+with the same route-B shape: the dialog names a source account and one of its
+passkeys, the server copies that passkey's public coordinates, and the
+assertion is a choice of key rather than a proof. The step itself is now one
+shared hook (`hooks/usePasskeyStep.ts`) used by both dialogs, so the two
+surfaces cannot drift on what the prompt offers or on which key is sent. The
+residual is the same one stated above — the Sales account shares its owner key
+with the account the passkey came from — and the turn-on route adds no new
+authority: it marks an account the caller already owns as the merchant account,
+moves no funds, and grants no delegation. Its idempotency key lives in the
+reserved `merchant-service:` namespace, so a client cannot pre-create an
+account under it and choose which account the marker lands on.
+
 ## 7. Two signers: a recommendation, not a gate (#1153)
 
 **This section previously recorded a launch GATE.** It said no mainnet

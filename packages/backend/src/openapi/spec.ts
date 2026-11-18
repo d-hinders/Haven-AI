@@ -2477,7 +2477,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '429': { ...errorResponse, description: 'Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited route the same owner calls, from any session.' },
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited owner route keyed by the shared generator (not `/feedback`, which has its own), from any session.' },
         },
       },
       delete: {
@@ -2513,7 +2513,7 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '429': { ...errorResponse, description: 'Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited route the same owner calls, from any session.' },
+          '429': { ...errorResponse, description: 'Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited owner route keyed by the shared generator (not `/feedback`, which has its own), from any session.' },
         },
       },
     },
@@ -5310,7 +5310,7 @@ export const openapiSpec = {
         operationId: 'accountedWebhookCallback',
         summary: 'PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.',
         description:
-          "Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).",
+          "Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (the webhook route has no auth hook, #4955).",
         security: [],
         parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {

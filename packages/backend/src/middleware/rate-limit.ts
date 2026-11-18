@@ -24,8 +24,9 @@
  *   unauthenticated GitHub sign-in pair (`ops_auth`, #3509).
  * - feedbackSubmitRateLimit — `POST /feedback` (#3597), per USER (overrides
  *   the shared key generator — see its own comment for why).
- * - opsRevealRateLimit — `POST /ops/reveal` (#3509), per ops token.
- * - opsSearchRateLimit — `GET /ops/search` (#3512), per ops token, in its own
+ * - opsRevealRateLimit — `POST /ops/reveal` (#3509), per admitted operator
+ *   (`ops:<GitHub id>`, #4955).
+ * - opsSearchRateLimit — `GET /ops/search` (#3512), per admitted operator, in its own
  *   bucket (`groupId`) so searching never spends the reveal budget.
  *
  * Constants, not env: tuning is a code change with review, and the values are

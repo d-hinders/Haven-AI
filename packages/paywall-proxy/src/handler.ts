@@ -24,6 +24,7 @@ import {
   NONCE_RE,
   PaymentError,
   SETTLE_RESOLVE_MS,
+  X_TAX_DECLARATION_HEADER,
   assertExtensionsEchoed,
   authorizationDigest,
   decodePayment,
@@ -45,6 +46,7 @@ import { applyOutputTokenCap, callUpstream, type UpstreamFailureReason } from '.
 import { DEFAULT_LIMITS, Gate, IpLimiter, type LimitSettings, type Permit } from './limits.js'
 import { redactor, type LogFn } from './log.js'
 import { indexProducts, type Product } from './products.js'
+import { buildReceiptForPayment, encodeReceiptHeader } from './receipt.js'
 import { buildSiwxChallenge, checkSiwxProof, siwxBinding, type SiwxChallenge } from './siwx.js'
 import type { SqliteConsumedPaymentStore } from './sqlite-store.js'
 
@@ -892,6 +894,35 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
   // ---- forwarding (§6, §7, §8) -------------------------------------------
 
+  /**
+   * §11: the receipt header for a delivered call, or `{}` when the deployment
+   * has no VAT rule. A receipt that cannot be built never fails a settled
+   * call: the header is left out and the failure is logged. The merchant key
+   * and the buyer's declaration are never logged.
+   */
+  function receiptHeadersFor(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Record<string, string> {
+    const settings = config.receipt
+    if (!settings || !record.txHash || !record.settledAt) return {}
+    const taxDeclarationHeader = firstHeader(ctx.req.headers[X_TAX_DECLARATION_HEADER.toLowerCase()])
+    try {
+      const json = buildReceiptForPayment({
+        settings,
+        product,
+        chain: config.chain,
+        payTo: config.payTo,
+        payer: record.payer,
+        txHash: record.txHash,
+        settledAt: record.settledAt,
+        ...(taxDeclarationHeader !== undefined ? { taxDeclarationHeader } : {}),
+        now: now().getTime(),
+      })
+      return { 'x-receipt-json': encodeReceiptHeader(json) }
+    } catch (err) {
+      log('receipt_failed', { key: record.key, error: describeError(err) })
+      return {}
+    }
+  }
+
   async function forwardAndAnswer(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Promise<void> {
     const { req, res } = ctx
     const controller = new AbortController()
@@ -938,11 +969,17 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     logOverage(record, product, result)
 
     const paymentHeader = paymentResponseHeader(record)
+    // §11: the receipt goes on the response headers of a delivered call — a
+    // 2xx passed through, or a 3xx/4xx wrapped into a 200 (§6's definition of
+    // delivered). The upstream's own receipt headers were stripped in
+    // `callUpstream`, so an upstream cannot pass off its own receipt as the
+    // kit's.
+    const receiptHeader = receiptHeadersFor(ctx, record, product)
     if (result.status >= 200 && result.status < 300) {
       // A 2xx is passed through, headers and body unchanged except the stripped ones.
       const headers: Record<string, string | string[]> = {}
       for (const [name, value] of result.headers) headers[name] = value
-      res.writeHead(result.status, { ...headers, 'Content-Length': result.body.length, ...paymentHeader })
+      res.writeHead(result.status, { ...headers, 'Content-Length': result.body.length, ...paymentHeader, ...receiptHeader })
       res.end(result.body)
       return
     }
@@ -960,7 +997,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         upstream_content_type: contentType,
         ...wrapped,
       },
-      paymentHeader,
+      { ...paymentHeader, ...receiptHeader },
     )
   }
 

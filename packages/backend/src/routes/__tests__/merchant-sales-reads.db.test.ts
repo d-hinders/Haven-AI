@@ -1,0 +1,824 @@
+/**
+ * The owner's sales reads and the clear route on the REAL Postgres harness
+ * (#4897, epic #4885).
+ *
+ * Only the chain read (used by the ingest in the round-trip test) is mocked;
+ * the routes, the request-validation plugin, the auth middleware, the
+ * repositories and every table are real.
+ *
+ * Each test is named for the criterion it proves:
+ *
+ *   - totals, breakdowns and the list agree for one fixture (one rule for every
+ *     figure: indexed transfers, zero-value and own-sender excluded, a sale's
+ *     legs not counted on top of its row);
+ *   - a sale from several payers is not attributed by payer;
+ *   - the product label falls back catalogue name, record name, product id;
+ *   - a payer is a contact, an own address or a wallet, and another Haven
+ *     user's agent is a wallet like any other;
+ *   - keyset paging is stable and complete, including on equal block times;
+ *   - every read is scoped to the caller's user and merchant account;
+ *   - services off, or no merchant account, reads as the empty state;
+ *   - a Sales key reaches none of the four routes, and a device-login token
+ *     cannot clear a record;
+ *   - clearing a record leaves the payment, and a new record is accepted.
+ */
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { randomUUID } from 'node:crypto'
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
+import fastifyJwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
+import db from '../../db.js'
+import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
+
+const mocks = vi.hoisted(() => ({ read: vi.fn() }))
+
+vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/chain-read.js')>()
+  return {
+    ...actual,
+    readInboundTransactionByTxHash: (...a: unknown[]) => mocks.read(...a),
+  }
+})
+
+const merchantSalesReadRoutes = (await import('../merchant-sales-reads.js')).default
+const merchantSalesRoutes = (await import('../merchant-sales.js')).default
+const { installRequestValidation } = await import('../../openapi/request-validation.js')
+const { generateMerchantKey } = await import('../../domain/merchant-keys.js')
+const { insertMerchantKey } = await import('../../infra/repositories/merchant-keys.js')
+const { insertMerchantSale } = await import('../../infra/repositories/merchant-sales.js')
+const { rateLimitKeyFor } = await import('../../middleware/rate-limit.js')
+const { up: backfillOwnFlag } = await import('../../db/migrations/133_inbound_transfers_own_flag_backfill.js')
+
+const CHAIN = 84532
+const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
+
+function addr(): string {
+  return '0x' + randomUUID().replace(/-/g, '').padEnd(40, '0').slice(0, 40)
+}
+function hash(n: number): string {
+  return '0x' + n.toString(16).padStart(64, '0')
+}
+
+interface Merchant {
+  userId: string
+  accountId: string
+  address: string
+}
+
+async function seedUser(): Promise<string> {
+  const user = await db.query<{ id: string }>(
+    `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+    [`reads-${randomUUID()}@test.example`],
+  )
+  return user.rows[0].id
+}
+
+async function seedMerchant(opts: { enabled?: boolean } = {}): Promise<Merchant> {
+  const userId = await seedUser()
+  const address = addr()
+  const account = await db.query<{ id: string }>(
+    `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, is_merchant_account)
+     VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', false, true) RETURNING id`,
+    [userId, address, CHAIN],
+  )
+  await db.query(
+    `INSERT INTO merchant_service_settings (user_id, enabled, enabled_at)
+     VALUES ($1, $2, CASE WHEN $2 THEN NOW() ELSE NULL END)`,
+    [userId, opts.enabled ?? true],
+  )
+  return { userId, accountId: account.rows[0].id, address }
+}
+
+interface LegSeed {
+  tx: string
+  payer: string
+  amount: string
+  logIndex?: number
+  own?: boolean
+  time: string
+}
+
+async function seedLeg(m: Merchant, leg: LegSeed): Promise<void> {
+  await db.query(
+    `INSERT INTO inbound_transfers
+       (account_id, user_id, chain_id, tx_hash, log_index, payer_address, token_address,
+        amount_raw, block_number, block_time, sender_is_own_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 100, $9, $10)`,
+    [m.accountId, m.userId, CHAIN, leg.tx, leg.logIndex ?? 0, leg.payer, USDC, leg.amount, leg.time, leg.own ?? false],
+  )
+}
+
+async function seedSale(
+  m: Merchant,
+  s: {
+    tx: string
+    productId: string
+    productName?: string | null
+    amount: string
+    payer: string | null
+    several?: boolean
+    own?: boolean
+    time: string
+    receipt?: string | null
+    vat?: 'SE_25' | 'REVERSE_CHARGE' | null
+  },
+): Promise<void> {
+  await insertMerchantSale({
+    accountId: m.accountId,
+    userId: m.userId,
+    chainId: CHAIN,
+    txHash: s.tx,
+    recordVersion: 1,
+    productId: s.productId,
+    productName: s.productName ?? null,
+    merchantReference: `ref-${s.tx.slice(-6)}`,
+    receiptNumber: s.receipt ?? null,
+    vatTreatment: s.vat ?? null,
+    amountRaw: s.amount,
+    tokenAddress: USDC,
+    payerAddress: s.payer,
+    severalPayers: s.several ?? false,
+    senderIsOwnAddress: s.own ?? false,
+    blockNumber: 100,
+    blockTime: new Date(s.time),
+  })
+}
+
+describeDb('the owner sales reads on the real database (#4897)', () => {
+  let app: FastifyInstance
+
+  beforeAll(async () => {
+    await initDbHarness()
+    app = Fastify({ logger: false })
+    await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(rateLimit, { global: false, keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request) })
+    installRequestValidation(app, {
+      mode: 'enforce',
+      enforcedModules: ['routes/merchant-sales-reads.ts', 'routes/merchant-sales.ts'],
+    })
+    await app.register(merchantSalesReadRoutes, { prefix: '/merchant-sales' })
+    await app.register(merchantSalesRoutes, { prefix: '/merchant' })
+  })
+
+  afterAll(async () => {
+    await app?.close()
+  })
+
+  beforeEach(async () => {
+    await resetDb()
+    vi.clearAllMocks()
+  })
+
+  const token = (userId: string, extra: Record<string, unknown> = {}) =>
+    app.jwt.sign({ sub: userId, email: 'owner@example.com', ...extra })
+
+  const get = (userId: string, url: string) =>
+    app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token(userId)}` } })
+
+  const clear = (userId: string, tx: string, extra: Record<string, unknown> = {}) =>
+    app.inject({
+      method: 'DELETE',
+      url: `/merchant-sales/payments/${tx}/record`,
+      headers: { authorization: `Bearer ${token(userId, extra)}` },
+    })
+
+  const PERIOD = 'from=2026-11-01&to=2026-11-30'
+
+  /**
+   * The one fixture the agreement test reads. Revenue 2,350,000:
+   *   A sale P1 1,000,000 from a contact           (one leg)
+   *   B sale P2   500,000 from two payers          (several payers; legs 300k + 200k)
+   *   C no sale   250,000 from the contact
+   *   D no sale   200,000 from one wallet          (two legs, same payer: 150k + 50k)
+   *   E no sale   100,000 from two wallets         (two legs: 60k + 40k)
+   *   I sale P3   300,000 from the contact         (its legs: 100k from an own agent + 300k)
+   * Not revenue:
+   *   F own move  700,000 from the owner's other account (no sale row)
+   *   G own move  400,000 from a REPLACED agent delegate (sale row, own)
+   *   H zero-value transfer only
+   *   and three transfers outside the period (one a second before, one at the
+   *   first instant of December).
+   */
+  async function seedAgreementFixture() {
+    const m = await seedMerchant()
+    const contact = addr()
+    const wallet4 = addr()
+    const wallet5 = addr()
+    const wallet6 = addr()
+    const wallet2 = addr()
+    const wallet3 = addr()
+    const otherAccount = addr()
+    const oldDelegate = addr()
+    const liveDelegate = addr()
+
+    await db.query(`INSERT INTO contacts (user_id, name, address) VALUES ($1, 'Alice', $2)`, [m.userId, contact])
+    await db.query(
+      `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, name)
+       VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true, 'Main')`,
+      [m.userId, otherAccount, CHAIN],
+    )
+    const agent = await db.query<{ id: string }>(
+      `INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Research agent', $2, 'active') RETURNING id`,
+      [m.userId, liveDelegate],
+    )
+    await db.query(
+      `INSERT INTO agent_rekeys (agent_id, initiated_by_user_id, old_delegate_address, new_delegate_address)
+       VALUES ($1, $2, $3, $4)`,
+      [agent.rows[0].id, m.userId, oldDelegate, liveDelegate],
+    )
+
+    const t = (day: string, hh = '10:00:00') => `2026-11-${day}T${hh}Z`
+    // A
+    await seedLeg(m, { tx: hash(0xa), payer: contact, amount: '1000000', time: t('10') })
+    await seedSale(m, { tx: hash(0xa), productId: 'P1', productName: 'Product one', amount: '1000000', payer: contact, time: t('10'), receipt: 'R-1', vat: 'SE_25' })
+    // B
+    await seedLeg(m, { tx: hash(0xb), payer: wallet2, amount: '300000', logIndex: 0, time: t('10', '11:00:00') })
+    await seedLeg(m, { tx: hash(0xb), payer: wallet3, amount: '200000', logIndex: 1, time: t('10', '11:00:00') })
+    await seedSale(m, { tx: hash(0xb), productId: 'P2', productName: 'Product two', amount: '500000', payer: null, several: true, time: t('10', '11:00:00') })
+    // C
+    await seedLeg(m, { tx: hash(0xc), payer: contact, amount: '250000', time: t('11') })
+    // D
+    await seedLeg(m, { tx: hash(0xd), payer: wallet4, amount: '150000', logIndex: 0, time: t('12') })
+    await seedLeg(m, { tx: hash(0xd), payer: wallet4, amount: '50000', logIndex: 1, time: t('12') })
+    // E
+    await seedLeg(m, { tx: hash(0xe), payer: wallet5, amount: '60000', logIndex: 0, time: t('12', '11:00:00') })
+    await seedLeg(m, { tx: hash(0xe), payer: wallet6, amount: '40000', logIndex: 1, time: t('12', '11:00:00') })
+    // I: an own leg beside a customer leg; the sale row is the customer's 300k
+    await seedLeg(m, { tx: hash(0x1), payer: liveDelegate, amount: '100000', logIndex: 0, own: true, time: t('13') })
+    await seedLeg(m, { tx: hash(0x1), payer: contact, amount: '300000', logIndex: 1, time: t('13') })
+    await seedSale(m, { tx: hash(0x1), productId: 'P3', productName: 'Product three', amount: '300000', payer: contact, time: t('13') })
+    // F
+    await seedLeg(m, { tx: hash(0xf), payer: otherAccount, amount: '700000', own: true, time: t('14') })
+    // G: a sale row marked own, paid from a REPLACED delegate
+    await seedLeg(m, { tx: hash(0x2), payer: oldDelegate, amount: '400000', own: true, time: t('15') })
+    await seedSale(m, { tx: hash(0x2), productId: 'P9', amount: '0', payer: oldDelegate, own: true, time: t('15') })
+    // H: zero-value only
+    await seedLeg(m, { tx: hash(0x3), payer: wallet4, amount: '0', time: t('16') })
+    // outside the period
+    await seedLeg(m, { tx: hash(0x4), payer: wallet4, amount: '900000', time: '2026-10-31T23:59:59Z' })
+    await seedLeg(m, { tx: hash(0x5), payer: wallet4, amount: '900000', time: '2026-12-01T00:00:00Z' })
+    // the last second of the period IS in it
+    await seedLeg(m, { tx: hash(0x6), payer: wallet4, amount: '10000', time: '2026-11-30T23:59:59Z' })
+    return { m, contact, wallet4, otherAccount, oldDelegate, liveDelegate }
+  }
+
+  describe('one rule for every figure', () => {
+    it('the totals, the breakdowns and the list agree for the same period', async () => {
+      const { m, contact, wallet4, otherAccount, oldDelegate } = await seedAgreementFixture()
+
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      // revenue = A + B + C + D + E + I + the last-second payment (10,000).
+      expect(summary.revenue_raw).toBe('2360000')
+      expect(summary.sales).toBe(3)
+      expect(summary.average_sale_raw).toBe('600000')
+      expect(summary.without_product).toEqual({ count: 4, amount_raw: '560000' })
+      expect(summary.own_moves).toEqual({ count: 2, amount_raw: '1100000' })
+
+      // by product: sales only, and with without_product they add up to revenue.
+      const byProduct = summary.by_product as Array<{ product_id: string; label: string; sales: number; amount_raw: string }>
+      expect(byProduct.map((p) => [p.product_id, p.amount_raw])).toEqual([
+        ['P1', '1000000'],
+        ['P2', '500000'],
+        ['P3', '300000'],
+      ])
+      const productSum = byProduct.reduce((s, p) => s + BigInt(p.amount_raw), 0n)
+      expect(productSum + BigInt(summary.without_product.amount_raw)).toBe(BigInt(summary.revenue_raw))
+
+      // by payer: the contact (A, C, I), wallet4 (D and the last-second one);
+      // B and E are several payers and are not attributed.
+      const byPayer = summary.by_payer as Array<{ payer: { kind: string; name: string | null; address: string }; payments: number; amount_raw: string }>
+      expect(byPayer.map((p) => [p.payer.address, p.payments, p.amount_raw])).toEqual([
+        [contact.toLowerCase(), 3, '1550000'],
+        [wallet4.toLowerCase(), 2, '210000'],
+      ])
+      expect(summary.unattributed).toEqual({ payments: 2, amount_raw: '600000' })
+      const payerSum =
+        byPayer.reduce((s, p) => s + BigInt(p.amount_raw), 0n) +
+        BigInt(summary.by_payer_other.amount_raw) +
+        BigInt(summary.unattributed.amount_raw)
+      expect(payerSum).toBe(BigInt(summary.revenue_raw))
+
+      // by day: adds up too, and names only days with revenue, in UTC.
+      const byDay = summary.by_day as Array<{ day: string; payments: number; revenue_raw: string }>
+      expect(byDay.map((d) => d.day)).toEqual(['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-30'])
+      expect(byDay.reduce((s, d) => s + BigInt(d.revenue_raw), 0n)).toBe(BigInt(summary.revenue_raw))
+
+      // the list: one row per transaction, newest first, own moves marked.
+      const list = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json()
+      const rows = list.payments as Array<{ tx_hash: string; kind: string; amount_raw: string; block_time: string }>
+      expect(rows).toHaveLength(9)
+      const times = rows.map((r) => Date.parse(r.block_time))
+      expect(times).toEqual([...times].sort((a, b) => b - a)) // newest first
+      const revenueRows = rows.filter((r) => r.kind !== 'own_move')
+      expect(revenueRows.reduce((s, r) => s + BigInt(r.amount_raw), 0n)).toBe(BigInt(summary.revenue_raw))
+      expect(rows.filter((r) => r.kind === 'sale')).toHaveLength(summary.sales)
+      expect(rows.filter((r) => r.kind === 'no_product')).toHaveLength(summary.without_product.count)
+      const ownRows = rows.filter((r) => r.kind === 'own_move')
+      expect(ownRows).toHaveLength(summary.own_moves.count)
+      expect(ownRows.reduce((s, r) => s + BigInt(r.amount_raw), 0n)).toBe(BigInt(summary.own_moves.amount_raw))
+      expect(rows.map((r) => r.tx_hash)).not.toContain(hash(0x3)) // zero-value: nowhere
+      expect(rows.map((r) => r.tx_hash)).not.toContain(hash(0x4))
+      expect(rows.map((r) => r.tx_hash)).not.toContain(hash(0x5))
+      expect(rows[0].tx_hash).toBe(hash(0x6))
+
+      // the payer of an own move is one of the owner's own addresses.
+      const f = list.payments.find((r: { tx_hash: string }) => r.tx_hash === hash(0xf))
+      expect(f.payer).toMatchObject({ kind: 'own', name: 'Main', address: otherAccount.toLowerCase() })
+      const g = list.payments.find((r: { tx_hash: string }) => r.tx_hash === hash(0x2))
+      expect(g).toMatchObject({ kind: 'own_move', amount_raw: '400000' })
+      expect(g.payer).toMatchObject({ kind: 'own', name: 'Research agent', address: oldDelegate.toLowerCase() })
+    })
+
+    it('a sale is counted once with its own amount: its legs are never added on top', async () => {
+      const { m } = await seedAgreementFixture()
+      const detail = (await get(m.userId, `/merchant-sales/payments/${hash(0x1)}`)).json()
+      // two legs (100k own + 300k) and a sale row of 300k: the row says 300k.
+      expect(detail.legs).toHaveLength(2)
+      expect(detail.kind).toBe('sale')
+      expect(detail.amount_raw).toBe('300000')
+    })
+
+    it('a zero-value transfer is never a sale, a payer or revenue', async () => {
+      const m = await seedMerchant()
+      const z = addr()
+      await seedLeg(m, { tx: hash(0x77), payer: z, amount: '0', time: '2026-11-10T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('0')
+      expect(summary.by_payer).toEqual([])
+      expect(summary.without_product).toEqual({ count: 0, amount_raw: '0' })
+      expect((await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments).toEqual([])
+      expect((await get(m.userId, `/merchant-sales/payments/${hash(0x77)}`)).statusCode).toBe(404)
+    })
+
+    it('a transfer from the owner\'s own address is in no revenue figure, however it is recorded', async () => {
+      const m = await seedMerchant()
+      const own = addr()
+      await db.query(
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default)
+         VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true)`,
+        [m.userId, own, CHAIN],
+      )
+      await seedLeg(m, { tx: hash(0x78), payer: own, amount: '5000000', own: true, time: '2026-11-10T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('0')
+      expect(summary.by_payer).toEqual([])
+      expect(summary.own_moves).toEqual({ count: 1, amount_raw: '5000000' })
+    })
+
+    it('a payment with no record and an own leg beside a customer leg counts only the customer\'s transfer', async () => {
+      const m = await seedMerchant()
+      const customer = addr()
+      await seedLeg(m, { tx: hash(0x7a), payer: addr(), amount: '40', logIndex: 0, own: true, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x7a), payer: customer, amount: '60', logIndex: 1, time: '2026-11-10T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('60')
+      expect(summary.without_product).toEqual({ count: 1, amount_raw: '60' })
+      expect(summary.own_moves.count).toBe(0)
+      expect(summary.by_payer.map((p: { payer: { address: string } }) => p.payer.address)).toEqual([customer.toLowerCase()])
+      const row = (await get(m.userId, `/merchant-sales/payments/${hash(0x7a)}`)).json()
+      expect(row).toMatchObject({ kind: 'no_product', amount_raw: '60' })
+    })
+
+    it('a sale from several payers is not attributed by payer', async () => {
+      const m = await seedMerchant()
+      await seedLeg(m, { tx: hash(0x79), payer: addr(), amount: '10', logIndex: 0, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x79), payer: addr(), amount: '20', logIndex: 1, time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, { tx: hash(0x79), productId: 'P', amount: '30', payer: null, several: true, time: '2026-11-10T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('30')
+      expect(summary.by_payer).toEqual([])
+      expect(summary.unattributed).toEqual({ payments: 1, amount_raw: '30' })
+      const row = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments[0]
+      expect(row).toMatchObject({ kind: 'sale', several_payers: true, payer: null })
+    })
+  })
+
+  describe('the product label', () => {
+    it('is the catalogue name, else the record name, else the product id', async () => {
+      const m = await seedMerchant()
+      await db.query(
+        `INSERT INTO merchant_products (merchant_account_id, product_id, name, price_atomic, network)
+         VALUES ($1, 'in-catalogue', 'Catalogue name', '1', 'eip155:84532'),
+                ($1, 'catalogue-no-name', NULL, '1', 'eip155:84532')`,
+        [m.accountId],
+      )
+      const sales: Array<[string, string, string | null, string]> = [
+        [hash(0x91), 'in-catalogue', 'Record name', '2026-11-10T10:00:00Z'],
+        [hash(0x92), 'only-in-record', 'Record name', '2026-11-10T11:00:00Z'],
+        [hash(0x93), 'nowhere', null, '2026-11-10T12:00:00Z'],
+        [hash(0x94), 'catalogue-no-name', 'Record name', '2026-11-10T13:00:00Z'],
+      ]
+      for (const [tx, productId, name, time] of sales) {
+        await seedLeg(m, { tx, payer: addr(), amount: '100', time })
+        await seedSale(m, { tx, productId, productName: name, amount: '100', payer: addr(), time })
+      }
+      const rows = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments as Array<{
+        product_id: string
+        product_label: string
+      }>
+      const labelOf = (id: string) => rows.find((r) => r.product_id === id)?.product_label
+      expect(labelOf('in-catalogue')).toBe('Catalogue name')
+      expect(labelOf('only-in-record')).toBe('Record name')
+      expect(labelOf('nowhere')).toBe('nowhere')
+      expect(labelOf('catalogue-no-name')).toBe('Record name')
+
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      const byLabel = Object.fromEntries(
+        (summary.by_product as Array<{ product_id: string; label: string }>).map((p) => [p.product_id, p.label]),
+      )
+      expect(byLabel).toMatchObject({ 'in-catalogue': 'Catalogue name', 'only-in-record': 'Record name', nowhere: 'nowhere' })
+    })
+  })
+
+  describe('payer kinds', () => {
+    it('is a contact, an own address or a wallet, and another Haven user\'s agent is a wallet', async () => {
+      const m = await seedMerchant()
+      const other = await seedUser()
+      const contact = addr()
+      const ownAgent = addr()
+      const strangersAgent = addr()
+      const strangersAccount = addr()
+      await db.query(`INSERT INTO contacts (user_id, name, address) VALUES ($1, 'Bob', $2)`, [m.userId, contact])
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Mine', $2, 'revoked')`, [m.userId, ownAgent])
+      // another Haven user's agent and account — and a contact entry of THAT user
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Their agent', $2, 'active')`, [other, strangersAgent])
+      await db.query(
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, name)
+         VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true, 'Their account')`,
+        [other, strangersAccount, CHAIN],
+      )
+      await db.query(`INSERT INTO contacts (user_id, name, address) VALUES ($1, 'Not yours', $2)`, [other, addr()])
+      let i = 0
+      for (const payer of [contact, ownAgent, strangersAgent, strangersAccount]) {
+        i += 1
+        await seedLeg(m, { tx: hash(0xa0 + i), payer, amount: '100', own: payer === ownAgent, time: `2026-11-10T1${i}:00:00Z` })
+      }
+      const list = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments as Array<{
+        tx_hash: string
+        payer: { kind: string; name: string | null; address: string }
+      }>
+      const payerOf = (n: number) => list.find((r) => r.tx_hash === hash(0xa0 + n))!.payer
+      expect(payerOf(1)).toEqual({ kind: 'contact', name: 'Bob', address: contact.toLowerCase() })
+      expect(payerOf(2)).toEqual({ kind: 'own', name: 'Mine', address: ownAgent.toLowerCase() })
+      expect(payerOf(3)).toEqual({ kind: 'wallet', name: null, address: strangersAgent.toLowerCase() })
+      expect(payerOf(4)).toEqual({ kind: 'wallet', name: null, address: strangersAccount.toLowerCase() })
+      // nothing in the body names the other user's agent, account or name.
+      const body = JSON.stringify(list) + JSON.stringify((await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json())
+      expect(body).not.toContain('Their agent')
+      expect(body).not.toContain('Their account')
+    })
+  })
+
+  describe('keyset paging', () => {
+    it('walks every payment once, newest first, including payments in the same block', async () => {
+      const m = await seedMerchant()
+      const sameTime = '2026-11-10T10:00:00Z'
+      for (let n = 1; n <= 7; n += 1) {
+        await seedLeg(m, { tx: hash(0x500 + n), payer: addr(), amount: '1', time: n <= 4 ? sameTime : `2026-11-1${n}T10:00:00Z` })
+      }
+      const seen: string[] = []
+      let cursor: string | null = null
+      let pages = 0
+      do {
+        const url: string = `/merchant-sales/payments?limit=3${cursor ? `&cursor=${cursor}` : ''}`
+        const page = (await get(m.userId, url)).json() as { payments: Array<{ tx_hash: string }>; next_cursor: string | null }
+        seen.push(...page.payments.map((p) => p.tx_hash))
+        cursor = page.next_cursor
+        pages += 1
+      } while (cursor !== null && pages < 10)
+      expect(pages).toBe(3)
+      expect(seen).toHaveLength(7)
+      expect(new Set(seen).size).toBe(7)
+      // (block_time DESC, tx_hash DESC): the three later blocks, then the four
+      // payments of one block in descending hash order.
+      expect(seen.slice(0, 3)).toEqual([hash(0x507), hash(0x506), hash(0x505)])
+      expect(seen.slice(3)).toEqual([hash(0x504), hash(0x503), hash(0x502), hash(0x501)])
+    })
+
+    it('defaults to 50 rows, refuses a limit above 200 and a cursor this list did not issue', async () => {
+      const m = await seedMerchant()
+      await db.query(
+        `INSERT INTO inbound_transfers (account_id, user_id, chain_id, tx_hash, log_index, payer_address,
+                                        token_address, amount_raw, block_number, block_time)
+         SELECT $1, $2, $3, '0x' || lpad(to_hex(g + 4096), 64, '0'), 0, '0x' || lpad(to_hex(g), 40, '0'),
+                $4, '1', 100, TIMESTAMPTZ '2026-11-10T10:00:00Z' + (g || ' minutes')::interval
+           FROM generate_series(1, 51) g`,
+        [m.accountId, m.userId, CHAIN, USDC],
+      )
+      const first = (await get(m.userId, '/merchant-sales/payments')).json()
+      expect(first.payments).toHaveLength(50)
+      expect(first.next_cursor).not.toBeNull()
+      const capped = (await get(m.userId, '/merchant-sales/payments?limit=200')).json()
+      expect(capped.payments).toHaveLength(51)
+      expect(capped.next_cursor).toBeNull()
+      expect((await get(m.userId, '/merchant-sales/payments?limit=201')).statusCode).toBe(400)
+      expect((await get(m.userId, '/merchant-sales/payments?limit=0')).statusCode).toBe(400)
+      const bad = await get(m.userId, '/merchant-sales/payments?cursor=not-a-cursor')
+      expect(bad.statusCode).toBe(400)
+      expect(bad.json().error_code).toBe('INVALID_CURSOR')
+      expect((await get(m.userId, '/merchant-sales/payments?from=2026-02-31')).json().error_code).toBe('INVALID_PERIOD')
+      expect((await get(m.userId, '/merchant-sales/payments?from=2026-12-02&to=2026-12-01')).json().error_code).toBe('INVALID_PERIOD')
+      expect((await get(m.userId, '/merchant-sales/payments?from=yesterday')).statusCode).toBe(400)
+    })
+
+    it('answers 400 INVALID_CURSOR, never 500, for a cursor whose timestamp is not a real one', async () => {
+      const m = await seedMerchant()
+      for (const time of ['2026-13-45 99:99:99+00', '2026-02-31 10:00:00+00', '2026-11-10 24:00:00+00', '2026-11-10 10:00:00+99']) {
+        const cursor = Buffer.from(`${time}|${hash(1)}`, 'utf8').toString('base64url')
+        const res = await get(m.userId, `/merchant-sales/payments?cursor=${cursor}`)
+        expect(res.statusCode, time).toBe(400)
+        expect(res.json().error_code).toBe('INVALID_CURSOR')
+      }
+    })
+  })
+
+  describe('breakdowns past the top 100', () => {
+    it('names the top 100 products and payers, folds the rest, and counts the 100th exactly once', async () => {
+      const m = await seedMerchant()
+      // 101 sales, each its own product and its own payer, amounts 1000 .. 101000.
+      await db.query(
+        `INSERT INTO inbound_transfers (account_id, user_id, chain_id, tx_hash, log_index, payer_address,
+                                        token_address, amount_raw, block_number, block_time)
+         SELECT $1, $2, $3, '0x' || lpad(to_hex(g + 8192), 64, '0'), 0, '0x' || lpad(to_hex(g + 100000), 40, '0'),
+                $4, (g * 1000)::text, 100, TIMESTAMPTZ '2026-11-10T10:00:00Z' + (g || ' minutes')::interval
+           FROM generate_series(1, 101) g`,
+        [m.accountId, m.userId, CHAIN, USDC],
+      )
+      await db.query(
+        `INSERT INTO merchant_sales (account_id, user_id, chain_id, tx_hash, product_id, merchant_reference,
+                                     amount_raw, token_address, payer_address, block_number, block_time)
+         SELECT account_id, user_id, chain_id, tx_hash, 'product-' || lpad(amount_raw, 7, '0'), 'r-' || tx_hash,
+                amount_raw::numeric, token_address, payer_address, 100, block_time
+           FROM inbound_transfers WHERE account_id = $1`,
+        [m.accountId],
+      )
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      const revenue = 1000n * (101n * 102n) / 2n
+      expect(BigInt(summary.revenue_raw)).toBe(revenue)
+
+      expect(summary.by_product).toHaveLength(100)
+      expect(summary.by_product_other).toEqual({ products: 1, sales: 1, amount_raw: '1000' })
+      const productIds = summary.by_product.map((p: { product_id: string }) => p.product_id)
+      expect(new Set(productIds).size).toBe(100)
+      expect(productIds[99]).toBe('product-0002000') // the 100th, in the list and not in the fold
+      expect(productIds).not.toContain('product-0001000')
+      const productSum = summary.by_product.reduce((n: bigint, p: { amount_raw: string }) => n + BigInt(p.amount_raw), 0n)
+      expect(productSum + BigInt(summary.by_product_other.amount_raw)).toBe(revenue)
+
+      expect(summary.by_payer).toHaveLength(100)
+      expect(summary.by_payer_other).toEqual({ payers: 1, payments: 1, amount_raw: '1000' })
+      expect(summary.by_payer[99].amount_raw).toBe('2000')
+      const payerSum = summary.by_payer.reduce((n: bigint, p: { amount_raw: string }) => n + BigInt(p.amount_raw), 0n)
+      expect(payerSum + BigInt(summary.by_payer_other.amount_raw) + BigInt(summary.unattributed.amount_raw)).toBe(revenue)
+    })
+  })
+
+  describe('the own-flag backfill (migration 133)', () => {
+    it('turns rows stamped false from the owner\'s own account, agent delegate and rotated-out delegate into own moves, and another user\'s delegate stays a wallet', async () => {
+      const m = await seedMerchant()
+      const other = await seedUser()
+      const delegate = addr()
+      const rotated = addr()
+      const strangers = addr()
+      const secondAccount = addr()
+      await db.query(
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default)
+         VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true)`,
+        [m.userId, secondAccount, CHAIN],
+      )
+      const agent = await db.query<{ id: string }>(
+        `INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Research agent', $2, 'active') RETURNING id`,
+        [m.userId, delegate],
+      )
+      await db.query(
+        `INSERT INTO agent_rekeys (agent_id, initiated_by_user_id, old_delegate_address, new_delegate_address) VALUES ($1, $2, $3, $4)`,
+        [agent.rows[0].id, m.userId, rotated, delegate],
+      )
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Theirs', $2, 'active')`, [other, strangers])
+      await seedLeg(m, { tx: hash(0xb1), payer: delegate, amount: '700', own: false, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0xb2), payer: rotated, amount: '300', own: false, time: '2026-11-10T11:00:00Z' })
+      await seedLeg(m, { tx: hash(0xb3), payer: strangers, amount: '50', own: false, time: '2026-11-10T12:00:00Z' })
+      await seedLeg(m, { tx: hash(0xb4), payer: secondAccount, amount: '2000', own: false, time: '2026-11-10T13:00:00Z' })
+
+      // before: all four count as revenue, though three payers read `own`
+      let summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('3050')
+
+      const client = await db.connect()
+      try {
+        await backfillOwnFlag(client)
+      } finally {
+        client.release()
+      }
+
+      summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('50')
+      expect(summary.own_moves).toEqual({ count: 3, amount_raw: '3000' })
+      const rows = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments as Array<{
+        tx_hash: string
+        kind: string
+        payer: { kind: string; name: string | null }
+      }>
+      const byTx = (n: number) => rows.find((r) => r.tx_hash === hash(n))!
+      expect(byTx(0xb1)).toMatchObject({ kind: 'own_move', payer: { kind: 'own', name: 'Research agent' } })
+      expect(byTx(0xb2)).toMatchObject({ kind: 'own_move', payer: { kind: 'own' } })
+      expect(byTx(0xb3)).toMatchObject({ kind: 'no_product', payer: { kind: 'wallet' } })
+      expect(byTx(0xb4)).toMatchObject({ kind: 'own_move', payer: { kind: 'own' } })
+    })
+  })
+
+  describe('one payment', () => {
+    it('carries its transfer legs and the merchant\'s own fields', async () => {
+      const m = await seedMerchant()
+      const p1 = addr()
+      const p2 = addr()
+      await seedLeg(m, { tx: hash(0x600), payer: p1, amount: '300', logIndex: 0, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x600), payer: p2, amount: '200', logIndex: 1, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x600), payer: p2, amount: '0', logIndex: 2, time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, {
+        tx: hash(0x600), productId: 'P', productName: 'Thing', amount: '500', payer: null, several: true,
+        time: '2026-11-10T10:00:00Z', receipt: 'FAK-1', vat: 'REVERSE_CHARGE',
+      })
+      const res = await get(m.userId, `/merchant-sales/payments/${hash(0x600).toUpperCase().replace('0X', '0x')}`)
+      expect(res.statusCode, res.body).toBe(200)
+      const body = res.json()
+      expect(body).toMatchObject({
+        tx_hash: hash(0x600),
+        kind: 'sale',
+        amount_raw: '500',
+        product_label: 'Thing',
+        receipt_number: 'FAK-1',
+        vat_treatment: 'REVERSE_CHARGE',
+        held_by: 'account',
+        several_payers: true,
+        payer: null,
+        merchant_reference: `ref-${hash(0x600).slice(-6)}`,
+      })
+      expect(body.legs).toEqual([
+        { log_index: 0, payer: { kind: 'wallet', name: null, address: p1.toLowerCase() }, amount_raw: '300' },
+        { log_index: 1, payer: { kind: 'wallet', name: null, address: p2.toLowerCase() }, amount_raw: '200' },
+      ])
+    })
+  })
+
+  describe('scoping', () => {
+    it('reads only the caller\'s merchant account: another user\'s payments, and the caller\'s other accounts, never appear', async () => {
+      const a = await seedMerchant()
+      const b = await seedMerchant()
+      await seedLeg(a, { tx: hash(0x700), payer: addr(), amount: '111', time: '2026-11-10T10:00:00Z' })
+      await seedLeg(b, { tx: hash(0x701), payer: addr(), amount: '222', time: '2026-11-10T10:00:00Z' })
+      await seedSale(b, { tx: hash(0x701), productId: 'B-only', amount: '222', payer: addr(), time: '2026-11-10T10:00:00Z' })
+      // a payment into a NON-merchant account of user A
+      const plain = await db.query<{ id: string }>(
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default)
+         VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true) RETURNING id`,
+        [a.userId, addr(), CHAIN],
+      )
+      await seedLeg({ ...a, accountId: plain.rows[0].id }, { tx: hash(0x702), payer: addr(), amount: '333', time: '2026-11-10T10:00:00Z' })
+
+      const summaryA = (await get(a.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summaryA.revenue_raw).toBe('111')
+      expect(summaryA.by_product).toEqual([])
+      const listA = (await get(a.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments
+      expect(listA.map((r: { tx_hash: string }) => r.tx_hash)).toEqual([hash(0x700)])
+      expect((await get(a.userId, `/merchant-sales/payments/${hash(0x701)}`)).statusCode).toBe(404)
+      expect((await get(a.userId, `/merchant-sales/payments/${hash(0x702)}`)).statusCode).toBe(404)
+    })
+
+    it('another user cannot clear a record, and the record stands', async () => {
+      const a = await seedMerchant()
+      const b = await seedMerchant()
+      await seedLeg(a, { tx: hash(0x710), payer: addr(), amount: '5', time: '2026-11-10T10:00:00Z' })
+      await seedSale(a, { tx: hash(0x710), productId: 'P', amount: '5', payer: addr(), time: '2026-11-10T10:00:00Z' })
+      const res = await clear(b.userId, hash(0x710))
+      expect(res.statusCode).toBe(404)
+      const count = await db.query(`SELECT 1 FROM merchant_sales WHERE account_id = $1`, [a.accountId])
+      expect(count.rowCount).toBe(1)
+    })
+  })
+
+  describe('merchant services off, or no merchant account', () => {
+    it('reads as the empty state, and the clear answers 409', async () => {
+      const off = await seedMerchant({ enabled: false })
+      await seedLeg(off, { tx: hash(0x720), payer: addr(), amount: '5', time: '2026-11-10T10:00:00Z' })
+      const none = await seedUser()
+      for (const userId of [off.userId, none]) {
+        const summary = (await get(userId, `/merchant-sales/summary?${PERIOD}`)).json()
+        expect(summary).toMatchObject({ revenue_raw: '0', sales: 0, by_product: [], by_payer: [], by_day: [] })
+        expect((await get(userId, `/merchant-sales/payments?${PERIOD}`)).json()).toEqual({ payments: [], next_cursor: null })
+        expect((await get(userId, `/merchant-sales/payments/${hash(0x720)}`)).statusCode).toBe(404)
+        const res = await clear(userId, hash(0x720))
+        expect(res.statusCode).toBe(409)
+        expect(res.json().error_code).toBe('MERCHANT_ACCOUNT_REQUIRED')
+      }
+    })
+  })
+
+  describe('who may call them', () => {
+    it('a Sales key reaches none of the four routes', async () => {
+      const m = await seedMerchant()
+      await seedLeg(m, { tx: hash(0x730), payer: addr(), amount: '5', time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, { tx: hash(0x730), productId: 'P', amount: '5', payer: addr(), time: '2026-11-10T10:00:00Z' })
+      const key = generateMerchantKey()
+      await insertMerchantKey({
+        userId: m.userId, accountId: m.accountId, keyHash: key.hash, keyPrefix: key.prefix, createdBy: m.userId,
+      })
+      const headers = { authorization: `Bearer ${key.secret}` }
+      const calls: Array<[string, string]> = [
+        ['GET', `/merchant-sales/summary?${PERIOD}`],
+        ['GET', `/merchant-sales/payments?${PERIOD}`],
+        ['GET', `/merchant-sales/payments/${hash(0x730)}`],
+        ['DELETE', `/merchant-sales/payments/${hash(0x730)}/record`],
+      ]
+      for (const [method, url] of calls) {
+        const res = await app.inject({ method: method as 'GET' | 'DELETE', url, headers })
+        expect(res.statusCode, `${method} ${url}`).toBe(401)
+      }
+      const x = await app.inject({ method: 'DELETE', url: `/merchant-sales/payments/${hash(0x730)}/record`, headers: { 'x-api-key': key.secret } })
+      expect(x.statusCode).toBe(401)
+      expect((await db.query(`SELECT 1 FROM merchant_sales WHERE account_id = $1`, [m.accountId])).rowCount).toBe(1)
+    })
+
+    it('a device-login token cannot clear a record', async () => {
+      const m = await seedMerchant()
+      await seedLeg(m, { tx: hash(0x731), payer: addr(), amount: '5', time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, { tx: hash(0x731), productId: 'P', amount: '5', payer: addr(), time: '2026-11-10T10:00:00Z' })
+      const res = await clear(m.userId, hash(0x731), { purpose: 'owner_cli' })
+      expect(res.statusCode).toBe(401)
+      expect((await db.query(`SELECT 1 FROM merchant_sales WHERE account_id = $1`, [m.accountId])).rowCount).toBe(1)
+    })
+
+    it('rate limits the clear route at the money-path ceiling (429 on the 61st call in a minute)', async () => {
+      const m = await seedMerchant()
+      const headers = { authorization: `Bearer ${token(m.userId, { jti: 'rate-limit-case' })}` }
+      const call = () =>
+        app.inject({ method: 'DELETE', url: `/merchant-sales/payments/${hash(0x740)}/record`, headers })
+      for (let i = 0; i < 60; i += 1) expect((await call()).statusCode).toBe(404)
+      expect((await call()).statusCode).toBe(429)
+    })
+
+    it('refuses a transaction hash that is not one, through the spec', async () => {
+      const m = await seedMerchant()
+      expect((await get(m.userId, '/merchant-sales/payments/not-a-hash')).statusCode).toBe(400)
+      expect((await clear(m.userId, '0x12')).statusCode).toBe(400)
+    })
+  })
+
+  describe('clearing a sale record', () => {
+    it('deletes the record, keeps the payment with no product, and accepts a new record afterwards', async () => {
+      const m = await seedMerchant()
+      const key = generateMerchantKey()
+      await insertMerchantKey({
+        userId: m.userId, accountId: m.accountId, keyHash: key.hash, keyPrefix: key.prefix, createdBy: m.userId,
+      })
+      const TX = hash(0x800)
+      const payer = addr()
+      const BLOCK_TIME = new Date('2026-11-17T10:00:00Z')
+      mocks.read.mockResolvedValue({
+        ok: true,
+        receiptFound: true,
+        blockNumber: 100,
+        latestBlock: 102,
+        legs: [{ txHash: TX, logIndex: 4, payerAddress: payer, tokenAddress: USDC, amountRaw: '1000000', blockNumber: 100, blockTime: BLOCK_TIME }],
+      })
+      const post = (over: Record<string, unknown>) =>
+        app.inject({
+          method: 'POST',
+          url: '/merchant/sales',
+          headers: { authorization: `Bearer ${key.secret}` },
+          payload: {
+            version: 1, tx_hash: TX, chain: `eip155:${CHAIN}`, product_id: 'first', product_name: 'First',
+            amount: '1000000', payer, merchant_reference: 'ref-1', ...over,
+          },
+        })
+      const first = await post({})
+      expect(first.statusCode, first.body).toBe(201)
+
+      let row = (await get(m.userId, `/merchant-sales/payments/${TX}`)).json()
+      expect(row).toMatchObject({ kind: 'sale', product_id: 'first', amount_raw: '1000000' })
+
+      const cleared = await clear(m.userId, TX)
+      expect(cleared.statusCode).toBe(204)
+      expect((await db.query(`SELECT 1 FROM merchant_sales WHERE account_id = $1`, [m.accountId])).rowCount).toBe(0)
+
+      // the payment stays, with no product, and still counts as revenue
+      row = (await get(m.userId, `/merchant-sales/payments/${TX}`)).json()
+      expect(row).toMatchObject({ kind: 'no_product', product_id: null, product_label: null, amount_raw: '1000000', receipt_number: null })
+      expect(row.legs).toHaveLength(1)
+      const summary = (await get(m.userId, '/merchant-sales/summary')).json()
+      expect(summary).toMatchObject({ revenue_raw: '1000000', sales: 0 })
+      expect(summary.without_product).toEqual({ count: 1, amount_raw: '1000000' })
+
+      // nothing left to clear
+      const again = await clear(m.userId, TX)
+      expect(again.statusCode).toBe(404)
+      expect(again.json().error_code).toBe('SALE_RECORD_NOT_FOUND')
+
+      // a new record for the same transaction is accepted, and is the one shown
+      const second = await post({ product_id: 'second', product_name: 'Second', merchant_reference: 'ref-2' })
+      expect(second.statusCode, second.body).toBe(201)
+      row = (await get(m.userId, `/merchant-sales/payments/${TX}`)).json()
+      expect(row).toMatchObject({ kind: 'sale', product_id: 'second', product_label: 'Second', amount_raw: '1000000' })
+    })
+  })
+})

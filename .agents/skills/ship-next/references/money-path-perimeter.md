@@ -554,3 +554,30 @@ are already on the runtime list through `infra/repositories/**` and
 
 - `packages/backend/src/modules/transactions/merchant-sales.ts`
 - `packages/backend/src/routes/merchant-sales.ts`
+
+### The owner's sales reads
+
+#4897 (second PR). `GET /merchant-sales/summary`, `GET /merchant-sales/payments`,
+`GET /merchant-sales/payments/:txHash` and `DELETE
+/merchant-sales/payments/:txHash/record` are the owner's side of the sales
+ingest: dashboard JWT only, never the Sales key, and the clear route is on the
+device-login census's must-refuse list. `modules/transactions/merchant-sales-reads.ts`
+decides every revenue figure (indexed transfers into the account, zero-value
+transfers and the owner's own addresses excluded, a sale counted once with its
+own amount, a payment with no record counted as revenue without a product) and
+classifies each payer as a contact, an own address or a wallet, which is the
+rule that keeps a read from telling the merchant that a wallet belongs to
+another Haven user or agent. `routes/merchant-sales-reads.ts` is the auth door,
+the period and cursor validation, the money-path rate limit on the clear and the
+status mapping. The one write deletes the merchant's statement, never a
+transfer.
+
+Control, not runtime (the same rule as the ingest above): no QA scenario calls
+`/merchant-sales`, so a green run says nothing about these two files. They move
+to the runtime list when a QA leg reads the totals. The repository
+(`infra/repositories/merchant-sales-reads.ts`) and migration
+`132_inbound_transfers_account_time.ts` are already on the runtime list through
+`infra/repositories/**` and `db/migrations/**`.
+
+- `packages/backend/src/modules/transactions/merchant-sales-reads.ts`
+- `packages/backend/src/routes/merchant-sales-reads.ts`

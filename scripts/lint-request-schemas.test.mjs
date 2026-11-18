@@ -331,6 +331,8 @@ describe('index.ts readers', () => {
       // #4897: the sales ingest — the merchant key's one write, born ENFORCED
       // (its body is closed: a record is exactly the section 5 shape).
       'routes/merchant-sales.ts',
+      // #4897: the owner's sales reads and the clear route, born ENFORCED.
+      'routes/merchant-sales-reads.ts',
     ])
   })
 })

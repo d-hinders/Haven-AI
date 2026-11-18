@@ -146,3 +146,17 @@ export {
   type RecipientTarget,
 } from './counterparty-name.js'
 export { loadRecipientNameIndex, type LoadRecipientNameIndexOptions } from './recipient-name-index.js'
+// #4897: the owner's sales reads and the clear action, consumed by
+// routes/merchant-sales-reads.ts.
+export {
+  clearSaleRecord,
+  decodePaymentsCursor,
+  emptySummary,
+  PAYMENTS_DEFAULT_LIMIT,
+  PAYMENTS_MAX_LIMIT,
+  parsePeriod,
+  readPaymentDetail,
+  readPaymentsPage,
+  readSalesSummaryForOwner,
+  resolveSalesScope,
+} from './merchant-sales-reads.js'

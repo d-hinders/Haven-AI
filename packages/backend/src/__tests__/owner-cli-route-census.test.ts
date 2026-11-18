@@ -351,6 +351,12 @@ describe('owner_cli route census (#2526)', () => {
       // authenticated by a Sales key, never a session, so a device-code session
       // has no business at it (and it can never be a way to plant a sale).
       { method: 'POST', path: '/merchant/sales' },
+      // #4897: clearing a sale record deletes the merchant's statement about a
+      // payment. It is the owner's own decision, made on the dashboard; a
+      // device-code session an agent drives must not be able to erase the
+      // record of what a sale was for. The reads beside it are not on the
+      // allow-list either — nothing needs them.
+      { method: 'DELETE', path: '/merchant-sales/payments/{txHash}/record' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)

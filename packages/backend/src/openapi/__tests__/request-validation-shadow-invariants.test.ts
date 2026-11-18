@@ -176,6 +176,9 @@ const COERCION_TARGETS: Record<string, string> = {
   'GET /agent-activity/feed query:offset': 'integer',
   'GET /balances/{accountAddress} query:chain_id': 'integer',
   'GET /machine-payments/receipts query:limit': 'integer',
+  // #4897: the owner's sales list; 50 when omitted, said in the description and
+  // applied in the handler (no spec default, so no reviewed-default row).
+  'GET /merchant-sales/payments query:limit': 'integer',
   'GET /portfolio/{accountAddress} query:chain_id': 'integer',
   // #3333 receive side — every route reads chain_id through the shared
   // `parseChainParam` (`Number(request.query.chain_id)`), which accepts the

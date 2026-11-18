@@ -430,6 +430,18 @@ const rekeyIdParam = {
   description: 'Re-key id from the preflight response.',
 } as const
 
+/** #4897: a UTC calendar day, `YYYY-MM-DD`. */
+const merchantSalesDay = { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' } as const
+
+/** #4897: the transaction hash of a sales-read path. */
+const merchantSalesTxHashParam = {
+  name: 'txHash',
+  in: 'path',
+  required: true,
+  schema: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$' },
+  description: 'The settlement transaction hash.',
+} as const
+
 /** Arbitrary-length 0x-hex — an ECDSA signature or an ABI-encoded WebAuthn assertion. */
 const hexBytes = {
   type: 'string',
@@ -10138,6 +10150,89 @@ export const openapiSpec = {
         },
       },
     },
+    '/merchant-sales/summary': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getMerchantSalesSummary',
+        summary: "The merchant account's sales for one period: totals and breakdowns.",
+        description:
+          "The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list; an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is the sales' amount divided by `sales` (rounded down). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Breakdowns name the top 100 by amount and fold the rest into `*_other`. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: merchantSalesDay, description: 'First UTC day of the period, inclusive.' },
+          { name: 'to', in: 'query', schema: merchantSalesDay, description: 'Last UTC day of the period, inclusive.' },
+        ],
+        responses: {
+          '200': {
+            description: 'The summary for the period.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesSummary' } } },
+          },
+          '400': { ...errorResponse, description: 'The period is malformed or `from` is after `to`: error_code INVALID_PERIOD.' },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/merchant-sales/payments': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'listMerchantSalesPayments',
+        summary: "The merchant account's payments, newest first, one row per transaction.",
+        description:
+          "The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` today. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. With merchant services off or no merchant account the list is empty. Read-only.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: merchantSalesDay, description: 'First UTC day of the period, inclusive.' },
+          { name: 'to', in: 'query', schema: merchantSalesDay, description: 'Last UTC day of the period, inclusive.' },
+          { name: 'cursor', in: 'query', schema: { type: 'string', maxLength: 256 }, description: "The previous page's `next_cursor`." },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 }, description: 'Rows per page. 50 when omitted; capped at 200.' },
+        ],
+        responses: {
+          '200': {
+            description: 'One page of payments.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesPaymentsPage' } } },
+          },
+          '400': { ...errorResponse, description: 'The period is malformed (INVALID_PERIOD) or the cursor is not one this list issued (INVALID_CURSOR).' },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/merchant-sales/payments/{txHash}': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getMerchantSalesPayment',
+        summary: 'One payment: its sale record fields and its transfer legs.',
+        description:
+          "One payment into the merchant account (#4897, epic #4885): the list row's fields, the merchant's reference, and the indexed transfers of the transaction (`log_index`, payer, amount; zero-value transfers are not listed). 404 PAYMENT_NOT_FOUND when the account has no such payment, the same answer for a transaction that paid another account. Read-only.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [merchantSalesTxHashParam],
+        responses: {
+          '200': {
+            description: 'The payment.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesPaymentDetail' } } },
+          },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'No such payment on the account: error_code PAYMENT_NOT_FOUND.' },
+        },
+      },
+    },
+    '/merchant-sales/payments/{txHash}/record': {
+      delete: {
+        tags: ['Dashboard'],
+        operationId: 'clearMerchantSaleRecord',
+        summary: "Clear a payment's sale record.",
+        description:
+          "The owner clears a wrong sale record (#4897, epic #4885). The merchant's record is deleted; the payment stays, shown with no product, and a new record for the transaction is then accepted by `POST /merchant/sales`. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [merchantSalesTxHashParam],
+        responses: {
+          '204': { description: 'The record was deleted.' },
+          '401': errorResponse,
+          '404': { ...errorResponse, description: 'The transaction has no sale record on the account: error_code SALE_RECORD_NOT_FOUND.' },
+          '409': { ...errorResponse, description: 'Merchant services are off or there is no merchant account: error_code MERCHANT_ACCOUNT_REQUIRED.' },
+          '429': errorResponse,
+        },
+      },
+    },
     '/merchants': {
       get: {
         tags: ['Catalog'],
@@ -12010,6 +12105,152 @@ export const openapiSpec = {
           created_at: { type: 'string', format: 'date-time' },
         },
         additionalProperties: false,
+      },
+      MerchantSalesPayer: {
+        type: 'object',
+        required: ['kind', 'name', 'address'],
+        properties: {
+          kind: { type: 'string', enum: ['contact', 'own', 'wallet'], description: "`contact`: one of the caller's contacts; `own`: one of the caller's own accounts or agents (current or replaced delegate addresses); `wallet`: any other address, never labelled as a Haven user." },
+          name: { type: 'string', nullable: true, description: 'The contact, account or agent name; null for a wallet.' },
+          address: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+      MerchantSalesAmount: {
+        type: 'object',
+        required: ['count', 'amount_raw'],
+        properties: { count: { type: 'integer' }, amount_raw: { type: 'string' } },
+        additionalProperties: false,
+      },
+      MerchantSalesSummary: {
+        type: 'object',
+        required: [
+          'revenue_raw', 'sales', 'average_sale_raw', 'without_product', 'own_moves', 'by_product',
+          'by_product_other', 'by_payer', 'by_payer_other', 'unattributed', 'by_day',
+        ],
+        properties: {
+          revenue_raw: { type: 'string', description: 'Atomic USDC units: sales plus payments without a product. Own moves are not in it.' },
+          sales: { type: 'integer' },
+          average_sale_raw: { type: 'string', description: "The sales' amount divided by `sales`, rounded down; 0 with no sales." },
+          without_product: { $ref: '#/components/schemas/MerchantSalesAmount' },
+          own_moves: { $ref: '#/components/schemas/MerchantSalesAmount' },
+          by_product: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['product_id', 'label', 'sales', 'amount_raw'],
+              properties: {
+                product_id: { type: 'string' },
+                label: { type: 'string' },
+                sales: { type: 'integer' },
+                amount_raw: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+          },
+          by_product_other: {
+            type: 'object',
+            required: ['products', 'sales', 'amount_raw'],
+            properties: { products: { type: 'integer' }, sales: { type: 'integer' }, amount_raw: { type: 'string' } },
+            additionalProperties: false,
+          },
+          by_payer: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['payer', 'payments', 'amount_raw'],
+              properties: {
+                payer: { $ref: '#/components/schemas/MerchantSalesPayer' },
+                payments: { type: 'integer' },
+                amount_raw: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+          },
+          by_payer_other: {
+            type: 'object',
+            required: ['payers', 'payments', 'amount_raw'],
+            properties: { payers: { type: 'integer' }, payments: { type: 'integer' }, amount_raw: { type: 'string' } },
+            additionalProperties: false,
+          },
+          unattributed: {
+            type: 'object',
+            required: ['payments', 'amount_raw'],
+            description: 'Revenue payments from several payers: not attributed in `by_payer`.',
+            properties: { payments: { type: 'integer' }, amount_raw: { type: 'string' } },
+            additionalProperties: false,
+          },
+          by_day: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['day', 'payments', 'sales', 'revenue_raw'],
+              properties: {
+                day: { type: 'string', description: 'UTC calendar day, YYYY-MM-DD.' },
+                payments: { type: 'integer' },
+                sales: { type: 'integer' },
+                revenue_raw: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      MerchantSalesPayment: {
+        type: 'object',
+        required: [
+          'tx_hash', 'block_time', 'kind', 'amount_raw', 'product_id', 'product_label', 'payer', 'several_payers',
+          'receipt_number', 'vat_treatment', 'held_by',
+        ],
+        properties: {
+          tx_hash: { type: 'string' },
+          block_time: { type: 'string', format: 'date-time' },
+          kind: { type: 'string', enum: ['sale', 'no_product', 'own_move'] },
+          amount_raw: { type: 'string', description: "The sale's amount, or the non-own transfers' sum; for an own move, what moved (no revenue)." },
+          product_id: { type: 'string', nullable: true },
+          product_label: { type: 'string', nullable: true, description: 'Catalogue name, else the record name, else the product id.' },
+          payer: { allOf: [{ $ref: '#/components/schemas/MerchantSalesPayer' }], nullable: true },
+          several_payers: { type: 'boolean' },
+          receipt_number: { type: 'string', nullable: true },
+          vat_treatment: { type: 'string', nullable: true, enum: ['SE_25', 'REVERSE_CHARGE', null] },
+          held_by: { type: 'string', enum: ['account', 'stripe'] },
+        },
+        additionalProperties: false,
+      },
+      MerchantSalesPaymentsPage: {
+        type: 'object',
+        required: ['payments', 'next_cursor'],
+        properties: {
+          payments: { type: 'array', items: { $ref: '#/components/schemas/MerchantSalesPayment' } },
+          next_cursor: { type: 'string', nullable: true, description: 'Pass as `cursor` for the next page; null on the last page.' },
+        },
+        additionalProperties: false,
+      },
+      MerchantSalesPaymentDetail: {
+        allOf: [
+          { $ref: '#/components/schemas/MerchantSalesPayment' },
+          {
+            type: 'object',
+            required: ['merchant_reference', 'legs'],
+            properties: {
+              merchant_reference: { type: 'string', nullable: true },
+              legs: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['log_index', 'payer', 'amount_raw'],
+                  properties: {
+                    log_index: { type: 'integer', nullable: true },
+                    payer: { $ref: '#/components/schemas/MerchantSalesPayer' },
+                    amount_raw: { type: 'string' },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+        ],
       },
       MerchantKeyListResponse: {
         type: 'object',

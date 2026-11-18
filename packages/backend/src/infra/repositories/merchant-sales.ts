@@ -125,3 +125,26 @@ export async function insertMerchantSale(
   )
   return result.rows[0] ?? null
 }
+
+/**
+ * The owner clears a sale record (#4897). Scoped by BOTH the account and the
+ * user; only the `merchant_sales` row is deleted. The indexed transfers stay,
+ * so the payment is still there, shown with no product, and a new record for
+ * the transaction is accepted afterwards (the unique index no longer holds it).
+ * Returns whether a row was deleted.
+ */
+export async function deleteMerchantSale(
+  scope: { accountId: string; userId: string; chainId: number },
+  txHash: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(
+    `DELETE FROM merchant_sales
+      WHERE account_id = $1
+        AND user_id = $2
+        AND chain_id = $3
+        AND LOWER(tx_hash) = LOWER($4)`,
+    [scope.accountId, scope.userId, scope.chainId, txHash],
+  )
+  return (result.rowCount ?? 0) > 0
+}

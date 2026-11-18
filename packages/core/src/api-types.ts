@@ -3952,6 +3952,86 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchant-sales/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The merchant account's sales for one period: totals and breakdowns.
+         * @description The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list; an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is the sales' amount divided by `sales` (rounded down). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Breakdowns name the top 100 by amount and fold the rest into `*_other`. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.
+         */
+        get: operations["getMerchantSalesSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The merchant account's payments, newest first, one row per transaction.
+         * @description The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` today. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. With merchant services off or no merchant account the list is empty. Read-only.
+         */
+        get: operations["listMerchantSalesPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/payments/{txHash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One payment: its sale record fields and its transfer legs.
+         * @description One payment into the merchant account (#4897, epic #4885): the list row's fields, the merchant's reference, and the indexed transfers of the transaction (`log_index`, payer, amount; zero-value transfers are not listed). 404 PAYMENT_NOT_FOUND when the account has no such payment, the same answer for a transaction that paid another account. Read-only.
+         */
+        get: operations["getMerchantSalesPayment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/payments/{txHash}/record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear a payment's sale record.
+         * @description The owner clears a wrong sale record (#4897, epic #4885). The merchant's record is deleted; the payment stays, shown with no product, and a new record for the transaction is then accepted by `POST /merchant/sales`. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
+         */
+        delete: operations["clearMerchantSaleRecord"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/merchants": {
         parameters: {
             query?: never;
@@ -5087,6 +5167,94 @@ export type components = {
             block_time: string;
             /** Format: date-time */
             created_at: string;
+        };
+        MerchantSalesPayer: {
+            /**
+             * @description `contact`: one of the caller's contacts; `own`: one of the caller's own accounts or agents (current or replaced delegate addresses); `wallet`: any other address, never labelled as a Haven user.
+             * @enum {string}
+             */
+            kind: "contact" | "own" | "wallet";
+            /** @description The contact, account or agent name; null for a wallet. */
+            name: string | null;
+            address: string;
+        };
+        MerchantSalesAmount: {
+            count: number;
+            amount_raw: string;
+        };
+        MerchantSalesSummary: {
+            /** @description Atomic USDC units: sales plus payments without a product. Own moves are not in it. */
+            revenue_raw: string;
+            sales: number;
+            /** @description The sales' amount divided by `sales`, rounded down; 0 with no sales. */
+            average_sale_raw: string;
+            without_product: components["schemas"]["MerchantSalesAmount"];
+            own_moves: components["schemas"]["MerchantSalesAmount"];
+            by_product: {
+                product_id: string;
+                label: string;
+                sales: number;
+                amount_raw: string;
+            }[];
+            by_product_other: {
+                products: number;
+                sales: number;
+                amount_raw: string;
+            };
+            by_payer: {
+                payer: components["schemas"]["MerchantSalesPayer"];
+                payments: number;
+                amount_raw: string;
+            }[];
+            by_payer_other: {
+                payers: number;
+                payments: number;
+                amount_raw: string;
+            };
+            /** @description Revenue payments from several payers: not attributed in `by_payer`. */
+            unattributed: {
+                payments: number;
+                amount_raw: string;
+            };
+            by_day: {
+                /** @description UTC calendar day, YYYY-MM-DD. */
+                day: string;
+                payments: number;
+                sales: number;
+                revenue_raw: string;
+            }[];
+        };
+        MerchantSalesPayment: {
+            tx_hash: string;
+            /** Format: date-time */
+            block_time: string;
+            /** @enum {string} */
+            kind: "sale" | "no_product" | "own_move";
+            /** @description The sale's amount, or the non-own transfers' sum; for an own move, what moved (no revenue). */
+            amount_raw: string;
+            product_id: string | null;
+            /** @description Catalogue name, else the record name, else the product id. */
+            product_label: string | null;
+            payer: components["schemas"]["MerchantSalesPayer"] | null;
+            several_payers: boolean;
+            receipt_number: string | null;
+            /** @enum {string|null} */
+            vat_treatment: "SE_25" | "REVERSE_CHARGE" | null;
+            /** @enum {string} */
+            held_by: "account" | "stripe";
+        };
+        MerchantSalesPaymentsPage: {
+            payments: components["schemas"]["MerchantSalesPayment"][];
+            /** @description Pass as `cursor` for the next page; null on the last page. */
+            next_cursor: string | null;
+        };
+        MerchantSalesPaymentDetail: components["schemas"]["MerchantSalesPayment"] & {
+            merchant_reference: string | null;
+            legs: {
+                log_index: number | null;
+                payer: components["schemas"]["MerchantSalesPayer"];
+                amount_raw: string;
+            }[];
         };
         MerchantKeyListResponse: {
             keys: components["schemas"]["MerchantKey"][];
@@ -25359,6 +25527,254 @@ export interface operations {
             };
             /** @description error `chain_unavailable`: the chain could not be read; nothing was stored. Retry. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantSalesSummary: {
+        parameters: {
+            query?: {
+                /** @description First UTC day of the period, inclusive. */
+                from?: string;
+                /** @description Last UTC day of the period, inclusive. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The summary for the period. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesSummary"];
+                };
+            };
+            /** @description The period is malformed or `from` is after `to`: error_code INVALID_PERIOD. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantSalesPayments: {
+        parameters: {
+            query?: {
+                /** @description First UTC day of the period, inclusive. */
+                from?: string;
+                /** @description Last UTC day of the period, inclusive. */
+                to?: string;
+                /** @description The previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Rows per page. 50 when omitted; capped at 200. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of payments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesPaymentsPage"];
+                };
+            };
+            /** @description The period is malformed (INVALID_PERIOD) or the cursor is not one this list issued (INVALID_CURSOR). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantSalesPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The settlement transaction hash. */
+                txHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesPaymentDetail"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such payment on the account: error_code PAYMENT_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    clearMerchantSaleRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The settlement transaction hash. */
+                txHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record was deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The transaction has no sale record on the account: error_code SALE_RECORD_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Merchant services are off or there is no merchant account: error_code MERCHANT_ACCOUNT_REQUIRED. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

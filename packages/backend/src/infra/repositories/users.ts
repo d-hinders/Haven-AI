@@ -149,8 +149,9 @@ export async function updateCurrencyPreference(
 // windows.
 //
 // The window a line describes is `(previous, current]`. `previous` is the
-// instant the PREVIOUS entry opened, `current` the instant this one did — so a
-// payment confirmed exactly on a boundary belongs to exactly one window.
+// PREVIOUS entry's `current`, and `current` is the instant this one opened,
+// never earlier than the stored marker (below) — so a payment confirmed exactly
+// on a boundary belongs to exactly one window.
 //
 // Retry safety: the client generates `entryId` and stores it BEFORE calling.
 // A retry carrying the same id returns the stored bounds and does NOT move the
@@ -162,6 +163,15 @@ export async function updateCurrencyPreference(
 // `current` never goes backwards: `GREATEST(COALESCE(visit_current_at, NOW()),
 // NOW())` keeps a future marker (clock skew) where it is rather than rewinding
 // the window.
+//
+// Two entries can therefore tie on `current` (#4947). `NOW()` is the
+// TRANSACTION start, so an entry whose transaction began first but took the
+// row lock second keeps the stored `current`; and node-pg parses `timestamptz`
+// into a millisecond `Date`, so two values microseconds apart also compare
+// equal. The tied entry's window `(T, T]` is empty: `/dashboard/since` refuses
+// equal bounds with 400 and the client shows no line — the same path a future
+// marker takes. Nothing is counted twice. `clock_timestamp()` would remove only
+// the first cause, so the SQL keeps `NOW()` and callers tolerate the tie.
 
 export interface UserVisitRow {
   /** The previous entry's instant; NULL on the first ever visit. */

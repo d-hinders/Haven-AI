@@ -698,7 +698,9 @@ describe('sales received in Stripe (#4954)', () => {
     expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('$2.14')
     expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('4')
     expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('$0.54')
-    const stripe = within(tiles).getByTestId('sales-stripe-tile')
+    // Its own row: not one of the account tiles.
+    expect(within(tiles).queryByTestId('sales-stripe-tile')).toBeNull()
+    const stripe = screen.getByTestId('sales-stripe-tile')
     expect(stripe.textContent).toContain('Received in Stripe')
     expect(stripe.textContent).toContain('$0.03')
     expect(stripe.textContent).toContain('2 sales, not in Revenue')

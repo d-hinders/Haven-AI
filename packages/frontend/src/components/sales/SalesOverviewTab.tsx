@@ -246,10 +246,7 @@ export function SalesOverviewTab({
 
   return (
     <div className="mt-6 space-y-4" data-testid="sales-overview">
-      <div
-        className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${stripeText !== null ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'xl:grid-cols-4'}`}
-        data-testid="sales-tiles"
-      >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-tiles">
         <StatTile
           label="Revenue"
           value={salesTotalText(data.revenue_raw, money)}
@@ -288,7 +285,13 @@ export function SalesOverviewTab({
             </Tooltip>
           }
         />
-        {stripeText !== null ? (
+      </div>
+
+      {/* #4954: the Stripe figure is its own row, on the same column grid, so
+          the account tiles above stay one row of four and the figure reads as
+          apart from them, as it is: not in Revenue. */}
+      {stripeText !== null ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div data-testid="sales-stripe-tile">
             <StatTile
               className="h-full"
@@ -309,8 +312,8 @@ export function SalesOverviewTab({
               }
             />
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {own.count > 0 ? (
         <NoticeRow>

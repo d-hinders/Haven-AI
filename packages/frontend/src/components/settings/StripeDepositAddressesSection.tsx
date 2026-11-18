@@ -115,7 +115,6 @@ export default function StripeDepositAddressesSection({ chainId }: { chainId: nu
           : copy.registeredHelper(registered),
       actions: (
         <span className="flex flex-wrap items-center justify-end gap-2">
-          <CopyButton value={shown} label="address" text={copy.copy} onCopied={() => toast.success(copy.copied)} />
           {entry.active ? (
             <Button
               variant="ghost"
@@ -129,6 +128,7 @@ export default function StripeDepositAddressesSection({ chainId }: { chainId: nu
               {copy.retire}
             </Button>
           ) : null}
+          <CopyButton value={shown} label="address" text={copy.copy} onCopied={() => toast.success(copy.copied)} />
         </span>
       ),
     }
@@ -137,12 +137,20 @@ export default function StripeDepositAddressesSection({ chainId }: { chainId: nu
   return (
     <Card.Section divided>
       <div className="space-y-4 px-5 py-4" data-testid="sales-deposit-addresses">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        {/* Stacks below `sm`, as the card's own header does, so the
+            description never squeezes into a narrow column beside the button. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{copy.title}</h3>
             <p className="mt-1 text-sm text-[var(--v2-ink-2)]">{copy.description}</p>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setRegisterOpen(true)} disabled={loading && addresses.length === 0}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="self-start"
+            onClick={() => setRegisterOpen(true)}
+            disabled={loading && addresses.length === 0}
+          >
             {copy.register}
           </Button>
         </div>

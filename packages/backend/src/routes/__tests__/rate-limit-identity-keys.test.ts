@@ -146,6 +146,16 @@ describe('rate-limit keys follow the verified identity (#4955)', () => {
     )
     expect(codes.slice(0, LIMIT).filter((c) => c === 429)).toEqual([])
     expect(codes[LIMIT]).toBe(429)
+    // Another agent from the same address is untouched: the bucket is the
+    // agent, not a per-IP collapse that would also have refused request 61.
+    const other = await app.inject({
+      method: 'POST',
+      url: '/payments',
+      headers: { 'x-api-key': agentKey('both-headers-other') },
+      payload: {},
+    })
+    expect(other.statusCode).not.toBe(429)
+    expect(other.statusCode).not.toBe(401)
   })
 
   describe('owners stay apart', () => {

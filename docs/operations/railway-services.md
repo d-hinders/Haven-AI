@@ -6,7 +6,8 @@ covers:
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
   - packages/backend/src/config.ts
-last-verified: "2026-11-17"
+  - packages/paywall-proxy/demo/opper-products.json
+last-verified: "2026-11-18"
 ---
 
 # Railway Services
@@ -148,6 +149,46 @@ Check the result with `GET /healthz`, which carries a `cdp` block
 (`configured: true`, no credential) only when CDP is on — it also catches the
 client-build failure above. See [secret-rotation.md](secret-rotation.md) for
 the key's inventory row.
+
+### Paywall-proxy (the #4892 demo)
+
+**Not deployed yet.** It waits on Haven's Opper API key, which does not exist
+yet, and on the receiving address. This is the configuration it is created
+with. When it is created, move it into the table above and record the date.
+
+The merchant kit's paywall proxy in front of Opper's inference API, run by
+Haven as an internal technical demo on Base Sepolia (#4892, owner decision
+2026-11-16: the owner accepted the added running cost). It exists in **dev
+only**: it is created in the dev environment and never in production.
+
+| Setting | Value |
+|---|---|
+| Build | root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first) |
+| Start command | `node packages/paywall-proxy/dist/index.js` |
+| Volume | one volume, mounted at `/data`, for `PAYMENTS_DB` |
+| Replicas | one. The proxy locks `PAYMENTS_DB` and a second process refuses to start, so a deploy must stop the old container before starting the new one. Check this on the first redeploy |
+| Sleep | on |
+| Healthcheck | `/healthz` |
+
+Variables, named, with values only for those that are not secret:
+
+| Variable | Value |
+|---|---|
+| `NETWORK` | `eip155:84532` |
+| `PAY_TO` | the receiving Haven dev account: a Haven dev account until Opper has its own, then Opper's |
+| `OPERATOR_NAME` | `Haven (internal technical demo)` |
+| `ENDPOINT_NAME` | `Haven inference demo (Opper)` |
+| `ENDPOINT_DESCRIPTION` | `Internal technical demo run by Haven on Base Sepolia. Test money only. Not a Haven product and not listed in any directory.` |
+| `PRODUCTS_FILE` | `packages/paywall-proxy/demo/opper-products.json` |
+| `PAYMENTS_DB` | `/data/payments.sqlite` |
+| `UPSTREAM_BASE_URL` | `https://api.opper.ai` (Opper's key goes in `Authorization: Bearer`, the proxy's default) |
+| `UPSTREAM_API_KEY` | secret: Haven's Opper key, pasted in by the owner ([secret-rotation.md](secret-rotation.md)) |
+| `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | references to Demo-merchant's dev values, `${{Demo-merchant.CDP_API_KEY_ID}}` and `${{Demo-merchant.CDP_API_KEY_SECRET}}`, so the secret is set in one place |
+| `RPC_URL` | a reference to the dev backend's `${{@haven/backend.RPC_URL_BASE_SEPOLIA}}` (the Alchemy URL, which embeds a key) |
+| `PUBLIC_BASE_URL` | the service's `https://` Railway domain. Haven's signer answers a retry challenge only for an `https` origin |
+| `CLIENT_IP_HEADER` | `X-Real-IP`, the client address Railway's edge sets. Check it against a request on the first deploy |
+| `VAT_RULE` | `SE_25_WITH_EU_REVERSE_CHARGE` |
+| `SELLER_NAME`, `SELLER_ADDRESS`, `SELLER_ORG_NR`, `SELLER_VAT_NR`, `SELLER_IBAN`, `SELLER_BIC` | Haven's demo seller, the demo merchant's `DEMO_SELLER`: `Haven Demo AB`, `Birger Jarlsgatan 57, 113 56 Stockholm`, `559412-3456`, `SE559412345601`, `SE35 5000 0000 0549 1000 0003`, `ESSESESS`. Never the pilot partner's details while Haven runs the endpoint |
 
 ### Sleep
 

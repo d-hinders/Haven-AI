@@ -347,6 +347,45 @@ settled call: the header is left out and the failure is logged.
 The shape is the one Haven's accounting reads, documented field by field in
 [`docs/operations/merchant-receipt-shape.md`](../../docs/operations/merchant-receipt-shape.md).
 
+## Haven's own demo on Base Sepolia (#4892)
+
+Haven runs one deployment of this proxy itself: an internal technical demo in
+front of Opper's inference API, on Base Sepolia, with test money only. It is not
+listed in any directory or catalogue, and it is not Haven selling: it receives
+into a Haven dev account until Opper has its own, and then into Opper's.
+
+- Products: [`demo/opper-products.json`](demo/opper-products.json). Two models
+  on Opper's one chat-completions route (`POST /v3/compat/chat/completions`),
+  each with its own output-token cap. Products on one route are told apart by
+  `model`, so one model cannot be sold at two caps on the same route.
+- Where it runs and what it is set to:
+  [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
+  § *Paywall-proxy (the #4892 demo)*. The secrets are listed in
+  [`docs/operations/secret-rotation.md`](../../docs/operations/secret-rotation.md).
+- It says what it is: `OPERATOR_NAME` and `ENDPOINT_DESCRIPTION` name it an
+  internal technical demo run by Haven, and every product description in the
+  demo file starts the same way, so the 402 challenge and the discovery
+  document both say so.
+- Its receipts carry Haven's demo seller (Haven Demo AB, the demo merchant's
+  `DEMO_SELLER`) for as long as Haven runs the endpoint, never the pilot
+  partner's details.
+
+### Running the same thing yourself
+
+To run this demo as your own merchant endpoint, change these, and nothing else:
+
+| What | Variable | Change it to |
+|---|---|---|
+| Your upstream key | `UPSTREAM_API_KEY` | Your own Opper key (or your own provider's, with its `UPSTREAM_BASE_URL`). |
+| Your receiving account | `PAY_TO` | Your own Haven account's address. |
+| Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account (Step 2). |
+| Who you are | `OPERATOR_NAME`, `OPERATOR_CONTACT`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION` | Your own name and description, without the "internal technical demo" wording. |
+| Your receipt | `VAT_RULE`, `SELLER_*` | Your own legal details, or unset `VAT_RULE` for no receipt. |
+| Your products | `PRODUCTS_FILE` | Your own copy of the demo file, with your prices and descriptions. |
+
+Check your upstream provider's terms allow you to offer calls made with your
+key to other parties before you take a real payment.
+
 ## Not in this release
 
 - Sales reporting to Haven (#4898). The proxy logs `sales_reporting: "off"` at

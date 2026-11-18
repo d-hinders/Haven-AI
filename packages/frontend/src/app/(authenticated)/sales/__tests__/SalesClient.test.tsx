@@ -417,8 +417,10 @@ describe('the display currency (#4963)', () => {
     expect(ledger.textContent).toContain(fmt(4.2))
     expect(ledger.textContent).not.toContain(fmt(41.58))
     expect(ledger.textContent).not.toContain('≈')
-    expect(screen.getByTestId('sales-payments-summary').textContent).toContain(`Revenue ${fmt(21.4)}`)
-    expect(screen.getByTestId('sales-payments-summary').textContent).not.toContain('≈')
+    // The list's summary line is a total: it carries "≈" like the Revenue tile (design review).
+    expect(screen.getByTestId('sales-payments-summary').textContent).toContain(`Revenue ≈${fmt(21.4)}`)
+    // The delta chip uses the figure's decimal comma, not "+100.0%".
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('+100,0')
   })
 
   it('strikes the chart axis in SEK at the summary rate, matching its values (#4963 review)', async () => {

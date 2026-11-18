@@ -11,6 +11,7 @@ import { StackedBarChart } from '@/components/ui/StackedBarChart'
 import { StatTile } from '@/components/ui/StatTile'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { NoticeRow } from '@/components/haven/NoticeRow'
+import { currencyLocale } from '@/lib/format'
 import { useSalesPayments } from '@/hooks/useSalesPayments'
 import { useSalesSummary } from '@/hooks/useSalesSummary'
 import {
@@ -228,7 +229,7 @@ export function SalesOverviewTab({
   // #4963: the bars are struck in the display currency, so the values and the
   // axis ticks format them as they are (USDC in token mode).
   const { formatValue, formatTick } = chart
-  const chartLabel = `Revenue over ${days} days: ${salesAmountText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
+  const chartLabel = `Revenue over ${days} days: ${salesTotalText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
 
   return (
     <div className="mt-6 space-y-4" data-testid="sales-overview">
@@ -237,7 +238,13 @@ export function SalesOverviewTab({
           label="Revenue"
           value={salesTotalText(data.revenue_raw, money)}
           {...(change !== null
-            ? { delta: change, polarity: 'neutral' as const, deltaCaption: revenueCaption }
+            ? {
+                delta: change,
+                polarity: 'neutral' as const,
+                deltaCaption: revenueCaption,
+                // #4963: the chip's decimal mark follows the figure's (no "+15.9%" beside "23,03 kr").
+                ...(chart.rate !== null ? { deltaLocale: currencyLocale(currency) } : {}),
+              }
             : previousRevenueIsZero
               ? { footnote: `No sales in the ${days} days before` }
               : {})}
@@ -331,7 +338,7 @@ export function SalesOverviewTab({
         <SalesPaymentsList
           list={list}
           total={total}
-          revenueText={salesAmountText(data.revenue_raw, money)}
+          revenueText={salesTotalText(data.revenue_raw, money)}
           money={money}
           merchantName={merchantName}
           onOpenPayment={onOpenPayment}

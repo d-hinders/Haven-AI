@@ -323,6 +323,10 @@ installRequestValidation(app, {
     // is closed (`additionalProperties: false`) so a body carrying anything
     // but the address is refused by the schema, not by a handler check.
     'routes/merchant-catalogue.ts',
+    // #4897: the sales ingest — the merchant key's one write. BRAND NEW, born
+    // ENFORCED on the same rule, with a closed body (`additionalProperties:
+    // false`) so a record is exactly the section 5 shape.
+    'routes/merchant-sales.ts',
   ],
 })
 

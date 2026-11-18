@@ -464,7 +464,7 @@ export type paths = {
         get: operations["getCompanyDetails"];
         /**
          * Create or replace the company details.
-         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per owner (`ownerProfileRateLimit`).
          */
         put: operations["putCompanyDetails"];
         post?: never;
@@ -489,7 +489,7 @@ export type paths = {
         put?: never;
         /**
          * Re-run the VIES check for the saved VAT number.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per owner (`ownerProfileRateLimit`).
          */
         post: operations["recheckCompanyDetailsVies"];
         delete?: never;
@@ -9390,7 +9390,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            /** @description Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited route the same owner calls, from any session. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -9520,7 +9520,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            /** @description Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited route the same owner calls, from any session. */
             429: {
                 headers: {
                     [name: string]: unknown;

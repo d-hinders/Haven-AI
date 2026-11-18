@@ -548,7 +548,7 @@ describe('auth rate limiting (#1670)', () => {
     // Mirrors index.ts: non-global, shared key generator.
     await app.register(rateLimitPlugin, {
       global: false,
-      keyGenerator: (request: { headers: Record<string, string | string[] | undefined>; ip: string }) => rateLimitKeyFor(request),
+      keyGenerator: (request: { ip: string }) => rateLimitKeyFor(request),
     })
     await app.register(routes, { prefix: '/auth', trustProxyHops })
     return app
@@ -570,6 +570,28 @@ describe('auth rate limiting (#1670)', () => {
     }
     // 10/min for signup: requests 11 and 12 must be refused. Against a build
     // where the route never spreads the tier, this is 0 — that IS the bug.
+    expect(limited).toBe(2)
+    await app.close()
+  })
+
+  it('#4955: a junk Authorization or X-API-Key does not move a signup caller out of the IP bucket', { timeout: 30_000 }, async () => {
+    // The old shared key hashed whichever of the two headers was present, so
+    // a fresh junk value per request was a fresh bucket and the per-IP
+    // ceiling never bound. Signup has no auth, so nothing verified an
+    // identity: the key is the IP whatever headers arrive.
+    const app = await buildRateLimitedApp(1)
+    mockQuery.mockImplementation(async () => ({ rows: [] }))
+
+    let limited = 0
+    for (let i = 0; i < 12; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/signup',
+        headers: i % 2 === 0 ? { authorization: `Bearer junk-${i}` } : { 'x-api-key': `sk_agent_junk_${i}` },
+        payload: { name: 'Ada', email: `junk-${i}@example.com`, password: 'password123' },
+      })
+      if (res.statusCode === 429) limited++
+    }
     expect(limited).toBe(2)
     await app.close()
   })

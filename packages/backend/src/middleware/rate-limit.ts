@@ -6,14 +6,13 @@
  * into their route `config`. Tiers:
  *
  * - moneyPathRateLimit — authenticated money-path writes (payments, x402,
- *   machine-payments). 60/min per credential is far above any legitimate
+ *   machine-payments). 60/min per caller is far above any legitimate
  *   agent's payment cadence (the on-chain allowance is the real spend gate;
- *   this is a per-credential request-storm ceiling on the handler — it does
- *   NOT throttle invalid-credential probing, since each distinct credential
- *   value keys its own bucket and auth runs before the route-level limiter;
- *   key entropy is what makes brute force infeasible).
- * - demoRateLimit — public demo reads (demo-mpp). Keyed per IP (no
- *   credential), tighter because the route is unauthenticated.
+ *   this is a per-identity request-storm ceiling on the handler — keyed on
+ *   the agent, owner or key the route's auth verified (`rateLimitKeyFor`,
+ *   #4955). It does NOT throttle invalid-credential probing: a refused
+ *   credential is answered 401 by auth, which runs before the route-level
+ *   limiter; key entropy is what makes brute force infeasible).
  * - publicVerifyRateLimit / publicIssuerRateLimit — public passport
  *   verification (#974). These override the shared key generator entirely,
  *   because per-IP is meaningless behind an untrusted proxy; see below.
@@ -33,32 +32,81 @@
  * deliberately generous — the goal is a ceiling, not throttling real use.
  */
 
-import { createHash } from 'node:crypto'
-import { MERCHANT_KEY_PREFIX } from '../domain/merchant-keys.js'
+import { admittedOpsOperator } from './ops-auth.js'
 
 /**
- * Bucket key for a request: a hash of the presented credential when there is
- * one, else the client IP. Covers BOTH agent auth channels —
- * `Authorization: Bearer` and `X-API-Key` (see middleware/agentAuth.ts) — so
- * every agent gets its own bucket regardless of network path. Without the
- * X-API-Key branch those agents would all collapse into one shared per-IP
- * bucket behind Railway's proxy (no trustProxy configured) and could 429 each
- * other's legitimate payment writes.
+ * The request fields the key generator reads — each one set only by an auth
+ * hook that verified the caller (#4955). Typed structurally so the unit suite
+ * can build a request without Fastify.
  */
-export function rateLimitKeyFor(request: {
-  headers: Record<string, string | string[] | undefined>
+export interface RateLimitSubject {
   ip: string
-}): string {
-  const auth = request.headers.authorization
-  const apiKey = request.headers['x-api-key']
-  const credential =
-    typeof auth === 'string' && auth.length > 0
-      ? auth
-      : typeof apiKey === 'string' && apiKey.length > 0
-        ? apiKey
-        : null
-  if (credential) {
-    return `cred:${createHash('sha256').update(credential).digest('hex').slice(0, 32)}`
+  /** Set by `agentAuthMiddleware` after the key's hash matched an agent. */
+  agent?: { id?: unknown } | null
+  /** Set by `merchantAuthMiddleware` after the key's hash matched a merchant key. */
+  merchant?: { key_id?: unknown } | null
+  /** Set by `@fastify/jwt`'s `jwtVerify` (dashboard and CLI sessions) — `sub` is the owner. */
+  user?: unknown
+}
+
+/**
+ * Bucket key for a request (#4955): the identity the route's own auth
+ * VERIFIED, never the raw text of a header.
+ *
+ * - an agent → `agent:<agent id>`, whichever header (`Authorization: Bearer`
+ *   or `X-API-Key`) carried its key;
+ * - a Sales key (`sk_merchant_`, #4897) → `merchant_key:<key id>`;
+ * - an ops session → `ops:<GitHub id>` of the admitted operator;
+ * - an owner session (a dashboard or CLI JWT) → `user:<sub>`;
+ * - anything else → `ip:<request.ip>`.
+ *
+ * Why identity and not headers: the old rule hashed whatever `Authorization`
+ * held, else `X-API-Key`. The bucket was then chosen by a header the auth may
+ * not use. An agent sending `Authorization: Bearer junk-<n>` beside its valid
+ * key in `X-API-Key` (agent auth ignores a non-`sk_agent_` Bearer) landed in a
+ * fresh bucket on every request, and any header at all moved a caller of a
+ * per-IP route (signup, login, device start and token, ops sign-in, catalog
+ * submit, the receipt drop) out of the IP bucket. Reading the verified
+ * identity closes both: a junk header changes nothing the auth accepted, and
+ * a route with no auth has no identity to read, so it is keyed per IP
+ * whatever headers arrive.
+ *
+ * Why it can read the identity: `@fastify/rate-limit` pushes its check onto
+ * the END of each route's own `onRequest` array (`index.js`, `onRoute`), and
+ * every rate-limited authenticated route runs its auth as an `onRequest`
+ * hook — a context `addHook('onRequest', …)` or the route's own `onRequest`
+ * — so auth has run and admitted the caller before this generator runs. A
+ * caller the auth refuses is answered 401 before the limiter, as before; the
+ * limit is a request-storm ceiling on admitted callers, not a throttle on
+ * credential probing (key entropy is that defence). A route whose auth ran
+ * LATER (a `preHandler`) would find no identity here and fall back to the IP
+ * bucket — a collapse, never a bypass — so new authenticated routes keep
+ * their auth in `onRequest`.
+ *
+ * Owners and ops sessions are keyed by their verified subject, so two
+ * sessions of one owner (two tabs) share a bucket and two owners behind the
+ * same proxy address never do. An agent is keyed by its id rather than its
+ * key, so a re-keyed agent keeps its count.
+ *
+ * The bucket names changed from `cred:<hash>` in #4955; that reset the live
+ * counters in `rate_limit_counters` once, at deploy (a one-minute window).
+ */
+export function rateLimitKeyFor(request: RateLimitSubject): string {
+  const merchantKeyId = request.merchant?.key_id
+  if (typeof merchantKeyId === 'string' && merchantKeyId.length > 0) {
+    return `merchant_key:${merchantKeyId}`
+  }
+  const agentId = request.agent?.id
+  if (typeof agentId === 'string' && agentId.length > 0) {
+    return `agent:${agentId}`
+  }
+  const operator = admittedOpsOperator(request)
+  if (operator) {
+    return `ops:${operator.githubId}`
+  }
+  const sub = (request.user as { sub?: unknown } | null | undefined)?.sub
+  if (typeof sub === 'string' && sub.length > 0) {
+    return `user:${sub}`
   }
   return `ip:${request.ip}`
 }
@@ -71,37 +119,9 @@ export const moneyPathRateLimit = {
 } as const
 
 /**
- * The bucket key for the merchant routes (#4897): the `sk_merchant_` credential
- * `merchantAuthMiddleware` would accept, from `Authorization: Bearer` first,
- * else `X-API-Key`, hashed; the client IP when neither carries one. It is NOT
- * `rateLimitKeyFor`, which hashes whatever `Authorization` holds: a caller
- * sending `Authorization: Bearer junk-<i>` beside a valid key in `X-API-Key`
- * would land in a new bucket on every request, and the same key sent through
- * the two headers would get two buckets. Keying on the accepted credential
- * makes the limit per key whichever header carries it.
- */
-export function merchantRateLimitKeyFor(request: {
-  headers: Record<string, string | string[] | undefined>
-  ip: string
-}): string {
-  const auth = request.headers.authorization
-  const apiKey = request.headers['x-api-key']
-  let credential: string | null = null
-  if (typeof auth === 'string' && auth.startsWith(`Bearer ${MERCHANT_KEY_PREFIX}`)) {
-    credential = auth.slice(7)
-  } else if (typeof apiKey === 'string' && apiKey.startsWith(MERCHANT_KEY_PREFIX)) {
-    credential = apiKey
-  }
-  if (credential) {
-    return `merchant:${createHash('sha256').update(credential).digest('hex').slice(0, 32)}`
-  }
-  return `ip:${request.ip}`
-}
-
-/**
  * `POST /merchant/sales` (#4897): the merchant key's sale ingest, 120/min per
- * merchant key (`merchantRateLimitKeyFor`, so the same key shares one bucket
- * through either header). Higher than the money-path tier because a busy
+ * merchant key (`rateLimitKeyFor` keys it on the verified key's id, so the
+ * same key shares one bucket through either header). Higher than the money-path tier because a busy
  * merchant reports one record per settled payment and a 425 retry resends the
  * same record. It is a request-storm ceiling, not a throttle on real use, and
  * it bounds the RPC reads one key can cause.
@@ -110,14 +130,13 @@ export const merchantSalesRateLimit = {
   rateLimit: {
     max: 120,
     timeWindow: '1 minute',
-    keyGenerator: merchantRateLimitKeyFor,
   },
 } as const
 
 /**
  * `POST /ops/reveal` (#3509): one unmasked customer field per call, by a
- * signed-in founder. Keyed per ops token (`rateLimitKeyFor` hashes the
- * Authorization header). Tight on purpose — a reveal is a deliberate click,
+ * signed-in founder. Keyed per admitted operator (`rateLimitKeyFor` reads
+ * the GitHub id `opsAuth` verified, #4955). Tight on purpose — a reveal is a deliberate click,
  * and a script walking the customer table one reveal at a time is exactly
  * what this ceiling exists to slow down.
  */
@@ -129,7 +148,7 @@ export const opsRevealRateLimit = {
 } as const
 
 /**
- * `GET /ops/search` (#3512): keyed per ops token like reveal, but a separate
+ * `GET /ops/search` (#3512): keyed per operator like reveal, but a separate
  * bucket — `groupId` is appended to the key, so a console that searches as the
  * founder types cannot 429 their next reveal. Looser than reveal because a
  * search returns masked rows only; still a ceiling on a script enumerating
@@ -143,21 +162,13 @@ export const opsSearchRateLimit = {
   },
 } as const
 
-export const demoRateLimit = {
-  rateLimit: {
-    max: 30,
-    timeWindow: '1 minute',
-  },
-} as const
-
 /**
  * Owner company details writes (#3332 review M3): `PUT /user/company-details`
  * and `POST /user/company-details/vies-check`, both dashboard-JWT-authenticated
- * so the shared credential key generator buckets per SESSION CREDENTIAL (the
- * presented JWT), never per shared proxy IP — and, precisely, per credential
- * rather than per owner: two sessions for the same owner (two open tabs, a
- * second device) get two separate buckets, since the key is a hash of the
- * bearer token itself, not the JWT's `sub`. Each write can start a VIES check
+ * so the shared key generator buckets per OWNER (the verified JWT's `sub`,
+ * #4955), never per shared proxy IP: two sessions for the same owner (two
+ * open tabs, a second device) share one bucket, and two owners behind one
+ * proxy address never do. Each write can start a VIES check
  * against the EU
  * Commission's endpoint — the ceiling here is about being a considerate
  * caller of THAT external service (and giving the async
@@ -352,12 +363,13 @@ export function receiptDropRateLimit(
 /**
  * `POST /feedback` (#3597): keyed per USER, not per credential or IP — the
  * one tier in this file that is, because the issue's owner decision says so
- * explicitly ("the rate limit... keyed per user, not per IP"). The shared
- * `rateLimitKeyFor` buckets per presented CREDENTIAL (a hash of the bearer
- * token itself), which is per SESSION for a dashboard JWT — see
- * `ownerProfileRateLimit`'s note on exactly that distinction. Two sessions
- * for the same user (two open terminals, a second machine) would get two
- * buckets under the shared generator; this route wants one.
+ * explicitly ("the rate limit... keyed per user, not per IP"). Since #4955
+ * the shared `rateLimitKeyFor` also keys an owner session on its verified
+ * `sub`, so the bucket would be the same owner either way; this generator
+ * stays because it keeps the feedback count in its own `feedback_user:`
+ * bucket (the shared `user:` count is spent by every other rate-limited
+ * owner route) and because it refuses loudly, below, if auth ever stopped
+ * running first.
  *
  * Keyed on the VERIFIED `request.user.sub` — measured (not assumed):
  * `@fastify/rate-limit` attaches its per-route check through `onRoute`, which

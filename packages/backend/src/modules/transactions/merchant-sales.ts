@@ -288,6 +288,11 @@ export async function ingestMerchantSale(input: {
 
   const own = new Set(await listOwnAccountAddresses(merchant.user_id))
   const facts = saleFactsFromLegs(saleLegs, own)
+  // Review of #4952: an own-only transfer to a Stripe deposit address is the
+  // owner moving their own money into Stripe, not a sale. The reads never show
+  // it (it is not revenue and no inbound row records what moved), so it is not
+  // stored either: the same answer as a hash that paid nobody.
+  if (heldBy === 'stripe' && facts.senderIsOwnAddress) return noPayment()
   const fields = recordFields(record)
 
   const inserted = await insertMerchantSale({

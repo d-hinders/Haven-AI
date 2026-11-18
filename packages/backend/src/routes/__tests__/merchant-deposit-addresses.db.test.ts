@@ -486,7 +486,7 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       expect(res.json()).toMatchObject({ receiving_address: a, amount_raw: '1000000' })
     })
 
-    it('the own-sender fold: a sale from the owner\'s own agent delegate is an own move, amount 0, in no revenue', async () => {
+    it('the own-sender fold: an own-only transfer to a deposit address is the owner moving money into Stripe, refused like a hash that paid nobody, and nothing is stored', async () => {
       const m = await seedMerchant()
       const deposit = addr()
       const delegate = addr()
@@ -497,17 +497,13 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       await registerAt(m, deposit, BEFORE_BLOCK)
       chainShows([], [{ to: deposit, leg: leg(delegate, '2000000', 3) }])
       const res = await post(m.secret, record({ payer: delegate }))
-      expect(res.statusCode, res.body).toBe(201)
-      expect(res.json()).toMatchObject({
-        held_by: 'stripe',
-        amount_raw: '0',
-        sender_is_own_address: true,
-        payer_address: delegate,
-      })
+      expect(res.statusCode, res.body).toBe(422)
+      chainShows([], [])
+      const nobody = await post(m.secret, record({ tx_hash: '0x' + '2c'.repeat(32) }))
+      expect(res.json()).toEqual(nobody.json())
+      expect((await salesFor(m.accountId)).rows).toHaveLength(0)
       const summary = (await get(m.userId, '/merchant-sales/summary')).json()
       expect(summary.received_in_stripe).toEqual({ count: 0, amount_raw: '0' })
-      expect(summary.own_moves).toEqual({ count: 0, amount_raw: '0' })
-      // Never revenue, and its row holds no "what moved" amount: not in the list.
       expect((await get(m.userId, '/merchant-sales/payments')).json().payments).toEqual([])
     })
   })
@@ -566,7 +562,7 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
     it('does not count a registration a fraction of a second after the whole-second block time', async () => {
       const m = await seedMerchant()
       const deposit = addr()
-      await registerAt(m, deposit, '2026-11-17T10:00:00.400Z')
+      await registerAt(m, deposit, '2026-11-17T10:00:00.0004Z')
       chainShows([], [{ to: deposit, leg: leg(PAYER, '1000000', 4) }])
       expect((await post(m.secret, record())).statusCode).toBe(422)
     })

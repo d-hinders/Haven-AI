@@ -34,10 +34,11 @@
  * ── Receipt email and addresses (#4870) ──────────────────────────────────
  * Three optional fields, saved with the rest of the business details:
  *
- * - **Receipt email.** Prefilled from the SIGN-UP email when nothing is
- *   stored, and stored only when the owner saves — the sign-up email is
- *   never used as a receipt email anywhere else (owner decision 2026-11-17,
- *   #4868). Clearing the box saves `null`.
+ * - **Receipt email.** Prefilled from the SIGN-UP email only while the owner
+ *   has no company details saved (#4946), and stored only when the owner
+ *   saves — the sign-up email is never used as a receipt email anywhere else
+ *   (owner decision 2026-11-17, #4868). Clearing the box saves `null`, and a
+ *   saved row with no receipt email shows the box empty.
  * - **Billing and shipping addresses.** Structured, not free text, so a
  *   merchant can use them: street address, second line, postal code, city
  *   and country. The stored shape is
@@ -212,8 +213,13 @@ function draftFrom(details: CompanyDetailsRow | null, signupEmail: string): Draf
     orgNumber: details?.org_number ?? '',
     vatNumber: details?.vat_number ?? '',
     // #4870: the sign-up email is a SUGGESTION, never a stored value — it is
-    // shown when nothing is stored and saved only if the owner saves.
-    receiptEmail: details?.receipt_email ?? signupEmail,
+    // saved only if the owner saves. #4946 (owner decision 2026-11-18): it is
+    // suggested ONLY when the owner has no company details at all. Once a row
+    // exists, a `null` receipt email is shown empty: the database cannot tell
+    // a cleared email from one never set (migration 129 has no backfill), and
+    // prefilling a cleared one would store the sign-up email again on the
+    // owner's next, unrelated save.
+    receiptEmail: details === null ? signupEmail : (details.receipt_email ?? ''),
     billing: addressDraftFrom(details?.billing_address),
     shipping: addressDraftFrom(details?.shipping_address),
     shippingSameAsBilling: addressesEqual(details?.shipping_address, details?.billing_address),

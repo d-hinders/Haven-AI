@@ -4,8 +4,13 @@ import {
   catalogueHost,
   catalogueNeedsAttention,
   catalogueView,
+  accountLedgerCount,
+  isEmptyPeriod,
   isOnChainHash,
+  isStripeHeld,
   ledgerCount,
+  stripeSalesCount,
+  stripeSalesRaw,
   payerKindLine,
   payerName,
   payerSubline,
@@ -144,6 +149,29 @@ describe('what the summary says', () => {
 
   it('lists every payment but counts only revenue ones as revenue', () => {
     expect(ledgerCount(summary)).toBe(6)
+  })
+
+  it('#4954: lists the Stripe sales too, and counts them apart from the account', () => {
+    const withStripe = { ...summary, received_in_stripe: { count: 2, amount_raw: '30000' } } as SalesSummary
+    expect(accountLedgerCount(withStripe)).toBe(6)
+    expect(stripeSalesCount(withStripe)).toBe(2)
+    expect(stripeSalesRaw(withStripe)).toBe('30000')
+    expect(ledgerCount(withStripe)).toBe(8)
+    // An older backend without the field reads as none.
+    expect(stripeSalesCount(summary)).toBe(0)
+    expect(stripeSalesRaw(summary)).toBe('0')
+  })
+
+  it('#4954: a period with only Stripe sales is not empty', () => {
+    const none = { ...summary, sales: 0, without_product: { count: 0, amount_raw: '0' }, own_moves: { count: 0, amount_raw: '0' } } as unknown as SalesSummary
+    expect(isEmptyPeriod(none)).toBe(true)
+    expect(isEmptyPeriod({ ...none, received_in_stripe: { count: 1, amount_raw: '10000' } } as SalesSummary)).toBe(false)
+  })
+
+  it('#4954: Stripe-held is the row\'s held_by, and nothing else', () => {
+    expect(isStripeHeld({ held_by: 'stripe' })).toBe(true)
+    expect(isStripeHeld({ held_by: 'account' })).toBe(false)
+    expect(isStripeHeld({})).toBe(false)
   })
 
   it('gives a comparison only where the period before had revenue', () => {

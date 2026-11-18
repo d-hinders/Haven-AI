@@ -12,10 +12,13 @@ import {
   TransactionActivityRowSkeleton,
   transactionDayGroups,
 } from '@/components/haven/TransactionActivityRow'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { SALES_STATUS } from '@/lib/payment-status'
 import { formatClockTime } from '@/lib/format'
 import {
   SALES_PAGE_SIZE,
+  STRIPE_MARK,
+  isStripeHeld,
   payerSubline,
   salesAmountText,
   salesFiatAmount,
@@ -44,9 +47,9 @@ function rowAmount(raw: string, money: SalesMoney) {
  * - a move from the owner's own account or agent: "Moved between your
  *   accounts", the move mark and "Not counted", its amount not signed as income.
  *
- * The row has no second mark yet. A later mark ("Received in Stripe", #4954,
- * `held_by` on the wire) goes in `extraBadges`; today every payment, whatever
- * its `held_by`, renders as any sale.
+ * - a sale received at a registered Stripe deposit address (#4954, `held_by`
+ *   `stripe`): the product's name and the "Received in Stripe" mark, as a
+ *   plain pill in `extraBadges` (nothing inside a ledger row is a control).
  */
 export function SalesLedgerRow({
   payment,
@@ -101,6 +104,9 @@ export function SalesLedgerRow({
       title={payment.product_label ?? payment.product_id ?? 'Sale'}
       direction="in"
       description={subline}
+      extraBadges={
+        isStripeHeld(payment) ? <StatusBadge tone={STRIPE_MARK.tone}>{STRIPE_MARK.label}</StatusBadge> : undefined
+      }
     />
   )
 }
@@ -115,6 +121,7 @@ export function SalesPaymentsList({
   list,
   total,
   revenueText,
+  stripeText = null,
   money,
   merchantName,
   onOpenPayment,
@@ -123,6 +130,8 @@ export function SalesPaymentsList({
   /** Every payment the period has, from the summary — never the loaded count. */
   total: number
   revenueText: string
+  /** The period's sales received in Stripe, as text; null when it has none (#4954). */
+  stripeText?: string | null
   money: SalesMoney
   merchantName: string
   onOpenPayment: (txHash: string) => void
@@ -139,6 +148,7 @@ export function SalesPaymentsList({
           {total} {total === 1 ? 'payment' : 'payments'}
         </span>
         <span>Revenue {revenueText}</span>
+        {stripeText !== null ? <span>Received in Stripe {stripeText}</span> : null}
       </p>
 
       <Card hover={false} className="mt-3 overflow-hidden">
@@ -212,6 +222,7 @@ export function SalesPaymentsList({
           Transactions
         </Link>
         . Sales adds what each payment was for and leaves your own moves out of the totals.
+        {stripeText !== null ? ' Sales received in Stripe went to your Stripe address, so they are not in Transactions.' : null}
       </p>
     </section>
   )

@@ -9,6 +9,12 @@ export type DetailListItem = {
   helper?: string
   /** Optional trailing actions for the row — a Remove, an Edit, a link. */
   actions?: ReactNode
+  /**
+   * A stable row identity, for a list whose rows share a label (#4954: one
+   * "Address" row per registered address). Defaults to `label`, so every
+   * existing caller keys exactly as before.
+   */
+  id?: string
 }
 
 /**
@@ -64,7 +70,7 @@ export function DetailList({
             : 'sm:grid-cols-[160px_1fr]'
         return (
           <div
-            key={item.label}
+            key={item.id ?? item.label}
             className={`${compact ? 'py-2' : 'py-3'} ${columns} grid gap-1 first:pt-0 last:pb-0 sm:gap-4`}
           >
             <dt className="text-xs font-medium text-[var(--v2-ink-3)]">{item.label}</dt>

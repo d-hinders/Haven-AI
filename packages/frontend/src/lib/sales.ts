@@ -233,9 +233,45 @@ export function payerKey(payer: SalesPayer): string {
 
 // ── What the summary says ───────────────────────────────────────────────────
 
-/** Every payment the ledger lists for the period: sales, no-product payments and own moves. */
+/**
+ * Every payment the ledger lists for the period: the account's sales,
+ * no-product payments and own moves, plus the sales received in Stripe — the
+ * list carries both kinds (#4952), so its count does too.
+ */
 export function ledgerCount(summary: SalesSummary): number {
+  return accountLedgerCount(summary) + stripeSalesCount(summary)
+}
+
+/** The payments into the Sales account itself: the ones every account figure describes. */
+export function accountLedgerCount(summary: SalesSummary): number {
   return summary.sales + summary.without_product.count + summary.own_moves.count
+}
+
+// ── Received in Stripe (#4954; dev and Stripe sandbox) ──────────────────────
+//
+// A sale paid to a Stripe deposit address the owner registered (#4952) is in
+// no account figure: Revenue, Sales, Average sale, the chart and both
+// breakdowns count the Sales account's payments only. Stripe-held sales have
+// ONE figure of their own, `received_in_stripe`, so each kind agrees with its
+// own rows. Nothing here is a Stripe balance: Haven reads no Stripe account,
+// only what the chain says reached the registered address.
+
+/** The mark a Stripe-held sale carries, in the row and in its detail. */
+export const STRIPE_MARK = { label: 'Received in Stripe', tone: 'brand' } as const
+
+/** The sales received at a registered Stripe deposit address in the period. */
+export function stripeSalesCount(summary: SalesSummary): number {
+  return summary.received_in_stripe?.count ?? 0
+}
+
+/** Their amount, atomic USDC. */
+export function stripeSalesRaw(summary: SalesSummary): string {
+  return summary.received_in_stripe?.amount_raw ?? '0'
+}
+
+/** True for a sale received in Stripe, from the row's `held_by` (the registry's answer, never the record's). */
+export function isStripeHeld(payment: { held_by?: string | null }): boolean {
+  return payment.held_by === 'stripe'
 }
 
 /** Payments that count as revenue: sales plus payments with no product. */
@@ -248,7 +284,7 @@ export function payerCount(summary: SalesSummary): number {
   return summary.by_payer.length + summary.by_payer_other.payers
 }
 
-/** Nothing in the period reached the account at all (a quiet period, not a first run). */
+/** Nothing in the period reached the account or a registered Stripe address (a quiet period, not a first run). */
 export function isEmptyPeriod(summary: SalesSummary): boolean {
   return ledgerCount(summary) === 0
 }
@@ -294,7 +330,7 @@ export function salesChartDays(
 
 export type SalesPaymentDetail = ApiSchema<'MerchantSalesPaymentDetail'>
 
-/** A payment hash the explorer can open: a 32-byte hex string. A future held-by-Stripe row carries none. */
+/** A payment hash the explorer can open: a 32-byte hex string. A Stripe-held sale carries one too: the payment into the deposit address. */
 export function isOnChainHash(value: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/.test(value)
 }

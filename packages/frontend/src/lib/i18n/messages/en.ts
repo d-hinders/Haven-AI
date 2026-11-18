@@ -532,6 +532,68 @@ export const en = {
       loadError: 'Haven could not load Sales.',
       retry: 'Try again',
 
+      /**
+       * Stripe deposit addresses (#4954, epic #4886; dev and Stripe sandbox).
+       * The address is the owner's word: Haven cannot check that a
+       * Stripe-controlled address is theirs, so every registration says
+       * "registered by you, not verified by Haven" (owner approval on #4902,
+       * 2026-11-18). Nothing here describes a Stripe balance: Haven reads no
+       * Stripe account, only payments on the chain.
+       */
+      depositAddresses: {
+        title: 'Stripe deposit addresses',
+        description:
+          'Payments your kit reports as paid to one of these addresses show on the Sales page as received in Stripe. They are never in a Haven balance.',
+        register: 'Register address',
+        notice:
+          'Registered by you, not verified by Haven. Haven cannot check that a Stripe address is yours, so only register an address Stripe gave you.',
+        loading: 'Loading Stripe deposit addresses…',
+        loadError: 'Haven could not load your Stripe deposit addresses.',
+        empty: 'No address registered. Register one before your first Stripe payment: a payment made to an address before it is registered is not counted.',
+        addressLabel: 'Address',
+        notVerified: 'Not verified by Haven',
+        retired: 'Retired',
+        registeredHelper: (date: string) => `Registered by you on ${date}, not verified by Haven.`,
+        retiredHelper: (registered: string, retired: string) =>
+          `Registered by you on ${registered}, not verified by Haven. Retired on ${retired}.`,
+        copy: 'Copy',
+        copied: 'Address copied',
+        retire: 'Retire',
+        registerDialog: {
+          title: 'Register a Stripe deposit address',
+          subtitle: (network: string) =>
+            `The address Stripe gave you to receive USDC on ${network}. Register it before the first payment to it.`,
+          label: 'Deposit address',
+          placeholder: '0x…',
+          helper: 'Registered by you, not verified by Haven.',
+          submit: 'Register address',
+          working: 'Registering…',
+          cancel: 'Cancel',
+          doneTitle: 'Address registered',
+          doneBody: 'Sales your kit reports as paid to it now show as received in Stripe.',
+          done: 'Done',
+        },
+        retireDialog: {
+          title: 'Retire this address?',
+          body: 'New payments to it stop counting as sales. The sales already received there stay. You can register it again later.',
+          confirm: 'Retire address',
+          cancel: 'Cancel',
+          working: 'Retiring…',
+        },
+        refusal: {
+          invalid: 'This is not an address. An address starts with 0x, followed by 40 letters and numbers.',
+          own_address:
+            'This is one of your own accounts or agents. A Stripe deposit address is one Stripe gives you, not a Haven address.',
+          already_registered: 'This address is already registered to a Sales account on this network.',
+          already_retired: 'This address is already retired.',
+          not_found: 'This address is no longer registered to your Sales account.',
+          sales_off: 'Turn Sales on before changing your Stripe deposit addresses.',
+          rate_limited: 'Too many changes in a short time. Wait a minute, then try again.',
+          refused: 'Haven refused this change. Nothing changed.',
+          unknown_outcome: 'Haven did not answer. Close this dialog to see what is registered now, then try again if it is not listed.',
+        },
+      },
+
       dialog: {
         title: 'Turn on Sales',
         subtitle: 'A separate Haven account for the payments you take. It starts empty.',

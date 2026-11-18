@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  classifyDepositAddressError,
+  isDepositAddressShape,
   ACCOUNT_CAP_REACHED,
   IDEMPOTENCY_KEY_REUSED,
   KEY_NOT_ON_SOURCE,
@@ -149,5 +151,40 @@ describe('salesCardState', () => {
 
   it('is on when the setting is on', () => {
     expect(salesCardState('ready', { ...off, enabled: true, merchant_account: account })).toBe('on')
+  })
+})
+
+describe('classifyDepositAddressError and isDepositAddressShape (#4954)', () => {
+  const err = (status: number | undefined, body: Record<string, unknown> = {}) => ({ status, body })
+
+  it.each([
+    ['INVALID_DEPOSIT_ADDRESS', 400, 'invalid'],
+    ['DEPOSIT_ADDRESS_IS_OWN', 409, 'own_address'],
+    ['DEPOSIT_ADDRESS_ALREADY_REGISTERED', 409, 'already_registered'],
+    ['DEPOSIT_ADDRESS_RETIRED', 409, 'already_retired'],
+    ['DEPOSIT_ADDRESS_NOT_FOUND', 404, 'not_found'],
+    ['MERCHANT_ACCOUNT_REQUIRED', 409, 'sales_off'],
+  ])('maps %s by its code, whatever the sentence', (code, status, kind) => {
+    expect(classifyDepositAddressError(err(status, { error_code: code, error: 'reworded' }))).toEqual({ kind })
+  })
+
+  it('a code-less 4xx is the route sentence, bounded; 429 is the rate limit', () => {
+    expect(classifyDepositAddressError(err(422, { error: '  Not today.  ' }))).toEqual({ kind: 'refused', detail: 'Not today.' })
+    expect(classifyDepositAddressError(err(422, { error: 'x'.repeat(500) }))).toEqual({ kind: 'refused', detail: 'x'.repeat(200) })
+    expect(classifyDepositAddressError(err(422))).toEqual({ kind: 'refused', detail: null })
+    expect(classifyDepositAddressError(err(429))).toEqual({ kind: 'rate_limited' })
+  })
+
+  it('no answer or a 5xx is an unknown outcome, never a refusal', () => {
+    expect(classifyDepositAddressError(new Error('network'))).toEqual({ kind: 'unknown_outcome' })
+    expect(classifyDepositAddressError(err(503, { error: 'down' }))).toEqual({ kind: 'unknown_outcome' })
+  })
+
+  it('accepts a 20-byte hex address, trimmed, in any case, and nothing else', () => {
+    expect(isDepositAddressShape(' 0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0 ')).toBe(true)
+    expect(isDepositAddressShape('0x3C9E5A1B7D2F4E60A8B1C3D5E7F9A0B2C4D6E8F0')).toBe(true)
+    expect(isDepositAddressShape('3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0')).toBe(false)
+    expect(isDepositAddressShape('0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f')).toBe(false)
+    expect(isDepositAddressShape('0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8fg')).toBe(false)
   })
 })

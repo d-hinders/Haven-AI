@@ -192,3 +192,80 @@ export function salesCardState(
   if (state.enabled) return 'on'
   return state.merchant_account === null ? 'never_on' : 'off'
 }
+
+// ── Stripe deposit addresses (#4954, epic #4886; dev and Stripe sandbox) ────
+// The owner's registry (#4952's `/merchant-deposit-addresses` routes). A sale
+// paid to an active registered address is stored as a Stripe-held sale and is
+// shown apart from the Sales account's figures. The address is the owner's
+// word: Haven cannot check a Stripe-controlled address is theirs, so every
+// registration is "registered by you, not verified by Haven".
+
+/** One registration, active or retired. */
+export type DepositAddress = ApiOperations['registerMerchantDepositAddress']['responses']['201']['content']['application/json']
+
+/** The list read: every registration, newest first. */
+export type DepositAddressList =
+  ApiOperations['listMerchantDepositAddresses']['responses']['200']['content']['application/json']
+
+/** Not a 0x-prefixed 20-byte hex address (400). */
+export const INVALID_DEPOSIT_ADDRESS = 'INVALID_DEPOSIT_ADDRESS'
+/** One of the owner's own accounts, or a current or past agent delegate (409). */
+export const DEPOSIT_ADDRESS_IS_OWN = 'DEPOSIT_ADDRESS_IS_OWN'
+/** Already active on a Sales account on this chain (409). */
+export const DEPOSIT_ADDRESS_ALREADY_REGISTERED = 'DEPOSIT_ADDRESS_ALREADY_REGISTERED'
+/** Already retired (409, retire only). */
+export const DEPOSIT_ADDRESS_RETIRED = 'DEPOSIT_ADDRESS_RETIRED'
+/** No such registration on the account (404, retire only). */
+export const DEPOSIT_ADDRESS_NOT_FOUND = 'DEPOSIT_ADDRESS_NOT_FOUND'
+/** Merchant services are off, or there is no merchant account (409). */
+export const MERCHANT_ACCOUNT_REQUIRED = 'MERCHANT_ACCOUNT_REQUIRED'
+
+/** The shape the route checks, so an obvious typo is caught before a round trip. */
+export function isDepositAddressShape(value: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(value.trim())
+}
+
+/** A refused registration or retirement, in the section's own terms — never the raw code. */
+export type DepositAddressRefusal =
+  | { kind: 'invalid' }
+  | { kind: 'own_address' }
+  | { kind: 'already_registered' }
+  | { kind: 'already_retired' }
+  | { kind: 'not_found' }
+  | { kind: 'sales_off' }
+  | { kind: 'rate_limited' }
+  /** A code-less 4xx: the route's sentence, bounded, or null. */
+  | { kind: 'refused'; detail: string | null }
+  /** No answer, or a 5xx: the outcome is not known; the list is read again. */
+  | { kind: 'unknown_outcome' }
+
+/**
+ * Map a failed register or retire to the section's vocabulary, by
+ * `error_code` first and never by the route's sentence — the same rule as
+ * `classifyTurnOnError`.
+ */
+export function classifyDepositAddressError(err: unknown): DepositAddressRefusal {
+  const body = readBody(err)
+  const status = (err as { status?: unknown } | null)?.status
+  const code = typeof body.error_code === 'string' ? body.error_code : null
+
+  switch (code) {
+    case INVALID_DEPOSIT_ADDRESS:
+      return { kind: 'invalid' }
+    case DEPOSIT_ADDRESS_IS_OWN:
+      return { kind: 'own_address' }
+    case DEPOSIT_ADDRESS_ALREADY_REGISTERED:
+      return { kind: 'already_registered' }
+    case DEPOSIT_ADDRESS_RETIRED:
+      return { kind: 'already_retired' }
+    case DEPOSIT_ADDRESS_NOT_FOUND:
+      return { kind: 'not_found' }
+    case MERCHANT_ACCOUNT_REQUIRED:
+      return { kind: 'sales_off' }
+  }
+
+  if (typeof status !== 'number' || status < 400 || status >= 500) return { kind: 'unknown_outcome' }
+  if (status === 429) return { kind: 'rate_limited' }
+  const sentence = typeof body.error === 'string' ? body.error.trim() : ''
+  return { kind: 'refused', detail: sentence ? sentence.slice(0, MAX_DETAIL_CHARS) : null }
+}

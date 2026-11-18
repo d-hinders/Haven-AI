@@ -13,6 +13,11 @@
  * - **The dialog, first turn-on** — the network choice, the "cannot be changed
  *   later" line, and the facts. No name field (the server names the account
  *   "Sales").
+ * - **The card, on, with Stripe deposit addresses (#4954)** — the section
+ *   under the account rows: the one "not verified" notice, an active address
+ *   and a retired one that stays listed, each labelled "registered by you, not
+ *   verified by Haven" (`salesDepositAddresses`, `fixtures/haven-api.ts`).
+ * - **The register dialog (#4954)** — the address field and its label.
  * - **The dialog, result** — `DialogResult` plus the backup recommendation.
  *   Reached by turning Sales back ON, which needs no passkey prompt (owner
  *   decision 5), so the capture never depends on a WebAuthn stub.
@@ -35,7 +40,12 @@
  */
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
-import { dismissMobileSidebar, mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import {
+  dismissMobileSidebar,
+  mockHavenApi,
+  salesDepositAddresses,
+  seedAuthenticatedSession,
+} from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports.
 import { VIEWPORTS as SHARED_VIEWPORTS } from '../scripts/evidence-viewports.mjs'
@@ -111,6 +121,18 @@ async function serveMerchantServices(
   })
 }
 
+/** #4954: serve the registered Stripe deposit addresses (Playwright runs the latest route first). */
+async function serveDepositAddresses(page: Page) {
+  await page.route('**/api/merchant-deposit-addresses', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ verification: 'Registered by you, not verified by Haven.', addresses: salesDepositAddresses }),
+    })
+  })
+}
+
 async function openBusiness(page: Page) {
   await page.goto('/settings?tab=business')
   await page.evaluate(() => document.fonts.ready)
@@ -172,6 +194,46 @@ test.describe('settings sales card and dialog (#4904)', () => {
       await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-sales-card-off-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    test(`card — on: Stripe deposit addresses, active and retired (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
+      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
+      await serveMerchantServices(page, ON)
+      await serveDepositAddresses(page)
+      const card = await openBusiness(page)
+
+      const section = card.getByTestId('sales-deposit-addresses')
+      await expect(section).toHaveCount(1)
+      await expect(section.getByTestId('sales-deposit-address')).toHaveCount(2)
+      await expect(section.getByText('Not verified by Haven', { exact: true })).toHaveCount(2)
+      await expect(section.getByText('Retired', { exact: true })).toHaveCount(1)
+      await expect(section.getByRole('button', { name: /^Retire / })).toHaveCount(1)
+      await scrollCardToTop(card)
+      await expect(card).toHaveScreenshot(
+        `settings-sales-card-on-stripe-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
+        SNAPSHOT_OPTIONS,
+      )
+    })
+
+    test(`dialog — register a Stripe deposit address (${vp.name})`, async ({ page }, testInfo) => {
+      const scheme = schemeOf(testInfo)
+      test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
+      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
+      await serveMerchantServices(page, ON)
+      await serveDepositAddresses(page)
+      const card = await openBusiness(page)
+
+      await card.getByRole('button', { name: 'Register address' }).click()
+      const panel = page.getByTestId('register-deposit-address-dialog')
+      await expect(panel).toHaveCount(1)
+      await expect(panel.getByLabel('Deposit address')).toHaveCount(1)
+      await expect(panel.getByText('Registered by you, not verified by Haven.', { exact: true })).toHaveCount(1)
+      await expect(panel).toHaveScreenshot(
+        `settings-sales-dialog-register-address-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
       )
     })

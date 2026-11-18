@@ -1280,6 +1280,11 @@ the `/design-system` specimen is unchanged).
   full width. Emit ONE `grid-cols` utility per row: two `sm:grid-cols-[…]`
   classes on one element resolve by their order in the compiled stylesheet,
   not in the class string, so the compact track would silently lose.
+- **Row identity.** A row is keyed by its `label`. A list whose rows share a
+  label passes `id` on each item ([#4954](https://github.com/d-hinders/Haven-AI/issues/4954):
+  one "Address" row per registered Stripe deposit address, keyed by the
+  registration), so a re-read that reorders the rows never reconciles one
+  address's badges or actions onto another.
 - **No outer margin.** The list owns none; the caller spaces it (`className`),
   because the same list sits under a card title in `AgentRulesSummary` and
   directly in a card elsewhere.

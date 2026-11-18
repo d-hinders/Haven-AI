@@ -100,6 +100,9 @@ describeDb('parties.buyer flag wiring — modules/mpp/evidence.ts (#3332 review 
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
 
     const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
@@ -118,6 +121,9 @@ describeDb('parties.buyer flag wiring — modules/mpp/evidence.ts (#3332 review 
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
 
     const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
@@ -136,5 +142,40 @@ describeDb('parties.buyer flag wiring — modules/mpp/evidence.ts (#3332 review 
 
     const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
     expect('buyer' in (receipt.parties as unknown as Record<string, unknown>)).toBe(false)
+  })
+
+  /**
+   * #4870: the receipt email and both addresses are stored on the same row
+   * the buyer join reads. `parties.buyer` must carry EXACTLY the six fields
+   * it carried before this slice — pinned with `toEqual`, so a column added
+   * to `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` turns this red.
+   */
+  it('#4870: a stored receipt email and both addresses stay out of parties.buyer', async () => {
+    ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+    const agent = await seedAgent()
+    const intentId = await seedIntent(agent.agentId, agent.userId)
+    await seedEvidence(agent, intentId)
+    await upsertOwnerCompanyDetails(agent.userId, {
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      vies_checked_at: '2026-09-20T10:00:00.000Z',
+      receipt_email: 'billing@acme.se',
+      billing_address: { line1: 'Sveavagen 1', city: 'Stockholm', postCode: '111 57', country: 'SE' },
+      shipping_address: { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' },
+    })
+
+    const [receipt] = (await listReceipts(agent.agentId, 10))!.receipts
+    expect((receipt.parties as { buyer?: Record<string, unknown> }).buyer).toEqual({
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      // The evidence mapper hands this back as a Date, not the wire string.
+      vies_checked_at: new Date('2026-09-20T10:00:00.000Z'),
+    })
   })
 })

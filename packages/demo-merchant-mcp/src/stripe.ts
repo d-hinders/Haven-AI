@@ -488,6 +488,13 @@ export function stripeDescription(product: Pick<Product, 'name'>, receiptNumber:
  * #4880: the record of a payment the merchant served, read off the receipt it
  * returned — the same number, treatment and VAT amount, and the buyer keys
  * only when the receipt carries an accepted declaration.
+ *
+ * #4873: the buyer block's checkout details (`receipt_email`,
+ * `billing_address`, `shipping_address`) are deliberately NOT read here. The
+ * record sent to Stripe carries the merchant's own bookkeeping data and, from
+ * an accepted declaration, the buyer's declared company VAT number and
+ * country; a receipt email and a home address are personal data Stripe has no
+ * use for. `stripe.test.ts` pins that they never reach the form.
  */
 export function stripeDetailsFromReceipt(
   product: Pick<Product, 'name' | 'price_usdc'>,

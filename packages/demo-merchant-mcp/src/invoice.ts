@@ -2,6 +2,7 @@ import {
   buildReceipt,
   receiptNumberForTransaction,
   renderReceiptText,
+  type AcceptedCheckoutDetails,
   type AcceptedTaxDeclaration,
   type InvoiceJson,
   type ReceiptSellerDetails,
@@ -274,6 +275,11 @@ export interface InvoiceParams {
    * request carried none (or carried one the merchant refused). Display only.
    */
   taxDeclaration?: AcceptedTaxDeclaration | null
+  /**
+   * #4873: the checkout details the paid request carried, or absent/null when
+   * it carried none. Display only: it adds fields to the buyer block.
+   */
+  checkoutDetails?: AcceptedCheckoutDetails | null
   /** EIP-3009 authorization nonce (hex bytes32) */
   authorizationNonce: string
   /** The wire hash — rendered only when `settlement === 'settled_onchain'`. */
@@ -317,6 +323,7 @@ export function generateInvoice(params: InvoiceParams): DemoInvoice {
     buyerAddress: params.buyerAddress,
     payerRole: params.payerRole,
     taxDeclaration: params.taxDeclaration ?? null,
+    checkoutDetails: params.checkoutDetails ?? null,
     txHash: params.txHash,
     settlement: params.settlement,
     now: params.now,
@@ -391,6 +398,8 @@ export function invoiceForPayment(
     receivingAddress: string
     chainId?: number
     taxDeclaration?: AcceptedTaxDeclaration | null
+    /** #4873: the checkout details the paid request carried, if any. */
+    checkoutDetails?: AcceptedCheckoutDetails | null
     seller?: ReceiptSellerDetails
     stripe?: StripeReceiptContext
   },
@@ -409,6 +418,7 @@ export function invoiceForPayment(
     // #4855: the declaration the paid request carried, already verified
     // against this payment's payer. Display only.
     taxDeclaration: opts.taxDeclaration ?? null,
+    checkoutDetails: opts.checkoutDetails ?? null,
     buyerAddress: payment.from,
     // #2960: `payment.from` is the delegate EOA on `eip3009` and the
     // delegate SMART account (`delegator`) on `erc7710` — see

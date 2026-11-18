@@ -1002,6 +1002,120 @@ treatment is not built — a Haven buyer only ever sends a declaration for an EU
 VAT number, and a non-EU jurisdiction falls back to `SE_25`. The declaration is
 not persisted: it lives on the receipt for the payment that carried it.
 
+## Checkout details (#4873)
+
+The demo merchant is the first merchant that asks for checkout details. One
+product asks — **NordShield VPN Pro** (`buy_vpn { plan: "pro" }`) — and every
+other product's challenge is unchanged. The wire shape is
+[`docs/architecture/13-checkout-details.md`](../../docs/architecture/13-checkout-details.md)
+§2 and §3.
+
+**The request.** `vpn_pro`'s 402 challenge carries one extra entry under
+`extensions`, keyed `haven-checkout-details`:
+
+```json
+"haven-checkout-details": {
+  "info": {
+    "version": 1,
+    "fields": {
+      "receipt_email": { "required": false },
+      "billing_address": { "required": false }
+    }
+  },
+  "schema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "…": "…" }
+}
+```
+
+Both fields are optional. A client that does not know the entry echoes it
+verbatim (the x402 v2 echo rule this merchant enforces) and answers nothing;
+the purchase is served exactly as today.
+
+**The answer.** A paid request may carry one header:
+
+```
+X-Checkout-Details: <base64url of the UTF-8 JSON, no padding>
+```
+
+```json
+{
+  "version": 1,
+  "receipt_email": "philip@example.se",
+  "billing_address": { "line1": "Sveavagen 1", "city": "Stockholm", "postCode": "111 57", "country": "SE" }
+}
+```
+
+Only the fields the merchant asked for are read. The address shape is the
+compliance-fields / EN 16931 BG-8 shape (`line1`, `line2`, `line3`, `city`,
+`postCode`, `subdivision`, `country`), and an absent optional member is omitted
+rather than sent as `null` or an empty string.
+
+**What the receipt shows.** The values appear in full in the buyer block, under
+the wire names the design doc fixes:
+
+```json
+"kopare": {
+  "identifierare": "0x…",
+  "typ": "blockkedjeadress",
+  "roll": "agent_delegate",
+  "receipt_email": "philip@example.se",
+  "billing_address": { "line1": "Sveavagen 1", "city": "Stockholm", "postCode": "111 57", "country": "SE" }
+}
+```
+
+The rendered invoice prints them under KÖPARE (`E-post`, `Fakturaadress`,
+`Leveransadress`; `Email`, `Billing address`, `Shipping address` in English).
+A paid request without the header produces today's receipt, byte for byte: the
+keys are absent, not empty.
+
+**A malformed or oversized header is treated as absent.** The header is
+base64url(JSON) of at most 1,536 bytes; anything that is not that — bad
+encoding, not an object, a version other than `1`, a field without the shape,
+a header over the budget — is dropped, and the purchase is served. A header
+never turns a settled purchase into an error, the same rule the tax declaration
+follows.
+
+**The required-field case, on dev only.** `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD=receipt_email`
+(or `billing_address`) turns one of `vpn_pro`'s optional fields into a required
+one, so Haven's "stopped before paying" behaviour (#4872) can be exercised
+against this merchant. It is **testnet-only, enforced in code**: the merchant
+refuses to start unless `MERCHANT_CHAIN_ID=84532`. Unset (the default), no
+field is required and the QA scenarios see the optional shape. A paid request
+for the required-field product that arrives without the header — an older
+client, or a path #4869 marks as not supported — is still served, and its
+receipt shows no buyer details.
+
+**What happens to the values.** The merchant does not store them beyond the
+response and does not log them: the receipt is built for the response and the
+values are never written to a log line. The paying client reports the
+merchant's receipt back to Haven (`POST /machine-payments/:id/merchant-receipt`),
+so the values are then stored in `merchant_receipts` and attached as a PDF in
+every accounting connection the owner has (Fortnox, Accounted, Igdrasil). The
+receipt shows them in full — owner decision 2026-11-17, see #4868 — because it
+is the owner's own bookkeeping record.
+
+**The Stripe record does not carry them.** The PaymentIntent's metadata carries
+the receipt number, the VAT treatment and amount and, from an accepted tax
+declaration, the buyer's declared VAT number and country. The receipt email and
+the addresses are never read into it (`stripeDetailsFromReceipt`).
+
+**Try it on dev.** Against the dev merchant
+(`https://demo-merchant-dev-84e4.up.railway.app/mcp`, Base Sepolia):
+
+1. Call `buy_vpn { "plan": "pro" }` with no payment header and read the 402's
+   `extensions["haven-checkout-details"]`.
+2. Pay it with a Haven agent whose owner has saved a receipt email and a
+   billing address and turned sharing on for that agent (#4870, #4871). The
+   SDK attaches `X-Checkout-Details` to the paid request.
+3. Read the `x-receipt-json` response header: `kopare.receipt_email` and
+   `kopare.billing_address` are there, and the purchase text prints them.
+4. Pay the same product with no header (or with a malformed one) and confirm
+   the receipt has neither key and the purchase still succeeds.
+5. To exercise the refusal, set
+   `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD=receipt_email` on the dev service
+   and pay `vpn_pro` with an agent whose owner has not saved a receipt email:
+   Haven refuses before paying (`CHECKOUT_DETAILS_UNAVAILABLE`). A paid request
+   that arrives without the header is still served.
+
 ## QA hook: verify-without-settle (testnet-only)
 
 `MERCHANT_SKIP_SETTLE_PRODUCT=<product_id,...>` (#603) verifies listed

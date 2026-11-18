@@ -4405,7 +4405,7 @@ export default function DesignSystemPage() {
                 {
                   label: 'Sales keys',
                   value: 'Keys not accepted while off',
-                  helper: 'The kit’s sales reports are refused until Sales is on again.',
+                  helper: 'Sales reports from your merchant kit are refused until Sales is on again.',
                 },
               ]}
             />

@@ -1284,9 +1284,9 @@ the `/design-system` specimen is unchanged).
 Recorded on `/design-system` → *Detail list*.
 
 **A row that states an off feature's credentials are refused** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)).
-The Settings → Business Sales card (built by #4904; not on the page yet)
+The Settings → Business Sales card (built by [#4904](https://github.com/d-hinders/Haven-AI/issues/4904))
 carries a Detail list row reading **Keys not accepted while off** when Sales is off: label "Sales keys", value "Keys not
-accepted while off", and optionally a helper saying what that means for the kit (its wording is #4904's; the specimen's helper is an illustration). It is a
+accepted while off", and a helper saying what that means for the kit ("The kit's sales reports are refused until Sales is on again."). It is a
 documented use of this list, not a new component — no badge, no alert, no
 action; the card's own switch is the control. Shown on `/design-system` →
 *Sales patterns*.

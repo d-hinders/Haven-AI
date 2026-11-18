@@ -23,9 +23,8 @@
  *   `/accounts/<id>?tab=security` (#4472) — plus
  *   "If something goes wrong": the exit path and what Haven cannot
  *   recover.
- * - **Business.** Company details and the accounting connections
- *   (#4359), visible only when at least one of them has something to
- *   show — see "The Business tab's visibility" below.
+ * - **Business.** Company details, the accounting connections (#4359) and
+ *   Sales (#4904) — see "The Business tab's visibility" below.
  *
  * The placeholder rows the old single-page layout carried (agent spend
  * alerts, password, active sessions, privacy controls) are removed with
@@ -36,28 +35,37 @@
  * The `#signers` anchor (`AccountSignersCard` links here with
  * `?tab=security#signers`) scrolls once the Security tab has mounted.
  *
- * ## The Business tab's visibility (#4359)
+ * ## The Business tab's visibility (#4359, widened by #4904)
  *
  * Company details and the accounting connections both load asynchronously,
  * so whether the Business tab belongs on the page is a TRI-STATE:
  *
- * - **Unknown** (either read still pending): the tab is absent — it must
+ * - **Unknown** (any read still pending): the tab is absent — it must
  *   never flash in and then out. But an explicit `?tab=business` (or an
  *   OAuth return) is honoured through the pending phase: the Business
  *   body renders its skeleton, so the "Open Settings" link from the
  *   feed page and the OAuth callback NEVER land on General.
  * - **Shown**: company details renders something (`empty`/`ready`/`error` —
  *   an error is something to show), or the accounting card does (a live,
- *   configured connector; a failed listing; an OAuth outcome). The
- *   self-hosted explanation is information, NOT content — on its own it
- *   does not make the tab visible.
- * - **Hidden** (both reads settled with nothing to show): the tab is
+ *   configured connector; a failed listing; an OAuth outcome), or the Sales
+ *   card does. The self-hosted explanation is information, NOT content — on
+ *   its own it does not make the tab visible.
+ * - **Hidden** (every read settled with nothing to show): the tab is
  *   absent. A deep link `?tab=business` falls back to the General BODY but
  *   the URL is never rewritten — `tab=business` stays, so the same link
  *   works once the data arrives.
  *
+ * #4904 makes the third state unreachable in practice: the Sales card always
+ * has something to show once its read settles (the switch and the purpose
+ * line, the account, or a retry), and Settings → Business is the only place
+ * Sales can be turned on. The rule is kept as written because it is still the
+ * rule for the two cards that came first, and because a future card that can
+ * genuinely be empty must not resurrect a hidden tab by accident.
+ *
  * The three reads themselves are called ONCE, in `BusinessDataProvider`
- * (see it for why), and shared with both cards through context.
+ * (see it for why), and shared with both cards through context. The Sales
+ * setting is read once for the whole SHELL (`MerchantServicesProvider`), not
+ * here, because the Sales menu entry (#4900) reads the same answer.
  */
 
 import { ArrowRight } from 'lucide-react'
@@ -79,8 +87,10 @@ import { accountingFeedOffState } from '@/hooks/useAccountingFeed'
 import { ConnectionsCard, CONNECT_OUTCOME_PARAMS } from '@/components/accounting/ConnectionsCard'
 import { CompanyDetailsCard } from '@/components/settings/CompanyDetailsCard'
 import { BusinessDataProvider, useBusinessData } from '@/components/settings/BusinessDataContext'
+import SalesCard from '@/components/settings/SalesCard'
 import { SignersSection } from '@/components/settings/SignersSection'
 import { ProfileNameEditor } from '@/components/settings/ProfileNameEditor'
+import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
 
 type SettingsTab = 'general' | 'security' | 'business'
 
@@ -116,6 +126,9 @@ function SettingsTabs() {
   const t = useT()
   const searchParams = useSearchParams()
   const { company, providers, feed } = useBusinessData()
+  // #4904: the Sales card lives on this tab, so the tab's visibility depends on
+  // its read too — see "The Business tab's visibility" below.
+  const sales = useMerchantServicesContext()
 
   // ── The tri-state ──────────────────────────────────────────────────────
   const companyPending = company.status === 'loading'
@@ -132,8 +145,17 @@ function SettingsTabs() {
     providersFailed ||
     feedUnknown ||
     hasConnectOutcome(searchParams)
-  const businessKnown = !companyPending && !providers.loading && !feed.loading
-  const businessVisible = companyHasContent || accountingHasContent
+  // #4904: the Sales card ALWAYS has something to show once its read settles —
+  // the switch and the purpose line when Sales was never on, the account and
+  // its network when it is on or off, a retry when the read failed. So the
+  // Business tab is no longer conditional on company details or accounting:
+  // it is the only place Sales can be turned on, and hiding it would make the
+  // feature unreachable. The tab still waits for the reads (no flash-in), and
+  // it can no longer flash OUT, because Sales content never disappears.
+  const salesSettled = sales.status !== 'loading'
+  const salesHasContent = salesSettled
+  const businessKnown = !companyPending && !providers.loading && !feed.loading && salesSettled
+  const businessVisible = companyHasContent || accountingHasContent || salesHasContent
 
   // The URL owns the tab; an unknown value falls back to General. #4573: the
   // one `?tab=` hook — Settings opts in to KEEPING the other parameters,
@@ -349,6 +371,12 @@ function SettingsTabs() {
               renders nothing when no connector qualifies.
             */}
             <ConnectionsCard />
+
+            {/* #4904: the third card, after Company details and Accounting
+                connections (owner decision 1 on #4894). The switch, the
+                dialog with the network choice and the passkey prompt, and the
+                off state that keeps the account and refuses the keys. */}
+            <SalesCard />
           </>
         )}
       </div>

@@ -28,7 +28,7 @@ import {
   upsertReconciliationEvent,
   type EvidenceBaseInput,
 } from '../machine-payments.js'
-import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
+import { upsertOwnerCompanyDetails, buyerPartyFromJoin, type BuyerJoinColumns } from '../owner-company-details.js'
 
 let seq = 0
 const ADDR = (n: string) => `0x${n.repeat(40).slice(0, 40)}`
@@ -551,6 +551,9 @@ describeDb('machine-payments repository (#1224)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     await upsertOwnerCompanyDetails(ownerB.userId, {
       legal_name: 'Owner B GmbH',
@@ -559,6 +562,9 @@ describeDb('machine-payments repository (#1224)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
 
     const afterA = await listEvidenceReceiptsForAgent<BuyerJoinColumns & { id: string }>(ownerA.agentId, 10)
@@ -572,5 +578,41 @@ describeDb('machine-payments repository (#1224)', () => {
     // other owner's — the join is on THIS row's `user_id`.
     expect(afterB[0].buyer_legal_name).toBe('Owner B GmbH')
     expect(afterB[0].buyer_country).toBe('DE')
+  })
+
+  /**
+   * #4870: the receipt email and the two addresses live on the SAME row the
+   * buyer join reads, so the only thing keeping them out of `parties.buyer`
+   * is `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` not naming them. This pins the
+   * buyer block's key set EXACTLY (`toEqual`, not `toMatchObject`): adding a
+   * column to the join fragment turns it red.
+   */
+  it('#4870: a stored receipt email and both addresses never reach the buyer block', async () => {
+    const owner = await seedAgent()
+    const intent = await seedIntent(owner.agentId, owner.userId)
+    await upsertEvidenceBase(evidenceInput(owner, { paymentIntentId: intent }))
+    await upsertOwnerCompanyDetails(owner.userId, {
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      vies_checked_at: '2026-09-20T10:00:00.000Z',
+      receipt_email: 'billing@acme.se',
+      billing_address: { line1: 'Sveavagen 1', city: 'Stockholm', postCode: '111 57', country: 'SE' },
+      shipping_address: { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' },
+    })
+
+    const rows = await listEvidenceReceiptsForAgent<BuyerJoinColumns & { id: string }>(owner.agentId, 10)
+    expect(rows).toHaveLength(1)
+    expect(buyerPartyFromJoin(rows[0], true)).toEqual({
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      // pg hands a timestamptz back as a Date.
+      vies_checked_at: new Date('2026-09-20T10:00:00.000Z'),
+    })
   })
 })

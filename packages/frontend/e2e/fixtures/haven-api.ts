@@ -1175,6 +1175,47 @@ export const accountingFeedAttention = {
   counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
+/**
+ * Merchant services (#4904, epic #4885): the setting the shell reads once.
+ *
+ * The DEFAULT is OFF with no account — the state every user starts in, and the
+ * one the Settings → Business card renders as "Turn on Sales". Every visual
+ * spec that renders the shell reads this route (the Sales menu entry #4900
+ * will read it too), so it must be answered here or the shell hits the 599
+ * unmocked-route gate.
+ *
+ * `merchantServicesOn` is the state after a turn-on: the setting on and the
+ * dedicated account the route creates, named "Sales" by the server. The
+ * account is a real `smart_accounts` row — a delegation-rail account on the
+ * fixture's chain, never the default, with no agents or budgets — so the
+ * fixture never invents a state the backend cannot serve (#2120).
+ */
+export const merchantServicesOff = {
+  enabled: false,
+  enabled_at: null as string | null,
+  disabled_at: null as string | null,
+  merchant_account: null as {
+    id: string
+    account_address: string
+    chain_id: number
+    name: string
+    created_at: string
+  } | null,
+}
+
+export const merchantServicesOn = {
+  enabled: true,
+  enabled_at: '2026-05-04T09:00:00.000Z',
+  disabled_at: null as string | null,
+  merchant_account: {
+    id: 'account-sales',
+    account_address: '0x5555555555555555555555555555555555555555',
+    chain_id: testSafe.chain_id,
+    name: 'Sales',
+    created_at: '2026-05-04T09:00:00.000Z',
+  },
+}
+
 type JsonValue = Record<string, unknown> | unknown[] | null
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
@@ -1754,6 +1795,16 @@ export async function mockHavenApi(page: Page) {
           },
         ],
       })
+      return
+    }
+
+    // #4904: the merchant-services setting, read ONCE by the shell
+    // (`MerchantServicesProvider`) on every authenticated page. The default is
+    // OFF with no account — the state every user starts in — so the Settings →
+    // Business card renders its "Turn on Sales" state and the Sales menu entry
+    // (#4900) stays hidden. A spec that needs Sales on overrides this route.
+    if (method === 'GET' && path === '/merchant-services') {
+      await fulfillJson(route, merchantServicesOff)
       return
     }
 

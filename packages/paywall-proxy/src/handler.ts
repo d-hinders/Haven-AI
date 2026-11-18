@@ -4,9 +4,10 @@
  * The order of checks on a paid request is the design's (§8): the body checks
  * (JSON, `model`, the cap, the size); the payment's key, looked up in the
  * store (a known key is answered from its record); the payment checks (an
- * unknown key only); [second PR: the per-IP rate limit and the verify cap];
- * reserve; the chain read, verify, [second PR: the upstream slot] and settle;
- * then forward. Nothing is forwarded, and the upstream key is never sent,
+ * unknown key only); the per-IP rate limit and the verify cap; reserve; the
+ * chain read, verify, the upstream slot and settle; then forward. A forward
+ * other than the reserving request's first needs a SIGN-IN-WITH-X proof from
+ * the payer (§6). Nothing is forwarded, and the upstream key is never sent,
  * until settlement is confirmed. The proxy has no settlement key and never
  * submits a transaction: it asks Coinbase's facilitator through the shared
  * core, and reads the chain to learn what happened when the answer is lost.
@@ -18,10 +19,12 @@ import { SettleError, VerifyError, type PaymentPayload, type PaymentRequired, ty
 import { encodePaymentRequiredHeader, encodePaymentResponseHeader } from '@x402/core/http'
 import {
   AuthorizationAlreadyUsedError,
+  CDP_CALL_TIMEOUT_MS,
   MAX_FORWARDS_PER_PAYMENT,
   NONCE_RE,
   PaymentError,
   SETTLE_RESOLVE_MS,
+  X_TAX_DECLARATION_HEADER,
   assertExtensionsEchoed,
   authorizationDigest,
   decodePayment,
@@ -38,9 +41,13 @@ import {
 } from '@haven_ai/merchant-payments'
 import { buildChallenge, refusalWithChallenge } from './challenge.js'
 import { secretValues, type ProxyConfig } from './config.js'
+import { DISCOVERY_PATH, buildDiscoveryDocument } from './discovery.js'
 import { applyOutputTokenCap, callUpstream, type UpstreamFailureReason } from './forward.js'
+import { DEFAULT_LIMITS, Gate, IpLimiter, type LimitSettings, type Permit } from './limits.js'
 import { redactor, type LogFn } from './log.js'
 import { indexProducts, type Product } from './products.js'
+import { buildReceiptForPayment, encodeReceiptHeader } from './receipt.js'
+import { buildSiwxChallenge, checkSiwxProof, siwxBinding, type SiwxChallenge } from './siwx.js'
 import type { SqliteConsumedPaymentStore } from './sqlite-store.js'
 
 export const MAX_REQUEST_BODY_BYTES = 1024 * 1024
@@ -48,10 +55,14 @@ export const MAX_REQUEST_BODY_BYTES = 1024 * 1024
 const DRAIN_LIMIT_BYTES = 8 * MAX_REQUEST_BODY_BYTES
 /** `Retry-After`, seconds, on a 503 `settlement_unknown`. */
 const SETTLEMENT_RETRY_SECONDS = 5
+/** `Retry-After`, seconds, on an `at_capacity` answer: the upstream slot wait. */
+const AT_CAPACITY_RETRY_SECONDS = 10
 
 export interface ProxyDeps {
   config: ProxyConfig
   products: readonly Product[]
+  /** The products file's last change, for the discovery document's `updated` (§4). */
+  updated?: string
   store: SqliteConsumedPaymentStore
   cdp: CdpSettlementConfig
   log: LogFn
@@ -62,6 +73,8 @@ export interface ProxyDeps {
   settlePollMs?: number
   /** Tests only; the deployed proxy uses the config's (bounded) value. */
   reservationDeadlineMs?: number
+  /** Tests only: the deployed proxy uses `DEFAULT_LIMITS` (§7). */
+  limits?: Partial<LimitSettings>
 }
 
 interface Problem {
@@ -96,6 +109,8 @@ interface RequestContext {
   url: URL
   subPath: string
   resourceUrl: string
+  /** The client address the per-IP limits count against (§7). */
+  ip: string
   body: BodyOutcome
 }
 
@@ -111,6 +126,13 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   const settlePollMs = deps.settlePollMs ?? 2_000
   const reservationDeadlineMs = deps.reservationDeadlineMs ?? config.reservationDeadlineMs
   const byRoute = indexProducts(deps.products)
+  // §4: the document is built once, from the products file read at startup, so
+  // a change to the file reaches readers when the proxy restarts.
+  const discovery = buildDiscoveryDocument({
+    config,
+    products: deps.products,
+    ...(deps.updated !== undefined ? { updated: deps.updated } : {}),
+  })
   const takeoverMs = config.upstreamTimeoutMs + 30_000
   // A secret that reached a response body by mistake is still never sent.
   const redact = redactor(secretValues(config))
@@ -119,6 +141,13 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   const holders = new Map<string, number>()
   /** Chain resolutions in flight, so a burst of replays costs one bounded resolve per key. */
   const resolving = new Set<string>()
+
+  const limits: LimitSettings = { ...DEFAULT_LIMITS, ...deps.limits }
+  const ipLimiter = new IpLimiter(limits)
+  /** §7: concurrent verify calls, taken without waiting before `reserve`. */
+  const verifyGate = new Gate(limits.verifyConcurrency)
+  /** §7: concurrent upstream calls, taken after verify and before settle, or before a known key's forward. */
+  const upstreamGate = new Gate(limits.upstreamConcurrency)
 
   // ---- responses --------------------------------------------------------
 
@@ -164,6 +193,42 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       { retry_after_seconds: SETTLEMENT_RETRY_SECONDS },
       { 'Retry-After': String(SETTLEMENT_RETRY_SECONDS) },
     )
+  }
+
+  function rateLimited(res: ServerResponse, retryAfter: number): void {
+    refuse(
+      res,
+      429,
+      'rate_limited',
+      'Too many unpaid or unverified requests from this address. Retry after the time given.',
+      { retry_after_seconds: retryAfter },
+      { 'Retry-After': String(retryAfter) },
+    )
+  }
+
+  function atCapacity(res: ServerResponse): void {
+    refuse(
+      res,
+      503,
+      'at_capacity',
+      'The merchant is at capacity. Nothing settled and nothing was reserved. Retry the same payment header shortly.',
+      { retry_after_seconds: AT_CAPACITY_RETRY_SECONDS },
+      { 'Retry-After': String(AT_CAPACITY_RETRY_SECONDS) },
+    )
+  }
+
+  /** The SIGN-IN-WITH-X challenge for a key, issuing (or reusing) its live nonce (§6 "The challenge"). */
+  function siwxChallengeFor(ctx: RequestContext, record: ConsumedPaymentRecord): SiwxChallenge {
+    const nonce = store.siwxNonces.issue(record.key, now().getTime())
+    return buildSiwxChallenge({ ...siwxBinding(ctx.resourceUrl), chainId: config.chain.chainId, nonce })
+  }
+
+  function retryInfo(record: ConsumedPaymentRecord): Record<string, unknown> {
+    return {
+      same_payment: true,
+      proof: 'SIGN-IN-WITH-X',
+      forwards_left: Math.max(0, MAX_FORWARDS_PER_PAYMENT - record.forwardCount),
+    }
   }
 
   function paymentResponseHeader(record: Pick<ConsumedPaymentRecord, 'txHash' | 'payer' | 'chain' | 'amount'>): Record<string, string> {
@@ -351,18 +416,16 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   // ---- known key (§6, §8 "For a known key") ------------------------------
 
   /**
-   * Answer a request whose key the store knows. The digest was matched by the
-   * caller: a key alone authorizes nothing.
-   *
-   * SECOND PR: every forward here (`settled`, `failed`, a stale `forwarding`)
-   * needs a SIGN-IN-WITH-X proof from the payer: verify it against the key's
-   * live challenge nonce, take an upstream slot, retire the nonce, call
-   * `beginForwarding`, forward. Until then those states are answered 200
-   * `payment_retry_needs_proof` with nothing forwarded and no forward used.
+   * Answer a request whose key the store knows. The digest is matched first:
+   * a key alone authorizes nothing. Every forward here (`settled`, `failed`, a
+   * stale `forwarding`) needs a SIGN-IN-WITH-X proof from the payer
+   * (`forwardWithProof`). A request whose digest matches is never answered 429.
    */
   async function answerKnown(ctx: RequestContext, pay: PaymentContext, record: ConsumedPaymentRecord, depth = 0): Promise<void> {
     const { res } = ctx
     if (record.authorizationDigest !== pay.digest) {
+      // Not this payment: a rebuilt or forged header counts against the address (§7).
+      ipLimiter.charge(ctx.ip)
       return send402(ctx, ctx.body.product, 'payment_mismatch', 'This payment header does not match the payment recorded for it. Nothing was changed.')
     }
     if (depth > 3) return settlementUnknown(res)
@@ -377,7 +440,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       case 'delivered':
         return answerSettled(res, record, 'payment_already_delivered', 'This payment already bought its one call.')
       case 'exhausted':
-        return answerSettled(res, record, 'payment_exhausted', `This payment was forwarded ${MAX_FORWARDS_PER_PAYMENT} times and each call failed. It buys no further call.`)
+        return answerExhausted(res, record)
       case 'settling': {
         const startedAt = holders.get(record.key)
         if (startedAt !== undefined) {
@@ -400,29 +463,97 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         if (Number.isFinite(startedAt) && remainingMs > 0) {
           return answerSettled(res, record, 'payment_in_flight', 'The call this payment bought is in flight. Retry the same payment shortly.', {
             retry_after_seconds: Math.ceil(remainingMs / 1000),
+            sign_in_with_x: siwxChallengeFor(ctx, record),
           })
         }
-        return answerNeedsProof(ctx, record)
+        return forwardWithProof(ctx, pay, record, depth)
       }
-      case 'settled':
       case 'failed':
-        return answerNeedsProof(ctx, record)
+        // Its forwards are used up: nothing a proof could buy, so none is asked for.
+        if (record.forwardCount >= MAX_FORWARDS_PER_PAYMENT) return answerExhausted(res, record)
+        return forwardWithProof(ctx, pay, record, depth)
+      case 'settled':
+        return forwardWithProof(ctx, pay, record, depth)
     }
   }
 
-  /** A forward that needs a proof: a request that cannot even pass the body checks gets `bad_request_after_settlement`. */
+  function answerExhausted(res: ServerResponse, record: ConsumedPaymentRecord): void {
+    answerSettled(res, record, 'payment_exhausted', `This payment was forwarded ${MAX_FORWARDS_PER_PAYMENT} times and each call failed. It buys no further call.`)
+  }
+
   function answerNeedsProof(ctx: RequestContext, record: ConsumedPaymentRecord): void {
-    if (ctx.body.problem) {
-      return answerSettled(ctx.res, record, 'bad_request_after_settlement', `${ctx.body.problem.message} Nothing was forwarded and no forward was used.`)
-    }
-    // SECOND PR: verify the SIGN-IN-WITH-X proof here and forward; the challenge goes under `sign_in_with_x`.
     answerSettled(
       ctx.res,
       record,
       'payment_retry_needs_proof',
-      'This payment settled and its call has not been delivered. Serving it again needs a SIGN-IN-WITH-X proof from the payer, which this proxy does not accept yet; nothing was forwarded and no forward was used.',
-      { retry: { same_payment: true, proof: 'SIGN-IN-WITH-X', forwards_left: Math.max(0, MAX_FORWARDS_PER_PAYMENT - record.forwardCount) } },
+      'This payment settled and its call has not been delivered. Present the same payment header again with a SIGN-IN-WITH-X header signed by the payer over the challenge under sign_in_with_x; nothing was forwarded and no forward was used.',
+      { retry: retryInfo(record), sign_in_with_x: siwxChallengeFor(ctx, record) },
     )
+  }
+
+  /**
+   * A forward other than the reserving request's first (§6, §7): the body
+   * checks, then the payer's SIGN-IN-WITH-X proof over the key's live nonce,
+   * then an upstream slot (waiting up to 10 s), then the nonce is retired (the
+   * acceptance point, one conditional update), then `beginForwarding`. A
+   * request that takes a slot and does not forward gives it back before it
+   * answers.
+   */
+  async function forwardWithProof(ctx: RequestContext, pay: PaymentContext, record: ConsumedPaymentRecord, depth: number): Promise<void> {
+    const { res, req } = ctx
+    const product = ctx.body.product
+    if (ctx.body.problem || !product) {
+      const message = ctx.body.problem?.message ?? 'The request body could not be checked.'
+      return answerSettled(res, record, 'bad_request_after_settlement', `${message} Nothing was forwarded and no forward was used.`, {
+        retry: retryInfo(record),
+        sign_in_with_x: siwxChallengeFor(ctx, record),
+      })
+    }
+    const header = firstHeader(req.headers['sign-in-with-x'])
+    if (!header) return answerNeedsProof(ctx, record)
+
+    const nowMs = now().getTime()
+    const check = await checkSiwxProof({
+      header,
+      binding: siwxBinding(ctx.resourceUrl),
+      chainId: config.chain.chainId,
+      live: store.siwxNonces.current(record.key, nowMs),
+      payer: getAddress(record.payer),
+      nowMs,
+    })
+    if (!check.ok) {
+      log('retry_proof_refused', { key: record.key, reason: check.reason })
+      return answerNeedsProof(ctx, record)
+    }
+
+    const slot = await upstreamGate.acquire(limits.upstreamSlotWaitMs)
+    if (!slot) {
+      // No forward used and the nonce not retired: the same proof can be presented again.
+      return answerSettled(res, record, 'at_capacity_after_settlement', 'The merchant is at capacity. The payment settled; nothing was forwarded and no forward was used. Retry the same payment and proof shortly.', {
+        retry_after_seconds: AT_CAPACITY_RETRY_SECONDS,
+        retry: retryInfo(record),
+        sign_in_with_x: siwxChallengeFor(ctx, record),
+      })
+    }
+    try {
+      if (!store.siwxNonces.retire(record.key, check.nonce, now().getTime())) {
+        // Another request accepted this proof first, or its nonce lapsed while it waited.
+        slot.release()
+        return answerNeedsProof(ctx, record)
+      }
+      const begun = await store.beginForwarding(record.key, now().toISOString())
+      const fresh = await store.get(record.key)
+      if (begun === 'forward' && fresh) {
+        log('payment_forward_with_proof', { key: record.key, forward_count: fresh.forwardCount })
+        return await forwardAndAnswer(ctx, fresh, product)
+      }
+      slot.release()
+      if (begun === 'delivered' && fresh) return answerSettled(res, fresh, 'payment_already_delivered', 'This payment already bought its one call.')
+      if (begun === 'exhausted' && fresh) return answerExhausted(res, fresh)
+      return fresh ? answerKnown(ctx, pay, fresh, depth + 1) : settlementUnknown(res)
+    } finally {
+      slot.release()
+    }
   }
 
   /** `settling` without a live holder, or `settlement_unknown`: resolve from the chain; a payment found there becomes `settled`, never `forwarding`. */
@@ -459,26 +590,55 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
   // ---- unknown key: reserve, verify, settle, forward (§6, §8) -----------
 
-  /** The facilitator calls, watched, so the answer to a failure follows what was actually sent. */
-  function watchSettlement() {
-    const seen = { verifyRefused: false, settleSent: false, settleRefused: false, chainSaidUsed: false }
+  /**
+   * The facilitator calls, watched, so the answer to a failure follows what was
+   * actually sent. The verify permit is given back when verify returns; the
+   * upstream slot is taken after verify and before the settle call is sent
+   * (§7), so a header that has not verified never holds one, and nothing is
+   * settled for a call that will not be served.
+   */
+  function watchSettlement(verifyPermit: Permit) {
+    const seen = { verifyRefused: false, settleSent: false, settleRefused: false, chainSaidUsed: false, noSlot: false }
+    const held: { slot: Permit | null; done: boolean } = { slot: null, done: false }
+    // Review of #4893: the slot wait is its own step in the 110 s budget (§6),
+    // not part of settle's 30 s. The core bounds each wrapped call at
+    // `timeoutMs`, so that outer bound is widened by the wait (and a margin, so
+    // it never fires first), and each facilitator call is bounded here at the
+    // core's own per-call value.
+    const callMs = cdp.timeoutMs ?? CDP_CALL_TIMEOUT_MS
     const config: CdpSettlementConfig = {
-      timeoutMs: cdp.timeoutMs,
+      timeoutMs: callMs + limits.upstreamSlotWaitMs + 1_000,
       facilitator: {
         async verify(payload, requirements) {
           try {
-            const result = await cdp.facilitator.verify(payload, requirements)
+            const result = await within(callMs, 'verify', cdp.facilitator.verify(payload, requirements))
             if (!result.isValid) seen.verifyRefused = true
             return result
           } catch (err) {
             if (err instanceof VerifyError) seen.verifyRefused = true
             throw err
+          } finally {
+            verifyPermit.release()
           }
         },
         async settle(payload, requirements) {
+          if (!held.slot) {
+            held.slot = await upstreamGate.acquire(limits.upstreamSlotWaitMs)
+            if (!held.slot) {
+              seen.noSlot = true
+              // Not sent: the core reads the chain, finds the authorization unused, and answers retryable.
+              throw new Error('no upstream slot within the wait')
+            }
+            if (held.done) {
+              // The request has already answered: never send a settle for a released reservation.
+              held.slot.release()
+              seen.noSlot = true
+              throw new Error('the request finished before a slot came free')
+            }
+          }
           seen.settleSent = true
           try {
-            const result = await cdp.facilitator.settle(payload, requirements)
+            const result = await within(callMs, 'settle', cdp.facilitator.settle(payload, requirements))
             if (!result.success) seen.settleRefused = true
             return result
           } catch (err) {
@@ -496,7 +656,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         findAuthorizationOutcome: (params) => cdp.chain.findAuthorizationOutcome(params),
       },
     }
-    return { seen, config }
+    return { seen, held, config }
   }
 
   type HolderOutcome =
@@ -511,6 +671,8 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     | { kind: 'refused'; error: string; message: string }
     | { kind: 'unknown' }
     | { kind: 'unavailable' }
+    /** No upstream slot came free after verify: the settle call was never sent. */
+    | { kind: 'at_capacity' }
 
   /** Settle as the reservation's holder, and decide what each failure leaves in the store. */
   async function settleAsHolder(
@@ -518,7 +680,6 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     verified: VerifiedCheck,
     watched: ReturnType<typeof watchSettlement>,
   ): Promise<HolderOutcome> {
-    // SECOND PR: the upstream slot is taken between verify and settle.
     const { authorization } = pay
     try {
       const txHash = await settleThroughCdp({
@@ -545,6 +706,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       }
       if (err instanceof PaymentError && err.reasonCode === 'facilitator_retryable') {
         if (watched.seen.chainSaidUsed) return { kind: 'unknown' }
+        if (watched.seen.noSlot && !watched.seen.settleSent) return { kind: 'at_capacity' }
         if (!watched.seen.settleSent) return { kind: 'unavailable' }
         return pollLostSettle(authorization, watched.seen.settleRefused)
       }
@@ -622,12 +784,20 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         asset: config.chain,
       })
     } catch (err) {
+      // A header that has not verified is not yet a payment: it counts against the address (§7).
+      ipLimiter.charge(ctx.ip)
       return send402(ctx, product, localCheckError(err), err instanceof PaymentError ? err.message : 'The payment header could not be checked.')
     }
 
-    // SECOND PR seam: per-IP rate limit and the concurrent-verify cap (503 at_capacity) go here, before reserve.
+    // §7: an address over the limit gets 429 before its unknown key is reserved; then the global verify cap.
+    const over = ipLimiter.over(ctx.ip)
+    if (over !== null) return rateLimited(res, over)
+    const verifyPermit = verifyGate.tryAcquire()
+    if (!verifyPermit) return atCapacity(res)
 
-    const reserved = await store.reserve({
+    let reserved: Awaited<ReturnType<typeof store.reserve>>
+    try {
+      reserved = await store.reserve({
       key: pay.key,
       productId: product.id,
       chain: config.chain.network,
@@ -635,13 +805,21 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       amount: product.price.toString(),
       validBefore: Number(pay.authorization.validBefore),
       merchantReference: newMerchantReference(),
-      authorizationDigest: pay.digest,
-      now: now().toISOString(),
-    })
-    if (!reserved.reserved) return answerKnown(ctx, pay, reserved.record)
+        authorizationDigest: pay.digest,
+        now: now().toISOString(),
+      })
+    } catch (err) {
+      verifyPermit.release()
+      throw err
+    }
+    if (!reserved.reserved) {
+      verifyPermit.release()
+      return answerKnown(ctx, pay, reserved.record)
+    }
 
     holders.set(pay.key, performance.now())
-    const watched = watchSettlement()
+    const watched = watchSettlement(verifyPermit)
+    const releaseSlot = (): void => watched.held.slot?.release()
     let outcome: HolderOutcome
     try {
       outcome = await settleAsHolder(pay, verified, watched)
@@ -650,14 +828,26 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       // never sent; once it may have been, the outcome is unknown, never released.
       log('settle_unexpected_error', { key: pay.key, error: describeError(err) })
       outcome = watched.seen.settleSent || watched.seen.chainSaidUsed ? { kind: 'unknown' } : { kind: 'unavailable' }
+    } finally {
+      // Every earlier exit gives the verify token back: a chain-first read that found the authorization used, or a read that failed.
+      verifyPermit.release()
+      // Before any await: a slot granted from here on is given back and sends no settle.
+      watched.held.done = true
     }
 
     try {
+      // Only this holder's own settlement forwards, so only then is its slot kept.
+      if (!(outcome.kind === 'settled' && outcome.bySelf)) releaseSlot()
       switch (outcome.kind) {
         case 'refused':
           await store.release(pay.key)
           log('payment_refused', { key: pay.key, error: outcome.error })
+          if (outcome.error === 'payment_invalid' || outcome.error === 'payment_mismatch') ipLimiter.charge(ctx.ip)
           return send402(ctx, product, outcome.error, outcome.message)
+        case 'at_capacity':
+          await store.release(pay.key)
+          log('at_capacity', { key: pay.key })
+          return atCapacity(res)
         case 'unavailable':
           await store.release(pay.key)
           return refuse(
@@ -673,7 +863,6 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
           log('settlement_unknown', { key: pay.key })
           return settlementUnknown(res)
         case 'settled': {
-          // SECOND PR seam: the upstream slot is taken here; none free releases nothing (settled) and answers at_capacity_after_settlement.
           // The proof-free first forward is for this holder's own settlement
           // only. A transfer it did not send is recorded without the token:
           // the holder gives its reservation up first (settlement_unknown
@@ -689,19 +878,50 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
             log('payment_settled', { key: pay.key, tx_hash: outcome.txHash, product_id: product.id })
             const record = await store.get(pay.key)
             if (!record) return settlementUnknown(res)
-            return forwardAndAnswer(ctx, record, product)
+            return await forwardAndAnswer(ctx, record, product)
           }
           // The token was voided (a restart, or this holder passed its deadline): answer by the record's state.
+          releaseSlot()
           const record = await store.get(pay.key)
           return record ? answerKnown(ctx, pay, record) : settlementUnknown(res)
         }
       }
     } finally {
+      releaseSlot()
       holders.delete(pay.key)
     }
   }
 
   // ---- forwarding (§6, §7, §8) -------------------------------------------
+
+  /**
+   * §11: the receipt header for a delivered call, or `{}` when the deployment
+   * has no VAT rule. A receipt that cannot be built never fails a settled
+   * call: the header is left out and the failure is logged. The merchant key
+   * and the buyer's declaration are never logged.
+   */
+  function receiptHeadersFor(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Record<string, string> {
+    const settings = config.receipt
+    if (!settings || !record.txHash || !record.settledAt) return {}
+    const taxDeclarationHeader = firstHeader(ctx.req.headers[X_TAX_DECLARATION_HEADER.toLowerCase()])
+    try {
+      const json = buildReceiptForPayment({
+        settings,
+        product,
+        chain: config.chain,
+        payTo: config.payTo,
+        payer: record.payer,
+        txHash: record.txHash,
+        settledAt: record.settledAt,
+        ...(taxDeclarationHeader !== undefined ? { taxDeclarationHeader } : {}),
+        now: now().getTime(),
+      })
+      return { 'x-receipt-json': encodeReceiptHeader(json) }
+    } catch (err) {
+      log('receipt_failed', { key: record.key, error: describeError(err) })
+      return {}
+    }
+  }
 
   async function forwardAndAnswer(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Promise<void> {
     const { req, res } = ctx
@@ -749,11 +969,17 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     logOverage(record, product, result)
 
     const paymentHeader = paymentResponseHeader(record)
+    // §11: the receipt goes on the response headers of a delivered call — a
+    // 2xx passed through, or a 3xx/4xx wrapped into a 200 (§6's definition of
+    // delivered). The upstream's own receipt headers were stripped in
+    // `callUpstream`, so an upstream cannot pass off its own receipt as the
+    // kit's.
+    const receiptHeader = receiptHeadersFor(ctx, record, product)
     if (result.status >= 200 && result.status < 300) {
       // A 2xx is passed through, headers and body unchanged except the stripped ones.
       const headers: Record<string, string | string[]> = {}
       for (const [name, value] of result.headers) headers[name] = value
-      res.writeHead(result.status, { ...headers, 'Content-Length': result.body.length, ...paymentHeader })
+      res.writeHead(result.status, { ...headers, 'Content-Length': result.body.length, ...paymentHeader, ...receiptHeader })
       res.end(result.body)
       return
     }
@@ -771,7 +997,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         upstream_content_type: contentType,
         ...wrapped,
       },
-      paymentHeader,
+      { ...paymentHeader, ...receiptHeader },
     )
   }
 
@@ -809,7 +1035,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       ...(upstreamStatus !== undefined ? { upstream_status: upstreamStatus } : {}),
     })
     if (ctx.res.destroyed || ctx.res.closed) return
-    // SECOND PR: the answer carries the SIGN-IN-WITH-X challenge under `sign_in_with_x`.
+    const failed = { ...record, state: 'failed' as const }
     answerSettled(
       ctx.res,
       record,
@@ -817,12 +1043,8 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       'The payment settled and the upstream call failed. Present the same payment header again with a SIGN-IN-WITH-X proof signed by the payer and it will be served without a second charge.',
       {
         reason,
-        retry: {
-          same_payment: true,
-          after_seconds: 0,
-          forwards_left: Math.max(0, MAX_FORWARDS_PER_PAYMENT - record.forwardCount),
-          proof: 'SIGN-IN-WITH-X',
-        },
+        retry: { ...retryInfo(failed), after_seconds: 0 },
+        ...(failed.forwardCount < MAX_FORWARDS_PER_PAYMENT ? { sign_in_with_x: siwxChallengeFor(ctx, failed) } : {}),
       },
     )
   }
@@ -833,10 +1055,15 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     const method = req.method ?? 'GET'
     const url = new URL(req.url ?? '/', 'http://proxy.invalid')
 
-    // Unpriced route: health. (The discovery document at /.well-known/x402 is #4891; until it lands that path is an unknown route.)
+    // Unpriced routes: health, and the public discovery document (§4). The
+    // discovery document is served at the x402 well-known path and nowhere
+    // else, outside BASE_PATH, and answering it makes no facilitator call.
     if (method === 'GET' && url.pathname === '/healthz') {
       const ready = store.isWritable()
       return send(res, ready ? 200 : 503, ready ? { status: 'ok', network: config.chain.network } : { status: 'not_ready' })
+    }
+    if ((method === 'GET' || method === 'HEAD') && url.pathname === DISCOVERY_PATH) {
+      return send(res, 200, discovery)
     }
 
     const { basePath } = config
@@ -847,6 +1074,41 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     const candidates = byRoute.get(`${method} ${subPath}`)
     if (!candidates) return refuse(res, 404, 'unknown_route', 'This route is not sold here.')
 
+    const ip = clientIp(req)
+    const header = firstHeader(req.headers['payment-signature']) ?? firstHeader(req.headers['x-payment'])
+    if (!header) {
+      // §7: unpaid requests are limited per address, in rate and in concurrency.
+      const wait = ipLimiter.take(ip)
+      if (wait !== null) return rateLimited(res, wait)
+      if (!ipLimiter.enter(ip)) return rateLimited(res, 1)
+      try {
+        return await answerPriced(req, res, url, subPath, candidates, ip, undefined)
+      } finally {
+        ipLimiter.leave(ip)
+      }
+    }
+    return answerPriced(req, res, url, subPath, candidates, ip, header)
+  }
+
+  function clientIp(req: IncomingMessage): string {
+    if (config.clientIpHeader) {
+      const value = firstHeader(req.headers[config.clientIpHeader])
+      // A list (X-Forwarded-For): the rightmost entry is the one the merchant's own proxy appended.
+      const last = value?.split(',').pop()?.trim()
+      if (last) return last
+    }
+    return req.socket.remoteAddress ?? 'unknown'
+  }
+
+  async function answerPriced(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    subPath: string,
+    candidates: readonly Product[],
+    ip: string,
+    header: string | undefined,
+  ): Promise<void> {
     const origin = config.publicBaseUrl ?? `http://${firstHeader(req.headers.host) ?? 'localhost'}`
     const rawBody = await readBody(req)
     // An oversized body is not drained: answer, then close the connection.
@@ -858,10 +1120,10 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       url,
       subPath,
       resourceUrl: `${origin}${url.pathname}`,
+      ip,
       body,
     }
 
-    const header = firstHeader(req.headers['payment-signature']) ?? firstHeader(req.headers['x-payment'])
     if (!header) {
       if (body.problem) return refuse(res, body.problem.status, body.problem.error, body.problem.message)
       return send402(ctx, body.product!, undefined, 'Payment required')
@@ -871,7 +1133,8 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     try {
       pay = derivePayment(header, config.chain.chainId)
     } catch (err) {
-      // No key to look up: the body checks come first, then an invalid payment.
+      // No key to look up: the body checks come first, then an invalid payment, which counts against the address.
+      ipLimiter.charge(ip)
       if (body.problem) return refuse(res, body.problem.status, body.problem.error, body.problem.message)
       return send402(ctx, body.product!, 'payment_invalid', err instanceof PaymentError ? err.message : 'The payment header could not be read.')
     }
@@ -893,6 +1156,17 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       }
     }
   }
+}
+
+/** Race a facilitator call against its own bound; a call that does not answer in time is "did not answer". */
+function within<T>(ms: number, label: string, call: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    call,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} did not answer within ${ms} ms`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'

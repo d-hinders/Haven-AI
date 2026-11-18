@@ -496,6 +496,121 @@ export const en = {
     },
 
     /**
+     * Settings → Business → Sales (#4904, epic #4885): the third card, after
+     * Company details and Accounting connections (owner decision 1 on #4894).
+     *
+     * The card is the switch; the dialog is the network choice, one passkey
+     * prompt and the result. Turning Sales off keeps the account and its
+     * history and stops the keys working (owner decision 5 on #4894), and
+     * turning it back on reuses the account with no network choice and no
+     * passkey prompt.
+     *
+     * Every refusal sentence says what the user can do about it and never
+     * shows a raw error code (the issue's acceptance criterion). The codes
+     * themselves live in `lib/merchant-services.ts`.
+     */
+    sales: {
+      title: 'Sales',
+      description: 'Take payments from customers and their agents, into a separate Sales account.',
+      state: {
+        on: 'On',
+        off: 'Off',
+      },
+      detail: {
+        on: 'Customers and their agents can pay you. Payments arrive in your Sales account.',
+        off: 'Sales is off. The Sales account and its history are kept, and the Sales keys are not accepted.',
+        neverOn: 'Turn Sales on to take payments from customers and their agents.',
+      },
+      accountLabel: 'Sales account',
+      networkLabel: 'Network',
+      keysLabel: 'Sales keys',
+      keysRefused: 'Keys not accepted while off',
+      keysRefusedHelper: 'Sales reports from your merchant kit are refused until Sales is on again.',
+      turnOn: 'Turn on Sales',
+      turnOff: 'Turn off Sales',
+      loading: 'Loading Sales…',
+      loadError: 'Haven could not load Sales.',
+      retry: 'Try again',
+
+      dialog: {
+        title: 'Turn on Sales',
+        subtitle: 'A separate Haven account for the payments you take. It starts empty.',
+        networkLabel: 'Network',
+        networkHelp: 'The network cannot be changed later.',
+        networkLocked: (network: string) =>
+          `Sales is on ${network}. The network cannot be changed later.`,
+        facts: {
+          account: 'The account is named Sales. You can rename it later.',
+          passkey: 'Secured by the passkey you use next: your device asks for it once.',
+          backup:
+            'Add a backup passkey or wallet afterwards, so a lost device never means a lost account.',
+        },
+        submit: 'Turn on Sales',
+        waiting: 'Waiting for your passkey…',
+        creating: 'Turning on Sales…',
+        cancel: 'Cancel',
+        close: 'Close',
+        done: 'Done',
+        doneTitle: 'Sales is on',
+        doneBody: (network: string) =>
+          `Payments from customers and their agents arrive in your Sales account on ${network}.`,
+        backupNotice:
+          'Add a backup — a backup passkey or a wallet — so a lost device never means a lost account.',
+        addBackup: 'Add backup',
+        openAccount: 'Open Sales account',
+        needsPasskeyTitle: 'Sales needs a passkey',
+        needsPasskeyBody:
+          'Sales is secured by a passkey from one of your accounts, and none of yours has one yet. Add a passkey from the Who can approve section on an account’s page, then come back here.',
+        passkeysLoading: 'Loading your passkeys…',
+        passkeysError:
+          'Couldn’t load your passkeys, so Haven can’t tell which account can secure Sales.',
+        refusals: {
+          source_not_found:
+            'Haven couldn’t find the account this passkey belongs to. Reload the page and try again.',
+          source_has_no_passkey:
+            'That account no longer has a passkey, so it can’t secure Sales. Reload the page to see your accounts as they are now.',
+          key_not_on_source:
+            'That passkey isn’t one of that account’s. Try again and pick a passkey saved for it.',
+          passkey_unsupported:
+            'This browser can’t use a passkey. Open Haven in Safari, Chrome, or Edge on the device that holds your passkey.',
+          passkey_failed: 'Your passkey couldn’t be read. Try again.',
+          cap_reached: (cap: number | null, network: string) =>
+            cap !== null
+              ? `You already have ${cap} accounts on ${network}, the most Haven allows on one network. Choose another network, or remove an account you no longer use from its page.`
+              : `You already have the most accounts Haven allows on ${network}. Choose another network, or remove an account you no longer use from its page.`,
+          unsupported_network: (supported: string) =>
+            supported === ''
+              ? 'Sales is not available on that network yet. Choose another network.'
+              : `Sales is not available on that network yet. Choose ${supported}.`,
+          other_network: (network: string) =>
+            `Sales is already on ${network}. The network cannot be changed later.`,
+          setup_details_required:
+            'Haven needs a network and a passkey to turn Sales on. Try again.',
+          address_unavailable:
+            'Haven couldn’t set up the Sales account just now. Try again in a moment.',
+          already_registered:
+            'The Sales account already exists. Reload the page to see it.',
+          rate_limited: 'Too many attempts in a short time. Wait a minute, then try again.',
+          could_not_turn_on: (detail: string | null) =>
+            detail === null
+              ? 'Haven couldn’t turn Sales on. Try again in a moment.'
+              : `Haven couldn’t turn Sales on. ${detail}`,
+          unknown_outcome:
+            'Haven couldn’t confirm Sales was turned on. Try again — it won’t create a second account.',
+        },
+      },
+
+      offDialog: {
+        title: 'Turn off Sales?',
+        body: 'The Sales account and its history are kept, and the Sales keys stop working. You can turn Sales back on at any time.',
+        confirm: 'Turn off Sales',
+        working: 'Turning off…',
+        cancel: 'Keep Sales on',
+        error: 'We could not turn Sales off. Try again in a moment.',
+      },
+    },
+
+    /**
      * General → "Your data" (#4358): one row. The CSV itself lives on
      * `/transactions` (its Export CSV) — this row only links there.
      */
@@ -520,7 +635,7 @@ export const en = {
     companyDetails: {
       title: 'Company details',
       description:
-        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into.',
+        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into. You can also save a receipt email and billing and shipping addresses.',
       // History: #3332's review rounds shaped a longer paragraph (VIES named,
       // the SE VAT encoding, a support-erasure sentence), and the "receipts"
       // sentence stays in `description` above.
@@ -556,6 +671,40 @@ export const en = {
         vatNumber: 'VAT number (optional)',
         vatNumberPlaceholder: 'e.g. SE556677889901',
         vatNumberHelp: 'Include the two-letter country prefix, e.g. "SE556677889901".',
+        // #4870. The sign-up email is a SUGGESTION here, never a stored
+        // value: nothing is saved until the owner saves, and nothing is sent
+        // to a merchant by this slice.
+        receiptEmail: 'Receipt email (optional)',
+        receiptEmailPlaceholder: 'e.g. name@example.com',
+        receiptEmailHelp: 'Where a merchant should send the receipt. We suggest your sign-up email; it is saved only when you save.',
+      },
+
+      /**
+       * #4870: the two structured addresses. The per-field labels are keyed
+       * `<address>.<field>` because the card renders the same five inputs
+       * twice and each label must be unique on the page — "Billing city" and
+       * "Shipping city", never two "City" labels a screen reader cannot tell
+       * apart.
+       */
+      addresses: {
+        billingTitle: 'Billing address (optional)',
+        shippingTitle: 'Shipping address (optional)',
+        sameAsBilling: 'Shipping address is the same as billing',
+        line1Placeholder: 'e.g. Sveavagen 1',
+        line2Placeholder: 'e.g. 4 tr',
+        postCodePlaceholder: 'e.g. 111 57',
+        cityPlaceholder: 'e.g. Stockholm',
+        countryPlaceholder: 'Choose a country',
+        'billing.line1': 'Billing street address',
+        'billing.line2': 'Billing street address line 2',
+        'billing.postCode': 'Billing postal code',
+        'billing.city': 'Billing city',
+        'billing.country': 'Billing country',
+        'shipping.line1': 'Shipping street address',
+        'shipping.line2': 'Shipping street address line 2',
+        'shipping.postCode': 'Shipping postal code',
+        'shipping.city': 'Shipping city',
+        'shipping.country': 'Shipping country',
       },
 
       validation: {
@@ -571,6 +720,16 @@ export const en = {
         // Matches `ORG_NUMBER_RE` (`^[A-Za-z0-9 .\-/]{1,32}$`) in the same file.
         orgNumberInvalidChars: 'Organisation number can only contain letters, numbers, spaces, and . - /',
         vatNumberTooLong: 'Enter a VAT number using 32 characters or fewer.',
+        // #4870. Matches `EMAIL_RE` and `ADDRESS_MAX_LENGTHS` in the same file.
+        receiptEmailInvalid: 'Enter a receipt email address, e.g. "name@example.com".',
+        receiptEmailTooLong: 'Enter a receipt email address using 254 characters or fewer.',
+        addressLine1Required: 'Enter a street address.',
+        addressLine1TooLong: 'Enter a street address using 70 characters or fewer.',
+        addressLine2TooLong: 'Enter a street address line using 70 characters or fewer.',
+        addressPostCodeTooLong: 'Enter a postal code using 16 characters or fewer.',
+        addressCityRequired: 'Enter a city.',
+        addressCityTooLong: 'Enter a city using 50 characters or fewer.',
+        addressCountryInvalid: 'Choose a country.',
       },
 
       save: 'Save',
@@ -594,7 +753,7 @@ export const en = {
         action: 'Remove company details',
         confirmTitle: 'Remove your company details?',
         confirmBody:
-          'This deletes your legal name, country, organisation number and VAT number from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
+          'This deletes your legal name, country, organisation number, VAT number, receipt email and addresses from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
         confirm: 'Remove',
         cancel: 'Keep details',
         // #4570: the confirm button's own verb while the delete is in flight,

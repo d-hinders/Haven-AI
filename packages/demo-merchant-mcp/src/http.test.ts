@@ -17,6 +17,11 @@ import {
   taxPrincipalId,
 } from '@haven_ai/sdk/edge'
 import {
+  X_CHECKOUT_DETAILS_HEADER,
+  checkoutDetailsExtensionEntry,
+  type CheckoutDetailsField,
+} from '@haven_ai/merchant-payments'
+import {
   LEGACY_PAYMENT_SIGNATURE_HEADER,
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_RESPONSE_HEADER,
@@ -46,7 +51,13 @@ afterEach(async () => {
 
 async function startServer(
   client: Partial<SettlementClient> = {},
-  serverOptions: { readinessCacheMs?: number } = {},
+  serverOptions: {
+    readinessCacheMs?: number
+    /** #4873: the dev-only required-field hook; `null` means off. */
+    checkoutDetailsRequiredField?: CheckoutDetailsField | null
+    /** #4851: offer the CDP-settled joke product. */
+    cdpConfigured?: boolean
+  } = {},
 ) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
@@ -69,6 +80,11 @@ async function startServer(
     // the CURRENT stub return value instead of a value cached from an earlier
     // call in the same test — no fake clock, no sleep.
     readinessCacheMs: serverOptions.readinessCacheMs ?? 0,
+    // #4873: absent means "read the environment", which is unset in tests.
+    ...(serverOptions.checkoutDetailsRequiredField !== undefined
+      ? { checkoutDetailsRequiredField: serverOptions.checkoutDetailsRequiredField }
+      : {}),
+    ...(serverOptions.cdpConfigured ? { cdpConfigured: true } : {}),
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -1340,5 +1356,173 @@ describe('buyer tax declaration on the receipt (#4855)', () => {
     }
     // Every purchase settled: the declaration never gates the payment.
     expect(submit).toHaveBeenCalledTimes(cases.length)
+  })
+})
+
+// ── Checkout details (#4873) ─────────────────────────────────────────────────
+
+/** Every offered product, with the tool call that selects it. */
+const PRODUCT_CALLS: Array<{ productId: string; tool: string; args: Record<string, unknown> }> = [
+  { productId: 'vpn_basic', tool: 'buy_vpn', args: { plan: 'basic' } },
+  { productId: 'vpn_legacy', tool: 'buy_vpn', args: { plan: 'legacy' } },
+  { productId: 'vpn_pro', tool: 'buy_vpn', args: { plan: 'pro' } },
+  { productId: 'vpn_ultra', tool: 'buy_vpn', args: { plan: 'ultra' } },
+  { productId: 'storage_50gb', tool: 'buy_cloud_storage', args: { tier: '50gb' } },
+  { productId: 'storage_200gb', tool: 'buy_cloud_storage', args: { tier: '200gb' } },
+  { productId: 'storage_1tb', tool: 'buy_cloud_storage', args: { tier: '1tb' } },
+  { productId: 'joke', tool: 'buy_joke', args: {} },
+]
+
+/** The 402 challenge a product's unpaid tool call answers with. */
+async function challengeFor(url: string, tool: string, args: Record<string, unknown>): Promise<PaymentRequired> {
+  const unpaid = await postMcp(url, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: tool, arguments: args },
+  })
+  expect(unpaid.status).toBe(402)
+  return (await unpaid.json()) as PaymentRequired
+}
+
+/** The `X-Checkout-Details` header value for `details`. */
+function checkoutDetailsHeader(details: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify({ version: 1, ...details }), 'utf8').toString('base64url')
+}
+
+const CHECKOUT_BILLING = {
+  line1: 'Sveavagen 1',
+  line2: '4 tr',
+  city: 'Stockholm',
+  postCode: '111 57',
+  subdivision: 'SE-AB',
+  country: 'SE',
+}
+
+describe('checkout details (#4873)', () => {
+  it('only the chosen product’s challenge carries the request; every other product’s is unchanged', async () => {
+    const { url } = await startServer({}, { cdpConfigured: true })
+    for (const { productId, tool, args } of PRODUCT_CALLS) {
+      const challenge = await challengeFor(url, tool, args)
+      const extensions = challenge.extensions as Record<string, unknown>
+      if (productId === 'vpn_pro') {
+        expect(extensions['haven-checkout-details'], productId).toEqual(
+          checkoutDetailsExtensionEntry({
+            fields: { receipt_email: { required: false }, billing_address: { required: false } },
+          }),
+        )
+      } else {
+        // Byte-identical to the challenge before this product asked: the base
+        // block and nothing else.
+        expect(Object.keys(extensions), productId).toEqual(['haven-demo'])
+      }
+    }
+  })
+
+  it('a paid request with the header shows the email and the address on the receipt', async () => {
+    const { url } = await startServer()
+    const { status, text, receipt } = await buyVpn(
+      url,
+      {
+        [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader({
+          receipt_email: 'philip@example.se',
+          billing_address: CHECKOUT_BILLING,
+        }),
+      },
+      { plan: 'pro' },
+    )
+
+    expect(status).toBe(200)
+    expect(receipt!.kopare).toMatchObject({
+      receipt_email: 'philip@example.se',
+      billing_address: CHECKOUT_BILLING,
+    })
+    // The rendered invoice in the purchase text carries the same values.
+    expect(text).toContain('philip@example.se')
+    expect(text).toContain('Sveavagen 1')
+    expect(text).toContain('111 57 Stockholm')
+  })
+
+  it('a paid request without the header produces today’s receipt', async () => {
+    const { url } = await startServer()
+    const { status, receipt } = await buyVpn(url, {}, { plan: 'pro' })
+
+    expect(status).toBe(200)
+    expect(Object.keys(receipt!.kopare as Record<string, unknown>)).toEqual(['identifierare', 'typ', 'roll'])
+  })
+
+  it('treats a malformed or oversized header as absent and serves the purchase', async () => {
+    const { url, submit } = await startServer()
+    const cases: Array<[string, string]> = [
+      ['not base64url(JSON)', 'not-a-header'],
+      ['JSON but not an object', Buffer.from('"hello"', 'utf8').toString('base64url')],
+      ['an unknown version', checkoutDetailsHeader({ version: 2, receipt_email: 'philip@example.se' })],
+      ['oversized', checkoutDetailsHeader({ receipt_email: `${'a'.repeat(2000)}@example.se` })],
+    ]
+
+    for (const [label, header] of cases) {
+      const { status, receipt } = await buyVpn(url, { [X_CHECKOUT_DETAILS_HEADER]: header }, { plan: 'pro' })
+      expect(status, label).toBe(200)
+      expect(Object.keys(receipt!.kopare as Record<string, unknown>), label).toEqual(['identifierare', 'typ', 'roll'])
+    }
+    // Every purchase settled: the header never gates the payment.
+    expect(submit).toHaveBeenCalledTimes(cases.length)
+  })
+
+  it('serves a paid request for the required-field product that arrives without the header', async () => {
+    const { url } = await startServer({}, { checkoutDetailsRequiredField: 'receipt_email' })
+
+    // The challenge asks for the field as required...
+    const challenge = await challengeFor(url, 'buy_vpn', { plan: 'pro' })
+    const entry = (challenge.extensions as Record<string, unknown>)['haven-checkout-details'] as {
+      info: { fields: Record<string, { required: boolean }> }
+    }
+    expect(entry.info.fields.receipt_email).toEqual({ required: true })
+
+    // ...and a paid request without it is still served, with no buyer details.
+    const { status, receipt } = await buyVpn(url, {}, { plan: 'pro' })
+    expect(status).toBe(200)
+    expect(Object.keys(receipt!.kopare as Record<string, unknown>)).toEqual(['identifierare', 'typ', 'roll'])
+  })
+
+  it('ignores the header on a product that asks for nothing', async () => {
+    const { url } = await startServer()
+    const { status, receipt } = await buyVpn(
+      url,
+      { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader({ receipt_email: 'philip@example.se' }) },
+      { plan: 'basic' },
+    )
+    expect(status).toBe(200)
+    expect(Object.keys(receipt!.kopare as Record<string, unknown>)).toEqual(['identifierare', 'typ', 'roll'])
+  })
+
+  it('never logs the values it received', async () => {
+    const { url } = await startServer()
+    const logged: string[] = []
+    const sinks = ['log', 'info', 'warn', 'error'] as const
+    const spies = sinks.map((sink) =>
+      vi.spyOn(console, sink).mockImplementation((...args: unknown[]) => {
+        logged.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '))
+      }),
+    )
+    try {
+      const { status } = await buyVpn(
+        url,
+        {
+          [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader({
+            receipt_email: 'philip@example.se',
+            billing_address: CHECKOUT_BILLING,
+          }),
+        },
+        { plan: 'pro' },
+      )
+      expect(status).toBe(200)
+    } finally {
+      spies.forEach((spy) => spy.mockRestore())
+    }
+    const all = logged.join('\n')
+    expect(all).not.toContain('philip@example.se')
+    expect(all).not.toContain('Sveavagen')
+    expect(all).not.toContain('111 57')
   })
 })

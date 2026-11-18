@@ -22,6 +22,7 @@ import {
   PRODUCTS,
   SKIP_SETTLE_QA_FIXTURE,
   SUPPORTED_SETTLEMENT_METHODS,
+  checkoutDetailsForProduct,
   formatUsdc,
   isSettlementMethod,
   isProductOffered,
@@ -30,12 +31,21 @@ import {
   productReceivingAddress,
   productSettlementKind,
   productToolArgs,
+  requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
   type ProductId,
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
-import { X_TAX_DECLARATION_HEADER, acceptTaxDeclaration, type ReceiptSellerDetails } from '@haven_ai/merchant-payments'
+import {
+  CHECKOUT_DETAILS_FIELDS,
+  X_CHECKOUT_DETAILS_HEADER,
+  X_TAX_DECLARATION_HEADER,
+  acceptCheckoutDetails,
+  acceptTaxDeclaration,
+  type CheckoutDetailsField,
+  type ReceiptSellerDetails,
+} from '@haven_ai/merchant-payments'
 import { recordStripePayment, stripeRecordingDecision, type StripeRecording } from './stripe.js'
 import type { SekRateFeed } from './sek-rate.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
@@ -104,6 +114,14 @@ export interface DemoMerchantServerOptions {
   sessionIdleTtlMs?: number
   /** Clock for the idle sweep; injectable for tests. */
   now?: () => number
+  /**
+   * #4873: the dev-only hook that makes one of the checkout-details product's
+   * optional fields required, so the "stopped before paying" behaviour can be
+   * exercised on dev. Absent, it is read from
+   * `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD` (testnet-only, off by default);
+   * `null` explicitly means "no field is required".
+   */
+  checkoutDetailsRequiredField?: CheckoutDetailsField | null
 }
 
 interface MerchantSession {
@@ -181,11 +199,14 @@ function createReadinessReader(
   }
 }
 
-interface ResolvedServerOptions extends Omit<DemoMerchantServerOptions, 'path' | 'sessionIdleTtlMs' | 'now'> {
+interface ResolvedServerOptions
+  extends Omit<DemoMerchantServerOptions, 'path' | 'sessionIdleTtlMs' | 'now' | 'checkoutDetailsRequiredField'> {
   path: string
   getReadiness: ReadinessReader
   sessionIdleTtlMs: number
   now: () => number
+  /** #4873: resolved once, so every challenge and quote agrees. */
+  checkoutDetailsRequiredField: CheckoutDetailsField | null
 }
 
 export function createDemoMerchantServer(options: DemoMerchantServerOptions): Server {
@@ -201,6 +222,12 @@ export function createDemoMerchantServer(options: DemoMerchantServerOptions): Se
     getReadiness,
     sessionIdleTtlMs: options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS,
     now: options.now ?? Date.now,
+    // #4873: the dev-only required-field hook. An explicit `null` means off;
+    // absent, it is read from the environment (testnet-only, off by default).
+    checkoutDetailsRequiredField:
+      options.checkoutDetailsRequiredField !== undefined
+        ? options.checkoutDetailsRequiredField
+        : requiredCheckoutFieldFromEnv(),
   }
 
   return createServer((req, res) => {
@@ -375,6 +402,21 @@ async function handle(
       payer: settled.from,
       chainId: CHAIN_ID,
     })
+    // #4873: the checkout details this paid request carried, if any. Read the
+    // same way the tax declaration is: a malformed or oversized header is
+    // treated as absent, so it can never turn a settled purchase into an
+    // error. Display only — it adds fields to the receipt's buyer block and
+    // changes no price, no settlement and no refusal. Only the fields this
+    // product asked for are read, so a client cannot put a value on a receipt
+    // for a product that never requested it. The values are never logged and
+    // never stored beyond this response.
+    const checkoutRequest = checkoutDetailsForProduct(paymentToolInfo.product, {
+      requiredField: options.checkoutDetailsRequiredField,
+    })
+    const checkoutDetails = acceptCheckoutDetails({
+      header: firstHeader(req.headers[X_CHECKOUT_DETAILS_HEADER.toLowerCase()]),
+      fields: checkoutRequest ? CHECKOUT_DETAILS_FIELDS.filter((field) => checkoutRequest.fields[field]) : [],
+    })
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
@@ -388,6 +430,7 @@ async function handle(
         stripeDepositAddress: options.stripe?.depositAddress,
       }),
       taxDeclaration,
+      checkoutDetails,
       seller: options.receiptSeller,
       ...(stripeWillRecord ? { stripe: { sekRate: options.sekRate?.current() } } : {}),
     })
@@ -461,6 +504,11 @@ async function handlePaymentGate(
       product,
       options.settlementMethods ?? SUPPORTED_SETTLEMENT_METHODS,
     ),
+    // #4873: the product's checkout-details request, when it asks for one.
+    // Every other product's challenge is unchanged.
+    checkoutDetails: checkoutDetailsForProduct(product, {
+      requiredField: options.checkoutDetailsRequiredField,
+    }),
   })
   const paymentHeader = getPaymentHeader(req)
 
@@ -614,6 +662,9 @@ async function getSession(
     // 402 does, so the deposit address travels with the session's config.
     stripeDepositAddress: options.stripe?.depositAddress,
     receiptSeller: options.receiptSeller,
+    // #4873: the in-band quote advertises the same checkout-details request
+    // the HTTP 402 does.
+    checkoutDetailsRequiredField: options.checkoutDetailsRequiredField,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
@@ -860,6 +911,8 @@ function applyCorsHeaders(res: ServerResponse): void {
       LEGACY_PAYMENT_SIGNATURE_HEADER,
       // #4855: the buyer's signed tax declaration travels on the paid retry.
       X_TAX_DECLARATION_HEADER,
+      // #4873: the buyer's checkout details travel on the paid retry.
+      X_CHECKOUT_DETAILS_HEADER,
     ].join(', '),
   )
   res.setHeader('Access-Control-Expose-Headers', `${PAYMENT_REQUIRED_HEADER}, ${PAYMENT_RESPONSE_HEADER}, mcp-session-id`)

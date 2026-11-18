@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CHECKOUT_DETAILS_REQUIRED_FIELD_ENV,
   PRODUCTS,
   buildProductMetadata,
+  checkoutDetailsForProduct,
   formatUsdc,
   merchantEnvironmentForChain,
   offeredProducts,
@@ -10,6 +12,7 @@ import {
   productReceivingAddress,
   productSettlementKind,
   productToolArgs,
+  requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
   type SettlementMethod,
 } from './products.js'
@@ -205,5 +208,52 @@ describe('the CDP-settled joke product (#4851)', () => {
       default_settlement_method: 'eip3009',
       arguments_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
     })
+  })
+})
+
+describe('checkout details (#4873)', () => {
+  it('one product asks, and every other product asks for nothing', () => {
+    const asking = Object.values(PRODUCTS)
+      .filter((product) => checkoutDetailsForProduct(product) !== undefined)
+      .map((product) => product.id)
+    expect(asking).toEqual(['vpn_pro'])
+  })
+
+  it('the asking product wants a receipt email and a billing address, both optional', () => {
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_pro)).toEqual({
+      fields: {
+        receipt_email: { required: false },
+        billing_address: { required: false },
+      },
+    })
+  })
+
+  it('the dev-only hook turns one of the product’s optional fields into a required one', () => {
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_pro, { requiredField: 'receipt_email' })).toEqual({
+      fields: {
+        receipt_email: { required: true },
+        billing_address: { required: false },
+      },
+    })
+    // A field the product does not ask for is not added by the hook.
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_pro, { requiredField: 'shipping_address' })).toEqual(
+      checkoutDetailsForProduct(PRODUCTS.vpn_pro),
+    )
+    // A product that asks for nothing stays that way.
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_basic, { requiredField: 'receipt_email' })).toBeUndefined()
+  })
+
+  it('reads the dev-only hook from the environment, testnet-only', () => {
+    expect(requiredCheckoutFieldFromEnv({}, 84532)).toBeNull()
+    expect(requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: '  ' }, 84532)).toBeNull()
+    expect(requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: 'receipt_email' }, 84532)).toBe(
+      'receipt_email',
+    )
+    expect(() => requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: 'receipt_email' }, 8453)).toThrow(
+      /dev-only hook/,
+    )
+    expect(() => requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: 'phone' }, 84532)).toThrow(
+      /must be one of/,
+    )
   })
 })

@@ -3872,6 +3872,66 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchant-catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the merchant account's catalogue and the last read.
+         * @description The catalogue as the owner's screens read it (#4899, epic #4885): the deployment address, the outcome of the last read, a mismatch if the document is not this account's deployment, and the product list. Scoped to the caller's merchant account, so another user's catalogue is never returned. A user with no merchant account, or one who has not saved an address, gets `deployment_url: null`, `last_read_status: 'never'` and an empty list. Read-only: nothing here charges a price, creates a sale or names a recipient.
+         */
+        get: operations["getMerchantCatalogue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-catalogue/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save the kit deployment's address and read its discovery document.
+         * @description Stores the public address of the owner's kit deployment for the merchant account and reads `/.well-known/x402` from it immediately, so the answer to the save is the catalogue the document produced (#4899, epic #4885). The address is stored as the deployment's ORIGIN — path, query and fragment are dropped — because the kit serves the discovery document at `/.well-known/x402` and nowhere else, so the read is always `<origin>/.well-known/x402` and a pasted path cannot become the path Haven reads. The address is checked by the outbound guard's own policy before it is stored — https only, default port, no embedded credentials, no IP literal, no locally-bound name — and refused with `MERCHANT_CATALOGUE_URL_REFUSED` and the guard's `reason`; the read itself refuses a host that resolves into private or local space and a redirect that leaves the host. A read that fails does not fail the save: the address is stored, the outcome is recorded in `last_read_status`, and the last good product list stays in place. A CHANGED address retires the list the old one produced (its products are marked no longer offered, not deleted, so past sales keep their names). The product list is stored in its own table, never `merchant_catalog`.
+         */
+        put: operations["saveMerchantCatalogueDeployment"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-catalogue/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the deployment again, on request.
+         * @description Reads the saved deployment's discovery document again and answers the catalogue (#4899, epic #4885). The scheduled refresh reads every configured deployment every 15 minutes (`background-jobs.ts`), so this is the owner's "read it now". A failed read records its outcome and leaves the last good list in place; a document whose receiving address or network is not this account's is recorded as a mismatch and its products are not used. The request carries no body.
+         */
+        post: operations["refreshMerchantCatalogue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/merchants": {
         parameters: {
             query?: never;
@@ -4987,6 +5047,57 @@ export type components = {
             last_used_at: string | null;
             /** @description The secret. Returned by this call only; it is never stored and no later read can produce it. */
             secret: string;
+        };
+        MerchantCatalogueProduct: {
+            /** @description The kit's stable product id (the products file's `id`), which a sale record also carries. */
+            product_id: string;
+            /** @description The human name, or null when the document has none. */
+            name: string | null;
+            description: string | null;
+            /** @description `METHOD /path`, as the document spells it. */
+            route: string | null;
+            model: string | null;
+            /** @description The price in whole atomic USDC units, as a decimal string. Display only: this slice never charges it. */
+            price_atomic: string;
+            /** @description CAIP-2 identifier of the document's network. */
+            network: string;
+            output_token_cap: number | null;
+            /** @description False when the document no longer lists the product. The row is kept so a past sale keeps its name. */
+            offered: boolean;
+            /**
+             * Format: date-time
+             * @description When the product stopped being offered, or null while it is offered.
+             */
+            removed_at: string | null;
+        };
+        MerchantCatalogueState: {
+            /** @description The public address of the kit deployment the owner saved, or null when none is saved. */
+            deployment_url: string | null;
+            /**
+             * Format: date-time
+             * @description When Haven last TRIED to read the document, or null when it never has.
+             */
+            last_read_at: string | null;
+            /**
+             * @description The outcome of the last read: `ok` (the list matches the document), `unreachable` (no answer), `malformed` (not a kit document), `mismatch` (not this account's deployment), `refused` (the address is not one Haven reads), `never` (no read yet).
+             * @enum {string}
+             */
+            last_read_status: "never" | "ok" | "unreachable" | "malformed" | "mismatch" | "refused";
+            /** @description The machine reason and detail of the last read, for the owner and for support. */
+            last_read_detail: string | null;
+            /** @description True when the document's receiving address or network is not the merchant account's. */
+            mismatch: boolean;
+            mismatch_reason: string | null;
+            /** @description What the last GOOD document called the endpoint. */
+            document_name: string | null;
+            document_operator_name: string | null;
+            /** @description The CAIP-2 network the last good document named. */
+            document_network: string | null;
+            /** @description The receiving address the last good document named. A LABEL: it is compared against the account's own address and never used as a payment destination. */
+            document_pay_to: string | null;
+            document_updated: string | null;
+            /** @description The product list, offered products first. */
+            products: components["schemas"]["MerchantCatalogueProduct"][];
         };
         Label: {
             /** Format: uuid */
@@ -24827,6 +24938,170 @@ export interface operations {
             };
             /** @description No such key of the caller's: error_code MERCHANT_KEY_NOT_FOUND. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantCatalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's merchant catalogue. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantCatalogueState"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    saveMerchantCatalogueDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uri
+                     * @description The public address of the kit deployment, e.g. `https://api.example.com`. https only, default port, no credentials. Stored as the deployment's ORIGIN: a path, query or fragment is dropped, and the read is always `<origin>/.well-known/x402`.
+                     */
+                    deployment_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The address is saved and the catalogue is the result of reading it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantCatalogueState"];
+                };
+            };
+            /** @description The address is not one Haven reads: error_code MERCHANT_CATALOGUE_URL_REFUSED, with the guard's `reason` (invalid_url, scheme_not_https, embedded_credentials, non_default_port, host_not_public). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The caller has no merchant account yet: error_code MERCHANT_ACCOUNT_REQUIRED. Turn merchant services on first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    refreshMerchantCatalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The catalogue after the read. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantCatalogueState"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No merchant account (error_code MERCHANT_ACCOUNT_REQUIRED), or no deployment address saved yet (error_code MERCHANT_CATALOGUE_NOT_CONFIGURED). */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -36,7 +36,7 @@ import {
   recordSubmittedUserOpHash,
   releaseSubmittedClaim,
 } from '../payment-intents.js'
-import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
+import { upsertOwnerCompanyDetails, buyerPartyFromJoin, type BuyerJoinColumns } from '../owner-company-details.js'
 import { buildPaymentReceipt } from '../../../modules/payments/receipt.js'
 
 let seq = 0
@@ -534,6 +534,9 @@ describeDb('payment-intents repository (#1223)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     await upsertOwnerCompanyDetails(ownerB.userId, {
       legal_name: 'Owner B GmbH',
@@ -542,6 +545,9 @@ describeDb('payment-intents repository (#1223)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
 
     const afterA = await findSettledPaymentReceiptRow(intentA, ownerA.agentId)
@@ -551,6 +557,52 @@ describeDb('payment-intents repository (#1223)', () => {
     const afterB = await findSettledPaymentReceiptRow(intentB, ownerB.agentId)
     expect(afterB?.id).toBe(intentB)
     expect(afterB?.buyer_legal_name).toBe('Owner B GmbH')
+  })
+
+  /**
+   * #4870: the receipt email and the two addresses are stored on the SAME row
+   * the buyer join reads, so the only thing keeping them out of
+   * `parties.buyer` is `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` not naming them.
+   * This pins the buyer block's key set EXACTLY (`toEqual`, not
+   * `toMatchObject`): adding a column to the join fragment turns it red.
+   */
+  it('#4870: a stored receipt email and both addresses never reach the buyer block', async () => {
+    const owner = await seedAgent()
+    const intent = await db.query<{ id: string }>(
+      `INSERT INTO payment_intents
+         (agent_id, user_id, account_address, token_symbol, token_address, to_address,
+          amount_raw, amount_human, delegate_address, allowance_nonce, sign_hash,
+          status, expires_at)
+       VALUES ($1, $2, '0x00000000000000000000000000000000000001', 'USDC',
+               '0x00000000000000000000000000000000000002', '0x00000000000000000000000000000000000003',
+               '100000', '0.10', '0x00000000000000000000000000000000000004', 1, $3,
+               'confirmed', NOW() + interval '10 minutes')
+       RETURNING id`,
+      [owner.agentId, owner.userId, `0x${'e'.repeat(64)}`],
+    )
+    await upsertOwnerCompanyDetails(owner.userId, {
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      vies_checked_at: '2026-09-20T10:00:00.000Z',
+      receipt_email: 'billing@acme.se',
+      billing_address: { line1: 'Sveavagen 1', city: 'Stockholm', postCode: '111 57', country: 'SE' },
+      shipping_address: { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' },
+    })
+
+    const row = await findSettledPaymentReceiptRow(intent.rows[0].id, owner.agentId)
+    expect(row).not.toBeNull()
+    expect(buyerPartyFromJoin(row as BuyerJoinColumns, true)).toEqual({
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      // pg hands a timestamptz back as a Date.
+      vies_checked_at: new Date('2026-09-20T10:00:00.000Z'),
+    })
   })
 
   // ── #3418: the receipt SQL returns the two scheme columns ────────────────────

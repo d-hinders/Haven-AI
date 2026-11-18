@@ -17,6 +17,25 @@ interface UpsertBody {
   country: string
   org_number: string
   vat_number?: string | null
+  /**
+   * #4870. Absent = keep the stored value; `null` = clear it. The route
+   * passes the value through untouched (`undefined` included) so the service
+   * can tell "omitted" from "cleared" — `?? null` here would erase that
+   * distinction and wipe the field on every old-shape request.
+   */
+  receipt_email?: string | null
+  billing_address?: AddressBody | null
+  shipping_address?: AddressBody | null
+}
+
+interface AddressBody {
+  line1?: string | null
+  line2?: string | null
+  line3?: string | null
+  city?: string | null
+  postCode?: string | null
+  subdivision?: string | null
+  country?: string | null
 }
 
 /**
@@ -37,6 +56,11 @@ const VALIDATION_MESSAGES: Record<CompanyDetailsValidationError, string> = {
   invalid_country: 'Country must be a two-letter ISO 3166-1 code, e.g. "SE".',
   invalid_org_number: 'Enter an organisation number using 32 characters or fewer.',
   invalid_vat_number: 'Enter a VAT number as a two-letter country prefix followed by up to 20 letters or digits.',
+  // #4870. The three new fields are optional, so each message names what a
+  // usable value looks like rather than saying the field is required.
+  invalid_receipt_email: 'Enter a receipt email address using 254 characters or fewer, e.g. "name@example.com".',
+  invalid_billing_address: 'Enter a billing address with a street line, a city and a two-letter country code.',
+  invalid_shipping_address: 'Enter a shipping address with a street line, a city and a two-letter country code.',
 }
 
 function toWireRow(row: OwnerCompanyDetailsRow) {
@@ -47,6 +71,11 @@ function toWireRow(row: OwnerCompanyDetailsRow) {
     vat_number: row.vat_number,
     vies_status: row.vies_status,
     vies_checked_at: row.vies_checked_at,
+    // #4870: always present on the wire, `null` when the owner has not saved
+    // one — the same convention `vat_number` already follows.
+    receipt_email: row.receipt_email,
+    billing_address: row.billing_address,
+    shipping_address: row.shipping_address,
     created_at: row.created_at,
     updated_at: row.updated_at,
   }
@@ -153,6 +182,11 @@ export default async function ownerCompanyDetailsRoutes(app: FastifyInstance): P
         country: request.body.country,
         org_number: request.body.org_number,
         vat_number: request.body.vat_number ?? null,
+        // #4870: passed through as-is. `undefined` (omitted) must reach the
+        // service as `undefined` — that is what "keep the stored value" means.
+        receipt_email: request.body.receipt_email,
+        billing_address: request.body.billing_address,
+        shipping_address: request.body.shipping_address,
       })
       if (!result.ok) {
         return reply.code(400).send({ error: VALIDATION_MESSAGES[result.error] })

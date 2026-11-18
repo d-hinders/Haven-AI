@@ -143,11 +143,12 @@ same place it already runs for stored failure text elsewhere in the backend.
   attaches its per-route check through `onRoute`, appended to that specific
   route's own hook array, so the route's own `authMiddleware` (added via
   `app.addHook('onRequest', authMiddleware)`) runs first and `request.user`
-  is already verified by the time the key generator runs. This is the one
-  rate-limit tier in the backend keyed per user rather than per credential or
-  per IP — see the comment on `feedbackSubmitRateLimit`
-  (`middleware/rate-limit.ts`) for why the distinction matters here
-  specifically.
+  is already verified by the time the key generator runs. Since #4955 the
+  shared key generator also keys an owner session per user (`user:<sub>`);
+  this tier keeps its own generator so feedback has its own
+  `feedback_user:` count, not the one every other rate-limited owner route
+  spends, and so it fails loudly if auth ever stops running first — see the
+  comment on `feedbackSubmitRateLimit` (`middleware/rate-limit.ts`).
 
 ## If it needs to change
 

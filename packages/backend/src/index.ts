@@ -372,14 +372,15 @@ await app.register(fastifyJwt, {
 })
 
 // Rate limiting (#794): registered non-global — only routes that opt in via
-// `config.rateLimit` (money-path writes and the public demo reads) are
-// limited; dashboard reads stay unthrottled. Keyed per presented credential
-// (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
-// own bucket regardless of network path; unauthenticated requests fall back
-// to per-IP. With TRUST_PROXY_HOPS unset that per-IP fallback collapses to
-// the proxy address behind Railway — acceptable for the public demo routes,
-// where a shared throttle still beats an open faucet, and the reason the
-// auth tier (#1670) refuses to arm itself until the proxy is trusted.
+// `config.rateLimit` (money-path writes, the auth front door and the other
+// public tiers) are limited; dashboard reads stay unthrottled. Keyed on the
+// identity the route's auth verified — the agent, the Sales key, the ops
+// operator or the owner's JWT `sub` — never on raw header text (#4955, see
+// rateLimitKeyFor), so each caller gets its own bucket regardless of network
+// path and a junk header cannot pick a fresh one. A route with no auth is
+// keyed per IP. With TRUST_PROXY_HOPS unset that per-IP key collapses to the
+// proxy address behind Railway — the reason the auth tier (#1670) and the
+// other public tiers refuse to arm themselves until the proxy is trusted.
 // #1680: the shared Postgres-backed store replaces the plugin's in-process
 // LRU. With the default store each replica counted only its own share of the
 // traffic, so the real ceiling was `max × replicas` and it ROSE with load —

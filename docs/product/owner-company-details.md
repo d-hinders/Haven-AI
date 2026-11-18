@@ -129,9 +129,9 @@ just the settings screen built on top of it; `DELETE` is the one exception
 | Route | Notes |
 |---|---|
 | `GET /user/company-details` | 404 when the flag is off, and only then. 200 with `null` if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
-| `PUT /user/company-details` | 404 when the flag is off. Full replacement of the row, with one exception: the three #4870 fields follow **omitted keeps, `null` clears** — a field the request omits keeps its stored value (so a dashboard tab built before #4870 cannot wipe it), and an explicit `null` clears it. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
+| `PUT /user/company-details` | 404 when the flag is off. Full replacement of the row, with one exception: the three #4870 fields follow **omitted keeps, `null` clears** — a field the request omits keeps its stored value (so a dashboard tab built before #4870 cannot wipe it), and an explicit `null` clears it. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per owner (a count shared with the owner's other rate-limited routes, from any session; #4955). |
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
-| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
+| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per owner (a count shared with the owner's other rate-limited routes, from any session; #4955). |
 
 An agent API key (a bearer token or `x-api-key` value starting `sk_agent_`)
 is refused with a named `403` on `DELETE` always, and on the other three

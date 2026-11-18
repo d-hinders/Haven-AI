@@ -69,11 +69,11 @@ import { decryptSecrets } from '../infra/secrets.js'
  * The body's shape has no schema, so `readAccountedWebhookContext` stays the
  * enforcement for it. The handler is branch-on-context only.
  *
- * Rate limiting (#3019 item 3): `@fastify/rate-limit` keys on
- * `Authorization`/`X-API-Key` (`middleware/rate-limit.ts`), which a webhook
- * carries neither of — the shared generator degrades to `ip:`
- * (`rateLimitKeyFor` returns `ip:${request.ip}` when neither header is
- * present). Behind the deployment proxy that is one shared bucket, so the
+ * Rate limiting (#3019 item 3): `@fastify/rate-limit` keys on the identity a
+ * route's auth verified (`middleware/rate-limit.ts`, #4955), and a webhook
+ * route has no auth hook — the shared generator keys it `ip:${request.ip}`
+ * (`rateLimitKeyFor`), whatever headers the provider sends. Behind the
+ * deployment proxy that is one shared bucket, so the
  * ceiling sits far above the whole provider's legitimate cadence: 600
  * callbacks a minute dwarfs a 7-retry storm across every connection, and the
  * 429 that could push the provider's deliveries toward `dead` is unreachable

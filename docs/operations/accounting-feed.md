@@ -1416,8 +1416,8 @@ keys dropped, 16 KB cap) — the probe's raw material for deciding whether a
 bad_signature / stale / unknown_token / duplicate / processed /
 feature_off / unknown_type / confirmed / verification — are process-lifetime; the rows are
 the durable facts. Rate limiting: the route carries its own 600/min ceiling —
-the shared limiter keys on `Authorization`/`X-API-Key`, which a webhook lacks,
-so it degrades to per-IP; 600/min dwarfs a 7-retry storm and keeps the
+the shared limiter keys on the identity a route's auth verified (#4955), and
+the webhook route has no auth hook, so it is keyed per IP; 600/min dwarfs a 7-retry storm and keeps the
 provider out of the 429s that could push deliveries toward `dead`.
 
 **Registration is all-or-nothing.** If any of the three creates fails, the

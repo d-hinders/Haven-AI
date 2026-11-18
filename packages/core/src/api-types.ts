@@ -464,7 +464,7 @@ export type paths = {
         get: operations["getCompanyDetails"];
         /**
          * Create or replace the company details.
-         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per owner (`ownerProfileRateLimit`).
          */
         put: operations["putCompanyDetails"];
         post?: never;
@@ -489,7 +489,7 @@ export type paths = {
         put?: never;
         /**
          * Re-run the VIES check for the saved VAT number.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per owner (`ownerProfileRateLimit`).
          */
         post: operations["recheckCompanyDetailsVies"];
         delete?: never;
@@ -1769,7 +1769,7 @@ export type paths = {
         put?: never;
         /**
          * PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.
-         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).
+         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (the webhook route has no auth hook, #4955).
          */
         post: operations["accountedWebhookCallback"];
         delete?: never;
@@ -9390,7 +9390,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            /** @description Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited owner route keyed by the shared generator (not `/feedback`, which has its own), from any session. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -9520,7 +9520,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            /** @description Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited owner route keyed by the shared generator (not `/feedback`, which has its own), from any session. */
             429: {
                 headers: {
                     [name: string]: unknown;

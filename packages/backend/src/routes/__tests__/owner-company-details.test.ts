@@ -536,7 +536,7 @@ describeDb('owner company details routes (#3332)', () => {
    * #3332 review round 2 (M-A): a real `@fastify/rate-limit` registration
    * (`global: false`, `rateLimitKeyFor` as the key generator, as `index.ts`
    * does — but on the plugin's in-memory store, not the production
-   * `SharedRateLimitStore`, which shares one count per credential across
+   * `SharedRateLimitStore`, which shares one count per owner across
    * routes; the GET property below does not depend on the store) — not the
    * plain `app` above,
    * which never loads the plugin at all and so could never have caught the
@@ -585,11 +585,9 @@ describeDb('owner company details routes (#3332)', () => {
 
     it('GET carries no x-ratelimit-* headers and is never 429, even after far more than PUT/POST\'s 20/min cap', async () => {
       const userId = await seedUser()
-      // Signed ONCE and reused: `rateLimitKeyFor` keys on the exact
-      // `Authorization` header value, so a fresh `jwt.sign` per request could
-      // (rarely, across a second boundary) mint a different token/`iat` and
-      // silently spread these across buckets instead of proving one bucket
-      // never 429s.
+      // Signed ONCE and reused. Since #4955 `rateLimitKeyFor` keys on the
+      // verified `sub`, so a fresh token per request would share the bucket
+      // too; one token keeps the request shape constant either way.
       const auth = limitedAuth(userId)
       let sawRateLimitHeader = false
       for (let i = 0; i < 30; i += 1) {

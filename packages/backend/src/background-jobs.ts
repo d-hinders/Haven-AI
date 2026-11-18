@@ -1,7 +1,7 @@
 /**
  * The backend's background jobs, as one importable table (#4764).
  *
- * `index.ts` used to start all ten of these inline, between its route
+ * `index.ts` used to start all eleven of these inline, between its route
  * registrations and `startRetrySweep`. That made the wiring untestable —
  * importing `index.ts` boots the server — so two tests read the file as text
  * and regex-matched it, a technique that failed once on record (#4411).
@@ -15,10 +15,10 @@
  * Behaviour is unchanged from the inline wiring: same lock keys, intervals,
  * first-run behaviour, `.unref()`, and warn messages; per-pass and per-phase
  * catches kept with their exact messages; dynamic imports stay lazy, not
- * hoisted; no overlap guard is added to these ten; the outbound job still
+ * hoisted; no overlap guard is added to these eleven; the outbound job still
  * iterates per chain inside one tick.
  *
- * The eleventh job — the accounting retry sweep — is NOT a row. It registers
+ * The twelfth job — the accounting retry sweep — is NOT a row. It registers
  * nothing when `config.accountingEnabled` is off, its interval comes from
  * config, it has an in-process overlap guard, and its leader function is
  * injectable, so it stays self-registering in
@@ -97,6 +97,14 @@ const OUTBOUND_BUMP_INTERVAL_MS = 60_000
 const RECONCILE_INTERVAL_MS = 60_000
 
 /**
+ * The scheduled merchant inbound index (#4903, epic #4885). Five minutes is the
+ * stated indexing latency: a payment into a merchant account is indexed within
+ * 5 minutes of the next tick, with no dashboard open. The pass reads only the
+ * blocks since its cursor, so a quiet tick is one `eth_getLogs` call.
+ */
+const MERCHANT_INBOUND_INDEX_INTERVAL_MS = 5 * 60 * 1000
+
+/**
  * Ops webhook, same Slack-compatible `{ text }` shape as the
  * delegate/relayer monitors — via the shared sender (#3345), which checks
  * `res.ok`: a 4xx/5xx or network error logs a warning with the status (never
@@ -121,7 +129,7 @@ export interface BackgroundJobsDeps {
 }
 
 /**
- * Build the ten rows. A function rather than a module-level constant because
+ * Build the eleven rows. A function rather than a module-level constant because
  * the catalog-ingest monitor must be built ONCE per start and held across
  * every tick (#4407) — a module-level table would build it at import time,
  * before the process has a logger or a pool.
@@ -367,6 +375,24 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
       },
     },
     {
+      name: 'merchant inbound index',
+      intervalMs: MERCHANT_INBOUND_INDEX_INTERVAL_MS,
+      lockKey: LEADER_LOCK_KEYS.merchantInboundIndex,
+      failureMessage: 'Merchant inbound index tick failed',
+      // The scheduled merchant inbound index (#4903, epic #4885): every account
+      // marked as a merchant account is read from the chain since its last
+      // indexed block, so a payment is indexed without anyone opening a
+      // dashboard. Leader-gated because the RPC scan is the expensive part;
+      // correctness does not depend on it (the row identity is idempotent and
+      // the cursor only moves forward). Indexing continues while merchant
+      // services are off — the account list is the marker, not the setting.
+      run: async () => {
+        const { runMerchantInboundIndexTick } = await import('./modules/transactions/index.js')
+        const tick = await runMerchantInboundIndexTick(log)
+        if (tick.indexed || tick.failed) log.info(tick, 'Merchant inbound index tick')
+      },
+    },
+    {
       name: 'passport sweep',
       intervalMs: PASSPORT_SWEEP_INTERVAL_MS,
       lockKey: LEADER_LOCK_KEYS.passportSweep,
@@ -467,7 +493,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the ten table rows, then the
+ * The one entry point `index.ts` calls: start the eleven table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

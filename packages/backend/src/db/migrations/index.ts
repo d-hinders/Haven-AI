@@ -126,6 +126,7 @@ import * as userVisits from './124_user_visits.js'
 import * as anchorCalldataCallSemantics from './125_anchor_calldata_call_semantics.js'
 import * as merchantServices from './126_merchant_services.js'
 import * as merchantKeys from './127_merchant_keys.js'
+import * as inboundTransferIdentity from './128_inbound_transfer_identity.js'
 import * as ownerCompanyDetailsCheckoutFields from './129_owner_company_details_checkout_fields.js'
 
 /**
@@ -312,5 +313,6 @@ export const migrations: Migration[] = [
   anchorCalldataCallSemantics,
   merchantServices,
   merchantKeys,
+  inboundTransferIdentity,
   ownerCompanyDetailsCheckoutFields,
 ]

@@ -17,9 +17,11 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/backend/src/routes/receive.ts
   - packages/backend/src/modules/transactions/receive.ts
+  - packages/backend/src/modules/transactions/chain-read.ts
+  - packages/backend/src/modules/transactions/merchant-index.ts
   - packages/backend/src/modules/transactions/off-ramp.ts
   - packages/backend/src/infra/repositories/inbound-transfers.ts
-last-verified: "2026-10-24"
+last-verified: "2026-11-17"
 ---
 
 # Haven — Payment Execution Sequence
@@ -314,12 +316,68 @@ of which moves a key or grants an agent authority:
 and stay that way — the wire shape (`direction: 'in' | 'out'`) is unchanged
 for the CLI and dashboard. What is NEW is that the same explorer read feeds a
 persisted index (`inbound_transfers`, migration 097): every USDC transfer
-inbound to the account's address is upserted idempotently per
-(chain, tx hash, account) with payer, raw amount and block time — one row per
-RECEIVING ACCOUNT, so one transaction paying two Haven accounts (or carrying
-several USDC legs) credits each account's ledger instead of collapsing into
-one. The live read remains the feed's source; the index is the matching
+inbound to the account's address is upserted idempotently with payer, raw
+amount and block time — one row per RECEIVING ACCOUNT, so one transaction
+paying two Haven accounts credits each account's ledger instead of collapsing
+into one. The live read remains the feed's source; the index is the matching
 substrate — and it costs no second explorer call.
+
+**Row identity (#4903).** A transfer's on-chain identity is its LOG, so the
+dedupe key is `(chain, tx hash, account, log index)` (migration 128). A
+transaction carrying several USDC transfers to the same account therefore
+lands one row per leg instead of one row per transaction. `log_index` is
+nullable — not every source reports it — so the unknown case keeps its own
+partial unique index on `(chain, tx hash, account, payer, amount)`: a re-read
+of the same leg still conflicts, while a second leg is a distinct row.
+
+**The cross-source rule, in both directions (#4903).** The two partial indexes
+are disjoint, so the same leg can arrive from the chain pass (log index known)
+and from the explorer read (Alchemy reports none) in either order, and both
+orders land ONE row. Explorer first, chain afterwards: the known-index leg
+ADOPTS the unknown row written from it (same payer and amount) by filling in
+the index, keeping the row's amount, match and `balance_consumed` flag. Chain
+first, explorer afterwards: the unknown-index leg is SKIPPED when a
+known-index row already exists for the same `(chain, tx hash, account, payer,
+amount)` — an explicit `WHERE NOT EXISTS` in the insert, because a partial
+index cannot span both cases. The receive balance of an account whose rows
+were collapsed before migration 128 does not move in either direction, while
+every leg is indexed. The match path carries the same rule: a row whose
+`(chain, tx hash, account, payer, amount)` leg is already matched is never
+matched again, so a replayed receipt drop cannot count one on-chain transfer
+twice. Zero-value transfers are left out for every account.
+
+**The scheduled pass (#4903).** A merchant account that nobody browses used to
+be unindexed, and one that received more payments between reads than the
+explorer's page cap lost the older ones. `modules/transactions/merchant-index.ts`
+runs every 5 minutes (`background-jobs.ts`, leader-locked on
+`LEADER_LOCK_KEYS.merchantInboundIndex`) over every account marked
+`is_merchant_account`, and reads every USDC transfer into it since the last
+indexed block straight from the chain (`eth_getLogs`, `chain-read.ts`) — no
+explorer page cap, and the exact log index for each leg. A per-account cursor
+(`inbound_index_cursors`) records the highest fully indexed block; the first
+pass seeds it at the block carrying the account's creation time. A payment is
+therefore indexed **within 5 minutes** of the next tick with no dashboard open.
+The pass is idempotent and safe with two replicas: the job is leader-gated, and
+the writes converge regardless (the row identity dedupes, the cursor only moves
+forward). Indexing continues while merchant services are turned off — the
+account list is the marker, not the setting — so the history stays complete.
+Each row records `sender_is_own_address`, decided at index time against the
+owner's own addresses (the set #4897 defines).
+
+**The by-hash read (#4903).** `readInboundTransferByTxHash` reads ONE
+transaction from the chain and returns the USDC transfers to the account, or
+says there is none. It is the primitive #4897 uses to check a sale record at
+once, and it never returns a caller-supplied value. An unreadable chain is
+reported as such, never as "there is none".
+
+**The caller-supplied ingest route (#4903 decision).** `POST
+/receive/{accountAddress}/ingest` used to insert an inbound row from values the
+caller sent, with no chain check — a row planted through it would block the
+real one and could then be matched as a sale. It now VERIFIES AGAINST THE
+CHAIN: it takes only `tx_hash`, reads the receipt, and indexes the
+settlement-token transfers whose `to` is the account. A body naming a payer,
+amount, token or block time is refused with 400, so no row for a hash that did
+not pay the account can be created through any route.
 
 The receive-ledger read (`GET /receive/{accountAddress}`) reads the index
 directly: the receiving address per chain, the running USDC balance (sum of

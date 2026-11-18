@@ -3534,8 +3534,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Record one inbound USDC transfer in the account receive index.
-         * @description Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns `ingested: false` rather than double-counting.
+         * Index the USDC transfers one transaction actually carried to this account.
+         * @description Owner-scoped ingestion hook (tests and the eventual indexer tick; the scheduled merchant pass feeds the same repository). Since #4903 the route VERIFIES AGAINST THE CHAIN: it takes only `tx_hash`, reads the transaction receipt, and indexes the settlement-token transfers whose `to` is this account. A caller-supplied payer, amount, token or block time is refused with 400, so a row for a hash that did not pay the account cannot be created through any route. Idempotent per (chain, tx hash, log index): a re-ingest returns `ingested: false` rather than double-counting. 404 means the chain says the transaction carried no USDC transfer to this account; 503 means the chain could not be read and nothing was written.
          */
         post: operations["ingestInboundTransfer"];
         delete?: never;
@@ -7327,6 +7327,8 @@ export type components = {
         };
         ReceiveLedgerTransfer: {
             tx_hash: string;
+            /** @description The transfer log index in its transaction — the on-chain half of the row identity (#4903). Null when the source that wrote the row reported none. */
+            log_index: number | null;
             payer_address: string;
             /** @description Atomic units, numeric string. */
             amount_raw: string;
@@ -7342,6 +7344,8 @@ export type components = {
             matched_receipt_id: string | null;
             /** @description True once the row counts in balance_atomic. */
             balance_consumed: boolean;
+            /** @description Whether the payer is one of the owner own addresses, decided at INDEX time (#4903). Recorded, not derived at read time, so a later change to the account set cannot rewrite history. */
+            sender_is_own_address: boolean;
             /** @description match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row. */
             earned: boolean;
         };
@@ -7421,30 +7425,13 @@ export type components = {
         };
         InboundIngestInput: {
             tx_hash: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            payer_address: string;
-            /** @description Atomic units. */
-            amount_raw: string;
-            /**
-             * @description Optional; defaults to the chain registry USDC — the receive index tracks USDC only.
-             * @example 0x1111111111111111111111111111111111111111
-             */
-            token_address?: string;
-            /**
-             * Format: date-time
-             * @description Defaults to now.
-             */
-            block_time?: string;
-            block_number?: string;
         };
         InboundIngestResponse: {
-            /** @description false when the (chain, tx hash) was already indexed — idempotent re-ingest. */
+            /** @description false when every leg of the transaction was already indexed — idempotent re-ingest. */
             ingested: boolean;
-            /**
-             * Format: uuid
-             * @description The row id, or null when it already existed.
-             */
-            id: string | null;
+            /** @description How many USDC legs to this account were newly indexed. */
+            legs_indexed: number;
+            tx_hash: string;
         };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
@@ -23579,7 +23566,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Recorded (`ingested: false` when the hash was already indexed). */
+            /** @description Recorded (`ingested: false` when every leg was already indexed). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -23620,6 +23607,36 @@ export interface operations {
             };
             /** @description Error response */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

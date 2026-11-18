@@ -11,7 +11,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockNormal } = vi.hoisted(() => ({ mockNormal: vi.fn() }))
 
-vi.mock('../receive.js', () => ({ ingestInboundTransfers: async () => undefined }))
+vi.mock('../receive.js', () => ({
+  ingestInboundTransfers: async () => undefined,
+  // #4903: the aggregate maps explorer rows to legs before ingesting.
+  explorerRowsToLegs: (_account: unknown, rows: unknown[]) => rows,
+}))
 vi.mock('../../../infra/repositories/inbound-transfers.js', () => ({
   findOwnerUserIdForAccount: async () => 'user-1',
 }))

@@ -580,7 +580,12 @@ Isolation rules that are non-negotiable for a payments product:
   commit. #4899's three `/merchant-catalogue` rows are the same shape again: a
   new module, `routes/merchant-catalogue.ts`, listed from its first commit, so
   its save body is refused by the schema when it carries anything but the
-  deployment address. New modules are born ENFORCED with their own
+  deployment address. #4897 added two more modules of that shape:
+  `routes/merchant-sales.ts`, with one `POST /merchant/sales` row (the Sales
+  key's ingest, whose body is closed to the sale-record shape), and
+  `routes/merchant-sales-reads.ts`, with four `/merchant-sales` rows for the
+  owner's reads and the clear route. Both are listed from their first commit.
+  New modules are born ENFORCED with their own
   `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
   prefix) followed the #3167 precedent exactly, and #3329's two new modules

@@ -23,6 +23,8 @@ export const PAY_TO = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' as Address
 export const UPSTREAM_KEY = 'sk-upstream-SECRET-0123456789'
 export const CDP_SECRET = 'cdp-secret-SECRET-abcdefghij'
 export const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address
+/** #4898: a Sales key (#4896's prefix), long enough for the log redactor to hold it. */
+export const SALES_KEY = 'sk_merchant_test_0123456789abcdef'
 
 export interface SeenRequest {
   method: string
@@ -86,6 +88,77 @@ export async function startUpstream(initial?: Partial<UpstreamBehaviour>): Promi
       }
       res.writeHead(b.status, { ...b.headers, 'content-length': String(body.length) })
       res.end(body)
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  mock.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  return mock
+}
+
+export interface HavenRequest {
+  method: string
+  url: string
+  headers: IncomingMessage['headers']
+  body: string
+}
+
+export interface HavenBehaviour {
+  status: number
+  body?: unknown
+  headers?: Record<string, string>
+  /** Never answer: the reporter's attempt times out. */
+  hang?: boolean
+  /** Answer after this many ms. */
+  delayMs?: number
+}
+
+export interface MockHaven {
+  url: string
+  seen: HavenRequest[]
+  behaviour: HavenBehaviour
+  close(): Promise<void>
+}
+
+/**
+ * #4898: a mocked Haven, the `POST /merchant/sales` route (#4897). It records
+ * every request and answers with `behaviour`, so a test can make Haven accept,
+ * refuse, hang or be unreachable without reaching the real API.
+ */
+export async function startHaven(initial?: Partial<HavenBehaviour>): Promise<MockHaven> {
+  const seen: HavenRequest[] = []
+  const mock: MockHaven = {
+    url: '',
+    seen,
+    behaviour: { status: 201, body: { sale: { id: 'sale-1' } }, ...initial },
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections()
+        server.close(() => resolve())
+      }),
+  }
+  const server: Server = createServer((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => {
+      seen.push({
+        method: req.method ?? '',
+        url: req.url ?? '',
+        headers: req.headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      })
+      const behaviour = mock.behaviour
+      if (behaviour.hang) return
+      const answer = (): void => {
+        const text = JSON.stringify(behaviour.body ?? {})
+        res.writeHead(behaviour.status, {
+          'content-type': 'application/json',
+          'content-length': String(Buffer.byteLength(text)),
+          ...behaviour.headers,
+        })
+        res.end(text)
+      }
+      if (behaviour.delayMs !== undefined) setTimeout(answer, behaviour.delayMs)
+      else answer()
     })
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))

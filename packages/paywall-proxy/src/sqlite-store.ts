@@ -56,6 +56,13 @@ export interface SqliteConsumedPaymentStore extends ConsumedPaymentStore {
    * live nonce per payment key.
    */
   siwxNonces: SiwxNonceTable
+  /**
+   * The settled payment with this transaction hash, for the re-report command
+   * (#4898): a sale whose record was cleared on Haven, or never recorded, is
+   * sent again from the payment the store kept. `null` when the store has no
+   * payment with that hash.
+   */
+  findByTxHash(txHash: string): Promise<ConsumedPaymentRecord | null>
   /** True while the file can take a write; for the readiness route. */
   isWritable(): boolean
   close(): void
@@ -211,6 +218,9 @@ export function openSqliteConsumedPaymentStore(path: string, options: SqliteStor
     ON CONFLICT(key) DO NOTHING
   `)
   const select = prepare(`SELECT ${RECORD_COLUMNS} FROM payments WHERE key = ?`)
+  const selectByTx = prepare(
+    `SELECT ${RECORD_COLUMNS} FROM payments WHERE lower(tx_hash) = lower(?) ORDER BY settled_at DESC LIMIT 1`,
+  )
   const settleWithToken = prepare(`
     UPDATE payments SET state = 'forwarding', forward_count = 1, forwarding_started_at = ?, tx_hash = ?,
       settled_at = ?, reservation_token_hash = NULL
@@ -394,6 +404,11 @@ export function openSqliteConsumedPaymentStore(path: string, options: SqliteStor
 
     async get(key) {
       return read(key)
+    },
+
+    async findByTxHash(txHash) {
+      const row = selectByTx.get(txHash) as unknown as Row | undefined
+      return row ? toRecord(row) : null
     },
 
     isWritable() {

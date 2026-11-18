@@ -38,6 +38,7 @@ import {
   type CdpSettlementConfig,
   type ConsumedPaymentRecord,
   type Eip3009Authorization,
+  type InvoiceJson,
 } from '@haven_ai/merchant-payments'
 import { buildChallenge, refusalWithChallenge } from './challenge.js'
 import { secretValues, type ProxyConfig } from './config.js'
@@ -47,6 +48,7 @@ import { DEFAULT_LIMITS, Gate, IpLimiter, type LimitSettings, type Permit } from
 import { redactor, type LogFn } from './log.js'
 import { indexProducts, type Product } from './products.js'
 import { buildReceiptForPayment, encodeReceiptHeader } from './receipt.js'
+import type { SalesReporter } from './sales.js'
 import { buildSiwxChallenge, checkSiwxProof, siwxBinding, type SiwxChallenge } from './siwx.js'
 import type { SqliteConsumedPaymentStore } from './sqlite-store.js'
 
@@ -66,6 +68,8 @@ export interface ProxyDeps {
   store: SqliteConsumedPaymentStore
   cdp: CdpSettlementConfig
   log: LogFn
+  /** §5: the sales reporter, present only when reporting is on. */
+  sales?: SalesReporter
   fetchImpl?: typeof fetch
   now?: () => Date
   /** How long a holder polls the chain for a lost settle answer. Default `SETTLE_RESOLVE_MS`. */
@@ -120,12 +124,15 @@ function firstHeader(value: string | string[] | undefined): string | undefined {
 
 export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const { config, store, cdp, log } = deps
+  const sales = deps.sales
   const fetchImpl = deps.fetchImpl ?? fetch
   const now = deps.now ?? (() => new Date())
   const settleResolveMs = deps.settleResolveMs ?? SETTLE_RESOLVE_MS
   const settlePollMs = deps.settlePollMs ?? 2_000
   const reservationDeadlineMs = deps.reservationDeadlineMs ?? config.reservationDeadlineMs
   const byRoute = indexProducts(deps.products)
+  /** §5: a settled payment's product, by the id the store recorded. */
+  const productById = new Map(deps.products.map((product) => [product.id, product]))
   // §4: the document is built once, from the products file read at startup, so
   // a change to the file reaches readers when the proxy restarts.
   const discovery = buildDiscoveryDocument({
@@ -572,6 +579,9 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         const fresh = await store.get(record.key)
         if (!fresh) return settlementUnknown(ctx.res)
         log('settlement_found_on_chain', { key: record.key, tx_hash: outcome.txHash, recorded: result })
+        // §5: the payment settled, so it is reported — whatever happens to the
+        // call, and without the buyer waiting on Haven.
+        reportSaleFor(ctx, fresh)
         return answerKnown(ctx, pay, fresh, depth + 1)
       }
       case 'refused':
@@ -878,6 +888,9 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
             log('payment_settled', { key: pay.key, tx_hash: outcome.txHash, product_id: product.id })
             const record = await store.get(pay.key)
             if (!record) return settlementUnknown(res)
+            // §5: one record per payment, sent after settlement and before the
+            // forward, so the buyer's answer never waits on Haven.
+            reportSaleFor(ctx, record)
             return await forwardAndAnswer(ctx, record, product)
           }
           // The token was voided (a restart, or this holder passed its deadline): answer by the record's state.
@@ -895,17 +908,17 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   // ---- forwarding (§6, §7, §8) -------------------------------------------
 
   /**
-   * §11: the receipt header for a delivered call, or `{}` when the deployment
-   * has no VAT rule. A receipt that cannot be built never fails a settled
-   * call: the header is left out and the failure is logged. The merchant key
-   * and the buyer's declaration are never logged.
+   * §11: the receipt document for a settled payment, or `undefined` when the
+   * deployment issues none. A receipt that cannot be built never fails a settled
+   * call: the failure is logged and the caller leaves the header out. The
+   * merchant key and the buyer's declaration are never logged.
    */
-  function receiptHeadersFor(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Record<string, string> {
+  function receiptFor(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): InvoiceJson | undefined {
     const settings = config.receipt
-    if (!settings || !record.txHash || !record.settledAt) return {}
+    if (!settings || !record.txHash || !record.settledAt) return undefined
     const taxDeclarationHeader = firstHeader(ctx.req.headers[X_TAX_DECLARATION_HEADER.toLowerCase()])
     try {
-      const json = buildReceiptForPayment({
+      return buildReceiptForPayment({
         settings,
         product,
         chain: config.chain,
@@ -916,11 +929,36 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         ...(taxDeclarationHeader !== undefined ? { taxDeclarationHeader } : {}),
         now: now().getTime(),
       })
+    } catch (err) {
+      log('receipt_failed', { key: record.key, error: describeError(err) })
+      return undefined
+    }
+  }
+
+  function receiptHeadersFor(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Record<string, string> {
+    const json = receiptFor(ctx, record, product)
+    if (!json) return {}
+    try {
       return { 'x-receipt-json': encodeReceiptHeader(json) }
     } catch (err) {
       log('receipt_failed', { key: record.key, error: describeError(err) })
       return {}
     }
+  }
+
+  /**
+   * §5: report a settled payment to Haven, once, without the buyer waiting on
+   * it. `sales.report` returns at once and never throws. The product is the one
+   * the store reserved the payment for — never the product the current request
+   * asks for, which a replay of the same payment may name differently. The
+   * record carries the receipt the buyer gets, when the deployment issues one;
+   * a product the products file no longer has is reported by its id, with no
+   * receipt, because the receipt cannot be rebuilt.
+   */
+  function reportSaleFor(ctx: RequestContext, record: ConsumedPaymentRecord): void {
+    if (!sales) return
+    const sold = productById.get(record.productId)
+    sales.report(record, sold ?? { id: record.productId }, sold ? receiptFor(ctx, record, sold) : undefined)
   }
 
   async function forwardAndAnswer(ctx: RequestContext, record: ConsumedPaymentRecord, product: Product): Promise<void> {
@@ -1060,7 +1098,13 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     // else, outside BASE_PATH, and answering it makes no facilitator call.
     if (method === 'GET' && url.pathname === '/healthz') {
       const ready = store.isWritable()
-      return send(res, ready ? 200 : 503, ready ? { status: 'ok', network: config.chain.network } : { status: 'not_ready' })
+      // §12: readiness includes the sales outbox's depth when reporting is on.
+      const salesBlock = sales !== undefined ? { sales: { reporting: 'on', outbox_depth: sales.outboxDepth() } } : {}
+      return send(
+        res,
+        ready ? 200 : 503,
+        ready ? { status: 'ok', network: config.chain.network, ...salesBlock } : { status: 'not_ready' },
+      )
     }
     if ((method === 'GET' || method === 'HEAD') && url.pathname === DISCOVERY_PATH) {
       return send(res, 200, discovery)

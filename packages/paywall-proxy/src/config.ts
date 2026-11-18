@@ -9,6 +9,7 @@ import { isAddress, getAddress, type Address } from 'viem'
 import { VAT_RULES, type VatRule } from '@haven_ai/merchant-payments'
 import { chainForNetwork, PROXY_CHAINS, type ProxyChain } from './chains.js'
 import type { ReceiptSettings } from './receipt.js'
+import { SALES_KEY_PREFIX, type SalesSettings, type SalesStatus } from './sales.js'
 
 export class ConfigError extends Error {
   constructor(readonly problems: readonly string[]) {
@@ -62,6 +63,13 @@ export interface ProxyConfig {
   /** What the startup log says about receipts (§11). */
   receiptStatus: ReceiptStatus
   /**
+   * §5, §12: the sales reporter's settings, present only when reporting is on.
+   * Absent: no sale is reported and the proxy works exactly as without it.
+   */
+  sales?: SalesSettings
+  /** What the startup log says about sales reporting (§5). */
+  salesStatus: SalesStatus
+  /**
    * Settings that do not refuse startup but change what the proxy does. A
    * test network with a VAT rule and no seller details starts and sends no
    * receipt; the warning says so.
@@ -80,10 +88,12 @@ export const HOLDER_WORST_CASE_MS = 110_000
 type Env = Readonly<Record<string, string | undefined>>
 
 /** Variables whose values must never be echoed, in an error or anywhere else. */
-export const SECRET_VARIABLES = ['UPSTREAM_API_KEY', 'CDP_API_KEY_SECRET'] as const
+export const SECRET_VARIABLES = ['UPSTREAM_API_KEY', 'CDP_API_KEY_SECRET', 'HAVEN_MERCHANT_KEY'] as const
 
-export function secretValues(config: Pick<ProxyConfig, 'upstream' | 'cdp'>): string[] {
-  return [config.upstream.apiKey, config.cdp.apiKeySecret].filter((value) => value.length >= 8)
+export function secretValues(config: Pick<ProxyConfig, 'upstream' | 'cdp'> & { sales?: SalesSettings }): string[] {
+  return [config.upstream.apiKey, config.cdp.apiKeySecret, config.sales?.merchantKey ?? ''].filter(
+    (value) => value.length >= 8,
+  )
 }
 
 export function loadConfig(env: Env): ProxyConfig {
@@ -280,6 +290,47 @@ export function loadConfig(env: Env): ProxyConfig {
     }
   }
 
+  // §5, §12: sales reporting. The merchant key is the switch: unset, nothing is
+  // reported and the proxy starts exactly as without it. Set, reporting is on
+  // and every part of it must be valid — a key that is not a Sales key, a
+  // missing or unusable Haven origin, or no outbox file refuses startup and
+  // names the variable, rather than leaving the merchant silently unreported.
+  let sales: SalesSettings | undefined
+  let salesStatus: SalesStatus = 'off (no HAVEN_MERCHANT_KEY)'
+  const merchantKey = text('HAVEN_MERCHANT_KEY')
+  if (merchantKey !== undefined) {
+    let salesOk = true
+    if (!merchantKey.startsWith(SALES_KEY_PREFIX)) {
+      problems.push(`HAVEN_MERCHANT_KEY must be a Sales key (it starts with ${SALES_KEY_PREFIX})`)
+      salesOk = false
+    }
+    const salesUrlRaw = text('HAVEN_SALES_URL')
+    let havenBaseUrl: string | undefined
+    if (salesUrlRaw === undefined) {
+      problems.push('HAVEN_SALES_URL is required when HAVEN_MERCHANT_KEY is set')
+      salesOk = false
+    } else {
+      try {
+        const url = new URL(salesUrlRaw)
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('scheme')
+        if (url.pathname !== '/' || url.search !== '' || url.hash !== '') throw new Error('path')
+        havenBaseUrl = url.origin
+      } catch {
+        problems.push("HAVEN_SALES_URL must be Haven's API origin, an http(s) URL with no path (for example https://api.haven.example)")
+        salesOk = false
+      }
+    }
+    const outboxPath = text('SALES_OUTBOX')
+    if (outboxPath === undefined) {
+      problems.push('SALES_OUTBOX is required when HAVEN_MERCHANT_KEY is set')
+      salesOk = false
+    }
+    if (salesOk && havenBaseUrl !== undefined && outboxPath !== undefined) {
+      sales = { havenBaseUrl, merchantKey, outboxPath }
+      salesStatus = 'on'
+    }
+  }
+
   const port = text('PORT') === undefined ? 8080 : Number(text('PORT'))
   if (!Number.isInteger(port) || port < 0 || port > 65535) problems.push('PORT must be a port number')
 
@@ -319,6 +370,8 @@ export function loadConfig(env: Env): ProxyConfig {
     reservationDeadlineMs,
     ...(receipt !== undefined ? { receipt } : {}),
     receiptStatus,
+    ...(sales !== undefined ? { sales } : {}),
+    salesStatus,
     warnings,
   }
 }

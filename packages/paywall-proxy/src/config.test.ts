@@ -6,7 +6,7 @@ import { ConfigError, loadConfig, secretValues } from './config.js'
 import { startProxy } from './main.js'
 import { ProductsFileError } from './products.js'
 import { StoreLockedError } from './sqlite-store.js'
-import { CDP_SECRET, PAY_TO, UPSTREAM_KEY } from './test-harness.js'
+import { CDP_SECRET, PAY_TO, SALES_KEY, UPSTREAM_KEY } from './test-harness.js'
 
 const base = {
   NETWORK: 'eip155:84532',
@@ -228,5 +228,46 @@ describe('the receipt settings (#4913, §11)', () => {
     expect(
       problems({ ...base, VAT_RULE: 'SE_25_WITH_EU_REVERSE_CHARGE', ...SELLER, SELLER_NAME: 'Kit\nMerchant' }).join(' '),
     ).toMatch(/SELLER_NAME must be a single line of text/)
+  })
+})
+
+describe('sales reporting settings (#4898)', () => {
+  it('is off when no merchant key is configured, and needs nothing else', () => {
+    const config = loadConfig(base)
+    expect(config.sales).toBeUndefined()
+    expect(config.salesStatus).toBe('off (no HAVEN_MERCHANT_KEY)')
+    expect(secretValues(config)).toEqual([UPSTREAM_KEY, CDP_SECRET])
+  })
+
+  it('is on with a Sales key, Haven\'s origin and an outbox file, and the key is a secret', () => {
+    const config = loadConfig({
+      ...base,
+      HAVEN_MERCHANT_KEY: SALES_KEY,
+      HAVEN_SALES_URL: 'https://api.haven.example/',
+      SALES_OUTBOX: '/tmp/sales-outbox.jsonl',
+    })
+    expect(config.sales).toEqual({
+      havenBaseUrl: 'https://api.haven.example',
+      merchantKey: SALES_KEY,
+      outboxPath: '/tmp/sales-outbox.jsonl',
+    })
+    expect(config.salesStatus).toBe('on')
+    expect(secretValues(config)).toContain(SALES_KEY)
+  })
+
+  it('refuses a key that is not a Sales key, a missing or unusable Haven origin, and no outbox', () => {
+    const sales = { HAVEN_MERCHANT_KEY: SALES_KEY, HAVEN_SALES_URL: 'https://api.haven.example', SALES_OUTBOX: '/tmp/o' }
+    expect(problems({ ...base, ...sales, HAVEN_MERCHANT_KEY: 'not-a-sales-key' }).join(' ')).toMatch(
+      /HAVEN_MERCHANT_KEY must be a Sales key/,
+    )
+    expect(problems({ ...base, ...sales, HAVEN_SALES_URL: undefined }).join(' ')).toMatch(
+      /HAVEN_SALES_URL is required when HAVEN_MERCHANT_KEY is set/,
+    )
+    expect(problems({ ...base, ...sales, HAVEN_SALES_URL: 'https://api.haven.example/v1' }).join(' ')).toMatch(
+      /HAVEN_SALES_URL must be Haven's API origin/,
+    )
+    expect(problems({ ...base, ...sales, SALES_OUTBOX: undefined }).join(' ')).toMatch(
+      /SALES_OUTBOX is required when HAVEN_MERCHANT_KEY is set/,
+    )
   })
 })

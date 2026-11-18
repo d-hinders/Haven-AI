@@ -303,6 +303,12 @@ describe('index.ts readers', () => {
       // body-less with one uuid path parameter; the PUT (owner auth) takes the
       // spec's UpsertAgentTaxDeclarationRequest.
       'routes/agent-tax-declaration.ts',
+      // #4871: the checkout-details sharing module is born enforced on the
+      // same reasoning — a brand-new module has no installed caller to shadow
+      // for. The owner PUT takes the spec's
+      // UpsertAgentCheckoutDetailsSharingRequest; the agent GET is body-less
+      // with one uuid path parameter.
+      'routes/agent-checkout-details.ts',
       'routes/agent-rekey.ts',
       'routes/agent-connection-setups.ts',
       'routes/agent-passports.ts',

@@ -489,6 +489,36 @@ export async function readPeriodFacets(
   return result.rows[0]
 }
 
+/**
+ * #4959: the products of the period's sale records, for resolving a search
+ * term to product ids. Read from `merchant_sales` alone (its account-time
+ * index), not through the payment relation: a SUPERSET of the products the
+ * relation holds is harmless here, since the ids only feed a match the
+ * relation then applies.
+ */
+export async function listPeriodSaleProducts(
+  scope: SalesScope,
+  period: PeriodBounds,
+  db: Executor = pool,
+): Promise<Array<{ product_id: string; record_name: string | null }>> {
+  const result = await db.query<{ product_id: string; record_name: string | null }>(
+    `SELECT product_id, (ARRAY_AGG(product_name ORDER BY block_time DESC, tx_hash DESC))[1] AS record_name
+       FROM merchant_sales
+      WHERE account_id = $1 AND user_id = $2 AND chain_id = $3
+        AND NOT sender_is_own_address
+        AND block_time >= $4::timestamptz AND block_time < $5::timestamptz
+      GROUP BY product_id`,
+    [
+      scope.accountId,
+      scope.userId,
+      scope.chainId,
+      period.from === null ? NO_BOUND_FROM : period.from,
+      period.to === null ? NO_BOUND_TO : period.to,
+    ],
+  )
+  return result.rows
+}
+
 /** One payment by transaction hash, or null. */
 export async function findPayment(
   scope: SalesScope,

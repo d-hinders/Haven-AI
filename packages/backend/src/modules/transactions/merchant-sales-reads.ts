@@ -56,6 +56,7 @@ import {
   listAgentNamesByDelegate,
   listPaymentLegs,
   listPayments,
+  listPeriodSaleProducts,
   NO_FILTERS,
   type PaymentLegRow,
   readPeriodFacets,
@@ -326,18 +327,18 @@ export async function resolveSalesFilters(
   }
   if (input.q === undefined) return filters
   const term = foldCase(input.q.trim())
-  const [directory, facets] = await Promise.all([
+  const [directory, products] = await Promise.all([
     buildPayerDirectory(scope.userId, scope.chainId),
-    readPeriodFacets(scope, period),
+    listPeriodSaleProducts(scope, period),
   ])
   const labels = await labelProducts(
     scope.accountId,
-    facets.products.map((p) => ({ productId: p.product_id, recordName: p.record_name })),
+    products.map((p) => ({ productId: p.product_id, recordName: p.record_name })),
   )
   filters.search = {
     receiptPattern: `%${escapeLike(term)}%`,
     payers: directory.named.filter((v) => foldCase(v.name as string).includes(term)).map((v) => v.address),
-    productIds: facets.products
+    productIds: products
       .map((p) => p.product_id)
       .filter((id) => foldCase(id).includes(term) || foldCase(labels.get(id) ?? id).includes(term)),
     addressPrefix: ADDRESS_PREFIX.test(term) ? `${term}%` : null,

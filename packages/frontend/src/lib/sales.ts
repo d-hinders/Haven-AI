@@ -1,0 +1,193 @@
+/**
+ * The pure half of the Sales page (#4900, epic #4885).
+ *
+ * The reads (`GET /merchant-sales/*`, #4897) answer in atomic USDC and in the
+ * owner's own vocabulary of payer kinds. Everything the page decides that does
+ * not need React lives here so one fixture can prove the tiles, the
+ * breakdowns and the rows agree: the period's UTC day range, the previous
+ * period for the Revenue comparison, the payer's name, the amount's words and
+ * the figures the page derives from the summary.
+ */
+
+import type { ApiSchema } from '@haven_ai/core'
+import { formatAnalyticsDay, unknownRecipientShortAddress } from '@/lib/analytics-format'
+import { formatFiatDisplay } from '@/lib/format'
+import type { PeriodValue } from '@/components/ui/list-url-codec'
+import type { StackedBarDay } from '@/components/ui/StackedBarChart'
+
+export type SalesSummary = ApiSchema<'MerchantSalesSummary'>
+export type SalesPayment = ApiSchema<'MerchantSalesPayment'>
+export type SalesPaymentsPage = ApiSchema<'MerchantSalesPaymentsPage'>
+export type SalesPayer = ApiSchema<'MerchantSalesPayer'>
+
+/** The page size the ledger asks for and "Show N more" names. */
+export const SALES_PAGE_SIZE = 50
+
+/** USDC has six decimals; the reads never pre-scale. */
+const USDC_DECIMALS = 6
+
+// ── The period ──────────────────────────────────────────────────────────────
+
+/** A period as the reads take it: UTC calendar days, both inclusive. */
+export interface SalesDayRange {
+  from: string
+  to: string
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function utcDayKey(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+function utcDayMs(day: string): number {
+  return Date.parse(`${day}T00:00:00Z`)
+}
+
+/**
+ * The URL's period as a day range. A preset is the last N UTC days INCLUDING
+ * today (so "Last 30 days" is 30 calendar days, not 31); a custom range is its
+ * own days. Anything else (All time) is not a range the page offers, so it
+ * reads as the default 30 days rather than an unbounded read.
+ */
+export function salesDayRange(period: PeriodValue | undefined, now: Date = new Date()): SalesDayRange {
+  if (period?.from && period.to) return { from: period.from, to: period.to }
+  const days = period?.preset ? Number(period.preset.replace('d', '')) : 30
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  return { from: utcDayKey(today - (days - 1) * DAY_MS), to: utcDayKey(today) }
+}
+
+/** The days in a range, both ends included. */
+export function salesRangeDays(range: SalesDayRange): number {
+  return Math.round((utcDayMs(range.to) - utcDayMs(range.from)) / DAY_MS) + 1
+}
+
+/** The period of the same length that ends the day before this one starts. */
+export function previousSalesRange(range: SalesDayRange): SalesDayRange {
+  const days = salesRangeDays(range)
+  const to = utcDayMs(range.from) - DAY_MS
+  return { from: utcDayKey(to - (days - 1) * DAY_MS), to: utcDayKey(to) }
+}
+
+// ── Amounts ─────────────────────────────────────────────────────────────────
+
+/** Atomic USDC to a number of dollars. Safe far past any single merchant's total. */
+export function usdcOf(raw: string): number {
+  return Number(BigInt(raw || '0')) / 10 ** USDC_DECIMALS
+}
+
+/**
+ * The display currency modes the reads can serve today. The reads carry atomic
+ * USDC and no rate, so only USD (1 USDC = 1 USD, exact, never "≈") can be
+ * struck in fiat. EUR and SEK read in USDC until a rate is on the wire; that is
+ * the existing "an unknown rate falls back to token mode" rule
+ * (`lib/budget-caption.ts`), not a second convention.
+ */
+export function salesInFiat(currency: 'USD' | 'EUR' | 'SEK'): boolean {
+  return currency === 'USD'
+}
+
+/** USDC in words: two decimals, four under a cent (the same sub-cent rule as fiat). */
+export function usdcText(raw: string): string {
+  return salesNumberText(usdcOf(raw), 'EUR')
+}
+
+/** A figure in dollars (or USDC) as text, in the display currency's mode. */
+export function salesNumberText(human: number, currency: 'USD' | 'EUR' | 'SEK'): string {
+  if (salesInFiat(currency)) return formatFiatDisplay(human, 'USD')
+  const digits = human !== 0 && Math.abs(human) < 0.01 ? 4 : 2
+  return `${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(human)} USDC`
+}
+
+/** One amount as text, in the display currency's mode. */
+export function salesAmountText(raw: string, currency: 'USD' | 'EUR' | 'SEK'): string {
+  return salesNumberText(usdcOf(raw), currency)
+}
+
+// ── Payers ──────────────────────────────────────────────────────────────────
+
+/**
+ * What a payer is called. A contact or one of the owner's own accounts and
+ * agents is named; EVERY other payer is "Wallet" — including another Haven
+ * user's agent, because the page never tells a merchant that a payer uses
+ * Haven (owner decision 2, #4894). A named payer whose name is missing falls
+ * back to "Wallet" rather than to an address.
+ */
+export function payerName(payer: SalesPayer | null): string {
+  if (payer !== null && payer.kind !== 'wallet' && payer.name) return payer.name
+  return 'Wallet'
+}
+
+/** The second line under a payer's name in the breakdown: its kind, or the short address of a wallet. */
+export function payerKindLine(payer: SalesPayer | null): string {
+  if (payer === null) return ''
+  if (payer.kind === 'contact' && payer.name) return 'Contact'
+  if (payer.kind === 'own' && payer.name) return 'Your account'
+  return unknownRecipientShortAddress(payer.address)
+}
+
+/** The payer in a ledger row's subline: the name, with a wallet's short address beside it. */
+export function payerSubline(payer: SalesPayer | null, severalPayers: boolean): string {
+  if (payer === null) return severalPayers ? 'Several wallets' : 'Wallet'
+  if (payer.kind !== 'wallet' && payer.name) return payer.name
+  return `Wallet · ${unknownRecipientShortAddress(payer.address)}`
+}
+
+/** A stable key for a payer row, by address (the reads give one row per payer). */
+export function payerKey(payer: SalesPayer): string {
+  return `${payer.kind}:${payer.address.toLowerCase()}`
+}
+
+// ── What the summary says ───────────────────────────────────────────────────
+
+/** Every payment the ledger lists for the period: sales, no-product payments and own moves. */
+export function ledgerCount(summary: SalesSummary): number {
+  return summary.sales + summary.without_product.count + summary.own_moves.count
+}
+
+/** Payments that count as revenue: sales plus payments with no product. */
+export function revenueCount(summary: SalesSummary): number {
+  return summary.sales + summary.without_product.count
+}
+
+/** The payers the Sales tile says the sales came from. */
+export function payerCount(summary: SalesSummary): number {
+  return summary.by_payer.length + summary.by_payer_other.payers
+}
+
+/** Nothing in the period reached the account at all (a quiet period, not a first run). */
+export function isEmptyPeriod(summary: SalesSummary): boolean {
+  return ledgerCount(summary) === 0
+}
+
+/** The revenue change against the previous period, as a signed whole percent; null when there is no basis. */
+export function revenueChangePercent(current: SalesSummary, previous: SalesSummary | null): number | null {
+  if (previous === null) return null
+  const before = usdcOf(previous.revenue_raw)
+  if (before <= 0) return null
+  return ((usdcOf(current.revenue_raw) - before) / before) * 100
+}
+
+// ── The chart ───────────────────────────────────────────────────────────────
+
+/** The one series the by-day chart draws: revenue, in the brand colour. */
+export const REVENUE_SERIES = { id: 'revenue', name: 'Revenue' } as const
+
+/**
+ * One slot per calendar day of the period, so a quiet day is an empty slot and
+ * the axis reads as time. The reads give each day's revenue only, not its
+ * products, so the bar is one series (a stack by product needs `by_day` to
+ * carry them).
+ */
+export function salesChartDays(summary: SalesSummary, range: SalesDayRange): StackedBarDay[] {
+  const revenueByDay = new Map(summary.by_day.map((d) => [d.day, usdcOf(d.revenue_raw)]))
+  const start = utcDayMs(range.from)
+  return Array.from({ length: salesRangeDays(range) }, (_, i) => {
+    const day = utcDayKey(start + i * DAY_MS)
+    const amount = revenueByDay.get(day) ?? 0
+    return {
+      label: formatAnalyticsDay(day),
+      series: amount > 0 ? [{ ...REVENUE_SERIES, amount, seriesIndex: 0 }] : [],
+    }
+  })
+}

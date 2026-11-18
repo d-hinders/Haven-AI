@@ -357,6 +357,12 @@ describe('owner_cli route census (#2526)', () => {
       // record of what a sale was for. The reads beside it are not on the
       // allow-list either — nothing needs them.
       { method: 'DELETE', path: '/merchant-sales/payments/{txHash}/record' },
+      // #4952: registering a Stripe deposit address names where a processor
+      // holds the merchant's sales, and retiring one stops sales being
+      // attributed to it. Both are the owner's decision, made on the dashboard.
+      // The list beside them is a read and is not on the allow-list either.
+      { method: 'POST', path: '/merchant-deposit-addresses' },
+      { method: 'POST', path: '/merchant-deposit-addresses/{id}/retire' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)

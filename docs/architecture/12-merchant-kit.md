@@ -24,6 +24,7 @@ covers:
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/routes/merchant-sales.ts
   - packages/backend/src/routes/merchant-sales-reads.ts
+  - packages/backend/src/routes/merchant-deposit-addresses.ts
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/merchant-payments/src/receipt.ts
   - packages/merchant-payments/src/tax-declaration.ts
@@ -125,6 +126,22 @@ The products file is JSON, read from the path in `PRODUCTS_FILE`. JSON rather
 than YAML because the proxy already runs on Node and needs no new parser, and
 because a JSON Schema can validate it at startup. The proxy refuses to start
 when the file is missing, is not valid JSON, or fails validation.
+
+A sale may also be received at a **registered Stripe deposit address** (#4952;
+dev and Stripe sandbox only). The owner registers the address on the dashboard
+(`/merchant-deposit-addresses`, owner session, never the key) and Haven labels
+it "registered by you, not verified by Haven". The record does not change: it
+gains no field and no version. When the transaction pays the key's account
+nothing, Haven reads its USDC legs to the account's registered addresses, and
+accepts the sale only when a leg went to an address registered to the account
+and active at the leg's block time (when legs go to several registered
+addresses, only those to the first one by log index count, so the row's address
+and amount agree). The sale is stored with `held_by: stripe`
+and the address from the registry, never from the record; it writes no
+`inbound_transfers` row, counts in no Haven balance, and the reads show it
+apart ("Received in Stripe"). Every other case, including an address registered
+to another account, answers `no_payment_to_account` exactly as a hash that paid
+nobody.
 
 ### Shape
 

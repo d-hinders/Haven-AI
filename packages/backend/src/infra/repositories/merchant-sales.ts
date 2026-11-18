@@ -81,13 +81,18 @@ export interface InsertMerchantSaleInput {
   senderIsOwnAddress: boolean
   blockNumber: number
   blockTime: Date
+  /**
+   * #4952: `'stripe'` with the registered deposit address the sale was
+   * received at; both come from the registry, never from the record. Absent
+   * means a sale into the account (`'account'`, no address).
+   */
+  heldBy?: 'account' | 'stripe'
+  receivingAddress?: string | null
 }
 
 /**
  * Store the sale. Returns the new row, or null when the transaction already
  * has a record on this account (the caller then reads the winner).
- * `held_by` and `receiving_address` keep their defaults ('account', NULL):
- * #4952 owns any other value.
  */
 export async function insertMerchantSale(
   input: InsertMerchantSaleInput,
@@ -98,9 +103,9 @@ export async function insertMerchantSale(
        account_id, user_id, chain_id, tx_hash, record_version, product_id,
        product_name, merchant_reference, receipt_number, vat_treatment,
        amount_raw, token_address, payer_address, several_payers,
-       sender_is_own_address, block_number, block_time
+       sender_is_own_address, block_number, block_time, held_by, receiving_address
      )
-     VALUES ($1, $2, $3, LOWER($4), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     VALUES ($1, $2, $3, LOWER($4), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, LOWER($19))
      ON CONFLICT (chain_id, LOWER(tx_hash), account_id) DO NOTHING
      RETURNING ${COLUMNS}`,
     [
@@ -121,6 +126,8 @@ export async function insertMerchantSale(
       input.senderIsOwnAddress,
       input.blockNumber,
       input.blockTime,
+      input.heldBy ?? 'account',
+      input.receivingAddress ?? null,
     ],
   )
   return result.rows[0] ?? null

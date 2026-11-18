@@ -333,6 +333,8 @@ describe('index.ts readers', () => {
       'routes/merchant-sales.ts',
       // #4897: the owner's sales reads and the clear route, born ENFORCED.
       'routes/merchant-sales-reads.ts',
+      // #4952: the Stripe deposit-address registry, born ENFORCED.
+      'routes/merchant-deposit-addresses.ts',
     ])
   })
 })

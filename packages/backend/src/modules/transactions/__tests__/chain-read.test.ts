@@ -279,4 +279,48 @@ describe('readInboundTransactionByTxHash (#4897)', () => {
       legs: [],
     })
   })
+
+  describe('the further recipients (#4952)', () => {
+    const REGISTERED = '0x' + 'AB'.repeat(20)
+    const UNNAMED = '0x' + 'dd'.repeat(20)
+    const logs = () => [
+      transferLog({ index: 1 }),
+      transferLog({ index: 2, to: REGISTERED, value: 5n }),
+      transferLog({ index: 3, to: UNNAMED }),
+    ]
+
+    it('returns the legs to the named addresses apart, with the address lower-cased', async () => {
+      mocks.getProvider.mockReturnValue(providerWith({ receipt: { hash: TX, blockNumber: 100, logs: logs() } }))
+      const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX, [REGISTERED])
+      expect(read.ok && read.receiptFound && read.otherLegs).toEqual([
+        expect.objectContaining({
+          toAddress: REGISTERED.toLowerCase(),
+          leg: expect.objectContaining({ logIndex: 2, amountRaw: '5' }),
+        }),
+      ])
+      expect(read.ok && read.receiptFound && read.legs.map((l) => l.logIndex)).toEqual([1])
+    })
+
+    it('an account named among the addresses is still only an account leg, never an other leg', async () => {
+      mocks.getProvider.mockReturnValue(providerWith({ receipt: { hash: TX, blockNumber: 100, logs: logs() } }))
+      const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX, [ACCOUNT, REGISTERED])
+      expect(read.ok && read.receiptFound && read.otherLegs?.map((o) => o.leg.logIndex)).toEqual([2])
+      expect(read.ok && read.receiptFound && read.legs.map((l) => l.logIndex)).toEqual([1])
+    })
+
+    it('matches a log that is not an account leg against the named addresses', async () => {
+      mocks.getProvider.mockReturnValue(
+        providerWith({ receipt: { hash: TX, blockNumber: 100, logs: [transferLog({ index: 2, to: REGISTERED })] } }),
+      )
+      const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX, [REGISTERED])
+      expect(read).toMatchObject({ ok: true, receiptFound: true, legs: [] })
+      expect(read.ok && read.receiptFound && read.otherLegs).toHaveLength(1)
+    })
+
+    it('with no address named the result has no otherLegs key', async () => {
+      mocks.getProvider.mockReturnValue(providerWith({ receipt: { hash: TX, blockNumber: 100, logs: logs() } }))
+      const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)
+      expect(read.ok && 'otherLegs' in read).toBe(false)
+    })
+  })
 })

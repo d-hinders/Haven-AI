@@ -160,3 +160,12 @@ export {
   readSalesSummaryForOwner,
   resolveSalesScope,
 } from './merchant-sales-reads.js'
+// #4952: the Stripe deposit-address registry, consumed by
+// routes/merchant-deposit-addresses.ts.
+export {
+  DEPOSIT_ADDRESS_VERIFICATION_NOTE,
+  listRegistrations,
+  registerDepositAddress,
+  retireRegistration,
+  serializeDepositAddress,
+} from './merchant-deposit-addresses.js'

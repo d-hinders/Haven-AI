@@ -101,6 +101,7 @@ import merchantKeyRoutes from './routes/merchant-keys.js'
 import merchantCatalogueRoutes from './routes/merchant-catalogue.js'
 import merchantSalesRoutes from './routes/merchant-sales.js'
 import merchantSalesReadRoutes from './routes/merchant-sales-reads.js'
+import merchantDepositAddressRoutes from './routes/merchant-deposit-addresses.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
@@ -333,6 +334,9 @@ installRequestValidation(app, {
     // ENFORCED: the period, the cursor, the limit and the transaction hash are
     // all declared in the spec and refused there when malformed.
     'routes/merchant-sales-reads.ts',
+    // #4952: the Stripe deposit-address registry's routes (owner session only)
+    // — BRAND NEW, born ENFORCED: the body is closed and the id is a uuid.
+    'routes/merchant-deposit-addresses.ts',
   ],
 })
 
@@ -640,6 +644,9 @@ await app.register(merchantSalesRoutes, { prefix: '/merchant' })
 // #4897: the owner's sales reads (summary, paged payments, one payment) and the
 // clear route. Dashboard JWT only; the Sales key never reaches them.
 await app.register(merchantSalesReadRoutes, { prefix: '/merchant-sales' })
+// #4952: the Stripe deposit-address registry (dev, Stripe sandbox). Dashboard
+// JWT only; the Sales key never reaches it.
+await app.register(merchantDepositAddressRoutes, { prefix: '/merchant-deposit-addresses' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns

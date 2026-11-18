@@ -581,3 +581,31 @@ to the runtime list when a QA leg reads the totals. The repository
 
 - `packages/backend/src/modules/transactions/merchant-sales-reads.ts`
 - `packages/backend/src/routes/merchant-sales-reads.ts`
+
+### The Stripe deposit-address registry
+
+#4952 (dev and Stripe sandbox only). `GET`/`POST /merchant-deposit-addresses`
+and `POST /merchant-deposit-addresses/:id/retire` are where the Sales account's
+owner registers, lists and retires an address a payment processor receives on
+their behalf: dashboard JWT only, never the Sales key (a key route would let a
+leaked key attach any address's payments to the account), and register and
+retire are on the device-login census's must-refuse list. The registry decides
+which transfers `modules/transactions/merchant-sales.ts` attributes to the
+account as Stripe-held sales (`held_by = 'stripe'`, the address from the
+registry, no `inbound_transfers` row, never in a Haven balance), so it is a
+money-path decision surface although it signs and moves nothing. Haven cannot
+verify a registered address is the owner's: every registration is labelled
+"registered by you, not verified by Haven", and a proof of ownership is required
+before production. `modules/transactions/merchant-deposit-addresses.ts` holds
+the refusals (an invalid address, one already registered on the chain, one of
+the owner's own addresses) and `routes/merchant-deposit-addresses.ts` is the
+auth door, the money-path rate limit and the status mapping.
+
+Control, not runtime (the same rule as the ingest and the reads): no QA scenario
+drives the registry. The repository
+(`infra/repositories/merchant-deposit-addresses.ts`) and migration
+`134_merchant_deposit_addresses.ts` are on the runtime list through
+`infra/repositories/**` and `db/migrations/**`.
+
+- `packages/backend/src/modules/transactions/merchant-deposit-addresses.ts`
+- `packages/backend/src/routes/merchant-deposit-addresses.ts`

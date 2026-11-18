@@ -133,6 +133,7 @@ import * as merchantCatalogue from './130_merchant_catalogue.js'
 import * as merchantSales from './131_merchant_sales.js'
 import * as inboundTransfersAccountTime from './132_inbound_transfers_account_time.js'
 import * as inboundTransfersOwnFlagBackfill from './133_inbound_transfers_own_flag_backfill.js'
+import * as merchantDepositAddresses from './134_merchant_deposit_addresses.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -329,4 +330,6 @@ export const migrations: Migration[] = [
   inboundTransfersAccountTime,
   // #4897 (reads): one-time own-flag backfill of existing rows.
   inboundTransfersOwnFlagBackfill,
+  // #4952: the Stripe deposit-address registry.
+  merchantDepositAddresses,
 ]

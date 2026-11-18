@@ -121,6 +121,20 @@ function legFromLog(
   accountAddress: string,
   blockTime: Date,
 ): ChainInboundLeg | null {
+  return legToAnyOf(log, tokenAddress, new Set([accountAddress]), blockTime)?.leg ?? null
+}
+
+/**
+ * Decode one log into a leg INTO any of `recipients` (lower-case), with the
+ * recipient it went to, or null when it is not a settlement-token `Transfer`
+ * into one of them, or carries no value.
+ */
+function legToAnyOf(
+  log: ethers.Log,
+  tokenAddress: string,
+  recipients: ReadonlySet<string>,
+  blockTime: Date,
+): { leg: ChainInboundLeg; toAddress: string } | null {
   if (log.address.toLowerCase() !== tokenAddress) return null
   let parsed: ethers.LogDescription | null = null
   try {
@@ -130,18 +144,28 @@ function legFromLog(
   }
   if (!parsed) return null
   const to = String(parsed.args.to).toLowerCase()
-  if (to !== accountAddress) return null
+  if (!recipients.has(to)) return null
   const amountRaw = (parsed.args.value as bigint).toString()
   if (isZeroAmountRaw(amountRaw)) return null
   return {
-    txHash: log.transactionHash,
-    logIndex: log.index,
-    payerAddress: String(parsed.args.from).toLowerCase(),
-    tokenAddress,
-    amountRaw,
-    blockNumber: log.blockNumber,
-    blockTime,
+    toAddress: to,
+    leg: {
+      txHash: log.transactionHash,
+      logIndex: log.index,
+      payerAddress: String(parsed.args.from).toLowerCase(),
+      tokenAddress,
+      amountRaw,
+      blockNumber: log.blockNumber,
+      blockTime,
+    },
   }
+}
+
+/** A leg and the address it was paid to (#4952). */
+export interface ChainRecipientLeg {
+  leg: ChainInboundLeg
+  /** The recipient, lower-case. */
+  toAddress: string
 }
 
 /**
@@ -152,7 +176,7 @@ function legFromLog(
  */
 export type ChainTransactionRead =
   | { ok: false; reason: 'rpc_unavailable' }
-  | { ok: true; receiptFound: false; legs: [] }
+  | { ok: true; receiptFound: false; legs: []; otherLegs?: [] }
   | {
       ok: true
       receiptFound: true
@@ -161,17 +185,26 @@ export type ChainTransactionRead =
       /** The chain's head when the receipt was read, from the same provider. */
       latestBlock: number
       legs: ChainInboundLeg[]
+      /**
+       * The USDC legs to the `alsoToAddresses` the caller named (#4952), each
+       * with the address it went to. Present only when the caller named any,
+       * so a caller that names none gets the answer it always did.
+       */
+      otherLegs?: ChainRecipientLeg[]
     }
 
 /**
  * The transaction behind `txHash`: its receipt's USDC legs into
  * `accountAddress`, the receipt's block and the chain head (#4897). Nothing is
  * taken from a caller; `ok: false` is an unreadable chain, never "none".
+ * `alsoToAddresses` (#4952) names further recipients whose legs are returned
+ * apart in `otherLegs`; `legs` is unchanged by it.
  */
 export async function readInboundTransactionByTxHash(
   chainId: number,
   accountAddress: string,
   txHash: string,
+  alsoToAddresses: readonly string[] = [],
 ): Promise<ChainTransactionRead> {
   const tokenAddress = settlementTokenAddress(chainId)
   const account = accountAddress.toLowerCase()
@@ -197,13 +230,26 @@ export async function readInboundTransactionByTxHash(
   }
 
   const legs: ChainInboundLeg[] = []
+  const otherLegs: ChainRecipientLeg[] = []
   if (tokenAddress) {
+    const others = new Set(alsoToAddresses.map((a) => a.toLowerCase()))
     for (const log of receipt.logs) {
       const leg = legFromLog(log, tokenAddress, account, blockTime)
       if (leg) legs.push(leg)
+      else if (others.size > 0) {
+        const other = legToAnyOf(log, tokenAddress, others, blockTime)
+        if (other) otherLegs.push(other)
+      }
     }
   }
-  return { ok: true, receiptFound: true, blockNumber: receipt.blockNumber, latestBlock, legs }
+  return {
+    ok: true,
+    receiptFound: true,
+    blockNumber: receipt.blockNumber,
+    latestBlock,
+    legs,
+    ...(alsoToAddresses.length > 0 ? { otherLegs } : {}),
+  }
 }
 
 /**

@@ -585,6 +585,9 @@ Isolation rules that are non-negotiable for a payments product:
   key's ingest, whose body is closed to the sale-record shape), and
   `routes/merchant-sales-reads.ts`, with four `/merchant-sales` rows for the
   owner's reads and the clear route. Both are listed from their first commit.
+  #4952 added one more of that shape, `routes/merchant-deposit-addresses.ts`,
+  with three `/merchant-deposit-addresses` rows (the owner's list, register and
+  retire of a Stripe deposit address), also listed from its first commit.
   New modules are born ENFORCED with their own
   `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`

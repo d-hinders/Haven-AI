@@ -20,6 +20,15 @@
  *   with `sender_is_own_address`, or no sale row and no non-own leg) is an own
  *   move: it is in the list, marked, and in no revenue figure.
  *
+ * ## Stripe-held sales (#4952)
+ *
+ * A sale received at a registered Stripe deposit address (`held_by = 'stripe'`)
+ * has no `inbound_transfers` legs; its chain facts are on the sale row, and it
+ * is its own arm of `pay`. It is NEVER in a Haven balance, so every summary
+ * figure (tiles, breakdowns, days) reads `pay_acct`, the account-held arm only,
+ * and the separate `received_in_stripe` figure carries the Stripe-held sales.
+ * The list and the detail include them, marked.
+ *
  * Every statement is scoped by BOTH `user_id` and `account_id` (and the
  * account's chain), so a payment is never readable through another account.
  * Nothing here writes, and no statement reads `match_kind`, `balance_consumed`
@@ -95,14 +104,47 @@ const PAYMENTS_CTE = `
            ms.merchant_reference,
            ms.receipt_number,
            ms.vat_treatment,
-           COALESCE(ms.held_by, 'account') AS held_by
+           'account'::text AS held_by,
+           NULL::text AS receiving_address
       FROM legs l
       LEFT JOIN merchant_sales ms
         ON ms.account_id = $1
        AND ms.user_id = $2
        AND ms.chain_id = $3
+       AND ms.held_by = 'account'
        AND LOWER(ms.tx_hash) = l.tx_hash
-  )`
+    UNION ALL
+    -- #4952: a Stripe-held sale has NO inbound_transfers legs: its chain facts
+    -- are on the sale row. Never in a Haven balance, so it is its own arm,
+    -- marked held_by = 'stripe', and every summary figure below reads pay_acct.
+    SELECT LOWER(ms.tx_hash),
+           ms.block_time,
+           'sale',
+           ms.amount_raw,
+           ms.amount_raw,
+           ms.several_payers,
+           LOWER(ms.payer_address),
+           ms.id,
+           ms.product_id,
+           ms.product_name,
+           ms.merchant_reference,
+           ms.receipt_number,
+           ms.vat_treatment,
+           'stripe'::text,
+           ms.receiving_address
+      FROM merchant_sales ms
+     WHERE ms.account_id = $1
+       AND ms.user_id = $2
+       AND ms.chain_id = $3
+       AND ms.held_by = 'stripe'
+       -- A Stripe-held sale from the owner's own address is never revenue and its
+       -- row holds no "what moved" amount: it is left out of the list.
+       AND NOT ms.sender_is_own_address
+       AND ms.block_time >= $4::timestamptz
+       AND ms.block_time < $5::timestamptz
+       AND ($6::text IS NULL OR LOWER(ms.tx_hash) = $6::text)
+  ),
+  pay_acct AS (SELECT * FROM pay WHERE held_by = 'account')`
 
 const NO_BOUND_FROM = '-infinity'
 const NO_BOUND_TO = 'infinity'
@@ -142,6 +184,8 @@ export interface SalesSummaryRaw {
   by_payer: Array<{ payer: string; payments: number; amount_raw: string }>
   by_payer_other: { payers: number; payments: number; amount_raw: string }
   unattributed: { payments: number; amount_raw: string }
+  /** #4952: Stripe-held sales, apart from every figure above. */
+  received_in_stripe: { count: number; amount_raw: string }
 }
 
 const SUMMARY_SQL = `
@@ -152,7 +196,7 @@ const SUMMARY_SQL = `
            COUNT(*) AS sales,
            SUM(amount) AS amount,
            ROW_NUMBER() OVER (ORDER BY SUM(amount) DESC, product_id) AS rn
-      FROM pay
+      FROM pay_acct
      WHERE kind = 'sale'
      GROUP BY product_id
   ),
@@ -161,7 +205,7 @@ const SUMMARY_SQL = `
            COUNT(*) AS payments,
            SUM(amount) AS amount,
            ROW_NUMBER() OVER (ORDER BY SUM(amount) DESC, payer) AS rn
-      FROM pay
+      FROM pay_acct
      WHERE kind <> 'own_move' AND NOT several_payers AND payer IS NOT NULL
      GROUP BY payer
   )
@@ -174,7 +218,7 @@ const SUMMARY_SQL = `
         'without_product_raw', COALESCE(SUM(amount) FILTER (WHERE kind = 'no_product'), 0)::text,
         'own_moves_count', COUNT(*) FILTER (WHERE kind = 'own_move'),
         'own_moves_raw', COALESCE(SUM(all_sum) FILTER (WHERE kind = 'own_move'), 0)::text
-      ) FROM pay) AS tiles,
+      ) FROM pay_acct) AS tiles,
     (SELECT COALESCE(json_agg(json_build_object(
         'product_id', product_id, 'record_name', record_name,
         'sales', sales, 'amount_raw', amount::text) ORDER BY rn), '[]'::json)
@@ -188,7 +232,7 @@ const SUMMARY_SQL = `
                COUNT(*) AS payments,
                COUNT(*) FILTER (WHERE kind = 'sale') AS sales,
                SUM(amount)::text AS revenue_raw
-          FROM pay
+          FROM pay_acct
          WHERE kind <> 'own_move'
          GROUP BY 1) d) AS by_day,
     (SELECT COALESCE(json_agg(json_build_object(
@@ -200,8 +244,12 @@ const SUMMARY_SQL = `
        FROM payer_groups WHERE rn > $7) AS by_payer_other,
     (SELECT json_build_object(
         'payments', COUNT(*), 'amount_raw', COALESCE(SUM(amount), 0)::text)
+       FROM pay_acct
+      WHERE kind <> 'own_move' AND (several_payers OR payer IS NULL)) AS unattributed,
+    (SELECT json_build_object(
+        'count', COUNT(*), 'amount_raw', COALESCE(SUM(amount), 0)::text)
        FROM pay
-      WHERE kind <> 'own_move' AND (several_payers OR payer IS NULL)) AS unattributed`
+      WHERE held_by = 'stripe' AND kind <> 'own_move') AS received_in_stripe`
 
 /** The totals and the three breakdowns for one period, from one statement. */
 export async function readSalesSummary(
@@ -232,13 +280,14 @@ export interface PaymentRow {
   receipt_number: string | null
   vat_treatment: 'SE_25' | 'REVERSE_CHARGE' | null
   held_by: 'account' | 'stripe'
+  receiving_address: string | null
 }
 
 const PAYMENT_COLUMNS = `
   tx_hash, block_time, block_time::text AS block_time_text, kind,
   CASE WHEN kind = 'own_move' THEN all_sum ELSE amount END::text AS amount_raw,
   several_payers, payer, sale_id, product_id, product_name, merchant_reference,
-  receipt_number, vat_treatment, held_by`
+  receipt_number, vat_treatment, held_by, receiving_address`
 
 export interface PaymentsCursor {
   blockTime: string

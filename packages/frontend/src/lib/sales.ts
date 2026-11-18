@@ -15,6 +15,7 @@
 import { shouldMarkApprox, tokenPeg, type ApiSchema } from '@haven_ai/core'
 import { formatAnalyticsDay, unknownRecipientShortAddress } from '@/lib/analytics-format'
 import { formatFiatDisplay } from '@/lib/format'
+import { formatAnalyticsTick } from '@/lib/analytics-format'
 import type { PeriodValue } from '@/components/ui/list-url-codec'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 
@@ -163,6 +164,25 @@ export function salesNumberText(human: number, money: SalesMoney): string {
   return fiat === null ? tokenText(human) : formatFiatDisplay(fiat, money.currency)
 }
 
+/**
+ * #4963: the chart's formatters. The chart's amounts are already struck in the
+ * display currency (`salesChartDays` with the rate), so its values and its
+ * axis ticks format those numbers as they are; in token mode both read USDC.
+ */
+export function salesChartFormat(money: SalesMoney): {
+  rate: number | null
+  formatValue: (value: number) => string
+  formatTick: (value: number, step: number) => string
+} {
+  const rate = salesRate(money)
+  if (rate === null) return { rate, formatValue: tokenText, formatTick: (value) => tokenText(value) }
+  return {
+    rate,
+    formatValue: (value) => formatFiatDisplay(value, money.currency),
+    formatTick: (value, step) => formatAnalyticsTick(value, step, money.currency),
+  }
+}
+
 /** One atomic amount as text, in the display currency's mode. */
 export function salesAmountText(raw: string, money: SalesMoney): string {
   return salesNumberText(usdcOf(raw), money)
@@ -253,8 +273,13 @@ export const REVENUE_SERIES = { id: 'revenue', name: 'Revenue' } as const
  * products, so the bar is one series (a stack by product needs `by_day` to
  * carry them).
  */
-export function salesChartDays(summary: SalesSummary, range: SalesDayRange): StackedBarDay[] {
-  const revenueByDay = new Map(summary.by_day.map((d) => [d.day, usdcOf(d.revenue_raw)]))
+export function salesChartDays(
+  summary: SalesSummary,
+  range: SalesDayRange,
+  /** #4963: the display-currency rate; the bars, and so the ticks, are struck in it. Null keeps USDC. */
+  rate: number | null = null,
+): StackedBarDay[] {
+  const revenueByDay = new Map(summary.by_day.map((d) => [d.day, usdcOf(d.revenue_raw) * (rate ?? 1)]))
   const start = utcDayMs(range.from)
   return Array.from({ length: salesRangeDays(range) }, (_, i) => {
     const day = utcDayKey(start + i * DAY_MS)

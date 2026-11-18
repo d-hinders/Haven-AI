@@ -11,7 +11,6 @@ import { StackedBarChart } from '@/components/ui/StackedBarChart'
 import { StatTile } from '@/components/ui/StatTile'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { NoticeRow } from '@/components/haven/NoticeRow'
-import { formatAnalyticsTick } from '@/lib/analytics-format'
 import { useSalesPayments } from '@/hooks/useSalesPayments'
 import { useSalesSummary } from '@/hooks/useSalesSummary'
 import {
@@ -26,8 +25,7 @@ import {
   revenueChangePercent,
   salesAmountText,
   salesChartDays,
-  salesInFiat,
-  salesNumberText,
+  salesChartFormat,
   salesRangeDays,
   salesTotalText,
   type SalesCurrency,
@@ -220,17 +218,16 @@ export function SalesOverviewTab({
   const payersExact = data.unattributed.payments === 0
   const revenuePayments = revenueCount(data)
   const averageRaw = revenuePayments > 0 ? String(BigInt(data.revenue_raw || '0') / BigInt(revenuePayments)) : '0'
-  const chartDays = salesChartDays(data, range)
+  const chart = salesChartFormat(money)
+  const chartDays = salesChartDays(data, range, chart.rate)
   const total = ledgerCount(data)
   const productRows = productLines(data, money)
   const payerRows = payerLines(data, money)
   const own = data.own_moves
 
-  const formatValue = (value: number) => salesNumberText(value, money)
-  // Ticks read in the display currency whenever the figures are struck in it;
-  // in token mode (no rate) they read in USDC like the values.
-  const formatTick = (value: number, step: number) =>
-    salesInFiat(money) ? formatAnalyticsTick(value, step, currency) : salesNumberText(value, money)
+  // #4963: the bars are struck in the display currency, so the values and the
+  // axis ticks format them as they are (USDC in token mode).
+  const { formatValue, formatTick } = chart
   const chartLabel = `Revenue over ${days} days: ${salesAmountText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
 
   return (

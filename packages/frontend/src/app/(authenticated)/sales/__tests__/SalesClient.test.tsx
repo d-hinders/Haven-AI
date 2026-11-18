@@ -183,7 +183,8 @@ function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY
 const callsTo = (fragment: string) => mockGet.mock.calls.map((c) => String(c[0])).filter((p) => p.includes(fragment))
 
 /** The page's own rate and a different one on the payments pages: the Overview must use the summary's. */
-const SUMMARY_RATES = { usd: 0.9998, eur: 0.92, sek: 10 }
+// usd is far from 1 on purpose: a USD figure that read it would show (#4963 review).
+const SUMMARY_RATES = { usd: 0.5, eur: 0.92, sek: 10 }
 const PAGE_RATES = { usd: 0.5, eur: 0.5, sek: 99 }
 
 async function renderPage() {
@@ -418,6 +419,21 @@ describe('the display currency (#4963)', () => {
     expect(ledger.textContent).not.toContain('≈')
     expect(screen.getByTestId('sales-payments-summary').textContent).toContain(`Revenue ${fmt(21.4)}`)
     expect(screen.getByTestId('sales-payments-summary').textContent).not.toContain('≈')
+  })
+
+  it('strikes the chart axis in SEK at the summary rate, matching its values (#4963 review)', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    serve({ summary: withRates(SUMMARY_RATES) })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    const ticks = screen.getAllByTestId('chart-tick-label').map((el) => el.textContent ?? '')
+    expect(ticks.length).toBeGreaterThan(0)
+    for (const tick of ticks) expect(tick).not.toContain('USDC')
+    // The largest day is 1.14 USDC = 11,40 kr. Unconverted ticks topped out near
+    // 1 kr; converted ones are on the kronor scale (the chart may draw its
+    // tallest bar past the top tick, as it always has).
+    const top = Math.max(...ticks.map((t) => Number(t.replace(/[^\d,]/g, '').replace(',', '.'))))
+    expect(top).toBeGreaterThanOrEqual(5)
   })
 
   it('reads in EUR from the eur rate', async () => {

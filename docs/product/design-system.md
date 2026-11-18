@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/core/src/approx-mark.ts
+  - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
+  - packages/frontend/src/components/connect-agent/CloseGuardPanel.tsx
   - packages/frontend/src/context/MerchantServicesContext.tsx
   - packages/frontend/src/components/sales/SalesOverviewTab.tsx
   - packages/frontend/src/lib/money-flow-tally.ts

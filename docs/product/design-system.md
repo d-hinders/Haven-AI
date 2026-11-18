@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/core/src/approx-mark.ts
+  - packages/frontend/src/context/MerchantServicesContext.tsx
+  - packages/frontend/src/components/sales/SalesOverviewTab.tsx
   - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
@@ -134,7 +136,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-17
+last-verified: 2026-11-18
 ---
 
 # Haven Design System

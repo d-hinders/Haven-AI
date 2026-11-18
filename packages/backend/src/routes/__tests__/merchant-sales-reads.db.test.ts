@@ -24,8 +24,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
+import rateLimit from '@fastify/rate-limit'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 
@@ -45,6 +46,8 @@ const { installRequestValidation } = await import('../../openapi/request-validat
 const { generateMerchantKey } = await import('../../domain/merchant-keys.js')
 const { insertMerchantKey } = await import('../../infra/repositories/merchant-keys.js')
 const { insertMerchantSale } = await import('../../infra/repositories/merchant-sales.js')
+const { rateLimitKeyFor } = await import('../../middleware/rate-limit.js')
+const { up: backfillOwnFlag } = await import('../../db/migrations/133_inbound_transfers_own_flag_backfill.js')
 
 const CHAIN = 84532
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
@@ -148,6 +151,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
     await initDbHarness()
     app = Fastify({ logger: false })
     await app.register(fastifyJwt, { secret: 'test-secret' })
+    await app.register(rateLimit, { global: false, keyGenerator: (request: FastifyRequest) => rateLimitKeyFor(request) })
     installRequestValidation(app, {
       mode: 'enforce',
       enforcedModules: ['routes/merchant-sales-reads.ts', 'routes/merchant-sales.ts'],
@@ -493,6 +497,20 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
 
     it('defaults to 50 rows, refuses a limit above 200 and a cursor this list did not issue', async () => {
       const m = await seedMerchant()
+      await db.query(
+        `INSERT INTO inbound_transfers (account_id, user_id, chain_id, tx_hash, log_index, payer_address,
+                                        token_address, amount_raw, block_number, block_time)
+         SELECT $1, $2, $3, '0x' || lpad(to_hex(g + 4096), 64, '0'), 0, '0x' || lpad(to_hex(g), 40, '0'),
+                $4, '1', 100, TIMESTAMPTZ '2026-11-10T10:00:00Z' + (g || ' minutes')::interval
+           FROM generate_series(1, 51) g`,
+        [m.accountId, m.userId, CHAIN, USDC],
+      )
+      const first = (await get(m.userId, '/merchant-sales/payments')).json()
+      expect(first.payments).toHaveLength(50)
+      expect(first.next_cursor).not.toBeNull()
+      const capped = (await get(m.userId, '/merchant-sales/payments?limit=200')).json()
+      expect(capped.payments).toHaveLength(51)
+      expect(capped.next_cursor).toBeNull()
       expect((await get(m.userId, '/merchant-sales/payments?limit=201')).statusCode).toBe(400)
       expect((await get(m.userId, '/merchant-sales/payments?limit=0')).statusCode).toBe(400)
       const bad = await get(m.userId, '/merchant-sales/payments?cursor=not-a-cursor')
@@ -501,6 +519,103 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect((await get(m.userId, '/merchant-sales/payments?from=2026-02-31')).json().error_code).toBe('INVALID_PERIOD')
       expect((await get(m.userId, '/merchant-sales/payments?from=2026-12-02&to=2026-12-01')).json().error_code).toBe('INVALID_PERIOD')
       expect((await get(m.userId, '/merchant-sales/payments?from=yesterday')).statusCode).toBe(400)
+    })
+
+    it('answers 400 INVALID_CURSOR, never 500, for a cursor whose timestamp is not a real one', async () => {
+      const m = await seedMerchant()
+      for (const time of ['2026-13-45 99:99:99+00', '2026-02-31 10:00:00+00', '2026-11-10 24:00:00+00', '2026-11-10 10:00:00+99']) {
+        const cursor = Buffer.from(`${time}|${hash(1)}`, 'utf8').toString('base64url')
+        const res = await get(m.userId, `/merchant-sales/payments?cursor=${cursor}`)
+        expect(res.statusCode, time).toBe(400)
+        expect(res.json().error_code).toBe('INVALID_CURSOR')
+      }
+    })
+  })
+
+  describe('breakdowns past the top 100', () => {
+    it('names the top 100 products and payers, folds the rest, and counts the 100th exactly once', async () => {
+      const m = await seedMerchant()
+      // 101 sales, each its own product and its own payer, amounts 1000 .. 101000.
+      await db.query(
+        `INSERT INTO inbound_transfers (account_id, user_id, chain_id, tx_hash, log_index, payer_address,
+                                        token_address, amount_raw, block_number, block_time)
+         SELECT $1, $2, $3, '0x' || lpad(to_hex(g + 8192), 64, '0'), 0, '0x' || lpad(to_hex(g + 100000), 40, '0'),
+                $4, (g * 1000)::text, 100, TIMESTAMPTZ '2026-11-10T10:00:00Z' + (g || ' minutes')::interval
+           FROM generate_series(1, 101) g`,
+        [m.accountId, m.userId, CHAIN, USDC],
+      )
+      await db.query(
+        `INSERT INTO merchant_sales (account_id, user_id, chain_id, tx_hash, product_id, merchant_reference,
+                                     amount_raw, token_address, payer_address, block_number, block_time)
+         SELECT account_id, user_id, chain_id, tx_hash, 'product-' || lpad(amount_raw, 7, '0'), 'r-' || tx_hash,
+                amount_raw::numeric, token_address, payer_address, 100, block_time
+           FROM inbound_transfers WHERE account_id = $1`,
+        [m.accountId],
+      )
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      const revenue = 1000n * (101n * 102n) / 2n
+      expect(BigInt(summary.revenue_raw)).toBe(revenue)
+
+      expect(summary.by_product).toHaveLength(100)
+      expect(summary.by_product_other).toEqual({ products: 1, sales: 1, amount_raw: '1000' })
+      const productIds = summary.by_product.map((p: { product_id: string }) => p.product_id)
+      expect(new Set(productIds).size).toBe(100)
+      expect(productIds[99]).toBe('product-0002000') // the 100th, in the list and not in the fold
+      expect(productIds).not.toContain('product-0001000')
+      const productSum = summary.by_product.reduce((n: bigint, p: { amount_raw: string }) => n + BigInt(p.amount_raw), 0n)
+      expect(productSum + BigInt(summary.by_product_other.amount_raw)).toBe(revenue)
+
+      expect(summary.by_payer).toHaveLength(100)
+      expect(summary.by_payer_other).toEqual({ payers: 1, payments: 1, amount_raw: '1000' })
+      expect(summary.by_payer[99].amount_raw).toBe('2000')
+      const payerSum = summary.by_payer.reduce((n: bigint, p: { amount_raw: string }) => n + BigInt(p.amount_raw), 0n)
+      expect(payerSum + BigInt(summary.by_payer_other.amount_raw) + BigInt(summary.unattributed.amount_raw)).toBe(revenue)
+    })
+  })
+
+  describe('the own-flag backfill (migration 133)', () => {
+    it('turns a row stamped false from the owner\'s agent delegate into an own move, and leaves other users\' rows alone', async () => {
+      const m = await seedMerchant()
+      const other = await seedUser()
+      const delegate = addr()
+      const rotated = addr()
+      const strangers = addr()
+      const agent = await db.query<{ id: string }>(
+        `INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Research agent', $2, 'active') RETURNING id`,
+        [m.userId, delegate],
+      )
+      await db.query(
+        `INSERT INTO agent_rekeys (agent_id, initiated_by_user_id, old_delegate_address, new_delegate_address) VALUES ($1, $2, $3, $4)`,
+        [agent.rows[0].id, m.userId, rotated, delegate],
+      )
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Theirs', $2, 'active')`, [other, strangers])
+      await seedLeg(m, { tx: hash(0xb1), payer: delegate, amount: '700', own: false, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0xb2), payer: rotated, amount: '300', own: false, time: '2026-11-10T11:00:00Z' })
+      await seedLeg(m, { tx: hash(0xb3), payer: strangers, amount: '50', own: false, time: '2026-11-10T12:00:00Z' })
+
+      // before: all three count as revenue, though two payers read `own`
+      let summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('1050')
+
+      const client = await db.connect()
+      try {
+        await backfillOwnFlag(client)
+      } finally {
+        client.release()
+      }
+
+      summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('50')
+      expect(summary.own_moves).toEqual({ count: 2, amount_raw: '1000' })
+      const rows = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments as Array<{
+        tx_hash: string
+        kind: string
+        payer: { kind: string; name: string | null }
+      }>
+      const byTx = (n: number) => rows.find((r) => r.tx_hash === hash(n))!
+      expect(byTx(0xb1)).toMatchObject({ kind: 'own_move', payer: { kind: 'own', name: 'Research agent' } })
+      expect(byTx(0xb2)).toMatchObject({ kind: 'own_move', payer: { kind: 'own' } })
+      expect(byTx(0xb3)).toMatchObject({ kind: 'no_product', payer: { kind: 'wallet' } })
     })
   })
 
@@ -623,6 +738,15 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       const res = await clear(m.userId, hash(0x731), { purpose: 'owner_cli' })
       expect(res.statusCode).toBe(401)
       expect((await db.query(`SELECT 1 FROM merchant_sales WHERE account_id = $1`, [m.accountId])).rowCount).toBe(1)
+    })
+
+    it('rate limits the clear route at the money-path ceiling (429 on the 61st call in a minute)', async () => {
+      const m = await seedMerchant()
+      const headers = { authorization: `Bearer ${token(m.userId, { jti: 'rate-limit-case' })}` }
+      const call = () =>
+        app.inject({ method: 'DELETE', url: `/merchant-sales/payments/${hash(0x740)}/record`, headers })
+      for (let i = 0; i < 60; i += 1) expect((await call()).statusCode).toBe(404)
+      expect((await call()).statusCode).toBe(429)
     })
 
     it('refuses a transaction hash that is not one, through the spec', async () => {

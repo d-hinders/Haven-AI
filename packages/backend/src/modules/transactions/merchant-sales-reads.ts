@@ -20,6 +20,16 @@
  * another Haven user or agent: the only lookups are the CALLER's own accounts,
  * agents and contacts, so another user's agent delegate is a `wallet`.
  *
+ * ## The own flag, and its residual
+ *
+ * Whether a transfer is the owner's own is decided once, at index time, and
+ * stored (`inbound_transfers.sender_is_own_address`); the reads never recompute
+ * it, so a later account or rotation cannot rewrite past revenue. Migration 133
+ * backfilled the rows indexed before the widened set existed. The remaining
+ * residual: an ingest whose own-address lookup fails stamps false
+ * (`receive.ts`), and nothing repairs that row, so such a transfer counts as
+ * revenue while its payer reads `own`.
+ *
  * Authority note (money-path gate): nothing here holds a key, signs or moves
  * funds. The one write is the owner clearing a sale record: it deletes the
  * merchant's statement, never a transfer.
@@ -109,7 +119,20 @@ export function parsePeriod(from: string | undefined, to: string | undefined): P
 
 // --- cursor ---------------------------------------------------------------
 
-const CURSOR_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}(:?\d{2})?)$/
+const CURSOR_TIME_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|[+-](\d{2})(?::?(\d{2}))?)$/
+
+/** A timestamp Postgres would accept: real calendar day, hour, minute, second and offset. */
+function isRealTimestamp(text: string): boolean {
+  const m = CURSOR_TIME_PATTERN.exec(text)
+  if (!m) return false
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number)
+  const d = new Date(Date.UTC(year, month - 1, day))
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return false
+  if (hour > 23 || minute > 59 || second > 59) return false
+  if (m[7] !== undefined && (Number(m[7]) > 15 || Number(m[8] ?? 0) > 59)) return false
+  return true
+}
 
 export function encodePaymentsCursor(row: { block_time_text: string; tx_hash: string }): string {
   return Buffer.from(`${row.block_time_text}|${row.tx_hash}`, 'utf8').toString('base64url')
@@ -126,7 +149,7 @@ export function decodePaymentsCursor(cursor: string): PaymentsCursor | null {
   const parts = text.split('|')
   if (parts.length !== 2) return null
   const [blockTime, txHash] = parts
-  if (!CURSOR_TIME_PATTERN.test(blockTime) || !TX_HASH_PATTERN.test(txHash)) return null
+  if (!isRealTimestamp(blockTime) || !TX_HASH_PATTERN.test(txHash)) return null
   return { blockTime, txHash: txHash.toLowerCase() }
 }
 

@@ -132,6 +132,7 @@ import * as merchantCatalogue from './130_merchant_catalogue.js'
 // 130 is #4945's (130_merchant_catalogue.ts); this one is 131.
 import * as merchantSales from './131_merchant_sales.js'
 import * as inboundTransfersAccountTime from './132_inbound_transfers_account_time.js'
+import * as inboundTransfersOwnFlagBackfill from './133_inbound_transfers_own_flag_backfill.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -326,4 +327,6 @@ export const migrations: Migration[] = [
   merchantSales,
   // #4897 (reads): the access path for one account's transfers by time.
   inboundTransfersAccountTime,
+  // #4897 (reads): one-time own-flag backfill of existing rows.
+  inboundTransfersOwnFlagBackfill,
 ]

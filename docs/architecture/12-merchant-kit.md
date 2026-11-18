@@ -358,7 +358,8 @@ by product, day and payer, for a UTC period), `GET /merchant-sales/payments`
 record: the record is deleted, the payment stays with no product, and a new
 record for it is accepted). Every figure is computed from the indexed transfers
 into the account, with zero-value transfers and transfers from the owner's own
-addresses left out; a sale counts once with the amount Haven read, and a payment
+addresses left out (the `own_moves` figure counts transactions paid only from them, the
+same rows the list marks as own moves); a sale counts once with the amount Haven read, and a payment
 with no record counts as revenue without a product. Each payer is a contact, one
 of the owner's own addresses or a wallet; a read never says that a wallet
 belongs to another Haven user or agent.

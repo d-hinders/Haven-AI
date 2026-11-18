@@ -1,6 +1,13 @@
 import type { PoolClient } from 'pg'
+import { createIndexConcurrently, dropIndexConcurrently } from '../concurrent-index.js'
 
 export const version = '132_inbound_transfers_account_time'
+
+// A plain CREATE INDEX takes a SHARE lock on inbound_transfers for the whole
+// build, which blocks the receive index's writes; the concurrent build does not.
+export const transactional = false
+export const nonTransactionalReason =
+  'CREATE INDEX CONCURRENTLY cannot run inside a transaction block (25001); a plain build would block inbound_transfers writes'
 
 /**
  * 132 — the owner's sales reads need one account's transfers by time (#4897,
@@ -20,12 +27,12 @@ export const version = '132_inbound_transfers_account_time'
  * path only; no row, column or constraint changes.
  */
 export async function up(client: PoolClient): Promise<void> {
-  await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_inbound_transfers_account_time
-      ON inbound_transfers (account_id, block_time DESC);
-  `)
+  await createIndexConcurrently(client, {
+    name: 'idx_inbound_transfers_account_time',
+    definition: 'ON inbound_transfers (account_id, block_time DESC)',
+  })
 }
 
 export async function down(client: PoolClient): Promise<void> {
-  await client.query(`DROP INDEX IF EXISTS idx_inbound_transfers_account_time;`)
+  await dropIndexConcurrently(client, 'idx_inbound_transfers_account_time')
 }

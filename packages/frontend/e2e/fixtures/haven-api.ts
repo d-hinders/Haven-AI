@@ -1284,8 +1284,8 @@ export const salesSummary = {
   ],
   by_product_other: { products: 0, sales: 0, amount_raw: '0' },
   by_payer: [
-    { payer: salesContact, payments: 2, amount_raw: '840000' },
-    { payer: salesWallet, payments: 2, amount_raw: '1300000' },
+    { payer: salesContact, payments: 2, amount_raw: '840000', last_paid_at: '2026-11-16T14:05:00.000Z' },
+    { payer: salesWallet, payments: 2, amount_raw: '1300000', last_paid_at: '2026-11-16T13:48:00.000Z' },
   ],
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
@@ -1475,7 +1475,15 @@ export async function serveSales(page: Page, scenario: SalesScenario) {
     if (path === '/merchant-sales/payments') {
       // Whole history with `limit=1` is the page's "has it ever been paid" probe.
       const rows = !paid ? [] : url.searchParams.has('from') ? payments : payments.slice(0, 1)
-      return fulfillJson(route, { usdc_rates: paid ? salesUsdcRates : null, payments: rows, next_cursor: null })
+      // #4960: `total` is the read's count for the filter set (here: no filter).
+      return fulfillJson(route, { usdc_rates: paid ? salesUsdcRates : null, payments: rows, next_cursor: null, total: rows.length })
+    }
+    if (path === '/merchant-sales/facets') {
+      // #4960: every product and payer of the period, for the filter menus.
+      if (!paid) return fulfillJson(route, { products: [], payers: [] })
+      const products = [...new Map(payments.filter((p) => p.product_id).map((p) => [p.product_id, { product_id: p.product_id, label: p.product_label }])).values()]
+      const payers = [...new Map(payments.filter((p) => p.payer).map((p) => [p.payer!.address, p.payer])).values()]
+      return fulfillJson(route, { products, payers })
     }
     const detail = /^\/merchant-sales\/payments\/(0x[0-9a-f]+)$/.exec(path)
     if (detail) {
@@ -2087,7 +2095,11 @@ export async function mockHavenApi(page: Page) {
       return
     }
     if (method === 'GET' && path === '/merchant-sales/payments') {
-      await fulfillJson(route, { usdc_rates: null, payments: [], next_cursor: null })
+      await fulfillJson(route, { usdc_rates: null, payments: [], next_cursor: null, total: 0 })
+      return
+    }
+    if (method === 'GET' && path === '/merchant-sales/facets') {
+      await fulfillJson(route, { products: [], payers: [] })
       return
     }
     if (method === 'GET' && path === '/merchant-catalogue') {

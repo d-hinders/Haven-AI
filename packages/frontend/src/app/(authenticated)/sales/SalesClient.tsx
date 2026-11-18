@@ -9,7 +9,7 @@ import { useMerchantCatalogue } from '@/hooks/useMerchantCatalogue'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useSalesPayments } from '@/hooks/useSalesPayments'
 import { resolveChainOrNull } from '@/lib/chains'
-import { catalogueNeedsAttention, salesDayRange } from '@/lib/sales'
+import { SALES_FACET_KEYS, SALES_KINDS, catalogueNeedsAttention, salesDayRange } from '@/lib/sales'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -31,7 +31,9 @@ import { SalesSetupTab } from '@/components/sales/SalesSetupTab'
  *
  * Three tabs — Overview, Products, Setup — held in `?tab=`, and for Overview
  * one period held in `?period=` (or `?from=&to=`), the list-controls
- * codec's own keys. The page exists only while merchant services are on:
+ * codec's own keys, beside the payments list's search (`?q=`) and its
+ * Product, Payer and Recorded facets (`?product=`, `?payer=`, `?recorded=`;
+ * #4960). The page exists only while merchant services are on:
  *
  * - the setting is the shell's one read (`MerchantServicesContext`, #4904);
  *   this page never reads it again;
@@ -55,6 +57,13 @@ const DEFAULT_PERIOD: PeriodValue = { preset: '30d' }
  */
 const SALES_URL_SCHEMA: ListUrlSchema = {
   period: { allowAllTime: false, allowCustom: true, defaultValue: DEFAULT_PERIOD },
+  // #4960: product and payer options load with the facets read, so they list
+  // no `values` (a value read before the options arrive must survive).
+  facets: [
+    { id: SALES_FACET_KEYS.product, selection: 'multi' },
+    { id: SALES_FACET_KEYS.payer, selection: 'multi' },
+    { id: SALES_FACET_KEYS.kind, selection: 'multi', values: SALES_KINDS },
+  ],
 }
 
 export default function SalesClient() {
@@ -83,7 +92,11 @@ export default function SalesClient() {
 
 function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerchantServicesContext>['merchantAccount']> }) {
   const { currency } = usePreferences()
-  const [listState, setListState] = useListUrlState(SALES_URL_SCHEMA, { filtering: 'browser' })
+  // `server`: the filters and the search are sent to the reads, so the search
+  // commits once typing pauses, not on every keystroke (#4960).
+  const [listState, setListState, { searchEpoch, bumpSearchEpoch }] = useListUrlState(SALES_URL_SCHEMA, {
+    filtering: 'server',
+  })
   const { tab, setTab } = useTabUrlState<SalesTab>({
     tabs: TABS,
     defaultTab: 'overview',
@@ -196,6 +209,7 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
             merchantName={account.name}
             onOpenPayment={setOpenPayment}
             refreshKey={refreshKey}
+            controls={{ state: listState, onChange: setListState, searchEpoch, bumpSearchEpoch }}
           />
         )
       ) : tab === 'products' ? (

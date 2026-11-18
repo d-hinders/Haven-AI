@@ -57,7 +57,7 @@ vi.mock('@/components/ReceiveDialog', () => ({
 }))
 
 import SalesClient from '../SalesClient'
-import { previousSalesRange, salesDayRange, SALES_PAGE_SIZE } from '@/lib/sales'
+import { previousSalesRange, productFacetValue, salesDayRange, SALES_PAGE_SIZE } from '@/lib/sales'
 
 const SALES_ACCOUNT = {
   id: 'acct-sales',
@@ -105,9 +105,9 @@ const SUMMARY = {
   ],
   by_product_other: { products: 0, sales: 0, amount_raw: '0' },
   by_payer: [
-    { payer: CONTACT, payments: 2, amount_raw: '1140000' },
-    { payer: WALLET, payments: 1, amount_raw: '700000' },
-    { payer: OTHER_USERS_AGENT, payments: 1, amount_raw: '300000' },
+    { payer: CONTACT, payments: 2, amount_raw: '1140000', last_paid_at: '2026-11-17T14:05:00.000Z' },
+    { payer: WALLET, payments: 1, amount_raw: '700000', last_paid_at: '2026-11-17T13:48:00.000Z' },
+    { payer: OTHER_USERS_AGENT, payments: 1, amount_raw: '300000', last_paid_at: '2026-11-16T09:00:00.000Z' },
   ],
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
@@ -163,19 +163,35 @@ interface Scenario {
   everPaid?: boolean
   summary?: unknown
   previous?: unknown
-  pages?: Array<{ payments: unknown[]; next_cursor: string | null }>
+  pages?: Array<{ payments: unknown[]; next_cursor: string | null; total?: number }>
+  /** The answer to a FILTERED read (#4960): any read carrying a filter parameter gets it. */
+  filtered?: { summary: unknown; payments: unknown[] }
 }
 
+/** #4960: the period's facets — every product and payer, unfiltered. */
+const FACETS = {
+  products: [
+    { product_id: 'chat', label: 'Chat completion' },
+    { product_id: 'embed', label: 'Embeddings' },
+  ],
+  payers: [CONTACT, WALLET, OTHER_USERS_AGENT, OWN],
+}
+
+const FILTER_KEYS = ['kind', 'product_id', 'payer', 'q']
+const isFiltered = (url: URL) => FILTER_KEYS.some((k) => url.searchParams.has(k))
+
 /** Serve the reads: the whole-history probe, the two summaries and the pages. */
-function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY, pages, catalogue = NO_KIT }: Scenario = {}) {
+function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY, pages, catalogue = NO_KIT, filtered }: Scenario = {}) {
   const today = salesDayRange({ preset: '30d' })
   const prior = previousSalesRange(today)
   const queue = pages ?? [{ payments: PAYMENTS, next_cursor: null }]
   mockGet.mockImplementation(async (path: string) => {
     const url = new URL(path, 'http://x')
     if (url.pathname === '/merchant-sales/summary') {
+      if (filtered && isFiltered(url)) return filtered.summary
       return url.searchParams.get('to') === prior.to ? previous : summary
     }
+    if (url.pathname === '/merchant-sales/facets') return FACETS
     if (url.pathname === '/merchant-catalogue') return catalogue
     if (url.pathname === '/merchant-keys') return { keys: [] }
     const detailMatch = /^\/merchant-sales\/payments\/(0x[^/]+)$/.exec(url.pathname)
@@ -185,11 +201,15 @@ function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY
     }
     if (url.pathname === '/merchant-sales/payments') {
       if (!url.searchParams.has('from')) {
-        return { payments: everPaid ? [PAYMENTS[0]] : [], next_cursor: null }
+        return { payments: everPaid ? [PAYMENTS[0]] : [], next_cursor: null, total: everPaid ? 1 : 0 }
+      }
+      if (filtered && isFiltered(url)) {
+        return { payments: filtered.payments, next_cursor: null, total: filtered.payments.length }
       }
       const cursor = url.searchParams.get('cursor')
       const index = cursor === null ? 0 : Number(cursor.replace('c', ''))
-      return queue[index]
+      const total = queue.reduce((n, page) => n + page.payments.length, 0)
+      return { total, ...queue[index] }
     }
     throw new Error(`unexpected read ${path}`)
   })
@@ -336,7 +356,7 @@ describe('the Overview, from one fixture', () => {
     // The list: its summary line is the SAME count and revenue as the tiles
     // (3 sales + 1 no product + 1 own move listed; revenue never includes the move).
     const summaryLine = await screen.findByTestId('sales-payments-summary')
-    expect(summaryLine.textContent).toContain('5 payments')
+    expect((await screen.findByTestId('list-toolbar-count')).textContent).toContain('5 payments')
     expect(summaryLine.textContent).toContain('Revenue $2.14')
     expect(screen.getAllByTestId('sales-ledger')[0].textContent).toContain('Chat completion')
   })
@@ -375,13 +395,19 @@ describe('the Overview, from one fixture', () => {
     expect(within(table[0]).getByRole('columnheader', { name: 'Revenue' })).toBeTruthy()
   })
 
-  it('has no search box, no facets and no Last paid column', async () => {
+  it('has the search, the Product, Payer and Recorded facets, and a Last paid column (#4960)', async () => {
     serve()
     await renderPage()
     await screen.findByTestId('sales-tiles')
-    expect(screen.queryByRole('searchbox')).toBeNull()
-    expect(screen.queryByPlaceholderText(/search/i)).toBeNull()
-    expect(screen.queryByText('Last paid')).toBeNull()
+    const payments = screen.getByTestId('sales-payments')
+    expect(within(payments).getByPlaceholderText('Search payments')).toBeTruthy()
+    const facets = within(payments).getByTestId('list-toolbar-facets')
+    for (const label of ['Product', 'Payer', 'Recorded']) {
+      expect(within(facets).getByRole('button', { name: new RegExp(label) })).toBeTruthy()
+    }
+    const byPayer = screen.getByTestId('sales-by-payer')
+    expect(within(byPayer).getAllByText('Last paid').length).toBeGreaterThan(0)
+    expect(within(byPayer).getAllByTestId('breakdown-last-paid-cell')).toHaveLength(SUMMARY.by_payer.length)
     expect(screen.queryByText('Price')).toBeNull()
   })
 
@@ -714,7 +740,7 @@ describe('sales received in Stripe (#4954)', () => {
     await renderPage()
     const line = await screen.findByTestId('sales-payments-summary')
     // 5 account payments + 2 Stripe sales, and the two figures apart.
-    expect(line.textContent).toContain('7 payments')
+    expect((await screen.findByTestId('list-toolbar-count')).textContent).toContain('7 payments')
     expect(line.textContent).toContain('Revenue $2.14')
     expect(line.textContent).toContain('Received in Stripe $0.03')
     expect(screen.getByTestId('sales-payments').textContent).toContain('not in Transactions')
@@ -785,3 +811,238 @@ describe('sales received in Stripe (#4954)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Joke' })).toBeNull())
   })
 })
+
+describe('filters and search (#4960)', () => {
+  /** The period narrowed to the chat product: 2 sales of $0.42 from the contact. */
+  const CHAT_SUMMARY = {
+    ...SUMMARY,
+    revenue_raw: '840000',
+    sales: 2,
+    average_sale_raw: '420000',
+    without_product: zero,
+    own_moves: zero,
+    by_product: [{ product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' }],
+    by_payer: [{ payer: CONTACT, payments: 2, amount_raw: '840000', last_paid_at: '2026-11-17T14:05:00.000Z' }],
+    by_day: [
+      { day: '2026-11-16', payments: 1, sales: 1, revenue_raw: '420000' },
+      { day: '2026-11-17', payments: 1, sales: 1, revenue_raw: '420000' },
+    ],
+  }
+  const CHAT_PAYMENTS = [PAYMENTS[0], PAYMENTS[3]]
+  const EMPTY_SUMMARY = {
+    ...SUMMARY,
+    revenue_raw: '0',
+    sales: 0,
+    average_sale_raw: '0',
+    without_product: zero,
+    own_moves: zero,
+    by_product: [],
+    by_payer: [],
+    by_day: [],
+  }
+  const params = (path: string) => new URL(path, 'http://x').searchParams
+
+  it('sends ONE filter set to every read, and the tiles, chart, breakdowns and list all describe it', async () => {
+    // Two Recorded values: every facet is multi-select, and both reach the reads.
+    window.history.replaceState(null, '', '/sales?product=chat&recorded=sale,no_product')
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    await waitFor(() => expect(within(screen.getByTestId('sales-ledger')).getAllByText('Chat completion')).toHaveLength(2))
+
+    // Every summary (this period AND the one it is compared with) and every
+    // list page carries the same filters; the facets read and the first-run
+    // probe carry none.
+    const reads = [...callsTo('/merchant-sales/summary'), ...callsTo('/merchant-sales/payments?').filter((p) => params(p).has('from') && params(p).get('limit') !== '1')]
+    expect(reads.length).toBeGreaterThanOrEqual(3)
+    for (const path of reads) {
+      expect(params(path).getAll('product_id'), path).toEqual(['chat'])
+      expect(params(path).getAll('kind'), path).toEqual(['no_product', 'sale'])
+    }
+    for (const path of callsTo('/merchant-sales/facets')) expect([...params(path).keys()].sort()).toEqual(['from', 'to'])
+    // The first-run probe (whole history, one row) is never filtered: a
+    // filtered link that matches nothing is not an account never paid.
+    const probes = callsTo('/merchant-sales/payments?').filter((p) => !params(p).has('from'))
+    expect(probes.length).toBeGreaterThan(0)
+    for (const path of probes) for (const key of FILTER_KEYS) expect(params(path).has(key), path).toBe(false)
+
+    // The figures are the filtered summary's, and they agree with the rows.
+    const tiles = screen.getByTestId('sales-tiles')
+    expect(tiles.textContent).toContain('$0.84')
+    expect(screen.getByTestId('sales-by-product').textContent).toContain('$0.84')
+    expect(screen.getByTestId('sales-by-product').textContent).not.toContain('Embeddings')
+    expect(screen.getByTestId('sales-by-payer').textContent).toContain('$0.84')
+    expect(screen.getByTestId('sales-by-payer').textContent).not.toContain('Wallet')
+    const rowsTotal = CHAT_PAYMENTS.reduce((n, p) => n + Number(p.amount_raw), 0)
+    expect(rowsTotal).toBe(Number(CHAT_SUMMARY.revenue_raw))
+    expect(screen.getByTestId('sales-payments-summary').textContent).toContain('Revenue $0.84')
+    // "{shown} of {total}": the filtered list's total of the period's unfiltered one.
+    await waitFor(() => expect(screen.getByTestId('list-toolbar-count').textContent).toContain('2 of 5 payments'))
+  })
+
+  it('lists every product and payer of the period in the facets, and does not shrink them to the value chosen', async () => {
+    window.history.replaceState(null, '', '/sales?product=chat')
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    const facets = screen.getByTestId('list-toolbar-facets')
+
+    await userEvent.click(within(facets).getByRole('button', { name: /Product/ }))
+    let menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Chat completion/ })).toBeTruthy()
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Embeddings/ })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(within(facets).getByRole('button', { name: /Payer/ }))
+    menu = await screen.findByRole('menu')
+    const payerText = menu.textContent ?? ''
+    // Named payers by name; every other payer as "Wallet" with a short address,
+    // and nothing says a payer uses Haven.
+    expect(payerText).toContain('Lumen Research')
+    expect(payerText).toContain('Atlas')
+    expect(within(menu).getAllByRole('menuitemcheckbox', { name: /^Wallet · 0x/ })).toHaveLength(2)
+    expect(payerText).not.toMatch(/haven/i)
+    await userEvent.keyboard('{Escape}')
+
+    await userEvent.click(within(facets).getByRole('button', { name: /Recorded/ }))
+    menu = await screen.findByRole('menu')
+    for (const label of ['Sale', 'No product recorded', 'Moved between your accounts']) {
+      expect(within(menu).getByRole('menuitemcheckbox', { name: new RegExp(`^${label}`) })).toBeTruthy()
+    }
+    expect(menu.textContent).not.toMatch(/no_product|own_move/)
+  })
+
+  it('shows the no-match state under the toolbar when a filter matches nothing, and Clear filters keeps the period', async () => {
+    window.history.replaceState(null, '', '/sales?period=7d&recorded=own_move&q=zzz')
+    serve({ filtered: { summary: EMPTY_SUMMARY, payments: [] } })
+    await renderPage()
+    const noMatch = await screen.findByTestId('sales-no-match')
+    expect(noMatch.textContent).toContain('No payments match these filters')
+    // The toolbar that set the filter is still there, and the period's empty state is not shown.
+    expect(screen.getByPlaceholderText('Search payments')).toBeTruthy()
+    expect(screen.queryByTestId('sales-empty-period')).toBeNull()
+
+    mockGet.mockClear()
+    await userEvent.click(within(noMatch).getByRole('button', { name: 'Clear filters' }))
+    const seven = salesDayRange({ preset: '7d' })
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').length).toBeGreaterThan(0))
+    for (const path of callsTo('/merchant-sales/summary')) {
+      for (const key of ['kind', 'q', 'product_id', 'payer']) expect(params(path).has(key), path).toBe(false)
+    }
+    expect(callsTo('/merchant-sales/summary').some((p) => p.includes(`from=${seven.from}&to=${seven.to}`))).toBe(true)
+  })
+
+  it('sends no search shorter than two characters, and sends one once it is long enough', async () => {
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    const box = screen.getByPlaceholderText('Search payments')
+    await userEvent.type(box, 'l{Enter}')
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 400))
+    })
+    expect(callsTo('q=')).toEqual([])
+    await userEvent.type(box, 'umen{Enter}')
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').some((p) => params(p).get('q') === 'lumen')).toBe(true))
+  })
+
+  it("prints By payer's Last paid in the viewer's clock: Today with the time, else the day and the time", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 17, 20, 0))
+    try {
+      serve({
+        summary: {
+          ...SUMMARY,
+          by_payer: [
+            { payer: CONTACT, payments: 2, amount_raw: '1140000', last_paid_at: new Date(2026, 10, 17, 14, 17).toISOString() },
+            { payer: WALLET, payments: 1, amount_raw: '700000', last_paid_at: new Date(2026, 10, 12, 9, 10).toISOString() },
+          ],
+        },
+      })
+      await renderPage()
+      const byPayer = await screen.findByTestId('sales-by-payer')
+      expect(within(byPayer).getAllByTestId('breakdown-last-paid-cell').map((c) => c.textContent)).toEqual([
+        'Today, 14:17',
+        '12 Nov, 09:10',
+      ])
+      // Inside a sentence (the collapsed stand-in and the phone line) "today" is lower case.
+      expect(byPayer.textContent).toContain('Last paid today, 14:17')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps focus in the search box when the search is cleared and the figures reload unfiltered', async () => {
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    const box = screen.getByPlaceholderText('Search payments')
+    await userEvent.type(box, 'lumen{Enter}')
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').some((p) => params(p).get('q') === 'lumen')).toBe(true))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    await waitFor(() => expect(screen.getByTestId('sales-tiles')).toBeTruthy())
+    expect(screen.getByPlaceholderText('Search payments')).toBe(box)
+    expect(document.activeElement).toBe(box)
+    // And backspacing a term below two characters does not drop focus either.
+    await userEvent.type(box, 'lu{Enter}')
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').some((p) => params(p).get('q') === 'lu')).toBe(true))
+    await userEvent.type(box, '{Backspace}{Enter}')
+    await waitFor(() => expect(screen.getByTestId('sales-tiles')).toBeTruthy())
+    expect(document.activeElement).toBe(box)
+  })
+
+  it('debounces the search: a typed term makes one read per figure, not one per keystroke', async () => {
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    await userEvent.type(screen.getByPlaceholderText('Search payments'), 'lumen')
+    const today = salesDayRange({ preset: '30d' })
+    await waitFor(() =>
+      expect(callsTo('/merchant-sales/summary').filter((p) => params(p).get('q') === 'lumen' && params(p).get('to') === today.to)).toHaveLength(1),
+    )
+    // No read for any prefix of the term.
+    const prefixes = ['l', 'lu', 'lum', 'lume']
+    expect(mockGet.mock.calls.map((c) => String(c[0])).filter((p) => prefixes.includes(params(p).get('q') ?? ''))).toEqual([])
+  })
+
+  it('reads the facets and the filtered figures again after a sale record is cleared', async () => {
+    window.history.replaceState(null, '', '/sales?product=chat')
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    mockDelete.mockResolvedValue(undefined)
+    await renderPage()
+    const row = within(await screen.findByTestId('sales-ledger')).getAllByText('Chat completion')[0].closest('[role="button"]') as HTMLElement
+    await userEvent.click(row)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear sale record' }))
+    const facetReads = callsTo('/merchant-sales/facets').length
+    mockGet.mock.calls.length = 0
+    await userEvent.click(screen.getByRole('button', { name: 'Clear record' }))
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').length).toBeGreaterThan(0))
+    for (const path of callsTo('/merchant-sales/summary')) expect(params(path).getAll('product_id'), path).toEqual(['chat'])
+    await waitFor(() => expect(callsTo('/merchant-sales/facets').length).toBeGreaterThan(0))
+    expect(facetReads).toBeGreaterThan(0)
+  })
+
+  it('says so when the filter options cannot load, and the search still works', async () => {
+    serve()
+    const served = mockGet.getMockImplementation()!
+    mockGet.mockImplementation(async (path: string) => {
+      if (path.startsWith('/merchant-sales/facets')) throw new Error('500')
+      return served(path)
+    })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    expect((await screen.findByTestId('sales-facets-error')).textContent).toContain('could not load')
+    expect(screen.getByPlaceholderText('Search payments')).toBeTruthy()
+  })
+
+  it('keeps a product id with a comma whole from the URL to the reads', async () => {
+    const id = 'pro,annual'
+    window.history.replaceState(null, '', `/sales?product=${encodeURIComponent(productFacetValue(id))}`)
+    serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').length).toBeGreaterThan(0))
+    for (const path of callsTo('/merchant-sales/summary')) expect(params(path).getAll('product_id'), path).toEqual([id])
+  })
+})
+

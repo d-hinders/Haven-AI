@@ -17,6 +17,12 @@
  *    (The sticky-`thead` leg is not carried over: no `Table` consumer pins its
  *    head any more.)
  *
+ *    The `md` stage's Sales consumer (#4960) is read too: By payer's "Last
+ *    paid" column reveals at a 718px container, and while it is collapsed the
+ *    same time rides under the payer's name (`tableHideFromClass`), so no
+ *    width shows it twice or not at all. The visual gate captures 1280 and
+ *    390 only, where the table is either wide or replaced by the row list.
+ *
  * 2. `/transactions` ledger rows survive a starved container. A ledger row
  *    lays out on the VIEWPORT breakpoint (`sm:` two-column grid), so a narrow
  *    container at a wide viewport is the case where the row cannot rely on
@@ -24,7 +30,7 @@
  *    its one line, and nothing may push the row past its container.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { mockHavenApi, seedAuthenticatedSession } from './fixtures/haven-api'
+import { mockHavenApi, SALES_FROZEN_NOW, seedAuthenticatedSession, serveSales } from './fixtures/haven-api'
 import { analyticsOverview } from './fixtures/analytics-overview'
 
 const ROW = '[data-testid="transactions-ledger"] [role="button"][aria-haspopup="dialog"]'
@@ -198,4 +204,61 @@ test('Table primitive: the xl collapse follows the CONTAINER while the viewport 
   expect(under.columns).not.toContain('Top merchant')
   expect(under.columns.length).toBe(atStage.columns.length - 1)
   expect(under.bodyCells, 'the body drops the same cell').toBe(atStage.bodyCells - 1)
+})
+
+/** Sales By payer (#4960): the Last paid column and the inline line that stands in for it. */
+async function readByPayer(page: Page) {
+  return page.evaluate(() => {
+    const visible = (el: Element) => el.getClientRects().length > 0
+    const card = document.querySelector('[data-testid="sales-by-payer"]')
+    const table = card ? Array.from(card.querySelectorAll('table')).find(visible) : undefined
+    if (!table) return { headers: ['NO TABLE'], cells: -1, inline: -1, containerWidth: -1 }
+    const headers = Array.from(table.querySelectorAll('thead th')).filter(visible).map((th) => (th.textContent ?? '').trim())
+    const cells = Array.from(table.querySelectorAll('[data-testid="breakdown-last-paid-cell"]')).filter(visible).length
+    const inline = Array.from(table.querySelectorAll('[data-testid="breakdown-last-paid-inline"]')).filter(visible).length
+    const container = table.parentElement
+    return { headers, cells, inline, containerWidth: container ? +container.getBoundingClientRect().width.toFixed(1) : -1 }
+  })
+}
+
+async function setByPayerContainerWidth(page: Page, px: number) {
+  await page.evaluate((width) => {
+    const card = document.querySelector('[data-testid="sales-by-payer"]')
+    const table = card ? Array.from(card.querySelectorAll('table')).find((t) => t.getClientRects().length > 0) : undefined
+    const container = table?.parentElement
+    if (!container || !container.className.includes('container-type')) {
+      throw new Error('no inline-size container found around the By payer table')
+    }
+    container.style.width = `${width}px`
+  }, px)
+  await page.waitForTimeout(250)
+}
+
+test('/sales By payer: Last paid follows the md CONTAINER stage, and rides under the name while collapsed', async ({ page }) => {
+  test.slow()
+  await mockHavenApi(page)
+  await seedAuthenticatedSession(page)
+  await page.clock.setFixedTime(SALES_FROZEN_NOW)
+  await serveSales(page, 'overview')
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/sales')
+  await expect(page.getByTestId('sales-by-payer')).toBeVisible({ timeout: 60_000 })
+
+  // 718px: the `md` stage — the column shows, in header and body, and the
+  // inline stand-in is gone.
+  await setByPayerContainerWidth(page, 718)
+  const atStage = await readByPayer(page)
+  expect(atStage.containerWidth, 'the container really is 718px wide').toBe(718)
+  expect(atStage.headers).toContain('Last paid')
+  expect(atStage.cells, 'every payer row shows its Last paid cell').toBeGreaterThan(0)
+  expect(atStage.inline, 'the inline line is hidden while the column shows').toBe(0)
+
+  // 717px: one pixel under, at the same 1600px viewport — the column drops
+  // from header and body, and the same time now rides under each name.
+  await setByPayerContainerWidth(page, 717)
+  const under = await readByPayer(page)
+  expect(under.containerWidth).toBe(717)
+  expect(under.headers).not.toContain('Last paid')
+  expect(under.cells).toBe(0)
+  expect(under.inline, 'each payer row carries the time inline instead').toBe(atStage.cells)
 })

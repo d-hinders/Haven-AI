@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  lastPaidText,
+  productFacetValue,
+  productIdFromFacetValue,
+  salesSearchTerm,
   catalogueChainId,
   catalogueHost,
   catalogueNeedsAttention,
@@ -249,5 +253,45 @@ describe('the catalogue', () => {
     expect(isOnChainHash(`0x${'ab'.repeat(32)}`)).toBe(true)
     expect(isOnChainHash('pi_3Q8example')).toBe(false)
     expect(isOnChainHash('0xab')).toBe(false)
+  })
+})
+
+describe('filters and Last paid (#4960)', () => {
+  // Local-time instants: the text is the VIEWER's clock, whatever zone runs the test.
+  const now = new Date(2026, 10, 17, 20, 0)
+
+  it('says Today with the time for a payment earlier today', () => {
+    expect(lastPaidText(new Date(2026, 10, 17, 14, 17).toISOString(), now)).toBe('Today, 14:17')
+  })
+
+  it('says the day and the time for an earlier day of this year, and adds the year otherwise', () => {
+    expect(lastPaidText(new Date(2026, 10, 12, 9, 10).toISOString(), now)).toBe('12 Nov, 09:10')
+    expect(lastPaidText(new Date(2026, 10, 16, 23, 59).toISOString(), now)).toBe('16 Nov, 23:59')
+    expect(lastPaidText(new Date(2025, 10, 12, 9, 10).toISOString(), now)).toBe('12 Nov 2025, 09:10')
+  })
+
+  it('sends a search only from two characters, counted as the backend counts them (code points)', () => {
+    expect(salesSearchTerm('a')).toBe('')
+    expect(salesSearchTerm('  a  ')).toBe('')
+    expect(salesSearchTerm('ab')).toBe('ab')
+    // One emoji is TWO UTF-16 units but ONE character to the backend's schema: not sent.
+    expect(salesSearchTerm('😀')).toBe('')
+    expect(salesSearchTerm('😀😀')).toBe('😀😀')
+    // Cut at 100 characters without splitting a surrogate pair.
+    const long = '😀'.repeat(120)
+    expect(Array.from(salesSearchTerm(long))).toHaveLength(100)
+    expect(salesSearchTerm(long)).toBe('😀'.repeat(100))
+  })
+
+  it('keeps any product id intact through the comma-joined URL facet', () => {
+    for (const id of ['chat', 'pro,annual', ' padded ', 'all', 'ALL', '~tilde', '100%', 'a b']) {
+      const value = productFacetValue(id)
+      expect(value.includes(','), id).toBe(false)
+      expect(value, id).toBe(value.trim())
+      expect(value.toLowerCase(), id).not.toBe('all')
+      expect(productIdFromFacetValue(value), id).toBe(id)
+    }
+    // An ordinary id is written as itself.
+    expect(productFacetValue('chat')).toBe('chat')
   })
 })

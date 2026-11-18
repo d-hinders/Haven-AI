@@ -20,6 +20,7 @@ covers:
   - .github/workflows/publish.yml
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/routes/merchant-sales.ts
+  - packages/backend/src/routes/merchant-sales-reads.ts
   - packages/demo-merchant-mcp/src/invoice.ts
   - packages/merchant-payments/src/receipt.ts
   - packages/merchant-payments/src/tax-declaration.ts
@@ -347,6 +348,20 @@ the proxy only needs the URL and the key. The key's limits — what it can and c
 residual, and how revocation works — are documented for merchants in
 [`docs/security/merchant-key-limits.md`](../security/merchant-key-limits.md);
 the kit README links there.
+
+The owner reads the sales back through four owner-session routes (#4897), never
+through the key: `GET /merchant-sales/summary` (the totals, and the breakdowns
+by product, day and payer, for a UTC period), `GET /merchant-sales/payments`
+(one row per transaction, newest first, keyset-paged), `GET
+/merchant-sales/payments/:txHash` (one payment with its transfer legs) and
+`DELETE /merchant-sales/payments/:txHash/record` (the owner clears a wrong
+record: the record is deleted, the payment stays with no product, and a new
+record for it is accepted). Every figure is computed from the indexed transfers
+into the account, with zero-value transfers and transfers from the owner's own
+addresses left out; a sale counts once with the amount Haven read, and a payment
+with no record counts as revenue without a product. Each payer is a contact, one
+of the owner's own addresses or a wallet; a read never says that a wallet
+belongs to another Haven user or agent.
 
 ### Shape
 

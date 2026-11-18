@@ -82,6 +82,9 @@ covers:
   - packages/backend/src/routes/merchant-sales.ts
   - packages/backend/src/modules/transactions/merchant-sales.ts
   - packages/backend/src/infra/repositories/merchant-sales.ts
+  - packages/backend/src/routes/merchant-sales-reads.ts
+  - packages/backend/src/modules/transactions/merchant-sales-reads.ts
+  - packages/backend/src/infra/repositories/merchant-sales-reads.ts
   - packages/backend/src/modules/accounts/create-additional.ts
   - packages/backend/src/domain/merchant-services.ts
   - packages/backend/src/domain/merchant-keys.ts

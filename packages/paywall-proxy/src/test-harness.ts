@@ -151,6 +151,9 @@ export interface ProductFixture {
   model?: string
   output_token_cap?: number
   name?: string
+  input_example?: unknown
+  input_schema?: unknown
+  output_example?: unknown
 }
 
 export const CHAT_PRODUCT: ProductFixture = {
@@ -206,6 +209,8 @@ export async function startHarness(options: {
     NETWORK: 'eip155:84532',
     PAY_TO,
     OPERATOR_NAME: 'Test operator',
+    ENDPOINT_NAME: 'Test endpoint',
+    ENDPOINT_DESCRIPTION: 'A test endpoint that sells calls.',
     PRODUCTS_FILE: productsFile,
     PAYMENTS_DB: join(dir, 'payments.sqlite'),
     UPSTREAM_BASE_URL: upstream.url,

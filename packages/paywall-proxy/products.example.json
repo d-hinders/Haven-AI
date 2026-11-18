@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "products": [
+    {
+      "id": "chat-1k",
+      "name": "Chat completion, 1,000 output tokens",
+      "route": "POST /v1/chat/completions",
+      "model": "your-provider/your-model",
+      "price": "10000",
+      "output_token_cap": 1000,
+      "description": "One chat completion on your-provider/your-model, up to 1,000 output tokens.",
+      "input_example": {
+        "model": "your-provider/your-model",
+        "messages": [{ "role": "user", "content": "Say hello in one sentence." }]
+      },
+      "input_schema": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "messages": { "type": "array" },
+          "max_tokens": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "output_example": {
+        "id": "cmpl-example",
+        "choices": [{ "index": 0, "message": { "role": "assistant", "content": "Hello." } }],
+        "usage": { "prompt_tokens": 12, "completion_tokens": 3 }
+      }
+    },
+    {
+      "id": "lookup",
+      "route": "GET /v1/lookup",
+      "price": "20000",
+      "description": "One lookup against your data."
+    }
+  ]
+}

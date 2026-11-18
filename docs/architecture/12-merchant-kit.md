@@ -29,7 +29,7 @@ covers:
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/siwx.ts
-last-verified: "2026-11-17"
+last-verified: "2026-11-18"
 ---
 
 # Merchant kit: design
@@ -221,8 +221,8 @@ route, or refused when it is not a product route.
 |---|---|---|
 | `version` | Yes | The kit document version. `1` is the only version. |
 | `operator.name` | Yes | Who operates the endpoint. A Haven-run demo says `Haven`; a third-party merchant says its own name. The proxy refuses to start without `OPERATOR_NAME` (#4893). |
-| `operator.contact` | No | A URL or address a reader can use to reach the operator. |
-| `name`, `description` | Yes | Human identification of the endpoint. |
+| `operator.contact` | No | A URL or address a reader can use to reach the operator: `OPERATOR_CONTACT`. |
+| `name`, `description` | Yes | Human identification of the endpoint: `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. The proxy refuses to start without them. |
 | `network` | Yes | CAIP-2 identifier. The same value the challenge advertises. |
 | `asset` | Yes | The USDC contract address on that network. |
 | `pay_to` | Yes | The receiving address. One setting of the deployment; every product is paid to it. |
@@ -1320,7 +1320,9 @@ What the merchant runs:
   merchant controls. A shared tunnel domain works but ranks lower in Coinbase's
   directory;
 - the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO`,
-  `OPERATOR_NAME`, `UPSTREAM_BASE_URL` (where calls are forwarded),
+  `OPERATOR_NAME`, `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION` (the discovery
+  document's name and description, §4), optionally `OPERATOR_CONTACT`,
+  `UPSTREAM_BASE_URL` (where calls are forwarded),
   `BASE_PATH` (the path prefix the products' routes are matched under; empty by
   default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
   `UPSTREAM_AUTH_SCHEME` when the upstream wants them), Coinbase facilitator

@@ -12,6 +12,8 @@ const base = {
   NETWORK: 'eip155:84532',
   PAY_TO,
   OPERATOR_NAME: 'Acme',
+  ENDPOINT_NAME: 'Acme inference',
+  ENDPOINT_DESCRIPTION: 'Acme inference, paid per call.',
   PRODUCTS_FILE: '/tmp/products.json',
   PAYMENTS_DB: '/tmp/payments.sqlite',
   UPSTREAM_BASE_URL: 'https://api.example.com/v3',
@@ -44,7 +46,7 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(loadConfig(base).upstream.authHeader).toBe('Authorization')
   })
 
-  it.each(['NETWORK', 'PAY_TO', 'OPERATOR_NAME', 'PRODUCTS_FILE', 'PAYMENTS_DB', 'UPSTREAM_BASE_URL', 'UPSTREAM_API_KEY', 'CDP_API_KEY_ID', 'CDP_API_KEY_SECRET', 'RPC_URL'])(
+  it.each(['NETWORK', 'PAY_TO', 'OPERATOR_NAME', 'ENDPOINT_NAME', 'ENDPOINT_DESCRIPTION', 'PRODUCTS_FILE', 'PAYMENTS_DB', 'UPSTREAM_BASE_URL', 'UPSTREAM_API_KEY', 'CDP_API_KEY_ID', 'CDP_API_KEY_SECRET', 'RPC_URL'])(
     'refuses to start without %s',
     (name) => {
       const env: Record<string, string | undefined> = { ...base }
@@ -84,6 +86,20 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(problems({ ...base, CLIENT_IP_HEADER: 'bad header' })[0]).toContain('CLIENT_IP_HEADER')
     expect(loadConfig({ ...base, CLIENT_IP_HEADER: 'X-Forwarded-For' }).clientIpHeader).toBe('x-forwarded-for')
     expect(loadConfig(base).clientIpHeader).toBeUndefined()
+    expect(problems({ ...base, ICON_URL: 'ftp://x' })).toEqual(['ICON_URL must be an http(s) URL'])
+    expect(problems({ ...base, ENDPOINT_NAME: 'two\nlines' })).toEqual(['ENDPOINT_NAME must be a single line of text'])
+    expect(problems({ ...base, ENDPOINT_DESCRIPTION: 'two\nlines' })).toEqual(['ENDPOINT_DESCRIPTION must be a single line of text'])
+    expect(problems({ ...base, OPERATOR_CONTACT: 'two\nlines' })).toEqual(['OPERATOR_CONTACT must be a single line of text'])
+  })
+
+  it('reads the discovery document settings, and leaves the optional ones absent when unset', () => {
+    const config = loadConfig({ ...base, OPERATOR_CONTACT: 'https://acme.example/contact', ICON_URL: 'https://acme.example/icon.png' })
+    expect(config.endpointName).toBe('Acme inference')
+    expect(config.endpointDescription).toBe('Acme inference, paid per call.')
+    expect(config.operatorContact).toBe('https://acme.example/contact')
+    expect(config.iconUrl).toBe('https://acme.example/icon.png')
+    expect(loadConfig(base).operatorContact).toBeUndefined()
+    expect(loadConfig(base).iconUrl).toBeUndefined()
   })
 
   it('lists the secrets to keep out of output', () => {

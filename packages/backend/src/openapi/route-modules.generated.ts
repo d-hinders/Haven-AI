@@ -81,6 +81,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "GET /merchant-catalogue": "routes/merchant-catalogue.ts",
   "GET /merchant-deposit-addresses": "routes/merchant-deposit-addresses.ts",
   "GET /merchant-keys": "routes/merchant-keys.ts",
+  "GET /merchant-sales/facets": "routes/merchant-sales-reads.ts",
   "GET /merchant-sales/payments": "routes/merchant-sales-reads.ts",
   "GET /merchant-sales/payments/{txHash}": "routes/merchant-sales-reads.ts",
   "GET /merchant-sales/summary": "routes/merchant-sales-reads.ts",

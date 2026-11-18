@@ -179,6 +179,16 @@ const COERCION_TARGETS: Record<string, string> = {
   // #4897: the owner's sales list; 50 when omitted, said in the description and
   // applied in the handler (no spec default, so no reviewed-default row).
   'GET /merchant-sales/payments query:limit': 'integer',
+  // #4959: the sales filters. Each may repeat, and ajv's `coerceTypes: 'array'`
+  // turns a single `?kind=sale` into `['sale']`; the route is ENFORCED, and the
+  // handler (`resolveSalesFilters`) reads every one of them as a list, so the
+  // coerced value is the one it is written for.
+  'GET /merchant-sales/payments query:kind': 'array',
+  'GET /merchant-sales/payments query:payer': 'array',
+  'GET /merchant-sales/payments query:product_id': 'array',
+  'GET /merchant-sales/summary query:kind': 'array',
+  'GET /merchant-sales/summary query:payer': 'array',
+  'GET /merchant-sales/summary query:product_id': 'array',
   'GET /portfolio/{accountAddress} query:chain_id': 'integer',
   // #3333 receive side — every route reads chain_id through the shared
   // `parseChainParam` (`Number(request.query.chain_id)`), which accepts the

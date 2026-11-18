@@ -391,10 +391,12 @@ residual, and how revocation works — are documented for merchants in
 [`docs/security/merchant-key-limits.md`](../security/merchant-key-limits.md);
 the kit README links there.
 
-The owner reads the sales back through four owner-session routes (#4897), never
+The owner reads the sales back through five owner-session routes (#4897), never
 through the key: `GET /merchant-sales/summary` (the totals, and the breakdowns
 by product, day and payer, for a UTC period), `GET /merchant-sales/payments`
-(one row per transaction, newest first, keyset-paged), `GET
+(one row per transaction, newest first, keyset-paged, with the `total` of the
+filter set), `GET /merchant-sales/facets` (every product and payer of the
+period, unfiltered, for the filter menus; #4959), `GET
 /merchant-sales/payments/:txHash` (one payment with its transfer legs) and
 `DELETE /merchant-sales/payments/:txHash/record` (the owner clears a wrong
 record: the record is deleted, the payment stays with no product, and a new
@@ -405,6 +407,22 @@ same rows the list marks as own moves); a sale counts once with the amount Haven
 with no record counts as revenue without a product. Each payer is a contact, one
 of the owner's own addresses or a wallet; a read never says that a wallet
 belongs to another Haven user or agent.
+
+The summary and the list take the same filters (#4959), each repeatable:
+`kind` (`sale`, `no_product`, `own_move`), `product_id` (sales only), `payer`
+(an address; a payment from several payers matches when any of its transfers
+is from it, and stays unattributed in `by_payer`) and `q`, a search of at least
+2 characters. Both read one filtered relation, so for a filter set the summary's
+figures, `received_in_stripe` included, agree with the list's rows. The search
+matches a payer by the name the read shows, which comes only from the owner's
+own contacts, accounts and agents, so another Haven user's name never matches.
+It also matches a product by its label or id, the receipt number by substring,
+and an address by prefix (`0x` and at least four hex digits). It does not search
+the merchant's reference. The term is resolved to addresses and product ids
+before the query runs, so paging stays exact. Each `by_payer` entry carries
+`last_paid_at`, the payer's newest revenue payment in the period. Each `by_day`
+row splits its sales by the products `by_product` names (the rest in
+`other_products_raw`) and carries `without_product_raw`.
 
 The summary, the payments page and the single-payment read each also carry
 `usdc_rates` (#4963): today's USDC price in USD, EUR and SEK, so the page can show

@@ -558,7 +558,7 @@ are already on the runtime list through `infra/repositories/**` and
 ### The owner's sales reads
 
 #4897 (second PR). `GET /merchant-sales/summary`, `GET /merchant-sales/payments`,
-`GET /merchant-sales/payments/:txHash` and `DELETE
+`GET /merchant-sales/facets` (#4959), `GET /merchant-sales/payments/:txHash` and `DELETE
 /merchant-sales/payments/:txHash/record` are the owner's side of the sales
 ingest: dashboard JWT only, never the Sales key, and the clear route is on the
 device-login census's must-refuse list. `modules/transactions/merchant-sales-reads.ts`
@@ -570,7 +570,10 @@ rule that keeps a read from telling the merchant that a wallet belongs to
 another Haven user or agent. `routes/merchant-sales-reads.ts` is the auth door,
 the period and cursor validation, the money-path rate limit on the clear and the
 status mapping. The one write deletes the merchant's statement, never a
-transfer.
+transfer. The filters and the search (#4959) narrow the same scoped relation
+and add `GET /merchant-sales/facets`. They are still reads only: the search
+term is resolved against the caller's own names before the query runs, so it
+widens nothing a read can reach.
 
 Control, not runtime (the same rule as the ingest above): no QA scenario calls
 `/merchant-sales`, so a green run says nothing about these two files. They move

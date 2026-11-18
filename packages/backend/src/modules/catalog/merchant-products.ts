@@ -53,6 +53,7 @@ import { safeGetText, type SafeFetchResult, type SsrfRefusalReason } from '../..
 import type { Executor } from '../../infra/transaction.js'
 import {
   findCatalogueProductName,
+  findCatalogueProductNames,
   findCatalogueSource,
   listCatalogueProducts,
   listCatalogueSources,
@@ -532,6 +533,28 @@ export async function labelSaleProduct(params: {
     if (catalogueName !== null) return catalogueName
   }
   return params.recordName
+}
+
+/**
+ * #4959: `labelSaleProduct` for many products in ONE catalogue read: the
+ * catalogue's name when it knows the id, else the record's name, else null.
+ * The Sales reads label every product of a period with it.
+ */
+export async function labelSaleProducts(params: {
+  merchantAccountId: string
+  products: ReadonlyArray<{ productId: string; recordName: string | null }>
+  db?: Executor
+}): Promise<Map<string, string | null>> {
+  const catalogue = await findCatalogueProductNames(
+    params.merchantAccountId,
+    [...new Set(params.products.map((p) => p.productId))],
+    params.db,
+  )
+  const labels = new Map<string, string | null>()
+  for (const p of params.products) {
+    if (!labels.has(p.productId)) labels.set(p.productId, catalogue.get(p.productId) ?? p.recordName)
+  }
+  return labels
 }
 
 /** The account's catalogue as the owner's screens read it (#4900). */

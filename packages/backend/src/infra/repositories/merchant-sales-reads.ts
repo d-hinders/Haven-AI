@@ -29,6 +29,18 @@
  * and the separate `received_in_stripe` figure carries the Stripe-held sales.
  * The list and the detail include them, marked.
  *
+ * ## Filters and search (#4959)
+ *
+ * The list, the total and the summary read ONE filtered relation, `pay_f`
+ * (`pay_acct` is its account-held part), so for one filter set the totals,
+ * the breakdowns, the count and the rows agree. A filter is a parameter of the
+ * statement, never a cut made after the fetch, so keyset paging stays exact.
+ * The search term arrives already RESOLVED (`SalesFilters.search`): the module
+ * matches it against the caller's own names and product labels in JS and hands
+ * this file addresses and product ids; only the receipt number and an address
+ * prefix are matched here. A transaction from several payers matches a payer
+ * (or a searched address) when any of its legs is from it.
+ *
  * Every statement is scoped by BOTH `user_id` and `account_id` (and the
  * account's chain), so a payment is never readable through another account.
  * Nothing here writes, and no statement reads `match_kind`, `balance_consumed`
@@ -54,9 +66,40 @@ export interface SalesScope {
 }
 
 /**
+ * The resolved filters of one read (#4959). Null means "no filter on that"; an
+ * empty array is a filter nothing matches.
+ */
+export interface SalesFilters {
+  kinds: PaymentKind[] | null
+  /** Matches sales only. */
+  productIds: string[] | null
+  /** Lower-case addresses. */
+  payers: string[] | null
+  /** The search, resolved by the module; null when there is no search. */
+  search: {
+    /** An ILIKE pattern (wildcards escaped) for the receipt number. */
+    receiptPattern: string
+    /** The caller's own named addresses whose name matched (lower-case). */
+    payers: string[]
+    /** The period's products whose label or id matched. */
+    productIds: string[]
+    /** A LIKE prefix pattern when the term is a partial address, else null. */
+    addressPrefix: string | null
+  } | null
+}
+
+export const NO_FILTERS: SalesFilters = { kinds: null, productIds: null, payers: null, search: null }
+
+/**
  * The per-transaction relation. Parameters:
  * $1 account, $2 user, $3 chain, $4 from (inclusive), $5 to (exclusive),
- * $6 one transaction hash (lower-case) or NULL for every transaction.
+ * $6 one transaction hash (lower-case) or NULL for every transaction,
+ * $7 kinds, $8 product ids, $9 payers (each a text[] or NULL),
+ * $10 the search's receipt pattern (NULL: no search), $11 its payers,
+ * $12 its product ids, $13 its address-prefix pattern (or NULL).
+ *
+ * `pay` is every payment of the period; `pay_f` is the filtered one, which
+ * every list, count and summary figure reads.
  */
 const PAYMENTS_CTE = `
   legs AS (
@@ -68,7 +111,12 @@ const PAYMENTS_CTE = `
            MIN(LOWER(t.payer_address)) FILTER (WHERE NOT t.sender_is_own_address) AS revenue_payer_min,
            MAX(LOWER(t.payer_address)) FILTER (WHERE NOT t.sender_is_own_address) AS revenue_payer_max,
            MIN(LOWER(t.payer_address)) AS any_payer_min,
-           MAX(LOWER(t.payer_address)) AS any_payer_max
+           MAX(LOWER(t.payer_address)) AS any_payer_max,
+           -- #4959: whether any leg is from a filtered (or searched) address,
+           -- for a transaction with several payers.
+           COALESCE(BOOL_OR(LOWER(t.payer_address) = ANY($9::text[])), false) AS leg_payer_match,
+           COALESCE(BOOL_OR(LOWER(t.payer_address) = ANY($11::text[])
+                            OR LOWER(t.payer_address) LIKE $13::text), false) AS leg_search_match
      FROM inbound_transfers t
      WHERE t.account_id = $1
        AND t.user_id = $2
@@ -105,7 +153,9 @@ const PAYMENTS_CTE = `
            ms.receipt_number,
            ms.vat_treatment,
            'account'::text AS held_by,
-           NULL::text AS receiving_address
+           NULL::text AS receiving_address,
+           l.leg_payer_match,
+           l.leg_search_match
       FROM legs l
       LEFT JOIN merchant_sales ms
         ON ms.account_id = $1
@@ -131,7 +181,10 @@ const PAYMENTS_CTE = `
            ms.receipt_number,
            ms.vat_treatment,
            'stripe'::text,
-           ms.receiving_address
+           ms.receiving_address,
+           COALESCE(LOWER(ms.payer_address) = ANY($9::text[]), false),
+           COALESCE(LOWER(ms.payer_address) = ANY($11::text[])
+                    OR LOWER(ms.payer_address) LIKE $13::text, false)
       FROM merchant_sales ms
      WHERE ms.account_id = $1
        AND ms.user_id = $2
@@ -144,12 +197,32 @@ const PAYMENTS_CTE = `
        AND ms.block_time < $5::timestamptz
        AND ($6::text IS NULL OR LOWER(ms.tx_hash) = $6::text)
   ),
-  pay_acct AS (SELECT * FROM pay WHERE held_by = 'account')`
+  pay_f AS (
+    SELECT * FROM pay p
+     WHERE ($7::text[] IS NULL OR p.kind = ANY($7::text[]))
+       AND ($8::text[] IS NULL OR (p.kind = 'sale' AND p.product_id = ANY($8::text[])))
+       AND ($9::text[] IS NULL
+            OR p.payer = ANY($9::text[])
+            OR (p.several_payers AND p.leg_payer_match))
+       AND ($10::text IS NULL
+            OR p.payer = ANY($11::text[])
+            OR p.payer LIKE $13::text
+            OR (p.several_payers AND p.leg_search_match)
+            OR (p.kind = 'sale' AND p.product_id = ANY($12::text[]))
+            OR p.receipt_number ILIKE $10::text)
+  ),
+  pay_acct AS (SELECT * FROM pay_f WHERE held_by = 'account')`
 
 const NO_BOUND_FROM = '-infinity'
 const NO_BOUND_TO = 'infinity'
 
-function boundsParams(scope: SalesScope, period: PeriodBounds, txHash: string | null): unknown[] {
+/** $1 to $13 of `PAYMENTS_CTE`. */
+function relationParams(
+  scope: SalesScope,
+  period: PeriodBounds,
+  txHash: string | null,
+  filters: SalesFilters,
+): unknown[] {
   return [
     scope.accountId,
     scope.userId,
@@ -157,6 +230,13 @@ function boundsParams(scope: SalesScope, period: PeriodBounds, txHash: string | 
     period.from === null ? NO_BOUND_FROM : period.from,
     period.to === null ? NO_BOUND_TO : period.to,
     txHash,
+    filters.kinds,
+    filters.productIds,
+    filters.payers,
+    filters.search?.receiptPattern ?? null,
+    filters.search?.payers ?? [],
+    filters.search?.productIds ?? [],
+    filters.search?.addressPrefix ?? null,
   ]
 }
 
@@ -180,8 +260,19 @@ export interface SalesSummaryRaw {
     amount_raw: string
   }>
   by_product_other: { products: number; sales: number; amount_raw: string }
-  by_day: Array<{ day: string; payments: number; sales: number; revenue_raw: string }>
-  by_payer: Array<{ payer: string; payments: number; amount_raw: string }>
+  by_day: Array<{
+    day: string
+    payments: number
+    sales: number
+    revenue_raw: string
+    without_product_raw: string
+    /** #4959: the day's sales by product, for the products `by_product` names. */
+    by_product: Array<{ product_id: string; amount_raw: string }>
+    /** The day's sales of the products folded into `by_product_other`. */
+    other_products_raw: string
+  }>
+  /** `last_paid_at` as Postgres's JSON prints a timestamptz. */
+  by_payer: Array<{ payer: string; payments: number; amount_raw: string; last_paid_at: string }>
   by_payer_other: { payers: number; payments: number; amount_raw: string }
   unattributed: { payments: number; amount_raw: string }
   /** #4952: Stripe-held sales, apart from every figure above. */
@@ -204,10 +295,26 @@ const SUMMARY_SQL = `
     SELECT payer,
            COUNT(*) AS payments,
            SUM(amount) AS amount,
+           MAX(block_time) AS last_paid_at,
            ROW_NUMBER() OVER (ORDER BY SUM(amount) DESC, payer) AS rn
       FROM pay_acct
      WHERE kind <> 'own_move' AND NOT several_payers AND payer IS NOT NULL
      GROUP BY payer
+  ),
+  pay_days AS (
+    SELECT TO_CHAR((block_time AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day, kind, product_id, amount
+      FROM pay_acct
+     WHERE kind <> 'own_move'
+  ),
+  day_products AS (
+    SELECT d.day,
+           json_agg(json_build_object('product_id', d.product_id, 'amount_raw', d.amount::text)
+                    ORDER BY d.amount DESC, d.product_id) FILTER (WHERE g.rn <= $14) AS products,
+           COALESCE(SUM(d.amount) FILTER (WHERE g.rn > $14), 0) AS other_amount
+      FROM (SELECT day, product_id, SUM(amount) AS amount
+              FROM pay_days WHERE kind = 'sale' GROUP BY day, product_id) d
+      JOIN product_groups g ON g.product_id = d.product_id
+     GROUP BY d.day
   )
   SELECT
     (SELECT json_build_object(
@@ -222,43 +329,49 @@ const SUMMARY_SQL = `
     (SELECT COALESCE(json_agg(json_build_object(
         'product_id', product_id, 'record_name', record_name,
         'sales', sales, 'amount_raw', amount::text) ORDER BY rn), '[]'::json)
-       FROM product_groups WHERE rn <= $7) AS by_product,
+       FROM product_groups WHERE rn <= $14) AS by_product,
     (SELECT json_build_object(
         'products', COUNT(*), 'sales', COALESCE(SUM(sales), 0),
         'amount_raw', COALESCE(SUM(amount), 0)::text)
-       FROM product_groups WHERE rn > $7) AS by_product_other,
-    (SELECT COALESCE(json_agg(d ORDER BY d.day), '[]'::json) FROM (
-        SELECT TO_CHAR((block_time AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day,
-               COUNT(*) AS payments,
-               COUNT(*) FILTER (WHERE kind = 'sale') AS sales,
-               SUM(amount)::text AS revenue_raw
-          FROM pay_acct
-         WHERE kind <> 'own_move'
-         GROUP BY 1) d) AS by_day,
+       FROM product_groups WHERE rn > $14) AS by_product_other,
     (SELECT COALESCE(json_agg(json_build_object(
-        'payer', payer, 'payments', payments, 'amount_raw', amount::text) ORDER BY rn), '[]'::json)
-       FROM payer_groups WHERE rn <= $7) AS by_payer,
+        'day', d.day, 'payments', d.payments, 'sales', d.sales, 'revenue_raw', d.revenue_raw::text,
+        'without_product_raw', d.without_product_raw::text,
+        'by_product', COALESCE(dp.products, '[]'::json),
+        'other_products_raw', COALESCE(dp.other_amount, 0)::text) ORDER BY d.day), '[]'::json)
+       FROM (SELECT day,
+                    COUNT(*) AS payments,
+                    COUNT(*) FILTER (WHERE kind = 'sale') AS sales,
+                    SUM(amount) AS revenue_raw,
+                    COALESCE(SUM(amount) FILTER (WHERE kind = 'no_product'), 0) AS without_product_raw
+               FROM pay_days GROUP BY day) d
+       LEFT JOIN day_products dp ON dp.day = d.day) AS by_day,
+    (SELECT COALESCE(json_agg(json_build_object(
+        'payer', payer, 'payments', payments, 'amount_raw', amount::text,
+        'last_paid_at', last_paid_at) ORDER BY rn), '[]'::json)
+       FROM payer_groups WHERE rn <= $14) AS by_payer,
     (SELECT json_build_object(
         'payers', COUNT(*), 'payments', COALESCE(SUM(payments), 0),
         'amount_raw', COALESCE(SUM(amount), 0)::text)
-       FROM payer_groups WHERE rn > $7) AS by_payer_other,
+       FROM payer_groups WHERE rn > $14) AS by_payer_other,
     (SELECT json_build_object(
         'payments', COUNT(*), 'amount_raw', COALESCE(SUM(amount), 0)::text)
        FROM pay_acct
       WHERE kind <> 'own_move' AND (several_payers OR payer IS NULL)) AS unattributed,
     (SELECT json_build_object(
         'count', COUNT(*), 'amount_raw', COALESCE(SUM(amount), 0)::text)
-       FROM pay
+       FROM pay_f
       WHERE held_by = 'stripe' AND kind <> 'own_move') AS received_in_stripe`
 
-/** The totals and the three breakdowns for one period, from one statement. */
+/** The totals and the three breakdowns for one period and filter set, from one statement. */
 export async function readSalesSummary(
   scope: SalesScope,
   period: PeriodBounds,
+  filters: SalesFilters = NO_FILTERS,
   db: Executor = pool,
 ): Promise<SalesSummaryRaw> {
   const result = await db.query<SalesSummaryRaw>(SUMMARY_SQL, [
-    ...boundsParams(scope, period, null),
+    ...relationParams(scope, period, null, filters),
     BREAKDOWN_TOP,
   ])
   return result.rows[0]
@@ -304,21 +417,103 @@ export async function listPayments(
   scope: SalesScope,
   period: PeriodBounds,
   options: { limit: number; cursor: PaymentsCursor | null },
+  filters: SalesFilters = NO_FILTERS,
   db: Executor = pool,
 ): Promise<PaymentRow[]> {
   const cursor = options.cursor
   const result = await db.query<PaymentRow>(
     `WITH ${PAYMENTS_CTE}
      SELECT ${PAYMENT_COLUMNS}
-       FROM pay
-      WHERE ($7::timestamptz IS NULL OR (block_time, tx_hash) < ($7::timestamptz, $8::text))
+       FROM pay_f
+      WHERE ($14::timestamptz IS NULL OR (block_time, tx_hash) < ($14::timestamptz, $15::text))
       ORDER BY block_time DESC, tx_hash DESC
-      LIMIT $9`,
+      LIMIT $16`,
     [
-      ...boundsParams(scope, period, null),
+      ...relationParams(scope, period, null, filters),
       cursor === null ? null : cursor.blockTime,
       cursor === null ? null : cursor.txHash,
       options.limit + 1,
+    ],
+  )
+  return result.rows
+}
+
+/** #4959: how many payments the filter set has in the period (own moves included, as in the list). */
+export async function countPayments(
+  scope: SalesScope,
+  period: PeriodBounds,
+  filters: SalesFilters = NO_FILTERS,
+  db: Executor = pool,
+): Promise<number> {
+  const result = await db.query<{ total: string }>(
+    `WITH ${PAYMENTS_CTE} SELECT COUNT(*)::text AS total FROM pay_f`,
+    relationParams(scope, period, null, filters),
+  )
+  return Number(result.rows[0]?.total ?? 0)
+}
+
+export interface PeriodFacetsRaw {
+  /** Every product with a sale in the period, with its newest record name. */
+  products: Array<{ product_id: string; record_name: string | null }>
+  /**
+   * Every address the payer filter can match in the period: the payer of each
+   * single-payer payment, and every leg of each payment from several payers.
+   */
+  payers: string[]
+}
+
+/** #4959: the period's products and payers, unfiltered and uncapped, for the filter menus. */
+export async function readPeriodFacets(
+  scope: SalesScope,
+  period: PeriodBounds,
+  db: Executor = pool,
+): Promise<PeriodFacetsRaw> {
+  const result = await db.query<PeriodFacetsRaw>(
+    `WITH ${PAYMENTS_CTE}
+     SELECT
+       (SELECT COALESCE(json_agg(json_build_object('product_id', product_id, 'record_name', record_name)
+                                 ORDER BY product_id), '[]'::json)
+          FROM (SELECT product_id,
+                       (ARRAY_AGG(product_name ORDER BY block_time DESC, tx_hash DESC))[1] AS record_name
+                  FROM pay WHERE kind = 'sale' GROUP BY product_id) pr) AS products,
+       (SELECT COALESCE(json_agg(a ORDER BY a), '[]'::json) FROM (
+          SELECT payer AS a FROM pay WHERE NOT several_payers AND payer IS NOT NULL
+          UNION
+          SELECT LOWER(t.payer_address)
+            FROM inbound_transfers t
+            JOIN pay p ON p.held_by = 'account' AND p.several_payers AND LOWER(t.tx_hash) = p.tx_hash
+           WHERE t.account_id = $1 AND t.user_id = $2 AND t.chain_id = $3
+             AND t.amount_raw::numeric > 0) x) AS payers`,
+    relationParams(scope, period, null, NO_FILTERS),
+  )
+  return result.rows[0]
+}
+
+/**
+ * #4959: the products of the period's sale records, for resolving a search
+ * term to product ids. Read from `merchant_sales` alone (its account-time
+ * index), not through the payment relation: a SUPERSET of the products the
+ * relation holds is harmless here, since the ids only feed a match the
+ * relation then applies.
+ */
+export async function listPeriodSaleProducts(
+  scope: SalesScope,
+  period: PeriodBounds,
+  db: Executor = pool,
+): Promise<Array<{ product_id: string; record_name: string | null }>> {
+  const result = await db.query<{ product_id: string; record_name: string | null }>(
+    `SELECT product_id, (ARRAY_AGG(product_name ORDER BY block_time DESC, tx_hash DESC))[1] AS record_name
+       FROM merchant_sales
+      WHERE account_id = $1 AND user_id = $2 AND chain_id = $3
+        AND NOT sender_is_own_address
+        AND block_time >= $4::timestamptz AND block_time < $5::timestamptz
+      GROUP BY product_id`,
+    [
+      scope.accountId,
+      scope.userId,
+      scope.chainId,
+      period.from === null ? NO_BOUND_FROM : period.from,
+      period.to === null ? NO_BOUND_TO : period.to,
     ],
   )
   return result.rows
@@ -333,7 +528,7 @@ export async function findPayment(
   const result = await db.query<PaymentRow>(
     `WITH ${PAYMENTS_CTE}
      SELECT ${PAYMENT_COLUMNS} FROM pay`,
-    boundsParams(scope, { from: null, to: null }, txHash.toLowerCase()),
+    relationParams(scope, { from: null, to: null }, txHash.toLowerCase(), NO_FILTERS),
   )
   return result.rows[0] ?? null
 }

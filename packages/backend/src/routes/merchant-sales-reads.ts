@@ -2,7 +2,7 @@
  * The owner's sales reads and the clear route (#4897, epic #4885).
  *
  * `GET /merchant-sales/summary`, `GET /merchant-sales/payments`,
- * `GET /merchant-sales/payments/:txHash` and `DELETE
+ * `GET /merchant-sales/facets` (#4959), `GET /merchant-sales/payments/:txHash` and `DELETE
  * /merchant-sales/payments/:txHash/record`: owner-session routes (dashboard
  * JWT), never the Sales key's. The Sales key is `sk_merchant_...` and
  * `authMiddleware` verifies a JWT, so a key is refused at the door (401); a
@@ -15,7 +15,9 @@
  * `MERCHANT_ACCOUNT_REQUIRED`. The figures, the paging and the payer kinds
  * live in `modules/transactions/merchant-sales-reads.ts`; this handler is the
  * auth door, the validation of the period, the rate limit and the status
- * mapping.
+ * mapping. The filters of the summary and the list (`kind`, `product_id`,
+ * `payer`, `q`; #4959) are validated by the spec through the request-validation
+ * plugin, and an unknown parameter name is ignored, as before.
  *
  * Money path: reads only, plus the owner deleting a merchant's statement. The
  * route holds no key, signs nothing, moves no funds and never touches a
@@ -34,8 +36,10 @@ import {
   PAYMENTS_MAX_LIMIT,
   readPaymentDetail,
   readPaymentsPage,
+  readSalesFacets,
   readSalesSummaryForOwner,
   resolveSalesScope,
+  type SalesFilterInput,
 } from '../modules/transactions/index.js'
 
 interface PeriodQuery {
@@ -43,7 +47,29 @@ interface PeriodQuery {
   to?: string
 }
 
-interface PaymentsQuery extends PeriodQuery {
+/** #4959: each filter may repeat; the spec coerces a single value to a list. */
+interface FilteredQuery extends PeriodQuery, SalesFilterInput {}
+
+/**
+ * A repeatable filter as a list. The enforced spec already coerces a single
+ * value to a list of one; this does not lean on that, so a handler mounted
+ * without the plugin cannot hand the SQL a bare string where it binds a text[].
+ */
+function asList<T>(value: T | T[] | undefined): T[] | undefined {
+  if (value === undefined) return undefined
+  return Array.isArray(value) ? value : [value]
+}
+
+function filterInput(query: SalesFilterInput): SalesFilterInput {
+  return {
+    kind: asList(query.kind),
+    product_id: asList(query.product_id),
+    payer: asList(query.payer),
+    q: query.q,
+  }
+}
+
+interface PaymentsQuery extends FilteredQuery {
   cursor?: string
   limit?: number
 }
@@ -60,7 +86,7 @@ const INVALID_CURSOR = 'INVALID_CURSOR'
 export default async function merchantSalesReadRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  app.get<{ Querystring: PeriodQuery }>('/summary', async (request, reply) => {
+  app.get<{ Querystring: FilteredQuery }>('/summary', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const period = parsePeriod(request.query.from, request.query.to)
     if (!period.ok) {
@@ -68,7 +94,18 @@ export default async function merchantSalesReadRoutes(app: FastifyInstance): Pro
     }
     const scope = await resolveSalesScope(sub)
     if (scope === null) return emptySummary()
-    return readSalesSummaryForOwner(scope, period.period)
+    return readSalesSummaryForOwner(scope, period.period, filterInput(request.query))
+  })
+
+  app.get<{ Querystring: PeriodQuery }>('/facets', async (request, reply) => {
+    const { sub } = request.user as { sub: string }
+    const period = parsePeriod(request.query.from, request.query.to)
+    if (!period.ok) {
+      return reply.code(400).send({ error: period.message, error_code: INVALID_PERIOD })
+    }
+    const scope = await resolveSalesScope(sub)
+    if (scope === null) return { products: [], payers: [] }
+    return readSalesFacets(scope, period.period)
   })
 
   app.get<{ Querystring: PaymentsQuery }>('/payments', async (request, reply) => {
@@ -87,9 +124,9 @@ export default async function merchantSalesReadRoutes(app: FastifyInstance): Pro
       }
     }
     const scope = await resolveSalesScope(sub)
-    if (scope === null) return { payments: [], next_cursor: null, usdc_rates: null }
+    if (scope === null) return { payments: [], next_cursor: null, total: 0, usdc_rates: null }
     const limit = Math.min(request.query.limit ?? PAYMENTS_DEFAULT_LIMIT, PAYMENTS_MAX_LIMIT)
-    return readPaymentsPage(scope, period.period, { limit, cursor })
+    return readPaymentsPage(scope, period.period, { limit, cursor }, filterInput(request.query))
   })
 
   app.get<{ Params: TxHashParams }>('/payments/:txHash', async (request, reply) => {

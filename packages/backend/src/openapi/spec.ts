@@ -433,6 +433,43 @@ const rekeyIdParam = {
 /** #4897: a UTC calendar day, `YYYY-MM-DD`. */
 const merchantSalesDay = { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' } as const
 
+/**
+ * #4959: the filters of the sales summary and the sales list. Each may repeat
+ * (`?kind=sale&kind=no_product`); a single value is read as a list of one.
+ */
+const merchantSalesFilterParams = [
+  {
+    name: 'kind',
+    in: 'query',
+    style: 'form',
+    explode: true,
+    schema: { type: 'array', maxItems: 3, items: { type: 'string', enum: ['sale', 'no_product', 'own_move'] } },
+    description: 'Only payments of these kinds. `no_product` is a payment with no sale record.',
+  },
+  {
+    name: 'product_id',
+    in: 'query',
+    style: 'form',
+    explode: true,
+    schema: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } },
+    description: 'Only sales of these products (a payment with no product never matches).',
+  },
+  {
+    name: 'payer',
+    in: 'query',
+    style: 'form',
+    explode: true,
+    schema: { type: 'array', maxItems: 100, items: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' } },
+    description: 'Only payments from these addresses (case-insensitive). A payment from several payers matches when any of its transfers is from one of them; it stays `unattributed` in `by_payer`.',
+  },
+  {
+    name: 'q',
+    in: 'query',
+    schema: { type: 'string', minLength: 2, maxLength: 100, pattern: '\\S.*\\S' },
+    description: "A search, case-insensitive, at least 2 characters besides surrounding spaces. It matches a payer by the name the read shows (one of the caller's own contacts, accounts or agents; never another Haven user's), a product by its label or id, the receipt number by substring, and a payer address by prefix when the term is `0x` and at least four hex digits. The merchant's reference is not searched.",
+  },
+] as const
+
 /** #4897: the transaction hash of a sales-read path. */
 const merchantSalesTxHashParam = {
   name: 'txHash',
@@ -10156,7 +10193,30 @@ export const openapiSpec = {
         operationId: 'getMerchantSalesSummary',
         summary: "The merchant account's sales for one period: totals and breakdowns.",
         description:
-          "The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those account-held TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list (an own-only transfer to a Stripe deposit address is refused at ingest); an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is the sales' amount divided by `sales` (rounded down). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Every figure above counts account-held payments only; sales received at a registered Stripe deposit address (#4952) are never in them and are reported apart in `received_in_stripe` (a count and an amount, own moves left out). Breakdowns name the top 100 by amount and fold the rest into `*_other`. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.",
+          "The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those account-held TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list (an own-only transfer to a Stripe deposit address is refused at ingest); an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is the sales' amount divided by `sales` (rounded down). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Every figure above counts account-held payments only; sales received at a registered Stripe deposit address (#4952) are never in them and are reported apart in `received_in_stripe` (a count and an amount, own moves left out). Breakdowns name the top 100 by amount and fold the rest into `*_other`; `by_payer[].last_paid_at` is the newest of that payer's revenue payments in the period, and each `by_day` row splits its sales by the products `by_product` names (the rest in `other_products_raw`) beside its `without_product_raw`. The filters (`kind`, `product_id`, `payer`, `q`, #4959) cut the same relation the list reads, so for one filter set every figure here agrees with the rows of `GET /merchant-sales/payments`; `received_in_stripe` honours them too. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [
+          { name: 'from', in: 'query', schema: merchantSalesDay, description: 'First UTC day of the period, inclusive.' },
+          { name: 'to', in: 'query', schema: merchantSalesDay, description: 'Last UTC day of the period, inclusive.' },
+          ...merchantSalesFilterParams,
+        ],
+        responses: {
+          '200': {
+            description: 'The summary for the period.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesSummary' } } },
+          },
+          '400': { ...errorResponse, description: 'The period is malformed or `from` is after `to` (error_code INVALID_PERIOD), or a filter is malformed (error_code invalid_request).' },
+          '401': errorResponse,
+        },
+      },
+    },
+    '/merchant-sales/facets': {
+      get: {
+        tags: ['Dashboard'],
+        operationId: 'getMerchantSalesFacets',
+        summary: "The period's products and payers, for the Sales filters.",
+        description:
+          "Every product with a sale and every payer of the period (#4959), unfiltered and not capped, for the option lists of the Sales page's filters. A payer is every address the `payer` filter can match: the payer of each payment from one payer, and each transfer's payer of a payment from several payers. Products carry the label the reads show; payers are classified as in the other reads. Period as in `GET /merchant-sales/summary`. With merchant services off or no merchant account both lists are empty. Read-only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'from', in: 'query', schema: merchantSalesDay, description: 'First UTC day of the period, inclusive.' },
@@ -10164,8 +10224,8 @@ export const openapiSpec = {
         ],
         responses: {
           '200': {
-            description: 'The summary for the period.',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesSummary' } } },
+            description: "The period's products and payers.",
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesFacets' } } },
           },
           '400': { ...errorResponse, description: 'The period is malformed or `from` is after `to`: error_code INVALID_PERIOD.' },
           '401': errorResponse,
@@ -10178,20 +10238,21 @@ export const openapiSpec = {
         operationId: 'listMerchantSalesPayments',
         summary: "The merchant account's payments, newest first, one row per transaction.",
         description:
-          "The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account, or per sale received at a registered Stripe deposit address (#4952), in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` for a payment into the account and `stripe` for a sale received at a registered Stripe deposit address (#4952), which carries `receiving_address`, has no transfers of its own, and is in no summary figure except `received_in_stripe`. A transfer to a registered deposit address from the owner's own addresses only is refused at ingest, so it is never stored and never listed. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. With merchant services off or no merchant account the list is empty. Read-only.",
+          "The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account, or per sale received at a registered Stripe deposit address (#4952), in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` for a payment into the account and `stripe` for a sale received at a registered Stripe deposit address (#4952), which carries `receiving_address`, has no transfers of its own, and is in no summary figure except `received_in_stripe`. A transfer to a registered deposit address from the owner's own addresses only is refused at ingest, so it is never stored and never listed. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. The filters (`kind`, `product_id`, `payer`, `q`, #4959) are those of `GET /merchant-sales/summary`, and `total` counts the payments the filter set has in the period, every page included. With merchant services off or no merchant account the list is empty. Read-only.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'from', in: 'query', schema: merchantSalesDay, description: 'First UTC day of the period, inclusive.' },
           { name: 'to', in: 'query', schema: merchantSalesDay, description: 'Last UTC day of the period, inclusive.' },
           { name: 'cursor', in: 'query', schema: { type: 'string', maxLength: 256 }, description: "The previous page's `next_cursor`." },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 }, description: 'Rows per page. 50 when omitted; capped at 200.' },
+          ...merchantSalesFilterParams,
         ],
         responses: {
           '200': {
             description: 'One page of payments.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSalesPaymentsPage' } } },
           },
-          '400': { ...errorResponse, description: 'The period is malformed (INVALID_PERIOD) or the cursor is not one this list issued (INVALID_CURSOR).' },
+          '400': { ...errorResponse, description: 'The period is malformed (INVALID_PERIOD), the cursor is not one this list issued (INVALID_CURSOR), or a filter is malformed (invalid_request).' },
           '401': errorResponse,
         },
       },
@@ -12284,11 +12345,12 @@ export const openapiSpec = {
             type: 'array',
             items: {
               type: 'object',
-              required: ['payer', 'payments', 'amount_raw'],
+              required: ['payer', 'payments', 'amount_raw', 'last_paid_at'],
               properties: {
                 payer: { $ref: '#/components/schemas/MerchantSalesPayer' },
                 payments: { type: 'integer' },
                 amount_raw: { type: 'string' },
+                last_paid_at: { type: 'string', format: 'date-time', description: "The newest of this payer's revenue payments in the period (#4959)." },
               },
               additionalProperties: false,
             },
@@ -12314,12 +12376,24 @@ export const openapiSpec = {
             type: 'array',
             items: {
               type: 'object',
-              required: ['day', 'payments', 'sales', 'revenue_raw'],
+              required: ['day', 'payments', 'sales', 'revenue_raw', 'without_product_raw', 'by_product', 'other_products_raw'],
               properties: {
                 day: { type: 'string', description: 'UTC calendar day, YYYY-MM-DD.' },
                 payments: { type: 'integer' },
                 sales: { type: 'integer' },
                 revenue_raw: { type: 'string' },
+                without_product_raw: { type: 'string', description: "The day's payments without a product (#4959)." },
+                by_product: {
+                  type: 'array',
+                  description: "The day's sales by product, for the products `by_product` names, largest first (#4959). With `other_products_raw` and `without_product_raw` it adds up to `revenue_raw`.",
+                  items: {
+                    type: 'object',
+                    required: ['product_id', 'amount_raw'],
+                    properties: { product_id: { type: 'string' }, amount_raw: { type: 'string' } },
+                    additionalProperties: false,
+                  },
+                },
+                other_products_raw: { type: 'string', description: "The day's sales of the products folded into `by_product_other`." },
               },
               additionalProperties: false,
             },
@@ -12351,11 +12425,29 @@ export const openapiSpec = {
       },
       MerchantSalesPaymentsPage: {
         type: 'object',
-        required: ['payments', 'next_cursor', 'usdc_rates'],
+        required: ['payments', 'next_cursor', 'total', 'usdc_rates'],
         properties: {
           usdc_rates: { $ref: '#/components/schemas/MerchantSalesUsdcRates' },
           payments: { type: 'array', items: { $ref: '#/components/schemas/MerchantSalesPayment' } },
           next_cursor: { type: 'string', nullable: true, description: 'Pass as `cursor` for the next page; null on the last page.' },
+          total: { type: 'integer', description: 'How many payments the filter set has in the period, every page included (#4959).' },
+        },
+        additionalProperties: false,
+      },
+      MerchantSalesFacets: {
+        type: 'object',
+        required: ['products', 'payers'],
+        properties: {
+          products: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['product_id', 'label'],
+              properties: { product_id: { type: 'string' }, label: { type: 'string' } },
+              additionalProperties: false,
+            },
+          },
+          payers: { type: 'array', items: { $ref: '#/components/schemas/MerchantSalesPayer' } },
         },
         additionalProperties: false,
       },

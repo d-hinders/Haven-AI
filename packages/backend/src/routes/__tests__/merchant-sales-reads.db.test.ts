@@ -18,11 +18,17 @@
  *   - keyset paging is stable and complete, including on equal block times;
  *   - every read is scoped to the caller's user and merchant account;
  *   - services off, or no merchant account, reads as the empty state;
- *   - a Sales key reaches none of the four routes, and a device-login token
+ *   - a Sales key reaches none of the five routes, and a device-login token
  *     cannot clear a record;
  *   - clearing a record leaves the payment, and a new record is accepted;
  *   - every read carries today's USDC rate for the page to convert with
- *     (#4963): a rate, one null currency, a failed read, and Sales off.
+ *     (#4963): a rate, one null currency, a failed read, and Sales off;
+ *   - the filters and the search (#4959): the summary is computed over the
+ *     same filtered relation as the list (each filter alone, two combined, the
+ *     search), a payment from several payers matches any of its payers, a
+ *     malformed filter is the plugin's 400, the search never matches another
+ *     Haven user's name, `last_paid_at` is the payer's newest payment, the
+ *     facets name every product and payer, and `total` counts the filter set.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
@@ -402,6 +408,239 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
     })
   })
 
+  describe('filters and search (#4959)', () => {
+    type Row = { tx_hash: string; kind: string; amount_raw: string; held_by: string; block_time: string }
+
+    /**
+     * The summary and the list for one filter set, and every agreement the
+     * summary promises checked against the list's rows. Returns both.
+     */
+    async function agree(userId: string, filter: string) {
+      const summaryRes = await get(userId, `/merchant-sales/summary?${PERIOD}${filter}`)
+      expect(summaryRes.statusCode, summaryRes.body).toBe(200)
+      const summary = summaryRes.json()
+      const listRes = await get(userId, `/merchant-sales/payments?${PERIOD}&limit=200${filter}`)
+      expect(listRes.statusCode, listRes.body).toBe(200)
+      const list = listRes.json()
+      const rows = list.payments as Row[]
+      const acct = rows.filter((r) => r.held_by === 'account')
+      const sum = (rs: Row[]) => rs.reduce((n, r) => n + BigInt(r.amount_raw), 0n)
+
+      expect(list.total).toBe(rows.length)
+      expect(list.next_cursor).toBeNull()
+      expect(sum(acct.filter((r) => r.kind !== 'own_move'))).toBe(BigInt(summary.revenue_raw))
+      expect(acct.filter((r) => r.kind === 'sale')).toHaveLength(summary.sales)
+      expect(acct.filter((r) => r.kind === 'no_product')).toHaveLength(summary.without_product.count)
+      expect(sum(acct.filter((r) => r.kind === 'no_product'))).toBe(BigInt(summary.without_product.amount_raw))
+      expect(acct.filter((r) => r.kind === 'own_move')).toHaveLength(summary.own_moves.count)
+      const stripe = rows.filter((r) => r.held_by === 'stripe' && r.kind !== 'own_move')
+      expect(summary.received_in_stripe).toEqual({ count: stripe.length, amount_raw: sum(stripe).toString() })
+
+      const productSum = (summary.by_product as Array<{ amount_raw: string }>).reduce((n, p) => n + BigInt(p.amount_raw), 0n)
+      expect(productSum + BigInt(summary.by_product_other.amount_raw) + BigInt(summary.without_product.amount_raw))
+        .toBe(BigInt(summary.revenue_raw))
+      const payerSum = (summary.by_payer as Array<{ amount_raw: string }>).reduce((n, p) => n + BigInt(p.amount_raw), 0n)
+      expect(payerSum + BigInt(summary.by_payer_other.amount_raw) + BigInt(summary.unattributed.amount_raw))
+        .toBe(BigInt(summary.revenue_raw))
+      for (const d of summary.by_day as Array<{
+        day: string; revenue_raw: string; without_product_raw: string; other_products_raw: string
+        by_product: Array<{ amount_raw: string }>
+      }>) {
+        const parts = d.by_product.reduce((n, p) => n + BigInt(p.amount_raw), 0n) +
+          BigInt(d.other_products_raw) + BigInt(d.without_product_raw)
+        expect(parts, d.day).toBe(BigInt(d.revenue_raw))
+        const dayRows = acct.filter((r) => r.kind !== 'own_move' && r.block_time.slice(0, 10) === d.day)
+        expect(sum(dayRows), d.day).toBe(BigInt(d.revenue_raw))
+      }
+      return { summary, rows }
+    }
+
+    /** The agreement fixture, plus a Stripe-held sale of P1 from wallet4 with receipt "STR-77". */
+    async function seedFilterFixture() {
+      const f = await seedAgreementFixture()
+      await insertMerchantSale({
+        accountId: f.m.accountId,
+        userId: f.m.userId,
+        chainId: CHAIN,
+        txHash: hash(0x8a),
+        recordVersion: 1,
+        productId: 'P1',
+        productName: 'Product one',
+        merchantReference: 'ref-stripe',
+        receiptNumber: 'STR-77',
+        vatTreatment: null,
+        amountRaw: '70000',
+        tokenAddress: USDC,
+        payerAddress: f.wallet4,
+        severalPayers: false,
+        senderIsOwnAddress: false,
+        blockNumber: 100,
+        blockTime: new Date('2026-11-20T10:00:00Z'),
+        heldBy: 'stripe',
+        receivingAddress: addr(),
+      })
+      return f
+    }
+
+    const txs = (rows: Row[]) => rows.map((r) => r.tx_hash).sort()
+
+    it('each filter alone, two combined and the search: the summary is cut from the same rows as the list', async () => {
+      const { m, contact, wallet4 } = await seedFilterFixture()
+
+      // no filter: everything, the Stripe-held sale included and apart.
+      const all = await agree(m.userId, '')
+      expect(all.rows).toHaveLength(10)
+      expect(all.summary.received_in_stripe).toEqual({ count: 1, amount_raw: '70000' })
+
+      // kind alone, repeated.
+      const kinds = await agree(m.userId, '&kind=no_product&kind=own_move')
+      expect(new Set(kinds.rows.map((r) => r.kind))).toEqual(new Set(['no_product', 'own_move']))
+      expect(kinds.rows).toHaveLength(6)
+      expect(kinds.summary.sales).toBe(0)
+      expect(kinds.summary.by_product).toEqual([])
+
+      // product alone: P1's sales only, the Stripe-held one too.
+      const p1 = await agree(m.userId, '&product_id=P1')
+      expect(txs(p1.rows)).toEqual([hash(0xa), hash(0x8a)].sort())
+      expect(p1.summary.revenue_raw).toBe('1000000')
+      expect(p1.summary.received_in_stripe).toEqual({ count: 1, amount_raw: '70000' })
+      // a product id on an own move (G's P9) is not a sale and never matches.
+      expect((await agree(m.userId, '&product_id=P9')).rows).toEqual([])
+
+      // payer alone: the contact's three payments.
+      const byContact = await agree(m.userId, `&payer=${contact.toUpperCase().replace('0X', '0x')}`)
+      expect(txs(byContact.rows)).toEqual([hash(0xa), hash(0xc), hash(0x1)].sort())
+      expect(byContact.summary.revenue_raw).toBe('1550000')
+
+      // two combined: wallet4's payments without a product (D and the last-second one, not the Stripe sale).
+      const combined = await agree(m.userId, `&payer=${wallet4}&kind=no_product`)
+      expect(txs(combined.rows)).toEqual([hash(0xd), hash(0x6)].sort())
+      expect(combined.summary.revenue_raw).toBe('210000')
+      expect(combined.summary.received_in_stripe).toEqual({ count: 0, amount_raw: '0' })
+
+      // the search, by the contact's name, case-folded.
+      const alice = await agree(m.userId, '&q=aLiC')
+      expect(txs(alice.rows)).toEqual(txs(byContact.rows))
+      // by product label
+      expect(txs((await agree(m.userId, '&q=product%20two')).rows)).toEqual([hash(0xb)])
+      // by receipt number, substring, case-folded
+      expect(txs((await agree(m.userId, '&q=str-7')).rows)).toEqual([hash(0x8a)])
+      // by an own account's name: F, the own move from "Main"
+      expect(txs((await agree(m.userId, '&q=main')).rows)).toEqual([hash(0xf)])
+      // the merchant's reference is not searched
+      expect((await agree(m.userId, '&q=ref-stripe')).rows).toEqual([])
+      // LIKE wildcards in the term are literal: `__` and `%%` match no receipt
+      // ("R-1", "STR-77"), where unescaped they would match every one.
+      expect((await agree(m.userId, '&q=__')).rows).toEqual([])
+      expect((await agree(m.userId, '&q=%25%25')).rows).toEqual([])
+      expect(txs((await agree(m.userId, '&q=r-_')).rows)).toEqual([])
+      // search and a filter combined
+      expect(txs((await agree(m.userId, '&q=alice&kind=no_product')).rows)).toEqual([hash(0xc)])
+    })
+
+    it('a payment from several payers matches any of its payers, and stays unattributed by payer', async () => {
+      const { m } = await seedFilterFixture()
+      const legs = await db.query<{ payer_address: string }>(
+        `SELECT LOWER(payer_address) AS payer_address FROM inbound_transfers WHERE LOWER(tx_hash) = $1 ORDER BY log_index`,
+        [hash(0xe)],
+      )
+      const [wallet5, wallet6] = legs.rows.map((r) => r.payer_address)
+      for (const payer of [wallet5, wallet6]) {
+        const { summary, rows } = await agree(m.userId, `&payer=${payer}`)
+        expect(txs(rows)).toEqual([hash(0xe)])
+        expect(summary.by_payer).toEqual([])
+        expect(summary.unattributed).toEqual({ payments: 1, amount_raw: '100000' })
+      }
+      // the search by an address prefix matches a leg too
+      expect(txs((await agree(m.userId, `&q=${wallet6.slice(0, 12)}`)).rows)).toEqual([hash(0xe)])
+      // the shortest prefix is `0x` and four hex digits; three are not an address
+      expect(txs((await agree(m.userId, `&q=${wallet6.slice(0, 6)}`)).rows)).toContain(hash(0xe))
+      expect((await agree(m.userId, `&q=${wallet6.slice(0, 5)}`)).rows).toEqual([])
+    })
+
+    it("never matches another Haven user's account or agent by name; that wallet is found by its address only", async () => {
+      const m = await seedMerchant()
+      const other = await seedUser()
+      const strangersAgent = addr()
+      const strangersAccount = addr()
+      await db.query(`INSERT INTO agents (user_id, name, delegate_address, status) VALUES ($1, 'Zebra agent', $2, 'active')`, [other, strangersAgent])
+      await db.query(
+        `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, name)
+         VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', true, 'Zebra account')`,
+        [other, strangersAccount, CHAIN],
+      )
+      // both of the other user's wallets pay this merchant
+      await seedLeg(m, { tx: hash(0x8b), payer: strangersAgent, amount: '100', time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x8c), payer: strangersAccount, amount: '200', time: '2026-11-10T11:00:00Z' })
+      expect(txs((await agree(m.userId, '')).rows)).toEqual([hash(0x8b), hash(0x8c)].sort())
+      for (const term of ['zebra', 'zebra%20agent', 'zebra%20account']) {
+        const { summary, rows } = await agree(m.userId, `&q=${term}`)
+        expect(rows, term).toEqual([])
+        expect(summary.revenue_raw, term).toBe('0')
+      }
+      for (const [wallet, tx] of [[strangersAgent, hash(0x8b)], [strangersAccount, hash(0x8c)]] as const) {
+        expect(txs((await agree(m.userId, `&q=${wallet.slice(0, 10)}`)).rows)).toEqual([tx])
+        expect(txs((await agree(m.userId, `&payer=${wallet}`)).rows)).toEqual([tx])
+      }
+    })
+
+    it('a malformed filter is the plugin\'s 400 invalid_request; an unknown parameter is ignored', async () => {
+      const m = await seedMerchant()
+      for (const bad of ['kind=refund', 'payer=0x1234', 'q=a', 'q=%20%20%20', 'product_id=', `q=${'x'.repeat(101)}`]) {
+        for (const path of ['summary', 'payments']) {
+          const res = await get(m.userId, `/merchant-sales/${path}?${PERIOD}&${bad}`)
+          expect(res.statusCode, `${path} ${bad}`).toBe(400)
+          expect(res.json().error_code, `${path} ${bad}`).toBe('invalid_request')
+        }
+      }
+      expect((await get(m.userId, `/merchant-sales/payments?${PERIOD}&colour=blue`)).statusCode).toBe(200)
+    })
+
+    it("last_paid_at is the newest of the payer's revenue payments in the period", async () => {
+      const { m, contact, wallet4 } = await seedFilterFixture()
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      const lastOf = (a: string) =>
+        (summary.by_payer as Array<{ payer: { address: string }; last_paid_at: string }>)
+          .find((p) => p.payer.address === a.toLowerCase())?.last_paid_at
+      expect(lastOf(contact)).toBe('2026-11-13T10:00:00.000Z') // I, not A or C
+      // wallet4's newest account payment is the last second of the period; its
+      // Stripe-held sale (11-20) is shown apart and is not in by_payer.
+      expect(lastOf(wallet4)).toBe('2026-11-30T23:59:59.000Z')
+      // the out-of-period payment of 12-01 is not it either
+      const november = (await get(m.userId, '/merchant-sales/summary?from=2026-11-01&to=2026-11-29')).json()
+      expect(
+        (november.by_payer as Array<{ payer: { address: string }; last_paid_at: string }>)
+          .find((p) => p.payer.address === wallet4.toLowerCase())?.last_paid_at,
+      ).toBe('2026-11-12T10:00:00.000Z')
+    })
+
+    it('the facets name every product and payer of the period, unfiltered, and total counts the filter set', async () => {
+      const { m, contact, wallet4, otherAccount, oldDelegate } = await seedFilterFixture()
+      const legs = await db.query<{ payer_address: string }>(
+        `SELECT DISTINCT LOWER(payer_address) AS payer_address FROM inbound_transfers WHERE LOWER(tx_hash) IN ($1, $2)`,
+        [hash(0xb), hash(0xe)],
+      )
+      const res = await get(m.userId, `/merchant-sales/facets?${PERIOD}&kind=sale`)
+      expect(res.statusCode).toBe(200)
+      const facets = res.json()
+      expect(facets.products).toEqual([
+        { product_id: 'P1', label: 'Product one' },
+        { product_id: 'P2', label: 'Product two' },
+        { product_id: 'P3', label: 'Product three' },
+      ])
+      const payers = (facets.payers as Array<{ address: string; kind: string; name: string | null }>)
+      expect(payers.map((p) => p.address).sort()).toEqual(
+        [contact, wallet4, otherAccount, oldDelegate, ...legs.rows.map((r) => r.payer_address)].map((a) => a.toLowerCase()).sort(),
+      )
+      expect(payers.find((p) => p.address === contact.toLowerCase())).toEqual({ kind: 'contact', name: 'Alice', address: contact.toLowerCase() })
+
+      const page = (await get(m.userId, `/merchant-sales/payments?${PERIOD}&limit=2&kind=no_product`)).json()
+      expect(page.payments).toHaveLength(2)
+      expect(page.next_cursor).not.toBeNull()
+      expect(page.total).toBe(4)
+    })
+  })
+
   describe('the product label', () => {
     it('is the catalogue name, else the record name, else the product id', async () => {
       const m = await seedMerchant()
@@ -411,11 +650,18 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
                 ($1, 'catalogue-no-name', NULL, '1', 'eip155:84532')`,
         [m.accountId],
       )
+      // #4959: a product no longer offered keeps its catalogue name on past sales.
+      await db.query(
+        `INSERT INTO merchant_products (merchant_account_id, product_id, name, price_atomic, network, offered)
+         VALUES ($1, 'retired', 'Retired name', '1', 'eip155:84532', false)`,
+        [m.accountId],
+      )
       const sales: Array<[string, string, string | null, string]> = [
         [hash(0x91), 'in-catalogue', 'Record name', '2026-11-10T10:00:00Z'],
         [hash(0x92), 'only-in-record', 'Record name', '2026-11-10T11:00:00Z'],
         [hash(0x93), 'nowhere', null, '2026-11-10T12:00:00Z'],
         [hash(0x94), 'catalogue-no-name', 'Record name', '2026-11-10T13:00:00Z'],
+        [hash(0x95), 'retired', 'Old record name', '2026-11-10T14:00:00Z'],
       ]
       for (const [tx, productId, name, time] of sales) {
         await seedLeg(m, { tx, payer: addr(), amount: '100', time })
@@ -430,6 +676,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(labelOf('only-in-record')).toBe('Record name')
       expect(labelOf('nowhere')).toBe('nowhere')
       expect(labelOf('catalogue-no-name')).toBe('Record name')
+      expect(labelOf('retired')).toBe('Retired name')
 
       const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
       const byLabel = Object.fromEntries(
@@ -579,6 +826,19 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(summary.by_payer[99].amount_raw).toBe('2000')
       const payerSum = summary.by_payer.reduce((n: bigint, p: { amount_raw: string }) => n + BigInt(p.amount_raw), 0n)
       expect(payerSum + BigInt(summary.by_payer_other.amount_raw) + BigInt(summary.unattributed.amount_raw)).toBe(revenue)
+
+      // #4959: the day's sales by product follow the same top 100 and fold the rest.
+      expect(summary.by_day).toHaveLength(1)
+      const [day] = summary.by_day
+      expect(day.by_product).toHaveLength(100)
+      expect(day.by_product.map((p: { product_id: string }) => p.product_id)).toEqual(productIds)
+      expect(day.other_products_raw).toBe('1000')
+      expect(day.without_product_raw).toBe('0')
+
+      // #4959: the facets are not capped at 100.
+      const facets = (await get(m.userId, `/merchant-sales/facets?${PERIOD}`)).json()
+      expect(facets.products).toHaveLength(101)
+      expect(facets.payers).toHaveLength(101)
     })
   })
 
@@ -714,7 +974,8 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       for (const userId of [off.userId, none]) {
         const summary = (await get(userId, `/merchant-sales/summary?${PERIOD}`)).json()
         expect(summary).toMatchObject({ revenue_raw: '0', sales: 0, by_product: [], by_payer: [], by_day: [], usdc_rates: null })
-        expect((await get(userId, `/merchant-sales/payments?${PERIOD}`)).json()).toEqual({ payments: [], next_cursor: null, usdc_rates: null })
+        expect((await get(userId, `/merchant-sales/payments?${PERIOD}`)).json()).toEqual({ payments: [], next_cursor: null, total: 0, usdc_rates: null })
+        expect((await get(userId, `/merchant-sales/facets?${PERIOD}`)).json()).toEqual({ products: [], payers: [] })
         expect((await get(userId, `/merchant-sales/payments/${hash(0x720)}`)).statusCode).toBe(404)
         const res = await clear(userId, hash(0x720))
         expect(res.statusCode).toBe(409)
@@ -781,7 +1042,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
   })
 
   describe('who may call them', () => {
-    it('a Sales key reaches none of the four routes', async () => {
+    it('a Sales key reaches none of the five routes', async () => {
       const m = await seedMerchant()
       await seedLeg(m, { tx: hash(0x730), payer: addr(), amount: '5', time: '2026-11-10T10:00:00Z' })
       await seedSale(m, { tx: hash(0x730), productId: 'P', amount: '5', payer: addr(), time: '2026-11-10T10:00:00Z' })
@@ -793,6 +1054,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       const calls: Array<[string, string]> = [
         ['GET', `/merchant-sales/summary?${PERIOD}`],
         ['GET', `/merchant-sales/payments?${PERIOD}`],
+        ['GET', `/merchant-sales/facets?${PERIOD}`],
         ['GET', `/merchant-sales/payments/${hash(0x730)}`],
         ['DELETE', `/merchant-sales/payments/${hash(0x730)}/record`],
       ]

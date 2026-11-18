@@ -7,7 +7,9 @@
  * moves beside them), seeded with ONE `INSERT ... SELECT generate_series` per
  * table; the summary read over the whole span is timed through the route.
  *
- * The stated times are `SUMMARY_ALL_BUDGET_MS` and `SUMMARY_MONTH_BUDGET_MS`.
+ * The stated times are `SUMMARY_ALL_BUDGET_MS` and `SUMMARY_MONTH_BUDGET_MS`,
+ * and for the filters (#4959) `FILTERED_SUMMARY_BUDGET_MS` and
+ * `FILTERED_LIST_BUDGET_MS`.
  * The figures measured on the author's laptop are in the PR report; each budget
  * is deliberately about 2.5 to 6 times the measurement, so a slow CI runner does
  * not flake it. The test also seeds 200,000 transfers of OTHER accounts, which
@@ -42,6 +44,17 @@ const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
  */
 const SUMMARY_ALL_BUDGET_MS = 3000
 const SUMMARY_MONTH_BUDGET_MS = 1000
+/**
+ * #4959: the whole history filtered by one product and searched by a payer
+ * address prefix (the summary), and the first page of one payer's payments
+ * with its `total` (the list). Measured on the #4959 author's machine while it
+ * was loaded (the same runs put the UNFILTERED whole-history summary at about
+ * 5 s on `dev` itself, against its own 3 s budget above): about 3.1 to 4.1 s and
+ * 3.0 to 4.5 s. Each budget is about 2.5 times the slowest of those, the rule
+ * this file states.
+ */
+const FILTERED_SUMMARY_BUDGET_MS = 10000
+const FILTERED_LIST_BUDGET_MS = 11000
 
 const volume = process.env.HAVEN_VOLUME_TESTS === '1'
 const suite = volume ? describeDb : describeDb.skip
@@ -150,11 +163,38 @@ suite('the summary at 100,000 sales (#4897)', () => {
     const pageMs = Math.round(performance.now() - pageStart)
     expect(page.statusCode).toBe(200)
 
+    // #4959: a filtered summary (one product, and a search by address prefix)
+    // and a filtered list page (one payer, with its total), whole history.
+    const filteredStart = performance.now()
+    const filtered = await app.inject({
+      method: 'GET',
+      url: '/merchant-sales/summary?from=2026-01-01&to=2026-12-31&product_id=product-7&q=0x00000000',
+      headers,
+    })
+    const filteredMs = Math.round(performance.now() - filteredStart)
+    expect(filtered.statusCode, filtered.body).toBe(200)
+    // product-7 is block_number % 40 = 7: 2,500 of the 100,000 sales.
+    expect(filtered.json().sales).toBe(2500)
+    const payer = '0x' + (123).toString(16).padStart(40, '0')
+    const listStart = performance.now()
+    const payerPage = await app.inject({
+      method: 'GET',
+      url: `/merchant-sales/payments?from=2026-01-01&to=2026-12-31&limit=50&payer=${payer}`,
+      headers,
+    })
+    const listMs = Math.round(performance.now() - listStart)
+    expect(payerPage.statusCode, payerPage.body).toBe(200)
+    // 130,000 transfers over 5,000 payers: 26 each.
+    expect(payerPage.json().total).toBe(26)
+    expect(payerPage.json().payments).toHaveLength(26)
+
     // eslint-disable-next-line no-console
-    console.log(`[volume] seeded in ${seedMs} ms; whole-history summary reads (ms): ${timed.join(', ')}; one-month summary: ${monthMs} ms; first list page (whole history): ${pageMs} ms`)
+    console.log(`[volume] seeded in ${seedMs} ms; whole-history summary reads (ms): ${timed.join(', ')}; one-month summary: ${monthMs} ms; first list page (whole history): ${pageMs} ms; filtered summary: ${filteredMs} ms; one payer's list page with total: ${listMs} ms`)
     expect(body?.sales).toBe(100000)
     // the budget is on the slowest of the three reads, the first included
     expect(Math.max(...timed)).toBeLessThan(SUMMARY_ALL_BUDGET_MS)
     expect(monthMs).toBeLessThan(SUMMARY_MONTH_BUDGET_MS)
+    expect(filteredMs).toBeLessThan(FILTERED_SUMMARY_BUDGET_MS)
+    expect(listMs).toBeLessThan(FILTERED_LIST_BUDGET_MS)
   }, 120_000)
 })

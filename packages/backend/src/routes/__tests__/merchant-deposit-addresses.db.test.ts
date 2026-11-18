@@ -701,7 +701,17 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       expect(summary.by_product).toEqual([expect.objectContaining({ product_id: 'P1', sales: 1, amount_raw: '1000000' })])
       expect(summary.by_payer).toHaveLength(1)
       expect(summary.by_payer[0]).toMatchObject({ payments: 1, amount_raw: '1000000' })
-      expect(summary.by_day).toEqual([{ day: '2026-11-10', payments: 1, sales: 1, revenue_raw: '1000000' }])
+      // #4959: the day's split by product counts the account-held P1 only; the
+      // Stripe-held P2 sales of 11-11 are in no day at all.
+      expect(summary.by_day).toEqual([{
+        day: '2026-11-10',
+        payments: 1,
+        sales: 1,
+        revenue_raw: '1000000',
+        without_product_raw: '0',
+        by_product: [{ product_id: 'P1', amount_raw: '1000000' }],
+        other_products_raw: '0',
+      }])
     })
 
     it('an account with no Stripe-held sales has exactly the figures it had, and a zero Stripe figure', async () => {

@@ -60,9 +60,9 @@ const SALES_URL_SCHEMA: ListUrlSchema = {
   // #4960: product and payer options load with the facets read, so they list
   // no `values` (a value read before the options arrive must survive).
   facets: [
-    { id: SALES_FACET_KEYS.product },
-    { id: SALES_FACET_KEYS.payer },
-    { id: SALES_FACET_KEYS.kind, values: SALES_KINDS },
+    { id: SALES_FACET_KEYS.product, selection: 'multi' },
+    { id: SALES_FACET_KEYS.payer, selection: 'multi' },
+    { id: SALES_FACET_KEYS.kind, selection: 'multi', values: SALES_KINDS },
   ],
 }
 

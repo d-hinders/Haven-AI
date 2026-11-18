@@ -137,16 +137,19 @@ export function salesFacets(facets: SalesFacets | null): ListFacet[] {
     {
       id: SALES_FACET_KEYS.product,
       label: 'Product',
+      selection: 'multi',
       options: (facets?.products ?? []).map((p) => ({ value: p.product_id, label: p.label })),
     },
     {
       id: SALES_FACET_KEYS.payer,
       label: 'Payer',
+      selection: 'multi',
       options: (facets?.payers ?? []).map((payer) => ({ value: payer.address.toLowerCase(), label: payerSubline(payer, false) })),
     },
     {
       id: SALES_FACET_KEYS.kind,
       label: 'Recorded',
+      selection: 'multi',
       values: SALES_KINDS,
       options: SALES_KINDS.map((kind) => ({ value: kind, label: SALES_KIND_LABELS[kind] })),
     },

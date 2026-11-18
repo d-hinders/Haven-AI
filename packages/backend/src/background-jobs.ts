@@ -18,11 +18,15 @@
  * hoisted; no overlap guard is added to these eleven; the outbound job still
  * iterates per chain inside one tick.
  *
- * The twelfth job — the accounting retry sweep — is NOT a row. It registers
+ * The thirteenth job — the accounting retry sweep — is NOT a row. It registers
  * nothing when `config.accountingEnabled` is off, its interval comes from
  * config, it has an in-process overlap guard, and its leader function is
  * injectable, so it stays self-registering in
  * `modules/accounting/retry-sweep.ts` and `startBackgroundJobs` calls it.
+ *
+ * #4903 (the merchant inbound index) and #4899 (the merchant catalogue
+ * refresh) each added a ROW, so the table is twelve rows and the retry sweep
+ * is the thirteenth job.
  */
 import { config } from './config.js'
 import { deployableChainIds } from './domain/chains.js'
@@ -37,6 +41,8 @@ import {
   createCatalogIngestMonitor,
   deliverCatalogAlerts,
   ingestDiscoveredCatalog,
+  MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS,
+  refreshAllMerchantCatalogues,
   refreshCatalog,
   type CatalogIngestMonitor,
   type QueryableLike,
@@ -129,7 +135,7 @@ export interface BackgroundJobsDeps {
 }
 
 /**
- * Build the eleven rows. A function rather than a module-level constant because
+ * Build the twelve rows. A function rather than a module-level constant because
  * the catalog-ingest monitor must be built ONCE per start and held across
  * every tick (#4407) — a module-level table would build it at import time,
  * before the process has a logger or a pool.
@@ -211,6 +217,23 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
         // log-only mode — the warn above is the whole alert and the
         // episode counts as handled.
         await deliverCatalogAlerts(report.alerts, (text) => sendCatalogOpsAlert(log, text))
+      },
+    },
+    {
+      name: 'merchant catalogue refresh',
+      intervalMs: MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS,
+      lockKey: LEADER_LOCK_KEYS.merchantCatalogueRefresh,
+      failureMessage: 'Merchant catalogue refresh failed',
+      // #4899: read every configured kit deployment's discovery document and
+      // keep its product list. The approved mockup (#4894) pins 15 minutes for
+      // an unreachable kit; the same tick is the schedule for a reachable one,
+      // so a recovered kit is picked up on the tick that retries a broken one.
+      // Leader-locked: two replicas would read the same merchant's deployment
+      // at once. One source's failure never stops the pass — each read is
+      // caught and counted, and the next tick retries it.
+      run: async () => {
+        const report = await refreshAllMerchantCatalogues()
+        if (report.read > 0) log.info(report, 'Merchant catalogues refreshed')
       },
     },
     {
@@ -493,7 +516,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the eleven table rows, then the
+ * The one entry point `index.ts` calls: start the twelve table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

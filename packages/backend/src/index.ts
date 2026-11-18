@@ -98,6 +98,7 @@ import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
 import merchantServiceRoutes from './routes/merchant-services.js'
 import merchantKeyRoutes from './routes/merchant-keys.js'
+import merchantCatalogueRoutes from './routes/merchant-catalogue.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
@@ -315,6 +316,13 @@ installRequestValidation(app, {
     // account to bind the key to is refused by the schema, not by a handler
     // check.
     'routes/merchant-keys.ts',
+    // #4899: the merchant catalogue's routes — save the kit deployment's
+    // address, read the catalogue, refresh it. A BRAND NEW module, born
+    // ENFORCED on the same rule. It is money-path (it decides what labels the
+    // account's sales and stores data a merchant supplies), and its save body
+    // is closed (`additionalProperties: false`) so a body carrying anything
+    // but the address is refused by the schema, not by a handler check.
+    'routes/merchant-catalogue.ts',
   ],
 })
 
@@ -612,6 +620,10 @@ await app.register(merchantServiceRoutes, { prefix: '/merchant-services' })
 // list by prefix, revoke. The key itself authenticates only the merchant
 // routes (#4897), through `middleware/merchantAuth.ts`.
 await app.register(merchantKeyRoutes, { prefix: '/merchant-keys' })
+// #4899: the merchant catalogue — the kit deployment's address, the product
+// list read from its discovery document, and the refresh. The list lives in
+// its own table, never `merchant_catalog`; the read only labels.
+await app.register(merchantCatalogueRoutes, { prefix: '/merchant-catalogue' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns

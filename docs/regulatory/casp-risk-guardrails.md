@@ -82,6 +82,9 @@ covers:
   - packages/backend/src/modules/accounts/create-additional.ts
   - packages/backend/src/domain/merchant-services.ts
   - packages/backend/src/domain/merchant-keys.ts
+  - packages/backend/src/domain/merchant-catalogue.ts
+  - packages/backend/src/modules/catalog/merchant-products.ts
+  - packages/backend/src/routes/merchant-catalogue.ts
   - packages/backend/src/routes/agent-delegations.ts
   - packages/backend/src/routes/agent-rekey.ts
   - packages/backend/src/modules/agents/rekey-*.ts
@@ -107,7 +110,7 @@ covers:
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-11-17"
+last-verified: "2026-11-18"
 ---
 
 # Haven CASP / MiCA Risk Minimisation Guardrails

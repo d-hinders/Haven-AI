@@ -21,7 +21,10 @@ covers:
   - packages/backend/src/modules/transactions/merchant-index.ts
   - packages/backend/src/modules/transactions/off-ramp.ts
   - packages/backend/src/infra/repositories/inbound-transfers.ts
-last-verified: "2026-11-17"
+  - packages/backend/src/routes/merchant-catalogue.ts
+  - packages/backend/src/modules/catalog/merchant-products.ts
+  - packages/backend/src/infra/repositories/merchant-catalogue.ts
+last-verified: "2026-11-18"
 ---
 
 # Haven — Payment Execution Sequence
@@ -442,5 +445,52 @@ their OWN saved deposit address at an off-ramp venue (Safello, Coinbase):
 Haven never holds the settlement key, never off-ramps, and never settles for
 third parties — the position recorded with counsel in
 [docs/regulatory/casp-risk-guardrails.md](../regulatory/casp-risk-guardrails.md).
+
+### 4. The catalogue — what the account sells (#4899, epic #4885)
+
+A merchant that runs the kit (`docs/architecture/12-merchant-kit.md`) serves a
+public discovery document at `/.well-known/x402`. The owner gives Haven the
+address of that deployment for the merchant account, and Haven reads the
+document, keeps the product list, and uses it to name products on the account's
+sales.
+
+- **The address is the owner's, and it is checked before it is stored.**
+  `PUT /merchant-catalogue/deployment` runs the outbound guard's own pure policy
+  (`assertSafeUrl`: https only, default port, no embedded credentials, no IP
+  literal, no locally-bound name) and refuses with the guard's `reason`. The
+  address is stored as the deployment's ORIGIN — path, query and fragment are
+  dropped — and the read is always `<origin>/.well-known/x402`, because the
+  proxy serves the document at that path and nowhere else. The read itself is
+  `safeGetText` with `sameHostOnly`, so a host that resolves into
+  private or local space is refused at resolution time and a redirect that
+  leaves the host is refused before it is resolved — the guard follows
+  cross-host redirects by default, and a merchant must not be able to point
+  Haven's read at a document it does not serve.
+- **The list is its own table.** `merchant_products`, keyed
+  `(merchant_account_id, product_id)`, never `merchant_catalog`: that table's
+  `pay_to` fills the recipient of a merchant-locked budget and feeds the public
+  catalogue, and neither may be reachable from merchant-supplied data. The
+  document's `pay_to` is COMPARED against the account's own address and stored
+  as a label on `merchant_catalogue_sources`; it is never used as a payment
+  destination.
+- **A mismatch is not a catalogue.** A document whose `pay_to` or `network` is
+  not the merchant account's is recorded as a mismatch and its products are not
+  written, so a document that is not this account's deployment cannot label this
+  account's sales. An unreachable, refused or malformed document records the
+  outcome and leaves the last good list in place; `last_read_at` is what the
+  owner's screen shows as "last read".
+- **A removed product is kept.** A product that disappears from the document is
+  marked `offered = false` with `removed_at` set and stays in the table, so a
+  past sale still names it. The sales reads (#4897) name a product from the
+  catalogue when its product id is known there — offered or not — and otherwise
+  fall back to the name the sale record carried (`labelSaleProduct`).
+- **It refreshes on a schedule and on request.** A leader-locked background job
+  reads every configured deployment every 15 minutes (the approved mockup's
+  cadence for an unreachable kit, and the schedule for a reachable one);
+  `POST /merchant-catalogue/refresh` is the owner's "read it now".
+
+Nothing in this piece moves money: it stores a merchant-supplied address and a
+product list, and labels products. It changes no amount, creates no sale, signs
+nothing and calls no facilitator.
 
 Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

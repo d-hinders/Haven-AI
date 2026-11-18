@@ -114,6 +114,15 @@ export const LEADER_LOCK_KEYS = {
    * row identity is idempotent and the cursor only moves forward).
    */
   merchantInboundIndex: 811013,
+  /**
+   * Merchant catalogue refresh (#4899, epic #4885) — reads every configured
+   * kit deployment's discovery document and keeps its product list. Leader-gated
+   * because the tick is otherwise replicated: two replicas would read the same
+   * merchant's deployment at once and race the product upserts. Correctness does
+   * not depend on it (the writes are upserts in one transaction), but the
+   * merchant's access log would show Haven reading twice for no reason.
+   */
+  merchantCatalogueRefresh: 811014,
 } as const
 
 /**

@@ -128,6 +128,7 @@ import * as merchantServices from './126_merchant_services.js'
 import * as merchantKeys from './127_merchant_keys.js'
 import * as inboundTransferIdentity from './128_inbound_transfer_identity.js'
 import * as ownerCompanyDetailsCheckoutFields from './129_owner_company_details_checkout_fields.js'
+import * as merchantCatalogue from './130_merchant_catalogue.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -315,4 +316,7 @@ export const migrations: Migration[] = [
   merchantKeys,
   inboundTransferIdentity,
   ownerCompanyDetailsCheckoutFields,
+  // #4899: takes the next free number after 128 (#4903) and 129 (#4870),
+  // both on dev now. Kept in sorted order.
+  merchantCatalogue,
 ]

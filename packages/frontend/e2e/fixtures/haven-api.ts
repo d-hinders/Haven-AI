@@ -1216,6 +1216,197 @@ export const merchantServicesOn = {
   },
 }
 
+/**
+ * Sales (#4900, epic #4885): the reads the Sales page makes — the summary, the
+ * payments list and one payment's detail (`routes/merchant-sales-reads.ts`,
+ * #4897), the catalogue (`routes/merchant-catalogue.ts`, #4899) and the keys
+ * (`routes/merchant-keys.ts`, #4896).
+ *
+ * The DEFAULT in `mockHavenApi` is the empty answer the backend gives an
+ * account with nothing to show (`emptySummary()`, an empty page, no kit
+ * address, no keys), so a spec that renders the shell with Sales off, or on
+ * with nothing paid, sees what a real deployment serves. `serveSales` is the
+ * populated answer: it turns Sales ON and serves one period of payments whose
+ * figures agree with each other, so a baseline photographs a state the product
+ * can produce (#2120).
+ *
+ * The data is one story. Revenue $2.14 = 2 chat sales ($0.84) + 1 embeddings
+ * sale ($0.30) + 1 payment with no product ($1.00); a $0.50 move from the
+ * owner's own agent is listed and is in no figure. All dates are absolute and
+ * sit inside the 30 days before `SALES_FROZEN_NOW`, which a spec freezes the
+ * page clock to, so the period's chart does not move with the wall clock.
+ */
+export const SALES_FROZEN_NOW = new Date('2026-11-17T12:00:00.000Z')
+
+const salesContact = { kind: 'contact', name: 'Lumen Research', address: '0x41b2c09e7a55d81f3b2e6c40a9d17e5f8c0b7d93' }
+const salesOwn = { kind: 'own', name: 'Atlas', address: '0x9e10aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4c2a' }
+const salesWallet = { kind: 'wallet', name: null as string | null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' }
+
+export const salesEmptySummary = {
+  revenue_raw: '0',
+  sales: 0,
+  average_sale_raw: '0',
+  without_product: { count: 0, amount_raw: '0' },
+  own_moves: { count: 0, amount_raw: '0' },
+  by_product: [] as unknown[],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [] as unknown[],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [] as unknown[],
+}
+
+export const salesSummary = {
+  revenue_raw: '2140000',
+  sales: 3,
+  average_sale_raw: '380000',
+  without_product: { count: 1, amount_raw: '1000000' },
+  own_moves: { count: 1, amount_raw: '500000' },
+  by_product: [
+    { product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' },
+    { product_id: 'embed', label: 'Embeddings', sales: 1, amount_raw: '300000' },
+  ],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [
+    { payer: salesContact, payments: 2, amount_raw: '1140000' },
+    { payer: salesWallet, payments: 2, amount_raw: '1000000' },
+  ],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000' },
+  ],
+}
+
+/** The period before: a smaller revenue, so the Revenue tile carries a comparison. */
+export const salesPreviousSummary = { ...salesSummary, revenue_raw: '1070000', without_product: { count: 0, amount_raw: '0' }, own_moves: { count: 0, amount_raw: '0' } }
+
+const salesHash = (byte: string) => `0x${byte.repeat(32)}`
+
+export const salesPayments = [
+  { tx_hash: salesHash('a1'), block_time: '2026-11-16T14:05:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: salesContact, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a2'), block_time: '2026-11-16T13:48:00.000Z', kind: 'no_product', amount_raw: '1000000', product_id: null, product_label: null, payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a3'), block_time: '2026-11-14T10:00:00.000Z', kind: 'own_move', amount_raw: '500000', product_id: null, product_label: null, payer: salesOwn, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a4'), block_time: '2026-11-14T09:30:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: salesContact, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a5'), block_time: '2026-11-12T09:00:00.000Z', kind: 'sale', amount_raw: '300000', product_id: 'embed', product_label: 'Embeddings', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+]
+
+const salesProduct = (overrides: Record<string, unknown>) => ({
+  description: null,
+  route: null,
+  model: null,
+  output_token_cap: null,
+  network: `eip155:${testSafe.chain_id}`,
+  offered: true,
+  removed_at: null as string | null,
+  ...overrides,
+})
+
+/** No kit address saved: the state of every Sales account before step 3. */
+export const salesCatalogueNone = {
+  deployment_url: null as string | null,
+  last_read_at: null as string | null,
+  last_read_status: 'never',
+  last_read_detail: null as string | null,
+  mismatch: false,
+  mismatch_reason: null as string | null,
+  document_name: null as string | null,
+  document_operator_name: null as string | null,
+  document_network: null as string | null,
+  document_pay_to: null as string | null,
+  document_updated: null as string | null,
+  products: [] as unknown[],
+}
+
+export const salesCatalogueOk = {
+  ...salesCatalogueNone,
+  deployment_url: 'https://inference.example.com',
+  last_read_at: '2026-11-17T11:56:00.000Z',
+  last_read_status: 'ok',
+  document_name: 'Inference',
+  document_network: `eip155:${testSafe.chain_id}`,
+  document_pay_to: merchantServicesOn.merchant_account.account_address,
+  products: [
+    salesProduct({ product_id: 'chat', name: 'Chat completion', price_atomic: '18000' }),
+    salesProduct({ product_id: 'embed', name: 'Embeddings', price_atomic: '100' }),
+    salesProduct({ product_id: 'legacy', name: 'Legacy model', price_atomic: '1000000', offered: false, removed_at: '2026-11-01T00:00:00.000Z' }),
+  ] as unknown[],
+}
+
+export const salesCatalogueMismatch = {
+  ...salesCatalogueOk,
+  last_read_status: 'mismatch',
+  mismatch: true,
+  mismatch_reason: 'pay_to_differs',
+  document_network: 'eip155:84532',
+  document_pay_to: '0x12d9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae4ab',
+}
+
+export const salesCatalogueUnreachable = {
+  ...salesCatalogueOk,
+  last_read_at: '2026-11-17T10:00:00.000Z',
+  last_read_status: 'unreachable',
+}
+
+export const salesKeys = [
+  { id: 'key-1', key_prefix: 'sk_merchant_4f2a9c7e1b05', created_by: testUser.id, created_at: '2026-11-12T09:00:00.000Z', revoked_by: null as string | null, revoked_at: null as string | null, last_used_at: '2026-11-17T11:58:00.000Z' as string | null },
+]
+
+export type SalesScenario =
+  | 'overview'
+  | 'first-run'
+  | 'products-ok'
+  | 'products-mismatch'
+  | 'products-unreachable'
+  | 'products-none'
+
+/**
+ * Turn Sales ON and serve its reads for one scenario. Registered AFTER
+ * `mockHavenApi`, so it answers first (Playwright runs the latest route first)
+ * and everything it does not name falls through to the shell's fixtures.
+ */
+export async function serveSales(page: Page, scenario: SalesScenario) {
+  const catalogue =
+    scenario === 'products-ok' || scenario === 'overview'
+      ? salesCatalogueOk
+      : scenario === 'products-mismatch'
+        ? salesCatalogueMismatch
+        : scenario === 'products-unreachable'
+          ? salesCatalogueUnreachable
+          : salesCatalogueNone
+  const paid = scenario !== 'first-run'
+  await page.route(/\/api\/merchant-(services|sales|catalogue|keys)/, async (route) => {
+    const request = route.request()
+    if (request.method() !== 'GET') {
+      await route.fallback()
+      return
+    }
+    const url = new URL(request.url())
+    const path = url.pathname.replace(/^\/api/, '')
+    if (path === '/merchant-services') return fulfillJson(route, merchantServicesOn)
+    if (path === '/merchant-catalogue') return fulfillJson(route, catalogue)
+    if (path === '/merchant-keys') return fulfillJson(route, { keys: scenario === 'first-run' ? [] : salesKeys })
+    if (path === '/merchant-sales/summary') {
+      const previous = url.searchParams.get('to') === '2026-10-18'
+      return fulfillJson(route, !paid ? salesEmptySummary : previous ? salesPreviousSummary : salesSummary)
+    }
+    if (path === '/merchant-sales/payments') {
+      // Whole history with `limit=1` is the page's "has it ever been paid" probe.
+      const rows = !paid ? [] : url.searchParams.has('from') ? salesPayments : salesPayments.slice(0, 1)
+      return fulfillJson(route, { payments: rows, next_cursor: null })
+    }
+    const detail = /^\/merchant-sales\/payments\/(0x[0-9a-f]+)$/.exec(path)
+    if (detail) {
+      const row = salesPayments.find((p) => p.tx_hash === detail[1])
+      if (!row) return fulfillJson(route, { error: 'No such payment on this account.', error_code: 'PAYMENT_NOT_FOUND' }, 404)
+      return fulfillJson(route, { ...row, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
+    }
+    await route.fallback()
+  })
+}
+
 type JsonValue = Record<string, unknown> | unknown[] | null
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
@@ -1805,6 +1996,26 @@ export async function mockHavenApi(page: Page) {
     // (#4900) stays hidden. A spec that needs Sales on overrides this route.
     if (method === 'GET' && path === '/merchant-services') {
       await fulfillJson(route, merchantServicesOff)
+      return
+    }
+
+    // #4900: the Sales reads. Off (the default), the backend answers the
+    // empty state — no payments, no kit address, no keys — and the shell never
+    // asks; a spec that renders Sales calls `serveSales`.
+    if (method === 'GET' && path === '/merchant-sales/summary') {
+      await fulfillJson(route, salesEmptySummary)
+      return
+    }
+    if (method === 'GET' && path === '/merchant-sales/payments') {
+      await fulfillJson(route, { payments: [], next_cursor: null })
+      return
+    }
+    if (method === 'GET' && path === '/merchant-catalogue') {
+      await fulfillJson(route, salesCatalogueNone)
+      return
+    }
+    if (method === 'GET' && path === '/merchant-keys') {
+      await fulfillJson(route, { keys: [] })
       return
     }
 

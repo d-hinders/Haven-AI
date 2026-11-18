@@ -5,10 +5,11 @@ import { notFound } from 'next/navigation'
 import { QrCode } from 'lucide-react'
 import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
 import type { SmartAccount } from '@/context/AuthContext'
+import { useMerchantCatalogue } from '@/hooks/useMerchantCatalogue'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useSalesPayments } from '@/hooks/useSalesPayments'
 import { resolveChainOrNull } from '@/lib/chains'
-import { salesDayRange } from '@/lib/sales'
+import { catalogueNeedsAttention, salesDayRange } from '@/lib/sales'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -91,6 +92,12 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
   })
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [openPayment, setOpenPayment] = useState<string | null>(null)
+  // Bumped when a sale record is cleared: the Overview reads again, so the
+  // list row and the summary's by-product lines follow the panel.
+  const [refreshKey, setRefreshKey] = useState(0)
+  // One catalogue read for the page: the Products tab's table, its count and
+  // warning dot, and the Setup tab's kit-address field describe the same answer.
+  const catalogue = useMerchantCatalogue()
 
   const period = listState.period ?? DEFAULT_PERIOD
   const range = useMemo(() => salesDayRange(period), [period])
@@ -118,6 +125,14 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
 
   const network = resolveChainOrNull(account.chain_id)?.name
   const meta = network ? `${account.name} · ${network}` : account.name
+
+  const productCount = catalogue.data?.products.length ?? 0
+  const attention = catalogueNeedsAttention(catalogue.data)
+
+  const openSetup = () => {
+    setOpenPayment(null)
+    setTab('setup')
+  }
 
   const changePeriod = (next: PeriodValue) => {
     const nextState: ListState = { ...listState, period: next }
@@ -155,8 +170,13 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
           onChange={setTab}
           tabs={[
             { value: 'overview', label: 'Overview' },
-            { value: 'products', label: 'Products' },
-            { value: 'setup', label: 'Setup' },
+            {
+              value: 'products',
+              label: 'Products',
+              ...(productCount > 0 ? { count: productCount } : {}),
+              ...(attention ? { warningDot: true } : {}),
+            },
+            { value: 'setup', label: 'Setup', ...(attention ? { warningDot: true } : {}) },
           ]}
         />
       </div>
@@ -174,15 +194,21 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
             currency={currency}
             merchantName={account.name}
             onOpenPayment={setOpenPayment}
+            refreshKey={refreshKey}
           />
         )
       ) : tab === 'products' ? (
-        <SalesProductsTab />
+        <SalesProductsTab catalogue={catalogue} range={range} onOpenSetup={() => setTab('setup')} />
       ) : (
-        <SalesSetupTab />
+        <SalesSetupTab account={account} catalogue={catalogue} onShowAddress={() => setReceiveOpen(true)} />
       )}
 
-      <SalesPaymentPanel txHash={openPayment} onClose={() => setOpenPayment(null)} />
+      <SalesPaymentPanel
+        txHash={openPayment}
+        onClose={() => setOpenPayment(null)}
+        onCleared={() => setRefreshKey((key) => key + 1)}
+        onOpenSetup={openSetup}
+      />
       <ReceiveDialog open={receiveOpen} account={receiveAccount} onClose={() => setReceiveOpen(false)} />
     </div>
   )

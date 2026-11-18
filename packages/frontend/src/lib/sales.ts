@@ -191,3 +191,84 @@ export function salesChartDays(summary: SalesSummary, range: SalesDayRange): Sta
     }
   })
 }
+
+// ── The payment's detail ────────────────────────────────────────────────────
+
+export type SalesPaymentDetail = ApiSchema<'MerchantSalesPaymentDetail'>
+
+/** A payment hash the explorer can open: a 32-byte hex string. A future held-by-Stripe row carries none. */
+export function isOnChainHash(value: string): boolean {
+  return /^0x[0-9a-fA-F]{64}$/.test(value)
+}
+
+// ── The catalogue ───────────────────────────────────────────────────────────
+
+export type SalesCatalogue = ApiSchema<'MerchantCatalogueState'>
+export type SalesCatalogueProduct = ApiSchema<'MerchantCatalogueProduct'>
+export type SalesKey = ApiSchema<'MerchantKey'>
+
+/**
+ * A product's price in USDC, exact: every decimal the atomic amount has (at
+ * most six), trailing zeros dropped, never fewer than two. Products is a token
+ * surface — the ledger rounds a $0.018 call to $0.02, and this is where the
+ * exact figure is.
+ */
+export function usdcExactText(atomic: string): string {
+  let raw: bigint
+  try {
+    raw = BigInt(atomic || '0')
+  } catch {
+    return `${atomic} USDC`
+  }
+  const whole = raw / BigInt(10 ** USDC_DECIMALS)
+  const fraction = (raw % BigInt(10 ** USDC_DECIMALS)).toString().padStart(USDC_DECIMALS, '0').replace(/0+$/, '')
+  const decimals = fraction.padEnd(2, '0')
+  return `${new Intl.NumberFormat('en-US').format(whole)}.${decimals} USDC`
+}
+
+/** The chain a CAIP-2 network names (`eip155:8453`), or undefined for one Haven does not know. */
+export function catalogueChainId(network: string | null | undefined): number | undefined {
+  const match = network ? /^eip155:(\d+)$/.exec(network) : null
+  return match ? Number(match[1]) : undefined
+}
+
+/** The host of the saved kit address, for "Read from {host}". */
+export function catalogueHost(deploymentUrl: string): string {
+  try {
+    return new URL(deploymentUrl).host
+  } catch {
+    return deploymentUrl
+  }
+}
+
+/**
+ * Which Products tab the catalogue read says, in the order the owner meets
+ * them: no address saved; a read that has not happened; one whose document is
+ * another account's (`mismatch`); one that could not be read or understood
+ * (`unreachable`, `malformed`, `refused`); and a good list.
+ */
+export type CatalogueView = 'none' | 'never' | 'mismatch' | 'unreachable' | 'malformed' | 'refused' | 'ok'
+
+export function catalogueView(catalogue: SalesCatalogue): CatalogueView {
+  if (catalogue.deployment_url === null) return 'none'
+  if (catalogue.mismatch || catalogue.last_read_status === 'mismatch') return 'mismatch'
+  switch (catalogue.last_read_status) {
+    case 'never':
+      return 'never'
+    case 'unreachable':
+      return 'unreachable'
+    case 'malformed':
+      return 'malformed'
+    case 'refused':
+      return 'refused'
+    default:
+      return 'ok'
+  }
+}
+
+/** The tabs the catalogue puts a warning dot on: a list Haven is not using, or one it could not read. */
+export function catalogueNeedsAttention(catalogue: SalesCatalogue | null): boolean {
+  if (catalogue === null) return false
+  const view = catalogueView(catalogue)
+  return view === 'mismatch' || view === 'unreachable' || view === 'malformed' || view === 'refused'
+}

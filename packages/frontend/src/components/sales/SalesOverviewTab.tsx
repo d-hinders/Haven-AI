@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -142,16 +143,31 @@ export function SalesOverviewTab({
   currency,
   merchantName,
   onOpenPayment,
+  refreshKey = 0,
 }: {
   range: SalesDayRange
   currency: DisplayCurrency
   merchantName: string
   onOpenPayment: (txHash: string) => void
+  /** Changes when something the figures describe changed (a sale record cleared): read both again. */
+  refreshKey?: number
 }) {
   const summary = useSalesSummary(range)
   const previousRange = previousSalesRange(range)
   const previous = useSalesSummary(previousRange)
   const list = useSalesPayments(range)
+
+  const refetchAll = useRef(() => {})
+  refetchAll.current = () => {
+    summary.refetch()
+    list.refetch()
+  }
+  const lastKey = useRef(refreshKey)
+  useEffect(() => {
+    if (refreshKey === lastKey.current) return
+    lastKey.current = refreshKey
+    refetchAll.current()
+  }, [refreshKey])
   const days = salesRangeDays(range)
 
   if (summary.loading) return <div className="mt-6"><OverviewSkeleton /></div>

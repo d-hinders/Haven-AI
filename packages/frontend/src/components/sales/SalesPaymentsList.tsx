@@ -1,5 +1,6 @@
 'use client'
 
+import { TransactionMovement } from '@/components/haven/TransactionMovement'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
@@ -74,7 +75,7 @@ export function SalesLedgerRow({
         {...shared}
         title="Moved between your accounts"
         direction="move"
-        description={`${from} → ${merchantName}`}
+        description={<TransactionMovement from={from} to={merchantName} bare />}
         status={SALES_STATUS.not_counted.label}
         statusTone={SALES_STATUS.not_counted.tone}
       />

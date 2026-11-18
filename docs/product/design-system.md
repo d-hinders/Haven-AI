@@ -989,9 +989,10 @@ amount's sign and tone. **Not counted** and **No longer offered** are neutral:
 they are facts about what the figures include and what the kit lists, not
 problems. The table maps the labels and wires nothing; the Sales screens
 (#4900, #4901) read the map. Today the detail panel's fallback labels every
-money-in, move and deposit "Sent" (`TransactionDetailPanel.tsx`); whether
-#4900 shows Received only on Sales or also on deposits in `/transactions` is
-#4900's decision.
+money-in, move and deposit "Sent" (`TransactionDetailPanel.tsx`). **#4900 decided: Sales only.** The
+Sales detail panel (`SalesPaymentPanel.tsx`) labels a sale and a payment with
+no sale record Received, and an own move Not counted; the `/transactions`
+panel keeps its fallback, so no Transactions baseline moves.
 
 #### What the table does not cover
 

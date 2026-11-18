@@ -15,13 +15,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  */
 
 const mockGet = vi.fn()
+const mockDelete = vi.fn()
+const mockReplace = vi.fn()
 const mockMerchantServices = vi.fn()
 const mockNotFound = vi.fn(() => {
   throw new Error('NEXT_NOT_FOUND')
 })
 
-vi.mock('@/lib/api', () => ({
-  api: { get: (path: string) => mockGet(path) },
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
+  api: { get: (path: string) => mockGet(path), delete: (path: string) => mockDelete(path) },
 }))
 
 vi.mock('@/context/MerchantServicesContext', () => ({
@@ -35,7 +38,7 @@ vi.mock('@/hooks/usePreferences', () => ({
 vi.mock('next/navigation', () => ({
   notFound: () => mockNotFound(),
   usePathname: () => '/sales',
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: (...args: unknown[]) => mockReplace(...args), back: vi.fn(), prefetch: vi.fn() }),
   useSearchParams: () => new URLSearchParams(window.location.search),
 }))
 
@@ -123,7 +126,24 @@ const PAYMENTS = [
   { tx_hash: '0xa5', block_time: '2026-11-16T09:00:00.000Z', kind: 'sale', amount_raw: '300000', product_id: 'embed', product_label: 'Embeddings', payer: OTHER_USERS_AGENT, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
 ]
 
+/** The catalogue the page reads once: no kit address saved unless a test says otherwise. */
+const NO_KIT = {
+  deployment_url: null,
+  last_read_at: null,
+  last_read_status: 'never',
+  last_read_detail: null,
+  mismatch: false,
+  mismatch_reason: null,
+  document_name: null,
+  document_operator_name: null,
+  document_network: null,
+  document_pay_to: null,
+  document_updated: null,
+  products: [],
+}
+
 interface Scenario {
+  catalogue?: unknown
   everPaid?: boolean
   summary?: unknown
   previous?: unknown
@@ -131,7 +151,7 @@ interface Scenario {
 }
 
 /** Serve the reads: the whole-history probe, the two summaries and the pages. */
-function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY, pages }: Scenario = {}) {
+function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY, pages, catalogue = NO_KIT }: Scenario = {}) {
   const today = salesDayRange({ preset: '30d' })
   const prior = previousSalesRange(today)
   const queue = pages ?? [{ payments: PAYMENTS, next_cursor: null }]
@@ -139,6 +159,13 @@ function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY
     const url = new URL(path, 'http://x')
     if (url.pathname === '/merchant-sales/summary') {
       return url.searchParams.get('to') === prior.to ? previous : summary
+    }
+    if (url.pathname === '/merchant-catalogue') return catalogue
+    if (url.pathname === '/merchant-keys') return { keys: [] }
+    const detailMatch = /^\/merchant-sales\/payments\/(0x[^/]+)$/.exec(url.pathname)
+    if (detailMatch) {
+      const row = PAYMENTS.find((p) => p.tx_hash === detailMatch[1])
+      return { ...row, merchant_reference: null, legs: [] }
     }
     if (url.pathname === '/merchant-sales/payments') {
       if (!url.searchParams.has('from')) {
@@ -161,6 +188,8 @@ async function renderPage() {
 
 beforeEach(() => {
   mockGet.mockReset()
+  mockDelete.mockReset()
+  mockReplace.mockReset()
   mockNotFound.mockClear()
   mockMerchantServices.mockReset().mockReturnValue(setting('ready', true))
   window.history.replaceState(null, '', '/sales')
@@ -202,8 +231,8 @@ describe('first run', () => {
     expect(within(steps).getByText('Create a Sales key')).toBeTruthy()
     expect(within(steps).getByText('Tell Haven where your kit runs')).toBeTruthy()
     // Steps 2 and 3 go to the Setup tab.
-    expect(within(steps).getByRole('link', { name: 'Create Sales key' }).getAttribute('href')).toBe('/sales?tab=setup')
-    expect(within(steps).getByRole('link', { name: 'Add kit address' }).getAttribute('href')).toBe('/sales?tab=setup')
+    expect(within(steps).getByRole('link', { name: 'Create Sales key' }).getAttribute('href')).toBe('/sales?tab=setup#sales-keys')
+    expect(within(steps).getByRole('link', { name: 'Add kit address' }).getAttribute('href')).toBe('/sales?tab=setup#kit-address')
     // No figures, no period control, no summary read: a first run is not a quiet period.
     expect(screen.queryByTestId('sales-tiles')).toBeNull()
     expect(screen.queryByRole('button', { name: /Period/ })).toBeNull()
@@ -356,7 +385,7 @@ describe('the ledger rows', () => {
     await renderPage()
     const title = await screen.findByText('Moved between your accounts')
     const row = title.closest('[role="button"]') as HTMLElement
-    expect(row.textContent).toContain('Atlas → Sales')
+    expect(row.textContent).toMatch(/Atlas.*Sales/)
     expect(within(row).getByText('Not counted')).toBeTruthy()
     expect(row.textContent).toContain('$0.50')
     expect(row.textContent).not.toContain('+$0.50')
@@ -376,9 +405,41 @@ describe('the ledger rows', () => {
     serve()
     await renderPage()
     const row = (await screen.findByText('No product recorded')).closest('[role="button"]') as HTMLElement
-    expect(screen.queryByTestId('sales-payment-panel')).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'No product recorded' })).toBeNull()
     await userEvent.click(row)
-    expect(screen.getByTestId('sales-payment-panel')).toBeTruthy()
+    // The panel reads the payment that was pressed, by its hash.
+    expect(await screen.findByRole('dialog', { name: 'No product recorded' })).toBeTruthy()
+    expect(callsTo('/merchant-sales/payments/0xa2')).toHaveLength(1)
+  })
+
+  it('clearing a sale record refreshes the list and the summary under the panel', async () => {
+    serve()
+    mockDelete.mockResolvedValue(undefined)
+    await renderPage()
+    const row = within(await screen.findByTestId('sales-ledger')).getAllByText('Chat completion')[0].closest('[role="button"]') as HTMLElement
+    await userEvent.click(row)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear sale record' }))
+    const summaryReads = callsTo('/merchant-sales/summary').length
+    const listReads = callsTo('/merchant-sales/payments?').length
+    await userEvent.click(screen.getByRole('button', { name: 'Clear record' }))
+    await waitFor(() => expect(mockDelete).toHaveBeenCalledWith('/merchant-sales/payments/0xa1/record'))
+    await waitFor(() => expect(callsTo('/merchant-sales/summary').length).toBeGreaterThan(summaryReads))
+    await waitFor(() => expect(callsTo('/merchant-sales/payments?').length).toBeGreaterThan(listReads))
+    await screen.findByTestId('sales-tiles')
+  })
+
+  it('the leaked-key notice in the clear dialog closes the panel and opens the Setup tab', async () => {
+    serve()
+    await renderPage()
+    const row = within(await screen.findByTestId('sales-ledger')).getAllByText('Chat completion')[0].closest('[role="button"]') as HTMLElement
+    await userEvent.click(row)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear sale record' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Sales keys' }))
+    // The page goes to the Setup tab (the URL holds the tab), and both the
+    // confirmation and the panel are closed.
+    expect(mockReplace).toHaveBeenCalledWith('/sales?tab=setup', { scroll: false })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(mockDelete).not.toHaveBeenCalled()
   })
 })
 
@@ -429,6 +490,27 @@ describe('the tabs and the period', () => {
     expect(screen.getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('tab', { name: 'Products' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Setup' })).toBeTruthy()
+  })
+
+  it('counts the products on the tab and flags Products and Setup when the kit could not be read', async () => {
+    serve({
+      catalogue: {
+        ...NO_KIT,
+        deployment_url: 'https://inference.example.com',
+        last_read_at: '2026-11-17T10:00:00.000Z',
+        last_read_status: 'unreachable',
+        products: [
+          { product_id: 'chat', name: 'Chat completion', description: null, route: null, model: null, price_atomic: '18000', network: 'eip155:8453', output_token_cap: null, offered: true, removed_at: null },
+          { product_id: 'embed', name: 'Embeddings', description: null, route: null, model: null, price_atomic: '100', network: 'eip155:8453', output_token_cap: null, offered: true, removed_at: null },
+        ],
+      },
+    })
+    await renderPage()
+    await screen.findByTestId('sales-tiles')
+    const products = await screen.findByRole('tab', { name: /^Products/ })
+    await waitFor(() => expect(products.textContent).toContain('2'))
+    expect(products.textContent).toMatch(/needs attention|attention/i)
+    expect(screen.getByRole('tab', { name: /^Setup/ }).textContent).toMatch(/attention/i)
   })
 
   it('opens on the tab the URL names, without the period control on Setup', async () => {

@@ -59,7 +59,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isAddress } from 'viem'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
-import { CopyButton } from '@/components/ui/CopyButton'
+import { ShowOnceCredentialBlock } from '@/components/ui/ShowOnceCredentialBlock'
 import { Input } from '@/components/ui/Input'
 import { StepProgress } from '@/components/ui/StepProgress'
 import { StatusBadge } from '@/components/ui/StatusBadge'
@@ -792,20 +792,15 @@ export function ReplaceSigningKeyModal({
           </span>
         </div>
 
-        {/* Mirrors PaymentCredentialsModal's credential block rather than
-            CredentialHandoffCard, which is the download-a-file shape. */}
+        {/* The shared show-once block, not CredentialHandoffCard (the
+            download-a-file shape). */}
         <div>
           <h4 className="text-sm font-medium text-[var(--v2-ink)]">New Haven credential</h4>
-          <div className="mt-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-            <code className="block break-all font-mono text-xs text-[var(--v2-ink-2)]">
-              {result.api_key}
-            </code>
-            <div className="mt-3">
-              {/* #4573: the shared copy primitive. The key is on screen and
-                  selectable, so a failed write stays silent — the value is
-                  still there to select by hand. */}
-              <CopyButton value={result.api_key} label="credential" text="Copy" />
-            </div>
+          <div className="mt-2">
+            {/* #4905: the shared show-once block (it was a copy of
+                PaymentCredentialsModal's). The key is shown in full: this is
+                the creating view. */}
+            <ShowOnceCredentialBlock value={result.api_key} maskedValue="" label="credential" />
           </div>
         </div>
 

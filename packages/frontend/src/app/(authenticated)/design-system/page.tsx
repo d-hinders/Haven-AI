@@ -71,6 +71,7 @@ import InfoModal, { type InfoPage } from '@/components/InfoModal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { BackLink } from '@haven_ai/ui/BackLink'
 import { CopyButton } from '@/components/ui/CopyButton'
+import { ShowOnceCredentialBlock } from '@/components/ui/ShowOnceCredentialBlock'
 import { Row } from '@/components/ui/Row'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { RouteLoading } from '@/components/ui/RouteLoading'
@@ -1691,7 +1692,6 @@ export default function DesignSystemPage() {
   // TransactionDetailPanel — the section names which row "opened".
   const [dsTab, setDsTab] = useState<'overview' | 'agents' | 'activity'>('agents')
   const [dsLedgerOpened, setDsLedgerOpened] = useState<string | null>(null)
-  const [dsKeyShown, setDsKeyShown] = useState(false)
   const [dsSalesView, setDsSalesView] = useState<'spending' | 'revenue'>('revenue')
   // #4908: the freshness line's sample instant — four minutes before mount.
   const [dsReadAt] = useState(() => Date.now() - 4 * 60_000)
@@ -4297,7 +4297,7 @@ export default function DesignSystemPage() {
       <Section
         title="Sales patterns"
         testId="ds-sales-patterns"
-        description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. Off, the Settings Sales card says “Keys not accepted while off” as a Detail list row. The show-once credential block is the copy-a-string shape PaymentCredentialsModal and ReplaceSigningKeyModal already share; #4905 extracts it."
+        description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. Off, the Settings Sales card says “Keys not accepted while off” as a Detail list row. The show-once credential block is the copy-a-string shape, extracted in #4905 as ShowOnceCredentialBlock and used by PaymentCredentialsModal, ReplaceSigningKeyModal and the Sales key dialog."
       >
         <div className="grid items-start gap-5 lg:grid-cols-2" data-testid="ds-sales-specimens">
           <div data-testid="ds-sales-ledger">
@@ -4416,21 +4416,15 @@ export default function DesignSystemPage() {
             <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
               Shown once. Copy it now; afterwards only its prefix is shown.
             </p>
-            <div className="mt-2 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-              <code className="block break-all font-mono text-xs text-[var(--v2-ink-2)]">
-                {dsKeyShown ? DS_SAMPLE_SALES_KEY : 'sk_merchant_3f9a••••••••••••'}
-              </code>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setDsKeyShown((shown) => !shown)}>
-                  {dsKeyShown ? 'Hide' : 'Show'}
-                </Button>
-                <CopyButton
-                  value={DS_SAMPLE_SALES_KEY}
-                  label="Sales key"
-                  text="Copy"
-                  onCopyFailed={() => toast.error('Could not copy Sales key')}
-                />
-              </div>
+            <div className="mt-2">
+              {/* #4905: the extracted ShowOnceCredentialBlock in its creating
+                  state, which opens on the value (`revealable` is the optional
+                  masked Show / Hide shape a later view may use). */}
+              <ShowOnceCredentialBlock
+                value={DS_SAMPLE_SALES_KEY}
+                maskedValue="sk_merchant_3f9a••••••••••••"
+                label="Sales key"
+              />
             </div>
           </Card>
         </div>

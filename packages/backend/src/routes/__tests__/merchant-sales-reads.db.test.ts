@@ -361,6 +361,20 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(summary.own_moves).toEqual({ count: 1, amount_raw: '5000000' })
     })
 
+    it('a payment with no record and an own leg beside a customer leg counts only the customer\'s transfer', async () => {
+      const m = await seedMerchant()
+      const customer = addr()
+      await seedLeg(m, { tx: hash(0x7a), payer: addr(), amount: '40', logIndex: 0, own: true, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x7a), payer: customer, amount: '60', logIndex: 1, time: '2026-11-10T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('60')
+      expect(summary.without_product).toEqual({ count: 1, amount_raw: '60' })
+      expect(summary.own_moves.count).toBe(0)
+      expect(summary.by_payer.map((p: { payer: { address: string } }) => p.payer.address)).toEqual([customer.toLowerCase()])
+      const row = (await get(m.userId, `/merchant-sales/payments/${hash(0x7a)}`)).json()
+      expect(row).toMatchObject({ kind: 'no_product', amount_raw: '60' })
+    })
+
     it('a sale from several payers is not attributed by payer', async () => {
       const m = await seedMerchant()
       await seedLeg(m, { tx: hash(0x79), payer: addr(), amount: '10', logIndex: 0, time: '2026-11-10T10:00:00Z' })

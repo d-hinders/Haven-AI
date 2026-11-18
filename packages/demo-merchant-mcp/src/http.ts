@@ -337,8 +337,10 @@ async function handle(
             },
           }
         : {}),
-      // #4950: present only when the Sales product is offered. Names the Sales
-      // account (public on-chain) and process-local counts, never the key.
+      // #4950, #4953: present whenever sales reporting is on (the Sales key and
+      // base URL set), with or without the Sales address. Names the Sales
+      // account when there is one (public on-chain) and process-local counts,
+      // never the key.
       ...(options.sales
         ? {
             sales: {

@@ -881,7 +881,7 @@ describe('the joke reports its Stripe-settled sales to Haven (#4953)', () => {
     expect(sales.stats().reported).toBe(1)
   })
 
-  it('offers no Sales product without MERCHANT_SALES_ADDRESS, and with all three settings both products report', async () => {
+  it('offers no Sales product without MERCHANT_SALES_ADDRESS, and with all three settings lists both products and reports the joke', async () => {
     const haven = mockHaven()
     const sales = jokeSales(haven)
     const noAddress = await startServer({ sales })

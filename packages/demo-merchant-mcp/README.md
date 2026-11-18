@@ -708,14 +708,17 @@ behaves as before.
 
 **Before a demo, register the Stripe deposit address in Haven**, under the Sales
 account the Sales key belongs to: Sales settings on the dashboard, or
-`POST /merchant-deposit-addresses` from the owner's session. Until it is
-registered Haven refuses each report as no payment to the account. The address
+`POST /merchant-deposit-addresses` from the owner's session. Register it **before the first demo payment**: Haven accepts a sale only
+if the address was registered at or before the payment's block time, and the
+merchant never resends a refused report, so a joke paid before registration
+never appears on the Sales page. The address
 is the owner's own statement and is shown as "registered by you, not verified by
 Haven". **The buyer must be a Haven user other than the Sales account's owner:**
 payments from the owner's own agents are internal moves and are refused. A
 Stripe-held sale never counts in a Haven balance; it is shown apart as
 "Received in Stripe". When the deposit address changes, register the new one and
-retire the old one (see `docs/operations/secret-rotation.md`).
+retire the old one only after the last payment to it has settled (see
+`docs/operations/secret-rotation.md`).
 
 ### Operator note: changing the Stripe variables changes the quoted address
 
@@ -925,11 +928,21 @@ split these: the joke reports with the key and base URL alone, see
 | `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Business → Sales on Haven), checksummed |
 | `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only) |
 
-With any of the three unset, the Sales product is offered nowhere — not in `list_products`, the
-discovery document, the tool list or the payment gate, and `/healthz` has no
-`sales` block — and every surface is byte-identical to a merchant without it
-(the startup banner only says `Sales: not reporting`). A
-half-set or unusable configuration logs a warning naming the variable (never
+There are three states (#4953):
+
+- **Key and base URL unset or unusable:** nothing reports and the Sales product
+  is offered nowhere — not in `list_products`, the discovery document, the tool
+  list or the payment gate. `/healthz` has no `sales` block, every surface is
+  byte-identical to a merchant without it, and the banner reads
+  `Sales: not reporting`.
+- **Key and base URL set, no usable `MERCHANT_SALES_ADDRESS`:** the Stripe-settled
+  joke reports, but the Sales product is still offered nowhere. `/healthz`
+  carries a `sales` block (`configured: true`, the counts, no `address`) and the
+  banner reads `Sales: reporting joke (Stripe-settled) to <base> — field_notes
+  not offered`.
+- **All three set:** both products report, and `/healthz` names the address.
+
+A half-set or unusable configuration logs a warning naming the variable (never
 its value) and stays off; it never refuses to start:
 
 | Configuration | Result |

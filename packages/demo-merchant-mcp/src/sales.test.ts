@@ -84,7 +84,7 @@ function mockHaven(mode: HavenMode = 'accept') {
 }
 
 async function startServer(
-  opts: { haven?: ReturnType<typeof mockHaven>; sales?: boolean; log?: (line: string) => void; attemptTimeoutMs?: number } = {},
+  opts: { haven?: ReturnType<typeof mockHaven>; sales?: boolean; noAddress?: boolean; log?: (line: string) => void; attemptTimeoutMs?: number } = {},
 ) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
@@ -93,7 +93,7 @@ async function startServer(
   const sales =
     opts.sales === false
       ? undefined
-      : createSalesReporting(CONFIG, {
+      : createSalesReporting(opts.noAddress ? { salesKey: SALES_KEY, havenBaseUrl: HAVEN } : CONFIG, {
           chainId: CHAIN_ID,
           fetch: haven.fetch,
           sleep: async () => {},
@@ -284,6 +284,21 @@ describe('the Sales product (#4950)', () => {
     expect(list).not.toContain('Field Notes')
     const tools = await (await postMcp(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).text()
     expect(tools).not.toContain('buy_field_notes')
+  })
+
+  it('#4953: refuses a direct paid call to field_notes when the key and base URL are set but no address', async () => {
+    const { url, sales, haven, submit } = await startServer({ noAddress: true })
+    // The payment gate does not quote it: no 402, as on a merchant without Sales.
+    expect((await postMcp(url, buyCall('field_notes'))).status).not.toBe(402)
+    // A header signed against another product's quote, replayed at field_notes.
+    const pr = (await (await postMcp(url, buyCall('vpn_basic'))).json()) as PaymentRequired
+    const header = await signedHeader(pr)
+    const res = await postMcp(url, buyCall('field_notes', 6), { [PAYMENT_SIGNATURE_HEADER]: header })
+    expect(await res.text()).not.toContain('Your field note')
+    expect(res.headers.get('payment-response')).toBeNull()
+    expect(submit).not.toHaveBeenCalled()
+    await sales!.idle()
+    expect(haven.posts).toHaveLength(0)
   })
 
   it('is listed, with its tool, on a merchant with the Sales settings', async () => {

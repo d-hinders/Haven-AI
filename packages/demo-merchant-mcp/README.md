@@ -894,7 +894,7 @@ Two settings, and **both** must be set, together with `MERCHANT_HAVEN_BASE_URL`
 
 | Variable | Value |
 |---|---|
-| `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Sales on Haven), checksummed |
+| `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Business → Sales on Haven), checksummed |
 | `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only) |
 
 With either unset, the product is offered nowhere — not in `list_products`, the

@@ -859,6 +859,47 @@ To turn it back **off**, unset either variable. The merchant advertises only
 
 Reference: `packages/demo-merchant-mcp/README.md` § *Agent Passport check*.
 
+### Enabling the Haven Sales product on the dev demo-merchant
+
+Since #4950 the dev demo-merchant can offer one more product, **Haven Field
+Notes** (`buy_field_notes`, 0.0025 USDC), paid into a Haven **Sales account**
+and reported to Haven after each sale, so it appears on that account's Sales
+page — the merchant-services demo (epic #4885). It is off by default and, like
+the rails above, a **manual variable change** on the Railway demo-merchant
+service.
+
+1. **First, on the dev Haven deployment**, as the demo merchant's Haven user:
+   turn on Sales (Settings → Business → Sales), which creates the Sales
+   account, and create a Sales key for it (`POST /merchant-keys` with the
+   user's session; the key screens are #4905). The secret is shown once, in
+   that answer. Note the Sales account's address.
+2. **Set both variables together** on the demo-merchant service, and make sure
+   `MERCHANT_HAVEN_BASE_URL` names the dev backend's public origin (it is shared
+   with the passport check; set alone it only logs the passport check's
+   "set BOTH" warning):
+
+   ```
+   MERCHANT_SALES_ADDRESS=<the Sales account's checksummed address>
+   MERCHANT_SALES_KEY=<the Sales key, sk_merchant_...>
+   MERCHANT_HAVEN_BASE_URL=https://<dev backend public origin>
+   ```
+
+   Paste the key straight into Railway's service variables, never into a file,
+   issue or chat. With either variable missing or unusable (an address that is
+   not checksummed, or equals `MERCHANT_ADDRESS` or a Stripe deposit address; a
+   key without the `sk_merchant_` prefix) the merchant warns and does not offer
+   the product; every other product is unchanged either way.
+3. **Check** `/healthz`: a `sales` block with the Sales address appears, and
+   the startup log has a `Sales:` line. After a purchase, `reported` counts the
+   sales Haven accepted; a refusal or give-up shows in the `[sales]` log lines.
+4. **Buy from a different Haven user.** A sale bought by an agent of the Sales
+   account's own owner is a move between the owner's accounts and shows no
+   revenue.
+
+To turn it back **off**, unset either variable.
+
+Reference: `packages/demo-merchant-mcp/README.md` § *Haven Sales account*.
+
 ### The `DEV` badge
 
 `NEXT_PUBLIC_HAVEN_ENV=dev` makes the frontend render a `DEV` chip beside the

@@ -135,7 +135,7 @@ export interface BackgroundJobsDeps {
 }
 
 /**
- * Build the eleven rows. A function rather than a module-level constant because
+ * Build the twelve rows. A function rather than a module-level constant because
  * the catalog-ingest monitor must be built ONCE per start and held across
  * every tick (#4407) — a module-level table would build it at import time,
  * before the process has a logger or a pool.
@@ -516,7 +516,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the eleven table rows, then the
+ * The one entry point `index.ts` calls: start the twelve table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

@@ -172,7 +172,7 @@ describe('startBackgroundJobs', () => {
     expect(rows).toHaveLength(12)
     expect(deps.log).toBe(log)
 
-    // The twelfth job is NOT a row: it self-registers inside
+    // The thirteenth job is NOT a row: it self-registers inside
     // `modules/accounting/retry-sweep.ts` and is called from the entry point.
     expect(mocks.startRetrySweep).toHaveBeenCalledTimes(1)
     expect(mocks.startRetrySweep).toHaveBeenCalledWith({ log })

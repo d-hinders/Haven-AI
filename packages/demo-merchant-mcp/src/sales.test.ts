@@ -54,6 +54,9 @@ function json(status: number, body: unknown): Response {
 
 type HavenMode = 'accept' | 'refuse' | 'slow' | 'unreachable'
 
+/** Holds every 'slow' answer open until the test releases it. */
+let releaseSlow: () => void = () => {}
+
 /** A mocked Haven: what `POST /merchant/sales` answers. */
 function mockHaven(mode: HavenMode = 'accept') {
   const posts: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = []
@@ -66,7 +69,12 @@ function mockHaven(mode: HavenMode = 'accept') {
     if (mode === 'refuse') return json(422, { error: 'no_payment_to_account', error_code: 'no_payment_to_account', message: 'no' })
     if (mode === 'unreachable') throw new TypeError('fetch failed')
     if (mode === 'slow') {
-      return new Promise<Response>((_resolve, reject) => {
+      return new Promise<Response>((resolve, reject) => {
+        const previous = releaseSlow
+        releaseSlow = () => {
+          previous()
+          resolve(json(201, { id: 'sale-1' }))
+        }
         init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
       })
     }
@@ -75,7 +83,9 @@ function mockHaven(mode: HavenMode = 'accept') {
   return { posts, fetch: fetchMock }
 }
 
-async function startServer(opts: { haven?: ReturnType<typeof mockHaven>; sales?: boolean; log?: (line: string) => void } = {}) {
+async function startServer(
+  opts: { haven?: ReturnType<typeof mockHaven>; sales?: boolean; log?: (line: string) => void; attemptTimeoutMs?: number } = {},
+) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
   const settlementClient: SettlementClient = { submit, waitForReceipt }
@@ -87,7 +97,7 @@ async function startServer(opts: { haven?: ReturnType<typeof mockHaven>; sales?:
           chainId: CHAIN_ID,
           fetch: haven.fetch,
           sleep: async () => {},
-          attemptTimeoutMs: 20,
+          attemptTimeoutMs: opts.attemptTimeoutMs ?? 20,
           retryDelaysMs: [1],
           log: opts.log ?? (() => {}),
         })
@@ -412,12 +422,19 @@ describe('the buyer is never affected (#4950)', () => {
     const nonce = `0x${'5a'.repeat(32)}` as Hex
     const answers: Array<{ status: number; paymentResponse: string | null; receipt: string | null; body: string; ms: number }> = []
     for (const mode of ['accept', 'refuse', 'slow', 'unreachable'] as const) {
-      const { url, sales } = await startServer({ haven: mockHaven(mode) })
+      // A 'slow' Haven is held open until released, long past the buyer's answer.
+      const { url, sales } = await startServer({ haven: mockHaven(mode), attemptTimeoutMs: 60_000 })
       const unpaid = await postMcp(url, buyCall('field_notes'))
       const pr = (await unpaid.json()) as PaymentRequired
       const header = await signedHeader(pr, nonce)
       const started = Date.now()
-      const paid = await postMcp(url, buyCall('field_notes', 4), { [PAYMENT_SIGNATURE_HEADER]: header })
+      const raced = await Promise.race([
+        postMcp(url, buyCall('field_notes', 4), { [PAYMENT_SIGNATURE_HEADER]: header }),
+        new Promise<'no answer'>((resolve) => setTimeout(() => resolve('no answer'), 1_500)),
+      ])
+      // The report is not awaited: a Haven that has not answered adds no wait.
+      expect(raced, `buyer answered while Haven was ${mode}`).not.toBe('no answer')
+      const paid = raced as Response
       const body = await paid.text()
       answers.push({
         status: paid.status,
@@ -426,6 +443,7 @@ describe('the buyer is never affected (#4950)', () => {
         body: normalize(body),
         ms: Date.now() - started,
       })
+      releaseSlow()
       await sales!.idle()
     }
     for (const answer of answers) {
@@ -433,8 +451,7 @@ describe('the buyer is never affected (#4950)', () => {
       expect(answer.paymentResponse).toBe(answers[0].paymentResponse)
       expect(answer.receipt).toBe(answers[0].receipt)
       expect(answer.body).toBe(answers[0].body)
-      // The report is not awaited: a Haven that never answers adds no wait.
-      expect(answer.ms).toBeLessThan(2_000)
+      expect(answer.ms).toBeLessThan(1_500)
     }
   })
 })

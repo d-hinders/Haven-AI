@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/Toast'
 import { useOptionalAuth } from '@/context/AuthContext'
-import { useMerchantKeys } from '@/hooks/useMerchantKeys'
+import { salesKeyLabel, useMerchantKeys } from '@/hooks/useMerchantKeys'
 import { timeAgo } from '@/lib/format'
 import type { SalesKey } from '@/lib/sales'
 import { CreateSalesKeyDialog } from './CreateSalesKeyDialog'
@@ -63,7 +63,7 @@ export function SalesKeysSection() {
   const items: DetailListItem[] = keys.map((key) => {
     const revoked = key.revoked_at !== null
     return {
-      label: `${key.key_prefix}…`,
+      label: salesKeyLabel(key.key_prefix),
       value: (
         <span className="flex flex-wrap items-center gap-2">
           <span>
@@ -91,7 +91,7 @@ export function SalesKeysSection() {
   return (
     <div id="sales-keys" data-testid="sales-keys-section">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Sales keys</h2>
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
             Your kit uses a Sales key to report what each payment was for. A key can’t move money, sign, or see
@@ -106,7 +106,7 @@ export function SalesKeysSection() {
             </a>
           </p>
         </div>
-        <Button size="sm" variant="ghost" leadingIcon={Plus} onClick={() => setCreating(true)}>
+        <Button size="sm" variant="ghost" leadingIcon={Plus} className="shrink-0" onClick={() => setCreating(true)}>
           Create Sales key
         </Button>
       </div>
@@ -135,7 +135,7 @@ export function SalesKeysSection() {
           setRevoking(null)
         }}
         onConfirm={confirmRevoke}
-        title={`Revoke ${revoking?.key_prefix ?? ''}…?`}
+        title={`Revoke ${revoking ? salesKeyLabel(revoking.key_prefix) : ''}?`}
         body="Your kit stops being able to report sales with this key straight away. Payments still arrive and count; they show with no product until your kit has a new key."
         confirmLabel="Revoke key"
         busyLabel="Revoking…"

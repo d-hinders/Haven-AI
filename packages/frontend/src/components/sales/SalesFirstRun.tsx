@@ -48,7 +48,7 @@ export function SalesFirstRun({
       description: 'Your kit uses it to tell Haven what each payment was for. It can’t move money.',
       action: (
         <Button href={`${setupHref}#sales-keys`} variant="ghost" size="sm" className="w-full sm:w-auto">
-          Create Sales key
+          Go to Sales keys
         </Button>
       ),
     },

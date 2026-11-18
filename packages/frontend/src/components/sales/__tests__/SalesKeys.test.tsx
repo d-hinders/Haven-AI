@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const SECRET = 'sk_merchant_4f2a9c7e1b05d3f8a6e2c94b7d10f58e3a6c2b9d7e41f0a8'
 const PREFIX = 'sk_merchant_4f2a9c7e1b05'
+// #4905 review: a key is named by its first 16 characters on screen.
+const LABEL = 'sk_merchant_4f2a…'
 
 const mockGet = vi.fn()
 const mockPost = vi.fn()
@@ -80,7 +82,7 @@ afterEach(() => vi.restoreAllMocks())
 
 async function renderSection() {
   render(<SalesKeysSection />)
-  await screen.findByText(`${PREFIX}…`)
+  await screen.findByText(`${LABEL}`)
 }
 
 async function openCreated() {
@@ -178,7 +180,7 @@ describe('revoke', () => {
   it('says what stops, then DELETEs, toasts and re-reads', async () => {
     await renderSection()
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
-    const dialog = screen.getByRole('dialog', { name: `Revoke ${PREFIX}…?` })
+    const dialog = screen.getByRole('dialog', { name: `Revoke ${LABEL}?` })
     expect(dialog.textContent).toContain('Your kit stops being able to report sales with this key straight away.')
     const reads = mockGet.mock.calls.length
     await userEvent.click(within(dialog).getByRole('button', { name: 'Revoke key' }))
@@ -204,7 +206,7 @@ describe('revoke', () => {
     expect(await screen.findByText(/could not revoke the key/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
-    expect(screen.getByRole('dialog', { name: `Revoke ${PREFIX}…?` })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: `Revoke ${LABEL}?` })).toBeTruthy()
     expect(screen.queryByText(/could not revoke the key/)).toBeNull()
   })
 })

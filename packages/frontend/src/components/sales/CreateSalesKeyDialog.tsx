@@ -9,7 +9,7 @@ import { Modal } from '@/components/ui/Modal'
 import { ShowOnceCredentialBlock } from '@/components/ui/ShowOnceCredentialBlock'
 import { CloseGuardPanel } from '@/components/connect-agent/CloseGuardPanel'
 import { ApiRequestError } from '@/lib/api'
-import type { CreatedSalesKey } from '@/hooks/useMerchantKeys'
+import { salesKeyLabel, type CreatedSalesKey } from '@/hooks/useMerchantKeys'
 
 /** The only thing of the secret that outlives the dialog. */
 const REPORT_LINE = 'Report what a payment into Sales was for'
@@ -132,7 +132,7 @@ export function CreateSalesKeyDialog({
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
             Put it in your kit’s settings. Haven shows it once: after you close this, you’ll see only{' '}
-            <span className="font-mono text-xs">{created.key_prefix}…</span>
+            <span className="font-mono text-xs">{salesKeyLabel(created.key_prefix)}</span>
           </p>
           <div>
             <h3 className="text-sm font-medium text-[var(--v2-ink)]">Sales key</h3>

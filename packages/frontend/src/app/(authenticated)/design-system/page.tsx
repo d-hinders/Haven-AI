@@ -4417,14 +4417,13 @@ export default function DesignSystemPage() {
               Shown once. Copy it now; afterwards only its prefix is shown.
             </p>
             <div className="mt-2">
-              {/* #4905: the extracted ShowOnceCredentialBlock. This specimen is
-                  the optional Show / Hide shape (`revealable`); the Sales key
-                  dialog opens on the value. */}
+              {/* #4905: the extracted ShowOnceCredentialBlock in its creating
+                  state, which opens on the value (`revealable` is the optional
+                  masked Show / Hide shape a later view may use). */}
               <ShowOnceCredentialBlock
                 value={DS_SAMPLE_SALES_KEY}
                 maskedValue="sk_merchant_3f9a••••••••••••"
                 label="Sales key"
-                revealable
               />
             </div>
           </Card>

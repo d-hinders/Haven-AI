@@ -67,7 +67,7 @@ export function DetailList({
             key={item.label}
             className={`${compact ? 'py-2' : 'py-3'} ${columns} grid gap-1 first:pt-0 last:pb-0 sm:gap-4`}
           >
-            <dt className="text-xs font-medium text-[var(--v2-ink-3)]">{item.label}</dt>
+            <dt className="min-w-0 text-xs font-medium text-[var(--v2-ink-3)] [overflow-wrap:anywhere]">{item.label}</dt>
             <dd>
               <div className="text-sm font-medium text-[var(--v2-ink)]">{item.value}</div>
               {/* Row helpers are ink-3, matching the form steps' field-helper tier

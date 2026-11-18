@@ -50,7 +50,7 @@ const SCENARIOS: Scenario[] = [
     name: 'setup',
     async assert(page) {
       const list = page.getByTestId('sales-keys-list')
-      await expect(list).toContainText('sk_merchant_4f2a9c7e1b05…')
+      await expect(list).toContainText('sk_merchant_4f2a…')
       await expect(list).toContainText('Never used')
       await expect(list.getByText('Revoked', { exact: true })).toHaveCount(1)
       await expect(list.getByRole('button', { name: 'Revoke' })).toHaveCount(2)

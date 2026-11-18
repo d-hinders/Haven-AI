@@ -72,3 +72,13 @@ export function useMerchantKeys(): UseMerchantKeysResult {
 
   return { keys, loading, failed, reload: () => void load(), create, revoke }
 }
+
+/**
+ * #4905: how a Sales key is named on screen: the prefix's first 16 characters
+ * (`sk_merchant_4f2a…`), as the approved mockup draws it. The full stored
+ * prefix (24 characters) overflows the Detail list's label track; one helper so
+ * the list, the revoke title and the created dialog name a key the same way.
+ */
+export function salesKeyLabel(prefix: string): string {
+  return `${prefix.slice(0, 16)}…`
+}

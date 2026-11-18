@@ -239,7 +239,7 @@ describe('first run', () => {
     expect(within(steps).getByText('Tell Haven where your kit runs')).toBeTruthy()
     // Step 2 (#4905) links to the keys on the Setup tab as a ghost action;
     // step 1's address is the one primary action; step 3 goes to the Setup tab.
-    expect(within(steps).getByRole('link', { name: 'Create Sales key' }).getAttribute('href')).toBe('/sales?tab=setup#sales-keys')
+    expect(within(steps).getByRole('link', { name: 'Go to Sales keys' }).getAttribute('href')).toBe('/sales?tab=setup#sales-keys')
     expect(within(steps).queryByText(/is coming/)).toBeNull()
     expect(within(steps).getByRole('link', { name: 'Add kit address' }).getAttribute('href')).toBe('/sales?tab=setup#kit-address')
     // No figures, no period control, no summary read: a first run is not a quiet period.

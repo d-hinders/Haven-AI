@@ -406,7 +406,10 @@ export interface SafeFetchOptions {
    * point Haven's read at a document it does not serve, and the owner would
    * see products that are not their deployment's. Same-host redirects are
    * still followed (and still re-validated from scratch), so a deployment that
-   * canonicalises `www.` or a trailing slash keeps working.
+   * canonicalises a trailing slash or a path keeps working. The host is
+   * compared exactly: a redirect from `shop.example.com` to
+   * `www.shop.example.com` is refused as `redirect_off_host` — the owner saves
+   * the canonical address.
    */
   sameHostOnly?: boolean
   /**

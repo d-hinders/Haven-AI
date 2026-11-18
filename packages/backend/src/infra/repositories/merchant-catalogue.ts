@@ -123,7 +123,18 @@ export const RECORD_CATALOGUE_READ_SQL = `UPDATE merchant_catalogue_sources
            document_updated = COALESCE($11, document_updated),
            updated_at = NOW()
        WHERE merchant_account_id = $1
+         AND deployment_url = $12
        RETURNING ${SOURCE_COLUMNS}`
+
+/**
+ * #4945 review S1: a read writes only while the address it read is still the
+ * saved one. Taken inside the product write's transaction, so it also waits
+ * for (and then sees) a concurrent `saveCatalogueDeployment`, which updates
+ * the same row.
+ */
+export const LOCK_SOURCE_AT_URL_SQL = `SELECT 1 FROM merchant_catalogue_sources
+       WHERE merchant_account_id = $1 AND deployment_url = $2
+       FOR UPDATE`
 
 export const UPSERT_PRODUCT_SQL = `INSERT INTO merchant_products
          (merchant_account_id, product_id, name, description, route, model,
@@ -228,6 +239,8 @@ export async function saveCatalogueDeployment(
 export async function recordCatalogueRead(
   params: {
     merchantAccountId: string
+    /** The address that was read. The row is written only while it is still the saved one (#4945 review S1). */
+    deploymentUrl: string
     readAt: Date
     status: MerchantCatalogueReadStatus
     detail: string | null
@@ -256,6 +269,7 @@ export async function recordCatalogueRead(
     doc?.name ?? null,
     doc?.operatorName ?? null,
     doc?.updated ?? null,
+    params.deploymentUrl,
   ])
   return result.rows[0] ?? null
 }
@@ -264,12 +278,23 @@ export async function recordCatalogueRead(
  * Write one document's product list: upsert every product it lists, then mark
  * every product it no longer lists as not offered. One transaction, so a
  * reader never sees a half-replaced list.
+ *
+ * Writes nothing and answers `false` when the saved address is no longer the
+ * one that was read — the owner saved a new deployment while this read was in
+ * flight, and its products must not land on the new address (#4945 review S1).
  */
 export async function replaceCatalogueProducts(
-  params: { merchantAccountId: string; products: readonly MerchantProductInput[]; readAt: Date },
+  params: {
+    merchantAccountId: string
+    deploymentUrl: string
+    products: readonly MerchantProductInput[]
+    readAt: Date
+  },
   db: Executor = pool,
-): Promise<void> {
-  await withTransaction(db, async (tx) => {
+): Promise<boolean> {
+  return withTransaction(db, async (tx) => {
+    const current = await tx.query(LOCK_SOURCE_AT_URL_SQL, [params.merchantAccountId, params.deploymentUrl])
+    if (current.rows.length === 0) return false
     for (const product of params.products) {
       await tx.query(UPSERT_PRODUCT_SQL, [
         params.merchantAccountId,
@@ -289,6 +314,7 @@ export async function replaceCatalogueProducts(
       params.readAt,
       params.products.map((p) => p.productId),
     ])
+    return true
   })
 }
 

@@ -340,6 +340,7 @@ export async function readMerchantCatalogue(params: {
     await recordCatalogueRead(
       {
         merchantAccountId: params.merchantAccountId,
+        deploymentUrl: params.deploymentUrl,
         readAt,
         status: 'refused',
         detail,
@@ -360,6 +361,7 @@ export async function readMerchantCatalogue(params: {
     await recordCatalogueRead(
       {
         merchantAccountId: params.merchantAccountId,
+        deploymentUrl: params.deploymentUrl,
         readAt,
         status,
         detail,
@@ -376,6 +378,7 @@ export async function readMerchantCatalogue(params: {
     await recordCatalogueRead(
       {
         merchantAccountId: params.merchantAccountId,
+        deploymentUrl: params.deploymentUrl,
         readAt,
         status: 'malformed',
         detail: parsed.detail,
@@ -401,6 +404,7 @@ export async function readMerchantCatalogue(params: {
     await recordCatalogueRead(
       {
         merchantAccountId: params.merchantAccountId,
+        deploymentUrl: params.deploymentUrl,
         readAt,
         status: 'mismatch',
         detail: mismatchReason,
@@ -412,10 +416,22 @@ export async function readMerchantCatalogue(params: {
     return { status: 'mismatch', detail: mismatchReason, mismatch: true, mismatchReason, productsWritten: 0 }
   }
 
-  await replaceCatalogueProducts(
-    { merchantAccountId: params.merchantAccountId, products: document.products, readAt },
+  const written = await replaceCatalogueProducts(
+    { merchantAccountId: params.merchantAccountId, deploymentUrl: params.deploymentUrl, products: document.products, readAt },
     db,
   )
+  if (!written) {
+    // The owner saved another deployment while this read was in flight: this
+    // document is the old address's, so nothing of it is written — not the
+    // products and not the read record (#4945 review S1).
+    return {
+      status: 'refused',
+      detail: 'superseded: the deployment address changed while it was being read; nothing was written',
+      mismatch: false,
+      mismatchReason: null,
+      productsWritten: 0,
+    }
+  }
   const detail =
     parsed.document.skippedProducts > 0
       ? `${parsed.document.skippedProducts} product(s) in the document could not be read and were not offered`
@@ -423,6 +439,7 @@ export async function readMerchantCatalogue(params: {
   await recordCatalogueRead(
     {
       merchantAccountId: params.merchantAccountId,
+      deploymentUrl: params.deploymentUrl,
       readAt,
       status: 'ok',
       detail,

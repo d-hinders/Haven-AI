@@ -206,6 +206,12 @@ describeDb('the merchant catalogue (#4899)', () => {
 
   it('reads the discovery document at /.well-known/x402, never the deployment root', async () => {
     const { accountId } = await seedMerchantAccount()
+    // A read runs only for a saved source, and writes only while its address is
+    // still the saved one (#4945 review S1).
+    await db.query(
+      `INSERT INTO merchant_catalogue_sources (merchant_account_id, deployment_url) VALUES ($1, $2)`,
+      [accountId, DEPLOYMENT],
+    )
     const seen: string[] = []
 
     const outcome = await read(accountId, async (url) => {
@@ -220,6 +226,10 @@ describeDb('the merchant catalogue (#4899)', () => {
 
   it('reads the well-known path even when the saved address carries a path', async () => {
     const { accountId } = await seedMerchantAccount()
+    await db.query(
+      `INSERT INTO merchant_catalogue_sources (merchant_account_id, deployment_url) VALUES ($1, $2)`,
+      [accountId, 'https://kit.example.com/foo?bar=1'],
+    )
     const seen: string[] = []
 
     const outcome = await read(
@@ -430,6 +440,47 @@ describeDb('the merchant catalogue (#4899)', () => {
     expect(list).toHaveLength(2)
     expect(list.every((p) => !p.offered)).toBe(true)
     expect(list.every((p) => p.removed_at !== null)).toBe(true)
+  })
+
+  /**
+   * #4945 review S1: the scheduled read of the OLD address is in flight when
+   * the owner saves a new one (and the new one cannot be read). The old read
+   * must write nothing: not its products and not an `ok` read record with the
+   * old document's receiving address on the new address's row.
+   */
+  it('writes nothing from a read whose address the owner replaced while it was in flight', async () => {
+    const { accountId } = await seedMerchantAccount()
+    await db.query(
+      `INSERT INTO merchant_catalogue_sources (merchant_account_id, deployment_url) VALUES ($1, $2)`,
+      [accountId, DEPLOYMENT],
+    )
+    const { saveCatalogueDeployment } = await import('../../../infra/repositories/merchant-catalogue.js')
+    const outcome = await read(accountId, async () => {
+      // The owner saves a new address while the old one's document is on its way.
+      await saveCatalogueDeployment({ merchantAccountId: accountId, deploymentUrl: 'https://other-kit.example.com' })
+      return ok(document())
+    })
+
+    expect(outcome.productsWritten).toBe(0)
+    expect(outcome.detail).toMatch(/^superseded:/)
+    expect(await products(accountId)).toHaveLength(0)
+    const row = await source(accountId)
+    expect(row?.last_read_status).toBe('never')
+    expect(row?.document_pay_to).toBeNull()
+  })
+
+  it('does not record a failed read of the old address on the new address', async () => {
+    const { accountId } = await seedMerchantAccount()
+    await db.query(
+      `INSERT INTO merchant_catalogue_sources (merchant_account_id, deployment_url) VALUES ($1, $2)`,
+      [accountId, DEPLOYMENT],
+    )
+    const { saveCatalogueDeployment } = await import('../../../infra/repositories/merchant-catalogue.js')
+    await read(accountId, async () => {
+      await saveCatalogueDeployment({ merchantAccountId: accountId, deploymentUrl: 'https://other-kit.example.com' })
+      return refusal('timeout')
+    })
+    expect((await source(accountId))?.last_read_status).toBe('never')
   })
 
   it('reads every configured source in one pass, and one failure does not stop the others', async () => {

@@ -314,8 +314,8 @@ export const migrations: Migration[] = [
   merchantServices,
   merchantKeys,
   ownerCompanyDetailsCheckoutFields,
-  // #4899: 128 is reserved by in-flight #4903, so this slice takes the next
-  // free number after 129 (#4870). Inserted in sorted order, so a later merge
-  // of 128 does not collide with it.
+  // #4899: 129 landed from #4870 and 128 is still in flight on #4903, so this
+  // slice takes the next free number AFTER both. Inserted in sorted order, so
+  // a later merge of 128 does not collide with it.
   merchantCatalogue,
 ]

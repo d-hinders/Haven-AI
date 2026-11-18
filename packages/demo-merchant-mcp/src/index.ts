@@ -232,11 +232,12 @@ const STRIPE_CONFIG = resolveStripeConfig({
 })
 const STRIPE_RECORDING = STRIPE_CONFIG ? createStripeRecording(STRIPE_CONFIG) : undefined
 
-// #4950: the Haven Sales account and its sale reporter, for the Sales product
-// (`field_notes`) only. Off unless BOTH MERCHANT_SALES_ADDRESS and
-// MERCHANT_SALES_KEY are set and usable, and MERCHANT_HAVEN_BASE_URL is set; a
-// half-set or unusable configuration warns and stays off (never a refusal to
-// start). The key goes to the core reporter and nowhere else.
+// #4950, #4953: the Haven Sales key and its sale reporter. Reporting is on with
+// MERCHANT_SALES_KEY and MERCHANT_HAVEN_BASE_URL: the Stripe-settled joke
+// (which also needs Stripe) reports, and with a usable MERCHANT_SALES_ADDRESS
+// the Sales product (`field_notes`) is offered and reports too. Unset or
+// unusable settings warn and stay off (never a refusal to start). The key goes
+// to the core reporter and nowhere else.
 const SALES_CONFIG = resolveSalesConfig({
   addressRaw: process.env.MERCHANT_SALES_ADDRESS,
   keyRaw: process.env.MERCHANT_SALES_KEY,
@@ -286,6 +287,22 @@ const server = createDemoMerchantServer({
   sekRate: SEK_RATE_FEED,
 })
 
+/** #4950, #4953: which products report, truthfully. Names no key. */
+function salesStartupLine(): string {
+  if (!SALES_REPORTING || !SALES_CONFIG) {
+    return '  Sales:     not reporting (MERCHANT_SALES_KEY / MERCHANT_HAVEN_BASE_URL unset or unusable) — field_notes not offered'
+  }
+  const reporting: string[] = []
+  if (STRIPE_RECORDING) reporting.push('joke (Stripe-settled)')
+  if (SALES_REPORTING.address) {
+    reporting.push(`field_notes $${formatUsdc(PRODUCTS.field_notes.price_usdc)} paid into ${SALES_REPORTING.address}`)
+  }
+  return (
+    `  Sales:     ${reporting.length > 0 ? `reporting ${reporting.join('; ')}` : 'no product reports (Stripe not configured)'} to ${SALES_CONFIG.havenBaseUrl}` +
+    (SALES_REPORTING.address ? '' : ' — field_notes not offered (MERCHANT_SALES_ADDRESS unset or unusable)')
+  )
+}
+
 server.listen(PORT, () => {
   console.log(`Haven Demo Merchant MCP server`)
   console.log(`  Endpoint:  ${BASE_URL}/mcp`)
@@ -320,14 +337,7 @@ server.listen(PORT, () => {
             : '')
       : '  Stripe:    not configured — the joke is paid to MERCHANT_ADDRESS',
   )
-  // #4950: names the Sales account (public on-chain) and where sales are
-  // reported, never the key.
-  console.log(
-    SALES_REPORTING && SALES_CONFIG
-      ? `  Sales:     field_notes $${formatUsdc(PRODUCTS.field_notes.price_usdc)} paid into ${SALES_REPORTING.address}; ` +
-          `each sale reported to ${SALES_CONFIG.havenBaseUrl}`
-      : '  Sales:     not configured (MERCHANT_SALES_ADDRESS / MERCHANT_SALES_KEY unset) — field_notes not offered',
-  )
+  console.log(salesStartupLine())
   // #4856: the seller every receipt carries, and where the joke receipt's
   // SEK rate comes from. Names no credential.
   console.log(

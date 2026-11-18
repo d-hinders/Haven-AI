@@ -693,6 +693,33 @@ PaymentIntents — and `scripts/reconcile-stripe.mjs` is the thin wrapper.
 
 **Who runs it.** The merchant's operator, on dev, after a test batch. The merchant itself cannot: it has no database and sleeps.
 
+### The joke reports its Stripe-settled sales (#4953)
+
+Dev and the Stripe sandbox only. With Stripe configured **and**
+`MERCHANT_SALES_KEY` and `MERCHANT_HAVEN_BASE_URL` set, each joke payment that
+the Stripe recorder sends to Stripe is also reported to Haven, with the
+transaction hash it settled with (`settled_onchain`), through the same reporter
+and the same record as Field Notes. `MERCHANT_SALES_ADDRESS` is **not** needed:
+it concerns Field Notes only. A payment the recorder skips (for instance
+`paid_other_address`) is not reported, and a replayed payment header reports
+nothing new. The buyer's answer, status and timing do not depend on Haven. With
+any of Stripe, the key or the base URL unset the joke reports nothing and
+behaves as before.
+
+**Before a demo, register the Stripe deposit address in Haven**, under the Sales
+account the Sales key belongs to: Sales settings on the dashboard, or
+`POST /merchant-deposit-addresses` from the owner's session. Register it **before the first demo payment**: Haven accepts a sale only
+if the address was registered at or before the payment's block time, and the
+merchant never resends a refused report, so a joke paid before registration
+never appears on the Sales page. The address
+is the owner's own statement and is shown as "registered by you, not verified by
+Haven". **The buyer must be a Haven user other than the Sales account's owner:**
+payments from the owner's own agents are internal moves and are refused. A
+Stripe-held sale never counts in a Haven balance; it is shown apart as
+"Received in Stripe". When the deposit address changes, register the new one and
+retire the old one only after the last payment to it has settled (see
+`docs/operations/secret-rotation.md`).
+
 ### Operator note: changing the Stripe variables changes the quoted address
 
 `STRIPE_DEPOSIT_ADDRESS` is the joke's `payTo`, so changing it (or turning
@@ -890,28 +917,41 @@ merchant-services demo (epic #4885): the payment goes into the merchant's
 **Haven Sales account**, and each settled sale is reported to Haven, so it
 shows on that account's Sales page.
 
-Two settings, and **both** must be set, together with `MERCHANT_HAVEN_BASE_URL`
-(the Haven API origin, shared with the passport check):
+Reporting needs `MERCHANT_SALES_KEY` and `MERCHANT_HAVEN_BASE_URL` (the Haven
+API origin, shared with the passport check). The Sales product itself also
+needs `MERCHANT_SALES_ADDRESS`, because it is paid into that account (#4953
+split these: the joke reports with the key and base URL alone, see
+[below](#the-joke-reports-its-stripe-settled-sales-4953)):
 
 | Variable | Value |
 |---|---|
 | `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Business → Sales on Haven), checksummed |
 | `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only) |
 
-With either unset, the product is offered nowhere — not in `list_products`, the
-discovery document, the tool list or the payment gate, and `/healthz` has no
-`sales` block — and every surface is byte-identical to a merchant without it
-(the startup banner only says `Sales: not configured`). A
-half-set or unusable configuration logs a warning naming the variable (never
+There are three states (#4953):
+
+- **Key and base URL unset or unusable:** nothing reports and the Sales product
+  is offered nowhere — not in `list_products`, the discovery document, the tool
+  list or the payment gate. `/healthz` has no `sales` block, every surface is
+  byte-identical to a merchant without it, and the banner reads
+  `Sales: not reporting`.
+- **Key and base URL set, no usable `MERCHANT_SALES_ADDRESS`:** the Stripe-settled
+  joke reports, but the Sales product is still offered nowhere. `/healthz`
+  carries a `sales` block (`configured: true`, the counts, no `address`) and the
+  banner reads `Sales: reporting joke (Stripe-settled) to <base> — field_notes
+  not offered`.
+- **All three set:** both products report, and `/healthz` names the address.
+
+A half-set or unusable configuration logs a warning naming the variable (never
 its value) and stays off; it never refuses to start:
 
 | Configuration | Result |
 |---|---|
-| only one of the two variables is set | warning; the product is not offered |
-| `MERCHANT_SALES_ADDRESS` is not a checksummed EVM address | warning; not offered |
-| `MERCHANT_SALES_ADDRESS` is `MERCHANT_ADDRESS`, `STRIPE_DEPOSIT_ADDRESS` or `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` | warning; not offered |
-| `MERCHANT_SALES_KEY` does not start with `sk_merchant_` | warning; not offered |
-| `MERCHANT_HAVEN_BASE_URL` is unset or not an http(s) URL | warning; not offered |
+| `MERCHANT_SALES_ADDRESS` is set without `MERCHANT_SALES_KEY` | warning; not offered, nothing reported |
+| `MERCHANT_SALES_ADDRESS` is not a checksummed EVM address | warning; not offered (the joke still reports) |
+| `MERCHANT_SALES_ADDRESS` is `MERCHANT_ADDRESS`, `STRIPE_DEPOSIT_ADDRESS` or `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` | warning; not offered (the joke still reports) |
+| `MERCHANT_SALES_KEY` does not start with `sk_merchant_` | warning; not offered, nothing reported |
+| `MERCHANT_HAVEN_BASE_URL` is unset or not an http(s) URL | warning; not offered, nothing reported |
 
 **Nothing else moves.** The product has its own id (`field_notes`), its own
 category and a one-product tool, like the joke, so no existing product's

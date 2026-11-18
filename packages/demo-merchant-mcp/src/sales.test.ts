@@ -84,7 +84,7 @@ function mockHaven(mode: HavenMode = 'accept') {
 }
 
 async function startServer(
-  opts: { haven?: ReturnType<typeof mockHaven>; sales?: boolean; log?: (line: string) => void; attemptTimeoutMs?: number } = {},
+  opts: { haven?: ReturnType<typeof mockHaven>; sales?: boolean; noAddress?: boolean; log?: (line: string) => void; attemptTimeoutMs?: number } = {},
 ) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
@@ -93,7 +93,7 @@ async function startServer(
   const sales =
     opts.sales === false
       ? undefined
-      : createSalesReporting(CONFIG, {
+      : createSalesReporting(opts.noAddress ? { salesKey: SALES_KEY, havenBaseUrl: HAVEN } : CONFIG, {
           chainId: CHAIN_ID,
           fetch: haven.fetch,
           sleep: async () => {},
@@ -213,13 +213,30 @@ describe('resolveSalesConfig', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it('#4953: with the key and base URL and no address, reports (for the joke) and offers no Sales product', () => {
+    const warn = vi.fn()
+    const config = resolveSalesConfig({ ...base, addressRaw: undefined, warn })
+    expect(config).toEqual({ salesKey: SALES_KEY, havenBaseUrl: HAVEN })
+    expect(config?.address).toBeUndefined()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it.each([
-    ['only the address', { keyRaw: undefined }],
-    ['only the key', { addressRaw: undefined }],
     ['an address that is not checksummed', { addressRaw: SALES.toLowerCase() }],
     ['an address that is not an address', { addressRaw: '0x1234' }],
     ['MERCHANT_ADDRESS as the Sales address', { addressRaw: MERCHANT }],
     ['the Stripe deposit address as the Sales address', { addressRaw: STRIPE_DEPOSIT }],
+  ])('#4953: keeps #4950 checks of the address: with %s the Sales product is off, the joke still reports', (_label, patch) => {
+    const warn = vi.fn()
+    expect(resolveSalesConfig({ ...base, ...patch, warn })).toEqual({ salesKey: SALES_KEY, havenBaseUrl: HAVEN })
+    expect(warn).toHaveBeenCalledTimes(1)
+    const message = String(warn.mock.calls[0][0])
+    expect(message).toContain('Sales product is not offered')
+    expect(message).not.toContain(SALES_KEY)
+  })
+
+  it.each([
+    ['only the address', { keyRaw: undefined }],
     ['a key that is not a Sales key', { keyRaw: 'sk_live_not_a_sales_key' }],
     ['no Haven base URL', { havenBaseUrlRaw: undefined }],
     ['a Haven base URL that is not a URL', { havenBaseUrlRaw: 'not a url' }],
@@ -267,6 +284,21 @@ describe('the Sales product (#4950)', () => {
     expect(list).not.toContain('Field Notes')
     const tools = await (await postMcp(url, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).text()
     expect(tools).not.toContain('buy_field_notes')
+  })
+
+  it('#4953: refuses a direct paid call to field_notes when the key and base URL are set but no address', async () => {
+    const { url, sales, haven, submit } = await startServer({ noAddress: true })
+    // The payment gate does not quote it: no 402, as on a merchant without Sales.
+    expect((await postMcp(url, buyCall('field_notes'))).status).not.toBe(402)
+    // A header signed against another product's quote, replayed at field_notes.
+    const pr = (await (await postMcp(url, buyCall('vpn_basic'))).json()) as PaymentRequired
+    const header = await signedHeader(pr)
+    const res = await postMcp(url, buyCall('field_notes', 6), { [PAYMENT_SIGNATURE_HEADER]: header })
+    expect(await res.text()).not.toContain('Your field note')
+    expect(res.headers.get('payment-response')).toBeNull()
+    expect(submit).not.toHaveBeenCalled()
+    await sales!.idle()
+    expect(haven.posts).toHaveLength(0)
   })
 
   it('is listed, with its tool, on a merchant with the Sales settings', async () => {
@@ -334,12 +366,39 @@ describe('one report per sale (#4950)', () => {
     expect(healthz.sales).toEqual({ configured: true, address: SALES, reported: 1, pending: 0, refused: 0, gave_up: 0 })
   })
 
-  it.each(['vpn_basic', 'storage_50gb'] as const)('sends no report for a sale of %s', async (id) => {
-    const { url, sales, haven } = await startServer()
-    const { paid } = await buy(url, id)
-    expect(paid.status).toBe(200)
-    await sales!.idle()
+  // #4953: rewritten, not deleted. Every product other than the Sales product
+  // and the joke (which reports only when Stripe sends it; see
+  // stripe-recording.test.ts) sends no report, whatever the settings.
+  const NON_REPORTING = Object.values(PRODUCTS)
+    .map((p) => p.id)
+    .filter((id) => id !== 'field_notes' && id !== 'joke')
+
+  it('names the seven products that never report', () => {
+    expect(NON_REPORTING).toHaveLength(7)
+  })
+
+  it.each(NON_REPORTING)('sends no report for a sale of %s', async (id) => {
+    const receipt = { fakturanummer: 'FAK-1', momsbehandling: 'SE_25' } as never
+    const haven = mockHaven()
+    const sales = createSalesReporting(CONFIG, { chainId: CHAIN_ID, fetch: haven.fetch, log: () => {} })
+    const payment = {
+      productId: id,
+      from: PAYER,
+      txHash: TX_HASH,
+      settlement: 'settled_onchain',
+      merchantReference: 'sale_TEST',
+    } as SettledPayment
+    sales.report(PRODUCTS[id], payment, receipt)
+    await sales.idle()
     expect(haven.posts).toHaveLength(0)
+    // Nor does a live purchase of it, where the product is purchasable here.
+    if (isProductOffered(PRODUCTS[id], { cdpConfigured: false, salesConfigured: true })) {
+      const { url, sales: live, haven: liveHaven } = await startServer()
+      const { paid } = await buy(url, id)
+      expect(paid.status).toBe(200)
+      await live!.idle()
+      expect(liveHaven.posts).toHaveLength(0)
+    }
   })
 
   it('reports only an on-chain settlement of the Sales product, once per transaction', async () => {

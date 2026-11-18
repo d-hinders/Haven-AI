@@ -372,11 +372,14 @@ arguments and reads no environment variable. `newMerchantReference`
 (`merchant-reference.ts`) is the one `sale_<ULID>` generator; the settle-once
 coordinator, the proxy and the demo merchant's skip-settle QA hook call it, and no other package defines one.
 
-- **The demo merchant** (#4950) reports the sales of its one Sales product,
-  `field_notes`, paid into its Haven Sales account. Its settings are
-  `MERCHANT_SALES_ADDRESS`, `MERCHANT_SALES_KEY` and the existing
-  `MERCHANT_HAVEN_BASE_URL`; the demo merchant README says how it holds what
-  is in flight.
+- **The demo merchant** (#4950) reports the sales of its Sales product,
+  `field_notes`, paid into its Haven Sales account, and (#4953, dev and Stripe
+  sandbox only) the joke's Stripe-settled sales: a payment its Stripe recorder
+  sends, with the `settled_onchain` hash, to be shown as "Received in Stripe"
+  against a deposit address the Sales account's owner registered (#4952). The
+  record is the same. Reporting needs `MERCHANT_SALES_KEY` and the existing
+  `MERCHANT_HAVEN_BASE_URL`; `MERCHANT_SALES_ADDRESS` concerns `field_notes`
+  only. The demo merchant README says how it holds what is in flight.
 - **The paywall proxy** (#4898) will report every settled call with
   `HAVEN_MERCHANT_KEY`. The reporter takes Haven's API **origin** and appends
   `/merchant/sales` itself (`saleReportUrl`), so #4898 passes the origin, not

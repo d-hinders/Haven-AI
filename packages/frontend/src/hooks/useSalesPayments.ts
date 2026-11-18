@@ -37,6 +37,8 @@ export interface UseSalesPaymentsResult {
   hasMore: boolean
   /** The read's count for the period and filter set; null until the first page answers. */
   total: number | null
+  /** Today's USDC rate the last page carried (#4963), for rows drawn before the summary answers. */
+  usdcRates: SalesPaymentsPage['usdc_rates'] | null
   loading: boolean
   loadingMore: boolean
   failed: boolean
@@ -61,6 +63,7 @@ export function useSalesPayments(
 ): UseSalesPaymentsResult {
   const [payments, setPayments] = useState<SalesPayment[]>([])
   const [total, setTotal] = useState<number | null>(null)
+  const [usdcRates, setUsdcRates] = useState<SalesPaymentsPage['usdc_rates'] | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -85,6 +88,7 @@ export function useSalesPayments(
       setPayments(page.payments)
       setCursor(page.next_cursor)
       setTotal(page.total)
+      setUsdcRates(page.usdc_rates ?? null)
     } catch {
       if (requestIdRef.current !== requestId) return
       setFailed(true)
@@ -127,6 +131,7 @@ export function useSalesPayments(
     payments,
     hasMore: cursor !== null,
     total,
+    usdcRates,
     loading,
     loadingMore,
     failed,

@@ -24,6 +24,7 @@ import {
   isEmptyPeriod,
   lastPaidText,
   payerSubline,
+  productFacetValue,
   salesFiltersFromList,
   payerCount,
   revenueCount,
@@ -138,7 +139,9 @@ export function salesFacets(facets: SalesFacets | null): ListFacet[] {
       id: SALES_FACET_KEYS.product,
       label: 'Product',
       selection: 'multi',
-      options: (facets?.products ?? []).map((p) => ({ value: p.product_id, label: p.label })),
+      // A product id is free text: `productFacetValue` keeps one with a comma
+      // (or an outer space, or the word "all") intact through the URL.
+      options: (facets?.products ?? []).map((p) => ({ value: productFacetValue(p.product_id), label: p.label })),
     },
     {
       id: SALES_FACET_KEYS.payer,
@@ -226,9 +229,9 @@ export function SalesOverviewTab({
   const previousRange = previousSalesRange(range)
   const previous = useSalesSummary(previousRange, filters)
   const list = useSalesPayments(range, { filters })
-  const facetData = useSalesFacets(range)
+  const facetsRead = useSalesFacets(range, refreshKey)
   const periodTotal = useSalesPeriodTotal(range, filtered)
-  const facets = useMemo(() => salesFacets(facetData), [facetData])
+  const facets = useMemo(() => salesFacets(facetsRead.data), [facetsRead.data])
 
   const refetchAll = useRef(() => {})
   refetchAll.current = () => {
@@ -244,25 +247,34 @@ export function SalesOverviewTab({
 
   // The display rate is today's, the same for every filter: the last summary's
   // is kept so the rows keep their currency while a new filter's summary loads.
+  // Before the first summary answers (a filtered link renders the list at
+  // once), the rows take the rate their own page carried.
   const lastRates = useRef<SalesUsdcRates | null>(null)
   if (summary.data?.usdc_rates) lastRates.current = summary.data.usdc_rates
-  const money: SalesMoney = { currency, chainId, rates: lastRates.current ?? undefined }
+  const money: SalesMoney = { currency, chainId, rates: lastRates.current ?? list.usdcRates ?? undefined }
 
+  // Clears the toolbar's own keys and nothing else: the period lives in the
+  // header and is kept (the codec's `clearedListState` would reset it).
   const clearFilters = () => {
     controls.bumpSearchEpoch()
     controls.onChange({
       ...controls.state,
       q: '',
-      facets: { [SALES_FACET_KEYS.product]: [], [SALES_FACET_KEYS.payer]: [], [SALES_FACET_KEYS.kind]: [] },
+      facets: Object.fromEntries(Object.values(SALES_FACET_KEYS).map((key) => [key, [] as string[]])),
     })
   }
 
   const data = summary.loading || summary.failed ? null : summary.data
   const emptyUnfiltered = data !== null && !filtered && isEmptyPeriod(data)
-  // The list (and its toolbar) stays mounted while a filter's figures reload,
-  // so the search field keeps its focus and its draft. Without a filter it
-  // waits for the first summary, as before, and an empty period has none.
-  const showList = filtered || (data !== null && !emptyUnfiltered)
+  // The list (and its toolbar) stays mounted once it has been shown for this
+  // period, through every reload a filter change causes — adding one AND
+  // removing the last one — so the search field keeps its focus and its draft
+  // and an open menu stays open. Before the period's first answer, and for a
+  // period with no payments at all, there is no list.
+  const rangeKey = `${range.from}..${range.to}`
+  const listShownFor = useRef<string | null>(null)
+  if (filtered || (data !== null && !emptyUnfiltered)) listShownFor.current = rangeKey
+  const showList = !emptyUnfiltered && listShownFor.current === rangeKey
   const revenueText = data !== null ? salesTotalText(data.revenue_raw, money) : null
   const stripeCount = data !== null ? stripeSalesCount(data) : 0
   const stripeText = data !== null && stripeCount > 0 ? salesTotalText(stripeSalesRaw(data), money) : null
@@ -293,6 +305,7 @@ export function SalesOverviewTab({
             facets={facets}
             filtered={filtered}
             onClearFilters={clearFilters}
+            facetsFailed={facetsRead.failed}
           />
         </div>
       ) : null}

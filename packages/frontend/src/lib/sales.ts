@@ -355,14 +355,46 @@ export interface SalesFilters {
 
 export const NO_SALES_FILTERS: SalesFilters = { q: '', products: [], payers: [], kinds: [] }
 
-/** The reads refuse a search under 2 characters or over 100 (#4959): a shorter term is not sent at all. */
+/**
+ * The reads refuse a search under 2 characters or over 100 (#4959), counted
+ * as the backend's schema counts them: in CODE POINTS, so one emoji is one
+ * character, not the two UTF-16 units `.length` would say.
+ */
 const SEARCH_MIN = 2
 const SEARCH_MAX = 100
 
-/** The search the reads are sent: trimmed, and only once it is long enough to be one. */
+/** The search the reads are sent: trimmed, cut at 100 characters, and only once it is 2 or more. */
 export function salesSearchTerm(q: string): string {
-  const term = q.trim().slice(0, SEARCH_MAX).trim()
-  return term.length >= SEARCH_MIN ? term : ''
+  const term = Array.from(q.trim()).slice(0, SEARCH_MAX).join('').trim()
+  return Array.from(term).length >= SEARCH_MIN ? term : ''
+}
+
+/**
+ * A product id as a facet value in the URL, and back. A product id is free
+ * text (1–200 characters), but the list codec joins a facet's values with
+ * commas, trims each one and reads `all` as All. An id that would not survive
+ * that — one with a comma, an outer space, a leading `~`, or the word `all` —
+ * is written as `~` and its percent-encoding (which holds no comma or space);
+ * every other id is written as itself, so ordinary links stay readable.
+ */
+const PRODUCT_ESCAPE = '~'
+
+export function productFacetValue(productId: string): string {
+  const unsafe =
+    productId.includes(',') ||
+    productId !== productId.trim() ||
+    productId.startsWith(PRODUCT_ESCAPE) ||
+    productId.toLowerCase() === 'all'
+  return unsafe ? `${PRODUCT_ESCAPE}${encodeURIComponent(productId)}` : productId
+}
+
+export function productIdFromFacetValue(value: string): string {
+  if (!value.startsWith(PRODUCT_ESCAPE)) return value
+  try {
+    return decodeURIComponent(value.slice(PRODUCT_ESCAPE.length))
+  } catch {
+    return value
+  }
 }
 
 /** The control state as the reads' filters. */
@@ -370,7 +402,7 @@ export function salesFiltersFromList(state: ListState): SalesFilters {
   const kinds = (state.facets[SALES_FACET_KEYS.kind] ?? []).filter((k): k is SalesKind => SALES_KINDS.includes(k as SalesKind))
   return {
     q: salesSearchTerm(state.q),
-    products: state.facets[SALES_FACET_KEYS.product] ?? [],
+    products: (state.facets[SALES_FACET_KEYS.product] ?? []).map(productIdFromFacetValue),
     payers: state.facets[SALES_FACET_KEYS.payer] ?? [],
     kinds,
   }

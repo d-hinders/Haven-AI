@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ListNoMatch, ListShowMore, ListToolbar } from '@/components/ui/ListToolbar'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { ListFacet } from '@/components/ui/FacetMenu'
 import type { ListNoun } from '@/components/ui/list-controls-copy'
 import type { ListState } from '@/components/ui/list-url-codec'
@@ -148,6 +149,7 @@ export function SalesPaymentsList({
   facets,
   filtered,
   onClearFilters,
+  facetsFailed = false,
 }: {
   list: UseSalesPaymentsResult
   /** The period's payments with no filter; null while unread. Only asked for while `filtered`. */
@@ -164,6 +166,8 @@ export function SalesPaymentsList({
   /** True when a filter or a search reaches the reads. */
   filtered: boolean
   onClearFilters: () => void
+  /** The facets read failed: the Product and Payer menus have no options, and the page says why. */
+  facetsFailed?: boolean
 }) {
   const { payments, loading, loadingMore, failed, hasMore, loadMore, refetch } = list
   const total = list.total ?? 0
@@ -203,6 +207,14 @@ export function SalesPaymentsList({
           ) : undefined
         }
       />
+
+      {/* The list controls' filter-options alert, under the summary line, as
+          Transactions places it: the menus are empty for a reason. */}
+      {facetsFailed ? (
+        <div className="mt-2" data-testid="sales-facets-error">
+          <InlineAlert>Product and payer filters could not load. Search still finds them.</InlineAlert>
+        </div>
+      ) : null}
 
       {showNoMatch ? (
         <div className="mt-3" data-testid="sales-no-match">

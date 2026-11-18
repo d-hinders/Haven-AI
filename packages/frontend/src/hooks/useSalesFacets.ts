@@ -8,34 +8,43 @@
  * past the summary's top 100. The options therefore never shrink to the value
  * just selected, which a menu built from the filtered summary would do. The
  * state keys on the range; a superseded answer never writes. A failed read
- * leaves the facets without options, and the search still works.
+ * leaves the facets without options and says so (`failed`): the page shows
+ * the list controls' filter-options alert, and the search still works.
+ * `refreshKey` reads again when something the options describe changed (a
+ * sale record cleared can take a product out of the period).
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { SalesDayRange, SalesFacets } from '@/lib/sales'
 
-export function useSalesFacets(range: SalesDayRange): SalesFacets | null {
+export interface UseSalesFacetsResult {
+  data: SalesFacets | null
+  failed: boolean
+}
+
+export function useSalesFacets(range: SalesDayRange, refreshKey = 0): UseSalesFacetsResult {
   const [data, setData] = useState<SalesFacets | null>(null)
+  const [failed, setFailed] = useState(false)
   const requestIdRef = useRef(0)
   const { from, to } = range
 
   useEffect(() => {
     const requestId = ++requestIdRef.current
     setData(null)
+    setFailed(false)
     api
       .get<SalesFacets>(`/merchant-sales/facets?from=${from}&to=${to}`)
       .then((response) => {
         if (requestIdRef.current === requestId) setData(response)
       })
       .catch(() => {
-        // The options are an aid: without them the facets show none and the
-        // search still reaches every product and payer.
+        if (requestIdRef.current === requestId) setFailed(true)
       })
     return () => {
       requestIdRef.current += 1
     }
-  }, [from, to])
+  }, [from, to, refreshKey])
 
-  return data
+  return { data, failed }
 }

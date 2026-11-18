@@ -21,6 +21,7 @@ covers:
   - packages/frontend/src/components/LabelsManagerModal.tsx
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
+  - packages/frontend/src/components/agent-panel/CheckoutDetailsSharingToggle.tsx
   - packages/frontend/src/components/agent-panel/McpServerName.tsx
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
@@ -58,7 +59,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-17"
+last-verified: "2026-11-18"
 ---
 
 # Haven Screen Recipes
@@ -1021,7 +1022,22 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       payment. `local_stdio`, `manual` and an unknown setup leave it enabled,
       and an agent whose opt-in is already ON stays interactive so the owner
       can switch it off (#4435).
-   5. **Agent Passport**: `AgentPassportCard` renders the row itself — the
+   5. **Checkout details**: `CheckoutDetailsSharingToggle` (#4871), rendered
+      whenever the company-details feature is on — it does NOT require a
+      VIES-valid VAT number or stored details, because the switch may be on
+      with nothing saved. The row is a title, a one-line description that
+      names what is shared and with whom ("Shares the receipt email and
+      addresses you saved in Business details with merchants that ask."), the
+      `Checkbox` in the action slot, and a closed-by-default **What gets
+      shared** disclosure in the row's full-width slot. The disclosure lists
+      the three fields, says only a merchant that asks receives them, that
+      the agent can read the details once sharing is on, that only a saved
+      receipt email is ever shared (never the sign-in email), and that the
+      owner can switch it off at any time. When none of the three fields is
+      saved, a one-line note in the row says so. The checkbox carries a short
+      visible label ("Allow") and the full accessible name through
+      `aria-label`, and points at the description through `aria-describedby`.
+   6. **Agent Passport**: `AgentPassportCard` renders the row itself — the
       title and status badge, the one-line description, Issue a passport or
       Try again, and the issued state's `dl` grid in the full-width slot. It
       gates Issue a passport on two things: the agent is not revoked (archived

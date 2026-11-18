@@ -50,7 +50,11 @@
  * 4. **Tax declaration** — `TaxDeclarationToggle`, which owns its row and
  *    renders only when the company details are VIES-valid; the row is absent
  *    otherwise, with no orphan divider.
- * 5. **Agent Passport** — `AgentPassportCard` renders the row itself (label,
+ * 5. **Checkout details** — `CheckoutDetailsSharingToggle` (#4871), which
+ *    owns its row and renders whenever the company-details feature is on. It
+ *    does not require a VIES-valid VAT number or stored details: the switch
+ *    may be on with nothing saved.
+ * 6. **Agent Passport** — `AgentPassportCard` renders the row itself (label,
  *    detail, action, and the issued-state `dl` in the full-width slot). Its
  *    own revoked-only gate stands (archived agents are not newly gated).
  *
@@ -79,6 +83,7 @@ import {
   hasUnrecordedMcpServerName,
 } from '@/components/agent-panel/McpServerName'
 import { TaxDeclarationToggle } from '@/components/agent-panel/TaxDeclarationToggle'
+import { CheckoutDetailsSharingToggle } from '@/components/agent-panel/CheckoutDetailsSharingToggle'
 import type { Agent } from '@/hooks/useAgents'
 
 interface Props {
@@ -209,7 +214,17 @@ export default function AgentSettingsTab({
           onAgentsChanged={onAgentsChanged}
         />
 
-        {/* 5. Agent Passport — `AgentPassportCard` renders the row itself;
+        {/* 5. Checkout details — the sharing switch (#4871). It owns its row
+            and visibility rule (the company-details feature must be on); it
+            does NOT require a VIES-valid VAT number or stored details, since
+            the switch may be on with nothing saved. */}
+        <CheckoutDetailsSharingToggle
+          agentId={agent.id}
+          checkoutDetailsSharingEnabled={agent.checkout_details_sharing_enabled}
+          onAgentsChanged={onAgentsChanged}
+        />
+
+        {/* 6. Agent Passport — `AgentPassportCard` renders the row itself;
             the divided section carries its hairline. Its revoked and
             not-issuable gates
             stand inside the component (archived is NOT gated there). */}

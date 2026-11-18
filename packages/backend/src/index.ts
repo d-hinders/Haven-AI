@@ -39,6 +39,9 @@ import dashboardRoutes from './routes/dashboard.js'
 import dashboardBudgetRemainingRoutes from './routes/dashboard-budget-remaining.js'
 import agentRoutes from './routes/agents.js'
 import agentTaxDeclarationRoutes from './routes/agent-tax-declaration.js'
+// #4871: the per-agent checkout-details sharing switch and the agent's read —
+// its own route FILE, for the reason at `agent-tax-declaration.ts:123-127`.
+import agentCheckoutDetailsRoutes from './routes/agent-checkout-details.js'
 import labelRoutes from './routes/labels.js'
 import agentLabelRoutes from './routes/agent-labels.js'
 import agentOrganizationRoutes from './routes/agent-organizations.js'
@@ -287,6 +290,11 @@ installRequestValidation(app, {
     // new module never enters shadow (no existing caller a stricter schema
     // could break). GET only: no request body, one uuid path parameter.
     'routes/agent-tax-declaration.ts',
+    // #4871: the checkout-details sharing module is born ENFORCED for the same
+    // reason — a genuinely new module never enters shadow (no existing caller
+    // a stricter schema could break). The owner PUT carries one boolean body;
+    // the agent GET has no body and one uuid path parameter.
+    'routes/agent-checkout-details.ts',
     'routes/agent-rekey.ts',
     'routes/agent-connection-setups.ts',
     'routes/agent-passports.ts',
@@ -576,6 +584,9 @@ await app.register(dashboardBudgetRemainingRoutes, { prefix: '/dashboard' })
 // tombstone below — the prefix survives only because that 410 does.
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(agentTaxDeclarationRoutes, { prefix: '/agents' })
+// #4871: the per-agent checkout-details sharing switch (owner PUT) and the
+// agent's own read (agent GET) — one module, two credentials, same prefix.
+await app.register(agentCheckoutDetailsRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentRekeyRoutes, { prefix: '/agents' })

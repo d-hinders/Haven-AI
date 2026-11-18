@@ -115,6 +115,22 @@ describe('sales reporting (#4898)', () => {
     for (const answer of answers) expect(answer.elapsed).toBeLessThan(1_500)
   })
 
+  it('resends a record Haven answers "not visible yet" with, and accepts it once the transaction is visible', async () => {
+    haven = await startHaven(undefined, [
+      { status: 425, body: { error_code: 'transaction_not_visible', retry_after_seconds: 0 } },
+      { status: 201, body: { sale: { id: 'sale-1' } } },
+    ])
+    const dir = salesDir()
+    harness = await startHarness({ dir, env: salesEnv(haven, dir), overrides: FAST })
+
+    const answer = await paidCall(harness)
+    expect(answer.status).toBe(200)
+    await until(() => harness!.logs.some((line) => line.event === 'sales_report_accepted'), 4_000)
+    expect(haven.seen.length).toBeGreaterThanOrEqual(2)
+    expect(harness.proxy.sales!.outboxDepth()).toBe(0)
+    expect((await harness.proxy.store.findByTxHash(TX_HASH))?.saleReported).toBe(true)
+  })
+
   it('resends a record Haven asks to be retried, from the outbox, and stops once Haven accepts', async () => {
     haven = await startHaven({ status: 503, body: { error_code: 'chain_unavailable' } })
     const dir = salesDir()

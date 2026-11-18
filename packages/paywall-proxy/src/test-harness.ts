@@ -116,20 +116,27 @@ export interface MockHaven {
   url: string
   seen: HavenRequest[]
   behaviour: HavenBehaviour
+  /** When set, the nth request gets `answers[n]` (the last one repeats). */
+  answers?: HavenBehaviour[]
   close(): Promise<void>
 }
 
 /**
  * #4898: a mocked Haven, the `POST /merchant/sales` route (#4897). It records
- * every request and answers with `behaviour`, so a test can make Haven accept,
- * refuse, hang or be unreachable without reaching the real API.
+ * every request and answers with `behaviour` — or, when `answers` is given, with
+ * the nth answer — so a test can make Haven accept, refuse, hang or be
+ * unreachable without reaching the real API.
  */
-export async function startHaven(initial?: Partial<HavenBehaviour>): Promise<MockHaven> {
+export async function startHaven(
+  initial?: Partial<HavenBehaviour>,
+  answers?: HavenBehaviour[],
+): Promise<MockHaven> {
   const seen: HavenRequest[] = []
   const mock: MockHaven = {
     url: '',
     seen,
     behaviour: { status: 201, body: { sale: { id: 'sale-1' } }, ...initial },
+    ...(answers !== undefined ? { answers } : {}),
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections()
@@ -146,7 +153,10 @@ export async function startHaven(initial?: Partial<HavenBehaviour>): Promise<Moc
         headers: req.headers,
         body: Buffer.concat(chunks).toString('utf8'),
       })
-      const behaviour = mock.behaviour
+      const behaviour =
+        mock.answers !== undefined
+          ? mock.answers[Math.min(seen.length - 1, mock.answers.length - 1)]!
+          : mock.behaviour
       if (behaviour.hang) return
       const answer = (): void => {
         const text = JSON.stringify(behaviour.body ?? {})

@@ -1738,6 +1738,11 @@ export const openapiSpec = {
         'Agent-side x402 payment authorization for independently signed payment payloads. Haven never receives the agent delegate private key and never treats an API key as payment authority.',
     },
     { name: 'Machine payments' },
+    {
+      name: 'Merchant',
+      description:
+        'The receive-only merchant key\'s routes (#4897, epic #4885). Authenticated by a Sales key (`sk_merchant_...`), never a session or an agent key. Nothing here moves funds or signs.',
+    },
     { name: 'Transactions' },
     { name: 'Delegations' },
     {
@@ -10072,6 +10077,67 @@ export const openapiSpec = {
         },
       },
     },
+    '/merchant/sales': {
+      post: {
+        tags: ['Merchant'],
+        operationId: 'ingestMerchantSale',
+        summary: 'Report a sale: one record, accepted only against a transfer Haven read from the chain.',
+        description:
+          'The merchant key\'s one write (#4897, epic #4885). The body is the sale record of `docs/architecture/12-merchant-kit.md` section 5. Haven reads the transaction itself and stores the sale only when it finds a USDC transfer into the key\'s account; the account comes from the key and nowhere else. `amount` and `payer` are validated and stored nowhere: the sale\'s amount, payer, token and time are copied from the chain read, so a record that states a different amount changes nothing. When one transaction carries several USDC transfers into the account the record attaches to the transaction as a whole: its amount is the sum of the transfers that do not come from the owner\'s own addresses, and its payer is the single sender when all transfers share one, else "several payers". One record per transaction per account: an identical resend answers 200 with the stored sale and writes nothing, a different record for the same transaction answers 409 and the first stands. The retry answer (425 `transaction_not_visible`) is distinct from every refusal: the receipt is not found yet or has fewer than 3 confirmations, so the same record may be sent again after `Retry-After` seconds. A transaction that paid another Haven account and one that paid nobody get the same 422, so a key cannot test whether a hash paid another account. Every refusal carries `error` and `error_code` with the same machine-readable code, and `message` in words.',
+        security: [{ MerchantApiKey: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSaleRecord' } } },
+        },
+        responses: {
+          '200': {
+            description: 'An identical resend: the sale already stored for this transaction. Nothing was written.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSale' } } },
+          },
+          '201': {
+            description: 'A new sale was stored.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantSale' } } },
+          },
+          '400': {
+            ...errorResponse,
+            description: 'The record is malformed, or `version` is not 1: error `unsupported_record_version` (version 1 is the only version).',
+          },
+          '401': { ...errorResponse, description: 'Missing, invalid or revoked merchant key.' },
+          '403': { ...errorResponse, description: 'Merchant services are turned off for the key\'s account: error_code MERCHANT_SERVICES_OFF.' },
+          '409': {
+            ...errorResponse,
+            description: 'error `sale_record_conflict`: this transaction already has a different sale record on the account. The first stands.',
+          },
+          '422': {
+            ...errorResponse,
+            description: 'Refused, not retryable. error `chain_mismatch`: `chain` is not the key account\'s network. error `no_payment_to_account`: the transaction is confirmed and has no USDC transfer into the key\'s account (the same answer whether it paid another Haven account or nobody).',
+          },
+          '425': {
+            description: 'error `transaction_not_visible`: the retry answer. The receipt is not found yet, or has fewer than 3 confirmations. Send the same record again after `Retry-After` seconds. It is the only 4xx answer a reporter retries.',
+            headers: {
+              'Retry-After': { description: 'Seconds to wait before sending the record again.', schema: { type: 'integer' } },
+            },
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'error_code', 'message', 'retry_after_seconds'],
+                  properties: {
+                    error: { type: 'string', enum: ['transaction_not_visible'] },
+                    error_code: { type: 'string', enum: ['transaction_not_visible'] },
+                    message: { type: 'string' },
+                    retry_after_seconds: { type: 'integer' },
+                  },
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+          '429': { ...errorResponse, description: 'Rate limited: 120/min per merchant key.' },
+          '503': { ...errorResponse, description: 'error `chain_unavailable`: the chain could not be read; nothing was stored. Retry.' },
+        },
+      },
+    },
     '/merchants': {
       get: {
         tags: ['Catalog'],
@@ -10212,6 +10278,12 @@ export const openapiSpec = {
         scheme: 'bearer',
         bearerFormat: 'JWT',
         description: 'Ops console session token (#3509), issued by the GitHub sign-in to an allowlisted founder. Signed with its own secret and refused by every customer route; it is read authority over the ops console only, never payment authority.',
+      },
+      MerchantApiKey: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'sk_merchant_*',
+        description: 'Receive-only Sales key (#4896). Authenticates the merchant routes and nothing else; it cannot move funds, sign, or change signers, budgets or agents.',
       },
       DashboardJwt: {
         type: 'http',
@@ -11886,6 +11958,56 @@ export const openapiSpec = {
             description:
               'When the key last made an ACCEPTED request, or null. Updated at most once a minute per key.',
           },
+        },
+        additionalProperties: false,
+      },
+      /**
+       * #4897: the sale record (`12-merchant-kit.md` section 5), closed. `version`
+       * is a bare integer here so an unknown one reaches the handler and is
+       * answered `unsupported_record_version`, not a generic schema 400.
+       */
+      MerchantSaleRecord: {
+        type: 'object',
+        required: ['tx_hash', 'chain', 'product_id', 'amount', 'payer', 'merchant_reference'],
+        properties: {
+          version: { type: 'integer', description: 'The sale-record schema version. 1 is the only version; absent means 1.' },
+          tx_hash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'The settlement transaction hash.' },
+          chain: { type: 'string', minLength: 1, maxLength: 64, description: 'CAIP-2 identifier. Must be `eip155:<the key account\'s chain id>`.' },
+          product_id: { type: 'string', minLength: 1, maxLength: 200 },
+          product_name: { type: 'string', maxLength: 500 },
+          amount: { type: 'string', pattern: '^[0-9]+$', maxLength: 78, description: 'Validated and stored nowhere: the sale\'s amount is read from the chain.' },
+          payer: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$', description: 'Validated and stored nowhere: the sale\'s payer is read from the chain.' },
+          merchant_reference: { type: 'string', minLength: 1, maxLength: 200 },
+          receipt_number: { type: 'string', maxLength: 200 },
+          vat_treatment: { type: 'string', enum: ['SE_25', 'REVERSE_CHARGE'] },
+        },
+        additionalProperties: false,
+      },
+      MerchantSale: {
+        type: 'object',
+        required: [
+          'id', 'tx_hash', 'chain', 'record_version', 'product_id', 'product_name', 'merchant_reference',
+          'receipt_number', 'vat_treatment', 'amount_raw', 'token_address', 'payer_address', 'several_payers',
+          'sender_is_own_address', 'block_number', 'block_time', 'created_at',
+        ],
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          tx_hash: { type: 'string' },
+          chain: { type: 'string' },
+          record_version: { type: 'integer' },
+          product_id: { type: 'string' },
+          product_name: { type: 'string', nullable: true },
+          merchant_reference: { type: 'string' },
+          receipt_number: { type: 'string', nullable: true },
+          vat_treatment: { type: 'string', nullable: true, enum: ['SE_25', 'REVERSE_CHARGE', null] },
+          amount_raw: { type: 'string', description: 'Atomic USDC units: the sum of the chain transfers that count as revenue (not from the owner\'s own addresses). Read from the chain, never from the record.' },
+          token_address: { type: 'string' },
+          payer_address: { type: 'string', nullable: true, description: 'The single sender when every transfer shares one; null otherwise.' },
+          several_payers: { type: 'boolean' },
+          sender_is_own_address: { type: 'boolean', description: 'Every transfer in the transaction came from one of the owner\'s own addresses.' },
+          block_number: { type: 'integer' },
+          block_time: { type: 'string', format: 'date-time' },
+          created_at: { type: 'string', format: 'date-time' },
         },
         additionalProperties: false,
       },

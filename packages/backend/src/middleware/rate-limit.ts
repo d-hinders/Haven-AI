@@ -70,6 +70,21 @@ export const moneyPathRateLimit = {
 } as const
 
 /**
+ * `POST /merchant/sales` (#4897): the merchant key's sale ingest. Keyed per
+ * merchant key (`rateLimitKeyFor` buckets by credential). Higher than the
+ * money-path tier because a busy merchant reports one record per settled
+ * payment and a 425 retry resends the same record; 120/min is a request-storm
+ * ceiling, not a throttle on real use. The route reads the chain per record,
+ * so the ceiling is also what bounds the RPC cost one key can cause.
+ */
+export const merchantSalesRateLimit = {
+  rateLimit: {
+    max: 120,
+    timeWindow: '1 minute',
+  },
+} as const
+
+/**
  * `POST /ops/reveal` (#3509): one unmasked customer field per call, by a
  * signed-in founder. Keyed per ops token (`rateLimitKeyFor` hashes the
  * Authorization header). Tight on purpose — a reveal is a deliberate click,

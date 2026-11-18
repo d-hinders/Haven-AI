@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({ getProvider: vi.fn() }))
 vi.mock('../../../infra/chain/relayer-reads.js', () => ({ getProvider: mocks.getProvider }))
 
 import {
+  readInboundTransactionByTxHash,
   readInboundTransfersByTxHash,
   readInboundTransfersInBlockRange,
   resetBlockTimeCache,
@@ -223,5 +224,59 @@ describe('readInboundTransfersInBlockRange (#4903)', () => {
       legs: [],
     })
     expect(provider.getLogs).not.toHaveBeenCalled()
+  })
+})
+
+describe('readInboundTransactionByTxHash (#4897)', () => {
+  it('tells a missing receipt from a receipt with no leg to the account, while the by-hash read folds both to "none"', async () => {
+    mocks.getProvider.mockReturnValue(providerWith({}))
+    const missing = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)
+    expect(missing).toEqual({ ok: true, receiptFound: false, legs: [] })
+    // The existing read, which the owner ingest route uses, is unchanged.
+    expect(await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)).toEqual({ ok: true, legs: [] })
+
+    mocks.getProvider.mockReturnValue(
+      providerWith({ receipt: { hash: TX, blockNumber: 100, logs: [transferLog({ to: OTHER })] } }),
+    )
+    const unpaid = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)
+    expect(unpaid).toMatchObject({ ok: true, receiptFound: true, blockNumber: 100, latestBlock: 1_000, legs: [] })
+    expect(await readInboundTransfersByTxHash(CHAIN, ACCOUNT, TX)).toEqual({ ok: true, legs: [] })
+  })
+
+  it('returns the legs, the receipt block and the head from the same provider', async () => {
+    const provider = providerWith({
+      receipt: { hash: TX, blockNumber: 100, logs: [transferLog({ index: 2 }), transferLog({ index: 5 })] },
+    })
+    mocks.getProvider.mockReturnValue(provider)
+    const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)
+    expect(read.ok && read.receiptFound && read.legs.map((l) => l.logIndex)).toEqual([2, 5])
+    expect(read.ok && read.receiptFound && read.latestBlock).toBe(1_000)
+  })
+
+  it('reports an unreadable receipt or head as not readable, never as none', async () => {
+    mocks.getProvider.mockReturnValue(providerWith({ getReceiptError: new Error('down') }))
+    expect(await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+    })
+
+    const provider = providerWith({ receipt: { hash: TX, blockNumber: 100, logs: [transferLog({})] } })
+    provider.getBlockNumber.mockRejectedValue(new Error('down'))
+    mocks.getProvider.mockReturnValue(provider)
+    expect(await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+    })
+  })
+
+  it('drops a zero-value transfer: an all-zero transaction has no leg, so it is never a sale', async () => {
+    mocks.getProvider.mockReturnValue(
+      providerWith({ receipt: { hash: TX, blockNumber: 100, logs: [transferLog({ value: 0n })] } }),
+    )
+    expect(await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)).toMatchObject({
+      ok: true,
+      receiptFound: true,
+      legs: [],
+    })
   })
 })

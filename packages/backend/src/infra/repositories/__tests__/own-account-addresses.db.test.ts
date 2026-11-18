@@ -9,7 +9,7 @@
  * 2026-11-16: it also holds every agent's delegate address (revoked agents
  * included) and every delegate address a key rotation replaced.
  */
-import { beforeAll, beforeEach, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'

@@ -196,6 +196,7 @@ export const ROUTE_MODULE_BY_OPERATION: Readonly<Record<string, string>> = Objec
   "POST /merchant-catalogue/refresh": "routes/merchant-catalogue.ts",
   "POST /merchant-keys": "routes/merchant-keys.ts",
   "POST /merchant-services": "routes/merchant-services.ts",
+  "POST /merchant/sales": "routes/merchant-sales.ts",
   "POST /ops/reveal": "routes/ops.ts",
   "POST /organizations": "routes/agent-organizations.ts",
   "POST /payments": "routes/payments.ts",

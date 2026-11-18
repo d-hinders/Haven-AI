@@ -403,6 +403,15 @@ with no record counts as revenue without a product. Each payer is a contact, one
 of the owner's own addresses or a wallet; a read never says that a wallet
 belongs to another Haven user or agent.
 
+The summary, the payments page and the single-payment read each also carry
+`usdc_rates` (#4963): today's USDC price in USD, EUR and SEK, so the page can show
+the USDC figures in the owner's display currency. It is the registry's settlement
+token for the account's chain, read once per answer (in parallel with the database
+reads), `null` in a single currency with no usable quote, `null` as a whole when the
+price read failed or Sales is off, and on the page's own level or the detail's
+own branch, never on each row. It is a display rate at today's price: it books
+nothing and the figures stay atomic USDC.
+
 ### Shape
 
 ```json

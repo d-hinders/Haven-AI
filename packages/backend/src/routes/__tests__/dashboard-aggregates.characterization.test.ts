@@ -79,7 +79,12 @@ vi.mock('../../modules/accounts/index.js', () => ({
   combineBalanceFreshness,
   needsBackupSignerRecommendation,
 }))
-vi.mock('../../infra/fiat-values.js', () => fiatMocks)
+// #4963: `loadTokenRates` lives in fiat-values now; the real one rides in and
+// reads through the `infra/prices.js` mock below.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
+  ...fiatMocks,
+}))
 vi.mock('../../modules/transactions/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../modules/transactions/index.js')>()
   return {

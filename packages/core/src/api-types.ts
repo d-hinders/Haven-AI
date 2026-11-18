@@ -5258,7 +5258,14 @@ export type components = {
             count: number;
             amount_raw: string;
         };
+        /** @description Today's USDC price in each display currency (a display rate, not the rate at the time of sale). A currency is null when it has no usable quote; the whole field is null when the read failed or Sales is off. */
+        MerchantSalesUsdcRates: {
+            usd: number | null;
+            eur: number | null;
+            sek: number | null;
+        } | null;
         MerchantSalesSummary: {
+            usdc_rates: components["schemas"]["MerchantSalesUsdcRates"];
             /** @description Atomic USDC units: sales plus payments without a product. Own moves are not in it. */
             revenue_raw: string;
             sales: number;
@@ -5327,11 +5334,13 @@ export type components = {
             receiving_address: string | null;
         };
         MerchantSalesPaymentsPage: {
+            usdc_rates: components["schemas"]["MerchantSalesUsdcRates"];
             payments: components["schemas"]["MerchantSalesPayment"][];
             /** @description Pass as `cursor` for the next page; null on the last page. */
             next_cursor: string | null;
         };
         MerchantSalesPaymentDetail: components["schemas"]["MerchantSalesPayment"] & {
+            usdc_rates: components["schemas"]["MerchantSalesUsdcRates"];
             merchant_reference: string | null;
             legs: {
                 log_index: number | null;

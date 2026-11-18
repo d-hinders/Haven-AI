@@ -17,12 +17,18 @@
  * `HAVEN_VOLUME_TESTS=1` is set
  * (`HAVEN_VOLUME_TESTS=1 npx vitest run src/routes/__tests__/merchant-sales-reads-volume.db.test.ts`).
  */
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
+
+// #4963: the summary carries today's USDC rate. A fixed price keeps the timed
+// read off CoinGecko, so the budget measures the database and nothing else.
+vi.mock('../../infra/prices.js', () => ({
+  getTokenPrice: async () => ({ usd: 1, eur: 0.92, sek: 10.4 }),
+}))
 
 const merchantSalesReadRoutes = (await import('../merchant-sales-reads.js')).default
 

@@ -87,7 +87,7 @@ export default async function merchantSalesReadRoutes(app: FastifyInstance): Pro
       }
     }
     const scope = await resolveSalesScope(sub)
-    if (scope === null) return { payments: [], next_cursor: null }
+    if (scope === null) return { payments: [], next_cursor: null, usdc_rates: null }
     const limit = Math.min(request.query.limit ?? PAYMENTS_DEFAULT_LIMIT, PAYMENTS_MAX_LIMIT)
     return readPaymentsPage(scope, period.period, { limit, cursor })
   })

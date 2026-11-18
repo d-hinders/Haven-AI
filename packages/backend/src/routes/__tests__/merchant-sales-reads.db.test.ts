@@ -20,7 +20,9 @@
  *   - services off, or no merchant account, reads as the empty state;
  *   - a Sales key reaches none of the four routes, and a device-login token
  *     cannot clear a record;
- *   - clearing a record leaves the payment, and a new record is accepted.
+ *   - clearing a record leaves the payment, and a new record is accepted;
+ *   - every read carries today's USDC rate for the page to convert with
+ *     (#4963): a rate, one null currency, a failed read, and Sales off.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
@@ -30,7 +32,13 @@ import rateLimit from '@fastify/rate-limit'
 import db from '../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helpers/db-harness.js'
 
-const mocks = vi.hoisted(() => ({ read: vi.fn() }))
+const mocks = vi.hoisted(() => ({ read: vi.fn(), price: vi.fn() }))
+
+// #4963: the reads carry today's USDC rate. The price read is mocked, as the
+// dashboard's test does, so the suite stays off CoinGecko.
+vi.mock('../../infra/prices.js', () => ({
+  getTokenPrice: (...a: unknown[]) => mocks.price(...a),
+}))
 
 vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../modules/transactions/chain-read.js')>()
@@ -167,6 +175,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
   beforeEach(async () => {
     await resetDb()
     vi.clearAllMocks()
+    mocks.price.mockResolvedValue({ usd: 0.9998, eur: 0.92, sek: 10.4 })
   })
 
   const token = (userId: string, extra: Record<string, unknown> = {}) =>
@@ -704,13 +713,70 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       const none = await seedUser()
       for (const userId of [off.userId, none]) {
         const summary = (await get(userId, `/merchant-sales/summary?${PERIOD}`)).json()
-        expect(summary).toMatchObject({ revenue_raw: '0', sales: 0, by_product: [], by_payer: [], by_day: [] })
-        expect((await get(userId, `/merchant-sales/payments?${PERIOD}`)).json()).toEqual({ payments: [], next_cursor: null })
+        expect(summary).toMatchObject({ revenue_raw: '0', sales: 0, by_product: [], by_payer: [], by_day: [], usdc_rates: null })
+        expect((await get(userId, `/merchant-sales/payments?${PERIOD}`)).json()).toEqual({ payments: [], next_cursor: null, usdc_rates: null })
         expect((await get(userId, `/merchant-sales/payments/${hash(0x720)}`)).statusCode).toBe(404)
         const res = await clear(userId, hash(0x720))
         expect(res.statusCode).toBe(409)
         expect(res.json().error_code).toBe('MERCHANT_ACCOUNT_REQUIRED')
       }
+    })
+  })
+
+  describe('the display rate (#4963)', () => {
+    async function seedOneSale() {
+      const m = await seedMerchant()
+      await seedLeg(m, { tx: hash(0x800), payer: addr(), amount: '1000000', time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, { tx: hash(0x800), productId: 'P', amount: '1000000', payer: addr(), time: '2026-11-10T10:00:00Z' })
+      return m
+    }
+
+    it('carries the USDC rate on the summary, the page and the detail, read for the chain\'s settlement token', async () => {
+      const m = await seedOneSale()
+      const rates = { usd: 0.9998, eur: 0.92, sek: 10.4 }
+      expect((await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json().usdc_rates).toEqual(rates)
+      expect((await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().usdc_rates).toEqual(rates)
+      const detail = await get(m.userId, `/merchant-sales/payments/${hash(0x800)}`)
+      expect(detail.statusCode, detail.body).toBe(200)
+      expect(detail.json().usdc_rates).toEqual(rates)
+      // the symbol is the registry's settlement token for the account's chain
+      expect(mocks.price).toHaveBeenCalledWith('USDC')
+    })
+
+    it('puts the rate on the detail only once, never on each row of the page', async () => {
+      const m = await seedOneSale()
+      const page = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json()
+      expect(page.payments[0]).not.toHaveProperty('usdc_rates')
+    })
+
+    it('nulls only the currency with no usable quote', async () => {
+      const m = await seedOneSale()
+      mocks.price.mockResolvedValue({ usd: 1, eur: 0, sek: 10.4 })
+      const expected = { usd: 1, eur: null, sek: 10.4 }
+      expect((await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json().usdc_rates).toEqual(expected)
+      expect((await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().usdc_rates).toEqual(expected)
+      expect((await get(m.userId, `/merchant-sales/payments/${hash(0x800)}`)).json().usdc_rates).toEqual(expected)
+    })
+
+    it('answers null for the rate, and still every figure, when the price read fails', async () => {
+      const m = await seedOneSale()
+      mocks.price.mockRejectedValue(new Error('CoinGecko down'))
+      const summary = await get(m.userId, `/merchant-sales/summary?${PERIOD}`)
+      expect(summary.statusCode, summary.body).toBe(200)
+      expect(summary.json()).toMatchObject({ revenue_raw: '1000000', sales: 1, usdc_rates: null })
+      const page = await get(m.userId, `/merchant-sales/payments?${PERIOD}`)
+      expect(page.json().payments).toHaveLength(1)
+      expect(page.json().usdc_rates).toBeNull()
+      const detail = await get(m.userId, `/merchant-sales/payments/${hash(0x800)}`)
+      expect(detail.statusCode).toBe(200)
+      expect(detail.json().usdc_rates).toBeNull()
+    })
+
+    it('does not read a price for the Sales-off answers, which carry null', async () => {
+      const off = await seedMerchant({ enabled: false })
+      expect((await get(off.userId, `/merchant-sales/summary?${PERIOD}`)).json().usdc_rates).toBeNull()
+      expect((await get(off.userId, `/merchant-sales/payments?${PERIOD}`)).json().usdc_rates).toBeNull()
+      expect(mocks.price).not.toHaveBeenCalled()
     })
   })
 

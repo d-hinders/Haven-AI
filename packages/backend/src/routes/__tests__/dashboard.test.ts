@@ -91,7 +91,11 @@ vi.mock('../../modules/accounts/index.js', () => ({
   combineBalanceFreshness,
   needsBackupSignerRecommendation,
 }))
-vi.mock('../../infra/fiat-values.js', () => ({
+// #4963: `loadTokenRates` lives in this module now, so the real one rides in
+// (it reads through the `infra/prices.js` mock below); only the booking helper
+// is stubbed.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
   getFiatValuesForTokenAmount: vi.fn(),
 }))
 // #3803: the route reads today's spot rates for the budget captions. A mock

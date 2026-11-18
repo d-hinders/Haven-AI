@@ -23,7 +23,7 @@ import {
 } from '../infra/repositories/dashboard.js'
 import { listBalanceByDayForUser } from '../infra/repositories/analytics.js'
 import { listContactsForUser } from '../infra/repositories/contacts.js'
-import { getTokenPrice } from '../infra/prices.js'
+import { loadTokenRates, type FiatValues } from '../infra/fiat-values.js'
 import { currentPeriodBounds } from '../infra/chain/delegation-budget-reader.js'
 import { deriveDelegationAllowances, deriveDelegationBudgets } from '../rails/delegation-budget-view.js'
 import {
@@ -138,17 +138,10 @@ export function emptySpendWindow(): SpendWindowFigures {
   }
 }
 
-/** A token's spot rates in the three fiat buckets; `null` bucket = no usable quote. */
-export interface TokenRates {
-  usd: number | null
-  eur: number | null
-  sek: number | null
-}
-
 /** A spend group's token, as the "≈" rule needs it, and its spot rates. */
 export interface GroupPricing {
   symbol: string | null
-  rates: TokenRates | null
+  rates: FiatValues | null
 }
 
 /**
@@ -172,34 +165,10 @@ function chainToken(
   }
 }
 
-/**
- * Today's spot rates for a set of symbols. One `getTokenPrice` call per symbol
- * (shared 60 s CoinGecko cache); a failed read or a zero quote is `null` — the
- * wire distinguishes "no rate" from a 0 rate (owner decision 1: a
- * NULL-booked-fiat row is priced at today's rate and the total is marked ≈, so
- * a rate must never silently undercount).
- */
-async function loadTokenRates(symbols: Iterable<string>): Promise<Map<string, TokenRates | null>> {
-  const rateBySymbol = new Map<string, TokenRates | null>()
-  for (const symbol of symbols) {
-    if (!rateBySymbol.has(symbol)) rateBySymbol.set(symbol, null)
-  }
-  for (const symbol of rateBySymbol.keys()) {
-    try {
-      const price = await getTokenPrice(symbol)
-      const pick = (value: number): number | null => (value > 0 ? value : null)
-      rateBySymbol.set(symbol, { usd: pick(price.usd), eur: pick(price.eur), sek: pick(price.sek) })
-    } catch {
-      rateBySymbol.set(symbol, null)
-    }
-  }
-  return rateBySymbol
-}
-
 /** The per-(chain, token) pricing map `accumulateWindow` reads. */
 function groupPricing(
   groups: Array<{ chain_key: number; token_key: string }>,
-  rateBySymbol: Map<string, TokenRates | null>,
+  rateBySymbol: Map<string, FiatValues | null>,
 ): Map<string, GroupPricing> {
   const rates = new Map<string, GroupPricing>()
   for (const group of groups) {

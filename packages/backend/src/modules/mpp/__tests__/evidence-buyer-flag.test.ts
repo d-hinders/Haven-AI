@@ -147,8 +147,11 @@ describeDb('parties.buyer flag wiring — modules/mpp/evidence.ts (#3332 review 
   /**
    * #4870: the receipt email and both addresses are stored on the same row
    * the buyer join reads. `parties.buyer` must carry EXACTLY the six fields
-   * it carried before this slice — pinned with `toEqual`, so a column added
-   * to `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` turns this red.
+   * it carried before this slice — pinned with `toEqual` on the mapper's
+   * output. A column added to `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` does NOT
+   * turn this red (the evidence path passes explicit fields to the mapper);
+   * the fragment is pinned by `owner-company-details-join-columns.test.ts`
+   * (#4946).
    */
   it('#4870: a stored receipt email and both addresses stay out of parties.buyer', async () => {
     ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true

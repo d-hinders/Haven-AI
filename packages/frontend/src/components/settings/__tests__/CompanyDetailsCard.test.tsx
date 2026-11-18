@@ -285,7 +285,7 @@ describe('CompanyDetailsCard — validation and save', () => {
    * convenience, not a stored flag.
    */
   describe('receipt email and addresses (#4870)', () => {
-    it('prefills the receipt email from the sign-up email when nothing is stored', async () => {
+    it('prefills the receipt email from the sign-up email when no company details are saved', async () => {
       mockApi.get.mockImplementation(() => noRow())
       renderCard()
       await revealEmptyForm()
@@ -357,6 +357,42 @@ describe('CompanyDetailsCard — validation and save', () => {
       await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
       const [, body] = mockApi.put.mock.calls[0] as [string, PutBody]
       expect(body.receipt_email).toBeNull()
+    })
+
+    /**
+     * #4946: a cleared receipt email stays cleared. Before the fix the PUT
+     * response (`receipt_email: null`) re-ran the draft reset and the sign-up
+     * email came back, so the owner's next, unrelated save stored it.
+     */
+    it('keeps a cleared receipt email cleared through the next, unrelated save (#4946)', async () => {
+      let stored = details({ receipt_email: 'billing@acme.se' })
+      mockApi.get.mockImplementation(() => Promise.resolve(stored))
+      mockApi.put.mockImplementation((_path: string, body: unknown) => {
+        stored = details({ ...(body as PutBody) })
+        return Promise.resolve(stored)
+      })
+      renderCard()
+      const email = () => screen.getByLabelText('Receipt email (optional)')
+      await waitFor(() => expect(email()).toHaveValue('billing@acme.se'))
+      fireEvent.change(email(), { target: { value: '' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(1))
+      expect((mockApi.put.mock.calls[0] as [string, PutBody])[1].receipt_email).toBeNull()
+      await waitFor(() => expect(email()).toHaveValue(''))
+      fireEvent.change(screen.getByLabelText('VAT number (optional)'), { target: { value: '' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(mockApi.put).toHaveBeenCalledTimes(2))
+      const [, second] = mockApi.put.mock.calls[1] as [string, PutBody]
+      expect(second.receipt_email).toBeNull()
+      expect(email()).toHaveValue('')
+    })
+
+    it('shows an empty receipt email for a saved row without one — after a reload or a row saved before #4870 (#4946)', async () => {
+      mockApi.get.mockImplementation(() => Promise.resolve(details({ receipt_email: null })))
+      renderCard()
+      await waitFor(() => expect(screen.getByLabelText('Legal name')).toHaveValue('Ada Lovelace AB'))
+      expect(screen.getByLabelText('Receipt email (optional)')).toHaveValue('')
+      expect(screen.getByLabelText('Receipt email (optional)')).not.toHaveValue(SIGNUP_EMAIL)
     })
 
     it('blocks submit when an address is partly filled, naming the missing field', async () => {

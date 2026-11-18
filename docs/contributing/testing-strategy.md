@@ -58,10 +58,13 @@ encode query order — not against mocking as such.
 ## Using the harness
 
 `packages/backend/src/infra/__tests__/helpers/db-harness.ts`. One Postgres
-schema per vitest worker (`test_w<id>`), bound through the connection string
-before `config.ts` reads it, so even module-level `pool` imports resolve into
-the worker schema. Migrations apply once per worker (idempotently — cheap on
-re-entry); `resetDb()` empties every table between tests — and **awaits harness init
+schema per vitest worker (`test_w<VITEST_POOL_ID>`: the pool slot, reused by
+every file the slot runs in sequence — since #4971; before that it was one per
+FILE, see *Two more coverage gaps, both closed (#2625)* below), bound through the
+connection string before `config.ts` reads it, so even module-level `pool`
+imports resolve into the worker schema. Migrations apply once per worker
+(idempotently — cheap on re-entry), and each file's first harness call empties
+the rows the previous file on that slot left; `resetDb()` empties every table between tests — and **awaits harness init
 itself** first, so a file that calls `initDbHarness()` without awaiting it (or
 skips it entirely) still cannot race its own worker's migration DDL. That
 guarantee exists because the #1555/#1559 outbound files DID call it bare at
@@ -385,9 +388,39 @@ on a cold cache and under a shuffled file order.** `VITEST_WORKER_ID` is not a
 stable worker identity — it is the file's ORDINAL in the run's spec list
 (vitest increments it once per `runFiles`, and `isolate: true` dispatches one
 call per file), so it changes with file order, and every file in a run gets a
-different one. Two consequences worth stating plainly: a spawned single-file
-`vitest run` is always worker 1, and schemas accumulate one per FILE rather
-than one per core (#2622).
+different one. A spawned single-file `vitest run` is always worker 1.
+
+That is why the worker schema is no longer keyed on it (#4971). Keyed on the
+ordinal, every real-DB file got a never-used schema and paid a full migration
+run, serialised across workers on advisory lock 811000061 — ~230 runs and
+141-309 s of strictly serial time per CI `Backend checks` job on 2026-11-18,
+the cost that pushed that job into its 12-minute ceiling. `workerSchemaName()`
+now keys on **`VITEST_POOL_ID`**, the pool SLOT (1..maxWorkers), which every
+file the slot runs in sequence reuses: one migration run per slot per run, and
+`test_w*` schemas no longer accumulate one per file. Each file is still its own
+process, so per-module state (`ensureMigrated()`'s memo, the head capture) is
+still per FILE.
+
+What sharing a slot's schema changes, and what keeps it safe:
+
+- **Rows.** `ensureMigrated()` empties every table (except `schema_migrations`)
+  and restarts sequences once per file, after the migration wait, so a file
+  still starts from an empty schema at head whatever the previous file on the
+  slot left. Pinned by `helpers/__tests__/db-harness-slot-sharing.test.ts`.
+- **Schema drift is now reported twice within a run:** by the leaking file's
+  end-of-file guard, then by the next file on that slot at its init-time
+  reference check. Drift the fingerprint cannot see — a trigger, a function, a
+  CHECK or FK constraint, a sequence `ALTER`, an index redefined under the same
+  name — now reaches later files on the same slot instead of dying with the
+  file's own schema, so cleaning up what a file creates matters more than it
+  did.
+- **Two suites running at once against one database** share `test_w1..N` for
+  their whole duration, and each file's init-time emptying deletes the other
+  run's live rows. Before, the two collided only when they reached the same
+  file ordinal at the same moment. Give each concurrent run its own
+  `HAVEN_TEST_SCHEMA_SUFFIX`.
+- **A test about the cold path** (`db-harness-reset-first.test.ts`) exercises
+  it only when it is the first file on its slot — in practice, only in CI.
 
 ### Drift that was already there when the run started (#2622)
 
@@ -419,13 +452,15 @@ compares this worker's schema against it **before** capturing head, and fails
 naming the schema, the difference and the repair.
 
 #2622's other candidate was dropping and recreating every worker schema, priced
-there as "a full migration run per worker per run". That price is wrong in the
-expensive direction. Worker schemas are allocated **per FILE**: `VITEST_WORKER_ID`
-is the file's ordinal in the run's spec list, not a stable worker identity —
+there as "a full migration run per worker per run". When #2622 landed that price
+was wrong in the expensive direction: worker schemas were then allocated **per
+FILE**, because `VITEST_WORKER_ID` is the file's ordinal in the run's spec list —
 measured, by a module-scope log printing once per file from three different pids
-and three different ids. At 62 real-DB files that is 62 full migration runs per
-suite run against a cold init of ~572 ms, which is the cost #2211 and #2354
-exist to have attacked. One reference per run is two orders cheaper.
+and three different ids. At 62 real-DB files that was 62 full migration runs per
+suite run against a cold init of ~572 ms. One reference per run is two orders
+cheaper either way. (Since #4971 schemas are per pool slot, so recreating them
+would cost one run per slot — but recreating would still discard the evidence the
+reference check exists to report.)
 
 The reference schema is **dropped and recreated**, never reused. Reusing it
 would reproduce this very defect one level up: a stale reference compares every
@@ -477,7 +512,7 @@ schema.
 Because the check runs inside `ensureMigrated()` — before any file's own
 `beforeAll` — there is **no self-heal path**. A `harness_smoke` left in
 `test_w55` by a branch WITHOUT this change makes the next run on that ordinal
-fail, and it fails even for the file that owns the table, because
+(since #4971: that pool slot) fail, and it fails even for the file that owns the table, because
 `CREATE TABLE IF NOT EXISTS` never gets to run. The same is true after a
 `Ctrl-C`. That is the intended trade — a leftover that used to be silent is now
 loud — but it converts a previously benign artifact into a per-ordinal failure
@@ -661,8 +696,9 @@ SHARE` on one table (`BEGIN; SELECT … FROM test_w1.users; pg_sleep(45)`) lets
 every `DELETE` through and blocks the `TRUNCATE` — the cycle case died with a
 bare `Test timed out in 5000ms` naming the test and nothing else (exit 1); the
 same file alone passed (exit 0). Realistic holders: a transaction a test left
-open, or an orphaned vitest worker with the same `VITEST_WORKER_ID` (#2319
-found eight orphans on one machine).
+open, or an orphaned vitest worker on the same pool slot — the same
+`VITEST_POOL_ID`, hence the same schema (#2319 found eight orphans on one
+machine; before #4971 the schema was keyed on `VITEST_WORKER_ID`).
 
 **What changed, and why none of it is a bigger number:**
 

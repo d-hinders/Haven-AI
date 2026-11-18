@@ -15,6 +15,19 @@
  * makes that divergence unrepresentable; `assertSearchPathMatchesWorkerSchema()`
  * in `db-harness.ts` proves the binding actually took effect.
  */
+/*
+ * Keyed on `VITEST_POOL_ID`, NOT `VITEST_WORKER_ID` (#4971). Under vitest 3
+ * `VITEST_WORKER_ID` is the FILE's ordinal in the run's spec list — every file
+ * gets a new one — so keying on it gave every real-DB file a never-used schema
+ * and a full migration run of its own, serialised across workers on advisory
+ * lock 811000061: ~230 runs and 141-309 s of strictly serial time per CI
+ * `Backend checks` job on 2026-11-18, which is what pushed that job into its
+ * 12-minute ceiling. `VITEST_POOL_ID` is the pool SLOT (1..maxWorkers), reused
+ * by every file the slot runs one after another, so each slot migrates once per
+ * run and later files take the warm path. Files on one slot never overlap, and
+ * the harness empties the rows a previous file left (`ensureMigrated()` in
+ * `db-harness.ts`), so a file still starts from an empty schema at head.
+ */
 export function workerSchemaName(env: NodeJS.ProcessEnv = process.env): string {
-  return `test_w${env.VITEST_WORKER_ID ?? '0'}${env.HAVEN_TEST_SCHEMA_SUFFIX ?? ''}`
+  return `test_w${env.VITEST_POOL_ID ?? '0'}${env.HAVEN_TEST_SCHEMA_SUFFIX ?? ''}`
 }

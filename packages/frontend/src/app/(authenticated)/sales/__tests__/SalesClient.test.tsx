@@ -845,7 +845,8 @@ describe('filters and search (#4960)', () => {
   const params = (path: string) => new URL(path, 'http://x').searchParams
 
   it('sends ONE filter set to every read, and the tiles, chart, breakdowns and list all describe it', async () => {
-    window.history.replaceState(null, '', '/sales?product=chat&recorded=sale')
+    // Two Recorded values: every facet is multi-select, and both reach the reads.
+    window.history.replaceState(null, '', '/sales?product=chat&recorded=sale,no_product')
     serve({ filtered: { summary: CHAT_SUMMARY, payments: CHAT_PAYMENTS } })
     await renderPage()
     await screen.findByTestId('sales-tiles')
@@ -858,7 +859,7 @@ describe('filters and search (#4960)', () => {
     expect(reads.length).toBeGreaterThanOrEqual(3)
     for (const path of reads) {
       expect(params(path).getAll('product_id'), path).toEqual(['chat'])
-      expect(params(path).getAll('kind'), path).toEqual(['sale'])
+      expect(params(path).getAll('kind'), path).toEqual(['no_product', 'sale'])
     }
     for (const path of callsTo('/merchant-sales/facets')) expect([...params(path).keys()].sort()).toEqual(['from', 'to'])
 

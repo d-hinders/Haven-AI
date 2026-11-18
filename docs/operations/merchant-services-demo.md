@@ -9,6 +9,8 @@ covers:
   - packages/backend/src/routes/merchant-sales.ts
   - packages/backend/src/routes/merchant-sales-reads.ts
   - packages/backend/src/routes/merchant-deposit-addresses.ts
+  - packages/frontend/src/components/settings/StripeDepositAddressesSection.tsx
+  - packages/frontend/src/components/sales/SalesPaymentPanel.tsx
 last-verified: "2026-11-18"
 ---
 
@@ -115,8 +117,12 @@ registered under the Sales account **at or before the payment's block time**
 (#4952). The demo merchant never resends a refused report, so a joke paid
 before registration is lost for good: it never appears on the Sales page.
 
-The registration screen is #4954, not shipped yet, so register through the
-API, with the merchant's dashboard session:
+Signed in as the merchant user, open **Settings → Business → Sales**. Under
+**Stripe deposit addresses**, choose **Register address**, paste
+`<STRIPE_DEPOSIT_ADDRESS>` and register it (#4954). The address is listed with
+"Not verified by Haven".
+
+The same through the API, with the merchant's dashboard session:
 
 ```bash
 curl -s -X POST "<DEV_API>/merchant-deposit-addresses" \
@@ -129,7 +135,7 @@ curl -s -X POST "<DEV_API>/merchant-deposit-addresses" \
 `STRIPE_DEPOSIT_ADDRESS`. Its `/healthz` shows it under
 `stripe.deposit_address`. The answer carries `verified: false`. Haven cannot
 check that the address is the merchant's (owner decision 2026-11-18, demo
-only), and the screens will say "registered by you, not verified by Haven".
+only), and the screens say "registered by you, not verified by Haven".
 
 ### 1.6 Fund *(not yet verified)*
 
@@ -176,11 +182,12 @@ The Stripe sandbox dashboard is optional, for the joke.
    crypto payment for the joke's price, whose metadata carries the
    transaction hash (#4854).
 3. **Show Haven:** reload the Sales page.
-   - Until #4954 ships, the joke appears in the payments list as a sale, without
-     the "Received in Stripe" mark, and it is **not** in Revenue: Stripe-held
-     sales are kept out of every tile.
-   - When #4954 ships, the row carries the mark, and a separate "Received in
-     Stripe" figure shows the amount.
+   - the joke's row carries the **Received in Stripe** mark, and it is **not**
+     in Revenue: Stripe-held sales are kept out of every account tile;
+   - a separate **Received in Stripe** tile shows their amount, and the
+     payments line names it beside Revenue;
+   - opening the row: the payment into the Stripe deposit address, with its
+     transaction hash, and no Sales account.
 4. **Say:** "Haven shows the sale, but the money is in Stripe's custody: it never
    counts in a Haven balance."
 
@@ -247,6 +254,9 @@ The payment stays, but its sale record goes. An account sale then shows as a
 payment with no product. A Stripe-held sale leaves the list. A new record for
 the same transaction is accepted afterwards.
 
+On screen: open the payment on the Sales page and choose **Clear sale record**.
+Through the API:
+
 ```bash
 curl -s -X DELETE "<DEV_API>/merchant-sales/payments/<TX_HASH>/record" \
   -H "Authorization: Bearer <MERCHANT_SESSION_TOKEN>"
@@ -261,7 +271,8 @@ curl -s -X DELETE "<DEV_API>/merchant-sales/payments/<TX_HASH>/record" \
    the old one, then redeploy
    ([secret-rotation.md](secret-rotation.md)).
 4. Only after the last payment to the old address has settled, retire the old
-   registration:
+   registration: **Retire** beside it under Settings → Business → Sales →
+   Stripe deposit addresses. It stays listed as Retired. Through the API:
 
    ```bash
    curl -s "<DEV_API>/merchant-deposit-addresses" \
@@ -286,10 +297,8 @@ A report sent with a revoked key is refused, and is not resent.
 
 | Not yet | Issue |
 |---|---|
-| The "Received in Stripe" mark and figure, and registering the address on screen | #4954 |
 | The Sales key screens (create, show once, list, revoke) | #4905 |
 | Revenue in Analytics | #4901 |
-| Sales amounts in the display currency (SEK, EUR) | #4963 |
 | Searching and filtering payments, and "last paid" per payer | #4959 (reads), #4960 (page) |
 
 Production use is out of scope. Before any production use, a proof that the

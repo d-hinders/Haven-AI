@@ -5,6 +5,12 @@ const { mockUseMerchantServices } = vi.hoisted(() => ({ mockUseMerchantServices:
 
 vi.mock('@/hooks/useMerchantServices', () => ({ useMerchantServices: () => mockUseMerchantServices() }))
 
+// #4954: the deposit-address section has its own tests; here only WHEN it renders.
+const { mockDepositAddresses } = vi.hoisted(() => ({ mockDepositAddresses: vi.fn() }))
+vi.mock('@/hooks/useMerchantDepositAddresses', () => ({
+  useMerchantDepositAddresses: (enabled: boolean) => mockDepositAddresses(enabled),
+}))
+
 import { LocaleProvider } from '@/context/LocaleContext'
 import { MerchantServicesProvider } from '@/context/MerchantServicesContext'
 import SalesCard from '@/components/settings/SalesCard'
@@ -39,6 +45,36 @@ function renderCard() {
 
 beforeEach(() => {
   mockUseMerchantServices.mockReset()
+  mockDepositAddresses.mockReset().mockReturnValue({
+    addresses: [],
+    loading: false,
+    failed: false,
+    refetch: vi.fn(),
+    register: vi.fn(),
+    retire: vi.fn(),
+  })
+})
+
+describe('SalesCard — Stripe deposit addresses (#4954)', () => {
+  it('on: renders the section', () => {
+    serve({ state: merchantServicesOn, enabled: true, merchantAccount: SALES_ACCOUNT })
+    renderCard()
+    expect(screen.getByTestId('sales-deposit-addresses')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Stripe deposit addresses' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['off', () => serve({ state: { ...merchantServicesOn, enabled: false }, merchantAccount: SALES_ACCOUNT })],
+    ['never on', () => serve()],
+    ['loading', () => serve({ status: 'loading', state: null })],
+    ['error', () => serve({ status: 'error', state: null })],
+  ])('%s: none of it renders, and nothing is read', (_state, arrange) => {
+    arrange()
+    renderCard()
+    expect(screen.queryByTestId('sales-deposit-addresses')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Stripe/)).not.toBeInTheDocument()
+    expect(mockDepositAddresses).not.toHaveBeenCalled()
+  })
 })
 
 describe('SalesCard — the states (#4904)', () => {

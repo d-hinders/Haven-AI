@@ -1268,6 +1268,7 @@ export const salesEmptySummary = {
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
   by_day: [] as unknown[],
+  received_in_stripe: { count: 0, amount_raw: '0' },
 }
 
 export const salesSummary = {
@@ -1293,6 +1294,7 @@ export const salesSummary = {
     { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000' },
     { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000' },
   ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
 }
 
 /** The period before: a smaller revenue, so the Revenue tile carries a comparison. */
@@ -1307,6 +1309,33 @@ export const salesPayments = [
   { tx_hash: salesHash('a4'), block_time: '2026-11-14T09:30:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: salesContact, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
   { tx_hash: salesHash('a5'), block_time: '2026-11-12T09:00:00.000Z', kind: 'sale', amount_raw: '300000', product_id: 'embed', product_label: 'Embeddings', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
 ]
+
+/**
+ * #4954: the Stripe deposit addresses the owner registered (#4952,
+ * `routes/merchant-deposit-addresses.ts`), newest first: one active and one
+ * retired. Lower-case on the wire, `verified: false` always.
+ */
+export const salesStripeAddress = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
+export const salesDepositAddresses = [
+  { id: '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5', address: salesStripeAddress, chain: `eip155:${testSafe.chain_id}`, registered_at: '2026-11-10T09:00:00.000Z', retired_at: null as string | null, active: true, verified: false, verification: 'Registered by you, not verified by Haven.' },
+  { id: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d', address: '0x71e4b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29', chain: `eip155:${testSafe.chain_id}`, registered_at: '2026-11-02T09:00:00.000Z', retired_at: '2026-11-09T17:00:00.000Z' as string | null, active: false, verified: false, verification: 'Registered by you, not verified by Haven.' },
+]
+
+/**
+ * #4954: the same period with two sales received at the registered Stripe
+ * address ($0.01 + $0.02, "Joke", the demo merchant's Stripe product). They
+ * are in NO account figure — `salesSummary`'s Revenue, Sales, Average sale,
+ * chart and breakdowns are unchanged — and in `received_in_stripe` only; the
+ * ingest never writes them a transfer (#4952).
+ */
+export const salesSummaryWithStripe = { ...salesSummary, received_in_stripe: { count: 2, amount_raw: '30000' } }
+export const salesStripePayments = [
+  { tx_hash: salesHash('b1'), block_time: '2026-11-16T15:10:00.000Z', kind: 'sale', amount_raw: '10000', product_id: 'joke', product_label: 'Joke', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: salesStripeAddress as string | null },
+  { tx_hash: salesHash('b2'), block_time: '2026-11-14T11:20:00.000Z', kind: 'sale', amount_raw: '20000', product_id: 'joke', product_label: 'Joke', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: salesStripeAddress as string | null },
+]
+const salesPaymentsWithStripe = [...salesPayments.map((p) => ({ ...p, receiving_address: null as string | null })), ...salesStripePayments].sort(
+  (a, b) => b.block_time.localeCompare(a.block_time),
+)
 
 const salesProduct = (overrides: Record<string, unknown>) => ({
   description: null,
@@ -1376,6 +1405,7 @@ export type SalesScenario =
   | 'products-mismatch'
   | 'products-unreachable'
   | 'products-none'
+  | 'overview-stripe'
 
 /**
  * Turn Sales ON and serve its reads for one scenario. Registered AFTER
@@ -1384,7 +1414,7 @@ export type SalesScenario =
  */
 export async function serveSales(page: Page, scenario: SalesScenario) {
   const catalogue =
-    scenario === 'products-ok' || scenario === 'overview'
+    scenario === 'products-ok' || scenario === 'overview' || scenario === 'overview-stripe'
       ? salesCatalogueOk
       : scenario === 'products-mismatch'
         ? salesCatalogueMismatch
@@ -1392,7 +1422,10 @@ export async function serveSales(page: Page, scenario: SalesScenario) {
           ? salesCatalogueUnreachable
           : salesCatalogueNone
   const paid = scenario !== 'first-run'
-  await page.route(/\/api\/merchant-(services|sales|catalogue|keys)/, async (route) => {
+  const stripe = scenario === 'overview-stripe'
+  const summary = stripe ? salesSummaryWithStripe : salesSummary
+  const payments = stripe ? salesPaymentsWithStripe : salesPayments
+  await page.route(/\/api\/merchant-(services|sales|catalogue|keys|deposit-addresses)/, async (route) => {
     const request = route.request()
     if (request.method() !== 'GET') {
       await route.fallback()
@@ -1403,18 +1436,21 @@ export async function serveSales(page: Page, scenario: SalesScenario) {
     if (path === '/merchant-services') return fulfillJson(route, merchantServicesOn)
     if (path === '/merchant-catalogue') return fulfillJson(route, catalogue)
     if (path === '/merchant-keys') return fulfillJson(route, { keys: scenario === 'first-run' ? [] : salesKeys })
+    if (path === '/merchant-deposit-addresses') {
+      return fulfillJson(route, { verification: 'Registered by you, not verified by Haven.', addresses: stripe ? salesDepositAddresses : [] })
+    }
     if (path === '/merchant-sales/summary') {
       const previous = url.searchParams.get('to') === '2026-10-18'
-      return fulfillJson(route, !paid ? salesEmptySummary : previous ? salesPreviousSummary : salesSummary)
+      return fulfillJson(route, !paid ? salesEmptySummary : previous ? salesPreviousSummary : summary)
     }
     if (path === '/merchant-sales/payments') {
       // Whole history with `limit=1` is the page's "has it ever been paid" probe.
-      const rows = !paid ? [] : url.searchParams.has('from') ? salesPayments : salesPayments.slice(0, 1)
+      const rows = !paid ? [] : url.searchParams.has('from') ? payments : payments.slice(0, 1)
       return fulfillJson(route, { usdc_rates: paid ? salesUsdcRates : null, payments: rows, next_cursor: null })
     }
     const detail = /^\/merchant-sales\/payments\/(0x[0-9a-f]+)$/.exec(path)
     if (detail) {
-      const row = salesPayments.find((p) => p.tx_hash === detail[1])
+      const row = payments.find((p) => p.tx_hash === detail[1])
       if (!row) return fulfillJson(route, { error: 'No such payment on this account.', error_code: 'PAYMENT_NOT_FOUND' }, 404)
       return fulfillJson(route, { ...row, usdc_rates: salesUsdcRates, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
     }
@@ -2031,6 +2067,11 @@ export async function mockHavenApi(page: Page) {
     }
     if (method === 'GET' && path === '/merchant-keys') {
       await fulfillJson(route, { keys: [] })
+      return
+    }
+    // #4954: no Stripe deposit address registered — the state every Sales account starts in.
+    if (method === 'GET' && path === '/merchant-deposit-addresses') {
+      await fulfillJson(route, { verification: 'Registered by you, not verified by Haven.', addresses: [] })
       return
     }
 

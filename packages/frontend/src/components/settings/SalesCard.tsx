@@ -54,6 +54,7 @@ import { useT } from '@/context/LocaleContext'
 import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
 import { salesCardState } from '@/lib/merchant-services'
 import TurnOnSalesDialog from './TurnOnSalesDialog'
+import StripeDepositAddressesSection from './StripeDepositAddressesSection'
 
 export default function SalesCard() {
   const t = useT()
@@ -164,6 +165,12 @@ export default function SalesCard() {
                 ]}
               />
             </div>
+          ) : null}
+
+          {/* #4954: Stripe deposit addresses, only while Sales is on — off means
+              off, and the route answers an empty list then anyway. */}
+          {merchantAccount !== null && cardState === 'on' ? (
+            <StripeDepositAddressesSection chainId={merchantAccount.chain_id} />
           ) : null}
         </Card>
       </section>

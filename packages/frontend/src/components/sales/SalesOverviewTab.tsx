@@ -29,6 +29,8 @@ import {
   salesChartFormat,
   salesRangeDays,
   salesTotalText,
+  stripeSalesCount,
+  stripeSalesRaw,
   type SalesCurrency,
   type SalesDayRange,
   type SalesMoney,
@@ -128,6 +130,9 @@ function OverviewSkeleton() {
   )
 }
 
+const STRIPE_HINT =
+  'Sales paid to a Stripe deposit address you registered. They are not in Revenue or in any Haven balance, and this is not your Stripe balance.'
+
 const WITHOUT_PRODUCT_HINT =
   'A payment your kit sent no sale record for. It still counts as revenue; the product is what is missing.'
 
@@ -140,6 +145,12 @@ const WITHOUT_PRODUCT_HINT =
  * count and revenue line read the same response, so they agree by construction
  * while the rows themselves are paged. Moves from the owner's own accounts or
  * agents are left out of every figure and named once, in the notice.
+ *
+ * Sales received in Stripe (#4954) are in none of those figures: they have one
+ * tile of their own, "Received in Stripe", shown only when the period has one,
+ * and the list's summary line names their amount beside Revenue. So each kind
+ * agrees with its own rows: the account's rows with the account's tiles, the
+ * Stripe rows with the Stripe figure.
  */
 export function SalesOverviewTab({
   range,
@@ -225,6 +236,8 @@ export function SalesOverviewTab({
   const productRows = productLines(data, money)
   const payerRows = payerLines(data, money)
   const own = data.own_moves
+  const stripeCount = stripeSalesCount(data)
+  const stripeText = stripeCount > 0 ? salesTotalText(stripeSalesRaw(data), money) : null
 
   // #4963: the bars are struck in the display currency, so the values and the
   // axis ticks format them as they are (USDC in token mode).
@@ -233,7 +246,10 @@ export function SalesOverviewTab({
 
   return (
     <div className="mt-6 space-y-4" data-testid="sales-overview">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-tiles">
+      <div
+        className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${stripeText !== null ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'xl:grid-cols-4'}`}
+        data-testid="sales-tiles"
+      >
         <StatTile
           label="Revenue"
           value={salesTotalText(data.revenue_raw, money)}
@@ -272,6 +288,28 @@ export function SalesOverviewTab({
             </Tooltip>
           }
         />
+        {stripeText !== null ? (
+          <div data-testid="sales-stripe-tile">
+            <StatTile
+              className="h-full"
+              label="Received in Stripe"
+              value={stripeText}
+              footnote={`${plural(stripeCount, 'sale')}, not in Revenue`}
+              hint={
+                <Tooltip label={STRIPE_HINT} side="bottom">
+                  <span
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`What this counts: ${STRIPE_HINT}`}
+                    className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
+                  >
+                    <Icon icon={Info} className="h-3.5 w-3.5" />
+                  </span>
+                </Tooltip>
+              }
+            />
+          </div>
+        ) : null}
       </div>
 
       {own.count > 0 ? (
@@ -339,6 +377,7 @@ export function SalesOverviewTab({
           list={list}
           total={total}
           revenueText={salesTotalText(data.revenue_raw, money)}
+          stripeText={stripeText}
           money={money}
           merchantName={merchantName}
           onOpenPayment={onOpenPayment}

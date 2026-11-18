@@ -115,6 +115,7 @@ const SUMMARY = {
     { day: '2026-11-16', payments: 2, sales: 2, revenue_raw: '1140000' },
     { day: '2026-11-17', payments: 2, sales: 1, revenue_raw: '1000000' },
   ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
 }
 
 const PREVIOUS_SUMMARY = { ...SUMMARY, revenue_raw: '1070000' }
@@ -123,8 +124,22 @@ const PAYMENTS = [
   { tx_hash: '0xa1', block_time: '2026-11-17T14:05:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: CONTACT, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
   { tx_hash: '0xa2', block_time: '2026-11-17T13:48:00.000Z', kind: 'no_product', amount_raw: '1000000', product_id: null, product_label: null, payer: WALLET, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
   { tx_hash: '0xa3', block_time: '2026-11-16T10:00:00.000Z', kind: 'own_move', amount_raw: '500000', product_id: null, product_label: null, payer: OWN, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
-  { tx_hash: '0xa4', block_time: '2026-11-16T09:30:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: CONTACT, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe' },
+  { tx_hash: '0xa4', block_time: '2026-11-16T09:30:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: CONTACT, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
   { tx_hash: '0xa5', block_time: '2026-11-16T09:00:00.000Z', kind: 'sale', amount_raw: '300000', product_id: 'embed', product_label: 'Embeddings', payer: OTHER_USERS_AGENT, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+]
+
+/**
+ * #4954: the same period plus two sales received at a registered Stripe
+ * deposit address ($0.01 + $0.02 of "Joke"). They are in NO account figure —
+ * Revenue, Sales, Average sale, the chart and both breakdowns are SUMMARY's
+ * unchanged — and in `received_in_stripe` only.
+ */
+const STRIPE_ADDRESS = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
+const STRIPE_SUMMARY = { ...SUMMARY, received_in_stripe: { count: 2, amount_raw: '30000' } }
+const STRIPE_PAYMENTS = [
+  { tx_hash: '0x' + 'b1'.repeat(32), block_time: '2026-11-17T15:00:00.000Z', kind: 'sale', amount_raw: '10000', product_id: 'joke', product_label: 'Joke', payer: WALLET, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: STRIPE_ADDRESS },
+  { tx_hash: '0x' + 'b2'.repeat(32), block_time: '2026-11-17T14:30:00.000Z', kind: 'sale', amount_raw: '20000', product_id: 'joke', product_label: 'Joke', payer: WALLET, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: STRIPE_ADDRESS },
+  ...PAYMENTS,
 ]
 
 /** The catalogue the page reads once: no kit address saved unless a test says otherwise. */
@@ -165,7 +180,7 @@ function serve({ everPaid = true, summary = SUMMARY, previous = PREVIOUS_SUMMARY
     if (url.pathname === '/merchant-keys') return { keys: [] }
     const detailMatch = /^\/merchant-sales\/payments\/(0x[^/]+)$/.exec(url.pathname)
     if (detailMatch) {
-      const row = PAYMENTS.find((p) => p.tx_hash === detailMatch[1])
+      const row = STRIPE_PAYMENTS.find((p) => p.tx_hash === detailMatch[1])
       return { ...row, merchant_reference: null, legs: [] }
     }
     if (url.pathname === '/merchant-sales/payments') {
@@ -531,11 +546,12 @@ describe('the ledger rows', () => {
     expect(sale.textContent).toContain('+$0.30')
   })
 
-  it('renders a payment held in Stripe like any sale, with no special mark', async () => {
+  it('shows no Stripe mark, tile or line for a period with no sale received in Stripe (#4954)', async () => {
     serve()
     await renderPage()
     await screen.findByText('Moved between your accounts')
     expect(screen.queryByText(/stripe/i)).toBeNull()
+    expect(screen.queryByTestId('sales-stripe-tile')).toBeNull()
   })
 
   it('opens the payment panel for the row that was pressed', async () => {
@@ -667,5 +683,104 @@ describe('the tabs and the period', () => {
     const seven = salesDayRange({ preset: '7d' })
     await waitFor(() => expect(callsTo('/summary').some((p) => p.includes(`from=${seven.from}&to=${seven.to}`))).toBe(true))
     await act(async () => {})
+  })
+})
+
+describe('sales received in Stripe (#4954)', () => {
+  const stripeServe = (summary: unknown = STRIPE_SUMMARY) =>
+    serve({ summary, pages: [{ payments: STRIPE_PAYMENTS, next_cursor: null }] })
+
+  it('keeps the account tiles and breakdowns unchanged, and gives Stripe sales one figure of their own', async () => {
+    stripeServe()
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    // Exactly SUMMARY's account figures: the two Stripe sales ($0.03) are in none of them.
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('$2.14')
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('4')
+    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('$0.54')
+    const stripe = within(tiles).getByTestId('sales-stripe-tile')
+    expect(stripe.textContent).toContain('Received in Stripe')
+    expect(stripe.textContent).toContain('$0.03')
+    expect(stripe.textContent).toContain('2 sales, not in Revenue')
+    // Never reads as a balance.
+    expect(stripe.textContent).not.toMatch(/balance/i)
+    expect(screen.getByTestId('sales-by-product').textContent).not.toContain('Joke')
+    expect(screen.getByTestId('sales-by-payer').textContent).not.toContain('$0.03')
+  })
+
+  it('counts both kinds in the list line, each beside its own figure', async () => {
+    stripeServe()
+    await renderPage()
+    const line = await screen.findByTestId('sales-payments-summary')
+    // 5 account payments + 2 Stripe sales, and the two figures apart.
+    expect(line.textContent).toContain('7 payments')
+    expect(line.textContent).toContain('Revenue $2.14')
+    expect(line.textContent).toContain('Received in Stripe $0.03')
+    expect(screen.getByTestId('sales-payments').textContent).toContain('not in Transactions')
+  })
+
+  it('marks the Stripe rows, and only them', async () => {
+    stripeServe()
+    await renderPage()
+    const ledger = await screen.findByTestId('sales-ledger')
+    const marks = within(ledger).getAllByText('Received in Stripe')
+    expect(marks).toHaveLength(2)
+    for (const mark of marks) {
+      expect(mark.closest('[role="button"]')?.textContent).toContain('Joke')
+    }
+  })
+
+  it('is not the empty state when the period has only Stripe sales', async () => {
+    const zeroAccount = {
+      ...SUMMARY,
+      revenue_raw: '0',
+      sales: 0,
+      average_sale_raw: '0',
+      without_product: zero,
+      own_moves: zero,
+      by_product: [],
+      by_payer: [],
+      by_day: [],
+      received_in_stripe: { count: 2, amount_raw: '30000' },
+    }
+    serve({ summary: zeroAccount, pages: [{ payments: STRIPE_PAYMENTS.slice(0, 2), next_cursor: null }] })
+    await renderPage()
+    expect(await screen.findByTestId('sales-stripe-tile')).toBeTruthy()
+    expect(screen.queryByTestId('sales-empty-period')).toBeNull()
+  })
+
+  it('shows the payment into the deposit address in the detail, with its hash and no account', async () => {
+    stripeServe()
+    await renderPage()
+    const row = within(await screen.findByTestId('sales-ledger')).getAllByText('Joke')[0].closest('[role="button"]') as HTMLElement
+    await userEvent.click(row)
+    const panel = await screen.findByRole('dialog', { name: 'Joke' })
+    const header = within(panel).getByTestId('sales-payment-header')
+    expect(within(header).getByText('Received in Stripe')).toBeTruthy()
+    expect(header.textContent).toContain('to your Stripe address')
+    // The who-line names the Stripe address, never "Paid … into Sales".
+    expect(header.textContent).not.toMatch(/Paid by[^·]*into Sales/)
+    expect(within(panel).getByTestId('sales-payment-details').textContent).toContain('Your Stripe deposit address')
+    const technical = within(panel).getByTestId('sales-payment-technical')
+    expect(technical.querySelector(`[title="${STRIPE_ADDRESS}"]`)).not.toBeNull()
+    expect(technical.querySelector(`[title="${STRIPE_PAYMENTS[0].tx_hash}"]`)).not.toBeNull()
+    // The Sales account is not where this sale went.
+    expect(technical.querySelector(`[title="${SALES_ACCOUNT.account_address}"]`)).toBeNull()
+    expect(within(panel).getByRole('link', { name: /View on explorer/ })).toBeTruthy()
+  })
+
+  it('says clearing a Stripe sale removes it from the page, and closes the panel after', async () => {
+    stripeServe()
+    mockDelete.mockResolvedValue(undefined)
+    await renderPage()
+    const row = within(await screen.findByTestId('sales-ledger')).getAllByText('Joke')[0].closest('[role="button"]') as HTMLElement
+    await userEvent.click(row)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clear sale record' }))
+    const confirm = screen.getByRole('dialog', { name: 'Clear this sale record?' })
+    expect(confirm.textContent).toContain('it leaves this page')
+    expect(confirm.textContent).not.toContain('The payment stays')
+    await userEvent.click(screen.getByRole('button', { name: 'Clear record' }))
+    await waitFor(() => expect(mockDelete).toHaveBeenCalledWith(`/merchant-sales/payments/${STRIPE_PAYMENTS[0].tx_hash}/record`))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Joke' })).toBeNull())
   })
 })

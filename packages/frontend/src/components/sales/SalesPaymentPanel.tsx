@@ -23,7 +23,9 @@ import { getExplorerUrlOrNull } from '@/lib/chains'
 import { formatDateTime, truncate } from '@/lib/format'
 import { SALES_STATUS } from '@/lib/payment-status'
 import {
+  STRIPE_MARK,
   isOnChainHash,
+  isStripeHeld,
   salesApprox,
   salesFiatAmount,
   tokenText,
@@ -51,8 +53,15 @@ import {
  * own "Sent" fallback for deposits.
  *
  * The panel reads only what the reads carry. It omits, rather than invents,
- * whatever a row lacks: `legs` is empty for a payment with no inbound leg, and
- * a payment held by Stripe (#4952) has no on-chain hash to show or link.
+ * whatever a row lacks: `legs` is empty for a payment with no inbound leg.
+ *
+ * **Received in Stripe (#4954).** A sale paid to a registered Stripe deposit
+ * address (`held_by` `stripe`) carries the mark beside its status, says it
+ * went to the Stripe address and not into the Sales account, and shows that
+ * on-chain payment — "Paid to" is the deposit address, with the transaction
+ * hash and the explorer link — instead of the account. It has no transfers of
+ * its own (#4952), so clearing its record removes the sale from the page; the
+ * clear dialog says so rather than the account sale's "the payment stays".
  */
 export interface SalesPaymentPanelProps {
   /** The payment to show; `null` keeps the panel closed. */
@@ -90,6 +99,7 @@ export function payerPhrase(payer: SalesPayer | null, severalPayers: boolean): s
 function whoLine(payment: SalesPaymentDetail, accountName: string): string {
   const payer = payerPhrase(payment.payer, payment.several_payers)
   if (payment.kind === 'own_move') return `By ${payer ?? 'your account'} into ${accountName}`
+  if (isStripeHeld(payment)) return payer ? `Paid by ${payer} to your Stripe address` : 'Paid to your Stripe address'
   return payer ? `Paid by ${payer} into ${accountName}` : `Paid into ${accountName}`
 }
 
@@ -133,6 +143,14 @@ function OpenPanel({
     try {
       await api.delete(`/merchant-sales/payments/${encodeURIComponent(txHash)}/record`)
       setConfirmOpen(false)
+      if (detail !== null && isStripeHeld(detail)) {
+        // A Stripe-held sale is its record (#4952): once cleared there is
+        // nothing left to show, so the panel closes rather than read a 404.
+        toast.success('Sale record cleared. Nothing changed in Stripe.')
+        onCleared?.()
+        onClose()
+        return
+      }
       toast.success('Sale record cleared. The payment stays.')
       refetch()
       onCleared?.()
@@ -174,6 +192,7 @@ function OpenPanel({
   }
 
   const own = detail.kind === 'own_move'
+  const stripe = isStripeHeld(detail)
   const hasRecord = detail.kind === 'sale'
   const status = own ? SALES_STATUS.not_counted : SALES_STATUS.received
   const title = own
@@ -216,6 +235,16 @@ function OpenPanel({
       />,
     )
     if (payerRow) details.push(<DetailRow key="payer" label="Payer" value={payerRow.value} note={payerRow.note} />)
+    if (stripe) {
+      details.push(
+        <DetailRow
+          key="received-at"
+          label="Received at"
+          value="Your Stripe deposit address"
+          note="Registered by you, not verified by Haven"
+        />,
+      )
+    }
     details.push(<DetailRow key="record" label="Sale record" value={hasRecord ? 'Sent' : 'Not sent'} />)
     if (detail.receipt_number) details.push(<DetailRow key="receipt" label="Receipt number" value={detail.receipt_number} />)
     if (detail.merchant_reference) {
@@ -223,9 +252,11 @@ function OpenPanel({
     }
   }
 
-  // Technical details: only what this row carries. A payment held by Stripe has
-  // no on-chain hash, and a payment with no legs may have no payer address.
-  const onChainHash = detail.held_by === 'account' && isOnChainHash(detail.tx_hash)
+  // Technical details: only what this row carries. A payment with no legs may
+  // have no payer address. A Stripe-held sale's hash is the payment into the
+  // deposit address, so it is shown and linked like any other.
+  const onChainHash = isOnChainHash(detail.tx_hash)
+  const stripeAddress = stripe ? detail.receiving_address : null
   const payerAddresses = [
     ...new Map(
       [...(detail.payer ? [detail.payer] : []), ...detail.legs.map((leg) => leg.payer)].map((payer) => [
@@ -246,7 +277,16 @@ function OpenPanel({
         />,
       )
     })
-    if (merchantAccount && onChainHash) {
+    if (stripeAddress) {
+      technical.push(
+        <DetailRow
+          key="to"
+          label="Paid to"
+          value={<OnChainValue chainId={chainId} type="address" value={stripeAddress} />}
+          note="Your Stripe deposit address"
+        />,
+      )
+    } else if (!stripe && merchantAccount && onChainHash) {
       technical.push(
         <DetailRow
           key="to"
@@ -326,7 +366,10 @@ function OpenPanel({
                 <Amount value={tokenFigure} symbol="USDC" direction={direction} size="lg" />
               )}
             </div>
-            <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+            <span className="flex flex-wrap items-center justify-end gap-1.5">
+              <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+              {stripe ? <StatusBadge tone={STRIPE_MARK.tone}>{STRIPE_MARK.label}</StatusBadge> : null}
+            </span>
           </div>
           <p className="mt-2 text-sm text-[var(--v2-ink-2)]">
             {whoLine(detail, accountName)} <span className="whitespace-nowrap">· {formatDateTime(detail.block_time)}</span>
@@ -334,6 +377,11 @@ function OpenPanel({
           {own ? (
             <NoticeRow className="mt-4">
               A payment from your own agent or account is a move, not a sale, so it is not in your revenue.
+            </NoticeRow>
+          ) : stripe ? (
+            <NoticeRow className="mt-4">
+              Paid to the Stripe deposit address you registered, not into {accountName}. It is not in your revenue
+              or in any Haven balance.
             </NoticeRow>
           ) : detail.kind === 'no_product' ? (
             <NoticeRow className="mt-4">
@@ -367,7 +415,9 @@ function OpenPanel({
         body={
           <div className="space-y-3">
             <p className="text-[var(--v2-ink-2)]">
-              The payment stays and still counts as revenue. It shows with no product until your kit reports it again.
+              {stripe
+                ? 'This sale was received in Stripe, so its record is all Sales has of it: it leaves this page until your kit reports it again. Nothing changes in Stripe.'
+                : 'The payment stays and still counts as revenue. It shows with no product until your kit reports it again.'}
             </p>
             <NoticeRow
               action={

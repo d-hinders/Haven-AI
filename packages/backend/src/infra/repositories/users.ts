@@ -176,7 +176,7 @@ export async function updateCurrencyPreference(
 export interface UserVisitRow {
   /** The previous entry's instant; NULL on the first ever visit. */
   previous: Date | null
-  /** This entry's instant. */
+  /** This entry's instant, never earlier than the stored marker — so it can tie with `previous` (see above). */
   current: Date
 }
 

@@ -41,7 +41,7 @@ interface Props {
  * the opened block reads as part of the panel. `note` is a one-line
  * explanation under the value.
  */
-function DetailRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
+export function DetailRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
   return (
     <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-3 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
       {/* `max-content`: a label never wraps ("Settlement transaction"). */}
@@ -64,7 +64,7 @@ function DetailRow({ label, value, note }: { label: string; value: ReactNode; no
  * two-line wraps the shortened form stops. A row on a chain the registry does
  * not know keeps the copy and drops the link.
  */
-function OnChainValue({
+export function OnChainValue({
   chainId,
   type,
   value,

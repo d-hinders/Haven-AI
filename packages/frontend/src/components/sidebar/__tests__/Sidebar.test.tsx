@@ -8,6 +8,15 @@ const mockUsePathname = vi.fn()
 const mockPush = vi.fn()
 /** #2869: the Accounting entry's markers come from `GET /accounting/feed/status`. */
 const mockAccountingFeed = vi.fn()
+/** #4900: the Sales entry reads the shell's one merchant-services setting. */
+const mockMerchantServices = vi.fn()
+function merchantServices(status: 'loading' | 'ready' | 'error', enabled: boolean) {
+  return { status, enabled, state: null, merchantAccount: null, refresh: vi.fn(), turnOn: vi.fn(), turnOff: vi.fn() }
+}
+
+vi.mock('@/context/MerchantServicesContext', () => ({
+  useMerchantServicesContext: () => mockMerchantServices(),
+}))
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
@@ -72,6 +81,7 @@ describe('Sidebar', () => {
     mockUsePathname.mockReset()
     mockPush.mockReset()
     mockAccountingFeed.mockReset().mockReturnValue(feed(feedStatus()))
+    mockMerchantServices.mockReset().mockReturnValue(merchantServices('ready', false))
 
     mockUsePathname.mockReturnValue('/dashboard')
     mockUseAuth.mockReturnValue({
@@ -302,6 +312,49 @@ describe('Sidebar', () => {
       expect(accountingLink()).not.toBeNull()
       expect(attentionDot()).toBeNull()
       expect(accountingLink()!.textContent).not.toContain(en.accountingPage.nav.comingSoon)
+    })
+  })
+
+  /**
+   * The Sales entry (#4900, approved on #4894): after Transactions, shown only
+   * on a read that answered "on". Opposite of Accounting on a failed read.
+   */
+  describe('Sales entry, by merchant-services state (#4900)', () => {
+    const railHrefs = () =>
+      Array.from(document.querySelector('nav[aria-label="All sections"]')!.querySelectorAll('a')).map((a) =>
+        a.getAttribute('href'),
+      )
+    const renderRail = () => render(<LocaleProvider><ThemeProvider><Sidebar /></ThemeProvider></LocaleProvider>)
+
+    it('sits after Transactions and before Accounting when the setting is on', () => {
+      mockMerchantServices.mockReturnValue(merchantServices('ready', true))
+      renderRail()
+      expect(railHrefs()).toEqual([
+        '/dashboard', '/analytics',
+        '/accounts', '/transactions', '/sales', '/accounting',
+        '/agents', '/marketplace', '/contacts',
+      ])
+      expect(screen.getAllByRole('link', { name: 'Sales' }).length).toBeGreaterThan(0)
+    })
+
+    it.each([
+      ['while the setting loads', merchantServices('loading', false)],
+      ['when the read failed', merchantServices('error', false)],
+      ['when Sales is off', merchantServices('ready', false)],
+      // A stale `enabled` under a failed read must still hide the entry.
+      ['when the read failed after an on answer', merchantServices('error', true)],
+    ])('is absent %s', (_label, value) => {
+      mockMerchantServices.mockReturnValue(value)
+      renderRail()
+      expect(railHrefs()).not.toContain('/sales')
+      expect(document.querySelector('a[href="/sales"]')).toBeNull()
+    })
+
+    it('does not touch the tab bar', () => {
+      mockMerchantServices.mockReturnValue(merchantServices('ready', true))
+      renderRail()
+      const bar = document.querySelector('nav[aria-label="Primary"]')!
+      expect(Array.from(bar.querySelectorAll('a')).map((a) => a.getAttribute('href'))).toEqual([...TAB_ROUTES])
     })
   })
 
@@ -553,6 +606,7 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
       logout: vi.fn(),
     })
     mockAccountingFeed.mockReset().mockReturnValue(feed(feedStatus()))
+    mockMerchantServices.mockReset().mockReturnValue(merchantServices('ready', false))
     width = 1280
     installMatchMedia()
   })
@@ -647,6 +701,15 @@ describe('More sheet across the desktop breakpoint (#2586, #4053)', () => {
     // Settings once in the whole sheet (the drawer had it in the footer AND
     // inside the kebab menu).
     expect(hrefs.filter((h) => h === '/settings')).toHaveLength(1)
+  })
+
+  it('puts Sales after Analytics when Sales is on (#4900), and nowhere when it is not', () => {
+    mockMerchantServices.mockReturnValue(merchantServices('ready', true))
+    mountAt(390)
+    openSheet()
+    const nav = sheet()!.querySelector('nav[aria-label="All sections"]')!
+    const navHrefs = Array.from(nav.querySelectorAll('a')).map((a) => a.getAttribute('href'))
+    expect(navHrefs).toEqual(['/analytics', '/sales', '/accounting', '/marketplace', '/contacts', '/settings'])
   })
 
   it('opens with the account, shows Log out as a visible row and has no kebab', () => {

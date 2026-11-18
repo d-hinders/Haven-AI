@@ -11,6 +11,7 @@ import {
   FileText,
   LayoutGrid,
   LogOut,
+  ReceiptText,
   Settings,
   ShieldCheck,
   Store,
@@ -26,6 +27,7 @@ import { displayName, userInitial as getUserInitial } from '@/lib/user'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { useT } from '@/context/LocaleContext'
+import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
 import { accountingFeedOffState, accountingNeedsAttention, useAccountingFeed } from '@/hooks/useAccountingFeed'
 
 export interface NavItem {
@@ -68,6 +70,7 @@ const icons = {
   logout: <Icon icon={LogOut} className="w-full h-full" />,
   dotsVertical: <Icon icon={EllipsisVertical} className="w-full h-full" />,
   accounting: <Icon icon={FileText} className="w-full h-full" />,
+  sales: <Icon icon={ReceiptText} className="w-full h-full" />,
 }
 
 /**
@@ -100,6 +103,26 @@ export const baseNavItems: NavItem[] = [
   { label: 'Marketplace', href: '/marketplace', icon: icons.marketplace },
   { label: 'Contacts', href: '/contacts', icon: icons.contacts },
 ]
+
+/**
+ * One rail entry, found by ROUTE (#4900). `baseNavItems` is read by position
+ * nowhere below: an entry inserted before another used to shift every index
+ * pick after it, which is how the tab bar learned to select by `href` too.
+ */
+function navItem(href: string): NavItem {
+  const item = baseNavItems.find((candidate) => candidate.href === href)
+  if (!item) throw new Error(`baseNavItems has no entry for ${href}`)
+  return item
+}
+
+/**
+ * The Sales entry (#4900, approved on #4894): after Transactions in the rail
+ * and, because the sheet is the rail minus the tab bar's routes, after
+ * Analytics in the phone More sheet. It is not in `baseNavItems`: it exists
+ * only for a merchant who turned Sales on, so the shared array (the tab bar and
+ * `/design-system` read it) stays the entries every user has.
+ */
+export const salesNavItem: NavItem = { label: 'Sales', href: '/sales', icon: icons.sales }
 
 const DESKTOP_BREAKPOINT_PX = 1024
 
@@ -176,6 +199,13 @@ export default function Sidebar() {
   // read per shell mount; the page refetches its own copy after Sync now,
   // this one refreshes on the next mount.
   const { status: accountingStatus, loading: accountingLoading } = useAccountingFeed()
+  // #4900: the Sales entry reads the shell's ONE merchant-services setting
+  // (#4904) — never a read of its own. Unlike Accounting, which shows on a
+  // failed read, Sales is a destination only a merchant who turned it on has,
+  // so it shows ONLY on a read that answered "on": loading, a failed read and
+  // off all hide it rather than offering a page that may not exist.
+  const { status: merchantStatus, enabled: salesEnabled } = useMerchantServicesContext()
+  const showSales = merchantStatus === 'ready' && salesEnabled
   // The phone More sheet (#4053). It only ever opens below `lg`: `sheetOpen`
   // is the conjunction, so a sheet left open across a widening cannot render
   // on desktop even for the frame before the crossing listener closes it.
@@ -227,7 +257,7 @@ export default function Sidebar() {
   const accountingOff = accountingFeedOffState(accountingStatus)
   const accountingPending = accountingLoading && !accountingStatus
   const accountingItem: NavItem = {
-    ...baseNavItems[4],
+    ...navItem('/accounting'),
     ...(accountingOff === 'coming_soon'
       ? { badge: t.accountingPage.nav.comingSoon, badgeTitle: t.common.comingSoon, badgeTone: 'muted' as const }
       : accountingNeedsAttention(accountingStatus)
@@ -246,15 +276,17 @@ export default function Sidebar() {
     {
       label: t.sidebar.overviewGroup,
       items: [
-        baseNavItems[0], // Dashboard
-        baseNavItems[1], // Analytics
+        navItem('/dashboard'),
+        navItem('/analytics'),
       ],
     },
     {
       label: t.sidebar.moneyGroup,
       items: [
-        baseNavItems[2], // Accounts
-        baseNavItems[3], // Transactions
+        navItem('/accounts'),
+        navItem('/transactions'),
+        // Sales (#4900): after Transactions; hidden on load, on a failed read and when off.
+        ...(showSales ? [salesNavItem] : []),
         // Accounting (#2869): markers per state; hidden on self-hosted; absent until the status has answered.
         ...(accountingPending || accountingOff === 'self_hosted' ? [] : [accountingItem]),
       ],
@@ -262,9 +294,9 @@ export default function Sidebar() {
     {
       label: t.sidebar.agentsGroup,
       items: [
-        baseNavItems[5], // Agents
-        baseNavItems[6], // Marketplace
-        baseNavItems[7], // Contacts
+        navItem('/agents'),
+        navItem('/marketplace'),
+        navItem('/contacts'),
       ],
     },
   ]

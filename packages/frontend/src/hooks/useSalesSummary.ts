@@ -1,0 +1,66 @@
+'use client'
+
+/**
+ * The Sales summary read for one period (#4900, epic #4885): the tiles, the
+ * chart and both breakdowns come from this ONE response, never from loaded
+ * rows, so a period of several thousand payments costs one small read.
+ *
+ * `GET /merchant-sales/summary?from&to` (#4897; UTC calendar days, inclusive).
+ * Pass `null` to skip the read (the Revenue comparison on a period with
+ * nothing to compare to, or a page that is not mounted on a Sales account).
+ * The state keys on the range, so changing the period shows loading, not the
+ * previous period's figures under the new period's label; a superseded answer
+ * never writes.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '@/lib/api'
+import type { SalesDayRange, SalesSummary } from '@/lib/sales'
+
+export interface UseSalesSummaryResult {
+  data: SalesSummary | null
+  loading: boolean
+  failed: boolean
+  refetch: () => void
+}
+
+export function useSalesSummary(range: SalesDayRange | null): UseSalesSummaryResult {
+  const [data, setData] = useState<SalesSummary | null>(null)
+  const [loading, setLoading] = useState(range !== null)
+  const [failed, setFailed] = useState(false)
+  const requestIdRef = useRef(0)
+  const from = range?.from ?? null
+  const to = range?.to ?? null
+
+  const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current
+    if (from === null || to === null) {
+      setData(null)
+      setLoading(false)
+      setFailed(false)
+      return
+    }
+    setLoading(true)
+    setFailed(false)
+    setData(null)
+    try {
+      const response = await api.get<SalesSummary>(`/merchant-sales/summary?from=${from}&to=${to}`)
+      if (requestIdRef.current !== requestId) return
+      setData(response)
+    } catch {
+      if (requestIdRef.current !== requestId) return
+      setFailed(true)
+    } finally {
+      if (requestIdRef.current === requestId) setLoading(false)
+    }
+  }, [from, to])
+
+  useEffect(() => {
+    void load()
+    return () => {
+      requestIdRef.current += 1
+    }
+  }, [load])
+
+  return { data, loading, failed, refetch: () => void load() }
+}

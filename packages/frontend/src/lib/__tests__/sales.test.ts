@@ -1,0 +1,189 @@
+import { describe, expect, it } from 'vitest'
+import {
+  catalogueChainId,
+  catalogueHost,
+  catalogueNeedsAttention,
+  catalogueView,
+  isOnChainHash,
+  ledgerCount,
+  payerKindLine,
+  payerName,
+  payerSubline,
+  previousSalesRange,
+  revenueChangePercent,
+  salesAmountText,
+  salesChartDays,
+  salesDayRange,
+  salesRangeDays,
+  tokenText,
+  usdcExactText,
+  usdcText,
+  type SalesCatalogue,
+  type SalesSummary,
+} from '../sales'
+
+const NOW = new Date('2026-11-18T09:30:00.000Z')
+const WALLET = { kind: 'wallet' as const, name: null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' }
+
+describe('the period', () => {
+  it('is the last N UTC days including today', () => {
+    expect(salesDayRange({ preset: '30d' }, NOW)).toEqual({ from: '2026-10-20', to: '2026-11-18' })
+    expect(salesRangeDays(salesDayRange({ preset: '30d' }, NOW))).toBe(30)
+    expect(salesDayRange({ preset: '7d' }, NOW)).toEqual({ from: '2026-11-12', to: '2026-11-18' })
+  })
+
+  it('takes a custom range as its own days, and defaults to 30 days for anything else', () => {
+    expect(salesDayRange({ from: '2026-11-01', to: '2026-11-05' }, NOW)).toEqual({ from: '2026-11-01', to: '2026-11-05' })
+    expect(salesDayRange({}, NOW)).toEqual({ from: '2026-10-20', to: '2026-11-18' })
+  })
+
+  it('compares with the period of the same length that ends the day before', () => {
+    expect(previousSalesRange({ from: '2026-10-20', to: '2026-11-18' })).toEqual({ from: '2026-09-20', to: '2026-10-19' })
+    expect(previousSalesRange({ from: '2026-11-01', to: '2026-11-05' })).toEqual({ from: '2026-10-27', to: '2026-10-31' })
+  })
+})
+
+describe('payers', () => {
+  it('names a contact and an own account, and calls every other payer Wallet', () => {
+    expect(payerName({ kind: 'contact', name: 'Lumen Research', address: '0x1' })).toBe('Lumen Research')
+    expect(payerName({ kind: 'own', name: 'Atlas', address: '0x2' })).toBe('Atlas')
+    expect(payerName(WALLET)).toBe('Wallet')
+    expect(payerName(null)).toBe('Wallet')
+  })
+
+  it('shows a wallet with its short address and never an address as a name', () => {
+    expect(payerSubline(WALLET, false)).toBe('Wallet · 0x8f3a…21c0')
+    expect(payerKindLine(WALLET)).toBe('0x8f3a…21c0')
+    // A named kind that arrives without its name reads as a wallet, not as an address.
+    expect(payerName({ kind: 'contact', name: null, address: WALLET.address })).toBe('Wallet')
+    expect(payerSubline(null, true)).toBe('Several wallets')
+  })
+})
+
+describe('a wallet is never named, whatever name it carries (owner decision 2, #4894)', () => {
+  // A wallet that arrives with a name (another Haven user's agent, say) must
+  // still read as "Wallet": the page never tells a merchant a payer uses Haven.
+  const NAMED_WALLET = { kind: 'wallet' as const, name: "Someone's agent", address: WALLET.address }
+
+  it('reads as Wallet in the name, the subline and the kind line', () => {
+    expect(payerName(NAMED_WALLET)).toBe('Wallet')
+    expect(payerSubline(NAMED_WALLET, false)).toBe('Wallet · 0x8f3a…21c0')
+    expect(payerKindLine(NAMED_WALLET)).toBe('0x8f3a…21c0')
+    expect(payerSubline(NAMED_WALLET, false)).not.toContain('Someone')
+  })
+
+  it('says an own payer is an account or an agent, which the read does not tell apart', () => {
+    expect(payerKindLine({ kind: 'own', name: 'Atlas', address: '0x2' })).toBe('Your account or agent')
+  })
+})
+
+describe('amounts', () => {
+  it('floors a token figure under four decimals', () => {
+    expect(tokenText(0.00004)).toBe('<0.0001 USDC')
+    expect(usdcText('10')).toBe('<0.0001 USDC')
+    expect(usdcText('4500')).toBe('0.0045 USDC')
+    expect(usdcText('0')).toBe('0.00 USDC')
+  })
+
+  it('follows the sub-cent rule in USD', () => {
+    expect(salesAmountText('18000', 'USD')).toBe('$0.02')
+    expect(salesAmountText('4500', 'USD')).toBe('$0.0045')
+    expect(salesAmountText('2140000', 'USD')).toBe('$2.14')
+  })
+
+  it('reads in USDC, not a converted figure, where no rate is on the wire', () => {
+    expect(salesAmountText('2140000', 'SEK')).toBe('2.14 USDC')
+    expect(salesAmountText('4500', 'EUR')).toBe('0.0045 USDC')
+  })
+})
+
+describe('what the summary says', () => {
+  const summary = {
+    revenue_raw: '2140000',
+    sales: 3,
+    without_product: { count: 1, amount_raw: '1000000' },
+    own_moves: { count: 2, amount_raw: '500000' },
+    by_day: [{ day: '2026-11-17', payments: 2, sales: 1, revenue_raw: '1000000' }],
+  } as unknown as SalesSummary
+
+  it('lists every payment but counts only revenue ones as revenue', () => {
+    expect(ledgerCount(summary)).toBe(6)
+  })
+
+  it('gives a comparison only where the period before had revenue', () => {
+    expect(revenueChangePercent(summary, { ...summary, revenue_raw: '1070000' })).toBeCloseTo(100)
+    expect(revenueChangePercent(summary, { ...summary, revenue_raw: '0' })).toBeNull()
+    expect(revenueChangePercent(summary, null)).toBeNull()
+  })
+
+  it('draws one slot per calendar day, empty on a quiet day', () => {
+    const days = salesChartDays(summary, { from: '2026-11-16', to: '2026-11-18' })
+    expect(days.map((d) => d.label)).toEqual(['16 Nov', '17 Nov', '18 Nov'])
+    expect(days.map((d) => d.series.length)).toEqual([0, 1, 0])
+    expect(days[1].series[0].amount).toBe(1)
+  })
+})
+
+describe('exact USDC prices (a token surface)', () => {
+  it('keeps every decimal the atomic amount has, and never fewer than two', () => {
+    expect(usdcExactText('18000')).toBe('0.018 USDC')
+    expect(usdcExactText('100')).toBe('0.0001 USDC')
+    expect(usdcExactText('1000000')).toBe('1.00 USDC')
+    expect(usdcExactText('1230000')).toBe('1.23 USDC')
+    expect(usdcExactText('1234567')).toBe('1.234567 USDC')
+    expect(usdcExactText('0')).toBe('0.00 USDC')
+    expect(usdcExactText('12345000000')).toBe('12,345.00 USDC')
+  })
+})
+
+describe('the catalogue', () => {
+  const none: SalesCatalogue = {
+    deployment_url: null,
+    last_read_at: null,
+    last_read_status: 'never',
+    last_read_detail: null,
+    mismatch: false,
+    mismatch_reason: null,
+    document_name: null,
+    document_operator_name: null,
+    document_network: null,
+    document_pay_to: null,
+    document_updated: null,
+    products: [],
+  }
+  const saved = { ...none, deployment_url: 'https://inference.example.com' }
+
+  it('names the view the read puts the Products tab in', () => {
+    expect(catalogueView(none)).toBe('none')
+    expect(catalogueView(saved)).toBe('never')
+    expect(catalogueView({ ...saved, last_read_status: 'ok' })).toBe('ok')
+    expect(catalogueView({ ...saved, last_read_status: 'unreachable' })).toBe('unreachable')
+    expect(catalogueView({ ...saved, last_read_status: 'malformed' })).toBe('malformed')
+    expect(catalogueView({ ...saved, last_read_status: 'refused' })).toBe('refused')
+    // A mismatch wins over the status the flag rides on.
+    expect(catalogueView({ ...saved, last_read_status: 'ok', mismatch: true })).toBe('mismatch')
+    expect(catalogueView({ ...saved, last_read_status: 'mismatch' })).toBe('mismatch')
+  })
+
+  it('flags the tabs only for a list Haven is not using or could not read', () => {
+    expect(catalogueNeedsAttention(null)).toBe(false)
+    expect(catalogueNeedsAttention(none)).toBe(false)
+    expect(catalogueNeedsAttention({ ...saved, last_read_status: 'ok' })).toBe(false)
+    expect(catalogueNeedsAttention({ ...saved, last_read_status: 'unreachable' })).toBe(true)
+    expect(catalogueNeedsAttention({ ...saved, mismatch: true })).toBe(true)
+  })
+
+  it('reads the chain and host from the strings the document carries', () => {
+    expect(catalogueChainId('eip155:8453')).toBe(8453)
+    expect(catalogueChainId('solana:mainnet')).toBeUndefined()
+    expect(catalogueChainId(null)).toBeUndefined()
+    expect(catalogueHost('https://inference.example.com')).toBe('inference.example.com')
+    expect(catalogueHost('not a url')).toBe('not a url')
+  })
+
+  it('tells an on-chain hash from a held-by-Stripe reference', () => {
+    expect(isOnChainHash(`0x${'ab'.repeat(32)}`)).toBe(true)
+    expect(isOnChainHash('pi_3Q8example')).toBe(false)
+    expect(isOnChainHash('0xab')).toBe(false)
+  })
+})

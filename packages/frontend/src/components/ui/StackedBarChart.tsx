@@ -231,6 +231,15 @@ export interface StackedBarChartProps {
    *  decided by the caller's breakpoint (see the file's header). */
   narrow?: boolean
   className?: string
+  /**
+   * Drop the **Refusals** column from the chart's screen-reader data table
+   * (#4900). A revenue chart (Sales, Analytics Revenue) has no refusal marker
+   * — a refused payment is not a sale — so a Refusals column would read
+   * "Refusals 0" on every day. Spend leaves this off, and so does every
+   * existing caller. It changes the data table only: the marks and the legend
+   * already draw nothing for a day whose `refusals` is `0` or absent.
+   */
+  hideRefusals?: boolean
 }
 
 /** Which agent's stack segment is drawn at a given y, for the tooltip. */
@@ -350,6 +359,7 @@ export function StackedBarChart({
   formatTick = formatValue,
   narrow = false,
   className = '',
+  hideRefusals = false,
 }: StackedBarChartProps) {
   // Pattern ids must be unique per mounted chart — the page mounts the
   // desktop and narrow pair, and /design-system a third — or one chart's
@@ -945,7 +955,7 @@ export function StackedBarChart({
               </th>
             ))}
             <th scope="col">Total</th>
-            <th scope="col">Refusals</th>
+            {hideRefusals ? null : <th scope="col">Refusals</th>}
           </tr>
         </thead>
         <tbody>
@@ -958,7 +968,7 @@ export function StackedBarChart({
                 </td>
               ))}
               <td>{formatValue(e.total)}</td>
-              <td>{e.refusals}</td>
+              {hideRefusals ? null : <td>{e.refusals}</td>}
             </tr>
           ))}
         </tbody>

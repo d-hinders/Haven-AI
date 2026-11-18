@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/core/src/approx-mark.ts
+  - packages/frontend/src/context/MerchantServicesContext.tsx
+  - packages/frontend/src/components/sales/SalesOverviewTab.tsx
   - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
@@ -134,7 +136,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-17
+last-verified: 2026-11-18
 ---
 
 # Haven Design System
@@ -696,11 +698,11 @@ The authenticated app uses one stable product shell:
   - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
 - **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
-  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name and email, #4358 — no longer a link, `/profile` is gone); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
+  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name and email, #4358 — no longer a link, `/profile` is gone); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Sales when on, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
   - **Behaviour:** a modal `role="dialog"` (`aria-modal`, #4058): while it is open the tab bar and `<main>` are `inert` and Tab cycles inside the card. Closes on the ✕, scrim tap, Escape, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal — not on a destination tap or route change, which is why `useFocusTrap` (restore on every close) is not reused. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989). The one dynamic entry left is Accounting ([#2869](https://github.com/d-hinders/Haven-AI/issues/2869)): a muted "Coming soon" badge when hosted but not enabled, an attention dot when the feed needs attention, and hidden on self-hosted.)
-- **A conditional entry that is hidden on load and on a failed read: Sales** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). #4900 adds the entry; until then the rail has none. Sales is absent while its setting loads, when that read fails, and when Sales is off; it shows only on a read that says Sales is on. That is the opposite of Accounting, which shows on a failed read (`Sidebar.tsx`'s `accountingFeedOffState`): Accounting is a destination every hosted user has, while Sales is a destination only a merchant who turned it on has, so an unknown answer hides it rather than offering a page that may not exist. Its icon is lucide `ReceiptText`. **Placement:** in the rail it comes after Transactions and before Accounting; in the More sheet it comes after Analytics. The sheet needs no placement of its own: its list is the rail's order with the tab bar's routes removed (`Sidebar.tsx` `sheetItems`), so Sales lands after Analytics there by itself. The tab bar's order is a separate rule (`MobileTabBar` builds its cells with `TAB_ROUTES.map(… items.find …)`), and Sales is not a tab.
-- **Entries are found by route, never by index.** `Sidebar.tsx` picks rail entries out of `baseNavItems` by position (eight sites at `eec6c8a8c`), and `/design-system` and `MobileTabBar` read the same array. Inserting an entry shifts every index after it, so the slice that adds Sales (#4900) finds entries by route and must not shift an index pick — the same rule the tab bar already follows (above).
+- **A conditional entry that is hidden on load and on a failed read: Sales** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). #4900 adds it (`Sidebar.tsx` `salesNavItem`, read from the shell's one merchant-services setting through `MerchantServicesContext`). Sales is absent while its setting loads, when that read fails, and when Sales is off; it shows only on a read that says Sales is on. That is the opposite of Accounting, which shows on a failed read (`Sidebar.tsx`'s `accountingFeedOffState`): Accounting is a destination every hosted user has, while Sales is a destination only a merchant who turned it on has, so an unknown answer hides it rather than offering a page that may not exist. Its icon is lucide `ReceiptText`. **Placement:** in the rail it comes after Transactions and before Accounting; in the More sheet it comes after Analytics. The sheet needs no placement of its own: its list is the rail's order with the tab bar's routes removed (`Sidebar.tsx` `sheetItems`), so Sales lands after Analytics there by itself. The tab bar's order is a separate rule (`MobileTabBar` builds its cells with `TAB_ROUTES.map(… items.find …)`), and Sales is not a tab.
+- **Entries are found by route, never by index.** `Sidebar.tsx` picks rail entries out of `baseNavItems` through `navItem(href)` (it picked them by position until #4900), and `/design-system` and `MobileTabBar` read the same array. Sales is not in `baseNavItems`: it is `salesNavItem`, spliced into the Money group after Transactions only when the setting is ready and on, so the shared array stays the entries every user has.
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
 - **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the logo band (rail and More sheet), with a gap between them — the app's only environment marker. Each width shows exactly one theme control: the rail footer's two-state flip at `lg` and above, the More sheet's three-way choice below it (#4053, superseding #2953 for the phone).
@@ -989,9 +991,10 @@ amount's sign and tone. **Not counted** and **No longer offered** are neutral:
 they are facts about what the figures include and what the kit lists, not
 problems. The table maps the labels and wires nothing; the Sales screens
 (#4900, #4901) read the map. Today the detail panel's fallback labels every
-money-in, move and deposit "Sent" (`TransactionDetailPanel.tsx`); whether
-#4900 shows Received only on Sales or also on deposits in `/transactions` is
-#4900's decision.
+money-in, move and deposit "Sent" (`TransactionDetailPanel.tsx`). **#4900 decided: Sales only.** The
+Sales detail panel (`SalesPaymentPanel.tsx`) labels a sale and a payment with
+no sale record Received, and an own move Not counted; the `/transactions`
+panel keeps its fallback, so no Transactions baseline moves.
 
 #### What the table does not cover
 
@@ -2401,11 +2404,12 @@ revenue use.
   is the consuming slice's decision. There is **no refusal marker** on
   revenue — a refused payment is not a sale — and the `ariaLabel` is the
   caller's revenue summary, not the spend wording.
-- **One revenue gap the chart still has:** its screen-reader data table always
-  renders a **Refusals** column (`StackedBarChart.tsx`), so a revenue chart
-  reads "Refusals 0" on every day to a screen reader. The first slice that
-  charts revenue (#4900 or #4901) adds an opt-in to drop that column; it is
-  not a revenue chart until it does.
+- **Revenue drops the Refusals column.** The chart's screen-reader data table
+  renders a **Refusals** column by default, which would read "Refusals 0" on
+  every day of a revenue chart. `hideRefusals` (#4900) is the opt-in that drops
+  it; a revenue chart passes it. It changes the data table only, and every spend
+  caller leaves it off. The Sales By-day chart (`SalesOverviewTab`) is the first
+  revenue chart.
 
 Shown on `/design-system` → *StackedBarChart* (spend) and *Sales patterns*
 (revenue).

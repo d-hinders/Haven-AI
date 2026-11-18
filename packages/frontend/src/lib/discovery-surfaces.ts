@@ -111,6 +111,7 @@ export const AUTH_MARKED_PREFIXES = [
   // #2859 renamed the feed page's route. `/reporting` remains on disk as a
   // redirect to `/accounting`, so the filesystem-pinned list carries both.
   '/reporting',
+  '/sales',
   '/settings',
   '/transactions',
 ] as const

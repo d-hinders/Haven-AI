@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { ProductsFileError, RECEIPT_LINE_MAX, loadProductsFile, parseProducts } from './products.js'
 
@@ -88,6 +89,11 @@ describe('products file (design 12 section 3)', () => {
     expect(problems(file([{ ...product, description: 'zero​width' }]))[0]).toContain('control')
   })
 
+  it('the example products file shipped with the package is valid', () => {
+    const example = fileURLToPath(new URL('../products.example.json', import.meta.url))
+    expect(loadProductsFile(example).map((p) => p.id)).toEqual(['chat-1k', 'lookup'])
+  })
+
   it('loads from a path and refuses a missing file or invalid JSON', () => {
     const dir = mkdtempSync(join(tmpdir(), 'paywall-products-'))
     try {
@@ -99,6 +105,23 @@ describe('products file (design 12 section 3)', () => {
       expect(() => loadProductsFile(path)).toThrow('not valid JSON')
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('the Haven-run Opper demo products file (#4892)', () => {
+  const demo = fileURLToPath(new URL('../demo/opper-products.json', import.meta.url))
+
+  it('loads, sells two models on the one upstream route, each with its own cap, and says on every product that it is an internal demo run by Haven', () => {
+    const products = loadProductsFile(demo)
+    expect(products.map((p) => [p.id, p.model, p.outputTokenCap, p.price])).toEqual([
+      ['gpt-5-mini-1k', 'azure/gpt-5-mini', 1000, 10_000n],
+      ['ministral-3b-2k', 'aws/ministral-3b', 2000, 5_000n],
+    ])
+    for (const product of products) {
+      expect(product.route).toBe('POST /v3/compat/chat/completions')
+      expect(product.description).toMatch(/^Internal technical demo run by Haven on Base Sepolia/)
+      expect(product.price > 0n).toBe(true)
     }
   })
 })

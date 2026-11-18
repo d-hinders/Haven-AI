@@ -17,11 +17,27 @@ import {
   withMigrationReverted,
 } from '../../../infra/__tests__/helpers/db-harness.js'
 import { down, up, version } from '../098_owner_company_details.js'
+import { up as up129 } from '../129_owner_company_details_checkout_fields.js'
 
 async function runUp(): Promise<void> {
   const client = await db.connect()
   try {
     await up(client)
+  } finally {
+    client.release()
+  }
+}
+
+/**
+ * #4870: `down()` DROPS the table, so restoring 098 alone recreates it
+ * WITHOUT the columns migration 129 added to it — leaving the worker schema
+ * off head (the harness's `assertWorkerSchemaAtHead` catches exactly that).
+ * Restoring therefore re-applies 129 too.
+ */
+async function runUp129(): Promise<void> {
+  const client = await db.connect()
+  try {
+    await up129(client)
   } finally {
     client.release()
   }
@@ -103,7 +119,10 @@ describeDb('migration 098_owner_company_details', () => {
         )
         expect(gone.rows[0].count).toBe('0')
       },
-      () => runUp(),
+      async () => {
+        await runUp()
+        await runUp129()
+      },
     )
   })
 

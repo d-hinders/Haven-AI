@@ -5,6 +5,7 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { ToastProvider, Toaster } from '@/components/ui/Toast'
+import { MerchantServicesProvider } from '@/context/MerchantServicesContext'
 
 const Sidebar = dynamic(() => import('@/components/sidebar/Sidebar'), {
   ssr: false,
@@ -23,7 +24,13 @@ export default function AuthenticatedShell({
 }) {
   return (
     <ProtectedRoute>
-      <ToastProvider>
+      {/* #4904: the merchant-services setting is read ONCE here, for the whole
+          shell — the Sales menu entry (#4900), Analytics (#4901), the key
+          screens (#4905) and the Settings card all read this one answer.
+          Inside `ProtectedRoute` deliberately: the read is authenticated, and
+          a signed-out shell must not fire it. */}
+      <MerchantServicesProvider>
+        <ToastProvider>
           {/*
             Two deliberate departures from the one focus-ring treatment (#1746),
             both because this control is unlike every other one:
@@ -121,6 +128,7 @@ export default function AuthenticatedShell({
           </div>
           <Toaster />
         </ToastProvider>
+      </MerchantServicesProvider>
     </ProtectedRoute>
   )
 }

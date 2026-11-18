@@ -101,6 +101,66 @@ describe('renderReceiptText takes the support contact and network as parameters 
   })
 })
 
+describe('checkout details on the buyer block (#4873)', () => {
+  const CHECKOUT = {
+    receiptEmail: 'philip@example.se',
+    billingAddress: {
+      line1: 'Sveavagen 1',
+      line2: '4 tr',
+      city: 'Stockholm',
+      postCode: '111 57',
+      subdivision: 'SE-AB',
+      country: 'SE',
+    },
+  }
+
+  it('shows the email and the address in full in the buyer block', () => {
+    const json = buildReceipt({ ...KIT_MERCHANT, checkoutDetails: CHECKOUT })
+    expect(json.kopare.receipt_email).toBe('philip@example.se')
+    expect(json.kopare.billing_address).toEqual(CHECKOUT.billingAddress)
+    expect(json.kopare.shipping_address).toBeUndefined()
+  })
+
+  it('keeps the buyer block exactly as it was when the request carried none', () => {
+    const json = buildReceipt(KIT_MERCHANT)
+    expect(Object.keys(json.kopare)).toEqual(['identifierare', 'typ', 'roll'])
+    expect(buildReceipt({ ...KIT_MERCHANT, checkoutDetails: null }).kopare).toEqual(json.kopare)
+  })
+
+  it('renders the values in both languages, and nothing when there are none', () => {
+    const withDetails = buildReceipt({ ...KIT_MERCHANT, checkoutDetails: CHECKOUT })
+    const sv = renderReceiptText(withDetails, {
+      productName: 'Inference',
+      locale: 'sv',
+      network: KIT_MERCHANT.network,
+      supportContact: 'help@example.se',
+    })
+    expect(sv).toContain('E-post:           philip@example.se')
+    expect(sv).toContain('Fakturaadress:')
+    expect(sv).toContain('Sveavagen 1')
+    expect(sv).toContain('111 57 Stockholm')
+    expect(sv).toContain('SE-AB')
+
+    const en = renderReceiptText(withDetails, {
+      productName: 'Inference',
+      locale: 'en',
+      network: KIT_MERCHANT.network,
+      supportContact: 'help@example.se',
+    })
+    expect(en).toContain('Email: philip@example.se')
+    expect(en).toContain('Billing address:')
+
+    const without = renderReceiptText(buildReceipt(KIT_MERCHANT), {
+      productName: 'Inference',
+      locale: 'en',
+      network: KIT_MERCHANT.network,
+      supportContact: 'help@example.se',
+    })
+    expect(without).not.toContain('Email:')
+    expect(without).not.toContain('Billing address:')
+  })
+})
+
 describe('vatAmountsAtomic', () => {
   it('takes 25% out of a VAT-inclusive price under SE_25', () => {
     expect(vatAmountsAtomic(500n, 'SE_25')).toEqual({ exclVat: 400n, vat: 100n, vatPercent: 25 })

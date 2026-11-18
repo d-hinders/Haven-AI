@@ -26,6 +26,7 @@ import {
   type ConsumedPaymentState,
   type ConsumedPaymentStore,
 } from '@haven_ai/merchant-payments'
+import { SIWX_NONCE_LIFETIME_MS, SIWX_REISSUE_MIN_REMAINING_MS, type SiwxNonce } from './siwx.js'
 
 // Loaded through `require`: the bundler rewrites a bare `node:sqlite` import to `sqlite`, which does not exist.
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
@@ -49,9 +50,33 @@ export interface SqliteConsumedPaymentStore extends ConsumedPaymentStore {
    * caller must read the record again and act on what it finds.
    */
   clearReservation(key: string, reservedAt: string): Promise<boolean>
+  /**
+   * The proxy's challenge nonces (§6 "The challenge nonces are the proxy's"),
+   * in their own table in the same file, outside the core's interface: one
+   * live nonce per payment key.
+   */
+  siwxNonces: SiwxNonceTable
   /** True while the file can take a write; for the readiness route. */
   isWritable(): boolean
   close(): void
+}
+
+export interface SiwxNonceTable {
+  /** The key's live nonce (issued, not retired, unexpired), read without a write; null when it has none. */
+  current(key: string, nowMs: number): SiwxNonce | null
+  /**
+   * The nonce a challenge for this key carries: the live one, unchanged, while
+   * at least `SIWX_REISSUE_MIN_REMAINING_MS` of it remains, else a fresh one
+   * replacing it. A fresh one is one write, which also prunes expired rows, so
+   * a stranger replaying a public header cannot grow the table.
+   */
+  issue(key: string, nowMs: number): SiwxNonce
+  /**
+   * Retire the nonce, as one conditional update (still this key's live nonce,
+   * unexpired, not yet retired). True: this request accepted the proof; of two
+   * requests with the same proof only one gets true.
+   */
+  retire(key: string, nonce: string, nowMs: number): boolean
 }
 
 export interface SqliteStoreOptions {
@@ -151,6 +176,16 @@ export function openSqliteConsumedPaymentStore(path: string, options: SqliteStor
           sale_reported INTEGER NOT NULL DEFAULT 0
         )
       `)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS siwx_nonces (
+          key TEXT PRIMARY KEY,
+          nonce TEXT NOT NULL,
+          issued_at TEXT NOT NULL,
+          expiration_time TEXT NOT NULL,
+          expires_ms INTEGER NOT NULL,
+          retired INTEGER NOT NULL DEFAULT 0
+        )
+      `)
       // Every token hash goes: no other process holds a token, so none is valid.
       db.exec('UPDATE payments SET reservation_token_hash = NULL WHERE reservation_token_hash IS NOT NULL')
       db.exec('COMMIT')
@@ -217,6 +252,16 @@ export function openSqliteConsumedPaymentStore(path: string, options: SqliteStor
     WHERE key = ? AND state = 'forwarding'
   `)
   const reported = prepare('UPDATE payments SET sale_reported = 1 WHERE key = ?')
+  const nonceSelect = prepare('SELECT nonce, issued_at, expiration_time, expires_ms, retired FROM siwx_nonces WHERE key = ?')
+  const noncePrune = prepare('DELETE FROM siwx_nonces WHERE expires_ms <= ?')
+  const nonceUpsert = prepare(`
+    INSERT INTO siwx_nonces (key, nonce, issued_at, expiration_time, expires_ms, retired) VALUES (?, ?, ?, ?, ?, 0)
+    ON CONFLICT(key) DO UPDATE SET nonce = excluded.nonce, issued_at = excluded.issued_at,
+      expiration_time = excluded.expiration_time, expires_ms = excluded.expires_ms, retired = 0
+  `)
+  const nonceRetire = prepare(`
+    UPDATE siwx_nonces SET retired = 1 WHERE key = ? AND nonce = ? AND retired = 0 AND expires_ms > ?
+  `)
   const probe = prepare('BEGIN IMMEDIATE')
   let closed = false
 
@@ -225,7 +270,54 @@ export function openSqliteConsumedPaymentStore(path: string, options: SqliteStor
     return row ? toRecord(row) : null
   }
 
+  interface NonceRow {
+    nonce: string
+    issued_at: string
+    expiration_time: string
+    expires_ms: number
+    retired: number
+  }
+  const toNonce = (row: NonceRow): SiwxNonce => ({
+    nonce: row.nonce,
+    issuedAt: row.issued_at,
+    expirationTime: row.expiration_time,
+    expiresMs: Number(row.expires_ms),
+  })
+  const siwxNonces: SiwxNonceTable = {
+    current(key, nowMs) {
+      const row = nonceSelect.get(key) as unknown as NonceRow | undefined
+      if (!row || row.retired === 1 || Number(row.expires_ms) <= nowMs) return null
+      return toNonce(row)
+    },
+    issue(key, nowMs) {
+      const row = nonceSelect.get(key) as unknown as NonceRow | undefined
+      if (row && row.retired === 0 && Number(row.expires_ms) - nowMs >= SIWX_REISSUE_MIN_REMAINING_MS) return toNonce(row)
+      const fresh: SiwxNonce = {
+        // 32 hex characters: alphanumeric and well over the 8 EIP-4361 requires.
+        nonce: randomBytes(16).toString('hex'),
+        issuedAt: new Date(nowMs).toISOString(),
+        expirationTime: new Date(nowMs + SIWX_NONCE_LIFETIME_MS).toISOString(),
+        expiresMs: nowMs + SIWX_NONCE_LIFETIME_MS,
+      }
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        noncePrune.run(nowMs)
+        nonceUpsert.run(key, fresh.nonce, fresh.issuedAt, fresh.expirationTime, fresh.expiresMs)
+        db.exec('COMMIT')
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
+      }
+      return fresh
+    },
+    retire(key, nonce, nowMs) {
+      return Number(nonceRetire.run(key, nonce, nowMs).changes) === 1
+    },
+  }
+
   return {
+    siwxNonces,
+
     async reserve(input) {
       const reservationToken = randomBytes(32).toString('hex')
       const result = insert.run(

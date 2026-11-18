@@ -21,7 +21,7 @@ exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 4
 
 exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_legacy is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_legacy 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Legacy — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"1000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
 
-exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_pro is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_pro 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Pro — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"3000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
+exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_pro is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_pro 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Pro — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"3000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"},"haven-checkout-details":{"info":{"version":1,"fields":{"receipt_email":{"required":false},"billing_address":{"required":false}}},"schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["version","fields"],"properties":{"version":{"const":1},"fields":{"type":"object","additionalProperties":false,"properties":{"receipt_email":{"type":"object","required":["required"],"properties":{"required":{"type":"boolean"}}},"billing_address":{"type":"object","required":["required"],"properties":{"required":{"type":"boolean"}}},"shipping_address":{"type":"object","required":["required"],"properties":{"required":{"type":"boolean"}}}}}}}}},"error":"Payment required"}"`;
 
 exports[`characterization: merchant-wide surfaces are unchanged by #4850 > the 402 for vpn_ultra is byte-identical and pays MERCHANT_ADDRESS > 402 vpn_ultra 1`] = `"{"x402Version":2,"resource":{"url":"http://127.0.0.1:PORT/mcp","description":"NordShield VPN Ultra — 1 month subscription","mimeType":"application/json","serviceName":"Haven Demo Merchant"},"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"5000","payTo":"0x15179876c595922999C2d5DC7c23Cc7711fE799a","maxTimeoutSeconds":300,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2"}}],"extensions":{"haven-demo":{"version":"1","echoRule":"x402 v2: clients must echo this extensions object in PaymentPayload"}},"error":"Payment required"}"`;
 
@@ -269,6 +269,71 @@ x402 payment requirements:
     "haven-demo": {
       "version": "1",
       "echoRule": "x402 v2: clients must echo this extensions object in PaymentPayload"
+    },
+    "haven-checkout-details": {
+      "info": {
+        "version": 1,
+        "fields": {
+          "receipt_email": {
+            "required": false
+          },
+          "billing_address": {
+            "required": false
+          }
+        }
+      },
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+          "version",
+          "fields"
+        ],
+        "properties": {
+          "version": {
+            "const": 1
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "receipt_email": {
+                "type": "object",
+                "required": [
+                  "required"
+                ],
+                "properties": {
+                  "required": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "billing_address": {
+                "type": "object",
+                "required": [
+                  "required"
+                ],
+                "properties": {
+                  "required": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "shipping_address": {
+                "type": "object",
+                "required": [
+                  "required"
+                ],
+                "properties": {
+                  "required": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "error": "Payment required"

@@ -698,6 +698,39 @@ describe('the PaymentIntent carries the receipt (#4880)', () => {
     expect(Object.keys(form).filter((key) => /buyer|recorded_by/.test(key))).toEqual([])
   })
 
+  it('never carries the buyer’s checkout details (#4873)', async () => {
+    const withDetails = generateInvoice({
+      invoiceNumber: receiptNumberForTransaction(TX),
+      productId: 'vpn_pro',
+      buyerAddress: '0x5555555555555555555555555555555555555555',
+      payerRole: 'agent_delegate',
+      receivingAddress: DEPOSIT,
+      authorizationNonce: `0x${'01'.repeat(32)}`,
+      txHash: TX,
+      settlement: 'settled_onchain',
+      checkoutDetails: {
+        receiptEmail: 'philip@example.se',
+        billingAddress: { line1: 'Sveavagen 1', city: 'Stockholm', postCode: '111 57', country: 'SE' },
+      },
+    }).json
+    // The receipt itself carries them...
+    expect(withDetails.kopare.receipt_email).toBe('philip@example.se')
+    expect(withDetails.kopare.billing_address).toEqual({
+      line1: 'Sveavagen 1',
+      city: 'Stockholm',
+      postCode: '111 57',
+      country: 'SE',
+    })
+
+    // ...and the record sent to Stripe does not.
+    const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.vpn_pro, withDetails))
+    const serialized = JSON.stringify(form)
+    expect(serialized).not.toContain('philip@example.se')
+    expect(serialized).not.toContain('Sveavagen')
+    expect(serialized).not.toContain('111 57')
+    expect(Object.keys(form).filter((key) => /email|address|checkout/.test(key))).toEqual([])
+  })
+
   it('with a declaration from another EU country: REVERSE_CHARGE, zero VAT, and the buyer’s VAT number and country', async () => {
     const form = await formSent(stripeDetailsFromReceipt(PRODUCTS.joke, receipt(DE)))
     expect(form).toMatchObject({

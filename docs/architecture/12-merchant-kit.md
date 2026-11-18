@@ -29,7 +29,7 @@ covers:
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/siwx.ts
-last-verified: "2026-11-17"
+last-verified: "2026-11-18"
 ---
 
 # Merchant kit: design
@@ -221,8 +221,8 @@ route, or refused when it is not a product route.
 |---|---|---|
 | `version` | Yes | The kit document version. `1` is the only version. |
 | `operator.name` | Yes | Who operates the endpoint. A Haven-run demo says `Haven`; a third-party merchant says its own name. The proxy refuses to start without `OPERATOR_NAME` (#4893). |
-| `operator.contact` | No | A URL or address a reader can use to reach the operator. |
-| `name`, `description` | Yes | Human identification of the endpoint. |
+| `operator.contact` | No | A URL or address a reader can use to reach the operator: `OPERATOR_CONTACT`. |
+| `name`, `description` | Yes | Human identification of the endpoint: `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. The proxy refuses to start without them. |
 | `network` | Yes | CAIP-2 identifier. The same value the challenge advertises. |
 | `asset` | Yes | The USDC contract address on that network. |
 | `pay_to` | Yes | The receiving address. One setting of the deployment; every product is paid to it. |
@@ -929,7 +929,12 @@ it.
 ### Limiting unpaid requests
 
 Unpaid requests are limited per client IP: 60 requests a minute with a burst of
-10, and at most 10 concurrent unpaid requests per IP. Over the limit the proxy
+10, and at most 10 concurrent unpaid requests per IP. The client IP is the connection's peer
+address, or, when `CLIENT_IP_HEADER` names a header the merchant's own front
+proxy sets (`X-Forwarded-For`, `CF-Connecting-IP`), that header's value; for a
+list, its rightmost entry, the one the merchant's proxy appended. Behind a
+reverse proxy without that setting every request has the reverse proxy's
+address, and the limit is shared by every buyer. Over the limit the proxy
 answers 429 with `Retry-After` and no challenge. **A payment header that fails
 verification counts against the same limit**, and so does one that matches a
 known key but not its `authorizationDigest` (402 `payment_mismatch`): a header
@@ -1217,7 +1222,10 @@ accounting reads a kit receipt with no change: its reader
 (`packages/backend/src/modules/accounting/receipt-statement.ts`, documented
 field by field in `docs/operations/merchant-receipt-shape.md`) is the
 contract, and the shape is not changed. The code moves into the shared core
-with #4890; the kit's use of it is built in #4913.
+with #4890; the kit's use of it is built in #4913, in
+`packages/paywall-proxy/src/receipt.ts`, which assembles the core's parameters
+and defines no VAT computation, no receipt-number derivation and no declaration
+verification of its own.
 
 The proxy sends the receipt as the `x-receipt-json` response header only:
 the receipt's JSON, base64-encoded so the header stays ASCII-safe, on the
@@ -1264,6 +1272,7 @@ contact.
 | `fakturadatum`, `forfallodatum` | The payment: the date of `settledAt` in the consumed-payment store, and 30 days later, so a retry on a later day gives the same receipt. |
 | `kopare.identifierare`, `kopare.roll` | The payment: the payer address, which for a Haven agent paying by EIP-3009 is its delegate address (`roll: agent_delegate`), as in section 5. |
 | `kopare.deklaration` | The payment: present only when the request carried an `X-Tax-Declaration` that verifies against the payer, on the payment's chain, and is unexpired. Display only; a declaration that fails any check is treated as absent and never refuses the purchase. |
+| `kopare.receipt_email`, `kopare.billing_address`, `kopare.shipping_address` | The paid request: present only when the merchant asked for the field in its challenge (`haven-checkout-details`, the shape [`13-checkout-details.md`](13-checkout-details.md) §2 fixes) and the request carried it in `X-Checkout-Details` (#4873). Display only; a malformed or oversized header is treated as absent and never refuses the purchase. The demo merchant is the first merchant that asks; the proxy does not ask yet, so its receipts keep their exact shape. |
 | `blockkedje_referens`, `status` | The payment: the settlement transaction hash, and `Betald`. |
 
 ### The VAT rule is a deployment setting
@@ -1314,7 +1323,9 @@ What the merchant runs:
   merchant controls. A shared tunnel domain works but ranks lower in Coinbase's
   directory;
 - the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO`,
-  `OPERATOR_NAME`, `UPSTREAM_BASE_URL` (where calls are forwarded),
+  `OPERATOR_NAME`, `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION` (the discovery
+  document's name and description, §4), optionally `OPERATOR_CONTACT`,
+  `UPSTREAM_BASE_URL` (where calls are forwarded),
   `BASE_PATH` (the path prefix the products' routes are matched under; empty by
   default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
   `UPSTREAM_AUTH_SCHEME` when the upstream wants them), Coinbase facilitator
@@ -1323,7 +1334,10 @@ What the merchant runs:
   client), `RPC_URL` (the chain reads that resolve a lost settle answer and a
   used authorization), `PAYMENTS_DB`, optionally `PUBLIC_BASE_URL` (the
   public origin the challenge's `resource.url` names; it must be `https` in
-  production, and without it the proxy derives `http://<Host>`), `PORT` and
+  production, and without it the proxy derives `http://<Host>`; Haven's
+  signer answers a retry challenge only for an `https` origin), optionally
+  `CLIENT_IP_HEADER` (the header a front proxy sets to the client's address,
+  for the per-IP limits, section 7), `PORT` and
   `HOST`, `UPSTREAM_TIMEOUT_MS` (at most 180 s) and `RESERVATION_DEADLINE_MS`
   (at least the holder's 110 s worst case), which the proxy refuses to start
   outside those bounds, an empty `UPSTREAM_AUTH_SCHEME` sending the key bare

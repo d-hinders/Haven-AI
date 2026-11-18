@@ -212,3 +212,50 @@ describe('sqlite consumed-payment store (real database)', () => {
     expect(store.isWritable()).toBe(true)
   })
 })
+
+describe('the challenge nonces (§6, the proxy\'s own table in PAYMENTS_DB)', () => {
+  const NOW = Date.parse(T0)
+  const KEY = 'eip3009:84532:0xpayer:0xnonce'
+
+  it('one live nonce per key: issued again unchanged while 60 s of it remain, then replaced', () => {
+    const { siwxNonces } = open()
+    expect(siwxNonces.current(KEY, NOW)).toBeNull()
+    const first = siwxNonces.issue(KEY, NOW)
+    expect(first.nonce).toMatch(/^[0-9a-f]{32}$/)
+    expect(first.expiresMs - NOW).toBe(300_000)
+    expect(first.expirationTime).toBe(new Date(first.expiresMs).toISOString())
+    expect(siwxNonces.issue(KEY, NOW + 240_000)).toEqual(first)
+    expect(siwxNonces.current(KEY, NOW + 240_001)).toEqual(first)
+    const second = siwxNonces.issue(KEY, NOW + 240_001)
+    expect(second.nonce).not.toBe(first.nonce)
+    expect(siwxNonces.current(KEY, NOW + 240_001)).toEqual(second)
+    expect(siwxNonces.issue('another-key', NOW).nonce).not.toBe(second.nonce)
+  })
+
+  it('a nonce retires once: only for the key, while live and unexpired, and the next issue is fresh', () => {
+    const { siwxNonces } = open()
+    const live = siwxNonces.issue(KEY, NOW)
+    expect(siwxNonces.retire('another-key', live.nonce, NOW)).toBe(false)
+    expect(siwxNonces.retire(KEY, 'ffffffffffffffffffffffffffffffff', NOW)).toBe(false)
+    expect(siwxNonces.retire(KEY, live.nonce, live.expiresMs)).toBe(false)
+    expect(siwxNonces.retire(KEY, live.nonce, NOW)).toBe(true)
+    expect(siwxNonces.retire(KEY, live.nonce, NOW)).toBe(false)
+    expect(siwxNonces.current(KEY, NOW)).toBeNull()
+    expect(siwxNonces.issue(KEY, NOW).nonce).not.toBe(live.nonce)
+  })
+
+  it('expired rows are pruned on the next fresh issue, and nonces survive a restart', () => {
+    let store = open()
+    store.siwxNonces.issue('old', NOW)
+    const kept = store.siwxNonces.issue(KEY, NOW + 200_000)
+    store.close()
+    store = open()
+    expect(store.siwxNonces.current(KEY, NOW + 200_000)).toEqual(kept)
+    store.siwxNonces.issue('new', NOW + 300_000)
+    store.close()
+    const raw = new DatabaseSync(file)
+    const keys = (raw.prepare('SELECT key FROM siwx_nonces ORDER BY key').all() as { key: string }[]).map((r) => r.key)
+    raw.close()
+    expect(keys).toEqual([KEY, 'new'])
+  })
+})

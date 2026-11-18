@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "products": [
+    {
+      "id": "gpt-5-mini-1k",
+      "name": "GPT-5 mini, 1,000 output tokens",
+      "route": "POST /v3/compat/chat/completions",
+      "model": "azure/gpt-5-mini",
+      "price": "10000",
+      "output_token_cap": 1000,
+      "description": "Internal technical demo run by Haven on Base Sepolia: one chat completion on azure/gpt-5-mini through Opper, up to 1,000 output tokens. Test money only.",
+      "input_example": {
+        "model": "azure/gpt-5-mini",
+        "messages": [{ "role": "user", "content": "Say hello in one sentence." }]
+      },
+      "input_schema": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "messages": { "type": "array" },
+          "max_tokens": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    {
+      "id": "ministral-3b-2k",
+      "name": "Ministral 3B, 2,000 output tokens",
+      "route": "POST /v3/compat/chat/completions",
+      "model": "aws/ministral-3b",
+      "price": "5000",
+      "output_token_cap": 2000,
+      "description": "Internal technical demo run by Haven on Base Sepolia: one chat completion on aws/ministral-3b through Opper, up to 2,000 output tokens. Test money only.",
+      "input_example": {
+        "model": "aws/ministral-3b",
+        "messages": [{ "role": "user", "content": "Say hello in one sentence." }]
+      },
+      "input_schema": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "messages": { "type": "array" },
+          "max_tokens": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  ]
+}

@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ApiSchema } from '@haven_ai/core'
 import { api } from '@/lib/api'
 import type { SalesKey } from '@/lib/sales'
 
@@ -29,7 +30,7 @@ export function useMerchantKeys(): UseMerchantKeysResult {
     setLoading(true)
     setFailed(false)
     try {
-      const response = await api.get<{ keys: SalesKey[] }>('/merchant-keys')
+      const response = await api.get<ApiSchema<'MerchantKeyListResponse'>>('/merchant-keys')
       if (requestIdRef.current !== requestId) return
       setKeys(response.keys)
     } catch {

@@ -47,7 +47,7 @@ vi.mock('@/context/MerchantServicesContext', () => ({
 }))
 
 import { ApiRequestError } from '@/lib/api'
-import { SalesPaymentPanel } from '../SalesPaymentPanel'
+import { SalesPaymentPanel, payerPhrase } from '../SalesPaymentPanel'
 
 const HASH = `0x${'ab'.repeat(32)}`
 const CONTACT = { kind: 'contact', name: 'Lumen Research', address: '0x41b2c09e7a55d81f3b2e6c40a9d17e5f8c0b7d93' }
@@ -300,5 +300,21 @@ describe('clearing a sale record', () => {
     expect(onOpenSetup).toHaveBeenCalledTimes(1)
     expect(mockDelete).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog', { name: 'Clear this sale record?' })).toBeNull()
+  })
+})
+
+describe('a wallet is never named (owner decision 2, #4894)', () => {
+  const NAMED_WALLET = { kind: 'wallet' as const, name: "Someone's agent", address: WALLET.address }
+
+  it('reads as a wallet in the header phrase, whatever name it carries', () => {
+    expect(payerPhrase(NAMED_WALLET, false)).toBe('Wallet (0x8f3a…21c0)')
+  })
+
+  it('reads as Wallet in the open panel and never shows the name', async () => {
+    serve({ ...base, payer: NAMED_WALLET, legs: [{ log_index: 3, payer: NAMED_WALLET, amount_raw: '420000' }] })
+    await open()
+    const dialog = screen.getByRole('dialog', { name: 'Chat completion' })
+    expect(screen.getByTestId('sales-payment-header').textContent).toContain('Paid by Wallet (0x8f3a…21c0) into Sales')
+    expect(dialog.textContent).not.toContain('Someone')
   })
 })

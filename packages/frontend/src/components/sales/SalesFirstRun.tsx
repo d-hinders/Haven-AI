@@ -14,9 +14,9 @@ import { StepChecklist, type StepChecklistRow } from '@/components/ui/StepCheckl
  *
  * Payments count as soon as they arrive, with or without these steps — the
  * chain is the truth — so the checklist is guidance, not a gate. Step 1 is
- * done from the start (the address exists the moment Sales is on) and still
- * offers the address again; steps 2 and 3 are the Setup tab's (the keys, #4905,
- * and the kit address).
+ * the clear next action (the address exists the moment Sales is on, and the
+ * kit needs it). Step 2, the keys, is #4905 and not shipped, so it is honest
+ * text with no button; step 3 is the Setup tab's kit address.
  */
 export function SalesFirstRun({
   onShowAddress,
@@ -28,27 +28,23 @@ export function SalesFirstRun({
   const rows: StepChecklistRow[] = [
     {
       id: 'receiving-address',
-      state: 'done',
+      state: 'active',
       number: 1,
       title: 'Put your receiving address in your kit',
       description: 'Your kit asks buyers to pay this address.',
       action: (
-        <Button variant="ghost" size="sm" leadingIcon={QrCode} onClick={onShowAddress} className="w-full sm:w-auto">
+        <Button size="sm" leadingIcon={QrCode} onClick={onShowAddress} className="w-full sm:w-auto">
           Show address
         </Button>
       ),
     },
     {
       id: 'sales-key',
-      state: 'active',
+      state: 'pending',
       number: 2,
       title: 'Create a Sales key',
-      description: 'Your kit uses it to tell Haven what each payment was for. It can’t move money.',
-      action: (
-        <Button href={`${setupHref}#sales-keys`} size="sm" className="w-full sm:w-auto">
-          Create Sales key
-        </Button>
-      ),
+      description:
+        'Your kit uses it to tell Haven what each payment was for. It can’t move money. Creating Sales keys on this page is coming.',
     },
     {
       id: 'kit-address',

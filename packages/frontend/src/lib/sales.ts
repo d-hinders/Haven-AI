@@ -89,14 +89,24 @@ export function salesInFiat(currency: 'USD' | 'EUR' | 'SEK'): boolean {
 
 /** USDC in words: two decimals, four under a cent (the same sub-cent rule as fiat). */
 export function usdcText(raw: string): string {
-  return salesNumberText(usdcOf(raw), 'EUR')
+  return tokenText(usdcOf(raw))
+}
+
+/**
+ * A figure in USDC as text: two decimals, four under a cent, and
+ * "<0.0001 USDC" under the smallest figure four decimals can show (the same
+ * floor `formatFiatDisplay` states in dollars).
+ */
+export function tokenText(human: number): string {
+  if (human !== 0 && Math.abs(human) < 0.00005) return `${human < 0 ? '-' : ''}<0.0001 USDC`
+  const digits = human !== 0 && Math.abs(human) < 0.01 ? 4 : 2
+  return `${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(human)} USDC`
 }
 
 /** A figure in dollars (or USDC) as text, in the display currency's mode. */
 export function salesNumberText(human: number, currency: 'USD' | 'EUR' | 'SEK'): string {
   if (salesInFiat(currency)) return formatFiatDisplay(human, 'USD')
-  const digits = human !== 0 && Math.abs(human) < 0.01 ? 4 : 2
-  return `${new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(human)} USDC`
+  return tokenText(human)
 }
 
 /** One amount as text, in the display currency's mode. */
@@ -122,7 +132,9 @@ export function payerName(payer: SalesPayer | null): string {
 export function payerKindLine(payer: SalesPayer | null): string {
   if (payer === null) return ''
   if (payer.kind === 'contact' && payer.name) return 'Contact'
-  if (payer.kind === 'own' && payer.name) return 'Your account'
+  // `own` covers the owner's accounts AND agents and the payer does not say
+  // which, so the line is true for both.
+  if (payer.kind === 'own' && payer.name) return 'Your account or agent'
   return unknownRecipientShortAddress(payer.address)
 }
 

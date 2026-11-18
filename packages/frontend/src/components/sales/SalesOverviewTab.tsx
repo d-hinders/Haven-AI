@@ -18,6 +18,7 @@ import {
   isEmptyPeriod,
   ledgerCount,
   payerCount,
+  revenueCount,
   payerKey,
   payerKindLine,
   payerName,
@@ -67,6 +68,7 @@ export function productLines(summary: SalesSummary, currency: DisplayCurrency): 
       revenue: salesAmountText(summary.without_product.amount_raw, currency),
       count: summary.without_product.count,
       muted: true,
+      countNoun: 'payment',
     })
   }
   return lines
@@ -205,6 +207,11 @@ export function SalesOverviewTab({
   const previousRevenueIsZero = previous.data !== null && previous.data.revenue_raw === '0'
   const revenueCaption = `vs the ${days} days before`
   const payers = payerCount(data)
+  // The payer count is exact only when every payment has a payer on the
+  // breakdown; a payment from several wallets at once has none to count.
+  const payersExact = data.unattributed.payments === 0
+  const revenuePayments = revenueCount(data)
+  const averageRaw = revenuePayments > 0 ? String(BigInt(data.revenue_raw || '0') / BigInt(revenuePayments)) : '0'
   const chartDays = salesChartDays(data, range)
   const total = ledgerCount(data)
   const productRows = productLines(data, currency)
@@ -214,7 +221,7 @@ export function SalesOverviewTab({
   const formatValue = (value: number) => salesNumberText(value, currency)
   const formatTick = (value: number, step: number) =>
     currency === 'USD' ? formatAnalyticsTick(value, step, 'USD') : salesNumberText(value, currency)
-  const chartLabel = `Revenue over ${days} days: ${salesAmountText(data.revenue_raw, currency)} from ${plural(data.sales + data.without_product.count, 'payment')}.`
+  const chartLabel = `Revenue over ${days} days: ${salesAmountText(data.revenue_raw, currency)} from ${plural(revenuePayments, 'payment')}.`
 
   return (
     <div className="mt-6 space-y-4" data-testid="sales-overview">
@@ -228,8 +235,12 @@ export function SalesOverviewTab({
               ? { footnote: `No sales in the ${days} days before` }
               : {})}
         />
-        <StatTile label="Sales" value={String(data.sales)} footnote={`from ${plural(payers, 'payer')}`} />
-        <StatTile label="Average sale" value={salesAmountText(data.average_sale_raw, currency)} footnote="per sale" />
+        <StatTile
+          label="Sales"
+          value={String(revenueCount(data))}
+          {...(payersExact ? { footnote: `from ${plural(payers, 'payer')}` } : {})}
+        />
+        <StatTile label="Average sale" value={salesAmountText(averageRaw, currency)} footnote="per payment" />
         <StatTile
           label="Without a product"
           value={String(data.without_product.count)}

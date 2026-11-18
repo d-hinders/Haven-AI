@@ -15,7 +15,9 @@ import {
   salesChartDays,
   salesDayRange,
   salesRangeDays,
+  tokenText,
   usdcExactText,
+  usdcText,
   type SalesCatalogue,
   type SalesSummary,
 } from '../sales'
@@ -58,7 +60,31 @@ describe('payers', () => {
   })
 })
 
+describe('a wallet is never named, whatever name it carries (owner decision 2, #4894)', () => {
+  // A wallet that arrives with a name (another Haven user's agent, say) must
+  // still read as "Wallet": the page never tells a merchant a payer uses Haven.
+  const NAMED_WALLET = { kind: 'wallet' as const, name: "Someone's agent", address: WALLET.address }
+
+  it('reads as Wallet in the name, the subline and the kind line', () => {
+    expect(payerName(NAMED_WALLET)).toBe('Wallet')
+    expect(payerSubline(NAMED_WALLET, false)).toBe('Wallet · 0x8f3a…21c0')
+    expect(payerKindLine(NAMED_WALLET)).toBe('0x8f3a…21c0')
+    expect(payerSubline(NAMED_WALLET, false)).not.toContain('Someone')
+  })
+
+  it('says an own payer is an account or an agent, which the read does not tell apart', () => {
+    expect(payerKindLine({ kind: 'own', name: 'Atlas', address: '0x2' })).toBe('Your account or agent')
+  })
+})
+
 describe('amounts', () => {
+  it('floors a token figure under four decimals', () => {
+    expect(tokenText(0.00004)).toBe('<0.0001 USDC')
+    expect(usdcText('10')).toBe('<0.0001 USDC')
+    expect(usdcText('4500')).toBe('0.0045 USDC')
+    expect(usdcText('0')).toBe('0.00 USDC')
+  })
+
   it('follows the sub-cent rule in USD', () => {
     expect(salesAmountText('18000', 'USD')).toBe('$0.02')
     expect(salesAmountText('4500', 'USD')).toBe('$0.0045')

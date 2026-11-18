@@ -230,8 +230,11 @@ describe('first run', () => {
     expect(within(steps).getByText('Put your receiving address in your kit')).toBeTruthy()
     expect(within(steps).getByText('Create a Sales key')).toBeTruthy()
     expect(within(steps).getByText('Tell Haven where your kit runs')).toBeTruthy()
-    // Steps 2 and 3 go to the Setup tab.
-    expect(within(steps).getByRole('link', { name: 'Create Sales key' }).getAttribute('href')).toBe('/sales?tab=setup#sales-keys')
+    // Step 2 (#4905 is not shipped) is honest text, with no button or link;
+    // step 1's address is the one primary action; step 3 goes to the Setup tab.
+    expect(within(steps).queryByRole('link', { name: 'Create Sales key' })).toBeNull()
+    expect(within(steps).queryByRole('button', { name: 'Create Sales key' })).toBeNull()
+    expect(within(steps).getByText(/Creating Sales keys on this page is coming/)).toBeTruthy()
     expect(within(steps).getByRole('link', { name: 'Add kit address' }).getAttribute('href')).toBe('/sales?tab=setup#kit-address')
     // No figures, no period control, no summary read: a first run is not a quiet period.
     expect(screen.queryByTestId('sales-tiles')).toBeNull()
@@ -255,14 +258,44 @@ describe('first run', () => {
 })
 
 describe('the Overview, from one fixture', () => {
+  it('leaves the payer foot off when a payment has no single payer', async () => {
+    serve({
+      summary: {
+        ...SUMMARY,
+        by_payer: [{ payer: CONTACT, payments: 2, amount_raw: '840000' }],
+        unattributed: { payments: 2, amount_raw: '1300000' },
+      },
+    })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('4')
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).not.toContain('payers')
+  })
+
+  it('counts payers from the lines and the folded Other payers', async () => {
+    serve({
+      summary: {
+        ...SUMMARY,
+        by_payer: [{ payer: CONTACT, payments: 2, amount_raw: '840000' }],
+        by_payer_other: { payers: 4, payments: 2, amount_raw: '1300000' },
+      },
+    })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('from 5 payers')
+  })
+
   it('shows tiles that agree with the breakdowns and the list', async () => {
     serve()
     await renderPage()
     const tiles = await screen.findByTestId('sales-tiles')
     expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('$2.14')
-    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('3')
+    // Sales counts every revenue payment (3 sales + 1 with no product), and
+    // the average is revenue over that count: $2.14 / 4.
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('4')
     expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('from 3 payers')
-    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('$0.38')
+    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('$0.54')
+    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('per payment')
     expect(within(tiles).getByTestId('stat-tile-without-a-product').textContent).toContain('1')
 
     // By product: the lines add up to the Revenue tile ($0.84 + $0.30 + $1.00).
@@ -270,6 +303,9 @@ describe('the Overview, from one fixture', () => {
     for (const text of ['Chat completion', 'Embeddings', 'No product', '$0.84', '$0.30', '$1.00']) {
       expect(within(byProduct).getAllByText(text).length).toBeGreaterThan(0)
     }
+    // The No product line counts payments, not sales.
+    expect(byProduct.textContent).toContain('1 payment')
+    expect(byProduct.textContent).not.toMatch(/No product[^$]*1 sale/)
     // By payer: the lines add up to it too ($1.14 + $0.70 + $0.30).
     const byPayer = screen.getByTestId('sales-by-payer')
     for (const text of ['$1.14', '$0.70', '$0.30']) {

@@ -25,6 +25,8 @@ export interface BreakdownLine {
   count: number
   /** A muted line is one that is not a real entity ("No product"). */
   muted?: boolean
+  /** Overrides the card's count noun for this line ("No product" counts payments, not sales). */
+  countNoun?: string
 }
 
 const CELL = 'px-4 py-3'
@@ -91,7 +93,7 @@ export function SalesBreakdownCard({
               title={<span className={`truncate ${line.muted ? 'text-[var(--v2-ink-3)]' : ''}`}>{line.name}</span>}
               subtitle={
                 <span className="v2-tabular">
-                  {line.count} {countNoun}
+                  {line.count} {line.countNoun ?? countNoun}
                   {line.count === 1 ? '' : 's'}
                   {line.detail ? <> · {line.detail}</> : null}
                 </span>

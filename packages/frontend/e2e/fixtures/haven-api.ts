@@ -1268,8 +1268,8 @@ export const salesSummary = {
   ],
   by_product_other: { products: 0, sales: 0, amount_raw: '0' },
   by_payer: [
-    { payer: salesContact, payments: 2, amount_raw: '1140000' },
-    { payer: salesWallet, payments: 2, amount_raw: '1000000' },
+    { payer: salesContact, payments: 2, amount_raw: '840000' },
+    { payer: salesWallet, payments: 2, amount_raw: '1300000' },
   ],
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },

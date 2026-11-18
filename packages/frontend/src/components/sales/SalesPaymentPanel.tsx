@@ -26,6 +26,7 @@ import {
   isOnChainHash,
   salesAmountText,
   salesInFiat,
+  tokenText,
   usdcOf,
   type SalesPayer,
   type SalesPaymentDetail,
@@ -79,7 +80,7 @@ function payerDetail(payment: SalesPaymentDetail): { value: string; note?: strin
 }
 
 /** The payer in the header line: a name, or a wallet with its short address. */
-function payerPhrase(payer: SalesPayer | null, severalPayers: boolean): string | null {
+export function payerPhrase(payer: SalesPayer | null, severalPayers: boolean): string | null {
   if (payer === null) return severalPayers ? 'several wallets' : null
   if (payer.kind !== 'wallet' && payer.name) return payer.name
   return `Wallet (${truncate(payer.address)})`
@@ -187,7 +188,7 @@ function OpenPanel({
   )
 
   const human = usdcOf(detail.amount_raw)
-  const tokenFigure = salesAmountText(detail.amount_raw, 'EUR').replace(/ USDC$/, '')
+  const tokenFigure = tokenText(human).replace(/ USDC$/, '')
   const direction = own ? undefined : ('in' as const)
   const payerRow = payerDetail(detail)
 

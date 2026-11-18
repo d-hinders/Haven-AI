@@ -174,15 +174,17 @@ function ProductsTable({
                     {product.name ? <span className="font-mono">{product.product_id}</span> : null}
                     {product.name ? ' · ' : null}
                     {count} {count === '1' ? 'sale' : 'sales'}
+                  </span>
+                }
+                trailing={
+                  // The badge sits under the price, never in the truncating subtitle.
+                  <span className="flex flex-col items-end gap-1">
+                    <span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">{usdcExactText(product.price_atomic)}</span>
                     {product.offered ? null : (
-                      <>
-                        {' · '}
-                        <StatusBadge tone={SALES_STATUS.no_longer_offered.tone}>{SALES_STATUS.no_longer_offered.label}</StatusBadge>
-                      </>
+                      <StatusBadge tone={SALES_STATUS.no_longer_offered.tone}>{SALES_STATUS.no_longer_offered.label}</StatusBadge>
                     )}
                   </span>
                 }
-                trailing={<span className="v2-tabular text-sm font-medium text-[var(--v2-ink)]">{usdcExactText(product.price_atomic)}</span>}
                 density="flush"
               />
             </div>

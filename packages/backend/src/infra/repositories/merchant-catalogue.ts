@@ -143,7 +143,7 @@ export const UPSERT_PRODUCT_SQL = `INSERT INTO merchant_products
 
 /**
  * Mark every product the document no longer lists as not offered. `product_id
- * <> ALL($2)` with an empty array is true for every row, which is the correct
+ * <> ALL($3)` with an empty array is true for every row, which is the correct
  * answer for a document that lists nothing.
  */
 export const RETIRE_MISSING_PRODUCTS_SQL = `UPDATE merchant_products

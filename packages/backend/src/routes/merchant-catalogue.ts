@@ -149,9 +149,12 @@ export default async function merchantCatalogueRoutes(app: FastifyInstance): Pro
         })
       }
 
+      // The saved address is the deployment's ORIGIN. The discovery document is
+      // served at `/.well-known/x402` and nowhere else, so a path, query or
+      // fragment the owner pasted must not become part of what Haven reads.
       const { source } = await saveCatalogueDeployment({
         merchantAccountId: account.id,
-        deploymentUrl: checked.url.toString(),
+        deploymentUrl: checked.url.origin,
       })
 
       // Read it now, so the answer to the save is the catalogue it produced.

@@ -107,12 +107,12 @@ function refusal(reason: 'address_not_public' | 'redirect_off_host' | 'timeout' 
 
 async function read(
   accountId: string,
-  fetchText: () => Promise<SafeFetchResult>,
-  overrides: { accountAddress?: string; chainId?: number } = {},
+  fetchText: (url: string) => Promise<SafeFetchResult>,
+  overrides: { accountAddress?: string; chainId?: number; deploymentUrl?: string } = {},
 ) {
   return readMerchantCatalogue({
     merchantAccountId: accountId,
-    deploymentUrl: DEPLOYMENT,
+    deploymentUrl: overrides.deploymentUrl ?? DEPLOYMENT,
     accountAddress: overrides.accountAddress ?? ACCOUNT_ADDRESS,
     chainId: overrides.chainId ?? 84532,
     fetchText,
@@ -202,6 +202,53 @@ describeDb('the merchant catalogue (#4899)', () => {
       document_network: NETWORK,
     })
     expect(row?.last_read_at).not.toBeNull()
+  })
+
+  it('reads the discovery document at /.well-known/x402, never the deployment root', async () => {
+    const { accountId } = await seedMerchantAccount()
+    const seen: string[] = []
+
+    const outcome = await read(accountId, async (url) => {
+      seen.push(url)
+      return ok(document())
+    })
+    expect(outcome.status).toBe('ok')
+    // The kit serves the document at this path and nowhere else; the root is a
+    // 404, so a read of the bare deployment would never produce a catalogue.
+    expect(seen).toEqual(['https://kit.example.com/.well-known/x402'])
+  })
+
+  it('reads the well-known path even when the saved address carries a path', async () => {
+    const { accountId } = await seedMerchantAccount()
+    const seen: string[] = []
+
+    const outcome = await read(
+      accountId,
+      async (url) => {
+        seen.push(url)
+        return ok(document())
+      },
+      { deploymentUrl: 'https://kit.example.com/foo?bar=1' },
+    )
+    expect(outcome.status).toBe('ok')
+    expect(seen).toEqual(['https://kit.example.com/.well-known/x402'])
+  })
+
+  it('records a saved address that is not a URL as refused, without fetching', async () => {
+    const { accountId } = await seedMerchantAccount()
+    let fetched = false
+
+    const outcome = await read(
+      accountId,
+      async () => {
+        fetched = true
+        return ok(document())
+      },
+      { deploymentUrl: 'not-a-url' },
+    )
+    expect(outcome).toMatchObject({ status: 'refused', productsWritten: 0 })
+    expect(outcome.detail).toContain('invalid_url')
+    expect(fetched).toBe(false)
   })
 
   it('keeps a product the document removed, marks it not offered, and still names it on a sale', async () => {
@@ -395,7 +442,7 @@ describeDb('the merchant catalogue (#4899)', () => {
 
     const report = await refreshAllMerchantCatalogues(undefined, {
       fetchText: async (url) =>
-        url === DEPLOYMENT ? ok(document()) : refusal('http_status'),
+        url === `${DEPLOYMENT}/.well-known/x402` ? ok(document()) : refusal('http_status'),
     })
     expect(report).toEqual({ read: 2, ok: 1, mismatch: 0, failed: 1 })
     expect(await products(first.accountId)).toHaveLength(2)

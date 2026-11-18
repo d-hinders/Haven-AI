@@ -47,6 +47,10 @@ const { installRequestValidation } = await import('../../openapi/request-validat
 const ACCOUNT_ADDRESS = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
 const NETWORK = 'eip155:84532'
 const DEPLOYMENT = 'https://kit.example.com/'
+/** What the save stores: the deployment's origin, path and query dropped. */
+const DEPLOYMENT_ORIGIN = 'https://kit.example.com'
+/** What the read fetches: the discovery document, and only that path. */
+const DISCOVERY_URL = 'https://kit.example.com/.well-known/x402'
 
 function document(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -170,7 +174,7 @@ describeDb('the merchant catalogue routes (#4899)', () => {
 
     const body = res.json()
     expect(body).toMatchObject({
-      deployment_url: DEPLOYMENT,
+      deployment_url: DEPLOYMENT_ORIGIN,
       last_read_status: 'ok',
       mismatch: false,
       document_name: 'Haven inference demo',
@@ -194,9 +198,20 @@ describeDb('the merchant catalogue routes (#4899)', () => {
       },
     ])
 
-    // The read went through the guard with the same-host policy.
+    // The read went through the guard with the same-host policy, and it fetched
+    // the discovery document — not the deployment root, which the proxy 404s.
     expect(mockSafeGetText).toHaveBeenCalledTimes(1)
+    expect(mockSafeGetText.mock.calls[0]![0]).toBe(DISCOVERY_URL)
     expect(mockSafeGetText.mock.calls[0]![1]).toMatchObject({ sameHostOnly: true })
+  })
+
+  it('stores the deployment origin, so a pasted path cannot become the read', async () => {
+    mockSafeGetText.mockResolvedValue(ok(document()))
+
+    const res = await save({ deployment_url: 'https://kit.example.com/foo?bar=1#frag' })
+    expect(res.statusCode, res.body).toBe(200)
+    expect(res.json()).toMatchObject({ deployment_url: DEPLOYMENT_ORIGIN, last_read_status: 'ok' })
+    expect(mockSafeGetText.mock.calls[0]![0]).toBe(DISCOVERY_URL)
   })
 
   it('stores the address even when the read fails, and records the outcome', async () => {
@@ -205,7 +220,7 @@ describeDb('the merchant catalogue routes (#4899)', () => {
     const res = await save({ deployment_url: DEPLOYMENT })
     expect(res.statusCode, res.body).toBe(200)
     expect(res.json()).toMatchObject({
-      deployment_url: DEPLOYMENT,
+      deployment_url: DEPLOYMENT_ORIGIN,
       last_read_status: 'unreachable',
       mismatch: false,
       products: [],

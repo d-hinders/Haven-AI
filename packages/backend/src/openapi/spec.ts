@@ -9995,7 +9995,7 @@ export const openapiSpec = {
         operationId: 'saveMerchantCatalogueDeployment',
         summary: "Save the kit deployment's address and read its discovery document.",
         description:
-          "Stores the public address of the owner's kit deployment for the merchant account and reads `/.well-known/x402` from it immediately, so the answer to the save is the catalogue the document produced (#4899, epic #4885). The address is checked by the outbound guard's own policy before it is stored — https only, default port, no embedded credentials, no IP literal, no locally-bound name — and refused with `MERCHANT_CATALOGUE_URL_REFUSED` and the guard's `reason`; the read itself refuses a host that resolves into private or local space and a redirect that leaves the host. A read that fails does not fail the save: the address is stored, the outcome is recorded in `last_read_status`, and the last good product list stays in place. A CHANGED address retires the list the old one produced (its products are marked no longer offered, not deleted, so past sales keep their names). The product list is stored in its own table, never `merchant_catalog`.",
+          "Stores the public address of the owner's kit deployment for the merchant account and reads `/.well-known/x402` from it immediately, so the answer to the save is the catalogue the document produced (#4899, epic #4885). The address is stored as the deployment's ORIGIN — path, query and fragment are dropped — because the kit serves the discovery document at `/.well-known/x402` and nowhere else, so the read is always `<origin>/.well-known/x402` and a pasted path cannot become the path Haven reads. The address is checked by the outbound guard's own policy before it is stored — https only, default port, no embedded credentials, no IP literal, no locally-bound name — and refused with `MERCHANT_CATALOGUE_URL_REFUSED` and the guard's `reason`; the read itself refuses a host that resolves into private or local space and a redirect that leaves the host. A read that fails does not fail the save: the address is stored, the outcome is recorded in `last_read_status`, and the last good product list stays in place. A CHANGED address retires the list the old one produced (its products are marked no longer offered, not deleted, so past sales keep their names). The product list is stored in its own table, never `merchant_catalog`.",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -10010,7 +10010,7 @@ export const openapiSpec = {
                     type: 'string',
                     format: 'uri',
                     description:
-                      'The public address of the kit deployment, e.g. `https://api.example.com`. https only, default port, no credentials.',
+                      "The public address of the kit deployment, e.g. `https://api.example.com`. https only, default port, no credentials. Stored as the deployment's ORIGIN: a path, query or fragment is dropped, and the read is always `<origin>/.well-known/x402`.",
                   },
                 },
               },

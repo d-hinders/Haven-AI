@@ -400,7 +400,10 @@ sales.
   `PUT /merchant-catalogue/deployment` runs the outbound guard's own pure policy
   (`assertSafeUrl`: https only, default port, no embedded credentials, no IP
   literal, no locally-bound name) and refuses with the guard's `reason`. The
-  read itself is `safeGetText` with `sameHostOnly`, so a host that resolves into
+  address is stored as the deployment's ORIGIN — path, query and fragment are
+  dropped — and the read is always `<origin>/.well-known/x402`, because the
+  proxy serves the document at that path and nowhere else. The read itself is
+  `safeGetText` with `sameHostOnly`, so a host that resolves into
   private or local space is refused at resolution time and a redirect that
   leaves the host is refused before it is resolved — the guard follows
   cross-host redirects by default, and a merchant must not be able to point

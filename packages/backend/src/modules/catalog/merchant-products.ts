@@ -82,6 +82,14 @@ export const MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS = 15 * 60 * 1000
 /** The kit document version this reader knows (`12-merchant-kit.md` §4). */
 export const MERCHANT_CATALOGUE_DOCUMENT_VERSION = 1
 /**
+ * The path the kit serves its discovery document at, and the ONLY path it
+ * serves it at (`12-merchant-kit.md` §4; `packages/paywall-proxy/src/discovery.ts`
+ * exports the same constant, and the proxy's handler routes this path and
+ * nothing else — every other path is a 404). The read must target it: the
+ * deployment root is not the document.
+ */
+export const MERCHANT_CATALOGUE_DISCOVERY_PATH = '/.well-known/x402'
+/**
  * Safety cap on one document's product list. A products file is hand-written;
  * 500 products is far past any pilot deployment and bounds the write.
  */
@@ -281,6 +289,26 @@ async function guardedDocumentFetch(url: string): Promise<SafeFetchResult> {
 }
 
 /**
+ * The discovery document's URL for a saved deployment address.
+ *
+ * The document is served at `/.well-known/x402` and nowhere else, so the read
+ * targets `<origin>/.well-known/x402` — never the address as pasted. An
+ * absolute path replaces whatever path the base carried, so a row saved before
+ * the route normalized the address (or written by hand) still reads the
+ * document rather than the path it happens to carry.
+ *
+ * Null when the saved address is not a parseable absolute URL: the caller
+ * records that as a refusal instead of throwing.
+ */
+export function discoveryDocumentUrl(deploymentUrl: string): string | null {
+  try {
+    return new URL(MERCHANT_CATALOGUE_DISCOVERY_PATH, deploymentUrl).toString()
+  } catch {
+    return null
+  }
+}
+
+/**
  * Read one merchant account's discovery document and keep what it says.
  *
  * The order is deliberate: the products are written BEFORE the read is recorded
@@ -304,7 +332,26 @@ export async function readMerchantCatalogue(params: {
   const fetchText = params.fetchText ?? guardedDocumentFetch
   const readAt = (params.now ?? (() => new Date()))()
 
-  const fetched = await fetchText(params.deploymentUrl)
+  // The document is served at `/.well-known/x402` and nowhere else, so the read
+  // targets that path on the saved deployment — never the address as pasted.
+  const documentUrl = discoveryDocumentUrl(params.deploymentUrl)
+  if (documentUrl === null) {
+    const detail = 'invalid_url: the saved deployment address is not a parseable URL'
+    await recordCatalogueRead(
+      {
+        merchantAccountId: params.merchantAccountId,
+        readAt,
+        status: 'refused',
+        detail,
+        mismatch: false,
+        mismatchReason: null,
+      },
+      db,
+    )
+    return { status: 'refused', detail, mismatch: false, mismatchReason: null, productsWritten: 0 }
+  }
+
+  const fetched = await fetchText(documentUrl)
   if (!fetched.ok) {
     const status: MerchantCatalogueReadStatus = POLICY_REFUSAL_REASONS.has(fetched.reason)
       ? 'refused'

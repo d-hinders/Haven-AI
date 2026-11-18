@@ -23,13 +23,14 @@
  * ## Why a reference rather than disposable schemas
  *
  * #2622 offered two designs and priced the second, dropping and recreating each
- * worker schema, as "a full migration run per worker per run". That price is
- * wrong in the expensive direction: `test_w*` schemas are allocated **per
- * FILE**, not per worker — `VITEST_WORKER_ID` is the file's ordinal in the
- * run's spec list, and vitest gives each file its own process. At 62 real-DB
- * files that is 62 full migration runs per suite run against a cold init
- * measured at ~572 ms, which is the cost #2211 and #2354 exist to have
- * attacked. So: one pristine schema per RUN, fingerprinted once in
+ * worker schema, as "a full migration run per worker per run". When #2622
+ * landed that price was wrong in the expensive direction: `test_w*` schemas
+ * were then allocated **per FILE** — `VITEST_WORKER_ID` is the file's ordinal
+ * in the run's spec list. At 62 real-DB files that was 62 full migration runs
+ * per suite run against a cold init measured at ~572 ms. (Since #4971 schemas
+ * are per pool slot, which made the per-file cost go away for the worker
+ * schemas themselves; recreating them would still destroy the evidence this
+ * check reports.) So: one pristine schema per RUN, fingerprinted once in
  * `vitest.global-setup.ts`, and a cheap catalog read per file to compare
  * against it.
  *
@@ -176,13 +177,15 @@ export function diffFingerprints(
  */
 export function driftMessage(schema: string, differences: string[]): string {
   return (
-    `db-harness: worker schema ${schema} was ALREADY off migration head when this run started ` +
+    `db-harness: worker schema ${schema} was ALREADY off migration head when this file started ` +
     `(#2622) — ${differences.join('; ')}.\n` +
     '\n' +
-    'This is inherited drift, not something this run caused: `schema_migrations` records every ' +
-    'migration as applied, so `ensureMigrated()` had nothing to do, and #2616\'s end-of-file guard ' +
-    'cannot see it because it captures head AFTER the migration run — drift already present ' +
-    'BECOMES head and diffs clean forever. Two common causes: an ordinary test whose hook creates or re-creates a table and does not remove it, and a run killed partway through a test ' +
+    'This is inherited drift, not something this file caused. It was left by an EARLIER FILE on ' +
+    'the same pool slot in this run (the schema is per slot since #4971 — that file\'s own ' +
+    'end-of-file guard will have failed it, so look for that failure first), or by an earlier run. ' +
+    '`schema_migrations` records every migration as applied, so `ensureMigrated()` had nothing to ' +
+    'do, and #2616\'s end-of-file guard cannot see it because it captures head AFTER the migration ' +
+    'run — drift already present BECOMES head and diffs clean forever. Common causes: an ordinary test whose hook creates or re-creates a table and does not remove it, and a run killed partway through a test ' +
     'that had reverted a migration; a `finally` does not run when the process is terminated.\n' +
     '\n' +
     `Repair (local test database only):  DROP SCHEMA ${schema} CASCADE;\n` +

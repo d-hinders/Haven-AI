@@ -8,7 +8,8 @@
  *
  * ## Isolation model
  *
- * One Postgres SCHEMA per vitest worker (`test_w<VITEST_WORKER_ID>`), bound
+ * One Postgres SCHEMA per vitest worker (`test_w<VITEST_POOL_ID>` — the pool
+ * SLOT, reused by every file the slot runs in sequence; #4971), bound
  * via the connection string: `vitest.setup.ts` appends
  * `?options=-c search_path=test_wN` to `DATABASE_URL` before anything
  * imports `config.ts`, so EVERY connection the app pool hands out — including
@@ -30,7 +31,12 @@
  *   is what keeps it from re-applying the full migration set every time
  *   (dozens and growing — never a fixed number here, it goes stale; the
  *   first file per worker DOES pay the full run, which is why
- *   vitest.config.ts sets an explicit hookTimeout, #1372).
+ *   vitest.config.ts sets an explicit hookTimeout, #1372). Once per file it
+ *   also empties the rows the previous file on the same pool slot left
+ *   (#4971), so a file starts from an empty schema at head. Until #4971 the
+ *   schema was keyed on `VITEST_WORKER_ID` — a per-FILE ordinal — so in CI
+ *   every real-DB file paid the full run, serialised on `MIGRATION_LOCK_KEY`:
+ *   ~230 runs, 141-309 s of serial time per `Backend checks` job.
  * - `resetDb()` (call in `beforeEach` — see the budget rule below): empties
  *   every table in the worker schema except `schema_migrations`, and restarts
  *   every advanced sequence.
@@ -90,8 +96,9 @@
  *
  * What a warm reset can genuinely WAIT on is a relation lock held by another
  * session on this worker's tables — a transaction a test left open, an
- * orphaned vitest worker with the same `VITEST_WORKER_ID` (#2319 found eight
- * orphans on one machine), or an autovacuum on the `TRUNCATE` path. That wait
+ * orphaned vitest worker on the same pool slot (`VITEST_POOL_ID`; #2319 found
+ * eight orphans on one machine), a second suite run against the same database
+ * without its own `HAVEN_TEST_SCHEMA_SUFFIX`, or an autovacuum on the `TRUNCATE` path. That wait
  * is never a healthy state, so it is bounded by `RESET_LOCK_WAIT_MS` — inside
  * the 5000 ms an in-body call runs under — and the failure names the holder
  * (pid, state, transaction age, query) instead of surfacing as an anonymous
@@ -169,7 +176,8 @@ import {
  * The schema this process owns.
  *
  * `HAVEN_TEST_SCHEMA_SUFFIX` exists for a SPAWNED fixture (#2625, found by
- * review). A child `vitest run` always gets `VITEST_WORKER_ID=1`, so a fixture
+ * review). A child `vitest run` always gets pool slot 1 (and, before #4971 keyed
+ * the name on the slot, `VITEST_WORKER_ID=1`), so a fixture
  * that deliberately drifts its schema was drifting `test_w1` — which a parent
  * worker is usually still using. A co-running innocent file then reads the
  * drift and fails with the guard's message, attributing it to a file that did
@@ -402,8 +410,8 @@ export const SLOW_HARNESS_CALL_MS = 2_000
  * for a lock another session HOLDS, so a busy machine with no holder never
  * trips it. A warm reset that waits this long on a relation lock is never a
  * healthy run: other vitest workers live in other schemas, so the holder is a
- * transaction this worker's own tests left open, an orphaned worker with the
- * same `VITEST_WORKER_ID`, or an autovacuum on the `TRUNCATE` path (which
+ * transaction this worker's own tests left open, an orphaned worker on the
+ * same pool slot (`VITEST_POOL_ID`), or an autovacuum on the `TRUNCATE` path (which
  * cancels itself within `deadlock_timeout`, 1 s by default). Raising this
  * number would only hide the holder.
  */
@@ -652,6 +660,17 @@ function ensureMigrated(): Promise<void> {
     // mechanism that let that class survive.
     await assertSchemaMatchesReference()
     headShape = await readSchemaFingerprint()
+    // #4971: the schema is per pool SLOT, so the file before this one on the
+    // same slot ran against it and may have left rows — a file whose last
+    // test inserted after its final `resetDb()`, or one that never calls
+    // `resetDb()` at all (seven real-DB files did not, when this landed).
+    // Every file used to start from a never-used schema, so every file may
+    // assume it starts empty; empty it here, once per FILE (this memo is per
+    // module instance), so that stays true. NOT in the public
+    // `initDbHarness()` wrapper: files call that once per `describe` (eight
+    // times in `delegation-budgets.test.ts`), and emptying on every call would
+    // delete rows an outer `beforeAll` seeded for the describes inside it.
+    await emptyWorkerSchema(() => undefined)
   })()
   return ready
 }
@@ -732,8 +751,10 @@ let headShape: TableFingerprint[] | null = null
  * module-scope `console.log`, imported by three test files run with
  * `--no-file-parallelism`, printed three times, from three different pids AND
  * three different `VITEST_WORKER_ID`s. Under this pool each file is its own
- * process and its own worker id — which is also why `test_w*` schemas
- * accumulate one per file rather than one per core (#2622).
+ * process and its own worker id. (That per-file id is why `test_w*` schemas
+ * used to accumulate one per file (#2622); since #4971 the schema is named by
+ * the pool slot instead, but each file is still its own process, so this
+ * capture is still once per FILE.)
  *
  * So the real frequency is: one head capture per real-DB file (63 files import
  * this module today, counted at the commit that added this note — a looser
@@ -889,11 +910,11 @@ export async function assertWorkerSchemaAtHead(): Promise<void> {
       (restored.length ? ` Tables present that head does not have: ${restored.join(', ')} — a down() or a CREATE was not undone.` : '') +
       (missing.length ? ` Tables head has that are gone: ${missing.join(', ')} — an up()/DROP was not followed by its down().` : '') +
       (changed.length ? ` Tables present in both but with a different COLUMN or INDEX shape: ${changed.join('; ')} — restore it. (This compares column and index NAMES plus a few column attributes; it does not see a CHECK or FK constraint, an index redefined under the same name, or a varchar/numeric width change. See the full blind-spot list on assertWorkerSchemaAtHead() in this file before reading a pass as full coverage.)` : '') +
-      ' The schema outlives this run (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
-      ' so a later run would have inherited it as a mystery failure. Restore in a `finally`.' +
-      ' (LATER RUN, not later file: `VITEST_WORKER_ID` is a per-run file ordinal, so no two' +
-      ' files in one run share a schema — the drift is inherited by whichever file' +
-      ' draws this ordinal next time, which is why the attribution is so hard to trace.)',
+      ' The schema outlives this file (worker schemas are created IF NOT EXISTS) and `schema_migrations` still reads as applied,' +
+      ' so a later file would inherit it as a mystery failure. Restore in a `finally`.' +
+      ' (Later FILE and later RUN: the schema is per pool slot (#4971), so the next file this' +
+      ' worker runs fails its init-time reference check on this drift, and so does whichever file' +
+      ' draws this slot in the next run — which is why the attribution is so hard to trace.)',
   )
 }
 
@@ -1248,6 +1269,19 @@ function describePoolTimeout(phaseLabel: string, cause: Error): string {
 async function performResetPhases(phase: PhaseReporter): Promise<void> {
   phase(PHASE_MIGRATION_HEAD)
   await ensureMigrated()
+  await emptyWorkerSchema(phase)
+}
+
+/**
+ * Empty every table in the worker schema except `schema_migrations` and restart
+ * every advanced sequence — the body of `resetDb()` after its migration wait.
+ *
+ * Split out of `performResetPhases` for `ensureMigrated()` (#4971), which calls
+ * it ONCE per module instance — once per real-DB file — and cannot go through
+ * `resetDb()`: `performResetPhases` awaits `ensureMigrated()` first, so the
+ * memoised body would be awaiting its own pending promise until `hookTimeout`.
+ */
+async function emptyWorkerSchema(phase: PhaseReporter): Promise<void> {
   phase('catalog read')
   const { tables, fks, sequences } = await readSchemaShape()
   if (tables.length === 0) return
@@ -1380,7 +1414,8 @@ export async function describeLockTimeout(phaseLabel: string): Promise<string> {
     `lock in ${WORKER_SCHEMA} (phase: ${phaseLabel}). Held by: ${holders}. A warm reset ` +
     `never waits on migration lock ${MIGRATION_LOCK_KEY} — only on a session holding a lock ` +
     "on this worker's tables: a transaction a test left open, an orphaned vitest worker " +
-    'with the same VITEST_WORKER_ID, or an autovacuum on the TRUNCATE path. Raising the ' +
+    'on the same pool slot (VITEST_POOL_ID), a second suite on the same database without its ' +
+    'own HAVEN_TEST_SCHEMA_SUFFIX, or an autovacuum on the TRUNCATE path. Raising the ' +
     'budget would only hide the holder (#2354).'
   )
 }

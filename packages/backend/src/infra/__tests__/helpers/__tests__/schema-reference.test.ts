@@ -87,9 +87,16 @@ describe('driftMessage (#2622)', () => {
     expect(message).toContain('db:reap-test-schemas')
   })
 
-  it('says the drift is INHERITED, not caused by this run', () => {
+  it('says the drift is INHERITED, not caused by this file, and names both sources', () => {
     // The whole diagnostic value. Without it the reader looks for the bug in
     // the file that failed, which is the mis-attribution #2616 exists to end.
-    expect(driftMessage('test_w7', ['x'])).toMatch(/ALREADY off migration head when this run started/)
+    // Since #4971 the schema is per pool slot, so "this run" is no longer the
+    // boundary: an earlier file on the same slot is a source too, and the
+    // message must send the reader to that file's own guard failure.
+    const message = driftMessage('test_w7', ['x'])
+    expect(message).toMatch(/ALREADY off migration head when this file started/)
+    expect(message).toMatch(/not something this file caused/)
+    expect(message).toMatch(/EARLIER FILE on the same pool slot in this run/)
+    expect(message).toMatch(/or by an earlier run/)
   })
 })

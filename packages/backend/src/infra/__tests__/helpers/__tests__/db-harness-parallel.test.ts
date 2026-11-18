@@ -30,8 +30,9 @@ describeDb('db-harness parallel isolation (#1220)', () => {
   // TWO guards now say so, and they catch different halves: #2625's
   // root-level `assertWorkerSchemaAtHead()` fails the file that LEAVES drift,
   // and #2622's reservoir check compares this schema against the run's
-  // pristine reference at init, so a table left behind fails whichever
-  // DIFFERENT file draws the same ordinal on a later run. The isolation proof
+  // pristine reference at init, so a table left behind fails the next file
+  // on the same pool slot (#4971), and whichever file draws that slot on a
+  // later run. The isolation proof
   // above needs the table only WHILE this file's tests run.
   // `CREATE TABLE IF NOT EXISTS` is what made leaving it survivable, and
   // therefore invisible.

@@ -21,7 +21,8 @@
  *    `plan-delete-order.test.ts` and by the census file's cycle case.
  * 3. What a warm reset can genuinely WAIT on is a relation lock held by another
  *    session on this worker's tables — a transaction a test left open, an
- *    orphaned vitest worker with the same `VITEST_WORKER_ID`. Reproduced
+ *    orphaned vitest worker on the same pool slot (`VITEST_POOL_ID`, which
+ *    names the schema since #4971). Reproduced
  *    deterministically: an external session holding a lock on one table sent
  *    the census file's `TRUNCATE` case to `Test timed out in 5000ms`, alone
  *    it passed. That failure named an innocent test and nothing else.

@@ -15,7 +15,10 @@ export default defineConfig({
     // resetDb() awaits init as a guarantee, inside a `beforeEach` for a file
     // whose first harness call is resetDb; hookTimeout covers both. The FIRST
     // test file scheduled on each worker pays the FULL migration run (61
-    // migrations at the time of writing, growing monotonically), and every
+    // migrations when this was written, 134 migration files on 2026-11-18 —
+    // growing monotonically; "each worker" is literal only since #4971 keyed
+    // worker schemas on the pool slot, before which EVERY real-DB file paid
+    // it, one at a time on advisory lock 811000061), and every
     // worker does that concurrently against the single Postgres service
     // container at run start — under CI load that exceeded vitest's default
     // 10s hook budget and killed three hooks at once with zero failing tests.

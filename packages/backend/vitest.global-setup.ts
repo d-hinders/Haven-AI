@@ -77,8 +77,9 @@ async function countRealDbTestFiles(dir: string = SRC): Promise<number> {
  *
  * Runs ONCE, in the main process, before a worker exists — which is the whole
  * economy of the design. The alternative #2622 costed, dropping and recreating
- * every worker schema, pays a full migration run per FILE (worker ids are file
- * ordinals), so 63 of them per suite run here.
+ * every worker schema, would have paid a full migration run per FILE at the
+ * time (worker schemas were keyed on per-file ordinals until #4971 keyed them on
+ * the pool slot), so 63 of them per suite run then.
  *
  * The reference schema is dropped and recreated rather than reused. Reusing it
  * would reproduce the very defect this closes one level up: a stale reference

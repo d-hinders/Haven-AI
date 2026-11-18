@@ -17,6 +17,7 @@ import { formatAnalyticsDay, formatAnalyticsTick, unknownRecipientShortAddress }
 import { formatFiatDisplay } from '@/lib/format'
 import type { PeriodValue } from '@/components/ui/list-url-codec'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
+import type { BreakdownLine } from '@/components/sales/SalesBreakdownCard'
 
 export type SalesSummary = ApiSchema<'MerchantSalesSummary'>
 export type SalesPayment = ApiSchema<'MerchantSalesPayment'>
@@ -63,6 +64,16 @@ export function salesDayRange(period: PeriodValue | undefined, now: Date = new D
 /** The days in a range, both ends included. */
 export function salesRangeDays(range: SalesDayRange): number {
   return Math.round((utcDayMs(range.to) - utcDayMs(range.from)) / DAY_MS) + 1
+}
+
+/**
+ * Every UTC calendar day of a range, in order — the axis both revenue charts
+ * draw one slot per day on (the Sales By-day chart and the Analytics Revenue
+ * chart, #4901), so a quiet day is an empty slot rather than a missing one.
+ */
+export function salesDayKeys(range: SalesDayRange): string[] {
+  const start = utcDayMs(range.from)
+  return Array.from({ length: salesRangeDays(range) }, (_, i) => utcDayKey(start + i * DAY_MS))
 }
 
 /** The period of the same length that ends the day before this one starts. */
@@ -284,6 +295,49 @@ export function payerCount(summary: SalesSummary): number {
   return summary.by_payer.length + summary.by_payer_other.payers
 }
 
+/** "N payment(s) of $X": the words the own-moves notice and the tiles share. */
+export function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
+/**
+ * The By product lines: every product, the products folded into "Other", then
+ * payments with no product. One projection for both revenue surfaces — the
+ * Sales Overview's By product card and the Analytics Revenue side (#4901) —
+ * so the two pages cannot disagree about what a product line says.
+ */
+export function productLines(summary: SalesSummary, money: SalesMoney): BreakdownLine[] {
+  const lines: BreakdownLine[] = summary.by_product.map((product) => ({
+    key: `product:${product.product_id}`,
+    name: product.label,
+    detail: product.product_id !== product.label ? product.product_id : undefined,
+    revenue: salesAmountText(product.amount_raw, money),
+    count: product.sales,
+  }))
+  const other = summary.by_product_other
+  if (other.products > 0 || other.sales > 0) {
+    lines.push({
+      key: 'product:other',
+      name: 'Other',
+      detail: plural(other.products, 'product'),
+      revenue: salesAmountText(other.amount_raw, money),
+      count: other.sales,
+    })
+  }
+  if (summary.without_product.count > 0) {
+    lines.push({
+      key: 'product:none',
+      name: 'No product',
+      detail: 'Paid, but your kit sent no sale record',
+      revenue: salesAmountText(summary.without_product.amount_raw, money),
+      count: summary.without_product.count,
+      muted: true,
+      countNoun: 'payment',
+    })
+  }
+  return lines
+}
+
 /** Nothing in the period reached the account or a registered Stripe address (a quiet period, not a first run). */
 export function isEmptyPeriod(summary: SalesSummary): boolean {
   return ledgerCount(summary) === 0
@@ -315,9 +369,7 @@ export function salesChartDays(
   rate: number | null = null,
 ): StackedBarDay[] {
   const revenueByDay = new Map(summary.by_day.map((d) => [d.day, usdcOf(d.revenue_raw) * (rate ?? 1)]))
-  const start = utcDayMs(range.from)
-  return Array.from({ length: salesRangeDays(range) }, (_, i) => {
-    const day = utcDayKey(start + i * DAY_MS)
+  return salesDayKeys(range).map((day) => {
     const amount = revenueByDay.get(day) ?? 0
     return {
       label: formatAnalyticsDay(day),

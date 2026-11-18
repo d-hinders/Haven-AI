@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useAgents } from '@/hooks/useAgents'
 import { useAnalyticsOverview } from '@/hooks/useAnalyticsOverview'
+import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
 import {
   formatAnalyticsAmount,
   paymentsAgentsCaption,
@@ -22,11 +23,20 @@ import {
   writeUrlAnalyticsAgentId,
   writeUrlAnalyticsRange,
 } from '@/lib/analytics-range'
+import {
+  ANALYTICS_VIEW_OPTIONS,
+  readUrlAnalyticsView,
+  writeUrlAnalyticsView,
+  type AnalyticsView,
+} from '@/lib/analytics-view'
+import { salesDayRange } from '@/lib/sales'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PeriodPicker } from '@/components/ui/PeriodPicker'
 import type { PeriodValue } from '@/components/ui/list-url-codec'
 import { FacetMenu } from '@/components/ui/FacetMenu'
 import type { ListFacet } from '@/components/ui/FacetMenu'
+import { Tabs } from '@/components/ui/Tabs'
+import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { Icon } from '@/components/ui/Icon'
 import { Info } from 'lucide-react'
@@ -35,6 +45,7 @@ import { StatTile } from '@/components/ui/StatTile'
 import { AgentsTable } from '@/components/analytics/AgentsTable'
 import { BalanceSection } from '@/components/analytics/BalanceSection'
 import { SpendSection } from '@/components/analytics/SpendSection'
+import { RevenueSection } from '@/components/analytics/RevenueSection'
 import { orderAgentsForDisplay, seriesColorByAgent } from '@/lib/analytics-series'
 import { MerchantsTable } from '@/components/analytics/MerchantsTable'
 // The floor slice D fixed for "too little data to chart" — ONE home: the
@@ -315,6 +326,16 @@ export default function AnalyticsClient() {
   const { currency } = usePreferences()
   const { agents: allAgents, loading: agentsLoading } = useAgents()
 
+  // The merchant-services setting, read ONCE for the whole shell (#4904): the
+  // switch exists only while Sales is on, and the revenue side reads the Sales
+  // account's chain from the same answer. While the read is loading or failed
+  // the switch is ABSENT — the shell's own rule for the Sales entry — so the
+  // page renders exactly as it shipped rather than offering a side it cannot
+  // fill.
+  const merchant = useMerchantServicesContext()
+  const merchantOn =
+    merchant.status === 'ready' && merchant.enabled && merchant.merchantAccount !== null
+
   // The window comes from the URL when it carries one — `?period=7d` opens on
   // Last 7 days, the sharable answer — and otherwise from the device's stored
   // choice. Both are read in the initialiser, not in an effect, so the FIRST
@@ -323,6 +344,15 @@ export default function AnalyticsClient() {
   const [range, setRange] = useState<AnalyticsRangeValue>(
     () => readUrlAnalyticsRange() ?? readStoredAnalyticsRange(),
   )
+
+  // The Spending / Revenue switch (#4901): a page data-source switch held in
+  // `?view=` beside `?period=`, read in the initialiser for the same reason
+  // the period is — the first render already knows which side it is on, so no
+  // request is spent on the side that is not shown. Without merchant services
+  // the page is the spend page, whatever the URL says: there is no revenue
+  // side to show.
+  const [view, setView] = useState<AnalyticsView>(() => readUrlAnalyticsView() ?? 'spending')
+  const activeView: AnalyticsView = merchantOn ? view : 'spending'
 
   // The Agent facet (#4333): a URL state, NOT a stored preference — an agent
   // page links `/analytics?agentId=<id>` and the filter lands set. Cleared
@@ -335,11 +365,22 @@ export default function AnalyticsClient() {
   // the response, and the response is not consulted for it — were the two to
   // disagree, the page would have two answers to "which currency am I
   // reading" and the reader would believe the louder one.
+  //
+  // The overview is read only while the SPEND side is on screen (#4901): the
+  // revenue side has its own one request, and a side that is not shown must
+  // not spend one. `null` is the hook's skip signal.
   const { data, loading, failed, agentNotFound, refetch } = useAnalyticsOverview(
-    range,
+    activeView === 'spending' ? range : null,
     currency === 'EUR' ? 'eur' : currency === 'SEK' ? 'sek' : 'usd',
     agentId,
   )
+
+  // The revenue side's period, in the Sales reads' own terms: UTC calendar
+  // days, both inclusive, from the SAME helper the Sales page uses
+  // (`salesDayRange`) — which is what makes the revenue total equal the Sales
+  // page's total for the same period by construction. Memoised on the period
+  // so the range object is stable across renders (the read keys on it).
+  const revenueRange = useMemo(() => salesDayRange({ preset: range }), [range])
 
   const changeRange = (next: PeriodValue) => {
     // The picker here offers presets only (no All time, no custom range), so
@@ -360,6 +401,14 @@ export default function AnalyticsClient() {
     // Picking a different agent is not an error recovery; the notice is
     // about the filter that WAS there, and a deliberate new choice clears it.
     setAgentNotice(false)
+  }
+
+  // The switch writes `?view=` beside `?period=` (#4901): the chosen side
+  // survives a reload and a period change, because `changeRange` writes only
+  // the `period` key and leaves `view` where it is.
+  const changeView = (next: AnalyticsView) => {
+    setView(next)
+    writeUrlAnalyticsView(next)
   }
 
   // A stale or foreign agentId (#4333): the endpoint answers 404 (#4332) and
@@ -389,7 +438,18 @@ export default function AnalyticsClient() {
   const days = data?.range.days ?? RANGE_DAYS[range]
 
   let body: ReactNode
-  if (loading) {
+  if (activeView === 'revenue') {
+    // The revenue side owns its own one request and its own loading, error and
+    // empty states (#4901); the spend side's request is skipped above, so the
+    // page never holds two sides' figures at once.
+    body = (
+      <RevenueSection
+        range={revenueRange}
+        currency={currency}
+        chainId={merchant.merchantAccount?.chain_id ?? null}
+      />
+    )
+  } else if (loading) {
     body = <AnalyticsSkeleton />
   } else if (failed || data === null) {
     // `data === null` with the request settled and no error is a state the
@@ -494,7 +554,14 @@ export default function AnalyticsClient() {
     <div className="max-w-6xl" data-testid="analytics-page">
       <PageHeader
         title="Analytics"
-        subtitle="What your agents did with your money."
+        subtitle={
+          // The subtitle names the side on screen (#4901): the revenue side is
+          // what the merchant account received, not what the agents spent, and
+          // one sentence cannot be true of both.
+          activeView === 'revenue'
+            ? 'What your Sales account received.'
+            : 'What your agents did with your money.'
+        }
         actions={
           // A fragment, never a wrapper of our own (#4401): PageHeader's
           // actions row is the one that wraps, so at 390 the Period picker
@@ -505,8 +572,18 @@ export default function AnalyticsClient() {
                 first) that writes `?agentId=` — the key `/transactions`
                 reads — and tints while a filter is set (FacetMenu's own
                 `active` rule). A stale or foreign id clears itself with a
-                notice, never the page error. */}
-            <FacetMenu facet={agentFacet} value={agentId !== null ? [agentId] : []} onChange={changeAgent} />
+                notice, never the page error.
+                It is HIDDEN on the revenue side (#4901): the Sales reads are
+                the merchant account's, not an agent's, so an agent filter
+                there would name a control that changes nothing. The link to
+                Sales takes its place — the revenue side's one navigation. */}
+            {activeView === 'spending' ? (
+              <FacetMenu facet={agentFacet} value={agentId !== null ? [agentId] : []} onChange={changeAgent} />
+            ) : (
+              <Button variant="ghost" size="sm" href="/sales">
+                View in Sales
+              </Button>
+            )}
             {/* The list-controls period control (#4110, #4116): presets only,
                 no All time and no custom range — the endpoint takes a rolling
                 `range`, not dates. With All time absent the picker treats the
@@ -517,12 +594,27 @@ export default function AnalyticsClient() {
           </>
         }
       />
-      {agentNotice && (
+      {/* The Spending / Revenue switch (#4901, approved on #4894): Tabs, the
+          design system's control for a page data-source switch, held in
+          `?view=` beside `?period=`. It exists only while merchant services
+          are on — without them there is no revenue side, and the page renders
+          exactly as it shipped. */}
+      {merchantOn && (
+        <div className="mt-6">
+          <Tabs
+            ariaLabel="Analytics view"
+            value={activeView}
+            onChange={changeView}
+            tabs={ANALYTICS_VIEW_OPTIONS}
+          />
+        </div>
+      )}
+      {agentNotice && activeView === 'spending' && (
         <p className="mt-3 text-sm text-[var(--v2-ink-2)]" role="status" data-testid="analytics-agent-notice">
           That agent isn&apos;t available.
         </p>
       )}
-      {body}
+      <div className={merchantOn ? 'mt-6' : undefined}>{body}</div>
     </div>
   )
 }

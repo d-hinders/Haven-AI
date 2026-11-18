@@ -2369,7 +2369,7 @@ Agents / Security & details), and the agent page (Activity / Tool calls / Settin
   reads with the tab's accessible name — and an optional amber `warningDot` marks a view
   that needs the user: decorative to the eye, named to the ear through its screen-reader
   text.
-- **As a page data-source switch** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). Analytics' **Spending / Revenue** (built by #4901; not on the page yet) is Tabs whose selection swaps the page's whole data source, not a view of one surface. It is held in `?view=` beside `?period=`, and each side hides the controls that do not apply to it (Revenue has no Agent facet). **Why not `?tab=`:** the choice changes what the whole page reads, alongside the period — every figure, chart and list below it — so it is a parameter of the page's query, like `?period=`, not a sub-view of one surface the way the account page's Activity / Agents tabs are. Shown on `/design-system` → *Sales patterns*.
+- **As a page data-source switch** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). Analytics' **Spending / Revenue** (built by [#4901](https://github.com/d-hinders/Haven-AI/issues/4901)) is Tabs whose selection swaps the page's whole data source, not a view of one surface. It is held in `?view=` beside `?period=`, and each side hides the controls that do not apply to it (Revenue has no Agent facet). **Why not `?tab=`:** the choice changes what the whole page reads, alongside the period — every figure, chart and list below it — so it is a parameter of the page's query, like `?period=`, not a sub-view of one surface the way the account page's Activity / Agents tabs are. Shown on `/design-system` → *Sales patterns*.
 
 ### Card header freshness line ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908))
 
@@ -2416,7 +2416,10 @@ revenue use.
   every day of a revenue chart. `hideRefusals` (#4900) is the opt-in that drops
   it; a revenue chart passes it. It changes the data table only, and every spend
   caller leaves it off. The Sales By-day chart (`SalesOverviewTab`) is the first
-  revenue chart.
+  revenue chart; Analytics' Revenue side ([#4901](https://github.com/d-hinders/Haven-AI/issues/4901)) is the second, and the
+  first to stack by product — its five named products take stops 1–5, the rest
+  fold into "Other" in neutral ink, and payments with no sale record take the
+  second neutral ink so the stack adds up to the Revenue tile.
 
 Shown on `/design-system` → *StackedBarChart* (spend) and *Sales patterns*
 (revenue).

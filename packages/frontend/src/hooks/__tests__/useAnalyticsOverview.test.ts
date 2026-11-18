@@ -228,4 +228,44 @@ describe('useAnalyticsOverview', () => {
       expect(result.current.agentNotFound).toBe(false)
     })
   })
+
+  describe('the Spending / Revenue switch (#4901)', () => {
+    it('issues nothing while the range is null — the side that is not shown spends no request', async () => {
+      const { result } = renderHook(() => useAnalyticsOverview(null, 'usd'))
+      // A null range is not a loading state: there is nothing in flight.
+      expect(result.current.loading).toBe(false)
+      expect(result.current.data).toBeNull()
+      expect(result.current.failed).toBe(false)
+      expect(mockApiGet).not.toHaveBeenCalled()
+    })
+
+    it('asks when a range arrives, and asks again when it goes away and comes back', async () => {
+      mockApiGet.mockResolvedValue(OVERVIEW)
+      const { result, rerender } = renderHook(
+        ({ range }: { range: AnalyticsRangeValue | null }) => useAnalyticsOverview(range, 'usd'),
+        { initialProps: { range: null as AnalyticsRangeValue | null } },
+      )
+      expect(mockApiGet).not.toHaveBeenCalled()
+
+      rerender({ range: '30d' })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(mockApiGet).toHaveBeenCalledTimes(1)
+      expect(result.current.data).not.toBeNull()
+
+      // Switching away issues nothing and leaves the answer where it is.
+      rerender({ range: null })
+      expect(mockApiGet).toHaveBeenCalledTimes(1)
+
+      // Switching back re-asks: the side that comes back is read fresh rather
+      // than painted from a response that may be minutes old.
+      rerender({ range: '30d' })
+      await waitFor(() => expect(mockApiGet).toHaveBeenCalledTimes(2))
+    })
+
+    it('does not refetch a skipped read', async () => {
+      const { result } = renderHook(() => useAnalyticsOverview(null, 'usd'))
+      act(() => result.current.refetch())
+      expect(mockApiGet).not.toHaveBeenCalled()
+    })
+  })
 })

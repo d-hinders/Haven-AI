@@ -272,6 +272,267 @@ describeDb('owner company details routes (#3332)', () => {
   })
 
   /**
+   * #4870 — the receipt email and the two structured addresses.
+   *
+   * The three fields are optional, and the rule that matters is "omitted
+   * keeps, `null` clears": the upsert replaces the whole row, so an old
+   * dashboard tab that sends only the four original fields must not wipe
+   * them. Every case below is a real request against real Postgres.
+   */
+  describe('receipt email and addresses (#4870)', () => {
+    beforeEach(() => {
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+    })
+
+    const BILLING = {
+      line1: 'Sveavagen 1',
+      line2: '4 tr',
+      city: 'Stockholm',
+      postCode: '111 57',
+      subdivision: 'SE-AB',
+      country: 'SE',
+    }
+    const SHIPPING = { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' }
+
+    async function saveAll(userId: string) {
+      const put = await app.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...auth(userId),
+        payload: {
+          ...VALID_BODY,
+          receipt_email: 'philip@example.se',
+          billing_address: BILLING,
+          shipping_address: SHIPPING,
+        },
+      })
+      expect(put.statusCode).toBe(200)
+      return put
+    }
+
+    it('PUT accepts and returns all three, and GET reads them back', async () => {
+      const userId = await seedUser()
+      const put = await saveAll(userId)
+      expect(put.json()).toMatchObject({
+        receipt_email: 'philip@example.se',
+        billing_address: BILLING,
+        shipping_address: SHIPPING,
+      })
+      expectMatchesSpec('PUT', '/user/company-details', put.json())
+
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.statusCode).toBe(200)
+      expect(get.json()).toMatchObject({
+        receipt_email: 'philip@example.se',
+        billing_address: BILLING,
+        shipping_address: SHIPPING,
+      })
+      expectMatchesSpec('GET', '/user/company-details', get.json())
+    })
+
+    it('each field is optional: the old four-field body still saves, with all three null', async () => {
+      const userId = await seedUser()
+      const put = await app.inject({ method: 'PUT', url: '/user/company-details', ...auth(userId), payload: VALID_BODY })
+      expect(put.statusCode).toBe(200)
+      expect(put.json()).toMatchObject({ receipt_email: null, billing_address: null, shipping_address: null })
+    })
+
+    it('an invalid email is refused with the route\'s own 400 { error } shape', async () => {
+      const userId = await seedUser()
+      const put = await app.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...auth(userId),
+        payload: { ...VALID_BODY, receipt_email: 'not-an-email' },
+      })
+      expect(put.statusCode).toBe(400)
+      expect(put.json()).toEqual({
+        error: 'Enter a receipt email address using 254 characters or fewer, e.g. "name@example.com".',
+      })
+      // Nothing was written.
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.json()).toBeNull()
+    })
+
+    it('an address whose country is not two letters is refused with the route\'s own 400 { error } shape', async () => {
+      const userId = await seedUser()
+      const put = await app.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...auth(userId),
+        payload: { ...VALID_BODY, billing_address: { ...BILLING, country: 'SWE' } },
+      })
+      expect(put.statusCode).toBe(400)
+      expect(put.json()).toEqual({
+        error: 'Enter a billing address with a street line, a city and a two-letter country code.',
+      })
+    })
+
+    it('OMITTED KEEPS: the old request shape, sent after the new fields are saved, leaves all three unchanged', async () => {
+      const userId = await seedUser()
+      await saveAll(userId)
+
+      // Exactly what a dashboard tab built before #4870 sends.
+      const oldShape = await app.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...auth(userId),
+        payload: { ...VALID_BODY, legal_name: 'Acme AB Updated' },
+      })
+      expect(oldShape.statusCode).toBe(200)
+      expect(oldShape.json()).toMatchObject({
+        legal_name: 'Acme AB Updated',
+        receipt_email: 'philip@example.se',
+        billing_address: BILLING,
+        shipping_address: SHIPPING,
+      })
+
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.json()).toMatchObject({
+        receipt_email: 'philip@example.se',
+        billing_address: BILLING,
+        shipping_address: SHIPPING,
+      })
+    })
+
+    it('NULL CLEARS: null clears one field and leaves the other two', async () => {
+      const userId = await seedUser()
+      await saveAll(userId)
+
+      const cleared = await app.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...auth(userId),
+        payload: { ...VALID_BODY, billing_address: null },
+      })
+      expect(cleared.statusCode).toBe(200)
+      expect(cleared.json()).toMatchObject({
+        receipt_email: 'philip@example.se',
+        billing_address: null,
+        shipping_address: SHIPPING,
+      })
+
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.json()).toMatchObject({
+        receipt_email: 'philip@example.se',
+        billing_address: null,
+        shipping_address: SHIPPING,
+      })
+    })
+
+    it('a row saved before this change is returned with the new fields empty', async () => {
+      const userId = await seedUser()
+      // The pre-#4870 write path: only the original columns.
+      await db.query(
+        `INSERT INTO owner_company_details (user_id, legal_name, country, org_number, vat_number, vies_status, vies_checked_at)
+         VALUES ($1, 'Acme AB', 'SE', '556677-8899', NULL, NULL, NULL)`,
+        [userId],
+      )
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.statusCode).toBe(200)
+      expect(get.json()).toMatchObject({
+        legal_name: 'Acme AB',
+        receipt_email: null,
+        billing_address: null,
+        shipping_address: null,
+      })
+      expectMatchesSpec('GET', '/user/company-details', get.json())
+    })
+
+    it('DELETE clears them with the row', async () => {
+      const userId = await seedUser()
+      await saveAll(userId)
+      const del = await app.inject({ method: 'DELETE', url: '/user/company-details', ...auth(userId) })
+      expect(del.statusCode).toBe(200)
+      const get = await app.inject({ method: 'GET', url: '/user/company-details', ...auth(userId) })
+      expect(get.json()).toBeNull()
+    })
+  })
+
+  /**
+   * #4870: the request schema is the OpenAPI spec's, enforced by the
+   * request-validation plugin — there is no hand-written second copy. This
+   * app runs the plugin in `enforce` mode for this module, so a body the spec
+   * refuses answers the plugin's envelope (`error_code: 'invalid_request'`)
+   * rather than the route's own `{ error }`; the route's semantic checks
+   * (email shape, two-letter country) are covered above, where the plugin is
+   * off.
+   */
+  describe('the request schema comes from the spec (#4870)', () => {
+    let enforcedApp: FastifyInstance
+
+    beforeAll(async () => {
+      enforcedApp = Fastify({ logger: false })
+      enforcedApp.setErrorHandler((error: FastifyError, _request, reply) => {
+        void reply.status(error.statusCode ?? 500).send({ error: error.message })
+      })
+      await enforcedApp.register(fastifyJwt, { secret: 'test-secret' })
+      installRequestValidation(enforcedApp, {
+        mode: 'enforce',
+        enforcedModules: ['routes/owner-company-details.ts'],
+      })
+      const ownerCompanyDetailsRoutes = (await import('../owner-company-details.js')).default
+      await enforcedApp.register(ownerCompanyDetailsRoutes, { prefix: '/user' })
+      await enforcedApp.ready()
+    })
+
+    afterAll(async () => {
+      await enforcedApp.close()
+    })
+
+    beforeEach(() => {
+      ;(config as { ownerCompanyDetailsEnabled: boolean }).ownerCompanyDetailsEnabled = true
+    })
+
+    function enforcedAuth(userId: string): { headers: { authorization: string } } {
+      const token = enforcedApp.jwt.sign({ sub: userId, email: 'ocd-enforced@test.example' })
+      return { headers: { authorization: 'Bearer ' + token } }
+    }
+
+    it('accepts the new shape', async () => {
+      const userId = await seedUser()
+      const put = await enforcedApp.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...enforcedAuth(userId),
+        payload: {
+          ...VALID_BODY,
+          receipt_email: 'philip@example.se',
+          billing_address: { line1: 'Sveavagen 1', city: 'Stockholm', country: 'SE' },
+        },
+      })
+      expect(put.statusCode).toBe(200)
+    })
+
+    it('refuses a receipt email over the spec\'s 254-character bound', async () => {
+      const userId = await seedUser()
+      const put = await enforcedApp.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...enforcedAuth(userId),
+        payload: { ...VALID_BODY, receipt_email: `${'a'.repeat(250)}@example.se` },
+      })
+      expect(put.statusCode).toBe(400)
+      expect(put.json()).toMatchObject({ error_code: 'invalid_request' })
+    })
+
+    it('refuses an address member the spec does not declare', async () => {
+      const userId = await seedUser()
+      const put = await enforcedApp.inject({
+        method: 'PUT',
+        url: '/user/company-details',
+        ...enforcedAuth(userId),
+        payload: {
+          ...VALID_BODY,
+          billing_address: { line1: 'Sveavagen 1', city: 'Stockholm', country: 'SE', extra: 'nope' },
+        },
+      })
+      expect(put.statusCode).toBe(400)
+      expect(put.json()).toMatchObject({ error_code: 'invalid_request' })
+    })
+  })
+
+  /**
    * #3332 review round 2 (M-A): a real `@fastify/rate-limit` registration
    * (`global: false`, `rateLimitKeyFor` as the key generator, as `index.ts`
    * does — but on the plugin's in-memory store, not the production

@@ -159,3 +159,74 @@ describe('the timing settings stay inside the design bounds (review of #4893)', 
     expect(problems({ ...base, UPSTREAM_TIMEOUT_MS: '60000', RESERVATION_DEADLINE_MS: '150000' })).toEqual([])
   })
 })
+
+describe('the receipt settings (#4913, §11)', () => {
+  const SELLER = {
+    SELLER_NAME: 'Kit Merchant AB',
+    SELLER_ADDRESS: 'Sveavägen 10, 111 57 Stockholm',
+    SELLER_ORG_NR: '559123-4567',
+    SELLER_VAT_NR: 'SE559123456701',
+  }
+
+  it('with no VAT rule, no seller detail is required and the proxy sends no receipt', () => {
+    const config = loadConfig(base)
+    expect(config.receipt).toBeUndefined()
+    expect(config.receiptStatus).toBe('off (no VAT_RULE)')
+    expect(config.warnings).toEqual([])
+  })
+
+  it('with the Swedish rule and the seller details, the receipt settings are read once', () => {
+    const config = loadConfig({
+      ...base,
+      VAT_RULE: 'SE_25_WITH_EU_REVERSE_CHARGE',
+      ...SELLER,
+      SELLER_IBAN: 'SE35 5000 0000 0549 1000 0003',
+      SELLER_BIC: 'ESSESESS',
+      SELLER_SUPPORT_CONTACT: 'support@kit-merchant.example',
+    })
+    expect(config.receiptStatus).toBe('on')
+    expect(config.receipt).toEqual({
+      vatRule: 'SE_25_WITH_EU_REVERSE_CHARGE',
+      seller: {
+        name: 'Kit Merchant AB',
+        address: 'Sveavägen 10, 111 57 Stockholm',
+        org_nr: '559123-4567',
+        moms_nr: 'SE559123456701',
+        iban: 'SE35 5000 0000 0549 1000 0003',
+        bic: 'ESSESESS',
+      },
+      supportContact: 'support@kit-merchant.example',
+    })
+    expect(config.warnings).toEqual([])
+  })
+
+  it('refuses a VAT rule it does not know', () => {
+    expect(problems({ ...base, VAT_RULE: 'UK_20' }).join(' ')).toMatch(/VAT_RULE must be one of SE_25_WITH_EU_REVERSE_CHARGE/)
+  })
+
+  it('on Base mainnet, refuses to start with a VAT rule and no seller name, organisation number or VAT number', () => {
+    const mainnet = { ...base, NETWORK: 'eip155:8453', VAT_RULE: 'SE_25_WITH_EU_REVERSE_CHARGE' }
+    expect(problems(mainnet).join(' ')).toMatch(
+      /with VAT_RULE set, SELLER_NAME, SELLER_ORG_NR, SELLER_VAT_NR are required on Base mainnet/,
+    )
+    expect(problems({ ...mainnet, SELLER_NAME: 'Kit Merchant AB' }).join(' ')).toMatch(
+      /SELLER_ORG_NR, SELLER_VAT_NR are required on Base mainnet/,
+    )
+    expect(problems({ ...mainnet, ...SELLER })).toEqual([])
+  })
+
+  it('on a test network, starts with a warning and sends no receipt when the seller details are missing', () => {
+    const config = loadConfig({ ...base, VAT_RULE: 'SE_25_WITH_EU_REVERSE_CHARGE', SELLER_NAME: 'Kit Merchant AB' })
+    expect(config.receipt).toBeUndefined()
+    expect(config.receiptStatus).toBe('off (seller details missing)')
+    expect(config.warnings).toEqual([
+      'VAT_RULE is set but SELLER_ORG_NR, SELLER_VAT_NR are missing: the proxy starts and sends no receipt',
+    ])
+  })
+
+  it('refuses a seller detail that is not a single line', () => {
+    expect(
+      problems({ ...base, VAT_RULE: 'SE_25_WITH_EU_REVERSE_CHARGE', ...SELLER, SELLER_NAME: 'Kit\nMerchant' }).join(' '),
+    ).toMatch(/SELLER_NAME must be a single line of text/)
+  })
+})

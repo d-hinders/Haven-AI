@@ -6,7 +6,9 @@
  * variables and never a secret's value.
  */
 import { isAddress, getAddress, type Address } from 'viem'
+import { VAT_RULES, type VatRule } from '@haven_ai/merchant-payments'
 import { chainForNetwork, PROXY_CHAINS, type ProxyChain } from './chains.js'
+import type { ReceiptSettings } from './receipt.js'
 
 export class ConfigError extends Error {
   constructor(readonly problems: readonly string[]) {
@@ -51,7 +53,24 @@ export interface ProxyConfig {
   paymentsDb: string
   upstreamTimeoutMs: number
   reservationDeadlineMs: number
+  /**
+   * §11: the receipt settings, present only when a VAT rule is configured AND
+   * the seller details it needs are present. Absent: the proxy sends no
+   * `x-receipt-json` header.
+   */
+  receipt?: ReceiptSettings
+  /** What the startup log says about receipts (§11). */
+  receiptStatus: ReceiptStatus
+  /**
+   * Settings that do not refuse startup but change what the proxy does. A
+   * test network with a VAT rule and no seller details starts and sends no
+   * receipt; the warning says so.
+   */
+  warnings: readonly string[]
 }
+
+/** §11: `on`, or why the proxy sends no receipt. */
+export type ReceiptStatus = 'on' | 'off (no VAT_RULE)' | 'off (seller details missing)'
 
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 180_000
 export const DEFAULT_RESERVATION_DEADLINE_MS = 120_000
@@ -194,6 +213,73 @@ export function loadConfig(env: Env): ProxyConfig {
     problems.push('DIRECTORY_LISTING=on is not built in this release (the pilot runs with listing off)')
   }
 
+  // §11: the receipt. The merchant decides its own tax treatment; the proxy
+  // applies the rule it is given. With no rule there is no receipt and no
+  // seller detail is required. With a rule, the seller's name, organisation
+  // number and VAT number are required: on Base mainnet the proxy refuses to
+  // start without them, on a test network it starts with a warning and sends
+  // no receipt.
+  const warnings: string[] = []
+  const vatRuleRaw = text('VAT_RULE')
+  let receipt: ReceiptSettings | undefined
+  let receiptStatus: ReceiptStatus = 'off (no VAT_RULE)'
+  if (vatRuleRaw !== undefined) {
+    if (!(VAT_RULES as readonly string[]).includes(vatRuleRaw)) {
+      problems.push(`VAT_RULE must be one of ${VAT_RULES.join(', ')}`)
+    } else {
+      const sellerName = text('SELLER_NAME')
+      const sellerOrgNr = text('SELLER_ORG_NR')
+      const sellerVatNr = text('SELLER_VAT_NR')
+      const sellerAddress = text('SELLER_ADDRESS')
+      const sellerIban = text('SELLER_IBAN')
+      const sellerBic = text('SELLER_BIC')
+      const supportContact = text('SELLER_SUPPORT_CONTACT')
+      for (const [name, value] of [
+        ['SELLER_NAME', sellerName],
+        ['SELLER_ADDRESS', sellerAddress],
+        ['SELLER_ORG_NR', sellerOrgNr],
+        ['SELLER_VAT_NR', sellerVatNr],
+        ['SELLER_IBAN', sellerIban],
+        ['SELLER_BIC', sellerBic],
+        ['SELLER_SUPPORT_CONTACT', supportContact],
+      ] as const) {
+        if (value !== undefined && /[\u0000-\u001f\u007f]/.test(value)) {
+          problems.push(`${name} must be a single line of text`)
+        }
+      }
+      const missing = [
+        ...(sellerName === undefined ? ['SELLER_NAME'] : []),
+        ...(sellerOrgNr === undefined ? ['SELLER_ORG_NR'] : []),
+        ...(sellerVatNr === undefined ? ['SELLER_VAT_NR'] : []),
+      ]
+      if (missing.length > 0) {
+        const list = missing.join(', ')
+        if (chain && !chain.testnet) {
+          problems.push(`with VAT_RULE set, ${list} ${missing.length === 1 ? 'is' : 'are'} required on Base mainnet`)
+        } else {
+          receiptStatus = 'off (seller details missing)'
+          warnings.push(
+            `VAT_RULE is set but ${list} ${missing.length === 1 ? 'is' : 'are'} missing: the proxy starts and sends no receipt`,
+          )
+        }
+      } else {
+        receipt = {
+          vatRule: vatRuleRaw as VatRule,
+          seller: {
+            name: sellerName!,
+            address: sellerAddress ?? '',
+            org_nr: sellerOrgNr!,
+            moms_nr: sellerVatNr!,
+            ...(sellerIban !== undefined ? { iban: sellerIban } : {}),
+            ...(sellerBic !== undefined ? { bic: sellerBic } : {}),
+          },
+          supportContact: supportContact ?? '',
+        }
+        receiptStatus = 'on'
+      }
+    }
+  }
+
   const port = text('PORT') === undefined ? 8080 : Number(text('PORT'))
   if (!Number.isInteger(port) || port < 0 || port > 65535) problems.push('PORT must be a port number')
 
@@ -231,5 +317,8 @@ export function loadConfig(env: Env): ProxyConfig {
     paymentsDb,
     upstreamTimeoutMs,
     reservationDeadlineMs,
+    ...(receipt !== undefined ? { receipt } : {}),
+    receiptStatus,
+    warnings,
   }
 }

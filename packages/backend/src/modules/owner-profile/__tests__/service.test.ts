@@ -13,6 +13,9 @@ function row(overrides: Partial<OwnerCompanyDetailsRow> = {}): OwnerCompanyDetai
     vat_number: 'SE556677889901',
     vies_status: 'valid',
     vies_checked_at: '2026-01-01T00:00:00.000Z',
+    receipt_email: null,
+    billing_address: null,
+    shipping_address: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     ...overrides,
@@ -121,6 +124,102 @@ describe('validateCompanyDetailsInput (#3332)', () => {
       vat_number: 'DE811569869',
     })
     expect(result.ok).toBe(true)
+  })
+})
+
+describe('validateCompanyDetailsInput — receipt email and addresses (#4870)', () => {
+  const base = { legal_name: 'Acme', country: 'SE', org_number: '1', vat_number: null }
+
+  it('omitted stays undefined — "keep the stored value"', () => {
+    const result = validateCompanyDetailsInput(base)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.receipt_email).toBeUndefined()
+    expect(result.value.billing_address).toBeUndefined()
+    expect(result.value.shipping_address).toBeUndefined()
+  })
+
+  it('null clears, and an empty string clears too (the vat_number convention)', () => {
+    const cleared = validateCompanyDetailsInput({ ...base, receipt_email: null, billing_address: null, shipping_address: null })
+    expect(cleared.ok && cleared.value.receipt_email).toBeNull()
+    expect(cleared.ok && cleared.value.billing_address).toBeNull()
+    expect(cleared.ok && cleared.value.shipping_address).toBeNull()
+
+    const blank = validateCompanyDetailsInput({ ...base, receipt_email: '   ' })
+    expect(blank.ok && blank.value.receipt_email).toBeNull()
+  })
+
+  it('normalises a receipt email (trim, stored as typed — never lowercased)', () => {
+    const result = validateCompanyDetailsInput({ ...base, receipt_email: '  Philip@Example.SE ' })
+    expect(result.ok && result.value.receipt_email).toBe('Philip@Example.SE')
+  })
+
+  it.each([
+    'philip',
+    'philip@example',
+    'Philip <philip@example.se>',
+    'philip@exa mple.se',
+    'philip@example.se\nBcc: x@y.se',
+    `${'a'.repeat(250)}@example.se`,
+  ])('rejects an unusable receipt email %j', (receipt_email) => {
+    expect(validateCompanyDetailsInput({ ...base, receipt_email })).toEqual({
+      ok: false,
+      error: 'invalid_receipt_email',
+    })
+  })
+
+  it('normalises an address: trims, uppercases the country, omits blank optional members', () => {
+    const result = validateCompanyDetailsInput({
+      ...base,
+      billing_address: {
+        line1: '  Sveavagen 1 ',
+        line2: '   ',
+        line3: null,
+        city: ' Stockholm ',
+        postCode: ' 111 57 ',
+        subdivision: '',
+        country: 'se',
+      },
+    })
+    expect(result.ok && result.value.billing_address).toEqual({
+      line1: 'Sveavagen 1',
+      city: 'Stockholm',
+      postCode: '111 57',
+      country: 'SE',
+    })
+  })
+
+  it.each([
+    { label: 'no line1', address: { city: 'Stockholm', country: 'SE' } },
+    { label: 'no city', address: { line1: 'Sveavagen 1', country: 'SE' } },
+    { label: 'no country', address: { line1: 'Sveavagen 1', city: 'Stockholm' } },
+    { label: 'a three-letter country', address: { line1: 'Sveavagen 1', city: 'Stockholm', country: 'SWE' } },
+    { label: 'a non-letter country', address: { line1: 'Sveavagen 1', city: 'Stockholm', country: '12' } },
+    { label: 'an over-long line1', address: { line1: 'a'.repeat(71), city: 'Stockholm', country: 'SE' } },
+    { label: 'an over-long city', address: { line1: 'Sveavagen 1', city: 'c'.repeat(51), country: 'SE' } },
+    {
+      label: 'an over-long postCode',
+      address: { line1: 'Sveavagen 1', city: 'Stockholm', country: 'SE', postCode: '1'.repeat(17) },
+    },
+    {
+      label: 'an over-long subdivision',
+      address: { line1: 'Sveavagen 1', city: 'Stockholm', country: 'SE', subdivision: 'SE-ABCD' },
+    },
+    {
+      label: 'a bidi control character',
+      address: { line1: 'Sveavagen\u202e1', city: 'Stockholm', country: 'SE' },
+    },
+  ])('rejects an unusable billing address: $label', ({ address }) => {
+    expect(validateCompanyDetailsInput({ ...base, billing_address: address })).toEqual({
+      ok: false,
+      error: 'invalid_billing_address',
+    })
+  })
+
+  it('names the shipping address separately from the billing address', () => {
+    expect(
+      validateCompanyDetailsInput({ ...base, shipping_address: { line1: '', city: 'Stockholm', country: 'SE' } }),
+    ).toEqual({ ok: false, error: 'invalid_shipping_address' })
   })
 })
 

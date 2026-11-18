@@ -29,13 +29,14 @@ Read it before changing behaviour; this README is the merchant's path through it
 The kit has no licence yet. During the pilot it is used under written permission
 from Haven. Do not redistribute it.
 
-## The four parts
+## The parts
 
 | Part | What it is | Required | In this release |
 |---|---|---|---|
 | Paywall proxy | This package. Answers an unpaid call with an x402 challenge, has the payment verified and settled by Coinbase's facilitator, then forwards the call upstream with your API key. | Yes | Yes |
 | Products file | One JSON file mapping a route or model to a fixed price, with an optional output-token cap and a description. | Yes | Yes |
 | Discovery document | A public, machine-readable list of your products, served by the proxy at `/.well-known/x402`. | Yes | Yes |
+| Receipt | Your own receipt for a paid call, returned as the `x-receipt-json` response header. | When you configure a VAT rule | Yes |
 | Sales reporter | After each settled call, a small record sent to Haven. | Required for the pilot | Not in this release (#4898) |
 
 ## Requirements: what you run and monitor
@@ -165,11 +166,29 @@ Optional:
 | `RESERVATION_DEADLINE_MS` | How long the request that reserved a payment is trusted to finish settling, at least `110000`. |
 | `DIRECTORY_LISTING` | Coinbase's directory listing. Off by default, and `on` is refused in this release. |
 
+Receipt (optional). With no `VAT_RULE` the proxy sends no receipt and needs no
+seller detail:
+
+| Variable | Meaning |
+|---|---|
+| `VAT_RULE` | Your tax rule. The pilot has one value, `SE_25_WITH_EU_REVERSE_CHARGE`: 25% Swedish VAT taken out of the price, and reverse charge when the buyer's accepted declaration names another EU country. Unset: no receipt. |
+| `SELLER_NAME` | Your legal name, on the receipt's seller block. Required with `VAT_RULE`. |
+| `SELLER_ORG_NR` | Your organisation number. Required with `VAT_RULE`. |
+| `SELLER_VAT_NR` | Your VAT registration number. Required with `VAT_RULE`. |
+| `SELLER_ADDRESS` | Your address, on the seller block. Optional. |
+| `SELLER_IBAN`, `SELLER_BIC` | Your bank details, on the seller block. Optional. |
+| `SELLER_SUPPORT_CONTACT` | Your own support contact. Optional, and never Haven's. The proxy sends the receipt as JSON only, and that shape carries no support line, so this value has no effect on the receipt the proxy emits. |
+
+On Base mainnet the proxy refuses to start with `VAT_RULE` set and any of
+`SELLER_NAME`, `SELLER_ORG_NR` or `SELLER_VAT_NR` missing. On a test network it
+starts with a warning and sends no receipt.
+
 What you should see: the proxy starts and logs one JSON line per event. The
 first is `started`, with `port`, `network`, `network_label`, `pay_to`,
-`operator`, `products`, `base_path`, `sales_reporting: "off"` and
-`receipt: "off"`. A missing or invalid setting refuses startup and names every
-problem at once, never a secret's value.
+`operator`, `products`, `base_path`, `sales_reporting: "off"` and `receipt`
+(`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A missing
+or invalid setting refuses startup and names every problem at once, never a
+secret's value.
 
 ## Step 5: run it on Base Sepolia
 
@@ -279,12 +298,103 @@ readable body, so Haven never reads a payment that reached you as rejected.
 
 The full table, with the buyer's recourse for each, is section 8 of the design.
 
+## The receipt
+
+With a VAT rule configured, a paid call returns your own receipt as the
+`x-receipt-json` response header: the receipt's JSON, base64-encoded so the
+header stays ASCII-safe. It is sent with the response headers of a delivered
+call — a 2xx passed through, or a 3xx/4xx the proxy wraps into a 200 — and it
+is the JSON only. A proxy has no carrier for the rendered text, because the
+response body is your upstream API's goods; a reader that wants the text
+renders it from the header.
+
+The receipt carries:
+
+- your seller block, from the settings above: name, address, organisation
+  number, VAT number, optional bank details, and the receiving address;
+- the buyer block: the payer address the proxy verified the payment from, and
+  the buyer's declaration when the request carried an `X-Tax-Declaration` that
+  verifies against that payer, on this network, and is unexpired. A
+  declaration that fails any check is treated as absent and never refuses the
+  purchase;
+- the VAT treatment your rule gives that declaration, and the VAT figures it
+  implies;
+- one line built from the products file entry: `<name> — <description>` (the
+  `id` when there is no name), the price, and no billing period for a
+  per-call product;
+- a receipt number derived from the settlement transaction hash, so the same
+  transaction gives the same number after a restart and on a retry, and an OCR
+  reference derived from it;
+- the settlement transaction hash and the status.
+
+**The merchant decides its own tax treatment.** The kit applies the rule you
+configure and makes no tax decision of its own: it neither computes a
+treatment you did not choose nor files tax. The price never changes with the
+treatment — VAT is taken out of the price, never added to it.
+
+**With no VAT rule configured, no receipt is sent.** Haven's reader accepts a
+receipt only when it states VAT figures, and a receipt stating a VAT of zero
+would be read as a stated zero — a tax claim the kit has no basis to make. A
+seller the Swedish rule does not fit configures no rule, and the proxy logs
+`receipt: "off (no VAT_RULE)"` at startup.
+
+The receipt names no Haven address or contact: the seller block and the
+support contact are yours. The proxy removes `x-receipt-json` and
+`x-receipt-url` from your upstream's response, so an upstream cannot pass off
+its own receipt as the kit's. A receipt that cannot be built never fails a
+settled call: the header is left out and the failure is logged.
+
+The shape is the one Haven's accounting reads, documented field by field in
+[`docs/operations/merchant-receipt-shape.md`](../../docs/operations/merchant-receipt-shape.md).
+
+## Haven's own demo on Base Sepolia (#4892)
+
+Haven runs one deployment of this proxy itself: an internal technical demo in
+front of Opper's inference API, on Base Sepolia, with test money only. It is not
+listed in any directory or catalogue, and it is not Haven selling: it receives
+into a Haven dev account until Opper has its own, and then into Opper's.
+
+- Products: [`demo/opper-products.json`](demo/opper-products.json). Two models
+  on Opper's one chat-completions route (`POST /v3/compat/chat/completions`),
+  each with its own output-token cap. Products on one route are told apart by
+  `model`, so one model cannot be sold at two caps on the same route.
+  `azure/gpt-5-mini` is a reasoning model, and its reasoning tokens count
+  against the cap, so a 1,000-token answer can come back short. Check it on the
+  first paid call and raise the cap and price if it does.
+- Where it runs and what it is set to:
+  [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
+  § *Paywall-proxy (the #4892 demo)*. The secrets are listed in
+  [`docs/operations/secret-rotation.md`](../../docs/operations/secret-rotation.md).
+- It says what it is: `OPERATOR_NAME` and `ENDPOINT_DESCRIPTION` name it an
+  internal technical demo run by Haven, and every product description in the
+  demo file starts the same way, so the 402 challenge and the discovery
+  document both say so.
+- Its receipts carry Haven's demo seller (Haven Demo AB, the demo merchant's
+  `DEMO_SELLER`) for as long as Haven runs the endpoint, never the pilot
+  partner's details.
+
+### Running the same thing yourself
+
+To run this demo as your own merchant endpoint, change these:
+
+| What | Variable | Change it to |
+|---|---|---|
+| Your upstream key | `UPSTREAM_API_KEY` | Your own Opper key (or your own provider's, with its `UPSTREAM_BASE_URL`). |
+| Your receiving account | `PAY_TO` | Your own Haven account's address. |
+| Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account (Step 2). |
+| Who you are | `OPERATOR_NAME`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`, and optionally `OPERATOR_CONTACT` | Your own name and description, without the "internal technical demo" wording. |
+| Your chain access | `RPC_URL` | Your own Base Sepolia RPC URL. Haven's deployment references its own backend's provider URL, which you cannot use. |
+| Where you run it | `PUBLIC_BASE_URL`, `CLIENT_IP_HEADER`, `PAYMENTS_DB` | Your own `https` origin, the client-address header your own host's edge sets (or unset), and a path on your own persistent disk. |
+| Your receipt | `VAT_RULE`, `SELLER_*` | Your own legal details, or unset `VAT_RULE` for no receipt. |
+| Your products | `PRODUCTS_FILE` | Your own copy of the demo file, with your prices and descriptions. |
+
+Check your upstream provider's terms allow you to offer calls made with your
+key to other parties before you take a real payment.
+
 ## Not in this release
 
 - Sales reporting to Haven (#4898). The proxy logs `sales_reporting: "off"` at
   startup and sends nothing.
-- Receipts (#4913). The proxy logs `receipt: "off"` and sends no
-  `x-receipt-json` header.
 - Coinbase directory listing (#4887). `DIRECTORY_LISTING=on` is refused at
   startup.
 - Base mainnet. This release runs on Base Sepolia only. The step for switching

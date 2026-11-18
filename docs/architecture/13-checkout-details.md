@@ -228,9 +228,13 @@ Haven's own field.
 `receipt_email` is one address, at most 254 characters (RFC 5321 §4.5.3.1.3's
 forward-path limit, less the angle brackets), with no display name and no CR or
 LF. It is shared only when the owner saved one. The sign-up email is never
-sent: the form suggests it as a prefill, and nothing reaches a merchant until
-the owner has saved a receipt email (owner decision 2026-11-17). Haven never
-falls back to the sign-up email.
+sent: the form suggests it as a prefill only while the owner has no company
+details saved at all, and nothing reaches a merchant until the owner has saved
+a receipt email (owner decision 2026-11-17). Once a row exists, a row with no
+receipt email shows the field empty — a cleared email and one never set are
+both `NULL`, so a per-field prefill would store the sign-up email again on the
+owner's next save (owner decision 2026-11-18, #4946). Haven never falls back
+to the sign-up email.
 
 ## 3. Haven's answer
 
@@ -586,8 +590,8 @@ stored details, and the past receipts stay for that period.
 
 The receipt email is shared only when the owner saved one. The sign-up email is
 never sent (owner decision 2026-11-17). The form suggests the sign-up email as
-a prefill; nothing reaches a merchant until the owner has saved a receipt
-email.
+a prefill only when the owner has no company details saved (#4946); nothing
+reaches a merchant until the owner has saved a receipt email.
 
 ### Personal data
 

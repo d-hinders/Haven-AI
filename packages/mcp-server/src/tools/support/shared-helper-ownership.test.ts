@@ -74,6 +74,7 @@ import {
 import * as capPrice from './cap-price.js'
 import * as catalogEntry from './catalog-entry.js'
 import * as allowanceBlock from './allowance-block.js'
+import * as checkoutDetails from './checkout-details.js'
 import * as errors from './errors.js'
 import * as guidance from './guidance.js'
 import * as mcpContext from './mcp-context.js'
@@ -144,6 +145,8 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // branch (every slice reaches it) and the catalog prepare preflight's
   // DELEGATION_EXPIRED refusal (s2810), which must use the same words.
   DELEGATION_EXPIRED_OMITTED_REASON: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  // #4872: the checkout-details refusal's omitted reason, read by normalizeError.
+  CHECKOUT_DETAILS_OMITTED_REASON: { module: 'errors', slices: ['s2810', 's2812'] },
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
@@ -278,6 +281,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // s2811's haven_pay_x402_quote (both branches) and s2810's
   // haven_pay_mcp_tool (both branches).
   delegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
+  // #4872 part 2: checkout details on the hosted paid paths. The pay tools
+  // (s2810) refuse before any intent; the settle leg (s2812) builds the
+  // answer for the paid request it sends. One module, so both read the same
+  // SDK decision.
+  refuseUnshareableCheckoutDetails: { module: 'checkout-details', slices: ['s2810'] },
+  checkoutDetailsHeaderForSettle: { module: 'checkout-details', slices: ['s2812'] },
   // The block's shape type — type-only, mapped for ownership (see TYPE_ONLY_EXPORTS).
   DelegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
 }
@@ -301,6 +310,10 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
+  refuseUnshareableCheckoutDetails:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  checkoutDetailsHeaderForSettle:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
   // s2811 (#4830): the expected_amount comparison and the not-compared answer.
   // Only haven_quote_x402 calls them (the two MCP quote tools take no
   // expectation), but they stay in shared support DELIBERATELY: the local
@@ -507,6 +520,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
   // block into `haven_pay_mcp_tool` (s2810) made it a two-slice helper —
   // moved VERBATIM, call sites unchanged.
   'allowance-block': ['delegationAllowanceBlock', 'DelegationAllowanceBlock'],
+  'checkout-details': ['refuseUnshareableCheckoutDetails', 'checkoutDetailsHeaderForSettle'],
   errors: [
     'HostedToolError',
     'runTool',
@@ -518,6 +532,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'SETTLEMENT_PROOF_HEADER_MISSING_CODE', // #4061
     'isMissingProofHeaderRefusal', // #4061
     'DELEGATION_EXPIRED_OMITTED_REASON', // #4458
+    'CHECKOUT_DETAILS_OMITTED_REASON', // #4872
   ],
   guidance: [
     'buildAgentGuidance',
@@ -650,6 +665,7 @@ const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
   'cap-price': capPrice,
   'catalog-entry': catalogEntry,
   'allowance-block': allowanceBlock,
+  'checkout-details': checkoutDetails,
   errors,
   guidance,
   'mcp-context': mcpContext,

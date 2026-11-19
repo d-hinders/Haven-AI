@@ -17,6 +17,7 @@
  */
 import { z } from 'zod/v3'
 import {
+  CheckoutDetailsUnavailableError,
   HavenApiError,
   HavenError,
   HavenPaymentStateError,
@@ -539,7 +540,33 @@ function normalizeMerchantEgressError(
   }
 }
 
+/** #4872: why no tool follows a checkout-details refusal (the local runtime's reason, verbatim). */
+export const CHECKOUT_DETAILS_OMITTED_REASON =
+  'the merchant needs a checkout detail only the owner can share: tell the user to save it in business details and turn on checkout-details sharing for this agent, then retry'
+
 export function normalizeError(err: unknown): ToolFailure {
+  // #4872: a merchant requires a checkout detail this agent cannot share.
+  // The hosted pay tools throw it BEFORE any intent is created, and the
+  // settle leg before the paid request is sent. Field names, never values.
+  if (err instanceof CheckoutDetailsUnavailableError) {
+    return {
+      success: false,
+      code: AgentPaymentFailureCode.CheckoutDetailsUnavailable,
+      message: err.message,
+      statusCode: err.statusCode,
+      ...(err.paymentId ? { paymentId: err.paymentId } : {}),
+      missing_fields: err.missingFields,
+      reason: err.reason,
+      next_action: AgentPaymentNextAction.StopAndTellUser,
+      ...nextStepWireFields(
+        refusalNextStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason: CHECKOUT_DETAILS_OMITTED_REASON,
+        }),
+      ),
+    }
+  }
   if (err instanceof HostedToolError) {
     return {
       success: false,

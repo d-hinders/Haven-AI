@@ -547,6 +547,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'X_CHECKOUT_DETAILS_HEADER', // #4872
+      'actualPaidHeaderBlockBytes', // #4872
       'addressFromKey',
       'advertisesHavenPassport', // #4722
       'assertBoundDirectPaymentUserOp', // #3283

@@ -67,6 +67,7 @@ import {
   type EvidenceReportOutcome,
   type AgentPaymentWarning,
   type X402McpTransport,
+  X_CHECKOUT_DETAILS_HEADER,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
@@ -78,6 +79,7 @@ import {
   paymentWindowExpiredError,
   runTool,
 } from './support/errors.js'
+import { checkoutDetailsHeaderForSettle } from './support/checkout-details.js'
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -116,6 +118,14 @@ export interface ResolvedMerchantCallContext {
    * haven_pay_mcp_tool purchase). Display tier of the purchase label only.
    */
   catalogName: string | null
+  /**
+   * #4872: the merchant's checkout-details request, verbatim from the challenge
+   * stored at authorize (merchant-call-context). Untrusted; parsed with the
+   * SDK's reader at settle. Absent when the challenge asked for nothing, and
+   * on an explicitly-threaded context (the version-skew path has no stored
+   * challenge to read, so no answer is sent there).
+   */
+  checkoutDetailsRequest?: unknown
 }
 
 /** #3101: after an erc7710 settle whose merchant reported a hash — report it if the agent can, else poll. */
@@ -465,6 +475,7 @@ export async function resolveMerchantCallContext(
       // catalog entry (the stored context carries it); absent on a direct
       // haven_pay_mcp_tool purchase.
       catalogName: ctx.catalogName ?? null,
+      ...(ctx.checkoutDetailsRequest !== undefined ? { checkoutDetailsRequest: ctx.checkoutDetailsRequest } : {}),
       mcpTransport: parseMcpTransport(
         ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
       ),
@@ -733,6 +744,21 @@ export async function deliverMerchantPayment(
   // their own tool name and run before any submit — never here.)
   const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
 
+  // #4872: the checkout-details answer for the paid request this server is
+  // about to send, measured on the ACTUAL payment header. A required field
+  // that can no longer be shared (sharing turned off since the pay tool's
+  // check) or that does not fit refuses delivery here — before the funding
+  // wait and before the merchant is contacted. The values stay in memory:
+  // never stored, logged or returned.
+  const requestHeaders = { 'Content-Type': 'application/json' }
+  const checkoutDetailsHeader = await checkoutDetailsHeaderForSettle(haven, {
+    storedRequest: context.checkoutDetailsRequest,
+    paymentHeader: args.payment_header,
+    requestHeaders,
+    noFundingLeg: options?.noFundingLeg === true,
+    paymentId: args.payment_id,
+  })
+
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
   // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
   // races the not-yet-mined funding tx and returns "Payment verification
@@ -763,7 +789,9 @@ export async function deliverMerchantPayment(
       url: context.merchantUrl,
       init: {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: checkoutDetailsHeader
+          ? { ...requestHeaders, [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader }
+          : requestHeaders,
         body: JSON.stringify(envelope),
       },
       paymentId: args.payment_id,

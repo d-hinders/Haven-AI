@@ -1611,6 +1611,10 @@ export interface ToolFailure {
    * revert carries no `revert_cause`.
    */
   revert_cause?: string
+  /** #4872: the checkout-detail field NAMES a merchant requires and this agent cannot share (never values). */
+  missing_fields?: string[]
+  /** #4872: why they cannot be shared (`not_shared`, `not_stored`, `over_budget`, `unreadable`, …). */
+  reason?: string
   /**
    * #3101 (epic #3105, decision 7): a refusal that carries a next step emits
    * the same `next_tool` family a success does, built by the SDK's typed

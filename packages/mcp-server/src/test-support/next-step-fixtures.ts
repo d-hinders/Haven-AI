@@ -345,7 +345,9 @@ export const REFUSAL_SITE_COUNT = 93
 // status split.
 // #4826: 88 = 87 + 1 — normalizeError's typed payment_already_submitted 409
 // branch names the status read.
-export const REFUSAL_STEP_CALLS = 88
+// #4872: 89 = 88 + 1 — normalizeError's CHECKOUT_DETAILS_UNAVAILABLE branch
+// (stop_and_tell_user, no tool: only the owner can share the field).
+export const REFUSAL_STEP_CALLS = 89
 
 export const REFUSAL_SITES: Site[] = [
   { site: 'catalog-purchase.ts prepare: allowance short', base: { code: 'INSUFFICIENT_ALLOWANCE', message: 'm', statusCode: 402, suggestedTool: 'haven_get_allowances' }, step: { nextAction: A.FundAccountOrRaiseAllowance, nextTool: null, nextToolOmittedReason: 'the account needs funds or a higher allowance first; haven_get_allowances shows the numbers' }, expect: { next_action: 'fund_account_or_raise_allowance', suggested_tool: 'haven_get_allowances', ...OMIT('the account needs funds or a higher allowance first; haven_get_allowances shows the numbers') } },

@@ -219,6 +219,7 @@ export {
   CHECKOUT_DETAILS_BUDGET_BYTES,
   CHECKOUT_DETAIL_FIELDS,
   HEADER_BLOCK_CEILING_BYTES,
+  actualPaidHeaderBlockBytes,
   X_CHECKOUT_DETAILS_HEADER,
   checkoutDetailsRequestOf,
   decideCheckoutDetails,

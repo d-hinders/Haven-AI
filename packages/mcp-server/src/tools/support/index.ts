@@ -55,3 +55,6 @@ export {
   signerCompatibilityNotice,
   taskSignerCompatibilityNotice,
 } from './signer-compat.js'
+
+// #4872 part 2: checkout details on the hosted paid paths (pay tools + settle).
+export { checkoutDetailsHeaderForSettle, refuseUnshareableCheckoutDetails } from './checkout-details.js'

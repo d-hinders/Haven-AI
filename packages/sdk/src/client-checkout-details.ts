@@ -92,12 +92,22 @@ const REASON_WORDS: Record<CheckoutDetailsRefusalReason, string> = {
 export function checkoutDetailsRefusalError(
   missingFields: CheckoutDetailField[],
   reason: CheckoutDetailsRefusalReason,
-  { funded = false }: { funded?: boolean } = {},
+  {
+    funded = false,
+    unsent = false,
+  }: {
+    /** The payment is funded (EIP-3009 after the funding leg): it is not delivered. */
+    funded?: boolean
+    /** A settlement exists but was never sent to the merchant (erc7710 at settle): nothing moved. */
+    unsent?: boolean
+  } = {},
 ): CheckoutDetailsUnavailableError {
   const names = missingFields.map((f) => FIELD_WORDS[f]).join(', ')
   const outcome = funded
     ? 'The payment is funded but was not delivered: resume it once the owner has fixed this.'
-    : 'No payment was created and no funds moved.'
+    : unsent
+      ? 'The payment was not sent to the merchant, so nothing was redeemed and no funds moved.'
+      : 'No payment was created and no funds moved.'
   return new CheckoutDetailsUnavailableError(
     missingFields,
     reason,

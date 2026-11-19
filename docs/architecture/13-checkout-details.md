@@ -399,6 +399,13 @@ the SDK holds). So the block's size is known before the payment is authorised.
 
 ## 4. Which payment paths carry it
 
+> **Implementation status (#4872).** The SDK paths (`fetch`, `payX402Quote`,
+> `resumeX402Payment`) and the local MCP tools that reach them carry the answer
+> and refuse before payment, in `packages/sdk/src/checkout-details.ts` and
+> `client-checkout-details.ts`. The two hosted paths (the MCP-merchant
+> completion and the state-direct `retry_headers`) follow in the second #4872
+> PR; until then they send no answer and do not refuse.
+
 The census below covers every path the issue names, plus the local MCP tools
 that reach the same SDK seam. "Supported in this epic" means the path answers
 the request and refuses before payment when a required field cannot be shared.

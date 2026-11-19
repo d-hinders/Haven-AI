@@ -193,6 +193,17 @@ echo had grown EIP-3009 headers to 5–6.5 KB — Anchor answered 431 to a doubl
 4,969-byte one after its funding leg confirmed. A successful merchant response
 may include `PAYMENT-RESPONSE` evidence.
 
+When the merchant's challenge asks for checkout details under
+`extensions["haven-checkout-details"]` (#4872,
+[`13-checkout-details.md`](13-checkout-details.md)), the paid retry on the SDK
+paths (`fetch`, `payX402Quote`, `resumeX402Payment`, and the local MCP tools
+that call them) also carries `X-Checkout-Details: <base64url(JSON)>` with only
+the fields asked for, on either scheme. It is unsigned, goes to the merchant
+only, and is never merged into the echoed `extensions` in `PAYMENT-SIGNATURE`.
+It is decided before `authorizeX402`: a required field this agent cannot share
+refuses the purchase with `CHECKOUT_DETAILS_UNAVAILABLE` before any payment is
+created. A challenge that asks for nothing gets exactly today's retry.
+
 **Native MCP transport profile (#3118).** A merchant following the official
 x402 MCP transport specification (`x402-foundation/x402`,
 `specs/transports-v2/mcp.md`) never answers HTTP 402. Its challenge is a tool

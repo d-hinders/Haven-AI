@@ -307,4 +307,30 @@ describe('checkout details on the paid request (#4872)', () => {
     expect(err.reason).toBe('not_stored')
     expect(JSON.stringify(err.body) + err.message).not.toContain(EMAIL)
   })
+
+  describe('the paths that are not supported pay as today (§4)', () => {
+    // The adapter rebuilds the challenge from tool arguments with
+    // `toolX402PaymentRequired`, which carries no `extensions`: even an agent
+    // that passes the merchant's request along gets no answer and no refusal.
+    const extensions = ask({ receipt_email: { required: true } })
+    const base = { url: MERCHANT_URL, payTo: accepted.payTo, amount: accepted.amount, asset: accepted.asset, network: accepted.network, extensions }
+
+    it('authorize_x402_payment: authorised as today, no read of the details, no refusal', async () => {
+      const { calls } = wire('fetch', { [DETAILS_PATH]: { available: false, reason: 'disabled' } }, challenge(extensions))
+      const out = (await newClient().executeTool('authorize_x402_payment', { ...base, idempotencyKey: 'adapter-4872' })) as Record<string, unknown>
+      expect(out.code).not.toBe('CHECKOUT_DETAILS_UNAVAILABLE')
+      expect(typeof out.payment_header).toBe('string')
+      expect(authorizeCalls(calls)).toHaveLength(1)
+      expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
+    })
+
+    it('resume_x402_payment: resumed as today, no read of the details, no refusal', async () => {
+      const { calls } = wire('resumeX402Payment', { [DETAILS_PATH]: { available: false, reason: 'disabled' } }, challenge(extensions))
+      const out = (await newClient().executeTool('resume_x402_payment', { ...base, payment_id: 'pay_4872', idempotencyKey: 'adapter-4872' })) as Record<string, unknown>
+      expect(out.code).not.toBe('CHECKOUT_DETAILS_UNAVAILABLE')
+      expect(typeof out.payment_header).toBe('string')
+      expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
+    })
+  })
 })
+

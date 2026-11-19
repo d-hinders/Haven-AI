@@ -1657,6 +1657,18 @@ signer imports:
   construction binds neither the resolver nor a delegate key, so it is
   structurally header-free.
 
+- **Checkout details on the paid request (#4872)** — NOT a signing shape.
+  When a merchant's challenge asks for a receipt email or an address and the
+  owner turned sharing on for the agent, the SDK attaches the requested fields
+  to the paid request as `X-Checkout-Details: <base64url(JSON)>`, unsigned, to
+  the merchant only: never to Haven, never in the payment payload, never in the
+  echoed `extensions` that reach the facilitator. It authorises nothing and
+  moves nothing. It adds one refusal BEFORE the payment is authorised — a
+  required field the agent cannot share stops the purchase with
+  `CHECKOUT_DETAILS_UNAVAILABLE`, so no intent is created and no funds move —
+  and it changes no amount, recipient or signing rule. The values are never
+  logged. The design is `docs/architecture/13-checkout-details.md`.
+
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. On `haven_sign`, every refusal on
 the shape checks, the settlement child's (malformed children included), is

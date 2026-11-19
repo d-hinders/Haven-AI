@@ -145,3 +145,24 @@ export async function resolveCheckoutDetails(
     estimatePaidHeaderBlockBytes({ paymentRequired, accepted, isErc7710, answerHeader }),
   )
 }
+
+/**
+ * The checkout-details answer for one challenge, decided BEFORE the payment is
+ * authorised (`docs/architecture/13-checkout-details.md` §5). Returns the
+ * header value to attach to the paid request, or `undefined` (no request, or
+ * nothing could be shared for optional fields). Throws
+ * `CheckoutDetailsUnavailableError` when a required field cannot be shared;
+ * `funded` says so in the message on a resume, where the payment already
+ * exists. A challenge that asks for nothing makes no Haven call.
+ */
+export async function checkoutDetailsHeaderFor(
+  client: { getAgent: () => Promise<{ id: string }>; get: <T>(path: string) => Promise<T> },
+  paymentRequired: X402PaymentRequired,
+  url: string,
+  { funded = false }: { funded?: boolean } = {},
+): Promise<string | undefined> {
+  const decision = await resolveCheckoutDetails(client, paymentRequired)
+  logCheckoutDetailsOutcome(decision, url)
+  if (decision.kind === 'refuse') throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, { funded })
+  return decision.kind === 'answer' ? decision.header : undefined
+}

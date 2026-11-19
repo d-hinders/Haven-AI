@@ -1,8 +1,4 @@
-import {
-  checkoutDetailsRefusalError,
-  logCheckoutDetailsOutcome,
-  resolveCheckoutDetails,
-} from './client-checkout-details.js'
+import { checkoutDetailsHeaderFor } from './client-checkout-details.js'
 import { hashTypedData } from 'viem'
 import {
   signHash,
@@ -1478,7 +1474,7 @@ export class HavenClient {
     const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
     // #4872: decided BEFORE authorisation — a required checkout detail that
     // cannot be shared refuses here, with no payment created.
-    const checkoutDetailsHeader = await this.checkoutDetailsHeaderFor(quote.paymentRequired, quote.request.url)
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, quote.paymentRequired, quote.request.url)
 
     try {
       // #3378: forward every authorization option (taskBudgetId included —
@@ -1644,28 +1640,6 @@ export class HavenClient {
     return receipt
   }
 
-  /**
-   * #4872: the checkout-details answer for one challenge, decided BEFORE the
-   * payment is authorised (`docs/architecture/13-checkout-details.md` §5).
-   * Returns the header value to attach to the paid request, or `undefined`
-   * (no request, or nothing could be shared for optional fields). Throws
-   * `CheckoutDetailsUnavailableError` when a required field cannot be shared.
-   * A challenge that asks for nothing makes no Haven call.
-   */
-  private async checkoutDetailsHeaderFor(
-    paymentRequired: X402PaymentRequired,
-    url: string,
-    { funded = false }: { funded?: boolean } = {},
-  ): Promise<string | undefined> {
-    const decision = await resolveCheckoutDetails(
-      { getAgent: () => this.getAgent(), get: (path) => this.get(path) },
-      paymentRequired,
-    )
-    logCheckoutDetailsOutcome(decision, url)
-    if (decision.kind === 'refuse') throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, { funded })
-    return decision.kind === 'answer' ? decision.header : undefined
-  }
-
   async resumeX402Payment(input: ResumeX402PaymentInput | X402ResumeState): Promise<Response> {
     const inputInit = 'init' in input ? input.init : undefined
     const initialInit = withX402Wallet(
@@ -1692,7 +1666,7 @@ export class HavenClient {
     // the re-sign, so a refused resume leaves the authorization unused and a
     // later resume (once the owner fixed it) re-signs the same nonce (§5).
     const resumeUrl = url ?? paymentRequired.resource.url
-    const checkoutDetailsHeader = await this.checkoutDetailsHeaderFor(paymentRequired, resumeUrl, { funded: true })
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, resumeUrl, { funded: true })
 
     const receipt = await this.resumeAuthorizedX402({
       paymentId: input.paymentId,
@@ -1800,7 +1774,7 @@ export class HavenClient {
     const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
     // #4872: decided BEFORE authorisation; a required checkout detail that
     // cannot be shared refuses here, with no payment created.
-    const checkoutDetailsHeader = await this.checkoutDetailsHeaderFor(paymentRequired, url)
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, url)
     let receipt: X402Receipt
     try {
       receipt = await this.authorizeX402(paymentRequired, options)

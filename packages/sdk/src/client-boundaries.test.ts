@@ -161,6 +161,7 @@ const boundary: ClientBoundary = {
   privateTotalCeiling: 4,
   localImports: [
     './account-reads.js',
+    './client-checkout-details.js', // #4872: the checkout-details answer decided before authorisation and attached to the paid retry
     './client-identity.js', // #3303: the HavenClientUpdate type clientUpdate() returns
     './client-tax-declaration.js', // #3427: the buyer tax declaration resolution the paid EIP-3009 retry attaches
     './delegate-sweep.js',
@@ -459,10 +460,14 @@ describe('HavenClient structural boundary', () => {
       'AgentPaymentRailDescriptions',
       'AgentPaymentRailSchema',
       'AgentPaymentWarningCode',
+      'CHECKOUT_DETAILS_BUDGET_BYTES', // #4872
+      'CHECKOUT_DETAILS_EXTENSION', // #4872
+      'CHECKOUT_DETAIL_FIELDS', // #4872
       'CONNECTOR_PACKAGE_NAME',
       // #1756: the ONE confirmation deadline the payment poller and the
       // delegate sweep share. Public so a consumer reading `unconfirmed` can
       // see how long the SDK waited before saying so.
+      'CheckoutDetailsUnavailableError', // #4872
       'DEFAULT_CONFIRMATION_TIMEOUT_MS',
       'DEFAULT_NEXT_TOOL_BY_ACTION', // #3101
       'DIRECT_SIGN_CONTEXT_VERSION', // #3271
@@ -478,6 +483,7 @@ describe('HavenClient structural boundary', () => {
       'HAVEN_PASSPORT_EXTENSION', // #4722
       'HAVEN_SKILL_BODY_MD',
       'HAVEN_SKILL_MD',
+      'HEADER_BLOCK_CEILING_BYTES', // #4872
       'HOSTED_DISCOVERY_TIMEOUT_MS', // #3747
       'HOSTED_EGRESS_TIMEOUTS', // #3747
       'HOSTED_MAX_GET_REDIRECTS', // #3747
@@ -538,6 +544,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_REQUIRED_HEADER_NAME',
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
+      'X_CHECKOUT_DETAILS_HEADER', // #4872
       'addressFromKey',
       'advertisesHavenPassport', // #4722
       'assertBoundDirectPaymentUserOp', // #3283
@@ -552,12 +559,15 @@ describe('HavenClient structural boundary', () => {
       'canonicalizePassportReceipt', // #4723: the ONE canonicalizer (SDK + backend)
       'catalogFundingLegExpected', // #3839
       'checkPassport', // #4723: fetch-and-verify wrapper
+      'checkoutDetailsRefusalError', // #4872
+      'checkoutDetailsRequestOf', // #4872
       'compareNodeVersions',
       'composeDescription',
       'connectorRerunCommand',
       'connectorSpec',
       'connectorUpgradeCommand', // #3412
       'createNextStepBuilder', // #3101
+      'decideCheckoutDetails', // #4872
       'decodeBase64Json',
       'decodeBase64Utf8',
       'defaultNextToolFor', // #3101
@@ -567,6 +577,7 @@ describe('HavenClient structural boundary', () => {
       'encodeBase64Json',
       'encodeBase64Utf8',
       'encodePaymentProof',
+      'estimatePaidHeaderBlockBytes', // #4872
       'formatTokenAmount', // #3410
       'hashDelegation', // #3329
       'havenClientIdentity', // #3303
@@ -584,16 +595,19 @@ describe('HavenClient structural boundary', () => {
       'packedUserOperationHash', // #3271
       // #3727: the PAYMENT-RESPONSE decoder the hosted outcome report reuses
       // (transaction only, never payer).
+      'parseCheckoutDetailsRequest', // #4872
       'parseMerchantSettlement',
       'parseNextTool', // #3101
       'parsePaymentRequired',
       'parsePaymentRequiredResponse',
       'publicHttpsMerchantUrlRefusal', // #3747
       'readBodyCapped', // #3747
+      'readCheckoutDetailsAvailability', // #4872
       'readClientUpdate', // #3303
       'readX402ReceiptPayer',
       'renderNextTool', // #3101
       'replaceSettlementEvidenceMessage', // #4808
+      'resolveCheckoutDetails', // #4872
       'resolveConnectorChannel',
       'resolveTokenBySymbol', // #3410
       'resolveTokenFromAddress',
@@ -618,7 +632,9 @@ describe('HavenClient structural boundary', () => {
       'verifyPaymentReceipt',
       'verifySettlementChild', // #3283
       'verifySignature',
+      'withCheckoutDetailsHeader', // #4872
       'withHavenPassportExtension', // #4722: the one haven-passport merge rule (SDK + backend)
+      'withinHeaderBlock', // #4872
       'x402AssetTransferMethod',
       'x402AuthorizationAmount',
       'x402FacilitatorAddresses',
@@ -663,6 +679,13 @@ describe('HavenClient structural boundary', () => {
       'CatalogFundingLegHint', // #3839
       'CatalogSubmissionAccepted',
       'CheckPassportOptions', // #4723
+      'CheckoutAddress', // #4872
+      'CheckoutDetailField', // #4872
+      'CheckoutDetailsAvailability', // #4872
+      'CheckoutDetailsDecision', // #4872
+      'CheckoutDetailsRefusalReason', // #4872
+      'CheckoutDetailsRequest', // #4872
+      'CheckoutDetailsValues', // #4872
       'ClaudeTool',
       'EvidenceReportOutcome', // #2970
       'HavenAgent',

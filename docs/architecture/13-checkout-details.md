@@ -3,6 +3,8 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/sdk/src/client.ts
+  - packages/sdk/src/checkout-details.ts
+  - packages/sdk/src/client-checkout-details.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/sdk/src/x402.ts
   - packages/sdk/src/x402-erc7710-header-size.test.ts
@@ -399,6 +401,16 @@ the SDK holds). So the block's size is known before the payment is authorised.
 
 ## 4. Which payment paths carry it
 
+> **Implementation status (#4872).** The SDK paths (`fetch`, `payX402Quote`,
+> `resumeX402Payment`) and the local MCP tools that reach them (`haven_pay_x402`,
+> `haven_pay_x402_quote`, `haven_resume_x402_payment`, `haven_pay_mcp_tool`)
+> carry the answer and refuse before payment, in
+> `packages/sdk/src/checkout-details.ts` and `client-checkout-details.ts`. The
+> SDK paths pay the EIP-3009 option, so on them the answer rides EIP-3009 only;
+> the pre-authorise block estimate counts the caller's own request headers. The two hosted paths (the MCP-merchant
+> completion and the state-direct `retry_headers`) follow in the second #4872
+> PR; until then they send no answer and do not refuse.
+
 The census below covers every path the issue names, plus the local MCP tools
 that reach the same SDK seam. "Supported in this epic" means the path answers
 the request and refuses before payment when a required field cannot be shared.
@@ -411,6 +423,7 @@ the request and refuses before payment when a required field cannot be shared.
 | Local MCP tools (`packages/mcp/src/tools.ts`, lines 879, 1043 and 1057) | **Supported in this epic.** | They call `haven.fetch` and `haven.payX402Quote`, so they reach the same seam. |
 | Hosted MCP-merchant completion (`packages/mcp-server/src/tools/paid-mcp-completion.ts`, lines 760 to 762, into `completeX402MerchantCall` at `packages/sdk/src/client.ts` line 1825) | **Supported in this epic.** | Haven's server sends the paid request itself and adds the header to the request it sends. |
 | Hosted state-direct path (`packages/mcp-server/src/tools/state-direct-recovery.ts`, lines 1024 to 1026, the `haven_submit` tool) | **Supported in this epic.** | Haven's server adds the header to the `retry_headers` it returns; the agent sends the paid request itself. |
+| A resume by `payment_id` alone (the local `haven_resume_x402_payment { payment_id }`, which reads `GET /payments/:id/resume_state`) | **Not supported, because** the stored resume state rebuilds `paymentRequired` without the merchant's `extensions`, so there is no request to answer or refuse. A resume from a preserved `resume_state` that carries the challenge is supported. | None. The funded payment is delivered as today. |
 | SDK tool adapter `authorize_x402_payment` (`packages/sdk/src/client.ts`, line 2286) and `resume_x402_payment` (line 2309) | **Not supported, because** they rebuild the challenge from tool arguments with `toolX402PaymentRequired`, which carries no `extensions` (`packages/sdk/src/tool-adapter.ts` has no `extensions` at all), so they can neither answer nor refuse. | None. The purchase is paid as today. |
 | An integrator calling `POST /x402/authorize` directly | **Not supported, because** the request carries the payment requirements the integrator supplies, not the merchant's challenge, so Haven never sees the merchant's request. | None. The purchase is paid as today. |
 | An installed client older than #4872 | **Not supported, because** it does not know the extension: it echoes the entry and sends no answer. | None. The purchase is paid as today. |
@@ -458,7 +471,7 @@ value in `packages/sdk/src/types.ts` (#4872 adds it). The refusal carries:
 | Field | Meaning |
 |---|---|
 | `missing_fields` | The field names that could not be shared, in the order the merchant listed them. |
-| `reason` | `not_shared` (the owner has not turned sharing on for this agent), `not_stored` (the owner has not saved the field), or `over_budget` (the answer or the block would exceed its limit). |
+| `reason` | `not_shared` (the owner has not turned sharing on for this agent), `feature_disabled` (the deployment has checkout details off), `not_stored` (the owner has not saved the field), `over_budget` (the answer or the block would exceed its limit), `unreadable` (Haven's read of the details failed), or `backend_unsupported` (a backend without the agent read, a 404). The last three were added by #4872, as the issue requires the read failure and the older backend to be told apart from "sharing off". |
 | `next_action` | `stop_and_tell_user`. The owner must turn sharing on or save the field; the agent cannot. |
 
 The message names the field and the owner setting, and says no payment was

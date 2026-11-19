@@ -427,7 +427,7 @@ export function salesSearchTerm(q: string): string {
  * commas, trims each one and reads `all` as All. An id that would not survive
  * that — one with a comma, an outer space, a leading `~`, or the word `all` —
  * is written as `~` and its percent-encoding (which holds no comma or space);
- * every other id is written as itself, so ordinary links stay readable.
+ * every other id is written as itself, so an ordinary link shows the plain id.
  */
 const PRODUCT_ESCAPE = '~'
 

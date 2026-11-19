@@ -196,6 +196,7 @@ export {
   MerchantTimeoutError,
   FundingConfirmationUnknownError,
   FundingRevertedError,
+  CheckoutDetailsUnavailableError,
   X402Erc7710AlreadySettledError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,
@@ -209,6 +210,37 @@ export {
   SIGNER_UPDATE_FALLBACK,
   signerUpdateFallback,
 } from './types.js'
+
+// #4872: checkout details on the paid x402 request
+// (`docs/architecture/13-checkout-details.md`). The hosted MCP server builds
+// the same answer from the same functions.
+export {
+  CHECKOUT_DETAILS_EXTENSION,
+  CHECKOUT_DETAILS_BUDGET_BYTES,
+  CHECKOUT_DETAIL_FIELDS,
+  HEADER_BLOCK_CEILING_BYTES,
+  X_CHECKOUT_DETAILS_HEADER,
+  checkoutDetailsRequestOf,
+  decideCheckoutDetails,
+  estimatePaidHeaderBlockBytes,
+  parseCheckoutDetailsRequest,
+  withCheckoutDetailsHeader,
+  withinHeaderBlock,
+} from './checkout-details.js'
+export type {
+  CheckoutAddress,
+  CheckoutDetailField,
+  CheckoutDetailsAvailability,
+  CheckoutDetailsDecision,
+  CheckoutDetailsRefusalReason,
+  CheckoutDetailsRequest,
+  CheckoutDetailsValues,
+} from './checkout-details.js'
+export {
+  checkoutDetailsRefusalError,
+  readCheckoutDetailsAvailability,
+  resolveCheckoutDetails,
+} from './client-checkout-details.js'
 
 export {
   parsePaymentRequired,

@@ -448,6 +448,12 @@ signature rides the paid EIP-3009 merchant retry to the seller only as
 redeemed, spent or unlocked by it, so it sits beside the guards rather than in
 their allowlist.
 
+Checkout details (#4872, [`13-checkout-details.md`](13-checkout-details.md))
+are the opposite case: the answer is **unsigned**, so the edge entry builds
+nothing for it and no new signing surface exists. The SDK attaches
+`X-Checkout-Details` to the paid request from the agent's own read of the
+owner's saved details; the delegate key is not involved.
+
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait
 for the user to approve and execute the Safe payment" — an approval that cannot

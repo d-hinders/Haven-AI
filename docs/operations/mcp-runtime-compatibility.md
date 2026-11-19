@@ -154,6 +154,30 @@ last-verified: "2026-11-12"
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
 > `@haven_ai/core`, so a new core code cannot go unanswered locally.
 
+> **Contract change (#4872, part 1, 2026-11-19): checkout details on the
+> local paid tools.** `packages/mcp/src/tools.ts` is on this contract's cover
+> list. `haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool` and
+> `haven_resume_x402_payment` reach the SDK seam that answers a merchant's
+> checkout-details request (`docs/architecture/13-checkout-details.md`). A
+> required field the agent cannot share is refused by the SDK before the
+> payment is authorised, and `normalizeError` answers it with `code:
+> "CHECKOUT_DETAILS_UNAVAILABLE"`, `statusCode: 409`, `missing_fields`,
+> `reason`, `next_action: "stop_and_tell_user"` and a
+> `next_tool_omitted_reason`, never the generic `API_ERROR`. The failure
+> envelope gains the two optional fields `missing_fields` and `reason`.
+>
+> **What an installed client sees.** The four descriptions gain one sentence
+> each, so their `local-tool-contract.golden.json` entries change (regenerated
+> with `npm run snapshot:regen -w packages/mcp`). A paid request whose merchant
+> asked for checkout details carries `X-Checkout-Details`; one that asked for
+> nothing is byte-identical to before. No tool name, argument, input schema,
+> strict-input list, expected-context version, consent hash,
+> `tools-list.snapshot.json` entry or `next-arguments-corpus.json` row
+> changes, and no hosted runtime file changes: the hosted tools follow in
+> part 2. **How it is held.** `packages/mcp/src/checkout-details-refusal.test.ts`
+> drives the four tools with the real refusal and pins the typed answer.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4826, 2026-11-12): one more typed refusal on the local
 > MCP.** `packages/mcp/src/tools.ts` is on this contract's cover list. The
 > backend's x402 authorize replay for an idempotency key whose payment is

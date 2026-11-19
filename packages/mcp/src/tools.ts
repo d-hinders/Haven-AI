@@ -11,6 +11,7 @@
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  CheckoutDetailsUnavailableError,
   HavenApiError,
   HavenClient,
   HavenError,
@@ -518,13 +519,23 @@ const SUBMIT_DESCRIPTION = [
  * surface and the MCP surface pointed at the same prose source means new
  * guidance lands in both places at once and a parity test can catch drift.
  */
+/**
+ * #4872: checkout details on the paid request, on the local tools that reach
+ * the SDK seam (`haven.fetch`, `haven.payX402Quote`, `haven.resumeX402Payment`).
+ * Local-only for now: the hosted tools say it when the hosted paths carry it.
+ */
+const LOCAL_CHECKOUT_DETAILS_SENTENCE =
+  'When the merchant\'s challenge asks for checkout details (a receipt email, billing or shipping address) and the owner turned sharing on for this agent, the paid request carries only the fields asked for, in X-Checkout-Details, to the seller only. If the merchant marks a field required and this agent cannot share it, the call refuses with CHECKOUT_DETAILS_UNAVAILABLE before any payment is created: stop and tell the user which field the merchant needs.'
+const LOCAL_RESUME_CHECKOUT_DETAILS_SENTENCE =
+  'Resumed from a resume_state that carries the merchant\'s challenge: when it asks for checkout details and a required field cannot be shared, the resume refuses with CHECKOUT_DETAILS_UNAVAILABLE and does not deliver the funded payment — tell the user, and resume again once the owner has saved the field and turned sharing on. Resumed by payment_id alone, the stored state carries no challenge extensions, so checkout details are neither shared nor refused and the payment is delivered as today.'
+
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_send: composeDescription(sharedDescriptions.send, 'local'),
-  haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
+  haven_pay_mcp_tool: `${composeDescription(sharedDescriptions.payMcpTool)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
-  haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
-  haven_pay_x402: composeDescription(sharedDescriptions.payX402OneShot),
-  haven_resume_x402_payment: composeDescription(sharedDescriptions.resumeX402),
+  haven_pay_x402_quote: `${composeDescription(sharedDescriptions.payX402)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
+  haven_pay_x402: `${composeDescription(sharedDescriptions.payX402OneShot)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
+  haven_resume_x402_payment: `${composeDescription(sharedDescriptions.resumeX402)} ${LOCAL_RESUME_CHECKOUT_DETAILS_SENTENCE}`,
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
   haven_get_agent: composeDescription(sharedDescriptions.getAgent, 'local'),
@@ -595,6 +606,10 @@ export interface ToolFailure {
   next_tool_omitted_reason?: string
   resume_state?: unknown
   body?: unknown
+  /** #4872: the checkout-detail field NAMES a merchant requires and this agent cannot share (never values). */
+  missing_fields?: string[]
+  /** #4872: why they cannot be shared (`not_shared`, `not_stored`, `over_budget`, `unreadable`, …). */
+  reason?: string
   /**
    * #2983: carried on `MERCHANT_NOT_READY` — mirrors the hosted MCP's
    * `retry_with_new_quote` (`mcp-context.ts`'s `merchantNotReadyErrorFor`).
@@ -1900,6 +1915,10 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
   }
 }
 
+/** #4872: why no tool follows a checkout-details refusal. */
+const CHECKOUT_DETAILS_OMITTED_REASON =
+  'the merchant needs a checkout detail only the owner can share: tell the user to save it in business details and turn on checkout-details sharing for this agent, then retry'
+
 function normalizeError(err: unknown): ToolFailure {
   if (err instanceof MerchantNotReadyError) {
     return {
@@ -1963,6 +1982,24 @@ function normalizeError(err: unknown): ToolFailure {
       next_tool: 'haven_get_payment_status',
       next_arguments: { payment_id: err.paymentId },
       suggested_tool: 'haven_get_payment_status',
+    }
+  }
+
+  // #4872: the merchant requires a checkout detail this agent cannot share.
+  // Refused before the payment was authorised (or, on a resume, before the
+  // funded payment was delivered). Only the owner can fix it, so no tool
+  // follows. The answer names fields, never values.
+  if (err instanceof CheckoutDetailsUnavailableError) {
+    return {
+      success: false,
+      code: AgentPaymentFailureCode.CheckoutDetailsUnavailable,
+      message: err.message,
+      statusCode: err.statusCode,
+      missing_fields: err.missingFields,
+      reason: err.reason,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      next_action: AgentPaymentNextAction.StopAndTellUser,
+      next_tool_omitted_reason: CHECKOUT_DETAILS_OMITTED_REASON,
     }
   }
 

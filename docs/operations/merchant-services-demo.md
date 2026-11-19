@@ -187,14 +187,15 @@ The Stripe sandbox dashboard is optional, for the joke.
    crypto payment for the joke's price, whose metadata carries the
    transaction hash (#4854).
 3. **Show Haven:** reload the Sales page.
-   - the joke's row carries the **Received in Stripe** mark, and it is **not**
-     in Revenue: Stripe-held sales are kept out of every account tile;
-   - a separate **Received in Stripe** tile shows their amount, and the
-     payments line names it beside Revenue;
+   - the joke's row carries the **Received in Stripe** mark, and it **counts in
+     Revenue**, Sales and the By day chart like any sale, split as "in Stripe":
+     the Revenue tile's foot reads "… in Haven · … in Stripe", the payments
+     line says the same, and the chart draws an **In Stripe** series beside
+     **In Haven**. There is no separate tile: the page keeps its four;
    - opening the row: the payment into the Stripe deposit address, with its
      transaction hash, and no Sales account.
-4. **Say:** "Haven shows the sale, but the money is in Stripe's custody: it never
-   counts in a Haven balance."
+4. **Say:** "Haven counts the sale, and says where it was received. The money is
+   in Stripe's custody, so it never counts in a Haven balance."
 
 ### 2.3 More to show, if there is time *(not yet verified)*
 

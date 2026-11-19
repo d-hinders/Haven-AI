@@ -247,27 +247,32 @@ export function payerKey(payer: SalesPayer): string {
 // ── What the summary says ───────────────────────────────────────────────────
 
 /**
- * Every payment the ledger lists for the period: the account's sales,
- * no-product payments and own moves, plus the sales received in Stripe — the
- * list carries both kinds (#4952), so its count does too.
+ * Every payment the ledger lists for the period: the sales (a Stripe-held sale
+ * is one of them since #4981, so it is NOT added again), the no-product
+ * payments and the own moves. The list carries all three kinds.
  */
 export function ledgerCount(summary: SalesSummary): number {
-  return accountLedgerCount(summary) + stripeSalesCount(summary)
+  return accountLedgerCount(summary)
 }
 
-/** The payments into the Sales account itself: the ones every account figure describes. */
+/**
+ * The payments the summary counts: sales (wherever the money landed, #4981),
+ * payments with no product, and own moves. Own moves are always account-held.
+ */
 export function accountLedgerCount(summary: SalesSummary): number {
   return summary.sales + summary.without_product.count + summary.own_moves.count
 }
 
-// ── Received in Stripe (#4954; dev and Stripe sandbox) ──────────────────────
+// ── Where it was received (#4954, #4981; dev and Stripe sandbox) ────────────
 //
-// A sale paid to a Stripe deposit address the owner registered (#4952) is in
-// no account figure: Revenue, Sales, Average sale, the chart and both
-// breakdowns count the Sales account's payments only. Stripe-held sales have
-// ONE figure of their own, `received_in_stripe`, so each kind agrees with its
-// own rows. Nothing here is a Stripe balance: Haven reads no Stripe account,
-// only what the chain says reached the registered address.
+// A sale paid to a Stripe deposit address the owner registered (#4952) is a
+// sale like any other: Revenue, Sales, Average sale, the chart and both
+// breakdowns count it, wherever the money landed. Only BALANCES stay
+// Haven-only. The summary carries the split (`revenue_in_account_raw`,
+// `received_in_stripe`, `by_day[].in_stripe_raw`) so the page names where the
+// money was received without deriving it. Nothing here is a Stripe balance:
+// Haven reads no Stripe account, only what the chain says reached the
+// registered address.
 
 /** The mark a Stripe-held sale carries, in the row and in its detail. */
 export const STRIPE_MARK = { label: 'Received in Stripe', tone: 'brand' } as const
@@ -277,9 +282,27 @@ export function stripeSalesCount(summary: SalesSummary): number {
   return summary.received_in_stripe?.count ?? 0
 }
 
-/** Their amount, atomic USDC. */
+/** Their amount, atomic USDC: the Stripe-held part of `revenue_raw`. */
 export function stripeSalesRaw(summary: SalesSummary): string {
   return summary.received_in_stripe?.amount_raw ?? '0'
+}
+
+/** The part of `revenue_raw` received in the Haven account: the read's answer, else the remainder. */
+export function revenueInAccountRaw(summary: SalesSummary): string {
+  if (typeof summary.revenue_in_account_raw === 'string') return summary.revenue_in_account_raw
+  const rest = BigInt(summary.revenue_raw || '0') - BigInt(stripeSalesRaw(summary))
+  return String(rest > 0n ? rest : 0n)
+}
+
+/**
+ * "{in Haven} in Haven · {in Stripe} in Stripe" in the display currency, or
+ * null when the (filtered) summary has no Stripe-held sale: there is then
+ * nothing to split. One helper for the Revenue tile's foot and the list's
+ * summary line, so the two cannot word it apart.
+ */
+export function revenueSplitText(summary: SalesSummary, money: SalesMoney): string | null {
+  if (stripeSalesCount(summary) === 0) return null
+  return `${salesTotalText(revenueInAccountRaw(summary), money)} in Haven · ${salesTotalText(stripeSalesRaw(summary), money)} in Stripe`
 }
 
 /** True for a sale received in Stripe, from the row's `held_by` (the registry's answer, never the record's). */
@@ -340,7 +363,7 @@ export function productLines(summary: SalesSummary, money: SalesMoney): Breakdow
   return lines
 }
 
-/** Nothing in the period reached the account or a registered Stripe address (a quiet period, not a first run). */
+/** Nothing in the period reached the account or a registered Stripe address (a quiet period, not a first run); a Stripe-held sale is one of the sales counted. */
 export function isEmptyPeriod(summary: SalesSummary): boolean {
   return ledgerCount(summary) === 0
 }
@@ -355,14 +378,21 @@ export function revenueChangePercent(current: SalesSummary, previous: SalesSumma
 
 // ── The chart ───────────────────────────────────────────────────────────────
 
-/** The one series the by-day chart draws: revenue, in the brand colour. */
+/** The one series the by-day chart draws when nothing was received in Stripe: revenue, in the brand colour. */
 export const REVENUE_SERIES = { id: 'revenue', name: 'Revenue' } as const
+
+/** The two series the chart draws when the period has Stripe-held sales (#4981): where the money was received. */
+export const IN_HAVEN_SERIES = { id: 'in-haven', name: 'In Haven' } as const
+export const IN_STRIPE_SERIES = { id: 'in-stripe', name: 'In Stripe' } as const
 
 /**
  * One slot per calendar day of the period, so a quiet day is an empty slot and
  * the axis reads as time. The reads give each day's revenue only, not its
  * products, so the bar is one series (a stack by product needs `by_day` to
- * carry them).
+ * carry them) — or, when the filtered summary has Stripe-held sales, two:
+ * "In Haven" (`seriesIndex` 0) and "In Stripe" (1), each day's `in_stripe_raw`
+ * split out of its revenue. A zero segment is dropped, so a Stripe-only day
+ * draws one segment and the series add up to the day's revenue.
  */
 export function salesChartDays(
   summary: SalesSummary,
@@ -370,12 +400,28 @@ export function salesChartDays(
   /** #4963: the display-currency rate; the bars, and so the ticks, are struck in it. Null keeps USDC. */
   rate: number | null = null,
 ): StackedBarDay[] {
-  const revenueByDay = new Map(summary.by_day.map((d) => [d.day, usdcOf(d.revenue_raw) * (rate ?? 1)]))
+  const scale = rate ?? 1
+  const split = stripeSalesCount(summary) > 0
+  const byDay = new Map(summary.by_day.map((d) => [d.day, d]))
   return salesDayKeys(range).map((day) => {
-    const amount = revenueByDay.get(day) ?? 0
+    const entry = byDay.get(day)
+    const total = entry ? usdcOf(entry.revenue_raw) : 0
+    if (!split) {
+      const amount = total * scale
+      return {
+        label: formatAnalyticsDay(day),
+        series: amount > 0 ? [{ ...REVENUE_SERIES, amount, seriesIndex: 0 }] : [],
+      }
+    }
+    const stripe = entry ? usdcOf(entry.in_stripe_raw ?? '0') : 0
+    const haven = Math.max(total - stripe, 0) * scale
+    const inStripe = stripe * scale
     return {
       label: formatAnalyticsDay(day),
-      series: amount > 0 ? [{ ...REVENUE_SERIES, amount, seriesIndex: 0 }] : [],
+      series: [
+        ...(haven > 0 ? [{ ...IN_HAVEN_SERIES, amount: haven, seriesIndex: 0 }] : []),
+        ...(inStripe > 0 ? [{ ...IN_STRIPE_SERIES, amount: inStripe, seriesIndex: 1 }] : []),
+      ],
     }
   })
 }

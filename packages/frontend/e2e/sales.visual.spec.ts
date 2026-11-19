@@ -18,9 +18,10 @@
  *   - `overview-sek` — the same fixture for a SEK user (#4963): converted at
  *     today's rate, "≈" on the two totals.
  *   - `overview-stripe` — the same period plus two sales received at a
- *     registered Stripe deposit address (#4954): the account tiles unchanged,
- *     the "Received in Stripe" tile, the list line naming both figures and the
- *     mark on the two Stripe rows (`salesSummaryWithStripe`).
+ *     registered Stripe deposit address (#4954, #4981): four tiles counting
+ *     them, the Revenue foot and the list line splitting "in Haven" from "in
+ *     Stripe", the two-series chart and the mark on the two Stripe rows
+ *     (`salesSummaryWithStripe`).
  *   - `payment-stripe` — one of those sales opened: the mark beside the
  *     status, "to your Stripe address", and the Stripe notice (#4954).
  *   - `first-run` — the account has never been paid: "No sales yet" and the
@@ -125,16 +126,19 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
-    // #4954: the account's figures are `overview`'s, unchanged; the Stripe
-    // sales are in their own tile and carry the mark in the list.
+    // #4981: a Stripe-held sale is a sale. Four tiles in one row, no tile of
+    // its own, Revenue the total with the split in its foot, and the list
+    // line saying the same; the Stripe rows keep their mark.
     name: 'overview-stripe',
     serve: 'overview-stripe',
     path: '/sales',
     async assert(page) {
-      await expect(page.getByTestId('sales-stripe-tile')).toHaveCount(1)
-      await expect(page.getByTestId('sales-stripe-tile')).toContainText('2 sales, not in Revenue')
-      await expect(page.getByTestId('stat-tile-revenue')).toContainText('$2.14')
-      await expect(page.getByTestId('sales-payments-summary')).toContainText('Received in Stripe $0.03')
+      await expect(page.getByTestId('sales-stripe-tile')).toHaveCount(0)
+      await expect(page.getByTestId('sales-tiles').getByTestId(/^stat-tile-/)).toHaveCount(4)
+      await expect(page.getByTestId('stat-tile-revenue')).toContainText('$2.17')
+      await expect(page.getByTestId('stat-tile-revenue')).toContainText('$2.14 in Haven \u00b7 $0.03 in Stripe')
+      await expect(page.getByTestId('stat-tile-sales')).toContainText('6')
+      await expect(page.getByTestId('sales-payments-summary')).toContainText('Revenue $2.17 ($2.14 in Haven \u00b7 $0.03 in Stripe)')
       await expect(page.getByTestId('sales-ledger').getByText('Received in Stripe')).toHaveCount(2)
     },
   },
@@ -148,6 +152,7 @@ const SCENARIOS: Scenario[] = [
       await expect(panel).toHaveCount(1)
       await expect(panel.getByTestId('sales-payment-header').getByText('Received in Stripe')).toHaveCount(1)
       await expect(panel.getByTestId('sales-payment-header')).toContainText('to your Stripe address')
+      await expect(panel).toContainText('It counts in your revenue, but not in the Sales account')
     },
   },
   {

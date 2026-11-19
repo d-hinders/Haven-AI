@@ -156,12 +156,14 @@ const SALES_ACCOUNT = {
 /** The revenue side's ONE read: the Sales summary (#4897). Its figures agree
  *  with each other — $2.14 = two chat sales ($0.84) + one embeddings sale
  *  ($0.30) + one payment with no product ($1.00); a $0.50 own move is in no
- *  total. */
+ *  total. The Sales tile counts every revenue payment (3 sales + 1 without a
+ *  product = 4) and the average is the total over those 4: $0.535 (#4981). */
 const REVENUE_SUMMARY = {
   usdc_rates: { usd: 0.9998, eur: 0.92, sek: 11.2 },
   revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
   sales: 3,
-  average_sale_raw: '380000',
+  average_sale_raw: '535000',
   without_product: { count: 1, amount_raw: '1000000' },
   own_moves: { count: 1, amount_raw: '500000' },
   by_product: [
@@ -186,6 +188,7 @@ const REVENUE_SUMMARY = {
       sales: 1,
       revenue_raw: '1420000',
       without_product_raw: '1000000',
+      in_stripe_raw: '0',
       by_product: [{ product_id: 'chat', amount_raw: '420000' }],
       other_products_raw: '0',
     },
@@ -1057,10 +1060,13 @@ describe('Analytics — the Spending / Revenue switch (#4901)', () => {
     expect(within(tiles).getByText('$2.14')).toBeTruthy()
     expect(within(tiles).getByText('from 4 payments')).toBeTruthy()
     expect(within(tiles).getByText('Sales')).toBeTruthy()
-    expect(within(tiles).getByText('3')).toBeTruthy()
+    // Every revenue payment, as the Sales page counts it: 3 sales + 1 without a product.
+    expect(within(tiles).getByText('4')).toBeTruthy()
     expect(within(tiles).getByText('from 1 payer')).toBeTruthy()
     expect(within(tiles).getByText('Average sale')).toBeTruthy()
-    expect(within(tiles).getByText('$0.38')).toBeTruthy()
+    // The total over every payment counted: $2.14 / 4 (#4981), "per payment".
+    expect(within(tiles).getByText('$0.54')).toBeTruthy()
+    expect(within(tiles).getByText('per payment')).toBeTruthy()
     expect(within(tiles).getByText('Not counted')).toBeTruthy()
     expect(within(tiles).getByText('$0.50')).toBeTruthy()
     expect(within(tiles).getByText('1 transfer between your accounts')).toBeTruthy()
@@ -1073,6 +1079,31 @@ describe('Analytics — the Spending / Revenue switch (#4901)', () => {
     // The spend side's sections are gone with its request.
     expect(screen.queryByTestId('analytics-tiles')).toBeNull()
     expect(screen.queryByTestId('analytics-spend-section')).toBeNull()
+  })
+
+  it('counts a Stripe-held sale in the Revenue tiles: Sales is every payment and Average reads the read’s figure (#4981)', async () => {
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    // One more sale, received in Stripe ($0.01): 4 sales + 1 without a product = 5 payments.
+    mockUseSalesSummary.mockReturnValue(
+      revenue({
+        data: {
+          ...REVENUE_SUMMARY,
+          revenue_raw: '2150000',
+          sales: 4,
+          average_sale_raw: '430000',
+          received_in_stripe: { count: 1, amount_raw: '10000' },
+        },
+      }),
+    )
+    render(<AnalyticsClient />)
+    const tiles = screen.getByTestId('analytics-revenue-tiles')
+    expect(within(tiles).getByText('$2.15')).toBeTruthy()
+    expect(within(tiles).getByText('from 5 payments')).toBeTruthy()
+    expect(within(tiles).getByText('5')).toBeTruthy()
+    expect(within(tiles).getByText('$0.43')).toBeTruthy()
+    expect(within(tiles).getByText('per payment')).toBeTruthy()
+    expect(within(tiles).queryByText('per sale')).toBeNull()
   })
 
   it('keeps the chosen side when the period changes', async () => {

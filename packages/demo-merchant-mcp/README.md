@@ -718,8 +718,8 @@ is the owner's own statement and is shown as "registered by you, not verified by
 Haven". **The buyer must be a Haven user other than the Sales account's owner:**
 a Field Notes payment from the owner's own agent is a move between the owner's
 accounts ("Not counted", outside Revenue), and a joke from one is refused. A
-Stripe-held sale never counts in a Haven balance; it is shown apart as
-"Received in Stripe". When the deposit address changes, register the new one and
+Stripe-held sale never counts in a Haven balance; it counts in Revenue, split as
+"in Stripe", and its row is marked "Received in Stripe". When the deposit address changes, register the new one and
 retire the old one only after the last payment to it has settled (see
 `docs/operations/secret-rotation.md`).
 

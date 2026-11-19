@@ -95,8 +95,10 @@ const zero = { count: 0, amount_raw: '0' }
  */
 const SUMMARY = {
   revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
   sales: 3,
-  average_sale_raw: '380000',
+  // $2.14 over every payment counted (3 sales + 1 with no product), rounded down (#4981).
+  average_sale_raw: '535000',
   without_product: { count: 1, amount_raw: '1000000' },
   own_moves: { count: 1, amount_raw: '500000' },
   by_product: [
@@ -112,8 +114,8 @@ const SUMMARY = {
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
   by_day: [
-    { day: '2026-11-16', payments: 2, sales: 2, revenue_raw: '1140000' },
-    { day: '2026-11-17', payments: 2, sales: 1, revenue_raw: '1000000' },
+    { day: '2026-11-16', payments: 2, sales: 2, revenue_raw: '1140000', in_stripe_raw: '0' },
+    { day: '2026-11-17', payments: 2, sales: 1, revenue_raw: '1000000', in_stripe_raw: '0' },
   ],
   received_in_stripe: { count: 0, amount_raw: '0' },
 }
@@ -129,13 +131,33 @@ const PAYMENTS = [
 ]
 
 /**
- * #4954: the same period plus two sales received at a registered Stripe
- * deposit address ($0.01 + $0.02 of "Joke"). They are in NO account figure —
- * Revenue, Sales, Average sale, the chart and both breakdowns are SUMMARY's
- * unchanged — and in `received_in_stripe` only.
+ * #4954, #4981: the same period plus two sales received at a registered
+ * Stripe deposit address ($0.01 + $0.02 of "Joke", payer WALLET). They count
+ * in EVERY figure — Revenue $2.17, 5 sales + 1 with no product = 6 payments,
+ * the chart, both breakdowns — and are split out as "in Stripe":
+ * `revenue_in_account_raw` + `received_in_stripe` = `revenue_raw`, and the
+ * day they landed on carries `in_stripe_raw`.
  */
 const STRIPE_ADDRESS = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
-const STRIPE_SUMMARY = { ...SUMMARY, received_in_stripe: { count: 2, amount_raw: '30000' } }
+const STRIPE_SUMMARY = {
+  ...SUMMARY,
+  revenue_raw: '2170000',
+  revenue_in_account_raw: '2140000',
+  sales: 5,
+  // 2170000 / 6, rounded down.
+  average_sale_raw: '361666',
+  by_product: [...SUMMARY.by_product, { product_id: 'joke', label: 'Joke', sales: 2, amount_raw: '30000' }],
+  by_payer: [
+    SUMMARY.by_payer[0],
+    { ...SUMMARY.by_payer[1], payments: 3, amount_raw: '730000' },
+    SUMMARY.by_payer[2],
+  ],
+  by_day: [
+    SUMMARY.by_day[0],
+    { day: '2026-11-17', payments: 4, sales: 3, revenue_raw: '1030000', in_stripe_raw: '30000' },
+  ],
+  received_in_stripe: { count: 2, amount_raw: '30000' },
+}
 const STRIPE_PAYMENTS = [
   { tx_hash: '0x' + 'b1'.repeat(32), block_time: '2026-11-17T15:00:00.000Z', kind: 'sale', amount_raw: '10000', product_id: 'joke', product_label: 'Joke', payer: WALLET, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: STRIPE_ADDRESS },
   { tx_hash: '0x' + 'b2'.repeat(32), block_time: '2026-11-17T14:30:00.000Z', kind: 'sale', amount_raw: '20000', product_id: 'joke', product_label: 'Joke', payer: WALLET, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: STRIPE_ADDRESS },
@@ -711,39 +733,115 @@ describe('the tabs and the period', () => {
   })
 })
 
-describe('sales received in Stripe (#4954)', () => {
-  const stripeServe = (summary: unknown = STRIPE_SUMMARY) =>
-    serve({ summary, pages: [{ payments: STRIPE_PAYMENTS, next_cursor: null }] })
+describe('sales received in Stripe (#4954, #4981)', () => {
+  const stripeServe = (summary: unknown = STRIPE_SUMMARY, previous: unknown = PREVIOUS_SUMMARY) =>
+    serve({ summary, previous, pages: [{ payments: STRIPE_PAYMENTS, next_cursor: null }] })
 
-  it('keeps the account tiles and breakdowns unchanged, and gives Stripe sales one figure of their own', async () => {
+  it('counts a Stripe sale in every tile, in one row of four, and says where it was received', async () => {
     stripeServe()
     await renderPage()
     const tiles = await screen.findByTestId('sales-tiles')
-    // Exactly SUMMARY's account figures: the two Stripe sales ($0.03) are in none of them.
-    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('$2.14')
-    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('4')
-    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('$0.54')
-    // Its own row: not one of the account tiles.
-    expect(within(tiles).queryByTestId('sales-stripe-tile')).toBeNull()
-    const stripe = screen.getByTestId('sales-stripe-tile')
-    expect(stripe.textContent).toContain('Received in Stripe')
-    expect(stripe.textContent).toContain('$0.03')
-    expect(stripe.textContent).toContain('2 sales, not in Revenue')
+    // Four tiles, one grid, and no tile of its own for Stripe.
+    expect(within(tiles).getAllByTestId(/^stat-tile-/)).toHaveLength(4)
+    expect(screen.queryByTestId('sales-stripe-tile')).toBeNull()
+    expect(screen.queryByText(/not in Revenue/)).toBeNull()
+    // Revenue is the total ($2.14 + $0.03) with the split in its foot.
+    const revenue = within(tiles).getByTestId('stat-tile-revenue')
+    expect(revenue.textContent).toContain('$2.17')
+    expect(revenue.textContent).toContain('$2.14 in Haven · $0.03 in Stripe')
+    // Sales counts every sale and payment (5 sales + 1 with no product).
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('6')
+    expect(within(tiles).getByTestId('stat-tile-sales').textContent).toContain('from 3 payers')
+    // Average is the read's own figure: $2.17 / 6.
+    expect(within(tiles).getByTestId('stat-tile-average-sale').textContent).toContain('$0.36')
+    expect(within(tiles).getByTestId('stat-tile-without-a-product').textContent).toContain('1')
     // Never reads as a balance.
-    expect(stripe.textContent).not.toMatch(/balance/i)
-    expect(screen.getByTestId('sales-by-product').textContent).not.toContain('Joke')
-    expect(screen.getByTestId('sales-by-payer').textContent).not.toContain('$0.03')
+    expect(tiles.textContent).not.toMatch(/balance/i)
   })
 
-  it('counts both kinds in the list line, each beside its own figure', async () => {
+  it('keeps the previous-period chip beside the split foot, on the new definition', async () => {
+    stripeServe()
+    await renderPage()
+    const revenue = await screen.findByTestId('stat-tile-revenue')
+    // ($2.17 - $1.07) / $1.07
+    await waitFor(() => expect(revenue.textContent).toContain('+102.8%'))
+    expect(revenue.textContent).toContain('vs the 30 days before')
+    expect(revenue.textContent).toContain('in Stripe')
+  })
+
+  it('lets the split foot take the slot the "no sales before" line would have', async () => {
+    stripeServe(STRIPE_SUMMARY, { ...SUMMARY, revenue_raw: '0' })
+    await renderPage()
+    const revenue = await screen.findByTestId('stat-tile-revenue')
+    await waitFor(() => expect(revenue.textContent).toContain('in Stripe'))
+    expect(revenue.textContent).not.toContain('No sales in the')
+    expect(revenue.textContent).not.toContain('%')
+  })
+
+  it('keeps today\'s footnote without a Stripe sale', async () => {
+    serve({ previous: { ...SUMMARY, revenue_raw: '0' } })
+    await renderPage()
+    const revenue = await screen.findByTestId('stat-tile-revenue')
+    await waitFor(() => expect(revenue.textContent).toContain('No sales in the 30 days before'))
+    expect(revenue.textContent).not.toContain('in Stripe')
+  })
+
+  it('includes the Stripe sales in By product and By payer, so each adds up to Revenue', async () => {
+    stripeServe()
+    await renderPage()
+    const byProduct = await screen.findByTestId('sales-by-product')
+    expect(byProduct.textContent).toContain('Joke')
+    expect(byProduct.textContent).toContain('$0.03')
+    const byPayer = screen.getByTestId('sales-by-payer')
+    // The wallet's $0.70 plus the two $0.03 Stripe payments' $0.03.
+    expect(byPayer.textContent).toContain('$0.73')
+  })
+
+  it('draws two series, In Haven and In Stripe, and drops the zero segment', async () => {
+    stripeServe()
+    await renderPage()
+    const table = (await screen.findAllByTestId('chart-data-table'))[0]
+    expect(within(table).getByRole('columnheader', { name: 'In Haven' })).toBeTruthy()
+    expect(within(table).getByRole('columnheader', { name: 'In Stripe' })).toBeTruthy()
+    expect(within(table).queryByRole('columnheader', { name: 'Revenue' })).toBeNull()
+    // The 17th: $1.00 in Haven and $0.03 in Stripe; the 16th has no Stripe segment.
+    expect(table.textContent).toContain('$0.03')
+    expect(table.textContent).toContain('$1.00')
+    // The chart's accessible name still names the total and the count.
+    const chart = screen.getAllByRole('img', { name: /Revenue over 30 days/ })[0]
+    expect(chart.getAttribute('aria-label')).toContain('$2.17 from 6 payments')
+  })
+
+  it('draws one Revenue series when the period has no Stripe sale', async () => {
+    serve()
+    await renderPage()
+    const table = (await screen.findAllByTestId('chart-data-table'))[0]
+    expect(within(table).getByRole('columnheader', { name: 'Revenue' })).toBeTruthy()
+    expect(within(table).queryByRole('columnheader', { name: 'In Haven' })).toBeNull()
+  })
+
+  it('counts both kinds in the list line, with the split beside the total', async () => {
     stripeServe()
     await renderPage()
     const line = await screen.findByTestId('sales-payments-summary')
-    // 5 account payments + 2 Stripe sales, and the two figures apart.
+    // 5 account payments + 2 Stripe sales.
     expect((await screen.findByTestId('list-toolbar-count')).textContent).toContain('7 payments')
-    expect(line.textContent).toContain('Revenue $2.14')
-    expect(line.textContent).toContain('Received in Stripe $0.03')
+    expect(line.textContent).toContain('Revenue $2.17 ($2.14 in Haven · $0.03 in Stripe)')
     expect(screen.getByTestId('sales-payments').textContent).toContain('not in Transactions')
+  })
+
+  it('splits in SEK at the summary rate, with "≈" on the total and its parts', async () => {
+    mockCurrency.mockReturnValue('SEK')
+    stripeServe({ ...STRIPE_SUMMARY, usdc_rates: SUMMARY_RATES })
+    await renderPage()
+    const fmt = (v: number) => new Intl.NumberFormat('sv-SE', { style: 'currency', currency: 'SEK' }).format(v)
+    const revenue = await screen.findByTestId('stat-tile-revenue')
+    expect(revenue.textContent).toContain(`≈${fmt(21.7)}`)
+    expect(revenue.textContent).toContain(`≈${fmt(21.4)} in Haven · ≈${fmt(0.3)} in Stripe`)
+    const line = screen.getByTestId('sales-payments-summary')
+    expect(line.textContent).toContain(`Revenue ≈${fmt(21.7)} (≈${fmt(21.4)} in Haven · ≈${fmt(0.3)} in Stripe)`)
+    const table = screen.getAllByTestId('chart-data-table')[0].textContent ?? ''
+    expect(table).toContain(fmt(0.3))
   })
 
   it('marks the Stripe rows, and only them', async () => {
@@ -757,22 +855,26 @@ describe('sales received in Stripe (#4954)', () => {
     }
   })
 
-  it('is not the empty state when the period has only Stripe sales', async () => {
-    const zeroAccount = {
+  it('is not the empty state when the period has only Stripe sales, and still shows four tiles', async () => {
+    const stripeOnly = {
       ...SUMMARY,
-      revenue_raw: '0',
-      sales: 0,
-      average_sale_raw: '0',
+      revenue_raw: '30000',
+      revenue_in_account_raw: '0',
+      sales: 2,
+      average_sale_raw: '15000',
       without_product: zero,
       own_moves: zero,
-      by_product: [],
-      by_payer: [],
-      by_day: [],
+      by_product: [{ product_id: 'joke', label: 'Joke', sales: 2, amount_raw: '30000' }],
+      by_payer: [{ payer: WALLET, payments: 2, amount_raw: '30000', last_paid_at: '2026-11-17T15:00:00.000Z' }],
+      by_day: [{ day: '2026-11-17', payments: 2, sales: 2, revenue_raw: '30000', in_stripe_raw: '30000' }],
       received_in_stripe: { count: 2, amount_raw: '30000' },
     }
-    serve({ summary: zeroAccount, pages: [{ payments: STRIPE_PAYMENTS.slice(0, 2), next_cursor: null }] })
+    serve({ summary: stripeOnly, pages: [{ payments: STRIPE_PAYMENTS.slice(0, 2), next_cursor: null }] })
     await renderPage()
-    expect(await screen.findByTestId('sales-stripe-tile')).toBeTruthy()
+    const tiles = await screen.findByTestId('sales-tiles')
+    expect(within(tiles).getAllByTestId(/^stat-tile-/)).toHaveLength(4)
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('$0.00 in Haven · $0.03 in Stripe')
+    expect(screen.queryByTestId('sales-stripe-tile')).toBeNull()
     expect(screen.queryByTestId('sales-empty-period')).toBeNull()
   })
 
@@ -785,6 +887,9 @@ describe('sales received in Stripe (#4954)', () => {
     const header = within(panel).getByTestId('sales-payment-header')
     expect(within(header).getByText('Received in Stripe')).toBeTruthy()
     expect(header.textContent).toContain('to your Stripe address')
+    // The sale counts in revenue; it is not in the account's balance (#4981).
+    expect(panel.textContent).toContain('It counts in your revenue, but not in the Sales account')
+    expect(panel.textContent).not.toContain('not in your revenue')
     // The who-line names the Stripe address, never "Paid … into Sales".
     expect(header.textContent).not.toMatch(/Paid by[^·]*into Sales/)
     expect(within(panel).getByTestId('sales-payment-details').textContent).toContain('Your Stripe deposit address')
@@ -818,14 +923,15 @@ describe('filters and search (#4960)', () => {
     ...SUMMARY,
     revenue_raw: '840000',
     sales: 2,
+    revenue_in_account_raw: '840000',
     average_sale_raw: '420000',
     without_product: zero,
     own_moves: zero,
     by_product: [{ product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' }],
     by_payer: [{ payer: CONTACT, payments: 2, amount_raw: '840000', last_paid_at: '2026-11-17T14:05:00.000Z' }],
     by_day: [
-      { day: '2026-11-16', payments: 1, sales: 1, revenue_raw: '420000' },
-      { day: '2026-11-17', payments: 1, sales: 1, revenue_raw: '420000' },
+      { day: '2026-11-16', payments: 1, sales: 1, revenue_raw: '420000', in_stripe_raw: '0' },
+      { day: '2026-11-17', payments: 1, sales: 1, revenue_raw: '420000', in_stripe_raw: '0' },
     ],
   }
   const CHAT_PAYMENTS = [PAYMENTS[0], PAYMENTS[3]]

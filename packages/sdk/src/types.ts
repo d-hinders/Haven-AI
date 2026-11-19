@@ -1981,6 +1981,16 @@ export const AgentPaymentFailureCode = {
    * top up its settlement wallet first (#3834).
    */
   MerchantNotReady: 'MERCHANT_NOT_READY',
+  /**
+   * #4872: the merchant's challenge marks a checkout detail (receipt email,
+   * billing or shipping address) as REQUIRED and this agent cannot share it —
+   * sharing is off, the owner has not saved it, it would not fit, or Haven's
+   * read of it failed. Refused BEFORE the payment is authorised: no payment
+   * is created and no funds move (on resume, the funded payment is not
+   * delivered). The owner can fix it; the agent cannot. The refusal names the
+   * missing fields, never their values.
+   */
+  CheckoutDetailsUnavailable: 'CHECKOUT_DETAILS_UNAVAILABLE',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -2093,6 +2103,8 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
   [AgentPaymentFailureCode.MerchantNotReady]:
     'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint — except an out-of-gas refusal (reason_code settlement_wallet_out_of_gas), which needs the merchant\'s operator to top up its settlement wallet before any retry can succeed.',
+  [AgentPaymentFailureCode.CheckoutDetailsUnavailable]:
+    'The merchant requires a checkout detail (receipt email, billing or shipping address) that this agent cannot share: the owner has not turned sharing on for this agent, has not saved the field, or Haven could not read it. No payment was created and no funds moved. Stop and tell the user which field the merchant needs and that the owner can save it in business details and turn on sharing for this agent.',
 }
 
 /**
@@ -3120,6 +3132,40 @@ export class MerchantTimeoutError extends HavenApiError {
   constructor(message: string) {
     super(message, 504)
     this.name = 'MerchantTimeoutError'
+  }
+}
+
+/**
+ * #4872: a merchant's challenge requires a checkout detail this agent cannot
+ * share (`docs/architecture/13-checkout-details.md` §5). Thrown BEFORE
+ * `authorizeX402`, so no payment exists and no funds moved — except on
+ * `resumeX402Payment`, where the payment is already funded and the paid
+ * request is simply not sent (resume again once the owner has fixed it).
+ *
+ * Status 409: the request conflicts with the owner's current sharing state,
+ * and repeating it unchanged gets the same answer. The body carries the code,
+ * the missing field NAMES (never values), the reason and the next action.
+ */
+export class CheckoutDetailsUnavailableError extends HavenApiError {
+  readonly checkoutDetailsErrorCode = 'checkout_details_unavailable' as const
+  constructor(
+    public readonly missingFields: string[],
+    public readonly reason: string,
+    message: string,
+  ) {
+    super(
+      message,
+      409,
+      {
+        code: 'CHECKOUT_DETAILS_UNAVAILABLE',
+        missing_fields: missingFields,
+        reason,
+        next_action: 'stop_and_tell_user',
+      },
+      undefined,
+      { kind: 'deterministic' },
+    )
+    this.name = 'CheckoutDetailsUnavailableError'
   }
 }
 

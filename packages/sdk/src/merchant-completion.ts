@@ -1,4 +1,9 @@
 import {
+  actualPaidHeaderBlockBytes,
+  HEADER_BLOCK_CEILING_BYTES,
+  withCheckoutDetailsHeader,
+} from './checkout-details.js'
+import {
   AgentPaymentNextAction,
   AgentPaymentPhase,
   HavenApiError,
@@ -256,6 +261,13 @@ export class MerchantCompletion {
     initialInit: RequestInit | undefined,
     paymentRequired: X402PaymentRequired,
     receipt: X402Receipt,
+    /**
+     * #4872: the checkout-details answer the caller decided BEFORE the payment
+     * was authorised (`resolveCheckoutDetails`), or `undefined` for none.
+     * Attached here, after any captured-request snapshot, so it never lands in
+     * a resume state, a Haven-API body or the payment payload.
+     */
+    checkoutDetailsHeader?: string,
   ): Promise<Response> {
     if (!receipt.accepted) {
       throw HavenApiError.deterministic('No accepted x402 option was recorded for payment retry', 500)
@@ -296,6 +308,17 @@ export class MerchantCompletion {
         // header the caller's own init might already carry.
         retryInit = withTaxDeclarationHeader(initialInit, undefined)
       }
+    }
+
+    // #4872: the checkout-details answer, decided before authorisation. The
+    // safety net re-checks the ACTUAL block now that the payment header is
+    // known: one that would exceed the 16 KB header ceiling is not sent (the
+    // merchant would answer 431 after funding). The answer is dropped, never
+    // the payment header; a required field was already checked against the
+    // conservative estimate before any money moved.
+    if (checkoutDetailsHeader !== undefined) {
+      const fits = actualPaidHeaderBlockBytes(receipt.paymentHeader, checkoutDetailsHeader) <= HEADER_BLOCK_CEILING_BYTES
+      retryInit = withCheckoutDetailsHeader(retryInit, fits ? checkoutDetailsHeader : undefined)
     }
 
     // 5. Retry with a merchant-verifiable x402 EIP-3009 payment header.

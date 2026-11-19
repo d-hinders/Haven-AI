@@ -568,6 +568,46 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/agents/{id}/checkout-details-sharing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn this agent’s checkout-details sharing on or off.
+         * @description The OWNER's per-agent switch (#4871, epic #4868). When it is on, this agent may share the owner's saved checkout details — the receipt email, billing address and shipping address stored in business details (#4870) — with merchants that ask for them in their x402 payment challenge (`docs/architecture/13-checkout-details.md`). Switching ON is refused with a structured 409 (`reason: 'feature_disabled'`) when the deployment's `HAVEN_OWNER_COMPANY_DETAILS` is off; switching OFF always succeeds, so an owner can always withdraw sharing. Unlike the tax-declaration toggle there is NO requirement that details are stored: the switch may be on with nothing saved, and the agent's read then answers `no_details`. The switch is independent of `tax_declaration_enabled` — either can be on while the other is off. It grants no spending authority and sends nothing by itself; #4872 attaches the answer to the paid request. An agent API key is refused with a named 403: this is an owner-session surface.
+         */
+        put: operations["putAgentCheckoutDetailsSharing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/checkout-details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the checkout details this agent may share with a merchant.
+         * @description The AGENT's own read (#4871, epic #4868) — authenticated by this agent's API key. Answers 200 with the stored details when the deployment flag is on, the owner has turned sharing on for THIS agent, and at least one of the three fields is saved: `receipt_email`, `billing_address` and `shipping_address`, under the names and address shape `docs/architecture/13-checkout-details.md` §2 decides (`line1`, `line2`, `line3`, `city`, `postCode`, `subdivision`, `country`). A field the owner has not saved is OMITTED, never `null` — in particular the read NEVER falls back to the sign-up email (owner decision 2026-11-17): with sharing on and no receipt email saved, the content has no `receipt_email`. Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (sharing off for this agent, or a foreign agent id) or `no_details` (sharing on, nothing saved). Availability is the body, not the status code: a temporarily unavailable answer is a state to poll, not an error. This slice sends nothing to any merchant; #4872 attaches the answer to the paid request.
+         */
+        get: operations["getAgentCheckoutDetails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{id}/delegate-balance": {
         parameters: {
             query?: never;
@@ -5599,6 +5639,35 @@ export type components = {
             available: false;
             reason: components["schemas"]["AgentTaxDeclarationUnavailableReason"];
         };
+        UpsertAgentCheckoutDetailsSharingRequest: {
+            /** @description True lets THIS agent share the owner’s saved checkout details; false withdraws sharing (never refused). */
+            checkout_details_sharing_enabled: boolean;
+        };
+        AgentCheckoutDetailsSharingState: {
+            /** Format: uuid */
+            id: string;
+            checkout_details_sharing_enabled: boolean;
+        };
+        /**
+         * @description Why no checkout details are available: the deployment flag is off, sharing is off for this agent, or the owner has saved none of the three fields.
+         * @enum {string}
+         */
+        AgentCheckoutDetailsUnavailableReason: "feature_disabled" | "disabled" | "no_details";
+        AgentCheckoutDetails: {
+            /** @description The receipt email the owner saved. Absent when none is saved — never the sign-up email. */
+            receipt_email?: string;
+            billing_address?: components["schemas"]["OwnerAddress"];
+            shipping_address?: components["schemas"]["OwnerAddress"];
+        };
+        AgentCheckoutDetailsContent: {
+            /** @enum {boolean} */
+            available: true;
+            checkout_details: components["schemas"]["AgentCheckoutDetails"];
+        } | {
+            /** @enum {boolean} */
+            available: false;
+            reason: components["schemas"]["AgentCheckoutDetailsUnavailableReason"];
+        };
         ReplaceAgentLabelsRequest: {
             label_ids: string[];
         };
@@ -5902,6 +5971,7 @@ export type components = {
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
             tax_declaration_enabled: boolean;
+            checkout_details_sharing_enabled: boolean;
             avatar_tint: number;
             runtime_mcp_mode?: string | null;
             mcp_last_seen_at?: string | null;
@@ -10006,6 +10076,159 @@ export interface operations {
             };
             /** @description The opt-in is not currently possible. The body carries `reason` (`feature_disabled`, `no_company_details` or `vies_not_valid`) and `available: false`; nothing was written. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    putAgentCheckoutDetailsSharing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertAgentCheckoutDetailsSharingRequest"];
+            };
+        };
+        responses: {
+            /** @description The new state of the switch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCheckoutDetailsSharingState"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Switching ON is not currently possible. The body carries `reason` (`feature_disabled`) and `available: false`; nothing was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentCheckoutDetails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored checkout details, or the structured not-available answer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCheckoutDetailsContent"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

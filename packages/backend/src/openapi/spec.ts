@@ -2751,6 +2751,67 @@ export const openapiSpec = {
         },
       },
     },
+    '/agents/{id}/checkout-details-sharing': {
+      put: {
+        tags: ['Agents'],
+        operationId: 'putAgentCheckoutDetailsSharing',
+        summary: 'Turn this agent’s checkout-details sharing on or off.',
+        description:
+          "The OWNER's per-agent switch (#4871, epic #4868). When it is on, this agent may share the owner's saved checkout details — the receipt email, billing address and shipping address stored in business details (#4870) — with merchants that ask for them in their x402 payment challenge (`docs/architecture/13-checkout-details.md`). Switching ON is refused with a structured 409 (`reason: 'feature_disabled'`) when the deployment's `HAVEN_OWNER_COMPANY_DETAILS` is off; switching OFF always succeeds, so an owner can always withdraw sharing. Unlike the tax-declaration toggle there is NO requirement that details are stored: the switch may be on with nothing saved, and the agent's read then answers `no_details`. The switch is independent of `tax_declaration_enabled` — either can be on while the other is off. It grants no spending authority and sends nothing by itself; #4872 attaches the answer to the paid request. An agent API key is refused with a named 403: this is an owner-session surface.",
+        security: [{ DashboardJwt: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpsertAgentCheckoutDetailsSharingRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The new state of the switch.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentCheckoutDetailsSharingState' },
+              },
+            },
+          },
+          '400': errorResponse,
+          '401': errorResponse,
+          '403': errorResponse,
+          '404': errorResponse,
+          '409': {
+            ...errorResponse,
+            description:
+              'Switching ON is not currently possible. The body carries `reason` (`feature_disabled`) and `available: false`; nothing was written.',
+          },
+        },
+      },
+    },
+    '/agents/{id}/checkout-details': {
+      get: {
+        tags: ['Agents'],
+        operationId: 'getAgentCheckoutDetails',
+        summary: 'Read the checkout details this agent may share with a merchant.',
+        description:
+          "The AGENT's own read (#4871, epic #4868) — authenticated by this agent's API key. Answers 200 with the stored details when the deployment flag is on, the owner has turned sharing on for THIS agent, and at least one of the three fields is saved: `receipt_email`, `billing_address` and `shipping_address`, under the names and address shape `docs/architecture/13-checkout-details.md` §2 decides (`line1`, `line2`, `line3`, `city`, `postCode`, `subdivision`, `country`). A field the owner has not saved is OMITTED, never `null` — in particular the read NEVER falls back to the sign-up email (owner decision 2026-11-17): with sharing on and no receipt email saved, the content has no `receipt_email`. Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (sharing off for this agent, or a foreign agent id) or `no_details` (sharing on, nothing saved). Availability is the body, not the status code: a temporarily unavailable answer is a state to poll, not an error. This slice sends nothing to any merchant; #4872 attaches the answer to the paid request.",
+        security: [{ AgentApiKey: [] }],
+        parameters: [{ $ref: '#/components/parameters/AgentId' }],
+        responses: {
+          '200': {
+            description: 'The stored checkout details, or the structured not-available answer.',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentCheckoutDetailsContent' },
+              },
+            },
+          },
+          '401': errorResponse,
+          '403': errorResponse,
+        },
+      },
+    },
     '/agents/{id}/delegate-balance': {
       get: {
         tags: ['Agents'],
@@ -12962,6 +13023,80 @@ export const openapiSpec = {
         ],
       },
       /**
+       * #4871: the owner's per-agent checkout-details sharing switch. One
+       * boolean, the same shape as the tax-declaration toggle.
+       */
+      UpsertAgentCheckoutDetailsSharingRequest: {
+        type: 'object',
+        required: ['checkout_details_sharing_enabled'],
+        properties: {
+          checkout_details_sharing_enabled: {
+            type: 'boolean',
+            description:
+              'True lets THIS agent share the owner’s saved checkout details; false withdraws sharing (never refused).',
+          },
+        },
+        additionalProperties: false,
+      },
+      AgentCheckoutDetailsSharingState: {
+        type: 'object',
+        required: ['id', 'checkout_details_sharing_enabled'],
+        properties: {
+          id: uuid,
+          checkout_details_sharing_enabled: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      },
+      AgentCheckoutDetailsUnavailableReason: {
+        type: 'string',
+        enum: ['feature_disabled', 'disabled', 'no_details'],
+        description:
+          'Why no checkout details are available: the deployment flag is off, sharing is off for this agent, or the owner has saved none of the three fields.',
+      },
+      /**
+       * #4871: the details the agent may share, under the names and address
+       * shape `docs/architecture/13-checkout-details.md` §2 decides. Every
+       * member is optional because the owner may have saved only some of
+       * them; an absent member is OMITTED, never `null`. In particular
+       * `receipt_email` is present only when the owner saved one — the
+       * sign-up email is never used as a fallback.
+       */
+      AgentCheckoutDetails: {
+        type: 'object',
+        properties: {
+          receipt_email: {
+            type: 'string',
+            description:
+              'The receipt email the owner saved. Absent when none is saved — never the sign-up email.',
+          },
+          billing_address: { $ref: '#/components/schemas/OwnerAddress' },
+          shipping_address: { $ref: '#/components/schemas/OwnerAddress' },
+        },
+        additionalProperties: false,
+      },
+      AgentCheckoutDetailsContent: {
+        oneOf: [
+          {
+            type: 'object',
+            required: ['available', 'checkout_details'],
+            properties: {
+              available: { type: 'boolean', enum: [true] },
+              checkout_details: { $ref: '#/components/schemas/AgentCheckoutDetails' },
+            },
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            required: ['available', 'reason'],
+            properties: {
+              available: { type: 'boolean', enum: [false] },
+              reason: { $ref: '#/components/schemas/AgentCheckoutDetailsUnavailableReason' },
+            },
+            additionalProperties: false,
+          },
+        ],
+      },
+      /**
        * FULL REPLACEMENT is the mutation: the agent ends up carrying exactly
        * this set. An empty array clears the agent's labels — that is the
        * editor's "remove every chip", not a refused no-op.
@@ -13537,6 +13672,7 @@ export const openapiSpec = {
           'account_id', 'account_address', 'account_name', 'account_chain_id',
           'api_key_prefix', 'status', 'created_at', 'allowances', 'labels',
           'organization_id', 'tax_declaration_enabled', 'avatar_tint',
+          'checkout_details_sharing_enabled',
         ],
         properties: {
           id: uuid,
@@ -13600,6 +13736,19 @@ export const openapiSpec = {
            * read is GET /agents/{id}/tax-declaration.
            */
           tax_declaration_enabled: { type: 'boolean' },
+          /**
+           * #4871: the owner's per-agent switch allowing THIS agent to share
+           * the owner's saved checkout details (receipt email, billing
+           * address, shipping address) with merchants that ask for them.
+           * SETTINGS ONLY — the same boundary as `tax_declaration_enabled`:
+           * nothing in the delegation, budget, or enforcement path may read
+           * it. The toggle that writes it is
+           * PUT /agents/{id}/checkout-details-sharing; the agent's own read
+           * is GET /agents/{id}/checkout-details. Independent of
+           * `tax_declaration_enabled`: either can be on while the other is
+           * off.
+           */
+          checkout_details_sharing_enabled: { type: 'boolean' },
           /**
            * #4429: the agent's stored display colour, 1..6, assigned by the
            * database on insert (migration 121) and never changed by a rename.

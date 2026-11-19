@@ -21,13 +21,17 @@ covers:
   - packages/sdk/src/receipt.ts
   - packages/backend/src/routes/agent-tax-declaration.ts
   - packages/backend/src/modules/agents/tax-declaration.ts
+  - packages/backend/src/db/migrations/135_agent_checkout_details_sharing.ts
+  - packages/backend/src/routes/agent-checkout-details.ts
+  - packages/backend/src/modules/agents/checkout-details.ts
+  - packages/frontend/src/components/agent-panel/CheckoutDetailsSharingToggle.tsx
   - packages/sdk/src/client-tax-declaration.ts
   - packages/sdk/src/tax-declaration.ts
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
   - packages/mcp/src/server.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-17"
+last-verified: "2026-11-18"
 ---
 
 # Owner company details
@@ -309,6 +313,63 @@ is never gated on OFF. The signal is display-only: `runtime_mcp_mode` on the
 agents list read, taken from the sanitized `install_status` of the agent's
 latest setup, and nothing in the delegation, budget, enforcement or
 client-compat path reads it.
+
+### A third reader: the per-agent checkout-details switch (#4871)
+
+The receipt email and the two addresses are also what a merchant asks for at
+checkout. An owner can let ONE agent share them with merchants that ask, with
+a per-agent switch that is **off by default** and that only the owner can turn
+on (`PUT /agents/:id/checkout-details-sharing`, owner session only; the toggle
+on the agent's Settings tab, `CheckoutDetailsSharingToggle`). An agent API key
+is refused with a named `403` — an agent cannot switch sharing on for itself.
+
+The switch is stored on the agent (`agents.checkout_details_sharing_enabled`,
+migration `135_agent_checkout_details_sharing`), not on the owner's row, so
+each agent carries its own consent. It is **independent of the tax declaration
+switch**: either can be on while the other is off, and no constraint ties them
+together. Unlike the tax toggle it does **not** require a VIES-valid VAT
+number, and it does **not** require stored details — the owner may turn
+sharing on before saving anything, and the agent's read then answers
+`no_details`. Switching ON is refused with a structured `409`
+(`reason: 'feature_disabled'`) when the deployment's
+`HAVEN_OWNER_COMPANY_DETAILS` is off; switching OFF always succeeds, so the
+owner can always withdraw sharing.
+
+The agent then reads `GET /agents/:id/checkout-details` with its own key, for
+its own id only: an id that is not the authenticated agent's is refused with a
+`403` before any company-details row is read. For its own id the answer is
+`200` either way:
+
+- `{ available: true, checkout_details: { receipt_email?, billing_address?,
+  shipping_address? } }` when the flag is on, sharing is on for this agent,
+  and at least one field is saved. The field names and the address shape are
+  the ones `docs/architecture/13-checkout-details.md` §2 decides
+  (`line1`, `line2`, `line3`, `city`, `postCode`, `subdivision`, `country`).
+  A field the owner has not saved is **omitted**, never `null`.
+- `{ available: false, reason }` otherwise — `feature_disabled` (flag off),
+  `disabled` (sharing off for this agent, or a foreign agent id) or
+  `no_details` (sharing on, nothing saved). Availability is the body, not the
+  status code: a temporarily unavailable answer is a state to poll, not an
+  error.
+
+The read returns **only a receipt email the owner saved**. It never falls back
+to the sign-up email (owner decision 2026-11-17, epic #4868): with sharing on
+and no receipt email saved, the content has no `receipt_email` key at all. The
+sign-up email is a form prefill in Business details, never a shared value.
+
+This slice sends nothing to any merchant. #4872 attaches the answer to the
+paid request, and only to a merchant that asked for it. Turning the switch off
+between the agent's read and the paid request does not recall an answer
+already attached to that request; the next purchase sees the switch off.
+
+The agent Settings tab's row says the same thing in the owner's words: the
+one-line description names what is shared and with whom ("Shares the receipt
+email and addresses you saved in Business details with merchants that ask."),
+and a closed-by-default **What gets shared** disclosure lists the three
+fields, says only a merchant that asks receives them, that the agent can read
+the details once sharing is on, that only a saved receipt email is ever shared
+(never the sign-in email), and that the owner can switch it off at any time.
+When none of the three fields is saved, the row says so.
 
 ## The settings screen
 

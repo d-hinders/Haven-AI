@@ -166,6 +166,10 @@ export const testAgent = {
   // schema-checked against `ApiSchema<'Agent'>`, so the new required boolean
   // cannot be dropped silently here).
   tax_declaration_enabled: false,
+  // #4871: the owner's per-agent checkout-details sharing switch, default
+  // OFF — the same fact the e2e default agent must carry (the fixture is
+  // schema-checked against `ApiSchema<'Agent'>`).
+  checkout_details_sharing_enabled: false,
   // #4429: the stored display colour (1..6), assigned by the database on
   // insert. DISPLAY ONLY — the fixture is schema-checked against
   // `ApiSchema<'Agent'>`, so the new required field cannot be dropped here.

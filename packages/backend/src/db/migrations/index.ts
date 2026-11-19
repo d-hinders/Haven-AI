@@ -134,6 +134,8 @@ import * as merchantSales from './131_merchant_sales.js'
 import * as inboundTransfersAccountTime from './132_inbound_transfers_account_time.js'
 import * as inboundTransfersOwnFlagBackfill from './133_inbound_transfers_own_flag_backfill.js'
 import * as merchantDepositAddresses from './134_merchant_deposit_addresses.js'
+// #4871: the per-agent checkout-details sharing switch (epic #4868).
+import * as agentCheckoutDetailsSharing from './135_agent_checkout_details_sharing.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -332,4 +334,6 @@ export const migrations: Migration[] = [
   inboundTransfersOwnFlagBackfill,
   // #4952: the Stripe deposit-address registry.
   merchantDepositAddresses,
+  // #4871: the per-agent checkout-details sharing switch (epic #4868).
+  agentCheckoutDetailsSharing,
 ]

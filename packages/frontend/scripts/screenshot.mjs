@@ -954,6 +954,8 @@ export const FIXTURE_AGENTS = [
     // #3426: the opt-in defaults OFF; the /agents screenshot photographs the
     // unchecked state.
     tax_declaration_enabled: false,
+    // #4871: the checkout-details sharing switch defaults OFF on every agent.
+    checkout_details_sharing_enabled: false,
     // #4429: the stored display colour (1..6). DISPLAY ONLY.
     avatar_tint: 1,
   },
@@ -994,6 +996,8 @@ export const FIXTURE_AGENTS = [
     organization_id: 'org-devops',
     // #3426: the opt-in defaults OFF on every agent.
     tax_declaration_enabled: false,
+    // #4871: the checkout-details sharing switch defaults OFF on every agent.
+    checkout_details_sharing_enabled: false,
     // #4429: the stored display colour (1..6). DISPLAY ONLY.
     avatar_tint: 2,
   },

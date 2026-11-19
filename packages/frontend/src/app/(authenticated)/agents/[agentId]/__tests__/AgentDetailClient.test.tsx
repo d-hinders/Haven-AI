@@ -1251,7 +1251,7 @@ describe('AgentDetailClient last-activity metadata', () => {
   // "On {account name}". The rows open the page-owned modals; nothing here
   // is a second copy of a flow.
 
-  it('renders the five sections in ONE card under This agent, plus the account card (#4228)', () => {
+  it('renders the six sections in ONE card under This agent, plus the account card (#4228, #4871)', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: VIES_VALID_ROW })
     mockDelegationAgent()
     renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
@@ -1267,6 +1267,8 @@ describe('AgentDetailClient last-activity metadata', () => {
     expect(within(card).getByTestId('payment-credentials-row')).toBeTruthy()
     expect(within(card).getByTestId('labels-row')).toBeTruthy()
     expect(within(card).getByTestId('tax-declaration-row')).toBeTruthy()
+    // #4871: the checkout-details sharing switch sits beside the tax row.
+    expect(within(card).getByTestId('checkout-details-sharing-row')).toBeTruthy()
     expect(within(card).getByTestId('agent-passport-row')).toBeTruthy()
 
     // The account-level section carries the Who can approve pointer under
@@ -1379,6 +1381,29 @@ describe('AgentDetailClient last-activity metadata', () => {
     mockUseCompanyDetails.mockReturnValue({ status: 'ready', details: { ...VIES_VALID_ROW, vies_status: 'invalid' } })
     render(<AgentDetailClient agentId="agent-1" />)
     expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
+  })
+
+  it('#4871: the checkout-details row renders whenever the feature is on — no VIES requirement, and it hides with the flag', () => {
+    // VIES invalid: the tax row hides, the checkout row does not.
+    mockUseCompanyDetails.mockReturnValue({
+      status: 'ready',
+      details: { ...VIES_VALID_ROW, vies_status: 'invalid' },
+    })
+    mockDelegationAgent()
+    const { unmount } = renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByTestId('tax-declaration-row')).not.toBeInTheDocument()
+    expect(screen.getByTestId('checkout-details-sharing-row')).toBeInTheDocument()
+    unmount()
+
+    // Flag off: both hide, and the row list keeps no orphan divider.
+    mockUseCompanyDetails.mockReturnValue({ status: 'off', details: null })
+    renderOnSettingsTab(<AgentDetailClient agentId="agent-1" />)
+    expect(screen.queryByTestId('checkout-details-sharing-row')).not.toBeInTheDocument()
+    const card = screen
+      .getByTestId('agent-settings-section')
+      .querySelector('.rounded-\\[10px\\]') as HTMLElement
+    const list = card.querySelector('.divide-y') as HTMLElement
+    expect(list.children.length).toBe(4)
   })
 
   it('orders the page: header, banner slot, Spending hero, tabs, Activity (#4226)', () => {

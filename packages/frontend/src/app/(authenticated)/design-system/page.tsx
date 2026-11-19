@@ -728,6 +728,8 @@ const DS_CARD_AGENT = {
   labels: [{ id: 'ds-label-research', name: 'research', color: 'blue' }],
   organization_id: null,
   tax_declaration_enabled: false,
+  // #4871: the checkout-details sharing switch, OFF by default.
+  checkout_details_sharing_enabled: false,
   // #4431: the card's mark reads the agent's STORED tint, the same one the
   // row and the chart give it.
   avatar_tint: DS_RESEARCH_TINT,

@@ -58,6 +58,9 @@ describe('route-modules.generated.ts (#3135)', () => {
         // #3426: the tax-declaration toggle+content routes share the /agents
         // mount too.
         'routes/agent-tax-declaration.ts',
+        // #4871: the checkout-details sharing toggle and the agent's read
+        // share the /agents mount too.
+        'routes/agent-checkout-details.ts',
       ]),
     )
   })

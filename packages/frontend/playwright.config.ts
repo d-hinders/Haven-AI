@@ -351,7 +351,8 @@ export default defineConfig({
       // follow the visitor's theme), how-it-works (#3576 — How it works and
       // its protocols sub-page), home (#3574 — the redesigned home page),
       // dev-agent-pages (#3577 — For developers and For agents), more-sheet
-      // (#4053 — the phone More sheet, light and dark).
+      // (#4053 — the phone More sheet, light and dark), agent-settings
+      // (#4871 — the agent Settings tab's "This agent" section).
       // Baseline counts are not restated here;
       // `git ls-files` the `__screenshots__` tree for them. receive-dialog
       // seeds `haven.theme='dark'` itself and skips its mobile shots under
@@ -376,6 +377,9 @@ export default defineConfig({
         // `haven.theme='dark'` itself and skips its mobile shots under this
         // project (no mobile dark baseline), like receive-dialog above.
         '**/send-dialog.visual.spec.ts',
+        // #4871: the agent Settings tab's "This agent" section, with the
+        // checkout-details sharing row beside the tax declaration row.
+        '**/agent-settings.visual.spec.ts',
       ],
       testIgnore: SUITE_IGNORE,
     },

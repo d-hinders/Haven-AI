@@ -174,7 +174,7 @@ nobody.
 | `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. Never a float and never a dollar string: a JSON number is refused, because a float cannot represent every atomic amount exactly. |
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product; absent for a product that is not token-priced. |
 | `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. The receipt line is composed from it and the name (section 11), and **the composed line is at most 300 characters** with no character Haven's receipt reader refuses: the reader reads at most 300 and refuses the whole receipt otherwise. The description alone is therefore well inside the 500 Coinbase's facilitator allows at verify and settle (section 4). The proxy refuses a products file that breaks either rule at startup, naming the product. |
-| `products[].input_example` | No | An example request body for this product, carried into the challenge's directory block when listing is on (section 4). It must pass the proxy's own checks (the route, `model`, a settable cap), because a directory probes the route with it. Without it a directory can list the product but an agent cannot build a valid call from the listing. |
+| `products[].input_example` | No | An example request body for this product, carried into the challenge's directory block when listing is on (section 4). It must pass the proxy's own checks (the route, `model`, a settable cap, and its `input_schema`, checked at startup), because a directory probes the route with it. Without it a directory can list the product but an agent cannot build a valid call from the listing. |
 | `products[].input_schema` | No | A JSON Schema (draft 2020-12) the request body must pass before the proxy quotes or settles (#4988), also carried into the same block. See *The input schema* below. |
 | `products[].output_example` | No | An example response body, for the same block. |
 
@@ -187,10 +187,12 @@ settled (#4988). The check is on the body as the buyer sent it: after the
 product is picked by `model`, and before the output-token cap is set on it.
 
 - **What is checked.** The body must parse as JSON and pass the schema. The
-  Content-Type must be `application/json` or a `+json` type, or absent: a body
+  Content-Type must be `application/json` or an `application/…+json` type, or absent: a body
   that parses is accepted with no Content-Type, because agents often omit it.
   Any other Content-Type, `text/plain` included, is refused. A failure is a 400
-  `invalid_request_body` (section 8) with no challenge, paid or not.
+  `invalid_request_body` (section 8) with no challenge, paid or not, unless
+  the payment is already recorded: then section 8's *For a known key* answers
+  (a settled payment gets 200 `bad_request_after_settlement`).
 - **The dialect.** JSON Schema draft 2020-12, through Ajv. A `$schema` naming
   another dialect is refused. `format` is an annotation, not a check, as
   2020-12 has it by default. An unknown keyword is refused rather than
@@ -379,8 +381,10 @@ One side effect to know when listing is turned on: Haven's SDK reads an
 POST first. That POST carries no payment, so the proxy answers it with the
 challenge (402) and no `mcp-session-id`, and the SDK falls back cleanly, at the
 cost of one extra unpaid request against the per-IP limit. A product with an
-`input_schema` answers that `initialize` body 400 `invalid_request_body`
-instead (section 3), unless its schema admits it; when listing is built
+`input_schema` and no `model` answers that `initialize` body 400
+`invalid_request_body` instead (section 3), unless its schema admits it, and a
+product that pins a `model` answers it 400 `bad_request`, because the `model`
+check runs first; when listing is built
 (#4887), that probe must still reach its 402, so this answer needs a decision
 there.
 
@@ -778,7 +782,7 @@ same key, and the store answers.
 **A known key is answered from the store first,** before the payment checks
 section 8 makes before settlement, once its digest matches, and its answer
 follows the record's state (section 8, *For a known key*). The body checks
-(JSON, `model`, the cap, the size) still run on every request. Their failure
+(the size, JSON, `model`, the product's `input_schema`, the cap) still run on every request. Their failure
 on a record that would be forwarded (`settled`, `failed`, or a `forwarding`
 record older than the takeover threshold) is answered 200
 `bad_request_after_settlement`: not forwarded, and no forward used, so a
@@ -1266,7 +1270,7 @@ that fails them is refused before a payment is ever signed.
 | Settle failed and the authorization is unused (the facilitator answered a definite failure, and no transfer is found on the chain) | 402 | `settle_failed` | Yes | Rejected after funding if funded | Verify, then sweep the delegate |
 | Route is not in the products file | 404 | `unknown_route` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | The product has an `input_schema` and the body fails it: not JSON, a non-JSON Content-Type, or a schema rule (section 3) | 400 | `invalid_request_body`, with `errors` | No | Rejected after funding if paid | Fix the body named by `errors`; if funded, verify, then sweep the delegate |
-| Body is not JSON, or `model` does not match the product (no `input_schema` for the JSON case) | 400 | `bad_request` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Body is not JSON, or `model` does not match the product (for the JSON case: the product, or on a shared route any product on it, has no `input_schema`) | 400 | `bad_request` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Rate limit: an unpaid request, or an unknown-key payment header from an IP over the limit (section 7) | 429 | `rate_limited` | No | No payment yet; rejected after funding if a Haven agent funded its delegate | Retry after `Retry-After`; verify, then sweep the delegate if funded |
@@ -1275,13 +1279,16 @@ that fails them is refused before a payment is ever signed.
 | Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 
 Every refusal body is JSON with `error`, a human `message`, and, where it
-applies, `retry_after_seconds`. `invalid_request_body` adds `errors`: at most
-10 entries of `{ path, rule }`, each string at most 200 characters, where
+applies, `retry_after_seconds`. `invalid_request_body` adds `errors`: the
+first failure the validator finds (Ajv's `allErrors` is off, so a large array
+cannot build one error per element), and never more than 10 entries of `{ path, rule }`, each string at most 200 characters, where
 `path` is a JSON pointer into the body (`""` for the body itself, and a
 missing property named by its pointer) and `rule` is the schema keyword that
 failed (`required`, `maximum`, `type`, …), or `json` when the body does not
-parse, or `content_type` for a non-JSON Content-Type. Neither carries a value
-from the body. Except for the two rows that come out of the
+parse, or `content_type` for a non-JSON Content-Type (`schema` is the fallback
+when the validator names no keyword). Neither carries a value from the body;
+`path` names a field by pointer, which can include a property name the buyer
+sent when the schema validates arbitrary keys. Except for the two rows that come out of the
 verify and settle calls themselves, the proxy never calls the facilitator for
 a request it will refuse.
 

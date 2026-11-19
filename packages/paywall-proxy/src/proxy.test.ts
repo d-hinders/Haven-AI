@@ -959,6 +959,35 @@ describe('input_schema (#4988)', () => {
     expect(JSON.parse(h.upstream.seen[0]!.body).max_tokens).toBe(1000)
   })
 
+  it('on a route shared by model, the schema is the one of the product the model picks; an unparseable body is bad_request unless every product has a schema', async () => {
+    const SCHEMA_MODEL = {
+      ...CHAT_PRODUCT,
+      id: 'chat-schema',
+      input_schema: { type: 'object', required: ['model', 'messages'], properties: { model: { type: 'string' }, messages: { type: 'array', minItems: 1 } } },
+    }
+    const PLAIN_MODEL = { ...CHAT_PRODUCT, id: 'chat-plain', model: 'openai/plain', price: '5000', output_token_cap: undefined }
+    h = await startHarness({ products: [PLAIN_MODEL, SCHEMA_MODEL] })
+    // The schema product, with a body its schema refuses: 400 unpaid and paid, no facilitator call.
+    const failing = JSON.stringify({ model: 'openai/gpt-6-sol', messages: [] })
+    const unpaid = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, failing))
+    expect(unpaid.status).toBe(400)
+    expect(await unpaid.json()).toMatchObject({ error: 'invalid_request_body', errors: [{ path: '/messages', rule: 'minItems' }] })
+    const paid = await newBuyer().pay(h, CHAT_PATH, chatRequest())
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }, failing))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_request_body')
+    expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+    // The product without a schema, the same shape of body, sent as text/plain: quoted, as today.
+    const plain = JSON.stringify({ model: 'openai/plain', messages: [] })
+    const quoted = await fetch(`${h.base}${CHAT_PATH}`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: plain })
+    expect(quoted.status).toBe(402)
+    // Not JSON at all: the product cannot be picked, and not every product has a schema.
+    const broken = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, '{"model": '))
+    expect(broken.status).toBe(400)
+    expect((await broken.json()).error).toBe('bad_request')
+  })
+
   it('a retried known payment with an invalid body is bad_request_after_settlement with errors, or payment_already_delivered once delivered, and is not forwarded', async () => {
     h = await startHarness({ products: [SEARCH_PRODUCT], upstream: { status: 503 } })
     const buyer = newBuyer()

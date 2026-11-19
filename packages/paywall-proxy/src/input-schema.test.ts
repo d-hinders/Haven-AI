@@ -34,16 +34,21 @@ describe('the validator', () => {
   })
 
   it('never carries a value from the body', () => {
-    const validate = compileInputSchema({ type: 'object', properties: { a: { const: 'x' }, b: { enum: ['y'] }, c: { type: 'integer' } } })
-    const errors = validate({ a: 'SECRET-A-77', b: 'SECRET-B-88', c: 'SECRET-C-99' })
-    expect(errors.map((e) => e.rule).sort()).toEqual(['const', 'enum', 'type'])
-    expect(JSON.stringify(errors)).not.toMatch(/SECRET/)
+    for (const [schema, rule] of [[{ const: 'x' }, 'const'], [{ enum: ['y'] }, 'enum'], [{ type: 'integer' }, 'type'], [{ maxLength: 2 }, 'maxLength']] as const) {
+      const errors = compileInputSchema({ type: 'object', properties: { a: schema } })({ a: 'SECRET-A-77' })
+      expect(errors).toEqual([{ path: '/a', rule }])
+      expect(JSON.stringify(errors)).not.toMatch(/SECRET/)
+    }
   })
 
-  it('is bounded: at most 10 entries, each string at most 200 characters', () => {
+  it('is bounded: it stops at the first failure (never more than 10 entries), and each string is at most 200 characters', () => {
     const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}`, { type: 'string' }]))
     const validate = compileInputSchema({ type: 'object', required: Object.keys(many), properties: many })
-    expect(validate({})).toHaveLength(MAX_INPUT_ERRORS)
+    expect(validate({})).toEqual([{ path: '/f0', rule: 'required' }])
+    expect(validate({}).length).toBeLessThanOrEqual(MAX_INPUT_ERRORS)
+    // A large array failing an items rule reports one entry, not one per element.
+    const items = compileInputSchema({ type: 'object', properties: { a: { type: 'array', items: { type: 'string' } } } })
+    expect(items({ a: Array.from({ length: 100_000 }, () => 1) })).toEqual([{ path: '/a/0', rule: 'type' }])
     const long = 'k'.repeat(500)
     const deep = compileInputSchema({ type: 'object', required: [long] })
     const [entry] = deep({})
@@ -55,6 +60,8 @@ describe('the validator', () => {
     expect(() => compileInputSchema({ properties: { a: { $ref: 'other.json#/x' } } })).toThrow(/outside the schema/)
     const validate = compileInputSchema({ $defs: { q: { type: 'string' } }, type: 'object', properties: { query: { $ref: '#/$defs/q' } } })
     expect(validate({ query: 1 })).toEqual([{ path: '/query', rule: 'type' }])
+    // A "$ref" key inside data (const, enum, default, examples) is not a reference.
+    expect(() => compileInputSchema({ type: 'object', examples: [{ $ref: 'https://x.example/a' }], properties: { a: { const: { $ref: 'b.json' } } } })).not.toThrow()
   })
 
   it('refuses what it cannot enforce: not a schema, another dialect, an unknown keyword', () => {
@@ -105,7 +112,7 @@ describe('the products file load', () => {
 
   it('fails startup naming the product for an input_example that fails its schema', () => {
     expect(problems([{ ...search, input_example: { max_results: 99 } }])).toEqual([
-      'product "search": "input_example" does not pass "input_schema": /query fails "required", /max_results fails "maximum"',
+      'product "search": "input_example" does not pass "input_schema": /query fails "required"',
     ])
   })
 

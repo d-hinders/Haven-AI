@@ -134,11 +134,14 @@ products file that names a network is refused at startup.
 **Give every product that takes a body an `input_schema`.** With one, the proxy
 checks each request body against it before it answers with a price and again
 before it settles a payment, so a buyer is never charged for a body your API
-cannot serve. The body must be JSON, sent as `application/json` (or a `+json`
+cannot serve. The body must be JSON, sent as `application/json` (or an `application/…+json`
 type) or with no Content-Type; a `text/plain` body is refused. A body that
-fails is answered 400 `invalid_request_body`, with an `errors` list of
-`{ path, rule }`: the field, as a JSON pointer, and the schema rule it failed.
-The list never repeats the buyer's values. **Without a schema the proxy cannot
+fails is answered 400 `invalid_request_body` (a payment the proxy already
+settled gets 200 `bad_request_after_settlement` instead), with an `errors` list
+of `{ path, rule }`: the field, as a JSON pointer, and the schema rule it
+failed; the proxy reports the first failure it finds. The list never repeats
+a value the buyer sent, though a path can contain a property name they sent
+when your schema validates arbitrary keys. **Without a schema the proxy cannot
 refuse a body before payment**: it forwards whatever it is sent.
 
 The dialect is JSON Schema draft 2020-12. At startup the proxy refuses, naming
@@ -146,6 +149,10 @@ the product: a schema it cannot compile; an unknown keyword; a `$ref` that
 points outside the schema (only `#...` references, so loading never makes a
 network call); `input_schema` on a `GET` or `DELETE` route, which has no body;
 and an `input_example` that fails its own schema. `format` is not checked.
+Three things that fail startup when you paste a schema from elsewhere: a
+`"$schema"` naming draft-07 (or any dialect other than 2020-12), OpenAPI's
+`example` keyword (2020-12 spells it `examples`), and `x-*` extension keys.
+Remove them.
 
 What you should see: the proxy starts, and its `started` log line lists your
 product ids under `products`.

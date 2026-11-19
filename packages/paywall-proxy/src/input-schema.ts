@@ -35,6 +35,9 @@ export class InputSchemaCompileError extends Error {
   }
 }
 
+/** Keywords whose value is data, not schema: a `$ref` key inside them is not a reference. */
+const DATA_KEYWORDS = new Set(['const', 'enum', 'default', 'examples'])
+
 /** A `$ref` or `$dynamicRef` that does not point inside the schema itself. */
 function findRemoteRef(node: unknown): string | undefined {
   if (Array.isArray(node)) {
@@ -46,6 +49,7 @@ function findRemoteRef(node: unknown): string | undefined {
   }
   if (node === null || typeof node !== 'object') return undefined
   for (const [key, value] of Object.entries(node)) {
+    if (DATA_KEYWORDS.has(key)) continue
     if ((key === '$ref' || key === '$dynamicRef') && typeof value === 'string' && !value.startsWith('#')) return value
     const found = findRemoteRef(value)
     if (found !== undefined) return found
@@ -78,7 +82,9 @@ export function compileInputSchema(schema: unknown): InputValidator {
     throw new InputSchemaCompileError(`"input_schema" has a $ref outside the schema (${clip(JSON.stringify(remote))}): only "#..." references are allowed, so loading never makes a network call`)
   }
   const ajv = new Ajv2020({
-    allErrors: true,
+    // The first failure only: with allErrors, a 1 MiB array against an `items` rule
+    // builds one error object per element before any bound applies (review of #4988).
+    allErrors: false,
     messages: false,
     // `format` is an annotation in 2020-12, not a check: an unknown format is not a startup failure.
     validateFormats: false,

@@ -100,6 +100,7 @@ import {
 } from './types.js'
 import {
   buildX402IdempotencyKey,
+  normalizePaymentRequired,
   parsePaymentRequiredResponse,
   resolveTokenFromAddress,
   selectStandardPaymentOption,
@@ -2219,6 +2220,23 @@ export class HavenClient {
    */
   async readCheckoutDetails(): Promise<CheckoutDetailsAvailability> {
     return readCheckoutDetailsAvailability({ getAgent: () => this.getAgent(), get: (path) => this.get(path) })
+  }
+
+  /**
+   * #4872: GET /x402/:id/payment-required — the merchant's x402 challenge as
+   * Haven stored it at authorize (#1355), for any x402 intent of this agent.
+   * The keyless hosted `haven_submit` reads the merchant's checkout-details
+   * request from it before it relays a plain-HTTP payment, which stores no
+   * merchant call context. Untrusted merchant content, normalized by the same
+   * parser every challenge goes through: no stored challenge, or a stored blob
+   * that is not a valid challenge, reads as `null`. Throws `HavenApiError`
+   * (404 unknown or foreign payment_id, 409 not an x402 intent).
+   */
+  async getX402StoredPaymentRequired(paymentId: string): Promise<X402PaymentRequired | null> {
+    const raw = await this.get<{ payment_id: string; payment_required?: unknown }>(
+      `/x402/${encodeURIComponent(paymentId)}/payment-required`,
+    )
+    return raw.payment_required == null ? null : normalizePaymentRequired(raw.payment_required)
   }
 
   async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext> {

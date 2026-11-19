@@ -52,8 +52,6 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
-  CheckoutDetailsUnavailableError,
-  checkoutDetailsRefusalError,
   FundingConfirmationUnknownError,
   FundingRevertedError,
   HavenApiError,
@@ -69,7 +67,6 @@ import {
   type EvidenceReportOutcome,
   type AgentPaymentWarning,
   type X402McpTransport,
-  type CheckoutDetailField,
   X_CHECKOUT_DETAILS_HEADER,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
@@ -86,6 +83,7 @@ import {
   checkoutDetailsAfterSubmit,
   checkoutDetailsBeforeSpend,
   checkoutDetailsForFundedDelivery,
+  checkoutDetailsWhilePending,
   type SettleCheckoutDetails,
   type StoredCheckoutRequest,
 } from './support/checkout-details.js'
@@ -1688,26 +1686,19 @@ export function createPaidMcpCompletionHandlers(
         // error on EIP-3009 — and delivery, if any happens, decides checkout
         // details itself as `funded`/`unsent` (`checkoutDetails: undefined`).
         // Telling that agent "nothing moved" could make it pay twice.
-        let checkoutDetails: SettleCheckoutDetails | undefined
-        try {
-          checkoutDetails = await checkoutDetailsBeforeSpend(haven, {
-            stored: merchantContext.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, merchantContext)),
-            paymentHeader: args.payment_header,
-            requestHeaders: MERCHANT_REQUEST_HEADERS,
-            paymentId: args.payment_id,
-          })
-        } catch (err) {
-          if (!(err instanceof CheckoutDetailsUnavailableError)) throw err
-          const status = await haven.getPaymentStatus(args.payment_id).catch(() => null)
-          if (status?.status === 'pending_signature') throw err
-          // Unreadable state: still refuse (fail closed — skipping would burn
-          // the erc7710 child or fund EIP-3009 first), but never claim that
-          // nothing moved: an earlier settle may already have.
-          if (status === null) {
-            throw checkoutDetailsRefusalError(err.missingFields as CheckoutDetailField[], err.reason, { stateUnknown: true, paymentId: args.payment_id })
-          }
-          checkoutDetails = undefined
-        }
+        // The rule itself is `checkoutDetailsWhilePending`, shared with the
+        // plain-HTTP `haven_submit` (part 2b).
+        const checkoutDetails: SettleCheckoutDetails | undefined = await checkoutDetailsWhilePending(
+          haven,
+          args.payment_id,
+          async () =>
+            checkoutDetailsBeforeSpend(haven, {
+              stored: merchantContext.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, merchantContext)),
+              paymentHeader: args.payment_header,
+              requestHeaders: MERCHANT_REQUEST_HEADERS,
+              paymentId: args.payment_id,
+            }),
+        )
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.

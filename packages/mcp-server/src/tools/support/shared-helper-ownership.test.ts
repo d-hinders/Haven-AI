@@ -282,12 +282,16 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // haven_pay_mcp_tool (both branches).
   delegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
   // #4872 part 2: checkout details on the hosted paid paths. The pay tools
-  // (s2810) refuse before any intent; the settle leg (s2812) builds the
-  // answer for the paid request it sends. One module, so both read the same
-  // SDK decision.
-  refuseUnshareableCheckoutDetails: { module: 'checkout-details', slices: ['s2810'] },
+  // (s2810, and s2811's haven_pay_x402_quote since part 2b) refuse before any
+  // intent; the settle leg (s2812) builds the answer for the paid request it
+  // sends, and the plain-HTTP haven_submit (s2809, part 2b) builds it into the
+  // retry headers. One module, so all of them read the same SDK decision.
+  refuseUnshareableCheckoutDetails: { module: 'checkout-details', slices: ['s2810', 's2811'] },
   checkoutDetailsBeforeSpend: { module: 'checkout-details', slices: ['s2812'] },
-  checkoutDetailsAfterSubmit: { module: 'checkout-details', slices: ['s2812'] },
+  checkoutDetailsAfterSubmit: { module: 'checkout-details', slices: ['s2809', 's2812'] },
+  checkoutDetailsWhilePending: { module: 'checkout-details', slices: ['s2809', 's2812'] },
+  checkoutDetailsBeforeSubmit: { module: 'checkout-details', slices: ['s2809'] },
+  storedChallengeForSubmit: { module: 'checkout-details', slices: ['s2809'] },
   checkoutDetailsForFundedDelivery: { module: 'checkout-details', slices: ['s2812'] },
   SettleCheckoutDetails: { module: 'checkout-details', slices: ['s2812'] },
   StoredCheckoutRequest: { module: 'checkout-details', slices: ['s2812'] },
@@ -314,12 +318,12 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
-  refuseUnshareableCheckoutDetails:
-    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
   checkoutDetailsBeforeSpend:
     '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
-  checkoutDetailsAfterSubmit:
-    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  checkoutDetailsBeforeSubmit:
+    '#4872 part 2b: the plain-HTTP haven_submit (s2809) half of the decision whose pay-time half every pay tool (s2810, s2811) calls — kept beside them so the submit-time answer and the pay-time refusal read the same SDK decision (budget, block, reasons) and cannot drift apart.',
+  storedChallengeForSubmit:
+    '#4872 part 2b: the plain-HTTP haven_submit (s2809) half of the decision whose pay-time half every pay tool (s2810, s2811) calls — kept beside them so the submit-time answer and the pay-time refusal read the same SDK decision (budget, block, reasons) and cannot drift apart.',
   checkoutDetailsForFundedDelivery:
     '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
   SettleCheckoutDetails:
@@ -536,7 +540,10 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'refuseUnshareableCheckoutDetails',
     'checkoutDetailsBeforeSpend',
     'checkoutDetailsAfterSubmit',
+    'checkoutDetailsBeforeSubmit',
     'checkoutDetailsForFundedDelivery',
+    'checkoutDetailsWhilePending',
+    'storedChallengeForSubmit',
     'SettleCheckoutDetails',
     'StoredCheckoutRequest',
   ],

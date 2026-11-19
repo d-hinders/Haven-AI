@@ -56,12 +56,16 @@ export {
   taskSignerCompatibilityNotice,
 } from './signer-compat.js'
 
-// #4872 part 2: checkout details on the hosted paid paths (pay tools + settle).
+// #4872 part 2: checkout details on the hosted paid paths (pay tools, settle,
+// and the plain-HTTP haven_submit).
 export {
   checkoutDetailsAfterSubmit,
   checkoutDetailsBeforeSpend,
+  checkoutDetailsBeforeSubmit,
   checkoutDetailsForFundedDelivery,
+  checkoutDetailsWhilePending,
   refuseUnshareableCheckoutDetails,
+  storedChallengeForSubmit,
   type SettleCheckoutDetails,
   type StoredCheckoutRequest,
 } from './checkout-details.js'

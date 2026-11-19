@@ -48,6 +48,7 @@ const boundary: ClientBoundary = {
     'getTaskBudget', // #3329
     'getTaskBudgetSignContext', // #3329
     'getX402MerchantCallContext',
+    'getX402StoredPaymentRequired', // #4872
     'listPendingSubBudgetSignatures', // #3506
     'listReceipts',
     'listReceiptsPage', // #3128
@@ -106,6 +107,7 @@ const boundary: ClientBoundary = {
     "async getTaskBudget(id: string): Promise<HavenTaskBudget>",
     "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
+    "async getX402StoredPaymentRequired(paymentId: string): Promise<X402PaymentRequired | null>", // #4872: the hosted haven_submit reads the stored checkout-details request
     "async readCheckoutDetails(): Promise<CheckoutDetailsAvailability>", // #4872: the keyless hosted server's read of the agent's own checkout details
     "async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",

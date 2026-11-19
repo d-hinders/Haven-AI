@@ -18,9 +18,11 @@
  *   and a retired one that stays listed, each labelled "registered by you, not
  *   verified by Haven" (`salesDepositAddresses`, `fixtures/haven-api.ts`).
  * - **The register dialog (#4954)** — the address field and its label.
- * - **The dialog, result** — `DialogResult` plus the backup recommendation.
- *   Reached by turning Sales back ON, which needs no passkey prompt (owner
- *   decision 5), so the capture never depends on a WebAuthn stub.
+ * - **The dialog, result** — `DialogResult` and the **Open Sales** action, which
+ *   goes to `/sales`. No backup copy on any screen (#4984, reversing the
+ *   #4894 drawing's `NoticeRow`). Reached by turning Sales back ON, which
+ *   needs no passkey prompt (owner decision 5), so the capture never depends
+ *   on a WebAuthn stub.
  *
  * ## Why the clips are the card and the panel, not the page
  *
@@ -252,6 +254,8 @@ test.describe('settings sales card and dialog (#4904)', () => {
       await expect(panel.getByText('The network cannot be changed later.')).toHaveCount(1)
       // No name field: the server names the account "Sales".
       await expect(panel.getByLabel('Account name')).toHaveCount(0)
+      // #4984: no backup copy on the ask screen either.
+      await expect(panel.getByText(/backup/i)).toHaveCount(0)
       await expect(panel).toHaveScreenshot(
         `settings-sales-dialog-form-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
         SNAPSHOT_OPTIONS,
@@ -259,7 +263,7 @@ test.describe('settings sales card and dialog (#4904)', () => {
     })
   }
 
-  test('dialog — result: the account is on, and a backup is recommended, never required', async ({ page }, testInfo) => {
+  test('dialog — result: the account is on, and Open Sales goes to the Sales page', async ({ page }, testInfo) => {
     const scheme = schemeOf(testInfo)
     await page.setViewportSize({ width: 1280, height: 720 })
     // Turning Sales back ON needs no network and no passkey (owner decision 5),
@@ -273,8 +277,11 @@ test.describe('settings sales card and dialog (#4904)', () => {
     await panel.getByRole('button', { name: 'Turn on Sales' }).click()
 
     await expect(panel.getByText('Sales is on')).toHaveCount(1)
-    await expect(panel.getByText(/Add a backup/)).toHaveCount(1)
-    await expect(panel.getByRole('link', { name: /Add backup/ })).toHaveCount(1)
+    // #4984: the backup push is gone, and the guard is flipped rather than deleted.
+    await expect(panel.getByText(/Add a backup/)).toHaveCount(0)
+    await expect(panel.getByRole('link', { name: /Add backup/ })).toHaveCount(0)
+    await expect(panel.getByText(/backup/i)).toHaveCount(0)
+    await expect(panel.getByRole('link', { name: 'Open Sales' })).toHaveAttribute('href', '/sales')
     await expect(panel).toHaveScreenshot(
       `settings-sales-dialog-result-desktop${scheme === 'dark' ? '-dark' : ''}.png`,
       SNAPSHOT_OPTIONS,

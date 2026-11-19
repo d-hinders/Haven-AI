@@ -69,7 +69,9 @@ the owner's.
 
 1. As the merchant, open **Settings → Business → Sales** and turn Sales on
    (#4904). Pick **Base Sepolia**.
-2. A new account named **Sales** appears. Copy its address from the Accounts
+2. The dialog ends on **Sales is on**. Choose **Open Sales** to land on the
+   Sales page (#4984).
+3. A new account named **Sales** appears. Copy its address from the Accounts
    screen or the Sales page's Receive dialog, in its **checksummed** (mixed-case)
    form: the demo merchant refuses an address that is not checksummed. This is
    `<SALES_ACCOUNT_ADDRESS>`.

@@ -91,14 +91,14 @@ function serve({
 
 function renderDialog() {
   const onClose = vi.fn()
-  render(
+  const { unmount } = render(
     <LocaleProvider>
       <MerchantServicesProvider>
         <TurnOnSalesDialog open onClose={onClose} />
       </MerchantServicesProvider>
     </LocaleProvider>,
   )
-  return { onClose }
+  return { onClose, unmount }
 }
 
 function assertsWith(credentialId: string) {
@@ -152,29 +152,33 @@ describe('TurnOnSalesDialog — the first turn-on (#4904)', () => {
     })
   })
 
-  it('ends on the result state with the backup recommendation, which is never a gate', async () => {
+  it('ends on the result state with no backup copy, and Open Sales goes to the Sales page (#4984)', async () => {
     serve()
     renderDialog()
     await submit()
 
     expect(await screen.findByText('Sales is on')).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        'Add a backup — a backup passkey or a wallet — so a lost device never means a lost account.',
-      ),
-    ).toBeInTheDocument()
-    // The recommendation is a link, and the dialog's own actions work without it.
-    expect(screen.getByRole('link', { name: /Add backup/ })).toHaveAttribute(
-      'href',
-      `/accounts/${SALES_ACCOUNT.id}`,
-    )
+    // The 2026-11-19 reversal of the #4894 drawing: no backup push here.
+    expect(screen.queryByText(/backup/i)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open Sales account' })).toHaveAttribute(
-      'href',
-      `/accounts/${SALES_ACCOUNT.id}`,
-    )
+    expect(screen.getByRole('link', { name: 'Open Sales' })).toHaveAttribute('href', '/sales')
     // The account list is re-read so the new account shows behind the dialog.
     expect(refreshAccounts).toHaveBeenCalled()
+  })
+
+  it('renders no backup copy on the first-time ask, the turn-back-on ask, or the success screen (#4984)', async () => {
+    serve()
+    const first = renderDialog()
+    expect(screen.queryByText(/backup/i)).not.toBeInTheDocument()
+    first.unmount()
+
+    serve({ merchantAccount: SALES_ACCOUNT })
+    const again = renderDialog()
+    expect(screen.queryByText(/backup/i)).not.toBeInTheDocument()
+    await submit()
+    expect(await screen.findByText('Sales is on')).toBeInTheDocument()
+    expect(screen.queryByText(/backup/i)).not.toBeInTheDocument()
+    again.unmount()
   })
 
   it('a cancelled passkey prompt returns to the form with nothing to report', async () => {
@@ -291,15 +295,17 @@ describe('TurnOnSalesDialog — every refusal says what to do, and never shows a
 })
 
 describe('TurnOnSalesDialog — no passkey anywhere (#4904)', () => {
-  it('explains the way forward instead of offering a form', () => {
+  it('explains the way forward instead of offering a form, and opens the account where the passkey is added (#4984)', () => {
     serve({ signers: [] })
     renderDialog()
 
     expect(screen.getByText('Sales needs a passkey')).toBeInTheDocument()
     expect(screen.queryByLabelText('Network')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open Sales account' })).toHaveAttribute(
+    // No Sales account exists yet, so the button names the account it opens,
+    // and it lands on the Security tab where the passkey is added.
+    expect(screen.getByRole('link', { name: 'Open account' })).toHaveAttribute(
       'href',
-      `/accounts/${MAIN.id}`,
+      `/accounts/${MAIN.id}?tab=security`,
     )
   })
 

@@ -29,6 +29,14 @@ export type SalesKind = SalesPayment['kind']
 /** The page size the ledger asks for and "Show N more" names. */
 export const SALES_PAGE_SIZE = 50
 
+/**
+ * The one sentence that says what a Sales key cannot do (#4984). The Setup
+ * tab, the create dialog and the first-run checklist all read it, so the
+ * product carries one wording rather than three.
+ */
+export const SALES_KEY_CANT_SENTENCE =
+  'A key can’t move money, sign, or see anything but this account’s sales.'
+
 /** USDC has six decimals; the reads never pre-scale. */
 const USDC_DECIMALS = 6
 

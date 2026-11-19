@@ -63,6 +63,9 @@ const SCENARIOS: Scenario[] = [
       await page.getByRole('dialog', { name: 'Create Sales key' }).getByRole('button', { name: 'Create Sales key' }).click()
       const dialog = page.getByRole('dialog', { name: 'Your new Sales key' })
       await expect(dialog).toContainText(SALES_KEY_FAKE_SECRET)
+      // #4984: the created screen carries no Can / Can't rows.
+      await expect(dialog.locator('dl')).toHaveCount(0)
+      await expect(dialog.getByText(/Can[’']t/)).toHaveCount(0)
     },
   },
 ]

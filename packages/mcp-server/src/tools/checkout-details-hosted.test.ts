@@ -145,7 +145,11 @@ describe('#4872 hosted: the pay tools, more cases', () => {
   })
 
   it('a required request in a challenge too large to store (over 64 KB) is refused at pay time: settle could never answer it', async () => {
-    const big = { ...PAYMENT_REQUIRED, extensions: { 'haven-checkout-details': ask({ receipt_email: { required: true } }), bazaar: { info: { blob: 'x'.repeat(70000) } } } }
+    // Large through extra `accepts` entries, which are NOT echoed into the
+    // payment header: the header-block check alone would let this through.
+    const filler = Array.from({ length: 300 }, (_, i) => ({ ...PAYMENT_REQUIRED.accepts[0], network: `eip155:${900000 + i}`, extra: { note: 'n'.repeat(200) } }))
+    const big = { ...PAYMENT_REQUIRED, accepts: [...PAYMENT_REQUIRED.accepts, ...filler], extensions: { 'haven-checkout-details': ask({ receipt_email: { required: true } }) } }
+    expect(JSON.stringify(big).length).toBeGreaterThan(65536)
     stubFetch({
       'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(big)) } },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
@@ -207,6 +211,8 @@ describe('#4872 hosted: the answer at settle', () => {
     const result = await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 })
     expect(result.success).toBe(true)
     expect(sentAnswer(complete)).toEqual({ version: 1, receipt_email: EMAIL })
+    // Decided ONCE, before the relay — not read again at delivery.
+    expect(detailReads()).toHaveLength(1)
     for (const marker of VALUE_MARKERS) {
       expect(JSON.stringify(result)).not.toContain(marker)
       expect(logs()).not.toContain(marker)
@@ -228,6 +234,9 @@ describe('#4872 hosted: the answer at settle', () => {
     const { haven, complete } = settleHaven(ask({ billing_address: { required: false } }), STORED)
     ok(await createToolHandlers(haven).haven_complete_mcp_tool({ payment_id: 'pay_x402', payment_header: 'eyJ4IjoxfQ==' }))
     expect(sentAnswer(complete)).toEqual({ version: 1, billing_address: ADDRESS })
+    // Decided AFTER the funding wait: the payment is known funded first.
+    const order = recordedCalls().map((c) => new URL(c.url).pathname)
+    expect(order.indexOf('/agents/agt_1/checkout-details')).toBeGreaterThan(order.indexOf('/machine-payments/pay_x402/status'))
   })
 
   it('haven_complete_mcp_tool, required field no longer shareable: funded-not-delivered, and the step names complete or verify-then-sweep, never settle', async () => {

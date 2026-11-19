@@ -122,9 +122,6 @@ describe('generateInvoice — settlement state (#2969)', () => {
     expect(sv).toContain(BASE_PARAMS.txHash)
   })
 
-  // #4980: the default receipt states each settlement truth in English, in
-  // the JSON as in the text — the same three strings the English render
-  // always printed.
   // #4980: one document per payment — a call in the other locale replays it
   // under its own headings, so the Swedish render of an English document is
   // Swedish labels around English values. Pinned so it is a decision, not drift.
@@ -137,6 +134,9 @@ describe('generateInvoice — settlement state (#2969)', () => {
     expect(invoice.json.betalningssatt).toMatch(/^Cryptocurrency \(USDC on /)
   })
 
+  // #4980: the default receipt states each settlement truth in English, in
+  // the JSON as in the text — the same three strings the English render
+  // always printed.
   it('the default (English) receipt states each settlement state in English', () => {
     for (const [settlement, status] of [
       ['settled_onchain', 'Paid'],

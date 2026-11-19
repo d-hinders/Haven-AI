@@ -2,7 +2,7 @@
   "name": "@haven_ai/demo-merchant-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "Haven demo merchant \u2014 x402 payment wall with VPN & cloud storage products. Swedish invoice generation.",
+  "description": "Haven demo merchant \u2014 x402 payment wall with VPN & cloud storage products. Invoices in the shape of a Swedish bookkeeping document, English by default.",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

@@ -1769,6 +1769,71 @@ export const FIXTURE_MERCHANT_SERVICES = {
 }
 
 /**
+ * #4901: the setting after a turn-on — the state the Analytics Spending /
+ * Revenue switch exists in. The account is the dedicated Sales account the
+ * route creates (a real `smart_accounts` row, named "Sales" by the server), on
+ * the fixture's chain, so the capture never invents a state the backend cannot
+ * serve (#2120).
+ */
+export const FIXTURE_MERCHANT_SERVICES_ON = {
+  enabled: true,
+  enabled_at: '2026-05-04T09:00:00.000Z',
+  disabled_at: null,
+  merchant_account: {
+    id: 'account-sales',
+    account_address: '0x5555555555555555555555555555555555555555',
+    chain_id: 8453,
+    name: 'Sales',
+    created_at: '2026-05-04T09:00:00.000Z',
+  },
+}
+
+/**
+ * #4901: the Sales summary the Analytics Revenue side reads (`GET
+ * /merchant-sales/summary`, #4897). One story whose figures agree: Revenue
+ * $2.14 = two chat sales ($0.84) + one embeddings sale ($0.30) + one payment
+ * with no product ($1.00); a $0.50 move from the owner's own agent is in no
+ * total. Every day's `by_product` + `other_products_raw` +
+ * `without_product_raw` adds up to its `revenue_raw`, which is the property
+ * the chart's stack relies on.
+ */
+export const FIXTURE_SALES_SUMMARY = {
+  usdc_rates: { usd: 0.9998, eur: 0.92, sek: 11.2 },
+  revenue_raw: '2140000',
+  sales: 3,
+  average_sale_raw: '380000',
+  without_product: { count: 1, amount_raw: '1000000' },
+  own_moves: { count: 1, amount_raw: '500000' },
+  by_product: [
+    { product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' },
+    { product_id: 'embed', label: 'Embeddings', sales: 1, amount_raw: '300000' },
+  ],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [
+    {
+      payer: { kind: 'contact', name: 'Lumen Research', address: '0x41b2c09e7a55d81f3b2e6c40a9d17e5f8c0b7d93' },
+      payments: 2,
+      amount_raw: '840000',
+      last_paid_at: '2026-11-16T14:05:00.000Z',
+    },
+    {
+      payer: { kind: 'wallet', name: null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' },
+      payments: 2,
+      amount_raw: '1300000',
+      last_paid_at: '2026-11-16T13:48:00.000Z',
+    },
+  ],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+  ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
+}
+
+/**
  * The ATTENTION state (#2869 design review): the destination's sign-in has
  * expired (still the destination, cannot push) and the sweep has given up on
  * three rows. Raises the attention summary, the inline "Stopped retrying"
@@ -3634,14 +3699,21 @@ function setAccountingFeedStage(next) {
  * a scenario that silently captured nothing would be a worse evidence gap
  * than no scenario at all.
  */
-async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
+async function runAnalyticsScenario(
+  { page, vp, shoot },
+  waitForContent,
+  // #4901: the revenue side opens on `?view=revenue` and reads the Sales
+  // fixture, whose days sit inside the 30 days before 2026-11-17 — so the
+  // virtual clock moves with the side, or the chart would draw an empty window.
+  { path = '/analytics', now = '2026-07-10T14:00:00.000Z' } = {},
+) {
   // Virtual clock at the fixture's anchor day: the agents table's "Last
   // payment: 2h ago" caption reads the real clock, and against a fixture
   // pinned to 2026-07-10 the real clock printed "2mo ago" beside "4 payments"
   // in a 30-day window (#3204). The rest of the page reads server figures
   // and is unaffected.
-  await page.clock.install({ time: new Date('2026-07-10T14:00:00.000Z') })
-  await page.goto(`${BASE_URL}/analytics`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.clock.install({ time: new Date(now) })
+  await page.goto(`${BASE_URL}${path}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.evaluate(() => document.fonts.ready)
   await dismissMobileSidebar(page, vp)
   // The title is slice C's declared PageHeader title (issue #2947), so this
@@ -6886,6 +6958,32 @@ export const SCENARIOS = {
         // the retry action C's spec calls for (one error state with retry).
         await page.getByText(/could not load|try again/i).first().waitFor({ timeout: 15_000 })
       })
+    },
+  },
+  'analytics-revenue': {
+    description:
+      'Analytics on the Revenue side of the Spending / Revenue switch (#4901): merchant services on, `?view=revenue`, the Sales summary served — the tiles (Revenue, Sales, Average sale, Not counted), the by-product chart and the by-product breakdown, with the Agent facet hidden and the link to Sales in its place.',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/merchant-sales/summary') return FIXTURE_SALES_SUMMARY
+      return undefined
+    },
+    async run(args) {
+      await runAnalyticsScenario(
+        args,
+        async (page) => {
+          // Wait for the side itself, not a skeleton that happens to carry the
+          // title: the revenue tiles, then the by-product line the chart and
+          // the breakdown both name.
+          await page.getByTestId('analytics-revenue-tiles').waitFor({ timeout: 15_000 })
+          await page
+            .getByText('Chat completion', { exact: true })
+            .filter({ visible: true })
+            .first()
+            .waitFor({ timeout: 15_000 })
+        },
+        { path: '/analytics?view=revenue', now: '2026-11-17T12:00:00.000Z' },
+      )
     },
   },
 

@@ -34,6 +34,14 @@ export type UseAnalyticsOverviewResult = {
  * history rather than a live tape, and re-running a full aggregate every few
  * seconds would buy no figure that changes on its own.
  *
+ * `range` may be `null` to SKIP the read (#4901): the Analytics page's
+ * Spending / Revenue switch swaps the page's whole data source, and the side
+ * that is not on screen must not spend a request. A null range issues nothing,
+ * writes no state, and leaves the previous answer where it is; when a range
+ * arrives again the effect re-asks, so the side that comes back is read fresh
+ * rather than painted from a stale response. The same idiom
+ * `useSalesSummary(range | null)` already uses.
+ *
  * `agentId` is optional and rides the SAME request when set — the endpoint
  * scopes every aggregate to one agent (#4332), and the page's Agent facet
  * writes it. A `null` agent is the unfiltered page. The id is NOT validated
@@ -46,12 +54,12 @@ export type UseAnalyticsOverviewResult = {
  * omitted and the server's documented UTC default takes over.
  */
 export function useAnalyticsOverview(
-  range: AnalyticsRangeValue,
+  range: AnalyticsRangeValue | null,
   currency: AnalyticsCurrencyParam,
   agentId: string | null = null,
 ): UseAnalyticsOverviewResult {
   const [data, setData] = useState<AnalyticsOverviewResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(range !== null)
   const [failed, setFailed] = useState(false)
   const [agentNotFound, setAgentNotFound] = useState(false)
   const requestIdRef = useRef(0)
@@ -59,8 +67,9 @@ export function useAnalyticsOverview(
   // Rebuilt only when an input that changes the answer changes, so a
   // re-render that alters nothing cannot issue a second request for the same
   // window. `agentId` is part of the question (#4333): the path memo includes
-  // it, so picking an agent re-asks exactly once.
+  // it, so picking an agent re-asks exactly once. `null` is the skip signal.
   const path = useMemo(() => {
+    if (range === null) return null
     const params = new URLSearchParams({ range, currency })
     const zone = browserTimeZone()
     if (zone !== undefined) params.set('tz', zone)
@@ -70,6 +79,7 @@ export function useAnalyticsOverview(
 
   const load = useCallback(
     async (requestId: number) => {
+      if (path === null) return
       try {
         const response = await api.get<AnalyticsOverviewResponse>(path)
         // A superseded response (the reader moved the range while this was in
@@ -101,6 +111,9 @@ export function useAnalyticsOverview(
   )
 
   useEffect(() => {
+    // The side that is not on screen reads nothing (#4901). The cleanup of
+    // the previous run has already invalidated any request it left in flight.
+    if (path === null) return
     const requestId = ++requestIdRef.current
     setLoading(true)
     setFailed(false)
@@ -112,15 +125,16 @@ export function useAnalyticsOverview(
       // state after unmount.
       requestIdRef.current += 1
     }
-  }, [load])
+  }, [load, path])
 
   const refetch = useCallback(() => {
+    if (path === null) return
     const requestId = ++requestIdRef.current
     setLoading(true)
     setFailed(false)
     setAgentNotFound(false)
     void load(requestId)
-  }, [load])
+  }, [load, path])
 
   return { data, loading, failed, agentNotFound, refetch }
 }

@@ -26,6 +26,8 @@ import {
   FIXTURE_ACCOUNTING_FEED_SELF_HOSTED,
   FIXTURE_ACCOUNTING_FEED_ATTENTION,
   FIXTURE_MERCHANT_SERVICES,
+  FIXTURE_MERCHANT_SERVICES_ON,
+  FIXTURE_SALES_SUMMARY,
   FIXTURE_ANALYTICS_OVERVIEW,
   FIXTURE_ANALYTICS_OVERVIEW_EMPTY,
   httpError,
@@ -52,6 +54,8 @@ import {
   accountingFeedSelfHosted,
   accountingFeedAttention,
   merchantServicesOff,
+  merchantServicesOn,
+  salesSummary,
 } from '../../e2e/fixtures/haven-api'
 import { API_MOCK_DEFAULTS } from '../../e2e/fixtures/api-mock'
 
@@ -245,6 +249,30 @@ describe('fixture shape parity (screenshot dataset ↔ e2e dataset)', () => {
     }
     // The typed builder serves the same default the Playwright fixture does.
     expect(keysOf(API_MOCK_DEFAULTS['/merchant-services'])).toEqual(keysOf(merchantServicesOff))
+  })
+
+  /**
+   * #4901: the Analytics Revenue side exists only while merchant services are
+   * ON, and it reads the Sales summary. Both harnesses must answer both with
+   * the same keys — a key that exists in one and not the other renders
+   * `undefined` in exactly one gate, which is the drift this file exists to
+   * catch.
+   */
+  it('the merchant-services ON state aligns structurally across both harnesses (#4901)', () => {
+    expect(keysOf(FIXTURE_MERCHANT_SERVICES_ON)).toEqual(keysOf(merchantServicesOn))
+    expect(keysOf(FIXTURE_MERCHANT_SERVICES_ON.merchant_account)).toEqual(
+      keysOf(merchantServicesOn.merchant_account),
+    )
+    expect(FIXTURE_MERCHANT_SERVICES_ON).toMatchObject({ enabled: true })
+  })
+
+  it('the Sales summary aligns structurally across both harnesses (#4901)', () => {
+    expect(keysOf(FIXTURE_SALES_SUMMARY)).toEqual(keysOf(salesSummary))
+    // The per-day row is where the revenue chart reads its product split, so
+    // its keys are pinned too — a day missing `by_product` would draw an empty
+    // stack in one gate and a full one in the other.
+    expect(keysOf(FIXTURE_SALES_SUMMARY.by_day[0])).toEqual(keysOf(salesSummary.by_day[0]))
+    expect(keysOf(FIXTURE_SALES_SUMMARY.by_product[0])).toEqual(keysOf(salesSummary.by_product[0]))
   })
 })
 

@@ -27,6 +27,8 @@ import {
   productFacetValue,
   salesFiltersFromList,
   payerCount,
+  plural,
+  productLines,
   revenueCount,
   payerKey,
   payerKindLine,
@@ -49,44 +51,6 @@ import {
 } from '@/lib/sales'
 import { SalesBreakdownCard, type BreakdownLine } from './SalesBreakdownCard'
 import { SalesPaymentsList, type SalesListControls } from './SalesPaymentsList'
-
-/** "N payment(s) of $X": the words the own-moves notice and the tiles share. */
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`
-}
-
-/** The By product lines: every product, the products folded into "Other", then payments with no product. */
-export function productLines(summary: SalesSummary, money: SalesMoney): BreakdownLine[] {
-  const lines: BreakdownLine[] = summary.by_product.map((product) => ({
-    key: `product:${product.product_id}`,
-    name: product.label,
-    detail: product.product_id !== product.label ? product.product_id : undefined,
-    revenue: salesAmountText(product.amount_raw, money),
-    count: product.sales,
-  }))
-  const other = summary.by_product_other
-  if (other.products > 0 || other.sales > 0) {
-    lines.push({
-      key: 'product:other',
-      name: 'Other',
-      detail: plural(other.products, 'product'),
-      revenue: salesAmountText(other.amount_raw, money),
-      count: other.sales,
-    })
-  }
-  if (summary.without_product.count > 0) {
-    lines.push({
-      key: 'product:none',
-      name: 'No product',
-      detail: 'Paid, but your kit sent no sale record',
-      revenue: salesAmountText(summary.without_product.amount_raw, money),
-      count: summary.without_product.count,
-      muted: true,
-      countNoun: 'payment',
-    })
-  }
-  return lines
-}
 
 /**
  * The By payer lines: contacts and your own accounts by name, every other

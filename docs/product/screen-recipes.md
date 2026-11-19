@@ -37,6 +37,7 @@ covers:
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
+  - packages/frontend/src/components/ui/StackedBarChart.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
   - packages/frontend/src/lib/dashboard-attention.ts
@@ -1397,6 +1398,9 @@ Structure:
    would not fit beside it (#4409).
    A stale or foreign `?agentId=` clears with a one-line notice ("That agent
    isn't available"), never the page error.
+   On the Revenue side (#4901) the facet is replaced by a **View in Sales**
+   link and the subtitle reads "What your Sales account received." — the
+   Sales reads are the merchant account's, not an agent's.
 2. One `PeriodPicker` — the list-controls period control (#4110) — for the
    window (7d / 30d / 90d, default 30d), presets only: Last 7 / 30 / 90 days,
    no All time and no custom range, because the endpoint takes a rolling
@@ -1476,6 +1480,23 @@ of the zero tiles and empty sections: "No agent activity yet", a line on what
 the page will show, and **Connect agent** opening the existing connect flow on
 `/agents` (#4333). An agent-owning user with a quiet window keeps the
 whole-window empty state; a sparse window keeps the tiles and the table.
+
+**The Spending / Revenue switch (#4901).** For a user with merchant services
+on, a `Tabs` row sits under the header — *Spending* / *Revenue* — and swaps the
+page's whole data source (`design-system.md` § Tabs). The side is held in
+`?view=` beside `?period=`, so it survives a reload and a period change; with
+merchant services off the switch is absent and the page renders exactly as it
+shipped. Each side keeps the one-request rule: the side not on screen issues
+nothing. The Revenue side reads the Sales reads from #4897 over the same
+period, so its total equals the Sales page's total for that period by
+construction. Its four tiles are *Revenue* (the period's total), *Sales* (the
+count of payments with a product), *Average sale*, and *Not counted* (what
+moved between the owner's own accounts and agents — in no total, and said so);
+then the shared `StackedBarChart` stacked by product (five named products, the
+rest folded into "Other" in neutral ink, payments with no sale record in the
+second neutral ink, no Refusals column) and the shared by-product breakdown
+card. A period with nothing in it is one empty state ("No sales in this
+period"), never four tiles asserting zeros.
 
 Money and risk clarity:
 - A value is a reading, never a judgement: the figure is ink in every state.

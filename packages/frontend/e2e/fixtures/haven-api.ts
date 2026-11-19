@@ -1290,9 +1290,12 @@ export const salesSummary = {
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
   by_day: [
-    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000' },
-    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000' },
-    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000' },
+    // #4901: the per-product split the Analytics Revenue chart stacks. It adds
+    // up to `revenue_raw` on every day (products + other_products_raw +
+    // without_product_raw), which is the property the chart's bars rely on.
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
   ],
   received_in_stripe: { count: 0, amount_raw: '0' },
 }

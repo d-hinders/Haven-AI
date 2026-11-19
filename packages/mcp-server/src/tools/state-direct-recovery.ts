@@ -1149,10 +1149,13 @@ export function createStateDirectRecoveryHandlers(
               )
             : 'unknown'
         // #4872: the agent sends a plain-HTTP paid request itself, so the
-        // answer rides this result. Never on the MCP-tool flow: there
-        // haven_complete_mcp_tool decides and sends it on the paid call.
+        // answer rides this result — ONLY once the relay confirmed and the
+        // flow is known to be plain HTTP. Never on the MCP-tool flow (there
+        // haven_complete_mcp_tool decides and sends it on the paid call), and
+        // never while the flow is unknown: an unconfirmed relay is told not to
+        // retry yet, and a failed flow read may be an MCP-tool payment.
         const additionalRetryHeaders =
-          checkoutDetails?.header && x402Flow !== 'mcp_tool'
+          checkoutDetails?.header && result.status === 'confirmed' && x402Flow === 'plain_http'
             ? { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetails.header }
             : undefined
         return {

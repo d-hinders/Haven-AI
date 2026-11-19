@@ -22,6 +22,7 @@ import {
   X402_INTENT_RESPONSE,
   clearCalls,
   fail,
+  fixtureHandlers,
   ok,
   recordedCalls,
   stubFetch,
@@ -121,6 +122,17 @@ describe('#4872 hosted plain HTTP: haven_pay_x402_quote refuses before any inten
     for (const marker of VALUE_MARKERS) expect(JSON.stringify(result)).not.toContain(marker)
   })
 
+  it('request mode (no payment_required; Haven probes the merchant): the same refusal, no POST /x402', async () => {
+    stubFetch({
+      ...payStubs(SHARING_OFF),
+      'GET /paid': { status: 402, body: challenge(REQUIRED_EMAIL) },
+    })
+    const out = fail(await fixtureHandlers().haven_pay_x402_quote({ url: PAYMENT_REQUIRED.resource.url, max_amount_human: '2' }))
+    expect(out).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', missing_fields: ['receipt_email'], reason: 'not_shared' })
+    expect(recordedCalls().some((c) => new URL(c.url).hostname === 'merchant.test')).toBe(true)
+    expect(intentCalls()).toEqual([])
+  })
+
   it('with an idempotency_key, the refusal says THIS call created nothing', async () => {
     stubFetch(payStubs(SHARING_OFF))
     const out = fail(await client().haven_pay_x402_quote({ ...PAY(REQUIRED_EMAIL), idempotency_key: 'k-1' }))
@@ -160,6 +172,11 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
     return new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
   }
 
+  /** The merchant-call-context read fails with a 5xx: the flow is unknown. */
+  function stubFetchOverride(haven: HavenClient) {
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new Error('context read failed'))
+  }
+
   describe('erc7710 (the agent sends the paid request with retry_headers)', () => {
     const HEADER = 'eyJ4IjoxfQ=='
     function erc7710(request: unknown, details: unknown, header = HEADER, opts: Parameters<typeof submitHaven>[2] = {}) {
@@ -187,6 +204,15 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       }
       expect(logs()).not.toContain(headers[X_CHECKOUT_DETAILS_HEADER])
       expect(detailReads()).toHaveLength(1)
+    })
+
+    it('the before-submit decision is sized for erc7710 (availability only), not as the EIP-3009 estimate', async () => {
+      // A challenge large enough that an EIP-3009 estimate would refuse; on
+      // erc7710 only the real (small) header decides, so the answer is sent.
+      const { haven, submit } = erc7710({ ...REQUIRED_EMAIL, padding: 'x'.repeat(14000) }, STORED)
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(decode(result.data.retry_headers[X_CHECKOUT_DETAILS_HEADER])).toEqual({ version: 1, receipt_email: EMAIL })
     })
 
     it('a challenge that asks for nothing: retry_headers are exactly today\'s, and the details are not read', async () => {
@@ -279,6 +305,22 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       expect(result.data.additional_retry_headers).toBeUndefined()
       for (const marker of VALUE_MARKERS) expect(JSON.stringify(result)).not.toContain(marker)
       expect(String(result.data.next_tool)).toContain('haven_complete_mcp_tool')
+    })
+
+    it('a relay that is only submitted, not confirmed: no answer is returned (the agent is told not to retry yet)', async () => {
+      const haven = submitHaven(REQUIRED_EMAIL, STORED, { relay: { status: 200, body: { status: 'submitted' } } })
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(result.data.additional_retry_headers).toBeUndefined()
+      expect(String(result.data.reason)).not.toContain('additional_retry_headers')
+      for (const marker of VALUE_MARKERS) expect(JSON.stringify(result)).not.toContain(marker)
+    })
+
+    it('a confirmed relay whose flow cannot be read (the context read fails): no answer, as it may be an MCP-tool payment', async () => {
+      const haven = submitHaven(REQUIRED_EMAIL, STORED, { status: { status: 'confirmed', phase: 'funded', tx_hash: '0xfund' } })
+      stubFetchOverride(haven)
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(result.data.additional_retry_headers).toBeUndefined()
+      for (const marker of VALUE_MARKERS) expect(JSON.stringify(result)).not.toContain(marker)
     })
 
     it('a direct payment (no stored challenge: a 409): nothing is read and the result is today\'s', async () => {

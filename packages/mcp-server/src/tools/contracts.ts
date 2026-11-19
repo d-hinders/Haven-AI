@@ -1525,6 +1525,18 @@ const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
     ' For an MCP entry with a spending cap in mind, prefer haven_prepare_catalog_purchase with its catalog_id.',
 })
 
+/**
+ * #4872 part 2: checkout details on the hosted MCP-merchant paths
+ * (`docs/architecture/13-checkout-details.md`). The pay tools refuse before
+ * any intent; the settle and complete legs answer on the paid request this
+ * server sends. Hosted-only sentences: the shared fragments stay
+ * surface-neutral, as the local runtime appends its own.
+ */
+const HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE =
+  'A required checkout detail this agent cannot share refuses with CHECKOUT_DETAILS_UNAVAILABLE before any payment: tell the user.'
+const HOSTED_CHECKOUT_DETAILS_SETTLE_SENTENCE =
+  'Requested checkout details ride the paid request (X-Checkout-Details, seller only, never stored); if a required one can no longer be shared, delivery refuses with CHECKOUT_DETAILS_UNAVAILABLE.'
+
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
@@ -1535,12 +1547,12 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_send: composeDescription(sharedDescriptions.send, 'hosted'),
   haven_pay: PAY_DESCRIPTION,
   haven_submit: SUBMIT_DESCRIPTION,
-  haven_pay_mcp_tool: PAY_MCP_TOOL_DESCRIPTION,
+  haven_pay_mcp_tool: `${PAY_MCP_TOOL_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE}`,
   haven_quote_mcp_tool: QUOTE_MCP_TOOL_DESCRIPTION,
-  haven_prepare_catalog_purchase: PREPARE_CATALOG_PURCHASE_DESCRIPTION,
+  haven_prepare_catalog_purchase: `${PREPARE_CATALOG_PURCHASE_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE}`,
   haven_quote_catalog_purchase: QUOTE_CATALOG_PURCHASE_DESCRIPTION,
-  haven_complete_mcp_tool: COMPLETE_MCP_TOOL_DESCRIPTION,
-  haven_settle_mcp_tool: SETTLE_MCP_TOOL_DESCRIPTION,
+  haven_complete_mcp_tool: `${COMPLETE_MCP_TOOL_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_SETTLE_SENTENCE}`,
+  haven_settle_mcp_tool: `${SETTLE_MCP_TOOL_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_SETTLE_SENTENCE}`,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
   haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
   haven_resume_x402_payment: RESUME_X402_DESCRIPTION,

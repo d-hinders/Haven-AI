@@ -535,11 +535,25 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * `haven_quote_x402`, the hosted x402 entry point: three names, +2 bytes
  * each, +6. 31,811 UTF-8 bytes — 1 under the round-29 pin, so the cap is
  * LOWERED to the measured value (31,812 → 31,811), as #4796 asks. No tool was added — 29 holds. Shrink-only from here.
+ *
+ * **Re-derived — round 35, #4872 part 2 (2026-11-19).** Checkout details on
+ * the hosted MCP-merchant paths: #4872 requires the descriptions of the paths
+ * that answer or refuse to say so. `haven_pay_mcp_tool` and
+ * `haven_prepare_catalog_purchase` gain one sentence (a required detail the
+ * agent cannot share refuses with CHECKOUT_DETAILS_UNAVAILABLE before any
+ * payment), `haven_settle_mcp_tool` and `haven_complete_mcp_tool` one more
+ * (the requested fields ride the paid request, seller only, never stored; a
+ * required one that can no longer be shared refuses delivery). A first draft
+ * at +1,180 was cut to +641: both sentences name the code the agent
+ * branches on and the one action it takes, nothing else. 32,452 UTF-8
+ * bytes; the cap is RAISED to the measured value, as rounds 26–28 did for a
+ * description an issue requires. No tool was added — 29 holds. Shrink-only
+ * from here.
  */
-const MAX_TOTAL_BYTES = 31_811
-// Mean pin: round 34 (#4796 block above): 31,811 / 29 = 1096.9310…, pinned
-// at the two-decimal ceiling (1096.94). Shrink-only from here.
-const MAX_MEAN_BYTES = 1096.94
+const MAX_TOTAL_BYTES = 32_452
+// Mean pin: round 35 (#4872 block above): 32,452 / 29 = 1119.0345…, pinned
+// at the two-decimal ceiling (1119.04). Shrink-only from here.
+const MAX_MEAN_BYTES = 1119.04
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

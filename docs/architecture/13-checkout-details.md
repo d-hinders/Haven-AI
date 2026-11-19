@@ -407,9 +407,20 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > carry the answer and refuse before payment, in
 > `packages/sdk/src/checkout-details.ts` and `client-checkout-details.ts`. The
 > SDK paths pay the EIP-3009 option, so on them the answer rides EIP-3009 only;
-> the pre-authorise block estimate counts the caller's own request headers. The two hosted paths (the MCP-merchant
-> completion and the state-direct `retry_headers`) follow in the second #4872
-> PR; until then they send no answer and do not refuse.
+> the pre-authorise block estimate counts the caller's own request headers.
+> The hosted MCP-merchant completion is supported too
+> (`packages/mcp-server/src/tools/support/checkout-details.ts`):
+> `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` refuse before any
+> intent, sized for the option actually paid (erc7710 or EIP-3009); the settle
+> and complete legs read the merchant's request back from the challenge stored
+> at authorize (`GET /x402/:id/merchant-call-context` serves it as
+> `checkout_details_request`), read the agent's details again, and send the
+> answer on the paid request. At settle the block is measured on the actual
+> payment header, and a required field that can no longer be shared refuses
+> delivery before the merchant is contacted. An explicitly threaded context,
+> or a challenge too large to store (over 64 KB), has no stored request, so
+> nothing is sent or refused there. The plain-HTTP and state-direct paths
+> follow in the last #4872 PR.
 
 The census below covers every path the issue names, plus the local MCP tools
 that reach the same SDK seam. "Supported in this epic" means the path answers

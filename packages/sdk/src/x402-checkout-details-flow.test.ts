@@ -461,5 +461,21 @@ describe('checkout details on the paid request (#4872)', () => {
     expect(err).not.toBeInstanceOf(CheckoutDetailsUnavailableError)
     expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
   })
+
+  it('the hosted settle reads the merchant request back: getX402MerchantCallContext carries checkout_details_request verbatim, and omits it when absent', async () => {
+    const request = { info: { version: 1, fields: { receipt_email: { required: true } } } }
+    const base = { payment_id: 'pay_ctx', merchant_url: 'https://merchant.example/mcp', tool_name: 't', arguments: {} }
+    const answers = [{ ...base, checkout_details_request: request }, base]
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(answers.shift()), { status: 200 }))
+    const client = newClient()
+    expect((await client.getX402MerchantCallContext('pay_ctx')).checkoutDetailsRequest).toEqual(request)
+    expect('checkoutDetailsRequest' in (await client.getX402MerchantCallContext('pay_ctx'))).toBe(false)
+  })
+
+  it('readCheckoutDetails: the keyless hosted read of the agent\'s own details, never throwing', async () => {
+    const { calls } = wire('fetch', { [DETAILS_PATH]: STORED }, challenge())
+    expect(await newClient().readCheckoutDetails()).toEqual({ available: true, values: STORED.checkout_details })
+    expect(havenCallsOf(calls).some((c) => c.url.endsWith(DETAILS_PATH))).toBe(true)
+  })
 })
 

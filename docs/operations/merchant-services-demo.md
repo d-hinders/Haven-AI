@@ -77,11 +77,12 @@ the owner's.
 ### 1.3 Create a Sales key *(not yet verified)*
 
 1. As the merchant, open the **Sales** page and its **Setup** tab. Under
-   **Sales keys**, choose **Create Sales key** and confirm (#4905).
+   **Sales keys**, choose **Create Sales key**, then **Create Sales key** again
+   in the dialog (#4905).
 2. The **Your new Sales key** dialog shows the key **once**: `sk_merchant_…`.
    Choose **Copy key**. This is `<SALES_KEY>`. Paste it straight into Railway
    (step 1.4), nowhere else.
-3. Close the dialog. From then on the list shows only the key's first
+3. Choose **Done**. From then on the list shows only the key's first
    characters. If you lose the key, revoke it (step 4.3) and create a new one.
 
 The same through the API, with the merchant's dashboard session. The session
@@ -300,7 +301,7 @@ curl -s -X DELETE "<DEV_API>/merchant-sales/payments/<TX_HASH>/record" \
 
 1. Create a new key (step 1.3), set it as `MERCHANT_SALES_KEY` and redeploy.
 2. Revoke the old one: on the Sales page's **Setup** tab, under **Sales keys**,
-   choose **Revoke** beside it and confirm. It stays listed as Revoked. Through
+   choose **Revoke** beside it, then **Revoke key**. It stays listed as Revoked. Through
    the API:
 
    ```bash
@@ -317,10 +318,6 @@ A report sent with a revoked key is refused, and is not resent.
 | The demo merchant's other products on the Sales page | Owner decision 2026-11-18: one Haven product plus the Stripe joke. The rest keep paying `MERCHANT_ADDRESS`. |
 | What a sale was worth on the day it was made | SEK and EUR amounts use today's rate, not the rate at the time of the sale (#4963). |
 | What Stripe shows for a payment the merchant never recorded there | Not tested (#4902). Every joke sale in the demo goes through the recorder, so the case does not arise. |
-
-Shipped since this runbook was first written, and now part of the steps above:
-the Sales key screens (#4905), revenue in Analytics (#4901), and searching and
-filtering payments with "last paid" per payer (#4959, #4960).
 
 Production use is out of scope. Before any production use, a proof that the
 merchant owns its deposit address is required (owner decision 2026-11-18,

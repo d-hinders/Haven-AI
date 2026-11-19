@@ -8430,6 +8430,51 @@ export const openapiSpec = {
         },
       },
     },
+    '/x402/{id}/payment-required': {
+      get: {
+        tags: ['x402'],
+        operationId: 'getX402StoredPaymentRequired',
+        summary: 'Fetch the merchant x402 challenge stored for an x402 intent.',
+        description:
+          'Read-only (#4872): re-serves the merchant\'s x402 PaymentRequired exactly as Haven stored it at authorize (#1355), for any x402 intent of the calling agent. The hosted haven_submit reads the merchant\'s checkout-details request from it before it relays a plain-HTTP payment, which stores no merchant call context. Merchant content, untrusted, never payment authority, and never the owner\'s details. payment_required is null on a row stored before #1355 and on a challenge too large to store. Writes nothing. Not-found and not-yours are the same 404; a non-x402 intent is a 409.',
+        security: [{ AgentApiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+            description: 'Payment intent id from the quote/authorize response.',
+          },
+        ],
+        responses: {
+          '400': errorResponse,
+          '200': {
+            description: 'The stored challenge, or null when none was stored.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['payment_id', 'payment_required'],
+                  properties: {
+                    payment_id: { type: 'string' },
+                    payment_required: {
+                      type: 'object',
+                      nullable: true,
+                      additionalProperties: true,
+                      description: 'The merchant\'s x402 PaymentRequired, verbatim. Untrusted merchant content.',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': errorResponse,
+          '404': errorResponse,
+          '409': errorResponse,
+        },
+      },
+    },
     '/x402': {
       post: {
         tags: ['x402'],
